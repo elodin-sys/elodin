@@ -86,6 +86,12 @@ pub struct Sim<S> {
     effectors: Vec<Box<dyn StateEffect<S>>>,
 }
 
+impl<S: Debug> Debug for Sim<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sim").field("state", &self.state).finish()
+    }
+}
+
 impl<S> Sim<S>
 where
     S: Default + Clone + Copy + Debug + Add<Output = S> + AddAssign<S> + State + 'static,
@@ -98,7 +104,7 @@ where
         }
     }
 
-    pub fn add_effector<T, E, EF>(&mut self, effector: E)
+    pub fn effector<T, E, EF>(mut self, effector: E) -> Self
     where
         T: 'static,
         E: 'static,
@@ -106,6 +112,7 @@ where
         EF: StateEffect<S> + 'static,
     {
         self.effectors.push(ErasedEffector::new(effector));
+        self
     }
 
     pub fn tick(&mut self, dt: f64) {
@@ -115,13 +122,13 @@ where
                     e.apply(&init_state, &mut s);
                     s
                 });
-                init_state.step(&mut state, dt);
+                init_state.step(&mut state);
                 state
             },
             self.state.clone(),
             dt,
         );
-        println!("{:?}", delta);
+        println!("delta = {:?}", delta);
         self.state += delta;
     }
 }
@@ -134,6 +141,36 @@ pub struct SixDof {
     pub ang: Quaternion<f64>,
     pub ang_vel: Vector3<f64>,
     pub time: f64,
+}
+
+impl SixDof {
+    pub fn sim(self) -> Sim<SixDof> {
+        Sim::new(self)
+    }
+    pub fn pos(mut self, pos: Vector3<f64>) -> Self {
+        self.pos = pos;
+        self
+    }
+    pub fn vel(mut self, vel: Vector3<f64>) -> Self {
+        self.vel = vel;
+        self
+    }
+    pub fn mass(mut self, mass: f64) -> Self {
+        self.mass = mass;
+        self
+    }
+    pub fn ang(mut self, ang: Quaternion<f64>) -> Self {
+        self.ang = ang;
+        self
+    }
+    pub fn ang_vel(mut self, ang_vel: Vector3<f64>) -> Self {
+        self.ang_vel = ang_vel;
+        self
+    }
+    pub fn time(mut self, time: f64) -> Self {
+        self.time = time;
+        self
+    }
 }
 
 pub fn rk4_step<F, S, A>(f: F, init_state: S, dt: f64) -> A
@@ -226,13 +263,13 @@ impl StateEffect<SixDof> for Force {
 }
 
 pub trait State {
-    fn step(&self, inc_state: &mut Self, dt: f64); // TODO: this feels kinda hacky or maybe just a bad name
+    fn step(&self, inc_state: &mut Self); // TODO: this feels kinda hacky or maybe just a bad name
 }
 
 impl State for SixDof {
-    fn step(&self, inc_state: &mut SixDof, dt: f64) {
+    fn step(&self, inc_state: &mut SixDof) {
         inc_state.pos += self.vel;
-        inc_state.time += dt;
+        inc_state.time += 1.0;
     }
 }
 
@@ -274,14 +311,12 @@ mod tests {
             .unwrap();
 
         let grav = gravity(1.0 / 6.649e-11, Vector3::zeros());
-        let six_dof = SixDof {
-            pos: Vector3::new(1.0, 0., 0.),
-            vel: Vector3::new(0.0, 1.0, 0.0),
-            mass: 1.0,
-            ..SixDof::default()
-        };
-        let mut six_dof = Sim::new(six_dof);
-        six_dof.add_effector(grav);
+        let mut six_dof = SixDof::default()
+            .pos(Vector3::new(1.0, 0., 0.))
+            .vel(Vector3::new(0.0, 1.0, 0.0))
+            .mass(1.0)
+            .sim()
+            .effector(grav);
         let mut time = 0.0;
         let mut points = vec![];
         let dt = 0.01;

@@ -5,28 +5,25 @@ use rerun::{components::Vec3D, time::Timeline};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rec_stream = rerun::RecordingStreamBuilder::new("proso_orbit").save("./out.rrd")?;
 
-    let six_dof = SixDof {
-        pos: Vector3::new(1.0, 0., 0.),
-        vel: Vector3::new(0.0, 1.0, 0.0),
-        mass: 1.0,
-        ..SixDof::default()
-    };
-    let mut six_dof = Sim::new(six_dof);
+    let mut six_dof = SixDof::default()
+        .pos(Vector3::new(1.0, 0., 0.))
+        .vel(Vector3::new(0.0, 1.0, 0.0))
+        .mass(1.0)
+        .sim()
+        .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
+        .effector(|Time(t)| {
+            println!("{:?}", t);
+            if (9.42..10.0).contains(&t) {
+                Force(Vector3::new(0.0, -0.3, 0.5))
+            } else {
+                Force(Vector3::zeros())
+            }
+        });
     let mut time = 0;
-    let dt = 0.001;
     let mut points = vec![];
-    let grav = gravity(1.0 / 6.649e-11, Vector3::zeros());
-    six_dof.add_effector(grav);
-    six_dof.add_effector(|Time(t)| {
-        println!("{:?}", t);
-        if (9.42..10.0).contains(&t) {
-            Force(Vector3::new(0.0, -0.3, 0.5))
-        } else {
-            Force(Vector3::zeros())
-        }
-    });
+    let dt = 0.001;
     while time <= 60_000 {
-        six_dof.tick(0.001);
+        six_dof.tick(dt);
         rerun::MsgSender::new("vel")
             .with_component(&[rerun::components::Arrow3D {
                 origin: Vec3D::new(
