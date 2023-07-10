@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .vel(Vector3::new(0.0, 1.0, 0.0))
         .mass(1.0)
         .sim()
-        .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
+        .effector(forces::gravity(1.0 / 6.649e-11, Vector3::zeros()))
         .effector(|Time(t)| {
             println!("{:?}", t);
             if (9.42..10.0).contains(&t) {
