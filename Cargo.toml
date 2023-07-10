@@ -1,0 +1,14 @@
+[package]
+name = "paracosm"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nalgebra = "0.32"
+
+[dev-dependencies]
+plotters = "0.3.5"
+approx = "0.5"
+rerun = "0.7.0"
