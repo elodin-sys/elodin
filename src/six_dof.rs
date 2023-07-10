@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Mul};
 
 use nalgebra::{Quaternion, Vector3};
 
-use crate::{Force, FromState, Mass, Pos, Sim, State, StateEffect, Time};
+use crate::{Force, FromState, Mass, Pos, Sim, State, StateEffect, Time, Torque};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct SixDof {
@@ -99,9 +99,20 @@ impl StateEffect<SixDof> for Force {
     }
 }
 
+impl StateEffect<SixDof> for Torque {
+    fn apply(&self, init_state: &SixDof, inc_state: &mut SixDof) {
+        let ang_accl = self.0 / init_state.mass;
+        //let accl = self.0 / init_state.mass;
+        inc_state.ang_vel += ang_accl;
+    }
+}
+
 impl State for SixDof {
     fn step(&self, inc_state: &mut SixDof) {
         inc_state.pos += self.vel;
+        inc_state.ang =
+            0.5 * Quaternion::new(0., self.ang_vel.x, self.ang_vel.y, self.ang_vel.z) * self.ang;
+        // NOTE: This relies on the small angle approx a bunch, I think this is safe for small dt, but for very high angular vel it will fail
         inc_state.time += 1.0;
     }
 }
@@ -114,5 +125,44 @@ impl AddAssign for SixDof {
         self.ang += rhs.ang;
         self.ang_vel += rhs.ang_vel;
         self.time += rhs.time;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use approx::assert_relative_eq;
+    use nalgebra::{UnitQuaternion, UnitVector3};
+
+    use super::*;
+
+    #[test]
+    fn impulse_torque() {
+        let mut sim = SixDof::default()
+            .mass(1.0)
+            .ang(*UnitQuaternion::from_axis_angle(
+                &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+                0.0,
+            ))
+            .sim()
+            .effector(|Time(t)| {
+                if t <= 1.0 {
+                    Torque(Vector3::new(1.0, 0.0, 0.0))
+                } else {
+                    Torque(Vector3::zeros())
+                }
+            });
+        const DT: f64 = 0.01;
+        for _ in 0..100 {
+            sim.tick(DT);
+        }
+        assert_relative_eq!(
+            sim.state.ang,
+            *UnitQuaternion::from_axis_angle(
+                &UnitVector3::new_unchecked(Vector3::new(1.0, 0.0, 0.0)),
+                0.5,
+            ),
+            epsilon = 1e-9,
+        )
     }
 }
