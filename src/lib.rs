@@ -5,15 +5,17 @@ use std::{
 
 pub mod effector;
 pub mod forces;
+pub mod sensor;
 mod six_dof;
 mod types;
+pub mod xpbd;
 
-use effector::{Effector, ErasedEffector, StateEffect};
+use effector::{Effector, ErasedStateEffector, StateEffect};
 pub use six_dof::*;
 pub use types::*;
 
 pub trait FromState<S> {
-    fn from_state(state: &S) -> Self;
+    fn from_state(time: Time, state: &S) -> Self;
 }
 
 pub struct Sim<S> {
@@ -29,7 +31,15 @@ impl<S: Debug> Debug for Sim<S> {
 
 impl<S> Sim<S>
 where
-    S: Default + Clone + Copy + Debug + Add<Output = S> + AddAssign<S> + State + 'static,
+    S: Default
+        + Clone
+        + Copy
+        + Debug
+        + Add<Output = S>
+        + AddAssign<S>
+        + State
+        + TimeState
+        + 'static,
     f64: Mul<S, Output = S>,
 {
     pub fn new(state: S) -> Self {
@@ -46,7 +56,7 @@ where
         E: Effector<T, S, Effect = EF> + 'static,
         EF: StateEffect<S> + 'static,
     {
-        self.effectors.push(ErasedEffector::new(effector));
+        self.effectors.push(ErasedStateEffector::new(effector));
         self
     }
 
@@ -54,7 +64,7 @@ where
         let delta = rk4_step(
             |init_state| {
                 let mut state = self.effectors.iter().fold(S::default(), |mut s, e| {
-                    e.apply(&init_state, &mut s);
+                    e.apply(init_state.time(), &init_state, &mut s);
                     s
                 });
                 init_state.step(&mut state);

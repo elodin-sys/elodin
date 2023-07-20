@@ -1,11 +1,15 @@
 use nalgebra::Vector3;
 
-use crate::{Effector, Force, Mass, Pos, SixDof};
+use crate::{Effector, Force, FromState, Mass, Pos};
 
-pub fn gravity(
+pub fn gravity<S>(
     body_mass: f64,
     body_pos: Vector3<f64>,
-) -> impl Effector<(Mass, Pos), SixDof, Effect = Force> {
+) -> impl Effector<(Mass, Pos), S, Effect = Force>
+where
+    Pos: FromState<S>,
+    Mass: FromState<S>,
+{
     move |Mass(m), Pos(pos)| {
         const G: f64 = 6.649e-11;
         let r = body_pos - pos;
@@ -17,6 +21,8 @@ pub fn gravity(
 
 #[cfg(test)]
 mod tests {
+    use crate::SixDof;
+
     use super::*;
     use approx::assert_relative_eq;
     use plotters::prelude::*;
@@ -44,7 +50,6 @@ mod tests {
         let dt = 0.01;
         while time <= 2.0 * 3.14 {
             six_dof.tick(dt);
-            // six_dof.int_force(time, dt, &grav);
             points.push((six_dof.state.pos.x, six_dof.state.pos.y));
             time += dt;
         }
