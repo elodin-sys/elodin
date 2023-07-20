@@ -75,34 +75,33 @@ impl Mul<SixDof> for f64 {
 }
 
 impl FromState<SixDof> for Mass {
-    fn from_state(state: &SixDof) -> Self {
+    fn from_state(_time: Time, state: &SixDof) -> Self {
         Mass(state.mass)
     }
 }
 
 impl FromState<SixDof> for Pos {
-    fn from_state(state: &SixDof) -> Self {
+    fn from_state(_time: Time, state: &SixDof) -> Self {
         Pos(state.pos)
     }
 }
 
 impl FromState<SixDof> for Time {
-    fn from_state(state: &SixDof) -> Self {
-        Time(state.time)
+    fn from_state(time: Time, _state: &SixDof) -> Self {
+        time
     }
 }
 
 impl StateEffect<SixDof> for Force {
-    fn apply(&self, init_state: &SixDof, inc_state: &mut SixDof) {
+    fn apply(&self, _time: Time, init_state: &SixDof, inc_state: &mut SixDof) {
         let accl = self.0 / init_state.mass;
         inc_state.vel += accl;
     }
 }
 
 impl StateEffect<SixDof> for Torque {
-    fn apply(&self, init_state: &SixDof, inc_state: &mut SixDof) {
-        let ang_accl = self.0 / init_state.mass;
-        //let accl = self.0 / init_state.mass;
+    fn apply(&self, _time: Time, init_state: &SixDof, inc_state: &mut SixDof) {
+        let ang_accl = self.0 / init_state.mass; // TODO: use moment of inertia
         inc_state.ang_vel += ang_accl;
     }
 }
@@ -125,6 +124,16 @@ impl AddAssign for SixDof {
         self.ang += rhs.ang;
         self.ang_vel += rhs.ang_vel;
         self.time += rhs.time;
+    }
+}
+
+pub trait TimeState {
+    fn time(&self) -> Time;
+}
+
+impl TimeState for SixDof {
+    fn time(&self) -> Time {
+        Time(self.time)
     }
 }
 
