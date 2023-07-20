@@ -9,27 +9,27 @@ use nalgebra::{Matrix3, Quaternion, Vector3};
 use stable_vec::ExternStableVec;
 
 #[derive(Default)]
-pub struct Xpbd {
+pub struct Xpbd<'a> {
     time: f64,
-    entities: ExternStableVec<Entity>,
+    entities: ExternStableVec<Wrapper<'a, Entity>>,
 }
 
-impl Xpbd {
+impl<'a> Xpbd<'a> {
     pub fn tick(&mut self, dt: f64) {
         for (_, entity) in &mut self.entities {
             entity.integrate(Time(self.time), dt);
-            entity.update_vel(dt);
+            entity.entity.update_vel(dt);
             entity.sense(Time(self.time));
         }
         self.time += dt;
     }
 
-    pub fn entity(&mut self, entity: impl Into<Entity>) -> EntityHandle {
+    pub fn entity(&mut self, entity: impl Into<Wrapper<'a, Entity>>) -> EntityHandle {
         EntityHandle(self.entities.push(entity.into()))
     }
 
     pub fn get_entity(&self, handle: EntityHandle) -> &Entity {
-        &self.entities[handle.0]
+        &self.entities[handle.0].entity
     }
 }
 
@@ -37,6 +37,13 @@ impl Xpbd {
 pub struct EntityHandle(usize);
 
 pub struct Builder<T>(T);
+
+#[derive(Default)]
+pub struct Wrapper<'a, T> {
+    entity: T,
+    effectors: Vec<Box<dyn Effector<(), Entity, Effect = XpbdEffects>>>,
+    sensors: Vec<Box<dyn Sensor<(), Entity> + 'a>>,
+}
 
 pub struct Entity {
     // pos
@@ -52,9 +59,6 @@ pub struct Entity {
     mass: f64,
     inertia: Matrix3<f64>,
     inverse_inertia: Matrix3<f64>,
-
-    effectors: Vec<Box<dyn Effector<(), Entity, Effect = XpbdEffects>>>,
-    sensors: Vec<Box<dyn Sensor<(), Entity>>>,
 }
 
 impl Default for Entity {
@@ -69,23 +73,16 @@ impl Default for Entity {
             mass: Default::default(),
             inertia: Default::default(),
             inverse_inertia: Default::default(),
-            effectors: Default::default(),
-            sensors: Default::default(),
         }
     }
 }
 
 impl Entity {
-    pub fn builder() -> Builder<Self> {
+    pub fn builder<'a>() -> Builder<Wrapper<'a, Self>> {
         Builder(Default::default())
     }
 
-    fn integrate(&mut self, time: Time, dt: f64) {
-        let effects = self
-            .effectors
-            .iter()
-            .fold(XpbdEffects::default(), |s, e| s + e.effect(time, self));
-
+    fn integrate(&mut self, dt: f64, effects: XpbdEffects) {
         // integrate position
         self.vel += dt * effects.force / self.mass;
         self.prev_pos = self.pos;
@@ -110,32 +107,42 @@ impl Entity {
         self.ang_vel =
             delta_att.w.signum() * 2.0 * Vector3::new(delta_att.i, delta_att.j, delta_att.k) / dt;
     }
+}
 
-    fn sense(&self, time: Time) {
-        for sensor in &self.sensors {
-            sensor.sense(time, self)
+impl<'a> Wrapper<'a, Entity> {
+    fn integrate(&mut self, time: Time, dt: f64) {
+        let effects = self.effectors.iter().fold(XpbdEffects::default(), |s, e| {
+            s + e.effect(time, &self.entity)
+        });
+
+        self.entity.integrate(dt, effects)
+    }
+
+    fn sense(&mut self, time: Time) {
+        for sensor in &mut self.sensors {
+            sensor.sense(time, &self.entity)
         }
     }
 }
 
-impl Builder<Entity> {
+impl<'a> Builder<Wrapper<'a, Entity>> {
     pub fn mass(mut self, mass: f64) -> Self {
-        self.0.mass = mass;
+        self.0.entity.mass = mass;
         self
     }
 
     pub fn vel(mut self, vel: Vector3<f64>) -> Self {
-        self.0.vel = vel;
+        self.0.entity.vel = vel;
         self
     }
 
     pub fn pos(mut self, pos: Vector3<f64>) -> Self {
-        self.0.pos = pos;
+        self.0.entity.pos = pos;
         self
     }
 
     pub fn att(mut self, att: Quaternion<f64>) -> Self {
-        self.0.att = att;
+        self.0.entity.att = att;
         self
     }
 
@@ -152,8 +159,8 @@ impl Builder<Entity> {
 
     pub fn sensor<T, E>(mut self, sensor: E) -> Self
     where
-        T: 'static,
-        E: Sensor<T, Entity> + 'static,
+        T: 'a,
+        E: Sensor<T, Entity> + 'a,
     {
         let erased = ErasedSensor::new(sensor);
         self.0.sensors.push(Box::new(erased));
@@ -161,8 +168,8 @@ impl Builder<Entity> {
     }
 }
 
-impl From<Builder<Entity>> for Entity {
-    fn from(value: Builder<Entity>) -> Self {
+impl<'a> From<Builder<Wrapper<'a, Entity>>> for Wrapper<'a, Entity> {
+    fn from(value: Builder<Wrapper<'a, Entity>>) -> Self {
         value.0
     }
 }

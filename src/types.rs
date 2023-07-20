@@ -10,3 +10,5 @@ pub struct Mass(pub f64);
 pub struct Pos(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Time(pub f64);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Vel(pub Vector3<f64>);

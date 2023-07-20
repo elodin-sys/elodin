@@ -5,10 +5,17 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["rerun"]
+rerun = ["dep:rerun"]
+
 [dependencies]
 nalgebra = "0.32"
+stable-vec = "0.4"
+
+rerun.version = "0.7.0"
+rerun.optional = true
 
 [dev-dependencies]
 plotters = "0.3.5"
 approx = "0.5"
-rerun = "0.7.0"
