@@ -13,7 +13,7 @@ pub fn gravity(body_mass: f64, body_pos: Vector3<f64>) -> impl Fn(Mass, Pos) -> 
 
 #[cfg(test)]
 mod tests {
-    use crate::SixDof;
+    use crate::six_dof::SixDof;
 
     use super::*;
     use approx::assert_relative_eq;
