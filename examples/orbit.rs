@@ -1,5 +1,5 @@
 use nalgebra::Vector3;
-use paracosm::*;
+use paracosm::{six_dof::SixDof, *};
 use rerun::{components::Vec3D, time::Timeline};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
