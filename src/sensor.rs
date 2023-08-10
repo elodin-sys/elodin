@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::{FromState, Time};
 
 pub trait Sensor<T, S> {
@@ -37,29 +35,6 @@ impl_sensor!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
 impl_sensor!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_sensor!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_sensor!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
-
-pub struct ErasedSensor<SE, S, T> {
-    sensor: SE,
-    _phantom: PhantomData<(S, T)>,
-}
-
-impl<SE, S, T> ErasedSensor<SE, S, T> {
-    pub fn new(sensor: SE) -> Self {
-        Self {
-            sensor,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<SE, S, T> Sensor<(), S> for ErasedSensor<SE, S, T>
-where
-    SE: Sensor<T, S>,
-{
-    fn sense(&mut self, time: Time, state: &S) {
-        self.sensor.sense(time, state)
-    }
-}
 
 #[cfg(feature = "rerun")]
 pub mod rerun {
