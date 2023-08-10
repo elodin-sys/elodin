@@ -56,7 +56,7 @@ where
         E: Effector<T, S, Effect = EF> + 'static,
         EF: StateEffect<S> + 'static,
     {
-        self.effectors.push(ErasedStateEffector::new(effector));
+        self.effectors.push(ErasedStateEffector::boxed(effector));
         self
     }
 
@@ -70,7 +70,7 @@ where
                 init_state.step(&mut state);
                 state
             },
-            self.state.clone(),
+            self.state,
             dt,
         );
         self.state += delta;
