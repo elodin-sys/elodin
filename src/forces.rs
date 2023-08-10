@@ -1,21 +1,13 @@
 use nalgebra::Vector3;
 
-use crate::{Effector, Force, FromState, Mass, Pos};
+use crate::{Force, Mass, Pos};
 
-pub fn gravity<S>(
-    body_mass: f64,
-    body_pos: Vector3<f64>,
-) -> impl Effector<(Mass, Pos), S, Effect = Force>
-where
-    Pos: FromState<S>,
-    Mass: FromState<S>,
-{
+pub fn gravity(body_mass: f64, body_pos: Vector3<f64>) -> impl Fn(Mass, Pos) -> Force {
     move |Mass(m), Pos(pos)| {
         const G: f64 = 6.649e-11;
         let r = body_pos - pos;
         let mu = G * body_mass;
-        let f = Force(r * (mu * m / r.norm().powi(3)));
-        f
+        Force(r * (mu * m / r.norm().powi(3)))
     }
 }
 

@@ -13,7 +13,10 @@ rerun = ["dep:rerun"]
 nalgebra = "0.32"
 stable-vec = "0.4"
 
-rerun.version = "0.7.0"
+bevy_ecs = "0.11"
+bevy = "0.11"
+
+rerun.version = "0.8.0"
 rerun.optional = true
 
 [dev-dependencies]
