@@ -45,8 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut time = 0;
         while time <= 60_000 {
-            xpbd.tick();
             time += 1;
+            xpbd.tick();
         }
     }
 
