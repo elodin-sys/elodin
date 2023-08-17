@@ -9,6 +9,9 @@ use crate::Torque;
 
 use super::{body, components::*};
 
+#[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
+pub struct SubstepSchedule;
+
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 enum SubstepSet {
     CalcEffects,
@@ -79,9 +82,6 @@ fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
     time.0 += config.dt;
 }
 
-#[derive(ScheduleLabel, Clone, PartialEq, Hash, Debug, Eq)]
-pub struct SubstepSchedule;
-
 fn integrate_pos(
     mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut Effect, &mut Mass)>,
     config: Res<Config>,
@@ -105,21 +105,21 @@ fn integrate_att(
         &mut Att,
         &mut PrevAtt,
         &mut AngVel,
-        &mut Torque,
+        &mut Effect,
         &mut Inertia,
         &mut InverseInertia,
     )>,
     config: Res<Config>,
 ) {
     query.par_iter_mut().for_each_mut(
-        |(mut att, mut prev_att, mut ang_vel, torque, inertia, inverse_inertia)| {
+        |(mut att, mut prev_att, mut ang_vel, effect, inertia, inverse_inertia)| {
             body::integrate_att(
                 &mut att.0,
                 &mut prev_att.0,
                 &mut ang_vel.0,
                 inertia.0,
                 inverse_inertia.0,
-                torque.0,
+                effect.torque.0,
                 config.dt,
             )
         },

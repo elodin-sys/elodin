@@ -1,12 +1,19 @@
 use std::marker::PhantomData;
 
+use bevy::{
+    asset::Asset,
+    prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
+};
+use bevy_ecs::{
+    system::CommandQueue,
+    world::{Mut, World},
+};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{effector::Effector, sensor::Sensor, Time};
 
 use super::components::*;
 
-#[derive(Default)]
 pub struct EntityBuilder {
     mass: f64,
     pos: Vector3<f64>,
@@ -18,6 +25,25 @@ pub struct EntityBuilder {
 
     effectors: Effectors,
     sensors: Sensors,
+
+    editor_bundle: Option<PbrBundle>,
+}
+
+impl Default for EntityBuilder {
+    fn default() -> Self {
+        Self {
+            mass: Default::default(),
+            pos: Default::default(),
+            vel: Default::default(),
+            att: Default::default(),
+            ang_vel: Default::default(),
+            inertia: Matrix3::identity(),
+            inverse_inertia: Matrix3::identity(),
+            effectors: Default::default(),
+            sensors: Default::default(),
+            editor_bundle: Default::default(),
+        }
+    }
 }
 
 impl EntityBuilder {
@@ -70,6 +96,22 @@ impl EntityBuilder {
     {
         let erased = ConcreteSensor::new(sensor);
         self.sensors.0.push(Box::new(erased));
+        self
+    }
+
+    pub fn mesh(mut self, mesh: AssetHandle<Mesh>) -> Self {
+        if let Some(mesh) = mesh.0 {
+            let editor_bundle = self.editor_bundle.get_or_insert_with(Default::default);
+            editor_bundle.mesh = mesh;
+        }
+        self
+    }
+
+    pub fn material(mut self, material: AssetHandle<StandardMaterial>) -> Self {
+        if let Some(material) = material.0 {
+            let editor_bundle = self.editor_bundle.get_or_insert_with(Default::default);
+            editor_bundle.material = material;
+        }
         self
     }
 
@@ -149,3 +191,54 @@ pub trait XpbdEffector {
 pub trait XpbdSensor {
     fn sense(&mut self, time: Time, state: EntityStateRef<'_>);
 }
+
+#[derive(Default)]
+pub struct XpbdBuilder {
+    queue: CommandQueue,
+}
+
+impl XpbdBuilder {
+    pub fn entity(mut self, mut entity: EntityBuilder) -> Self {
+        if let Some(pbr) = entity.editor_bundle.take() {
+            self.queue.push(bevy_ecs::system::Spawn {
+                bundle: (pbr, entity.bundle()),
+            });
+        } else {
+            self.queue.push(bevy_ecs::system::Spawn {
+                bundle: entity.bundle(),
+            });
+        }
+        self
+    }
+
+    pub fn apply(mut self, world: &mut World) {
+        self.queue.apply(world);
+    }
+}
+
+pub struct Assets<'a>(pub(crate) Option<AssetsInner<'a>>);
+
+pub(crate) struct AssetsInner<'a> {
+    pub(crate) meshes: Mut<'a, bevy::prelude::Assets<Mesh>>,
+    pub(crate) materials: Mut<'a, bevy::prelude::Assets<StandardMaterial>>,
+}
+
+impl<'a> Assets<'a> {
+    pub fn mesh(&mut self, mesh: Mesh) -> AssetHandle<Mesh> {
+        AssetHandle(if let Some(inner) = self.0.as_mut() {
+            Some(inner.meshes.add(mesh))
+        } else {
+            None
+        })
+    }
+
+    pub fn material(&mut self, material: StandardMaterial) -> AssetHandle<StandardMaterial> {
+        AssetHandle(if let Some(inner) = self.0.as_mut() {
+            Some(inner.materials.add(material))
+        } else {
+            None
+        })
+    }
+}
+
+pub struct AssetHandle<T: Asset>(Option<Handle<T>>);
