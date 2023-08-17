@@ -24,7 +24,7 @@ where
     S: 'static,
     T: 'static,
 {
-    pub(crate) fn new(effector: ER) -> Box<dyn StateEffect<S>> {
+    pub(crate) fn boxed(effector: ER) -> Box<dyn StateEffect<S>> {
         Box::new(ErasedStateEffector {
             effector,
             _phantom: PhantomData,
