@@ -1,5 +1,5 @@
 use nalgebra::Vector3;
-use paracosm::*;
+use paracosm::{six_dof::SixDof, *};
 use rerun::{components::Vec3D, time::Timeline};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,7 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .sim()
         .effector(forces::gravity(1.0 / 6.649e-11, Vector3::zeros()))
         .effector(|Time(t)| {
-            println!("{:?}", t);
             if (9.42..10.0).contains(&t) {
                 Force(Vector3::new(0.0, -0.3, 0.5))
             } else {

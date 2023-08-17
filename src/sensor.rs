@@ -63,19 +63,12 @@ where
 
 #[cfg(feature = "rerun")]
 pub mod rerun {
-    use crate::{FromState, Pos, Time, Vel};
+    use crate::{Pos, Time, Vel};
     use rerun::{
         components::Vec3D, external::re_log_types::DataTableError, time::Timeline, RecordingStream,
     };
 
-    use super::Sensor;
-
-    pub fn vel_sensor<S>(stream: RecordingStream) -> impl Sensor<(Time, Pos, Vel), S>
-    where
-        Pos: FromState<S>,
-        Vel: FromState<S>,
-        Time: FromState<S>,
-    {
+    pub fn vel_sensor(stream: RecordingStream) -> impl Fn(Time, Pos, Vel) {
         move |Time(time), Pos(pos), Vel(vel)| {
             let time = (time * 1000.0) as i64;
             rerun::MsgSender::new("vel")
@@ -92,11 +85,7 @@ pub mod rerun {
         }
     }
 
-    pub fn time_pos_sensor<S>(stream: RecordingStream) -> impl Sensor<(Time, Pos), S>
-    where
-        Pos: FromState<S>,
-        Time: FromState<S>,
-    {
+    pub fn time_pos_sensor(stream: RecordingStream) -> impl Fn(Time, Pos) {
         move |Time(time), Pos(pos)| {
             let time = (time * 1000.0) as i64;
             rerun::MsgSender::new("pos")
@@ -114,10 +103,7 @@ pub mod rerun {
         }
     }
 
-    pub fn pos_sensor<S>(stream: RecordingStream) -> impl Sensor<(Pos,), S>
-    where
-        Pos: FromState<S>,
-    {
+    pub fn pos_sensor(stream: RecordingStream) -> impl Fn(Pos) {
         move |Pos(pos)| {
             rerun::MsgSender::new("total_pos")
                 .with_component(&[rerun::components::Point3D::new(
