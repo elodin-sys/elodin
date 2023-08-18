@@ -5,8 +5,6 @@ use bevy_ecs::{
     system::{Query, Res, ResMut},
 };
 
-use crate::Torque;
-
 use super::{body, components::*};
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
