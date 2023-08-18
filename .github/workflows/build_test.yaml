@@ -8,19 +8,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - run: cargo clippy -- -D warnings
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v4
+      - name: Run the Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: nix-shell ci/rust.nix --command "cargo clippy -- -D warnings"
   test:
     name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - run: cargo test
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v4
+      - name: Run the Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: nix-shell ci/rust.nix --command "cargo clippy -- -D warnings"
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
