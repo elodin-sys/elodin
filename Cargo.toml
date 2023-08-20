@@ -18,7 +18,8 @@ bevy_ecs = "0.11"
 bevy_utils = "0.11"
 
 # editor
-bevy = "0.11"
+bevy.version = "0.11"
+bevy.features = ["wayland"]
 bevy_egui = "0.21"
 smooth-bevy-cameras = "0.9"
 
