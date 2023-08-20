@@ -145,17 +145,10 @@ pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
     query
         .par_iter_mut()
         .for_each_mut(|(mut transform, Pos(pos), Att(att))| {
-            transform.translation = Vec3 {
-                x: pos.x as f32,
-                y: pos.y as f32,
-                z: pos.z as f32,
-            };
-            transform.rotation = Quat {
-                x: att.i as f32,
-                y: att.j as f32,
-                z: att.k as f32,
-                w: att.w as f32,
-            }; // TODO: Is `Quat` a JPL quat who knows?!
+            transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
+            transform.rotation =
+                Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
+            // TODO: Is `Quat` a JPL quat who knows?!
         });
 }
 
