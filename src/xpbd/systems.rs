@@ -1,13 +1,14 @@
 use crate::Time;
 use bevy_ecs::{
     query::WorldQuery,
-    schedule::{IntoSystemConfigs, Schedule, ScheduleLabel, SystemSet},
+    schedule::{IntoSystemConfigs, IntoSystemSetConfigs, Schedule, ScheduleLabel, SystemSet},
     system::{Query, Res, ResMut},
 };
 
-use crate::Torque;
-
 use super::{body, components::*};
+
+#[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
+pub struct SubstepSchedule;
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 enum SubstepSet {
@@ -20,27 +21,21 @@ enum SubstepSet {
 
 pub fn schedule() -> Schedule {
     let mut schedule = Schedule::default();
+    schedule.configure_sets(
+        (
+            SubstepSet::CalcEffects,
+            SubstepSet::Integrate,
+            SubstepSet::UpdateVel,
+            SubstepSet::ClearEffects,
+            SubstepSet::UpdateTime,
+        )
+            .chain(),
+    );
     schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
-    schedule.add_systems(
-        (integrate_att, integrate_pos)
-            .in_set(SubstepSet::Integrate)
-            .after(SubstepSet::CalcEffects),
-    );
-    schedule.add_systems(
-        (update_vel, update_ang_vel)
-            .in_set(SubstepSet::UpdateVel)
-            .after(SubstepSet::Integrate),
-    );
-    schedule.add_systems(
-        (clear_effects)
-            .in_set(SubstepSet::ClearEffects)
-            .after(SubstepSet::UpdateVel),
-    );
-    schedule.add_systems(
-        (update_time)
-            .in_set(SubstepSet::UpdateTime)
-            .after(SubstepSet::ClearEffects),
-    );
+    schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
+    schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
+    schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
+    schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
     schedule
 }
 
@@ -85,9 +80,6 @@ fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
     time.0 += config.dt;
 }
 
-#[derive(ScheduleLabel, Clone, PartialEq, Hash, Debug, Eq)]
-pub struct SubstepSchedule;
-
 fn integrate_pos(
     mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut Effect, &mut Mass)>,
     config: Res<Config>,
@@ -111,21 +103,21 @@ fn integrate_att(
         &mut Att,
         &mut PrevAtt,
         &mut AngVel,
-        &mut Torque,
+        &mut Effect,
         &mut Inertia,
         &mut InverseInertia,
     )>,
     config: Res<Config>,
 ) {
     query.par_iter_mut().for_each_mut(
-        |(mut att, mut prev_att, mut ang_vel, torque, inertia, inverse_inertia)| {
+        |(mut att, mut prev_att, mut ang_vel, effect, inertia, inverse_inertia)| {
             body::integrate_att(
                 &mut att.0,
                 &mut prev_att.0,
                 &mut ang_vel.0,
                 inertia.0,
                 inverse_inertia.0,
-                torque.0,
+                effect.torque.0,
                 config.dt,
             )
         },

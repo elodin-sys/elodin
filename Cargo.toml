@@ -13,8 +13,15 @@ rerun = ["dep:rerun"]
 nalgebra = "0.32"
 stable-vec = "0.4"
 
+# core bevy
 bevy_ecs = "0.11"
 bevy_utils = "0.11"
+
+# editor
+bevy.version = "0.11"
+bevy.features = ["wayland"]
+bevy_egui = "0.21"
+smooth-bevy-cameras = "0.9"
 
 rerun.version = "0.8.0"
 rerun.optional = true
@@ -22,3 +29,4 @@ rerun.optional = true
 [dev-dependencies]
 plotters = "0.3.5"
 approx = "0.5"
+bevy = "0.11"

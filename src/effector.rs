@@ -73,29 +73,3 @@ impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
-
-pub struct UnifiedEffector<ER, E, S, T> {
-    effector: ER,
-    _phantom: PhantomData<(E, S, T)>,
-}
-
-impl<ER, E, S, T> UnifiedEffector<ER, E, S, T> {
-    pub fn new(effector: ER) -> Self {
-        Self {
-            effector,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<ER, E, S, T> Effector<(), S> for UnifiedEffector<ER, E, S, T>
-where
-    ER: Effector<T, S>,
-    ER::Effect: Into<E>,
-{
-    type Effect = E;
-
-    fn effect(&self, time: Time, state: &S) -> Self::Effect {
-        self.effector.effect(time, state).into()
-    }
-}
