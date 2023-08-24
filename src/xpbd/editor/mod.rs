@@ -14,8 +14,7 @@ use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
 };
-use smooth_bevy_cameras::controllers::orbit::{OrbitCameraController, OrbitCameraPlugin};
-use smooth_bevy_cameras::{controllers::orbit::OrbitCameraBundle, LookTransformPlugin};
+mod pan_orbit_cam;
 
 use crate::{Att, Pos, SharedNum};
 
@@ -67,7 +66,7 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
 
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
-        .add_plugins((LookTransformPlugin, OrbitCameraPlugin::default()))
+        .add_plugins(pan_orbit_cam::PanOrbitCamPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
         .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
@@ -106,22 +105,21 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(ScreenSpaceAmbientOcclusionSettings {
         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
     });
+
+    let translation = Vec3::new(-2.0, 2.5, 5.0);
+    let transform = Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y);
+    let radius = translation.length();
+
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_xyz(-4.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform,
             ..default()
         })
-        .insert(OrbitCameraBundle::new(
-            OrbitCameraController {
-                mouse_translate_sensitivity: Vec2::splat(1.0),
-                mouse_rotate_sensitivity: Vec2::splat(1.0),
-                ..default()
-            },
-            Vec3::new(-2.0, 5.0, 5.0),
-            Vec3::new(0., 0., 0.),
-            Vec3::Y,
-        ))
+        .insert(pan_orbit_cam::PanOrbitCamera {
+            radius,
+            ..Default::default()
+        })
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("diffuse.ktx2"),
             specular_map: asset_server.load("specular.ktx2"),
