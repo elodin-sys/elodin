@@ -26,7 +26,7 @@ mod tests {
         let x_axis = (-1.5..1.5).step(0.1);
         let y_axis = (-1.5..1.5).step(0.1);
         let mut chart = ChartBuilder::on(&area)
-            .caption(format!("Grav Test"), ("sans", 20))
+            .caption("Grav Test", ("sans", 20))
             .build_cartesian_2d(x_axis, y_axis)
             .unwrap();
 
@@ -40,7 +40,7 @@ mod tests {
         let mut time = 0.0;
         let mut points = vec![];
         let dt = 0.01;
-        while time <= 2.0 * 3.14 {
+        while time <= 2.0 * std::f64::consts::PI {
             six_dof.tick(dt);
             points.push((six_dof.state.pos.x, six_dof.state.pos.y));
             time += dt;

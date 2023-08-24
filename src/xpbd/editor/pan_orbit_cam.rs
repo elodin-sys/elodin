@@ -1,6 +1,7 @@
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy::render::camera::Projection;
+use nalgebra::Vector3;
 
 /// Tags an entity as capable of panning and orbiting.
 #[derive(Component)]
@@ -21,13 +22,54 @@ impl Default for PanOrbitCamera {
     }
 }
 
+// /// Used to help identify our main camera
+// #[derive(Component)]
+// struct MainCamera;
+
+// fn setup(mut commands: Commands) {
+//     commands.spawn((Camera2dBundle::default(), MainCamera));
+// }
+
+// fn my_cursor_system(
+//     // need to get window dimensions
+//     windows: Res<Windows>,
+//     // query to get camera transform
+//     camera_q: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+// ) {
+//     // get the camera info and transform
+//     // assuming there is exactly one main camera entity, so query::single() is OK
+//     let (camera, camera_transform) = camera_q.single();
+
+//     // get the window that the camera is displaying to (or the primary window)
+//     let window = if let RenderTarget::Window(id) = camera.target {
+//         windows.get(id).unwrap()
+//     } else {
+//         windows.get_primary().unwrap()
+//     };
+
+//     // check if the cursor is inside the window and get its position
+//     // then, ask bevy to convert into world coordinates, and truncate to discard Z
+//     if let Some(world_position) = window.cursor_position()
+//         .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
+//         .map(|ray| ray.origin.truncate())
+//     {
+//         eprintln!("World coords: {}/{}", world_position.x, world_position.y);
+//     }
+// }
+
 /// Pan the camera with middle mouse click, zoom with scroll wheel, orbit with right mouse click.
 fn pan_orbit_cam(
     windows: Query<&Window>,
     mut ev_motion: EventReader<MouseMotion>,
     mut ev_scroll: EventReader<MouseWheel>,
     input_mouse: Res<Input<MouseButton>>,
-    mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
+    mut query: Query<(
+        &mut PanOrbitCamera,
+        &mut Transform,
+        &Projection,
+        &Camera,
+        &GlobalTransform,
+    )>,
 ) {
     // change input mapping for orbit and panning here
     let orbit_button = MouseButton::Right;
@@ -55,7 +97,7 @@ fn pan_orbit_cam(
         orbit_button_changed = true;
     }
 
-    for (mut pan_orbit, mut transform, projection) in query.iter_mut() {
+    for (mut pan_orbit, mut transform, projection, camera, global_transform) in query.iter_mut() {
         if orbit_button_changed {
             // only check for upside down when orbiting started or ended this frame
             // if the camera is "upside" down, panning horizontally would be inverted, so invert the input to make it correct
@@ -79,7 +121,7 @@ fn pan_orbit_cam(
             let yaw = Quat::from_rotation_y(-delta_x);
             let pitch = Quat::from_rotation_x(-delta_y);
             transform.rotation = yaw * transform.rotation; // rotate around global y axis
-            transform.rotation = transform.rotation * pitch; // rotate around local x axis
+            transform.rotation *= pitch; // rotate around local x axis
         } else if pan.length_squared() > 0.0 {
             any = true;
             // make panning distance independent of resolution and FOV,
@@ -95,9 +137,19 @@ fn pan_orbit_cam(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= scroll * pan_orbit.radius * 0.2;
+            pan_orbit.radius -= scroll * pan_orbit.radius * 0.01;
             // dont allow zoom to reach zero or you get stuck
-            pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
+            pan_orbit.radius = f32::max(pan_orbit.radius, 0.8);
+
+            let window = windows.get_single().unwrap();
+
+            if let Some(mouse_world_position) = window
+                .cursor_position()
+                .and_then(|cursor| camera.viewport_to_world(global_transform, cursor))
+                .map(|ray| ray.direction * 10.0)
+            {
+                pan_orbit.focus = mouse_world_position;
+            }
         }
 
         if any {
@@ -117,8 +169,8 @@ fn pan_orbit_cam(
 
 fn get_primary_window_size(windows: &Query<&Window>) -> Vec2 {
     let window = windows.get_single().unwrap();
-    let window = Vec2::new(window.width() as f32, window.height() as f32);
-    window
+    
+    Vec2::new(window.width(), window.height())
 }
 
 pub struct PanOrbitCamPlugin;
