@@ -14,7 +14,7 @@ use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
 };
-mod pan_orbit_cam;
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::{Att, Pos, SharedNum};
 
@@ -66,7 +66,7 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
 
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
-        .add_plugins(pan_orbit_cam::PanOrbitCamPlugin)
+        .add_plugins(PanOrbitCameraPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
         .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
@@ -106,20 +106,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
     });
 
-    let translation = Vec3::new(-2.0, 2.5, 5.0);
-    let transform = Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y);
-    let radius = translation.length();
-
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform,
+            transform: Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
             ..default()
         })
-        .insert(pan_orbit_cam::PanOrbitCamera {
-            radius,
-            ..Default::default()
-        })
+        .insert(PanOrbitCamera::default())
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("diffuse.ktx2"),
             specular_map: asset_server.load("specular.ktx2"),
