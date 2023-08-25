@@ -4,7 +4,8 @@ use paracosm::{
     xpbd::{
         builder::{Assets, EntityBuilder, XpbdBuilder},
         editor::{editor, Input},
-    }, Time, Torque,
+    },
+    Time, Torque,
 };
 
 fn main() {
