@@ -9,7 +9,6 @@ use bevy::{
     prelude::*,
     DefaultPlugins,
 };
-use bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell;
 use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
@@ -21,30 +20,37 @@ use crate::{Att, Pos, SharedNum};
 use self::sealed::EditorEnv;
 
 use super::{
-    builder::{Assets, AssetsInner},
+    builder::{Assets, AssetsInner, XpbdBuilder},
     systems::{self, SubstepSchedule},
     Env, FromEnv, SimBuilder,
 };
 
 pub(crate) mod sealed {
+    use std::cell::RefCell;
+
     use bevy::prelude::App;
+    use bevy_ecs::system::CommandQueue;
 
     pub struct EditorEnv {
         pub app: App,
+        pub command_queue: RefCell<CommandQueue>,
     }
 
     impl EditorEnv {
         pub(crate) fn new(app: App) -> EditorEnv {
-            EditorEnv { app }
+            EditorEnv {
+                app,
+                command_queue: Default::default(),
+            }
         }
     }
 }
 
 impl Env for EditorEnv {
-    type Param<'e> = UnsafeWorldCell<'e>;
+    type Param<'e> = &'e EditorEnv;
 
     fn param(&mut self) -> Self::Param<'_> {
-        self.app.world.as_unsafe_world_cell()
+        self
     }
 }
 
@@ -52,8 +58,9 @@ impl<'a> FromEnv<EditorEnv> for Assets<'a> {
     type Item<'e> = Assets<'e>;
 
     fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        let meshes = unsafe { env.get_resource_mut().unwrap() };
-        let materials = unsafe { env.get_resource_mut().unwrap() };
+        let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
+        let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
+        let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
 
         Assets(Some(AssetsInner { meshes, materials }))
     }
@@ -87,9 +94,14 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
         .insert_resource(crate::Time(0.0))
         .insert_resource(super::components::Config { dt: 1.0 / 60.0 });
     let mut editor_env = EditorEnv::new(app);
-    let queue = sim_builder.build(&mut editor_env);
-    queue.apply(&mut editor_env.app.world);
-    editor_env.app.run()
+    sim_builder.build(&mut editor_env);
+    let EditorEnv {
+        mut app,
+        command_queue,
+    } = editor_env;
+    let mut command_queue = command_queue.into_inner();
+    command_queue.apply(&mut app.world);
+    app.run()
 }
 
 fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
@@ -165,7 +177,11 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
     type Item<'a> = F;
 
     fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        unsafe { env.get_resource::<F>().expect("missing resource").clone() }
+        env.app
+            .world
+            .get_resource::<F>()
+            .expect("missing resource")
+            .clone()
     }
 
     fn init(env: &mut EditorEnv) {
@@ -181,3 +197,16 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
 
 #[derive(Resource)]
 pub struct Editables(Vec<Box<dyn Editable>>);
+
+impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
+    type Item<'t> = XpbdBuilder<'t>;
+
+    fn init(_env: &mut EditorEnv) {}
+
+    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
+        XpbdBuilder {
+            queue: env.command_queue.borrow_mut(),
+            entities: env.app.world.entities(),
+        }
+    }
+}

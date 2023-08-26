@@ -2,7 +2,7 @@ use bevy_ecs::world::World;
 
 use crate::Time;
 
-use self::{builder::XpbdBuilder, components::Config, systems::SubstepSchedule};
+use self::{components::Config, systems::SubstepSchedule};
 
 pub mod body;
 pub mod builder;
@@ -53,17 +53,7 @@ pub trait Env {
 }
 
 pub trait SimBuilder<T, E: Env> {
-    fn build(self, env: &mut E) -> XpbdBuilder;
-}
-
-impl<F, E> SimBuilder<(), E> for F
-where
-    E: Env,
-    F: FnOnce() -> XpbdBuilder,
-{
-    fn build(self, _env: &mut E) -> XpbdBuilder {
-        (self)()
-    }
+    fn build(self, env: &mut E);
 }
 
 macro_rules! impl_sim_builder {
@@ -72,12 +62,12 @@ macro_rules! impl_sim_builder {
          impl<F, $($ty,)* E> SimBuilder<($($ty, )*), E> for F
          where
              E: Env,
-             F: Fn($($ty, )*) -> XpbdBuilder,
-             F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) -> XpbdBuilder,
+             F: Fn($($ty, )*),
+             F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) ,
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(self, env: &mut E) -> XpbdBuilder {
+             fn build(self, env: &mut E)  {
 
                  $(
                          $ty::init(env);
