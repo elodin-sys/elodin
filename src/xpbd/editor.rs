@@ -14,8 +14,7 @@ use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
 };
-use smooth_bevy_cameras::controllers::orbit::{OrbitCameraController, OrbitCameraPlugin};
-use smooth_bevy_cameras::{controllers::orbit::OrbitCameraBundle, LookTransformPlugin};
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::{Att, Pos, SharedNum};
 
@@ -67,7 +66,7 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
 
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
-        .add_plugins((LookTransformPlugin, OrbitCameraPlugin::default()))
+        .add_plugins(PanOrbitCameraPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
         .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
@@ -106,22 +105,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(ScreenSpaceAmbientOcclusionSettings {
         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
     });
+
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_xyz(-4.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_translation(Vec3::new(-4.0, 8.0, 10.0)),
             ..default()
         })
-        .insert(OrbitCameraBundle::new(
-            OrbitCameraController {
-                mouse_translate_sensitivity: Vec2::splat(1.0),
-                mouse_rotate_sensitivity: Vec2::splat(1.0),
-                ..default()
-            },
-            Vec3::new(-2.0, 5.0, 5.0),
-            Vec3::new(0., 0., 0.),
-            Vec3::Y,
-        ))
+        .insert(PanOrbitCamera::default())
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("diffuse.ktx2"),
             specular_map: asset_server.load("specular.ktx2"),

@@ -1,12 +1,11 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
-    forces::gravity,
     xpbd::{
         builder::{Assets, EntityBuilder, XpbdBuilder},
         editor::{editor, Input},
     },
-    Force, Mass, Time, Torque,
+    Time, Torque,
 };
 
 fn main() {

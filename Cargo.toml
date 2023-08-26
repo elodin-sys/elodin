@@ -21,7 +21,7 @@ bevy_utils = "0.11"
 bevy.version = "0.11"
 bevy.features = ["wayland"]
 bevy_egui = "0.21"
-smooth-bevy-cameras = "0.9"
+bevy_panorbit_camera = "0.8.0"
 
 rerun.version = "0.8.0"
 rerun.optional = true
