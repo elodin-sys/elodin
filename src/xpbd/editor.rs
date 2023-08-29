@@ -9,42 +9,48 @@ use bevy::{
     prelude::*,
     DefaultPlugins,
 };
-use bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell;
 use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::{Att, Pos, SharedNum};
+use crate::SharedNum;
 
 use self::sealed::EditorEnv;
 
 use super::{
-    builder::{Assets, AssetsInner},
-    systems::{self, SubstepSchedule},
+    builder::{Assets, AssetsInner, XpbdBuilder},
+    plugin::XpbdPlugin,
     Env, FromEnv, SimBuilder,
 };
 
 pub(crate) mod sealed {
+    use std::cell::RefCell;
+
     use bevy::prelude::App;
+    use bevy_ecs::system::CommandQueue;
 
     pub struct EditorEnv {
         pub app: App,
+        pub command_queue: RefCell<CommandQueue>,
     }
 
     impl EditorEnv {
         pub(crate) fn new(app: App) -> EditorEnv {
-            EditorEnv { app }
+            EditorEnv {
+                app,
+                command_queue: Default::default(),
+            }
         }
     }
 }
 
 impl Env for EditorEnv {
-    type Param<'e> = UnsafeWorldCell<'e>;
+    type Param<'e> = &'e EditorEnv;
 
     fn param(&mut self) -> Self::Param<'_> {
-        self.app.world.as_unsafe_world_cell()
+        self
     }
 }
 
@@ -52,8 +58,9 @@ impl<'a> FromEnv<EditorEnv> for Assets<'a> {
     type Item<'e> = Assets<'e>;
 
     fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        let meshes = unsafe { env.get_resource_mut().unwrap() };
-        let materials = unsafe { env.get_resource_mut().unwrap() };
+        let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
+        let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
+        let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
 
         Assets(Some(AssetsInner { meshes, materials }))
     }
@@ -67,29 +74,28 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(XpbdPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
-        .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
-        .add_schedule(SubstepSchedule, systems::schedule())
-        .add_systems(
-            Update,
-            (sync_pos)
-                .in_set(TickSet::SyncPos)
-                .after(TickSet::TickPhysics),
-        )
         .insert_resource(AmbientLight {
             color: Color::hex("#FFD4AC").unwrap(),
             brightness: 1.0 / 2.0,
         })
+        .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
         .insert_resource(DirectionalLightShadowMap { size: 8192 })
         .insert_resource(Msaa::Off)
         .insert_resource(crate::Time(0.0))
-        .insert_resource(super::components::Config { dt: 1.0 / 60.0 });
+        .insert_resource(super::components::Config::default());
     let mut editor_env = EditorEnv::new(app);
-    let queue = sim_builder.build(&mut editor_env);
-    queue.apply(&mut editor_env.app.world);
-    editor_env.app.run()
+    sim_builder.build(&mut editor_env);
+    let EditorEnv {
+        mut app,
+        command_queue,
+    } = editor_env;
+    let mut command_queue = command_queue.into_inner();
+    command_queue.apply(&mut app.world);
+    app.run()
 }
 
 fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
@@ -126,27 +132,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .insert(TemporalAntiAliasBundle::default());
 }
 
-#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
-enum TickSet {
-    TickPhysics,
-    SyncPos,
-}
-
-pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
-    query
-        .par_iter_mut()
-        .for_each_mut(|(mut transform, Pos(pos), Att(att))| {
-            transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
-            transform.rotation =
-                Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
-            // TODO: Is `Quat` a JPL quat who knows?!
-        });
-}
-
-pub fn tick(world: &mut World) {
-    world.run_schedule(SubstepSchedule)
-}
-
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Input(pub SharedNum<f64>);
 
@@ -165,7 +150,11 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
     type Item<'a> = F;
 
     fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        unsafe { env.get_resource::<F>().expect("missing resource").clone() }
+        env.app
+            .world
+            .get_resource::<F>()
+            .expect("missing resource")
+            .clone()
     }
 
     fn init(env: &mut EditorEnv) {
@@ -179,5 +168,18 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct Editables(Vec<Box<dyn Editable>>);
+
+impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
+    type Item<'t> = XpbdBuilder<'t>;
+
+    fn init(_env: &mut EditorEnv) {}
+
+    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
+        XpbdBuilder {
+            queue: env.command_queue.borrow_mut(),
+            entities: env.app.world.entities(),
+        }
+    }
+}
