@@ -10,7 +10,6 @@ pub mod components;
 pub mod constraints;
 pub mod editor;
 pub mod systems;
-pub mod utils;
 
 pub struct Xpbd {
     world: World,

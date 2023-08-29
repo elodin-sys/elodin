@@ -27,6 +27,8 @@ pub struct EntityBuilder {
     sensors: Sensors,
 
     editor_bundle: Option<PbrBundle>,
+
+    fixed: bool,
 }
 
 impl Default for EntityBuilder {
@@ -42,6 +44,7 @@ impl Default for EntityBuilder {
             effectors: Default::default(),
             sensors: Default::default(),
             editor_bundle: Default::default(),
+            fixed: false,
         }
     }
 }
@@ -115,6 +118,11 @@ impl EntityBuilder {
         self
     }
 
+    pub fn fixed(mut self) -> Self {
+        self.fixed = true;
+        self
+    }
+
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
             pos: Pos(self.pos),
@@ -133,6 +141,7 @@ impl EntityBuilder {
             sensors: self.sensors,
 
             effect: Effect::default(),
+            fixed: Fixed(self.fixed),
         }
     }
 }

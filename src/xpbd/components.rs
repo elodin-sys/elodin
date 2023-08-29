@@ -18,6 +18,8 @@ pub struct PrevPos(pub Vector3<f64>);
 pub struct PrevAtt(pub UnitQuaternion<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct InverseInertia(pub Matrix3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct Fixed(pub bool);
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 pub struct Config {
@@ -56,6 +58,8 @@ impl AddAssign for Effect {
 
 #[derive(Bundle)]
 pub struct EntityBundle {
+    pub fixed: Fixed,
+
     // pos
     pub prev_pos: PrevPos,
     pub pos: Pos,
@@ -80,6 +84,7 @@ pub struct EntityBundle {
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 pub struct EntityQuery {
+    pub fixed: &'static Fixed,
     pub pos: &'static mut Pos,
     pub vel: &'static mut Vel,
 
@@ -92,6 +97,7 @@ pub struct EntityQuery {
 }
 
 pub struct EntityStateRef<'a> {
+    pub fixed: &'a Fixed,
     pub pos: &'a Pos,
     pub vel: &'a Vel,
 
@@ -113,6 +119,7 @@ impl<'a> EntityStateRef<'a> {
             mass: value.mass,
             inertia: value.inertia,
             inverse_inertia: value.inverse_inertia,
+            fixed: value.fixed,
         }
     }
 }
