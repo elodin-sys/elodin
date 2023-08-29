@@ -1,18 +1,18 @@
+use std::cell::RefMut;
 use std::marker::PhantomData;
 
 use bevy::{
     asset::Asset,
     prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
 };
-use bevy_ecs::{
-    system::CommandQueue,
-    world::{Mut, World},
-};
+use bevy_ecs::system::Insert;
+use bevy_ecs::{entity::Entities, system::Spawn};
+use bevy_ecs::{prelude::Entity, system::CommandQueue, world::Mut};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{effector::Effector, sensor::Sensor, Time};
 
-use super::components::*;
+use super::{components::*, constraints::DistanceConstraint};
 
 pub struct EntityBuilder {
     mass: f64,
@@ -27,6 +27,8 @@ pub struct EntityBuilder {
     sensors: Sensors,
 
     editor_bundle: Option<PbrBundle>,
+
+    fixed: bool,
 }
 
 impl Default for EntityBuilder {
@@ -42,6 +44,7 @@ impl Default for EntityBuilder {
             effectors: Default::default(),
             sensors: Default::default(),
             editor_bundle: Default::default(),
+            fixed: false,
         }
     }
 }
@@ -115,6 +118,11 @@ impl EntityBuilder {
         self
     }
 
+    pub fn fixed(mut self) -> Self {
+        self.fixed = true;
+        self
+    }
+
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
             pos: Pos(self.pos),
@@ -133,6 +141,7 @@ impl EntityBuilder {
             sensors: self.sensors,
 
             effect: Effect::default(),
+            fixed: Fixed(self.fixed),
         }
     }
 }
@@ -192,27 +201,32 @@ pub trait XpbdSensor {
     fn sense(&mut self, time: Time, state: EntityStateRef<'_>);
 }
 
-#[derive(Default)]
-pub struct XpbdBuilder {
-    queue: CommandQueue,
+pub struct XpbdBuilder<'a> {
+    pub(crate) queue: RefMut<'a, CommandQueue>,
+    pub(crate) entities: &'a Entities,
 }
 
-impl XpbdBuilder {
-    pub fn entity(mut self, mut entity: EntityBuilder) -> Self {
-        if let Some(pbr) = entity.editor_bundle.take() {
-            self.queue.push(bevy_ecs::system::Spawn {
-                bundle: (pbr, entity.bundle()),
+impl<'a> XpbdBuilder<'a> {
+    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
+        let entity = self.entities.reserve_entity();
+        if let Some(pbr) = entity_builder.editor_bundle.take() {
+            self.queue.push(Insert {
+                entity,
+                bundle: (pbr, entity_builder.bundle()),
             });
         } else {
-            self.queue.push(bevy_ecs::system::Spawn {
-                bundle: entity.bundle(),
+            self.queue.push(Insert {
+                entity,
+                bundle: entity_builder.bundle(),
             });
         }
-        self
+        entity
     }
 
-    pub fn apply(mut self, world: &mut World) {
-        self.queue.apply(world);
+    pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
+        self.queue.push(Spawn {
+            bundle: distance_constriant,
+        });
     }
 }
 
