@@ -5,7 +5,7 @@ use bevy_ecs::{
     system::{Query, Res, ResMut},
 };
 
-use super::{body, components::*};
+use super::{body, components::*, constraints::distance_system};
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SubstepSchedule;
@@ -14,6 +14,7 @@ pub struct SubstepSchedule;
 enum SubstepSet {
     CalcEffects,
     Integrate,
+    SolveConstraints,
     UpdateVel,
     ClearEffects,
     UpdateTime,
@@ -25,6 +26,7 @@ pub fn schedule() -> Schedule {
         (
             SubstepSet::CalcEffects,
             SubstepSet::Integrate,
+            SubstepSet::SolveConstraints,
             SubstepSet::UpdateVel,
             SubstepSet::ClearEffects,
             SubstepSet::UpdateTime,
@@ -33,6 +35,7 @@ pub fn schedule() -> Schedule {
     );
     schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
     schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
+    schedule.add_systems((distance_system).in_set(SubstepSet::SolveConstraints));
     schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
     schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
     schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
@@ -44,14 +47,14 @@ pub fn schedule() -> Schedule {
 struct EffectQuery {
     effect: &'static mut Effect,
     effectors: &'static Effectors,
-    entity: EntityQuery,
+    entity: EntityQueryReadOnly,
 }
 
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 struct SensorQuery {
     sensors: &'static mut Sensors,
-    entity: EntityQuery,
+    entity: EntityQueryReadOnly,
 }
 
 fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) {
@@ -77,7 +80,7 @@ fn clear_effects(mut query: Query<&mut Effect>) {
 }
 
 fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
-    time.0 += config.dt;
+    time.0 += config.sub_dt;
 }
 
 fn integrate_pos(
@@ -93,7 +96,7 @@ fn integrate_pos(
                 &mut vel.0,
                 effect.force.0,
                 mass.0,
-                config.dt,
+                config.sub_dt,
             )
         })
 }
@@ -118,7 +121,7 @@ fn integrate_att(
                 inertia.0,
                 inverse_inertia.0,
                 effect.torque.0,
-                config.dt,
+                config.sub_dt,
             )
         },
     )
@@ -128,7 +131,7 @@ fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>, config: Res<Config>)
     query
         .par_iter_mut()
         .for_each_mut(|(pos, prev_pos, mut vel)| {
-            vel.0 = body::calc_vel(pos.0, prev_pos.0, config.dt);
+            vel.0 = body::calc_vel(pos.0, prev_pos.0, config.sub_dt);
         })
 }
 
@@ -136,6 +139,6 @@ fn update_ang_vel(mut query: Query<(&Att, &PrevAtt, &mut AngVel)>, config: Res<C
     query
         .par_iter_mut()
         .for_each_mut(|(att, prev_att, mut ang_vel)| {
-            ang_vel.0 = body::calc_ang_vel(att.0, prev_att.0, config.dt);
+            ang_vel.0 = body::calc_ang_vel(att.0, prev_att.0, config.sub_dt);
         })
 }

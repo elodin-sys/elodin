@@ -5,14 +5,14 @@ use bevy::{
     asset::Asset,
     prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
 };
-use bevy_ecs::entity::Entities;
 use bevy_ecs::system::Insert;
+use bevy_ecs::{entity::Entities, system::Spawn};
 use bevy_ecs::{prelude::Entity, system::CommandQueue, world::Mut};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{effector::Effector, sensor::Sensor, Time};
 
-use super::components::*;
+use super::{components::*, constraints::DistanceConstraint};
 
 pub struct EntityBuilder {
     mass: f64,
@@ -198,7 +198,7 @@ pub struct XpbdBuilder<'a> {
 }
 
 impl<'a> XpbdBuilder<'a> {
-    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> EntityRef {
+    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
         let entity = self.entities.reserve_entity();
         if let Some(pbr) = entity_builder.editor_bundle.take() {
             self.queue.push(Insert {
@@ -211,11 +211,15 @@ impl<'a> XpbdBuilder<'a> {
                 bundle: entity_builder.bundle(),
             });
         }
-        EntityRef(entity)
+        entity
+    }
+
+    pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
+        self.queue.push(Spawn {
+            bundle: distance_constriant,
+        });
     }
 }
-
-pub struct EntityRef(Entity);
 
 pub struct Assets<'a>(pub(crate) Option<AssetsInner<'a>>);
 

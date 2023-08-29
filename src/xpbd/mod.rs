@@ -7,8 +7,10 @@ use self::{components::Config, systems::SubstepSchedule};
 pub mod body;
 pub mod builder;
 pub mod components;
+pub mod constraints;
 pub mod editor;
 pub mod systems;
+pub mod utils;
 
 pub struct Xpbd {
     world: World,
@@ -18,7 +20,7 @@ impl Default for Xpbd {
     fn default() -> Self {
         let mut world = World::new();
         world.insert_resource(Time(0.0));
-        world.insert_resource(Config { dt: 0.001 });
+        world.insert_resource(Config::default());
         world.add_schedule(systems::schedule(), SubstepSchedule);
         Self { world }
     }
