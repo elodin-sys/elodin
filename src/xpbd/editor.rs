@@ -21,6 +21,7 @@ use self::sealed::EditorEnv;
 
 use super::{
     builder::{Assets, AssetsInner, XpbdBuilder},
+    constraints::clear_distance_lagrange,
     systems::{self, SubstepSchedule},
     Env, FromEnv, SimBuilder,
 };
@@ -76,23 +77,32 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
         .add_plugins(PanOrbitCameraPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
-        .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
-        .add_schedule(SubstepSchedule, systems::schedule())
         .add_systems(
             Update,
-            (sync_pos)
-                .in_set(TickSet::SyncPos)
-                .after(TickSet::TickPhysics),
+            (clear_distance_lagrange).in_set(TickSet::ClearConstraintLagrange),
         )
+        .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
+        .add_schedule(SubstepSchedule, systems::schedule())
+        .add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFD4AC").unwrap(),
             brightness: 1.0 / 2.0,
         })
+        .configure_sets(
+            Update,
+            (
+                TickSet::ClearConstraintLagrange,
+                TickSet::TickPhysics,
+                TickSet::SyncPos,
+            )
+                .chain(),
+        )
+        .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
         .insert_resource(DirectionalLightShadowMap { size: 8192 })
         .insert_resource(Msaa::Off)
         .insert_resource(crate::Time(0.0))
-        .insert_resource(super::components::Config { dt: 1.0 / 60.0 });
+        .insert_resource(super::components::Config::default());
     let mut editor_env = EditorEnv::new(app);
     sim_builder.build(&mut editor_env);
     let EditorEnv {
@@ -140,6 +150,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 enum TickSet {
+    ClearConstraintLagrange,
     TickPhysics,
     SyncPos,
 }
@@ -156,7 +167,9 @@ pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
 }
 
 pub fn tick(world: &mut World) {
-    world.run_schedule(SubstepSchedule)
+    for _ in 0..16 {
+        world.run_schedule(SubstepSchedule)
+    }
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -195,7 +208,7 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct Editables(Vec<Box<dyn Editable>>);
 
 impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {

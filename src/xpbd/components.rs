@@ -8,7 +8,7 @@ use bevy_ecs::{
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
-use crate::{FromState, Torque};
+use crate::{FromState, Time, Torque};
 
 use super::builder::{XpbdEffector, XpbdSensor};
 
@@ -22,11 +22,16 @@ pub struct InverseInertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 pub struct Config {
     pub dt: f64,
+    pub sub_dt: f64,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { dt: 0.01 }
+        let dt = 1.0 / 60.0;
+        Self {
+            dt,
+            sub_dt: dt / 12.0,
+        }
     }
 }
 
@@ -73,16 +78,17 @@ pub struct EntityBundle {
 }
 
 #[derive(WorldQuery)]
+#[world_query(mutable)]
 pub struct EntityQuery {
-    pub pos: &'static Pos,
-    pub vel: &'static Vel,
+    pub pos: &'static mut Pos,
+    pub vel: &'static mut Vel,
 
-    pub att: &'static Att,
-    pub ang_vel: &'static AngVel,
+    pub att: &'static mut Att,
+    pub ang_vel: &'static mut AngVel,
 
-    pub mass: &'static Mass,
-    pub inertia: &'static Inertia,
-    pub inverse_inertia: &'static InverseInertia,
+    pub mass: &'static mut Mass,
+    pub inertia: &'static mut Inertia,
+    pub inverse_inertia: &'static mut InverseInertia,
 }
 
 pub struct EntityStateRef<'a> {
@@ -98,7 +104,7 @@ pub struct EntityStateRef<'a> {
 }
 
 impl<'a> EntityStateRef<'a> {
-    pub fn from_query(value: &EntityQueryItem<'a>) -> Self {
+    pub fn from_query(value: &EntityQueryReadOnlyItem<'a>) -> Self {
         Self {
             pos: value.pos,
             vel: value.vel,
@@ -111,50 +117,60 @@ impl<'a> EntityStateRef<'a> {
     }
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for Mass {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.mass
+impl Pos {
+    pub fn to_world<S>(&self, state: &S) -> Self
+    where
+        Pos: FromState<S>,
+        Att: FromState<S>,
+    {
+        Pos((Att::from_state(Time(0.0), state).0 * self.0) + Pos::from_state(Time(0.0), state).0)
     }
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for Pos {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.pos
+impl InverseInertia {
+    pub fn to_world<S>(&self, state: &S) -> Self
+    where
+        Att: FromState<S>,
+    {
+        let att = Att::from_state(Time(0.0), state);
+        InverseInertia(att.0.to_rotation_matrix() * self.0)
     }
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for Vel {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.vel
+impl<'a> EntityQueryReadOnlyItem<'a> {
+    pub fn state_ref(&self) -> EntityStateRef<'_> {
+        EntityStateRef::from_query(self)
     }
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for Att {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.att
-    }
+macro_rules! impl_from_state {
+    ($state: ty, $component: ty, $field: ident) => {
+        impl<'a> FromState<$state> for $component {
+            fn from_state(_time: crate::Time, state: &$state) -> Self {
+                *state.$field
+            }
+        }
+    };
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for AngVel {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.ang_vel
-    }
+macro_rules! impl_entity_state {
+    ($component: ty, $field: ident) => {
+        impl_from_state!(EntityStateRef<'a>, $component, $field);
+        impl_from_state!(EntityQueryItem<'a>, $component, $field);
+        impl_from_state!(EntityQueryReadOnlyItem<'a>, $component, $field);
+    };
 }
 
-impl<'a> FromState<EntityStateRef<'a>> for Inertia {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.inertia
-    }
-}
+impl_entity_state!(Mass, mass);
+impl_entity_state!(Pos, pos);
+impl_entity_state!(Vel, vel);
+impl_entity_state!(Att, att);
+impl_entity_state!(AngVel, ang_vel);
+impl_entity_state!(Inertia, inertia);
+impl_entity_state!(InverseInertia, inverse_inertia);
 
-impl<'a> FromState<EntityStateRef<'a>> for InverseInertia {
-    fn from_state(_time: crate::Time, state: &EntityStateRef<'a>) -> Self {
-        *state.inverse_inertia
-    }
-}
-
-impl<'a> FromState<EntityStateRef<'a>> for crate::Time {
-    fn from_state(time: crate::Time, _state: &EntityStateRef<'a>) -> Self {
+impl<'a> FromState<EntityStateRef<'a>> for Time {
+    fn from_state(time: Time, _state: &EntityStateRef<'a>) -> Self {
         time
     }
 }
