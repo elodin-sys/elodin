@@ -12,8 +12,8 @@ fn main() {
     editor(sim)
 }
 
-fn sim(mut assets: Assets, input: Input) -> XpbdBuilder {
-    XpbdBuilder::default().entity(
+fn sim(mut builder: XpbdBuilder, mut assets: Assets, input: Input) {
+    builder.entity(
         EntityBuilder::default()
             .mass(1.0)
             .pos(vector![0.0, 0.75, 0.0])
@@ -28,5 +28,5 @@ fn sim(mut assets: Assets, input: Input) -> XpbdBuilder {
                 perceptual_roughness: 0.1,
                 ..Default::default()
             })),
-    )
+    );
 }
