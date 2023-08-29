@@ -18,7 +18,9 @@ Since we needed a simulation of fixed-wing drones I skipped over `jMAVSim`, and 
 
 `JSBSim` is not an option you would use if you want to have visuals, and it is primarily used with options that do provide them. Like for example it was used with `AirSim` in attempts to add fixed-wing simulation, or with `FlightGear` as an extra source of simulation models. So while this is useful information, it also indicates that `JSBSim` is not enough on its own if we want some visuals.
 
-Quick Demo: https://youtu.be/fy41NWVqpLQ
+Also I would like to mention that there's [a `JSBSim` plugin](https://github.com/JSBSim-Team/jsbsim/tree/master/UnrealEngine) for `Unreal Engine` itself, and it works in a sense that it is functional, but I later found that it was created specifically for [Antoinette Project](https://elodin-systems.slack.com/archives/D05KFC245P1/p1692194068165019) ("Co-Simulation with a flight dynamic model" in [this tutorial](https://dev.epicgames.com/community/learning/tutorials/mmL/a-diy-flight-simulator-tutorial)) and not supposed to be easily used in SITL.
+
+So I went with `PX4` + `FlightGear` results of which can be seen in this quick Demo: https://youtu.be/fy41NWVqpLQ
 
 [![Video](http://img.youtube.com/vi/fy41NWVqpLQ/0.jpg)](http://www.youtube.com/watch?v=fy41NWVqpLQ "PX4 + FlightGear")
 
