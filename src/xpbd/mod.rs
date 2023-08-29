@@ -1,9 +1,3 @@
-use bevy_ecs::world::World;
-
-use crate::Time;
-
-use self::{components::Config, systems::SubstepSchedule};
-
 pub mod body;
 pub mod builder;
 pub mod components;
@@ -11,30 +5,6 @@ pub mod constraints;
 pub mod editor;
 pub mod plugin;
 pub mod systems;
-
-pub struct Xpbd {
-    world: World,
-}
-
-impl Default for Xpbd {
-    fn default() -> Self {
-        let mut world = World::new();
-        world.insert_resource(Time(0.0));
-        world.insert_resource(Config::default());
-        world.add_schedule(systems::substep_schedule(), SubstepSchedule);
-        Self { world }
-    }
-}
-
-impl Xpbd {
-    pub fn tick(&mut self) {
-        self.world.run_schedule(SubstepSchedule)
-    }
-
-    pub fn into_world(self) -> World {
-        self.world
-    }
-}
 
 pub trait FromEnv<E: Env> {
     type Item<'a>
