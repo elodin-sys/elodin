@@ -15,14 +15,13 @@ use bevy_egui::{
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::{Att, Pos, SharedNum};
+use crate::SharedNum;
 
 use self::sealed::EditorEnv;
 
 use super::{
     builder::{Assets, AssetsInner, XpbdBuilder},
-    constraints::clear_distance_lagrange,
-    systems::{self, SubstepSchedule},
+    plugin::XpbdPlugin,
     Env, FromEnv, SimBuilder,
 };
 
@@ -75,28 +74,13 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(XpbdPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
-        .add_systems(
-            Update,
-            (clear_distance_lagrange).in_set(TickSet::ClearConstraintLagrange),
-        )
-        .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
-        .add_schedule(SubstepSchedule, systems::schedule())
-        .add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFD4AC").unwrap(),
             brightness: 1.0 / 2.0,
         })
-        .configure_sets(
-            Update,
-            (
-                TickSet::ClearConstraintLagrange,
-                TickSet::TickPhysics,
-                TickSet::SyncPos,
-            )
-                .chain(),
-        )
         .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
         .insert_resource(DirectionalLightShadowMap { size: 8192 })
@@ -146,30 +130,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             ..Default::default()
         })
         .insert(TemporalAntiAliasBundle::default());
-}
-
-#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
-enum TickSet {
-    ClearConstraintLagrange,
-    TickPhysics,
-    SyncPos,
-}
-
-pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
-    query
-        .par_iter_mut()
-        .for_each_mut(|(mut transform, Pos(pos), Att(att))| {
-            transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
-            transform.rotation =
-                Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
-            // TODO: Is `Quat` a JPL quat who knows?!
-        });
-}
-
-pub fn tick(world: &mut World) {
-    for _ in 0..16 {
-        world.run_schedule(SubstepSchedule)
-    }
 }
 
 #[derive(Resource, Clone, Debug, Default)]

@@ -11,6 +11,13 @@ use super::{body, components::*, constraints::distance_system};
 pub struct SubstepSchedule;
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
+pub enum TickSet {
+    ClearConstraintLagrange,
+    TickPhysics,
+    SyncPos,
+}
+
+#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 enum SubstepSet {
     CalcEffects,
     Integrate,
@@ -20,7 +27,7 @@ enum SubstepSet {
     UpdateTime,
 }
 
-pub fn schedule() -> Schedule {
+pub fn substep_schedule() -> Schedule {
     let mut schedule = Schedule::default();
     schedule.configure_sets(
         (
