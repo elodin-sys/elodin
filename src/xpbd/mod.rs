@@ -9,6 +9,7 @@ pub mod builder;
 pub mod components;
 pub mod constraints;
 pub mod editor;
+pub mod plugin;
 pub mod systems;
 
 pub struct Xpbd {
@@ -20,7 +21,7 @@ impl Default for Xpbd {
         let mut world = World::new();
         world.insert_resource(Time(0.0));
         world.insert_resource(Config::default());
-        world.add_schedule(systems::schedule(), SubstepSchedule);
+        world.add_schedule(systems::substep_schedule(), SubstepSchedule);
         Self { world }
     }
 }
