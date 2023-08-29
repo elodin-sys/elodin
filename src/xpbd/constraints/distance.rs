@@ -101,25 +101,30 @@ pub fn distance_system(
         );
         constraint.lagrange_multiplier += delta_lagrange;
         let pos_impulse = pos_impulse(delta_lagrange, n);
-        entity_a.pos.0 += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
-        entity_b.pos.0 -= pos_delta_pos_impulse(pos_impulse, entity_b.mass.0);
-        entity_a.att.0 = UnitQuaternion::new_normalize(
-            entity_a.att.0.into_inner()
-                + att_delta_pos_impulse(
-                    *entity_a.att.0,
-                    pos_impulse,
-                    world_anchor_a.0,
-                    entity_a.inverse_inertia.0,
-                ),
-        );
-        entity_b.att.0 = UnitQuaternion::new_normalize(
-            entity_a.att.0.into_inner()
-                - att_delta_pos_impulse(
-                    *entity_b.att.0,
-                    pos_impulse,
-                    world_anchor_b.0,
-                    entity_b.inverse_inertia.0,
-                ),
-        );
+        if !entity_a.fixed.0 {
+            entity_a.pos.0 += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
+            entity_a.att.0 = UnitQuaternion::new_normalize(
+                entity_a.att.0.into_inner()
+                    + att_delta_pos_impulse(
+                        *entity_a.att.0,
+                        pos_impulse,
+                        world_anchor_a.0,
+                        entity_a.inverse_inertia.0,
+                    ),
+            );
+        }
+
+        if !entity_b.fixed.0 {
+            entity_b.pos.0 -= pos_delta_pos_impulse(pos_impulse, entity_b.mass.0);
+            entity_b.att.0 = UnitQuaternion::new_normalize(
+                entity_a.att.0.into_inner()
+                    - att_delta_pos_impulse(
+                        *entity_b.att.0,
+                        pos_impulse,
+                        world_anchor_b.0,
+                        entity_b.inverse_inertia.0,
+                    ),
+            );
+        }
     });
 }

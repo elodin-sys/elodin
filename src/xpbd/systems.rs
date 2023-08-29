@@ -84,12 +84,22 @@ fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
 }
 
 fn integrate_pos(
-    mut query: Query<(&mut Pos, &mut PrevPos, &mut Vel, &mut Effect, &mut Mass)>,
+    mut query: Query<(
+        &mut Pos,
+        &mut PrevPos,
+        &mut Vel,
+        &mut Effect,
+        &mut Mass,
+        &Fixed,
+    )>,
     config: Res<Config>,
 ) {
     query
         .par_iter_mut()
-        .for_each_mut(|(mut pos, mut prev_pos, mut vel, effect, mass)| {
+        .for_each_mut(|(mut pos, mut prev_pos, mut vel, effect, mass, fixed)| {
+            if fixed.0 {
+                return;
+            }
             body::integrate_pos(
                 &mut pos.0,
                 &mut prev_pos.0,
@@ -109,11 +119,15 @@ fn integrate_att(
         &mut Effect,
         &mut Inertia,
         &mut InverseInertia,
+        &Fixed,
     )>,
     config: Res<Config>,
 ) {
     query.par_iter_mut().for_each_mut(
-        |(mut att, mut prev_att, mut ang_vel, effect, inertia, inverse_inertia)| {
+        |(mut att, mut prev_att, mut ang_vel, effect, inertia, inverse_inertia, fixed)| {
+            if fixed.0 {
+                return;
+            }
             body::integrate_att(
                 &mut att.0,
                 &mut prev_att.0,
@@ -127,18 +141,25 @@ fn integrate_att(
     )
 }
 
-fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel)>, config: Res<Config>) {
+fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel, &Fixed)>, config: Res<Config>) {
     query
         .par_iter_mut()
-        .for_each_mut(|(pos, prev_pos, mut vel)| {
+        .for_each_mut(|(pos, prev_pos, mut vel, fixed)| {
+            if fixed.0 {
+                return;
+            }
             vel.0 = body::calc_vel(pos.0, prev_pos.0, config.sub_dt);
         })
 }
 
-fn update_ang_vel(mut query: Query<(&Att, &PrevAtt, &mut AngVel)>, config: Res<Config>) {
+fn update_ang_vel(mut query: Query<(&Att, &PrevAtt, &mut AngVel, &Fixed)>, config: Res<Config>) {
     query
         .par_iter_mut()
-        .for_each_mut(|(att, prev_att, mut ang_vel)| {
+        .for_each_mut(|(att, prev_att, mut ang_vel, fixed)| {
+            if fixed.0 {
+                return;
+            }
+
             ang_vel.0 = body::calc_ang_vel(att.0, prev_att.0, config.sub_dt);
         })
 }
