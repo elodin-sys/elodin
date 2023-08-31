@@ -12,7 +12,10 @@ use crate::{
     Pos,
 };
 
-use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
+use super::{
+    apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass,
+    rot_generalized_inverse_mass,
+};
 
 #[derive(Component, Debug, Clone)]
 pub struct RevoluteJoint {
@@ -97,21 +100,13 @@ pub fn revolute_system(
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
 
-        let inverse_mass_a = pos_generalized_inverse_mass(
-            entity_a.mass.0,
-            entity_a.inverse_inertia.to_world(&entity_a).0,
-            world_anchor_a.0,
-            n,
-        );
-        let inverse_mass_b = pos_generalized_inverse_mass(
-            entity_a.mass.0,
-            entity_b.inverse_inertia.to_world(&entity_b).0,
-            world_anchor_b.0,
-            n,
-        );
-
         let compliance = constraint.compliance;
         let delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
+        let inverse_inertia_a = entity_a.inverse_inertia.to_world(&entity_a);
+        let inverse_inertia_b = entity_b.inverse_inertia.to_world(&entity_b);
+        let inverse_mass_a = rot_generalized_inverse_mass(inverse_inertia_a.0, n);
+        let inverse_mass_b = rot_generalized_inverse_mass(inverse_inertia_b.0, n);
+
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
@@ -121,6 +116,18 @@ pub fn revolute_system(
             &mut constraint.angle_lagrange,
             compliance,
             config.sub_dt,
+        );
+        let inverse_mass_a = pos_generalized_inverse_mass(
+            entity_a.mass.0,
+            entity_a.inverse_inertia.to_world(&entity_a).0,
+            world_anchor_a.0,
+            n,
+        );
+        let inverse_mass_b = pos_generalized_inverse_mass(
+            entity_b.mass.0,
+            entity_b.inverse_inertia.to_world(&entity_b).0,
+            world_anchor_b.0,
+            n,
         );
 
         apply_distance_constraint(
