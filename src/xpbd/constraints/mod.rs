@@ -21,7 +21,6 @@ pub fn lagrange_multiplier_delta(
     inverse_masses: impl Iterator<Item = f64>,
     gradients: impl Iterator<Item = Vector3<f64>>,
 ) -> f64 {
-    let alpha_tilde = compliance / dt.powi(2);
     let sum_inverse_masses: f64 = inverse_masses
         .zip(gradients)
         .map(|(m, g)| m * g.norm_squared())
@@ -29,6 +28,7 @@ pub fn lagrange_multiplier_delta(
     if sum_inverse_masses <= f64::EPSILON {
         return 0.0;
     }
+    let alpha_tilde = compliance / dt.powi(2);
     (-c - alpha_tilde * lagrange_multiplier) / (sum_inverse_masses + alpha_tilde)
 }
 
@@ -87,7 +87,7 @@ pub fn apply_distance_constraint(
         [inverse_mass_a, inverse_mass_b].into_iter(),
         [n.into_inner(), -n.into_inner()].into_iter(),
     );
-    *lagrange_multiplier += dbg!(delta_lagrange);
+    *lagrange_multiplier += delta_lagrange;
     let pos_impulse = impulse(delta_lagrange, n);
     if !entity_a.fixed.0 {
         entity_a.pos.0 += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
@@ -110,7 +110,6 @@ pub fn apply_distance_constraint(
             world_anchor_b.0,
             entity_b.inverse_inertia.to_world(entity_b).0,
         );
-        //println!("att = {att:?} delta = {delta:?}");
         entity_b.att.0 = UnitQuaternion::new_normalize(att - delta);
     }
 }
@@ -155,8 +154,8 @@ pub fn apply_rot_constraint(
     }
 }
 
-pub fn rot_generalized_inverse_mass(inverse_mass: Matrix3<f64>, axis: UnitVector3<f64>) -> f64 {
-    axis.dot(&(inverse_mass * *axis))
+pub fn rot_generalized_inverse_mass(inverse_inertia: Matrix3<f64>, axis: UnitVector3<f64>) -> f64 {
+    axis.dot(&(inverse_inertia * *axis))
 }
 
 pub fn att_delta_ang_impulse(
