@@ -6,6 +6,8 @@ pub mod editor;
 pub mod plugin;
 pub mod systems;
 
+const SUBSTEPS: usize = 40;
+
 pub trait FromEnv<E: Env> {
     type Item<'a>
     where

@@ -6,6 +6,7 @@ use crate::{Att, Pos};
 use super::{
     constraints::{clear_distance_lagrange, clear_revolute_lagrange},
     systems::{self, SubstepSchedule},
+    SUBSTEPS,
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
@@ -41,7 +42,7 @@ impl Plugin for XpbdPlugin {
 }
 
 pub fn tick(world: &mut World) {
-    for _ in 0..16 {
+    for _ in 0..SUBSTEPS {
         world.run_schedule(SubstepSchedule)
     }
 }
