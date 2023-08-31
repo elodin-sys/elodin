@@ -130,7 +130,15 @@ impl Pos {
         Pos: FromState<S>,
         Att: FromState<S>,
     {
-        Pos((Att::from_state(Time(0.0), state).0 * self.0) + Pos::from_state(Time(0.0), state).0)
+        Pos(Att::from_state(Time(0.0), state).0 * self.0 + Pos::from_state(Time(0.0), state).0)
+    }
+
+    pub fn to_world_basis<S>(&self, state: &S) -> Self
+    where
+        Pos: FromState<S>,
+        Att: FromState<S>,
+    {
+        Pos(Att::from_state(Time(0.0), state).0 * self.0)
     }
 }
 

@@ -8,7 +8,7 @@ use std::{
 };
 
 use bevy_ecs::{prelude::Component, system::Resource};
-use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+use nalgebra::{matrix, Matrix3, UnitQuaternion, Vector3};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
 pub struct Force(pub Vector3<f64>);
@@ -28,6 +28,20 @@ pub struct Att(pub UnitQuaternion<f64>);
 pub struct AngVel(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Inertia(pub Matrix3<f64>);
+
+impl Inertia {
+    pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
+        let h = height.powi(2);
+        let w = width.powi(2);
+        let d = depth.powi(2);
+        let k = mass / 12.0;
+        Inertia(matrix![
+            k * (h + d), 0.0, 0.0;
+            0.0, k * ( w + d ), 0.0;
+            0.0, 0.0, k * (w + h)
+        ])
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SharedNum<T> {

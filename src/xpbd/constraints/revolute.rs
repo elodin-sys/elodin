@@ -1,37 +1,47 @@
+use std::ops::Range;
+
 use bevy_ecs::{
-    prelude::{Component, Entity},
+    component::Component,
+    entity::Entity,
     system::{Query, Res},
 };
-use nalgebra::{UnitVector3, Vector3};
+use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use crate::{
     xpbd::components::{Config, EntityQuery},
     Pos,
 };
 
-use super::{apply_distance_constraint, pos_generalized_inverse_mass};
+use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
 
 #[derive(Component, Debug, Clone)]
-pub struct DistanceConstraint {
+pub struct RevoluteJoint {
     pub entity_a: Entity,
     pub entity_b: Entity,
     pub anchor_a: Pos,
     pub anchor_b: Pos,
-    pub distance_target: f64,
+    pub joint_axis: UnitVector3<f64>,
+    pub angle_limits: Option<Range<f64>>,
     pub compliance: f64,
-    pub lagrange_multiplier: f64,
+
+    pub angle_limit_lagrange: f64,
+    pub pos_lagrange: f64,
+    pub angle_lagrange: f64,
 }
 
-impl DistanceConstraint {
+impl RevoluteJoint {
     pub fn new(entity_a: Entity, entity_b: Entity) -> Self {
-        DistanceConstraint {
+        RevoluteJoint {
             entity_a,
             entity_b,
-            anchor_a: Pos(Vector3::zeros()),
-            anchor_b: Pos(Vector3::zeros()),
-            distance_target: 1.0,
-            compliance: 0.001,
-            lagrange_multiplier: 0.0,
+            anchor_a: Pos(Vector3::default()),
+            anchor_b: Pos(Vector3::default()),
+            joint_axis: Vector3::x_axis(),
+            angle_limits: None,
+            compliance: 1.0 / 100.0,
+            angle_limit_lagrange: 0.0,
+            pos_lagrange: 0.0,
+            angle_lagrange: 0.0,
         }
     }
 
@@ -45,24 +55,32 @@ impl DistanceConstraint {
         self
     }
 
-    pub fn distance_target(mut self, distance: f64) -> Self {
-        self.distance_target = distance;
+    pub fn join_axis(mut self, axis: UnitVector3<f64>) -> Self {
+        self.joint_axis = axis;
         self
     }
+
+    pub fn angle_limits(mut self, limits: impl Into<Option<Range<f64>>>) -> Self {
+        self.angle_limits = limits.into();
+        self
+    }
+
     pub fn compliance(mut self, compliance: f64) -> Self {
         self.compliance = compliance;
         self
     }
 }
 
-pub fn clear_distance_lagrange(mut query: Query<&mut DistanceConstraint>) {
+pub fn clear_revolute_lagrange(mut query: Query<&mut RevoluteJoint>) {
     query.par_iter_mut().for_each_mut(|mut c| {
-        c.lagrange_multiplier = 0.0;
+        c.angle_lagrange = 0.0;
+        c.angle_limit_lagrange = 0.0;
+        c.pos_lagrange = 0.0;
     });
 }
 
-pub fn distance_system(
-    mut query: Query<&mut DistanceConstraint>,
+pub fn revolute_system(
+    mut query: Query<&mut RevoluteJoint>,
     mut bodies: Query<EntityQuery>,
     config: Res<Config>,
 ) {
@@ -72,11 +90,12 @@ pub fn distance_system(
         else {
             return;
         };
+
         let world_anchor_a = constraint.anchor_a.to_world_basis(&entity_a);
         let world_anchor_b = constraint.anchor_b.to_world_basis(&entity_b);
         let dist = (world_anchor_a.0 + entity_a.pos.0) - (world_anchor_b.0 + entity_b.pos.0);
-        let c = dist.norm() - constraint.distance_target;
         let n = UnitVector3::new_normalize(dist);
+        let c = dist.norm();
 
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
@@ -92,6 +111,18 @@ pub fn distance_system(
         );
 
         let compliance = constraint.compliance;
+        let delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
+        apply_rot_constraint(
+            &mut entity_a,
+            &mut entity_b,
+            delta_q,
+            inverse_mass_a,
+            inverse_mass_b,
+            &mut constraint.angle_lagrange,
+            compliance,
+            config.sub_dt,
+        );
+
         apply_distance_constraint(
             &mut entity_a,
             &mut entity_b,
@@ -99,11 +130,21 @@ pub fn distance_system(
             n,
             inverse_mass_a,
             inverse_mass_b,
-            &mut constraint.lagrange_multiplier,
+            &mut constraint.pos_lagrange,
             compliance,
             config.sub_dt,
             world_anchor_a,
             world_anchor_b,
         );
-    });
+    })
+}
+
+pub fn delta_q(
+    att_a: UnitQuaternion<f64>,
+    att_b: UnitQuaternion<f64>,
+    axis: UnitVector3<f64>,
+) -> Vector3<f64> {
+    let axis_a = att_a * axis;
+    let axis_b = att_b * axis;
+    axis_a.into_inner().cross(&*axis_b)
 }
