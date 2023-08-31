@@ -63,6 +63,7 @@ pub fn pos_generalized_inverse_mass(
     1.0 / mass + r_cross_n.dot(&(inverse_inertia * r_cross_n))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply_distance_constraint(
     entity_a: &mut EntityQueryItem<'_>,
     entity_b: &mut EntityQueryItem<'_>,
@@ -114,6 +115,7 @@ pub fn apply_distance_constraint(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply_rot_constraint(
     entity_a: &mut EntityQueryItem<'_>,
     entity_b: &mut EntityQueryItem<'_>,
