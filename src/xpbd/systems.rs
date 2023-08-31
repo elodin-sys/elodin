@@ -5,17 +5,14 @@ use bevy_ecs::{
     system::{Query, Res, ResMut},
 };
 
-use super::{body, components::*, constraints::distance_system};
+use super::{
+    body,
+    components::*,
+    constraints::{distance_system, revolute_system},
+};
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SubstepSchedule;
-
-#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
-pub enum TickSet {
-    ClearConstraintLagrange,
-    TickPhysics,
-    SyncPos,
-}
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 enum SubstepSet {
@@ -42,7 +39,7 @@ pub fn substep_schedule() -> Schedule {
     );
     schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
     schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
-    schedule.add_systems((distance_system).in_set(SubstepSet::SolveConstraints));
+    schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
     schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
     schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
     schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));

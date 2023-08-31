@@ -4,7 +4,7 @@ use bevy_ecs::schedule::SystemSet;
 use crate::{Att, Pos};
 
 use super::{
-    constraints::clear_distance_lagrange,
+    constraints::{clear_distance_lagrange, clear_revolute_lagrange},
     systems::{self, SubstepSchedule},
 };
 
@@ -21,10 +21,10 @@ impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (clear_distance_lagrange).in_set(TickSet::ClearConstraintLagrange),
+            (clear_distance_lagrange, clear_revolute_lagrange)
+                .in_set(TickSet::ClearConstraintLagrange),
         )
         .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
-        .add_schedule(SubstepSchedule, systems::substep_schedule())
         .add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
         .configure_sets(
             Update,
@@ -34,7 +34,9 @@ impl Plugin for XpbdPlugin {
                 TickSet::SyncPos,
             )
                 .chain(),
-        );
+        )
+        //.insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
+        .add_schedule(SubstepSchedule, systems::substep_schedule());
     }
 }
 

@@ -115,7 +115,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(-4.0, 8.0, 10.0)),
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
             ..default()
         })
         .insert(PanOrbitCamera::default())
