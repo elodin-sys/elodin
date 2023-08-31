@@ -10,7 +10,10 @@ use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
 use crate::{FromState, Time, Torque};
 
-use super::builder::{XpbdEffector, XpbdSensor};
+use super::{
+    builder::{XpbdEffector, XpbdSensor},
+    SUBSTEPS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PrevPos(pub Vector3<f64>);
@@ -32,7 +35,7 @@ impl Default for Config {
         let dt = 1.0 / 60.0;
         Self {
             dt,
-            sub_dt: dt / 12.0,
+            sub_dt: dt / SUBSTEPS as f64,
         }
     }
 }
