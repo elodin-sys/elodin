@@ -30,6 +30,9 @@ pub struct RevoluteJoint {
     pub angle_limit_lagrange: f64,
     pub pos_lagrange: f64,
     pub angle_lagrange: f64,
+
+    pub pos_damping: f64,
+    pub ang_damping: f64,
 }
 
 impl RevoluteJoint {
@@ -45,6 +48,8 @@ impl RevoluteJoint {
             angle_limit_lagrange: 0.0,
             pos_lagrange: 0.0,
             angle_lagrange: 0.0,
+            pos_damping: 1.0,
+            ang_damping: 1.0,
         }
     }
 
@@ -144,6 +149,57 @@ pub fn revolute_system(
             world_anchor_b,
         );
     })
+}
+
+pub fn revolute_damping(
+    query: Query<&RevoluteJoint>,
+    mut bodies: Query<EntityQuery>,
+    config: Res<Config>,
+) {
+    for constraint in &query {
+        let Ok([mut entity_a, mut entity_b]) =
+            bodies.get_many_mut([constraint.entity_a, constraint.entity_b])
+        else {
+            return;
+        };
+
+        let delta_v =
+            (entity_b.vel.0 - entity_a.vel.0) * (constraint.pos_damping * config.sub_dt).min(1.0);
+
+        let delta_omega = (entity_b.ang_vel.0 - entity_a.ang_vel.0)
+            * (constraint.ang_damping * config.sub_dt).min(1.0);
+
+        if !entity_a.fixed.0 {
+            entity_a.ang_vel.0 += delta_omega;
+        }
+
+        if !entity_b.fixed.0 {
+            entity_b.ang_vel.0 -= delta_omega;
+        }
+
+        let w_a = if entity_a.fixed.0 {
+            0.0
+        } else {
+            1.0 / entity_a.mass.0
+        };
+        let w_b = if entity_b.fixed.0 {
+            0.0
+        } else {
+            1.0 / entity_b.mass.0
+        };
+
+        let w_sum = w_a + w_b;
+        if w_sum <= f64::EPSILON {
+            continue;
+        }
+        let p = delta_v / w_sum;
+        if !entity_a.fixed.0 {
+            entity_a.vel.0 += w_a * p;
+        }
+        if !entity_b.fixed.0 {
+            entity_b.vel.0 -= w_b * p;
+        }
+    }
 }
 
 pub fn delta_q(

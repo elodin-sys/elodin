@@ -8,7 +8,7 @@ use bevy_ecs::{
 use super::{
     body,
     components::*,
-    constraints::{distance_system, revolute_system},
+    constraints::{distance_system, revolute_damping, revolute_system},
 };
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
@@ -20,6 +20,7 @@ enum SubstepSet {
     Integrate,
     SolveConstraints,
     UpdateVel,
+    DampJoints,
     ClearEffects,
     UpdateTime,
 }
@@ -32,6 +33,7 @@ pub fn substep_schedule() -> Schedule {
             SubstepSet::Integrate,
             SubstepSet::SolveConstraints,
             SubstepSet::UpdateVel,
+            SubstepSet::DampJoints,
             SubstepSet::ClearEffects,
             SubstepSet::UpdateTime,
         )
@@ -41,6 +43,7 @@ pub fn substep_schedule() -> Schedule {
     schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
     schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
     schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
+    schedule.add_systems((revolute_damping).in_set(SubstepSet::DampJoints));
     schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
     schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
     schedule
