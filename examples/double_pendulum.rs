@@ -25,7 +25,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             })))
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into())),
     );
-    let rod_a_angle = f64::to_radians(70.0);
+    let rod_a_angle = f64::to_radians(5.0);
     let rod_a_pos = vector![0.5 * rod_a_angle.sin(), -0.5 * rod_a_angle.cos(), 0.0];
     let rod_a = builder.entity(
         EntityBuilder::default()
@@ -44,10 +44,10 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         RevoluteJoint::new(root, rod_a)
             .join_axis(Vector3::z_axis())
             .anchor_b(Pos(vector![0., 0.5, 0.0]))
-            .compliance(0.0001),
+            .compliance(0.0000),
     );
 
-    let rod_b_angle = f64::to_radians(45.0);
+    let rod_b_angle = f64::to_radians(0.0);
     let rod_b = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
@@ -65,7 +65,8 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     builder.revolute_join(
         RevoluteJoint::new(rod_a, rod_b)
             .join_axis(Vector3::z_axis())
-            .anchor_b(Pos(vector![0., 1.0, 0.0]))
-            .compliance(0.0001),
+            .anchor_a(Pos(vector![0., -0.5, 0.0]))
+            .anchor_b(Pos(vector![0., 0.5, 0.0]))
+            .compliance(0.0000),
     );
 }
