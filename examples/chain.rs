@@ -40,7 +40,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         builder.distance_constraint(
             DistanceConstraint::new(link, previous_link)
                 .distance_target(0.25)
-                .compliance(0.00001),
+                .compliance(0.0),
         );
         previous_link = link
     }
