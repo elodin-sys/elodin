@@ -1,4 +1,4 @@
-use std::ops::DerefMut;
+use std::{f64::consts::PI, ops::DerefMut};
 
 use bevy::{
     core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
@@ -197,6 +197,6 @@ pub struct ObservableInput(pub ObservableNum<f64>);
 impl Editable for ObservableInput {
     fn build(&mut self, ui: &mut Ui) {
         let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
+        ui.add(egui::Slider::new(num.deref_mut(), -PI / 2.0..=PI / 2.0));
     }
 }

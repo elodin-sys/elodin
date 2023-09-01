@@ -1,12 +1,19 @@
-use std::f64::consts::PI;
+use std::{
+    f64::consts::PI,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Instant, SystemTime},
+};
 
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, UnitQuaternion, Vector3};
 use paracosm::{
     xpbd::{
         builder::{Assets, EntityBuilder, XpbdBuilder},
-        constraints::{Angle, JointSetPoint, RevoluteJoint},
-        editor::{editor, Input, ObservableInput},
+        constraints::{Angle, RevoluteJoint},
+        editor::{editor, ObservableInput},
     },
     Force, Pos, Time,
 };
@@ -16,6 +23,7 @@ fn main() {
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput) {
+    let last_change = Arc::new(AtomicU64::new(0));
     let root = builder.entity(
         EntityBuilder::default()
             .mass(10.0)
@@ -27,7 +35,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             })))
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into())),
     );
-    let rod_a_angle = f64::to_radians(0.0);
+    let rod_a_angle = f64::to_radians(40.0);
     let rod_a_pos = vector![0.5 * rod_a_angle.sin(), -0.5 * rod_a_angle.cos(), 0.0];
     let rod_a = builder.entity(
         EntityBuilder::default()
@@ -48,7 +56,18 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             .anchor_b(Pos(vector![0., 0.5, 0.0]))
             .angle_limits(-PI / 2.0..PI / 2.0)
             .compliance(0.0)
-            .effector(move || input.0.has_changed().then(|| Angle(*input.0.load()))),
+            .effector(move |Time(t)| {
+                let t = (t * 1000.0) as u64;
+                if input.0.has_changed() {
+                    last_change.store(t, Ordering::SeqCst);
+                }
+                let last_change_val = last_change.load(Ordering::SeqCst);
+                if t < last_change_val + 250 {
+                    Some(Angle(*input.0.load()))
+                } else {
+                    None
+                }
+            }),
     );
 
     let rod_b_angle = f64::to_radians(0.0);
