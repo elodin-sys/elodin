@@ -15,7 +15,7 @@ use bevy_egui::{
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::SharedNum;
+use crate::{ObservableNum, SharedNum};
 
 use self::sealed::EditorEnv;
 
@@ -115,7 +115,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // camera
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(-4.0, 8.0, 10.0)),
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
             ..default()
         })
         .insert(PanOrbitCamera::default())
@@ -181,5 +181,14 @@ impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
             queue: env.command_queue.borrow_mut(),
             entities: env.app.world.entities(),
         }
+    }
+}
+
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ObservableInput(pub ObservableNum<f64>);
+impl Editable for ObservableInput {
+    fn build(&mut self, ui: &mut Ui) {
+        let mut num = self.0.load();
+        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
     }
 }

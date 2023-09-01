@@ -61,6 +61,17 @@ macro_rules! impl_effector {
     };
 }
 
+impl<F, E, S> Effector<(), S> for F
+where
+    F: Fn() -> E,
+{
+    type Effect = E;
+
+    fn effect(&self, _time: Time, _state: &S) -> Self::Effect {
+        (self)()
+    }
+}
+
 impl_effector!(T1);
 impl_effector!(T1, T2);
 impl_effector!(T1, T2, T3);
@@ -73,3 +84,36 @@ impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_effector!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+
+macro_rules! concrete_effector {
+    ($concrete_name: ident, $trait_name: ident, $state: ty, $effect: ty) => {
+        struct $concrete_name<ER, E> {
+            effector: ER,
+            _phantom: std::marker::PhantomData<(E,)>,
+        }
+
+        impl<ER, E> $concrete_name<ER, E> {
+            fn new(effector: ER) -> Self {
+                Self {
+                    effector,
+                    _phantom: std::marker::PhantomData,
+                }
+            }
+        }
+        impl<ER, T, Eff> $trait_name for $concrete_name<ER, T>
+        where
+            ER: for<'s> crate::effector::Effector<T, $state, Effect = Eff>,
+            Eff: Into<$effect>,
+        {
+            fn effect<'s>(&self, time: crate::Time, state: $state) -> $effect {
+                self.effector.effect(time, &state).into()
+            }
+        }
+
+        pub trait $trait_name {
+            fn effect<'s>(&self, time: crate::Time, state: $state) -> $effect;
+        }
+    };
+}
+
+pub(crate) use concrete_effector;

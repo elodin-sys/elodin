@@ -10,9 +10,16 @@ use bevy_ecs::{entity::Entities, system::Spawn};
 use bevy_ecs::{prelude::Entity, system::CommandQueue, world::Mut};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
-use crate::{effector::Effector, sensor::Sensor, Time};
+use crate::{
+    effector::{concrete_effector, Effector},
+    sensor::Sensor,
+    Time,
+};
 
-use super::{components::*, constraints::DistanceConstraint};
+use super::{
+    components::*,
+    constraints::{DistanceConstraint, RevoluteJoint},
+};
 
 pub struct EntityBuilder {
     mass: f64,
@@ -75,9 +82,9 @@ impl EntityBuilder {
         self
     }
 
-    pub fn intertia(mut self, inertia: Matrix3<f64>) -> Self {
-        self.inertia = inertia;
-        self.inverse_inertia = inertia.try_inverse().unwrap();
+    pub fn intertia(mut self, inertia: Inertia) -> Self {
+        self.inertia = inertia.0;
+        self.inverse_inertia = inertia.0.try_inverse().unwrap();
         self
     }
 
@@ -146,29 +153,7 @@ impl EntityBuilder {
     }
 }
 
-struct ConcreteEffector<ER, E> {
-    effector: ER,
-    _phantom: PhantomData<(E,)>,
-}
-
-impl<ER, E> ConcreteEffector<ER, E> {
-    fn new(effector: ER) -> Self {
-        Self {
-            effector,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<ER, T, Eff> XpbdEffector for ConcreteEffector<ER, T>
-where
-    ER: for<'s> Effector<T, EntityStateRef<'s>, Effect = Eff>,
-    Eff: Into<Effect>,
-{
-    fn effect(&self, time: Time, state: EntityStateRef<'_>) -> Effect {
-        self.effector.effect(time, &state).into()
-    }
-}
+concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
 
 struct ConcreteSensor<ER, E> {
     sensor: ER,
@@ -191,10 +176,6 @@ where
     fn sense(&mut self, time: crate::Time, state: EntityStateRef<'_>) {
         self.sensor.sense(time, &state)
     }
-}
-
-pub trait XpbdEffector {
-    fn effect(&self, time: Time, state: EntityStateRef<'_>) -> Effect;
 }
 
 pub trait XpbdSensor {
@@ -226,6 +207,12 @@ impl<'a> XpbdBuilder<'a> {
     pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
         self.queue.push(Spawn {
             bundle: distance_constriant,
+        });
+    }
+
+    pub fn revolute_join(&mut self, revolute_join: RevoluteJoint) {
+        self.queue.push(Spawn {
+            bundle: revolute_join,
         });
     }
 }
