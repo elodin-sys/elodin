@@ -2,17 +2,14 @@ use bevy_ecs::{
     prelude::{Component, Entity},
     system::{Query, Res},
 };
-use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
+use nalgebra::{UnitVector3, Vector3};
 
 use crate::{
     xpbd::components::{Config, EntityQuery},
     Pos,
 };
 
-use super::{
-    att_delta_pos_impulse, lagrange_multiplier_delta, pos_delta_pos_impulse,
-    pos_generalized_inverse_mass, pos_impulse,
-};
+use super::{apply_distance_constraint, pos_generalized_inverse_mass};
 
 #[derive(Component, Debug, Clone)]
 pub struct DistanceConstraint {
@@ -75,11 +72,12 @@ pub fn distance_system(
         else {
             return;
         };
-        let world_anchor_a = constraint.anchor_a.to_world(&entity_a);
-        let world_anchor_b = constraint.anchor_b.to_world(&entity_b);
-        let dist = world_anchor_a.0 - world_anchor_b.0;
+        let world_anchor_a = constraint.anchor_a.to_world_basis(&entity_a);
+        let world_anchor_b = constraint.anchor_b.to_world_basis(&entity_b);
+        let dist = (world_anchor_a.0 + entity_a.pos.0) - (world_anchor_b.0 + entity_b.pos.0);
         let c = dist.norm() - constraint.distance_target;
         let n = UnitVector3::new_normalize(dist);
+
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
             entity_a.inverse_inertia.to_world(&entity_a).0,
@@ -92,39 +90,20 @@ pub fn distance_system(
             world_anchor_b.0,
             n,
         );
-        let delta_lagrange = lagrange_multiplier_delta(
-            c,
-            constraint.lagrange_multiplier,
-            constraint.compliance,
-            config.sub_dt,
-            [inverse_mass_a, inverse_mass_b].into_iter(),
-        );
-        constraint.lagrange_multiplier += delta_lagrange;
-        let pos_impulse = pos_impulse(delta_lagrange, n);
-        if !entity_a.fixed.0 {
-            entity_a.pos.0 += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
-            entity_a.att.0 = UnitQuaternion::new_normalize(
-                entity_a.att.0.into_inner()
-                    + att_delta_pos_impulse(
-                        *entity_a.att.0,
-                        pos_impulse,
-                        world_anchor_a.0,
-                        entity_a.inverse_inertia.0,
-                    ),
-            );
-        }
 
-        if !entity_b.fixed.0 {
-            entity_b.pos.0 -= pos_delta_pos_impulse(pos_impulse, entity_b.mass.0);
-            entity_b.att.0 = UnitQuaternion::new_normalize(
-                entity_a.att.0.into_inner()
-                    - att_delta_pos_impulse(
-                        *entity_b.att.0,
-                        pos_impulse,
-                        world_anchor_b.0,
-                        entity_b.inverse_inertia.0,
-                    ),
-            );
-        }
+        let compliance = constraint.compliance;
+        apply_distance_constraint(
+            &mut entity_a,
+            &mut entity_b,
+            c,
+            n,
+            inverse_mass_a,
+            inverse_mass_b,
+            &mut constraint.lagrange_multiplier,
+            compliance,
+            config.sub_dt,
+            world_anchor_a,
+            world_anchor_b,
+        );
     });
 }

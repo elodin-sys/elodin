@@ -10,7 +10,10 @@ use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
 use crate::{FromState, Time, Torque};
 
-use super::builder::{XpbdEffector, XpbdSensor};
+use super::{
+    builder::{XpbdEffector, XpbdSensor},
+    SUBSTEPS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PrevPos(pub Vector3<f64>);
@@ -32,7 +35,7 @@ impl Default for Config {
         let dt = 1.0 / 60.0;
         Self {
             dt,
-            sub_dt: dt / 12.0,
+            sub_dt: dt / SUBSTEPS as f64,
         }
     }
 }
@@ -81,8 +84,8 @@ pub struct EntityBundle {
     pub sensors: Sensors,
 }
 
-#[derive(WorldQuery)]
-#[world_query(mutable)]
+#[derive(WorldQuery, Debug)]
+#[world_query(mutable, derive(Debug))]
 pub struct EntityQuery {
     pub fixed: &'static Fixed,
     pub pos: &'static mut Pos,
@@ -130,7 +133,15 @@ impl Pos {
         Pos: FromState<S>,
         Att: FromState<S>,
     {
-        Pos((Att::from_state(Time(0.0), state).0 * self.0) + Pos::from_state(Time(0.0), state).0)
+        Pos(Att::from_state(Time(0.0), state).0 * self.0 + Pos::from_state(Time(0.0), state).0)
+    }
+
+    pub fn to_world_basis<S>(&self, state: &S) -> Self
+    where
+        Pos: FromState<S>,
+        Att: FromState<S>,
+    {
+        Pos(Att::from_state(Time(0.0), state).0 * self.0)
     }
 }
 
