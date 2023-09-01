@@ -1,4 +1,4 @@
-use std::{f64::consts::PI, ops::Range};
+use std::{f64::consts::PI, fmt::Debug, ops::Range};
 
 use bevy_ecs::{
     component::Component,
@@ -8,16 +8,14 @@ use bevy_ecs::{
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use crate::{
+    effector::{concrete_effector, Effector},
     xpbd::components::{Config, EntityQuery},
-    Pos,
+    Pos, Time,
 };
 
-use super::{
-    apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass,
-    rot_generalized_inverse_mass,
-};
+use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component)]
 pub struct RevoluteJoint {
     pub entity_a: Entity,
     pub entity_b: Entity,
@@ -34,6 +32,8 @@ pub struct RevoluteJoint {
 
     pub pos_damping: f64,
     pub ang_damping: f64,
+
+    pub effector: Option<Box<dyn RevoluteEffector + Send + Sync>>,
 }
 
 impl RevoluteJoint {
@@ -51,6 +51,7 @@ impl RevoluteJoint {
             angle_lagrange: 0.0,
             pos_damping: 1.0,
             ang_damping: 1.0,
+            effector: None,
         }
     }
 
@@ -76,6 +77,17 @@ impl RevoluteJoint {
 
     pub fn compliance(mut self, compliance: f64) -> Self {
         self.compliance = compliance;
+        self
+    }
+
+    pub fn effector<T, E, EF>(mut self, effector: E) -> Self
+    where
+        T: 'static + Send + Sync,
+        E: for<'a> Effector<T, &'a RevoluteJoint, Effect = EF> + Send + Sync + 'static,
+        EF: Into<JointSetPoint> + Send + Sync,
+    {
+        let unified: ConcereteRevoluteEffector<E, T> = ConcereteRevoluteEffector::new(effector);
+        self.effector = Some(Box::new(unified));
         self
     }
 }
@@ -106,7 +118,22 @@ pub fn revolute_system(
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
         let compliance = constraint.compliance;
-        let delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
+        let mut delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
+        if let Some(ref effector) = constraint.effector {
+            if let Some(angle) = effector.effect(Time(0.0), &constraint).theta {
+                let perp_axis = Vector3::new(
+                    constraint.joint_axis.z,
+                    constraint.joint_axis.x,
+                    constraint.joint_axis.y,
+                );
+                let b1 = entity_a.att.0 * perp_axis;
+                let b2 = entity_b.att.0 * perp_axis;
+                let a1 = entity_a.att.0 * constraint.joint_axis;
+                let b_target = UnitQuaternion::from_axis_angle(&a1, angle) * b1;
+                let delta_q_target = b_target.cross(&b2);
+                delta_q += delta_q_target;
+            }
+        }
 
         apply_rot_constraint(
             &mut entity_a,
@@ -153,10 +180,10 @@ pub fn revolute_system(
                 constraint.joint_axis.x,
                 constraint.joint_axis.y,
             );
-            let a1 = entity_a.att.0 * limit_axis;
-            let a2 = entity_b.att.0 * limit_axis;
-            let n = a1.cross(&a2).normalize();
-            if let Some(delta_q) = angle_limit.delta_q(&n, a1, a2) {
+            let b1 = entity_a.att.0 * limit_axis;
+            let b2 = entity_b.att.0 * limit_axis;
+            let n = b1.cross(&b2).normalize();
+            if let Some(delta_q) = angle_limit.delta_q(&n, b1, b2) {
                 apply_rot_constraint(
                     &mut entity_a,
                     &mut entity_b,
@@ -265,5 +292,47 @@ impl AngleLimits {
             return Some(dq);
         }
         None
+    }
+}
+
+concrete_effector!(
+    ConcereteRevoluteEffector,
+    RevoluteEffector,
+    &'s RevoluteJoint,
+    JointSetPoint
+);
+
+#[derive(Default)]
+pub struct JointSetPoint {
+    pub theta: Option<f64>,
+    pub omega: Option<f64>,
+}
+
+pub struct Angle(pub f64);
+pub struct AngleVel(pub f64);
+impl From<Angle> for JointSetPoint {
+    fn from(val: Angle) -> Self {
+        JointSetPoint {
+            theta: Some(val.0),
+            omega: None,
+        }
+    }
+}
+
+impl From<AngleVel> for JointSetPoint {
+    fn from(val: AngleVel) -> Self {
+        JointSetPoint {
+            theta: None,
+            omega: Some(val.0),
+        }
+    }
+}
+
+impl<T> Into<JointSetPoint> for Option<T>
+where
+    JointSetPoint: From<T>,
+{
+    fn into(self) -> JointSetPoint {
+        self.map(JointSetPoint::from).unwrap_or_default()
     }
 }
