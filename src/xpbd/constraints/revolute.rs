@@ -328,11 +328,11 @@ impl From<AngleVel> for JointSetPoint {
     }
 }
 
-impl<T> Into<JointSetPoint> for Option<T>
+impl<T> From<Option<T>> for JointSetPoint
 where
     JointSetPoint: From<T>,
 {
-    fn into(self) -> JointSetPoint {
-        self.map(JointSetPoint::from).unwrap_or_default()
+    fn from(val: Option<T>) -> Self {
+        val.map(JointSetPoint::from).unwrap_or_default()
     }
 }

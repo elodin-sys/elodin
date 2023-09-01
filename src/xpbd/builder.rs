@@ -8,7 +8,7 @@ use bevy::{
 use bevy_ecs::system::Insert;
 use bevy_ecs::{entity::Entities, system::Spawn};
 use bevy_ecs::{prelude::Entity, system::CommandQueue, world::Mut};
-use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{
     effector::{concrete_effector, Effector},
