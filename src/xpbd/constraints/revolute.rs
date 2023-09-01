@@ -10,7 +10,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 use crate::{
     effector::{concrete_effector, Effector},
     xpbd::components::{Config, EntityQuery},
-    Pos, Time,
+    FromState, Pos, Time,
 };
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
@@ -104,6 +104,7 @@ pub fn revolute_system(
     mut query: Query<&mut RevoluteJoint>,
     mut bodies: Query<EntityQuery>,
     config: Res<Config>,
+    time: Res<Time>,
 ) {
     query.for_each_mut(|mut constraint| {
         let Ok([mut entity_a, mut entity_b]) =
@@ -180,7 +181,7 @@ pub fn revolute_system(
         }
 
         if let Some(ref effector) = constraint.effector {
-            if let Some(angle) = effector.effect(Time(0.0), &constraint).theta {
+            if let Some(angle) = effector.effect(*time, &constraint).theta {
                 let perp_axis = Vector3::new(
                     constraint.joint_axis.z,
                     constraint.joint_axis.x,
@@ -342,5 +343,11 @@ where
 {
     fn from(val: Option<T>) -> Self {
         val.map(JointSetPoint::from).unwrap_or_default()
+    }
+}
+
+impl<'a> FromState<&'a RevoluteJoint> for Time {
+    fn from_state(time: Time, _state: &&'a RevoluteJoint) -> Self {
+        time
     }
 }
