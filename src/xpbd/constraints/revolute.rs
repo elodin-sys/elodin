@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{f64::consts::PI, ops::Range};
 
 use bevy_ecs::{
     component::Component,
@@ -24,8 +24,9 @@ pub struct RevoluteJoint {
     pub anchor_a: Pos,
     pub anchor_b: Pos,
     pub joint_axis: UnitVector3<f64>,
-    pub angle_limits: Option<Range<f64>>,
     pub compliance: f64,
+
+    pub angle_limits: Option<AngleLimits>,
 
     pub angle_limit_lagrange: f64,
     pub pos_lagrange: f64,
@@ -69,7 +70,7 @@ impl RevoluteJoint {
     }
 
     pub fn angle_limits(mut self, limits: impl Into<Option<Range<f64>>>) -> Self {
-        self.angle_limits = limits.into();
+        self.angle_limits = limits.into().map(|range| AngleLimits { range });
         self
     }
 
@@ -104,24 +105,18 @@ pub fn revolute_system(
         let dist = (world_anchor_a.0 + entity_a.pos.0) - (world_anchor_b.0 + entity_b.pos.0);
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
-
         let compliance = constraint.compliance;
         let delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
-        let inverse_inertia_a = entity_a.inverse_inertia.to_world(&entity_a);
-        let inverse_inertia_b = entity_b.inverse_inertia.to_world(&entity_b);
-        let inverse_mass_a = rot_generalized_inverse_mass(inverse_inertia_a.0, n);
-        let inverse_mass_b = rot_generalized_inverse_mass(inverse_inertia_b.0, n);
 
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
             delta_q,
-            inverse_mass_a,
-            inverse_mass_b,
             &mut constraint.angle_lagrange,
             compliance,
             config.sub_dt,
         );
+
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
             entity_a.inverse_inertia.to_world(&entity_a).0,
@@ -148,6 +143,30 @@ pub fn revolute_system(
             world_anchor_a,
             world_anchor_b,
         );
+
+        if let Some(ref angle_limit) = constraint.angle_limits {
+            // NOTE(sphw): This is sourced from `revolute.rs` in bevy_xpbd, I'm not sure exavtly what the algo is doing, and I can't source it
+            // so if something is broken with angle limits look here
+
+            let limit_axis = Vector3::new(
+                constraint.joint_axis.z,
+                constraint.joint_axis.x,
+                constraint.joint_axis.y,
+            );
+            let a1 = entity_a.att.0 * limit_axis;
+            let a2 = entity_b.att.0 * limit_axis;
+            let n = a1.cross(&a2).normalize();
+            if let Some(delta_q) = angle_limit.delta_q(&n, a1, a2) {
+                apply_rot_constraint(
+                    &mut entity_a,
+                    &mut entity_b,
+                    delta_q,
+                    &mut constraint.angle_limit_lagrange,
+                    compliance,
+                    config.sub_dt,
+                );
+            }
+        }
     })
 }
 
@@ -210,4 +229,41 @@ pub fn delta_q(
     let axis_a = att_a * axis;
     let axis_b = att_b * axis;
     axis_a.into_inner().cross(&*axis_b)
+}
+
+#[derive(Clone, Debug)]
+pub struct AngleLimits {
+    range: Range<f64>,
+}
+
+impl AngleLimits {
+    fn delta_q(
+        &self,
+        n: &Vector3<f64>,
+        n1: Vector3<f64>,
+        n2: Vector3<f64>,
+    ) -> Option<Vector3<f64>> {
+        let mut phi = n1.cross(&n2).dot(n).asin();
+        if n1.dot(&n2) < 0.0 {
+            phi = PI - phi
+        };
+        if phi > PI {
+            phi -= 2.0 * PI;
+        }
+        if phi < -PI {
+            phi += 2.0 * PI;
+        }
+
+        if phi < self.range.start || phi > self.range.end {
+            phi = phi.clamp(self.range.start, self.range.end);
+            let n1 = UnitQuaternion::from_axis_angle(&UnitVector3::new_normalize(*n), phi) * n1;
+            let mut dq = n1.cross(&n2);
+            let norm = dq.norm();
+            if norm > PI {
+                dq *= PI / norm;
+            }
+            return Some(dq);
+        }
+        None
+    }
 }
