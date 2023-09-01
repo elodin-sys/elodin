@@ -1,4 +1,4 @@
-use std::ops::DerefMut;
+use std::{ops::DerefMut, sync::atomic::AtomicBool};
 
 use bevy::{
     core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
@@ -15,7 +15,7 @@ use bevy_egui::{
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::SharedNum;
+use crate::{ObservableNum, SharedNum};
 
 use self::sealed::EditorEnv;
 
@@ -181,5 +181,14 @@ impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
             queue: env.command_queue.borrow_mut(),
             entities: env.app.world.entities(),
         }
+    }
+}
+
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ObservableInput(pub ObservableNum<f64>);
+impl Editable for ObservableInput {
+    fn build(&mut self, ui: &mut Ui) {
+        let mut num = self.0.load();
+        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
     }
 }
