@@ -5,8 +5,8 @@ use nalgebra::{vector, UnitQuaternion, Vector3};
 use paracosm::{
     xpbd::{
         builder::{Assets, EntityBuilder, XpbdBuilder},
-        constraints::RevoluteJoint,
-        editor::editor,
+        constraints::{Angle, JointSetPoint, RevoluteJoint},
+        editor::{editor, Input, ObservableInput},
     },
     Force, Pos, Time,
 };
@@ -15,7 +15,7 @@ fn main() {
     editor(sim)
 }
 
-fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
+fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput) {
     let root = builder.entity(
         EntityBuilder::default()
             .mass(10.0)
@@ -27,7 +27,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             })))
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into())),
     );
-    let rod_a_angle = f64::to_radians(85.0);
+    let rod_a_angle = f64::to_radians(0.0);
     let rod_a_pos = vector![0.5 * rod_a_angle.sin(), -0.5 * rod_a_angle.cos(), 0.0];
     let rod_a = builder.entity(
         EntityBuilder::default()
@@ -47,10 +47,11 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             .join_axis(Vector3::z_axis())
             .anchor_b(Pos(vector![0., 0.5, 0.0]))
             .angle_limits(-PI / 2.0..PI / 2.0)
-            .compliance(0.0000),
+            .compliance(0.0)
+            .effector(move || input.0.has_changed().then(|| Angle(*input.0.load()))),
     );
 
-    let rod_b_angle = f64::to_radians(10.0);
+    let rod_b_angle = f64::to_radians(0.0);
     let rod_b = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
@@ -70,6 +71,6 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             .join_axis(Vector3::z_axis())
             .anchor_a(Pos(vector![0., -0.5, 0.0]))
             .anchor_b(Pos(vector![0., 0.5, 0.0]))
-            .compliance(0.0000),
+            .compliance(0.0),
     );
 }
