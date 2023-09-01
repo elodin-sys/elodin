@@ -1,4 +1,4 @@
-use std::{ops::DerefMut, sync::atomic::AtomicBool};
+use std::ops::DerefMut;
 
 use bevy::{
     core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
