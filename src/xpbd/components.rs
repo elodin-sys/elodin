@@ -84,8 +84,8 @@ pub struct EntityBundle {
     pub sensors: Sensors,
 }
 
-#[derive(WorldQuery)]
-#[world_query(mutable)]
+#[derive(WorldQuery, Debug)]
+#[world_query(mutable, derive(Debug))]
 pub struct EntityQuery {
     pub fixed: &'static Fixed,
     pub pos: &'static mut Pos,

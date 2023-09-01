@@ -120,8 +120,6 @@ pub fn apply_rot_constraint(
     entity_a: &mut EntityQueryItem<'_>,
     entity_b: &mut EntityQueryItem<'_>,
     delta_q: Vector3<f64>,
-    inverse_mass_a: f64,
-    inverse_mass_b: f64,
     lagrange_multiplier: &mut f64,
     compliance: f64,
     sub_dt: f64,
@@ -131,6 +129,11 @@ pub fn apply_rot_constraint(
         return;
     }
     let axis = UnitVector3::new_normalize(delta_q);
+    let inverse_inertia_a = entity_a.inverse_inertia.to_world(entity_a);
+    let inverse_inertia_b = entity_b.inverse_inertia.to_world(entity_b);
+    let inverse_mass_a = rot_generalized_inverse_mass(inverse_inertia_a.0, axis);
+    let inverse_mass_b = rot_generalized_inverse_mass(inverse_inertia_b.0, axis);
+
     let delta_lagrange = lagrange_multiplier_delta(
         angle,
         *lagrange_multiplier,
@@ -151,7 +154,7 @@ pub fn apply_rot_constraint(
     if !entity_b.fixed.0 {
         let inverse_inertia = entity_b.inverse_inertia.to_world(entity_b).0;
         entity_b.att.0 = UnitQuaternion::new_normalize(
-            *entity_b.att.0 + att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_b.att.0),
+            *entity_b.att.0 - att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_b.att.0),
         );
     }
 }
