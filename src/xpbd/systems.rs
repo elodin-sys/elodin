@@ -1,57 +1,14 @@
 use crate::Time;
 use bevy_ecs::{
     query::WorldQuery,
-    schedule::{IntoSystemConfigs, IntoSystemSetConfigs, Schedule, ScheduleLabel, SystemSet},
     system::{Query, Res, ResMut},
 };
 
-use super::{
-    body,
-    components::*,
-    constraints::{distance_system, revolute_damping, revolute_system},
-};
-
-#[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
-pub struct SubstepSchedule;
-
-#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
-enum SubstepSet {
-    CalcEffects,
-    Integrate,
-    SolveConstraints,
-    UpdateVel,
-    DampJoints,
-    ClearEffects,
-    UpdateTime,
-}
-
-pub fn substep_schedule() -> Schedule {
-    let mut schedule = Schedule::default();
-    schedule.configure_sets(
-        (
-            SubstepSet::CalcEffects,
-            SubstepSet::Integrate,
-            SubstepSet::SolveConstraints,
-            SubstepSet::UpdateVel,
-            SubstepSet::DampJoints,
-            SubstepSet::ClearEffects,
-            SubstepSet::UpdateTime,
-        )
-            .chain(),
-    );
-    schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
-    schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
-    schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
-    schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
-    schedule.add_systems((revolute_damping).in_set(SubstepSet::DampJoints));
-    schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
-    schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
-    schedule
-}
+use super::{body, components::*};
 
 #[derive(WorldQuery)]
 #[world_query(mutable)]
-struct EffectQuery {
+pub(crate) struct EffectQuery {
     effect: &'static mut Effect,
     effectors: &'static Effectors,
     entity: EntityQueryReadOnly,
@@ -59,12 +16,12 @@ struct EffectQuery {
 
 #[derive(WorldQuery)]
 #[world_query(mutable)]
-struct SensorQuery {
+pub(crate) struct SensorQuery {
     sensors: &'static mut Sensors,
     entity: EntityQueryReadOnly,
 }
 
-fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) {
+pub(crate) fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) {
     query.par_iter_mut().for_each_mut(|mut q| {
         for effector in &q.effectors.0 {
             *q.effect += effector.effect(*time, EntityStateRef::from_query(&q.entity))
@@ -72,7 +29,7 @@ fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) {
     })
 }
 
-fn calculate_sensors(mut query: Query<SensorQuery>, time: Res<Time>) {
+pub(crate) fn calculate_sensors(mut query: Query<SensorQuery>, time: Res<Time>) {
     query.par_iter_mut().for_each_mut(|mut q| {
         for effector in &mut q.sensors.0 {
             effector.sense(*time, EntityStateRef::from_query(&q.entity));
@@ -80,17 +37,17 @@ fn calculate_sensors(mut query: Query<SensorQuery>, time: Res<Time>) {
     })
 }
 
-fn clear_effects(mut query: Query<&mut Effect>) {
+pub(crate) fn clear_effects(mut query: Query<&mut Effect>) {
     query.par_iter_mut().for_each_mut(|mut q| {
         *q = Effect::default();
     });
 }
 
-fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
+pub(crate) fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
     time.0 += config.sub_dt;
 }
 
-fn integrate_pos(
+pub(crate) fn integrate_pos(
     mut query: Query<(
         &mut Pos,
         &mut PrevPos,
@@ -118,7 +75,7 @@ fn integrate_pos(
         })
 }
 
-fn integrate_att(
+pub(crate) fn integrate_att(
     mut query: Query<(
         &mut Att,
         &mut PrevAtt,
@@ -148,7 +105,10 @@ fn integrate_att(
     )
 }
 
-fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel, &Fixed)>, config: Res<Config>) {
+pub(crate) fn update_vel(
+    mut query: Query<(&Pos, &PrevPos, &mut Vel, &Fixed)>,
+    config: Res<Config>,
+) {
     query
         .par_iter_mut()
         .for_each_mut(|(pos, prev_pos, mut vel, fixed)| {
@@ -159,7 +119,10 @@ fn update_vel(mut query: Query<(&Pos, &PrevPos, &mut Vel, &Fixed)>, config: Res<
         })
 }
 
-fn update_ang_vel(mut query: Query<(&Att, &PrevAtt, &mut AngVel, &Fixed)>, config: Res<Config>) {
+pub(crate) fn update_ang_vel(
+    mut query: Query<(&Att, &PrevAtt, &mut AngVel, &Fixed)>,
+    config: Res<Config>,
+) {
     query
         .par_iter_mut()
         .for_each_mut(|(att, prev_att, mut ang_vel, fixed)| {

@@ -1,11 +1,14 @@
 use bevy::prelude::*;
-use bevy_ecs::schedule::SystemSet;
+use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 
 use crate::{Att, Pos};
 
 use super::{
-    constraints::{clear_distance_lagrange, clear_revolute_lagrange},
-    systems::{self, SubstepSchedule},
+    constraints::{
+        clear_distance_lagrange, clear_revolute_lagrange, distance_system, revolute_damping,
+        revolute_system,
+    },
+    systems::*,
     SUBSTEPS,
 };
 
@@ -37,7 +40,7 @@ impl Plugin for XpbdPlugin {
                 .chain(),
         )
         //.insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
-        .add_schedule(SubstepSchedule, systems::substep_schedule());
+        .add_schedule(SubstepSchedule, substep_schedule());
     }
 }
 
@@ -56,4 +59,42 @@ pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
                 Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
             // TODO: Is `Quat` a JPL quat who knows?!
         });
+}
+
+#[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
+pub struct SubstepSchedule;
+
+#[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
+enum SubstepSet {
+    CalcEffects,
+    Integrate,
+    SolveConstraints,
+    UpdateVel,
+    DampJoints,
+    ClearEffects,
+    UpdateTime,
+}
+
+pub fn substep_schedule() -> Schedule {
+    let mut schedule = Schedule::default();
+    schedule.configure_sets(
+        (
+            SubstepSet::CalcEffects,
+            SubstepSet::Integrate,
+            SubstepSet::SolveConstraints,
+            SubstepSet::UpdateVel,
+            SubstepSet::DampJoints,
+            SubstepSet::ClearEffects,
+            SubstepSet::UpdateTime,
+        )
+            .chain(),
+    );
+    schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
+    schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
+    schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
+    schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
+    schedule.add_systems((revolute_damping).in_set(SubstepSet::DampJoints));
+    schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
+    schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
+    schedule
 }
