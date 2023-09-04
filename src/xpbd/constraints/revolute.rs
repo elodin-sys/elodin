@@ -80,6 +80,16 @@ impl RevoluteJoint {
         self
     }
 
+    pub fn ang_damping(mut self, ang_damping: f64) -> Self {
+        self.ang_damping = ang_damping;
+        self
+    }
+
+    pub fn pos_damping(mut self, pos_damping: f64) -> Self {
+        self.pos_damping = pos_damping;
+        self
+    }
+
     pub fn effector<T, E, EF>(mut self, effector: E) -> Self
     where
         T: 'static + Send + Sync,
