@@ -25,7 +25,7 @@ fn sim(mut builder: XpbdBuilder, mut assets: Assets, input: Input) {
             .material(assets.material(bevy::prelude::StandardMaterial {
                 base_color: Color::hex("#0085FF").unwrap(),
                 metallic: 0.6,
-                perceptual_roughness: 0.1,
+                perceptual_roughness: 0.3,
                 ..Default::default()
             })),
     );

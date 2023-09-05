@@ -31,3 +31,4 @@ rerun.optional = true
 plotters = "0.3.5"
 approx = "0.5"
 bevy = "0.11"
+anyhow = "1"

@@ -10,7 +10,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 use crate::{
     effector::{concrete_effector, Effector},
     xpbd::components::{Config, EntityQuery},
-    Pos, Time,
+    FromState, Pos, Time,
 };
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
@@ -80,6 +80,16 @@ impl RevoluteJoint {
         self
     }
 
+    pub fn ang_damping(mut self, ang_damping: f64) -> Self {
+        self.ang_damping = ang_damping;
+        self
+    }
+
+    pub fn pos_damping(mut self, pos_damping: f64) -> Self {
+        self.pos_damping = pos_damping;
+        self
+    }
+
     pub fn effector<T, E, EF>(mut self, effector: E) -> Self
     where
         T: 'static + Send + Sync,
@@ -104,6 +114,7 @@ pub fn revolute_system(
     mut query: Query<&mut RevoluteJoint>,
     mut bodies: Query<EntityQuery>,
     config: Res<Config>,
+    time: Res<Time>,
 ) {
     query.for_each_mut(|mut constraint| {
         let Ok([mut entity_a, mut entity_b]) =
@@ -118,23 +129,7 @@ pub fn revolute_system(
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
         let compliance = constraint.compliance;
-        let mut delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
-        if let Some(ref effector) = constraint.effector {
-            if let Some(angle) = effector.effect(Time(0.0), &constraint).theta {
-                let perp_axis = Vector3::new(
-                    constraint.joint_axis.z,
-                    constraint.joint_axis.x,
-                    constraint.joint_axis.y,
-                );
-                let b1 = entity_a.att.0 * perp_axis;
-                let b2 = entity_b.att.0 * perp_axis;
-                let a1 = entity_a.att.0 * constraint.joint_axis;
-                let b_target = UnitQuaternion::from_axis_angle(&a1, angle) * b1;
-                let delta_q_target = b_target.cross(&b2);
-                delta_q += delta_q_target;
-            }
-        }
-
+        let delta_q = delta_q(entity_a.att.0, entity_b.att.0, constraint.joint_axis);
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
@@ -189,6 +184,30 @@ pub fn revolute_system(
                     &mut entity_b,
                     delta_q,
                     &mut constraint.angle_limit_lagrange,
+                    compliance,
+                    config.sub_dt,
+                );
+            }
+        }
+
+        if let Some(ref effector) = constraint.effector {
+            if let Some(angle) = effector.effect(*time, &constraint).theta {
+                let perp_axis = Vector3::new(
+                    constraint.joint_axis.z,
+                    constraint.joint_axis.x,
+                    constraint.joint_axis.y,
+                );
+                let b1 = entity_a.att.0 * perp_axis;
+                let b2 = entity_b.att.0 * perp_axis;
+                let a1 = entity_a.att.0 * constraint.joint_axis;
+                let b_target = UnitQuaternion::from_axis_angle(&a1, angle) * b1;
+                let delta_q_target = b_target.cross(&b2);
+
+                apply_rot_constraint(
+                    &mut entity_a,
+                    &mut entity_b,
+                    delta_q_target,
+                    &mut constraint.angle_lagrange,
                     compliance,
                     config.sub_dt,
                 );
@@ -334,5 +353,11 @@ where
 {
     fn from(val: Option<T>) -> Self {
         val.map(JointSetPoint::from).unwrap_or_default()
+    }
+}
+
+impl<'a> FromState<&'a RevoluteJoint> for Time {
+    fn from_state(time: Time, _state: &&'a RevoluteJoint) -> Self {
+        time
     }
 }

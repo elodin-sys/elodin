@@ -4418,6 +4418,7 @@ dependencies = [
 name = "paracosm"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "approx",
  "bevy",
  "bevy_atmosphere",
