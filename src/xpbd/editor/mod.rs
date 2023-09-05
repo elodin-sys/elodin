@@ -1,5 +1,12 @@
-use std::ops::DerefMut;
-
+pub(crate) use self::sealed::EditorEnv;
+use self::ui::*;
+use crate::{
+    xpbd::{
+        builder::{Assets, AssetsInner, Env, FromEnv, SimBuilder, XpbdBuilder},
+        plugin::XpbdPlugin,
+    },
+    ObservableNum, SharedNum,
+};
 use bevy::{
     core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
     pbr::{
@@ -12,19 +19,12 @@ use bevy::{
 use bevy_atmosphere::prelude::*;
 use bevy_egui::{
     egui::{self, Ui},
-    EguiContexts, EguiPlugin,
+    EguiPlugin,
 };
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use std::ops::DerefMut;
 
-use crate::{ObservableNum, SharedNum};
-
-use self::sealed::EditorEnv;
-
-use super::{
-    builder::{Assets, AssetsInner, XpbdBuilder},
-    plugin::XpbdPlugin,
-    Env, FromEnv, SimBuilder,
-};
+mod ui;
 
 pub(crate) mod sealed {
     use std::cell::RefCell;
@@ -71,29 +71,7 @@ impl<'a> FromEnv<EditorEnv> for Assets<'a> {
 
 pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
     let mut app = App::new();
-
-    app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
-        .add_plugins(EguiPlugin)
-        .add_plugins(PanOrbitCameraPlugin)
-        .add_plugins(AtmospherePlugin)
-        .add_plugins(XpbdPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(Update, ui_system)
-        .insert_resource(AtmosphereModel::new(Gradient {
-            horizon: Color::hex("1B2642").unwrap(),
-            sky: Color::hex("1B2642").unwrap(),
-            ground: Color::hex("#00081E").unwrap(),
-        }))
-        .insert_resource(AmbientLight {
-            color: Color::hex("#FFF").unwrap(),
-            brightness: 1.0,
-        })
-        .insert_resource(Editables::default())
-        .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
-        .insert_resource(DirectionalLightShadowMap { size: 8192 })
-        .insert_resource(Msaa::Off)
-        .insert_resource(crate::Time(0.0))
-        .insert_resource(super::components::Config::default());
+    app.add_plugins(EditorPlugin);
     let mut editor_env = EditorEnv::new(app);
     sim_builder.build(&mut editor_env);
     let EditorEnv {
@@ -105,13 +83,32 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
     app.run()
 }
 
-fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
-    egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
-        for editable in &mut editables.0 {
-            editable.build(ui);
-        }
-        ui.label("world");
-    });
+pub struct EditorPlugin;
+impl Plugin for EditorPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
+            .add_plugins(EguiPlugin)
+            .add_plugins(PanOrbitCameraPlugin)
+            .add_plugins(XpbdPlugin)
+            .add_systems(Startup, setup)
+            .add_systems(Update, ui_system)
+            .add_plugins(AtmospherePlugin)
+            .insert_resource(AtmosphereModel::new(Gradient {
+                horizon: Color::hex("1B2642").unwrap(),
+                sky: Color::hex("1B2642").unwrap(),
+                ground: Color::hex("#00081E").unwrap(),
+            }))
+            .insert_resource(AmbientLight {
+                color: Color::hex("#FFF").unwrap(),
+                brightness: 1.0,
+            })
+            .insert_resource(Editables::default())
+            .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
+            .insert_resource(DirectionalLightShadowMap { size: 8192 })
+            .insert_resource(Msaa::Off)
+            .insert_resource(crate::Time(0.0))
+            .insert_resource(super::components::Config::default());
+    }
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -119,7 +116,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
     });
 
-    // camera
     commands
         .spawn(Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
@@ -142,42 +138,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Input(pub SharedNum<f64>);
-
-impl Editable for Input {
-    fn build(&mut self, ui: &mut Ui) {
-        let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
-    }
-}
-
-pub trait Editable: Send + Sync {
-    fn build(&mut self, ui: &mut Ui);
-}
-
-impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
-    type Item<'a> = F;
-
-    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        env.app
-            .world
-            .get_resource::<F>()
-            .expect("missing resource")
-            .clone()
-    }
-
-    fn init(env: &mut EditorEnv) {
-        let f = F::default();
-        let mut editables = env
-            .app
-            .world
-            .get_resource_or_insert_with(|| Editables(vec![]));
-        editables.0.push(Box::new(f.clone()));
-        env.app.world.insert_resource(f);
-    }
-}
-
-#[derive(Resource, Default)]
-pub struct Editables(Vec<Box<dyn Editable>>);
 
 impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
     type Item<'t> = XpbdBuilder<'t>;

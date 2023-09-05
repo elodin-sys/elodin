@@ -1,25 +1,9 @@
-use std::cell::RefMut;
-use std::marker::PhantomData;
-
-use bevy::{
-    asset::Asset,
-    prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
-};
-use bevy_ecs::system::Insert;
-use bevy_ecs::{entity::Entities, system::Spawn};
-use bevy_ecs::{prelude::Entity, system::CommandQueue, world::Mut};
+use bevy::prelude::{Mesh, PbrBundle, StandardMaterial};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
-use crate::{
-    effector::{concrete_effector, Effector},
-    sensor::Sensor,
-    Time,
-};
+use crate::{effector::Effector, sensor::Sensor, xpbd::components::*};
 
-use super::{
-    components::*,
-    constraints::{DistanceConstraint, RevoluteJoint},
-};
+use super::{AssetHandle, ConcreteEffector, ConcreteSensor};
 
 pub struct EntityBuilder {
     mass: f64,
@@ -33,7 +17,7 @@ pub struct EntityBuilder {
     effectors: Effectors,
     sensors: Sensors,
 
-    editor_bundle: Option<PbrBundle>,
+    pub(crate) editor_bundle: Option<PbrBundle>,
 
     fixed: bool,
 }
@@ -152,94 +136,3 @@ impl EntityBuilder {
         }
     }
 }
-
-concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
-
-struct ConcreteSensor<ER, E> {
-    sensor: ER,
-    _phantom: PhantomData<(E,)>,
-}
-
-impl<ER, E> ConcreteSensor<ER, E> {
-    fn new(sensor: ER) -> Self {
-        Self {
-            sensor,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<ER, T> XpbdSensor for ConcreteSensor<ER, T>
-where
-    ER: for<'a> Sensor<T, EntityStateRef<'a>>,
-{
-    fn sense(&mut self, time: crate::Time, state: EntityStateRef<'_>) {
-        self.sensor.sense(time, &state)
-    }
-}
-
-pub trait XpbdSensor {
-    fn sense(&mut self, time: Time, state: EntityStateRef<'_>);
-}
-
-pub struct XpbdBuilder<'a> {
-    pub(crate) queue: RefMut<'a, CommandQueue>,
-    pub(crate) entities: &'a Entities,
-}
-
-impl<'a> XpbdBuilder<'a> {
-    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
-        let entity = self.entities.reserve_entity();
-        if let Some(pbr) = entity_builder.editor_bundle.take() {
-            self.queue.push(Insert {
-                entity,
-                bundle: (pbr, entity_builder.bundle()),
-            });
-        } else {
-            self.queue.push(Insert {
-                entity,
-                bundle: entity_builder.bundle(),
-            });
-        }
-        entity
-    }
-
-    pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
-        self.queue.push(Spawn {
-            bundle: distance_constriant,
-        });
-    }
-
-    pub fn revolute_join(&mut self, revolute_join: RevoluteJoint) {
-        self.queue.push(Spawn {
-            bundle: revolute_join,
-        });
-    }
-}
-
-pub struct Assets<'a>(pub(crate) Option<AssetsInner<'a>>);
-
-pub(crate) struct AssetsInner<'a> {
-    pub(crate) meshes: Mut<'a, bevy::prelude::Assets<Mesh>>,
-    pub(crate) materials: Mut<'a, bevy::prelude::Assets<StandardMaterial>>,
-}
-
-impl<'a> Assets<'a> {
-    pub fn mesh(&mut self, mesh: Mesh) -> AssetHandle<Mesh> {
-        AssetHandle(if let Some(inner) = self.0.as_mut() {
-            Some(inner.meshes.add(mesh))
-        } else {
-            None
-        })
-    }
-
-    pub fn material(&mut self, material: StandardMaterial) -> AssetHandle<StandardMaterial> {
-        AssetHandle(if let Some(inner) = self.0.as_mut() {
-            Some(inner.materials.add(material))
-        } else {
-            None
-        })
-    }
-}
-
-pub struct AssetHandle<T: Asset>(Option<Handle<T>>);
