@@ -80,13 +80,13 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
         .insert_resource(AtmosphereModel::new(Gradient {
-            ground: Color::SEA_GREEN,
-            horizon: Color::GRAY,
-            sky: Color::ALICE_BLUE,
+            horizon: Color::hex("1B2642").unwrap(),
+            sky: Color::hex("1B2642").unwrap(),
+            ground: Color::hex("#00081E").unwrap(),
         }))
         .insert_resource(AmbientLight {
-            color: Color::hex("#FFD4AC").unwrap(),
-            brightness: 1.0 / 2.0,
+            color: Color::hex("#FFF").unwrap(),
+            brightness: 1.0,
         })
         .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
