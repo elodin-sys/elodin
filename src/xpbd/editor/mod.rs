@@ -1,5 +1,5 @@
 pub(crate) use self::sealed::EditorEnv;
-use self::ui::*;
+use self::{traces::TracesPlugin, ui::*};
 use crate::{
     xpbd::{
         builder::{Assets, AssetsInner, Env, FromEnv, SimBuilder, XpbdBuilder},
@@ -23,8 +23,10 @@ use bevy_egui::{
 };
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_polyline::PolylinePlugin;
 use std::ops::DerefMut;
 
+pub(crate) mod traces;
 mod ui;
 
 pub(crate) mod sealed {
@@ -93,6 +95,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(InfiniteGridPlugin)
             .add_plugins(AtmospherePlugin)
             .add_plugins(XpbdPlugin)
+            .add_plugins(PolylinePlugin)
+            .add_plugins(TracesPlugin)
             .add_systems(Startup, setup)
             .add_systems(Update, ui_system)
             .insert_resource(AtmosphereModel::new(Gradient {
