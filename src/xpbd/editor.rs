@@ -9,6 +9,7 @@ use bevy::{
     prelude::*,
     DefaultPlugins,
 };
+use bevy_atmosphere::prelude::*;
 use bevy_egui::{
     egui::{self, Ui},
     EguiContexts, EguiPlugin,
@@ -74,12 +75,18 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
     app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(AtmospherePlugin)
         .add_plugins(XpbdPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
+        .insert_resource(AtmosphereModel::new(Gradient {
+            horizon: Color::hex("1B2642").unwrap(),
+            sky: Color::hex("1B2642").unwrap(),
+            ground: Color::hex("#00081E").unwrap(),
+        }))
         .insert_resource(AmbientLight {
-            color: Color::hex("#FFD4AC").unwrap(),
-            brightness: 1.0 / 2.0,
+            color: Color::hex("#FFF").unwrap(),
+            brightness: 1.0,
         })
         .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
@@ -118,6 +125,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             transform: Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
             ..default()
         })
+        .insert(AtmosphereCamera::default())
         .insert(PanOrbitCamera::default())
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("diffuse.ktx2"),
