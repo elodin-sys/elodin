@@ -14,6 +14,7 @@ use bevy::{
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
+    window::WindowTheme,
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
@@ -89,31 +90,39 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
 pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
-            .add_plugins(EguiPlugin)
-            .add_plugins(PanOrbitCameraPlugin)
-            .add_plugins(InfiniteGridPlugin)
-            .add_plugins(AtmospherePlugin)
-            .add_plugins(XpbdPlugin)
-            .add_plugins(PolylinePlugin)
-            .add_plugins(TracesPlugin)
-            .add_systems(Startup, setup)
-            .add_systems(Update, ui_system)
-            .insert_resource(AtmosphereModel::new(Gradient {
-                sky: Color::hex("1B2642").unwrap(),
-                horizon: Color::hex("00081E").unwrap(),
-                ground: Color::hex("#00081E").unwrap(),
-            }))
-            .insert_resource(AmbientLight {
-                color: Color::hex("#FFF").unwrap(),
-                brightness: 1.0,
-            })
-            .insert_resource(Editables::default())
-            .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
-            .insert_resource(DirectionalLightShadowMap { size: 8192 })
-            .insert_resource(Msaa::Off)
-            .insert_resource(crate::Time(0.0))
-            .insert_resource(super::components::Config::default());
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                window_theme: Some(WindowTheme::Dark),
+                title: "Paracosm Editor".into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(TemporalAntiAliasPlugin)
+        .add_plugins(EguiPlugin)
+        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(InfiniteGridPlugin)
+        .add_plugins(AtmospherePlugin)
+        .add_plugins(XpbdPlugin)
+        .add_plugins(PolylinePlugin)
+        .add_plugins(TracesPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Update, ui_system)
+        .insert_resource(AtmosphereModel::new(Gradient {
+            sky: Color::hex("1B2642").unwrap(),
+            horizon: Color::hex("00081E").unwrap(),
+            ground: Color::hex("#00081E").unwrap(),
+        }))
+        .insert_resource(AmbientLight {
+            color: Color::hex("#FFF").unwrap(),
+            brightness: 1.0,
+        })
+        .insert_resource(Editables::default())
+        .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
+        .insert_resource(DirectionalLightShadowMap { size: 8192 })
+        .insert_resource(Msaa::Off)
+        .insert_resource(crate::Time(0.0))
+        .insert_resource(super::components::Config::default());
     }
 }
 
