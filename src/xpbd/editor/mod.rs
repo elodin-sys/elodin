@@ -124,8 +124,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn(InfiniteGridBundle {
         grid: InfiniteGrid {
-            // shadow_color: None,
-            ..default()
+            minor_line_color: Color::hex("#00081E").unwrap(),
+            major_line_color: Color::hex("#00081E").unwrap(),
+            x_axis_color: Color::hex("F46E22").unwrap(),
+            ..Default::default()
         },
         ..default()
     });
