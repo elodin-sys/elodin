@@ -8,7 +8,11 @@ use crate::{
     ObservableNum, SharedNum,
 };
 use bevy::{
-    core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+    core_pipeline::{
+        bloom::BloomSettings,
+        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        tonemapping::Tonemapping,
+    },
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
@@ -144,8 +148,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands
         .spawn(Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+            camera: Camera {
+                hdr: true,
+                ..Default::default()
+            },
+            tonemapping: Tonemapping::TonyMcMapface,
             ..default()
         })
+        .insert(BloomSettings { ..default() })
         .insert(AtmosphereCamera::default())
         .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera)
