@@ -65,7 +65,7 @@ pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
 pub struct SubstepSchedule;
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
-enum SubstepSet {
+pub enum SubstepSet {
     CalcEffects,
     Integrate,
     SolveConstraints,
