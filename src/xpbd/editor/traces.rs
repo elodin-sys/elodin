@@ -3,14 +3,17 @@ use bevy_ecs::entity::Entity;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
-use crate::xpbd::{components::EntityQuery, plugin::TickSet};
+use crate::xpbd::{
+    components::EntityQuery,
+    plugin::{SubstepSchedule, SubstepSet},
+};
 
 pub struct TracesPlugin;
 
 impl Plugin for TracesPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_systems(PostStartup, setup_query);
-        app.add_systems(Update, update_lines.after(TickSet::TickPhysics));
+        app.add_systems(SubstepSchedule, update_lines.after(SubstepSet::UpdateTime));
     }
 }
 
