@@ -21,6 +21,7 @@ use bevy_egui::{
     egui::{self, Ui},
     EguiPlugin,
 };
+use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use std::ops::DerefMut;
 
@@ -89,10 +90,11 @@ impl Plugin for EditorPlugin {
         app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
             .add_plugins(EguiPlugin)
             .add_plugins(PanOrbitCameraPlugin)
+            .add_plugins(InfiniteGridPlugin)
+            .add_plugins(AtmospherePlugin)
             .add_plugins(XpbdPlugin)
             .add_systems(Startup, setup)
             .add_systems(Update, ui_system)
-            .add_plugins(AtmospherePlugin)
             .insert_resource(AtmosphereModel::new(Gradient {
                 horizon: Color::hex("1B2642").unwrap(),
                 sky: Color::hex("1B2642").unwrap(),
@@ -116,13 +118,22 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
     });
 
+    commands.spawn(InfiniteGridBundle {
+        grid: InfiniteGrid {
+            // shadow_color: None,
+            ..default()
+        },
+        ..default()
+    });
+
     commands
         .spawn(Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
+            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
             ..default()
         })
         .insert(AtmosphereCamera::default())
         .insert(PanOrbitCamera::default())
+        .insert(GridShadowCamera)
         .insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("diffuse.ktx2"),
             specular_map: asset_server.load("specular.ktx2"),
