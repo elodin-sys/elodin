@@ -27,7 +27,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
         EntityBuilder::default()
             .mass(10.0)
             .fixed()
-            .pos(vector![0.0, 0.0, 0.0])
+            .pos(vector![0.0, 2.0, 0.0])
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.1,
                 ..Default::default()
@@ -35,7 +35,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into())),
     );
     let rod_a_angle = f64::to_radians(0.0);
-    let rod_a_pos = vector![0.5 * rod_a_angle.sin(), -0.5 * rod_a_angle.cos(), 0.0];
+    let rod_a_pos = vector![0.5 * rod_a_angle.sin(), 2.0 - 0.5 * rod_a_angle.cos(), 0.0];
     let rod_a = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
