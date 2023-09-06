@@ -80,7 +80,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
     let rod_b = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(rod_a_pos + vector![0.5 * rod_b_angle.sin(), -0.5 * rod_b_angle.cos(), 0.0])
+            .pos(rod_a_pos + vector![1.0 * rod_b_angle.sin(), -1.0 * rod_b_angle.cos(), 0.0])
             .att(UnitQuaternion::from_axis_angle(
                 &Vector3::z_axis(),
                 rod_a_angle,
