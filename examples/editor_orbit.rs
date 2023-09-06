@@ -32,7 +32,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
                 radius: 0.05,
                 ..Default::default()
             })))
-            .material(assets.material(Color::BLUE.into())),
+            .material(assets.material(Color::rgba_u8(0x41, 0xBB, 0xFF, 0xFF).into())),
     );
     builder.entity(
         EntityBuilder::default()
@@ -57,6 +57,10 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
                 radius: 0.2,
                 ..Default::default()
             })))
-            .material(assets.material(Color::YELLOW.into())),
+            .material(assets.material(bevy::prelude::StandardMaterial {
+                emissive: Color::rgb_linear(20., 188.0 / 255.0 * 20., 0.),
+                base_color: Color::hex("FFB800").unwrap(),
+                ..Default::default()
+            })),
     );
 }
