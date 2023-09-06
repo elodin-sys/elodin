@@ -100,8 +100,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup)
             .add_systems(Update, ui_system)
             .insert_resource(AtmosphereModel::new(Gradient {
-                horizon: Color::hex("1B2642").unwrap(),
                 sky: Color::hex("1B2642").unwrap(),
+                horizon: Color::hex("00081E").unwrap(),
                 ground: Color::hex("#00081E").unwrap(),
             }))
             .insert_resource(AmbientLight {
@@ -172,6 +172,6 @@ pub struct ObservableInput(pub ObservableNum<f64>);
 impl Editable for ObservableInput {
     fn build(&mut self, ui: &mut Ui) {
         let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
+        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
     }
 }
