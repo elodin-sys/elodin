@@ -1,8 +1,10 @@
 use nalgebra::{Matrix3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
 
 mod distance;
+mod gravity;
 mod revolute;
 pub use distance::*;
+pub use gravity::*;
 pub use revolute::*;
 
 use crate::Pos;
