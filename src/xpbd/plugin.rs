@@ -5,8 +5,8 @@ use crate::{Att, Pos};
 
 use super::{
     constraints::{
-        clear_distance_lagrange, clear_revolute_lagrange, distance_system, revolute_damping,
-        revolute_system,
+        clear_distance_lagrange, clear_revolute_lagrange, distance_system, gravity_system,
+        revolute_damping, revolute_system,
     },
     systems::*,
     SUBSTEPS,
@@ -89,7 +89,9 @@ pub fn substep_schedule() -> Schedule {
         )
             .chain(),
     );
-    schedule.add_systems((calculate_effects, calculate_sensors).in_set(SubstepSet::CalcEffects));
+    schedule.add_systems(
+        (calculate_effects, calculate_sensors, gravity_system).in_set(SubstepSet::CalcEffects),
+    );
     schedule.add_systems((integrate_att, integrate_pos).in_set(SubstepSet::Integrate));
     schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
     schedule.add_systems((update_vel, update_ang_vel).in_set(SubstepSet::UpdateVel));
