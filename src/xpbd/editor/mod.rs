@@ -1,5 +1,5 @@
 pub(crate) use self::sealed::EditorEnv;
-use self::ui::*;
+use self::{traces::TracesPlugin, ui::*};
 use crate::{
     xpbd::{
         builder::{Assets, AssetsInner, Env, FromEnv, SimBuilder, XpbdBuilder},
@@ -8,12 +8,17 @@ use crate::{
     ObservableNum, SharedNum,
 };
 use bevy::{
-    core_pipeline::experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+    core_pipeline::{
+        bloom::BloomSettings,
+        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        tonemapping::Tonemapping,
+    },
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
+    window::WindowTheme,
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
@@ -23,8 +28,10 @@ use bevy_egui::{
 };
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_polyline::PolylinePlugin;
 use std::ops::DerefMut;
 
+pub(crate) mod traces;
 mod ui;
 
 pub(crate) mod sealed {
@@ -87,29 +94,39 @@ pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
 pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((DefaultPlugins, TemporalAntiAliasPlugin))
-            .add_plugins(EguiPlugin)
-            .add_plugins(PanOrbitCameraPlugin)
-            .add_plugins(InfiniteGridPlugin)
-            .add_plugins(AtmospherePlugin)
-            .add_plugins(XpbdPlugin)
-            .add_systems(Startup, setup)
-            .add_systems(Update, ui_system)
-            .insert_resource(AtmosphereModel::new(Gradient {
-                horizon: Color::hex("1B2642").unwrap(),
-                sky: Color::hex("1B2642").unwrap(),
-                ground: Color::hex("#00081E").unwrap(),
-            }))
-            .insert_resource(AmbientLight {
-                color: Color::hex("#FFF").unwrap(),
-                brightness: 1.0,
-            })
-            .insert_resource(Editables::default())
-            .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
-            .insert_resource(DirectionalLightShadowMap { size: 8192 })
-            .insert_resource(Msaa::Off)
-            .insert_resource(crate::Time(0.0))
-            .insert_resource(super::components::Config::default());
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                window_theme: Some(WindowTheme::Dark),
+                title: "Paracosm Editor".into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins(TemporalAntiAliasPlugin)
+        .add_plugins(EguiPlugin)
+        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(InfiniteGridPlugin)
+        .add_plugins(AtmospherePlugin)
+        .add_plugins(XpbdPlugin)
+        .add_plugins(PolylinePlugin)
+        .add_plugins(TracesPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Update, ui_system)
+        .insert_resource(AtmosphereModel::new(Gradient {
+            sky: Color::hex("1B2642").unwrap(),
+            horizon: Color::hex("00081E").unwrap(),
+            ground: Color::hex("#00081E").unwrap(),
+        }))
+        .insert_resource(AmbientLight {
+            color: Color::hex("#FFF").unwrap(),
+            brightness: 1.0,
+        })
+        .insert_resource(Editables::default())
+        .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
+        .insert_resource(DirectionalLightShadowMap { size: 8192 })
+        .insert_resource(Msaa::Off)
+        .insert_resource(crate::Time(0.0))
+        .insert_resource(super::components::Config::default());
     }
 }
 
@@ -120,8 +137,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn(InfiniteGridBundle {
         grid: InfiniteGrid {
-            // shadow_color: None,
-            ..default()
+            minor_line_color: Color::hex("#00081E").unwrap(),
+            major_line_color: Color::hex("#00081E").unwrap(),
+            x_axis_color: Color::hex("F46E22").unwrap(),
+            ..Default::default()
         },
         ..default()
     });
@@ -129,8 +148,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands
         .spawn(Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+            camera: Camera {
+                hdr: true,
+                ..Default::default()
+            },
+            tonemapping: Tonemapping::TonyMcMapface,
             ..default()
         })
+        .insert(BloomSettings { ..default() })
         .insert(AtmosphereCamera::default())
         .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera)
@@ -168,6 +193,6 @@ pub struct ObservableInput(pub ObservableNum<f64>);
 impl Editable for ObservableInput {
     fn build(&mut self, ui: &mut Ui) {
         let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25));
+        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
     }
 }

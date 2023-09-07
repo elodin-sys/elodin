@@ -20,6 +20,7 @@ pub struct EntityBuilder {
     pub(crate) editor_bundle: Option<PbrBundle>,
 
     fixed: bool,
+    pub(crate) trace: Option<Vector3<f64>>,
 }
 
 impl Default for EntityBuilder {
@@ -36,6 +37,7 @@ impl Default for EntityBuilder {
             sensors: Default::default(),
             editor_bundle: Default::default(),
             fixed: false,
+            trace: None,
         }
     }
 }
@@ -111,6 +113,11 @@ impl EntityBuilder {
 
     pub fn fixed(mut self) -> Self {
         self.fixed = true;
+        self
+    }
+
+    pub fn trace(mut self, anchor: Vector3<f64>) -> Self {
+        self.trace = Some(anchor);
         self
     }
 
