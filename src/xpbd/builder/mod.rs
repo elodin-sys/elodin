@@ -17,6 +17,7 @@ use crate::{effector::concrete_effector, sensor::Sensor, Time};
 use super::{
     components::*,
     constraints::{DistanceConstraint, RevoluteJoint},
+    editor::traces::TraceAnchor,
 };
 
 concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
@@ -56,17 +57,22 @@ pub struct XpbdBuilder<'a> {
 impl<'a> XpbdBuilder<'a> {
     pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
         let entity = self.entities.reserve_entity();
+        if let Some(anchor) = entity_builder.trace {
+            self.queue.push(Insert {
+                entity,
+                bundle: TraceAnchor { anchor },
+            });
+        }
         if let Some(pbr) = entity_builder.editor_bundle.take() {
             self.queue.push(Insert {
                 entity,
-                bundle: (pbr, entity_builder.bundle()),
-            });
-        } else {
-            self.queue.push(Insert {
-                entity,
-                bundle: entity_builder.bundle(),
+                bundle: pbr,
             });
         }
+        self.queue.push(Insert {
+            entity,
+            bundle: entity_builder.bundle(),
+        });
         entity
     }
 
