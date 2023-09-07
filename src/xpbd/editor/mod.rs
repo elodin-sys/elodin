@@ -2,7 +2,7 @@ pub(crate) use self::sealed::EditorEnv;
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
     xpbd::{
-        builder::{Assets, AssetsInner, Env, FromEnv, SimBuilder, XpbdBuilder},
+        builder::{Assets, AssetsInner, Env, FromEnv, SimFunc, XpbdBuilder},
         plugin::XpbdPlugin,
     },
     ObservableNum, SharedNum,
@@ -78,7 +78,7 @@ impl<'a> FromEnv<EditorEnv> for Assets<'a> {
     fn init(_: &mut EditorEnv) {}
 }
 
-pub fn editor<T>(sim_builder: impl SimBuilder<T, EditorEnv>) {
+pub fn editor<T>(sim_builder: impl SimFunc<T, EditorEnv>) {
     let mut app = App::new();
     app.add_plugins(EditorPlugin);
     let mut editor_env = EditorEnv::new(app);
