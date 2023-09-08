@@ -1,7 +1,7 @@
 use super::Input;
 use crate::xpbd::{
     builder::{Env, FromEnv},
-    editor::EditorEnv,
+    runner::SimRunnerEnv,
 };
 use bevy::prelude::*;
 use bevy_egui::{
@@ -102,10 +102,10 @@ pub trait Editable: Send + Sync {
     fn build(&mut self, ui: &mut Ui);
 }
 
-impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
+impl<F: Editable + Clone + Resource + Default> FromEnv<SimRunnerEnv> for F {
     type Item<'a> = F;
 
-    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
+    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
         env.app
             .world
             .get_resource::<F>()
@@ -113,7 +113,7 @@ impl<F: Editable + Clone + Resource + Default> FromEnv<EditorEnv> for F {
             .clone()
     }
 
-    fn init(env: &mut EditorEnv) {
+    fn init(env: &mut SimRunnerEnv) {
         let f = F::default();
         let mut editables = env
             .app
