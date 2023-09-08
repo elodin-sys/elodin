@@ -31,6 +31,9 @@ paracosm_macros.path = "./paracosm_macros"
 rerun.version = "0.8.0"
 rerun.optional = true
 
+# monte carlo
+rand = "0.8.5"
+
 [dev-dependencies]
 plotters = "0.3.5"
 approx = "0.5"

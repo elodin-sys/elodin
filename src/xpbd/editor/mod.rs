@@ -1,10 +1,6 @@
-pub(crate) use self::sealed::EditorEnv;
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
-    xpbd::{
-        builder::{Assets, AssetsInner, Env, FromEnv, SimFunc, XpbdBuilder},
-        plugin::XpbdPlugin,
-    },
+    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, SimFunc, XpbdBuilder},
     ObservableNum, SharedNum,
 };
 use bevy::{
@@ -32,42 +28,15 @@ use bevy_polyline::PolylinePlugin;
 use paracosm_macros::Editable;
 use std::ops::DerefMut;
 
+use super::runner::{SimRunner, SimRunnerEnv};
+
 pub(crate) mod traces;
 mod ui;
 
-pub(crate) mod sealed {
-    use std::cell::RefCell;
-
-    use bevy::prelude::App;
-    use bevy_ecs::system::CommandQueue;
-
-    pub struct EditorEnv {
-        pub app: App,
-        pub command_queue: RefCell<CommandQueue>,
-    }
-
-    impl EditorEnv {
-        pub(crate) fn new(app: App) -> EditorEnv {
-            EditorEnv {
-                app,
-                command_queue: Default::default(),
-            }
-        }
-    }
-}
-
-impl Env for EditorEnv {
-    type Param<'e> = &'e EditorEnv;
-
-    fn param(&mut self) -> Self::Param<'_> {
-        self
-    }
-}
-
-impl<'a> FromEnv<EditorEnv> for Assets<'a> {
+impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
     type Item<'e> = Assets<'e>;
 
-    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
+    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
         let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
         let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
         let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
@@ -75,20 +44,12 @@ impl<'a> FromEnv<EditorEnv> for Assets<'a> {
         Assets(Some(AssetsInner { meshes, materials }))
     }
 
-    fn init(_: &mut EditorEnv) {}
+    fn init(_: &mut SimRunnerEnv) {}
 }
 
-pub fn editor<T>(sim_builder: impl SimFunc<T, EditorEnv>) {
-    let mut app = App::new();
-    app.add_plugins(EditorPlugin);
-    let mut editor_env = EditorEnv::new(app);
-    sim_builder.build(&mut editor_env);
-    let EditorEnv {
-        mut app,
-        command_queue,
-    } = editor_env;
-    let mut command_queue = command_queue.into_inner();
-    command_queue.apply(&mut app.world);
+pub fn editor<T>(sim_func: impl SimFunc<T, SimRunnerEnv>) {
+    let runner = SimRunner::new(sim_func);
+    let mut app = runner.build_with_plugins(EditorPlugin);
     app.run()
 }
 
@@ -108,7 +69,6 @@ impl Plugin for EditorPlugin {
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(AtmospherePlugin)
-        .add_plugins(XpbdPlugin)
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
@@ -125,9 +85,7 @@ impl Plugin for EditorPlugin {
         .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
         .insert_resource(DirectionalLightShadowMap { size: 8192 })
-        .insert_resource(Msaa::Off)
-        .insert_resource(crate::Time(0.0))
-        .insert_resource(super::components::Config::default());
+        .insert_resource(Msaa::Off);
     }
 }
 
@@ -176,12 +134,12 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Input(pub SharedNum<f64>);
 
-impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
+impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
     type Item<'t> = XpbdBuilder<'t>;
 
-    fn init(_env: &mut EditorEnv) {}
+    fn init(_env: &mut SimRunnerEnv) {}
 
-    fn from_env(env: <EditorEnv as Env>::Param<'_>) -> Self::Item<'_> {
+    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
         XpbdBuilder {
             queue: env.command_queue.borrow_mut(),
             entities: env.app.world.entities(),

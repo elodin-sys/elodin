@@ -112,7 +112,7 @@ pub trait Env {
 }
 
 pub trait SimFunc<T, E: Env> {
-    fn build(self, env: &mut E);
+    fn build(&mut self, env: &mut E);
 }
 
 macro_rules! impl_sim_builder {
@@ -126,7 +126,7 @@ macro_rules! impl_sim_builder {
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(self, env: &mut E)  {
+             fn build(&mut self, env: &mut E)  {
 
                  $(
                          $ty::init(env);

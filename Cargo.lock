@@ -4450,6 +4450,7 @@ dependencies = [
  "nalgebra",
  "paracosm_macros",
  "plotters",
+ "rand",
  "rerun",
  "stable-vec",
 ]

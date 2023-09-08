@@ -4,12 +4,12 @@ use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use crate::{Att, Pos};
 
 use super::{
+    components::{Config, LockStepSignal},
     constraints::{
         clear_distance_lagrange, clear_revolute_lagrange, distance_system, gravity_system,
         revolute_damping, revolute_system,
     },
     systems::*,
-    SUBSTEPS,
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
@@ -19,7 +19,10 @@ pub enum TickSet {
     SyncPos,
 }
 
-pub struct XpbdPlugin;
+#[derive(Default)]
+pub struct XpbdPlugin {
+    pub lockstep: Option<LockStepSignal>,
+}
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
@@ -27,25 +30,35 @@ impl Plugin for XpbdPlugin {
             Update,
             (clear_distance_lagrange, clear_revolute_lagrange)
                 .in_set(TickSet::ClearConstraintLagrange),
-        )
-        .add_systems(Update, (tick).in_set(TickSet::TickPhysics))
-        .add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
-        .configure_sets(
-            Update,
-            (
-                TickSet::ClearConstraintLagrange,
-                TickSet::TickPhysics,
-                TickSet::SyncPos,
+        );
+        if let Some(ref lockstep) = self.lockstep {
+            let lockstep = lockstep.clone();
+            app.add_systems(
+                Update,
+                (tick)
+                    .in_set(TickSet::TickPhysics)
+                    .run_if(IntoSystem::into_system(move || lockstep.can_continue())),
+            );
+        } else {
+            app.add_systems(Update, (tick).in_set(TickSet::TickPhysics));
+        }
+        app.add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
+            .configure_sets(
+                Update,
+                (
+                    TickSet::ClearConstraintLagrange,
+                    TickSet::TickPhysics,
+                    TickSet::SyncPos,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        //.insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
-        .add_schedule(SubstepSchedule, substep_schedule());
+            .add_schedule(SubstepSchedule, substep_schedule());
     }
 }
 
 pub fn tick(world: &mut World) {
-    for _ in 0..SUBSTEPS {
+    let config = world.get_resource::<Config>().expect("missing config");
+    for _ in 0..config.substep_count {
         world.run_schedule(SubstepSchedule)
     }
 }
