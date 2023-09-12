@@ -1,16 +1,8 @@
-use std::{
-    any::{type_name, Any, TypeId},
-    collections::HashMap,
-    path::PathBuf,
-};
+use std::{collections::HashMap, panic::resume_unwind, path::PathBuf};
 
 use bevy::prelude::App;
-use rand::rngs::ThreadRng;
 
-use crate::xpbd::{
-    builder::{Env, FromEnv},
-    runner::IntoSimRunner,
-};
+use crate::xpbd::runner::IntoSimRunner;
 
 #[derive(Default)]
 pub struct JobSpec {
@@ -34,13 +26,15 @@ impl JobSpec {
             .tasks
             .into_iter()
             .map(|task| match task {
-                Task::RustFunc(func) => std::thread::spawn(move || (func)()),
+                Task::RustFunc(func) => std::thread::spawn(func),
                 Task::Container(_) => todo!(),
                 Task::Sim(mut app) => std::thread::spawn(move || app.run()),
             })
             .collect::<Vec<_>>();
         for handle in handles.into_iter() {
-            handle.join().unwrap();
+            if let Err(err) = handle.join() {
+                resume_unwind(err)
+            }
         }
     }
 }

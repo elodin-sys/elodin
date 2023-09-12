@@ -67,7 +67,7 @@ impl<'a> SimRunner<'a> {
             RunMode::FixedTime(time) => {
                 let n: usize = (time / self.config.dt) as usize;
                 app.set_runner(move |mut app| {
-                    for i in 0..n {
+                    for _ in 0..n {
                         app.update();
                     }
                 });
