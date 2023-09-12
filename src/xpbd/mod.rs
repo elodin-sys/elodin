@@ -6,4 +6,4 @@ pub mod editor;
 pub mod plugin;
 pub mod systems;
 
-const SUBSTEPS: usize = 24;
+const SUBSTEPS: usize = 32;
