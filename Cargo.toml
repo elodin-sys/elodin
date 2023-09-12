@@ -19,7 +19,7 @@ bevy_utils = "0.11"
 
 # editor
 bevy.version = "0.11"
-bevy.features = ["wayland"]
+bevy.features = ["wayland", "trace"]
 bevy_egui = "0.21"
 bevy_panorbit_camera = "0.8.0"
 bevy_atmosphere = "0.7.0"
@@ -39,3 +39,9 @@ plotters = "0.3.5"
 approx = "0.5"
 bevy = "0.11"
 anyhow = "1"
+criterion.version = "0.4"
+criterion.features = ["html_reports"]
+
+[[bench]]
+name = "xpbd"
+harness = false
