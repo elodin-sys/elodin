@@ -68,7 +68,6 @@ impl<'a> SimRunner<'a> {
                 let n: usize = (time / self.config.dt) as usize;
                 app.set_runner(move |mut app| {
                     for i in 0..n {
-                        println!("update {i:?}");
                         app.update();
                     }
                 });
@@ -90,11 +89,10 @@ impl<'a> SimRunner<'a> {
         }
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
-
-        app.add_plugins(plugins);
         app.add_plugins(XpbdPlugin {
             lockstep: self.lockstep,
         });
+        app.add_plugins(plugins);
         let mut env = SimRunnerEnv::new(app);
         self.sim_func.build(&mut env);
         let SimRunnerEnv {
