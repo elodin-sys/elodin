@@ -1,5 +1,5 @@
 use super::{
-    builder::{Env, SimFunc},
+    builder::{ConcreteSimFunc, Env, SimFunc},
     components::{Config, LockStepSignal},
     plugin::XpbdPlugin,
 };
@@ -7,7 +7,6 @@ use bevy::{app::Plugins, prelude::App};
 use bevy_ecs::system::CommandQueue;
 use std::{
     cell::RefCell,
-    marker::PhantomData,
     time::{Duration, Instant},
 };
 
@@ -54,7 +53,7 @@ impl<'a> SimRunner<'a> {
         self.build_with_plugins(())
     }
 
-    pub fn build_with_plugins<M>(mut self, plugins: impl Plugins<M>) -> App {
+    pub fn build_with_plugins<M>(self, plugins: impl Plugins<M>) -> App {
         let mut app = App::new();
         match self.run_mode {
             RunMode::FixedTicks(n) => {
@@ -191,28 +190,6 @@ impl Env for SimRunnerEnv {
 
     fn param(&mut self) -> Self::Param<'_> {
         self
-    }
-}
-
-struct ConcreteSimFunc<F, T> {
-    func: F,
-    _phantom_data: PhantomData<T>,
-}
-
-impl<E, T> ConcreteSimFunc<E, T> {
-    pub(crate) fn new(func: E) -> Self {
-        Self {
-            func,
-            _phantom_data: PhantomData,
-        }
-    }
-}
-impl<F, T> SimFunc<(), SimRunnerEnv> for ConcreteSimFunc<F, T>
-where
-    F: for<'s> SimFunc<T, SimRunnerEnv>,
-{
-    fn build(&mut self, env: &mut SimRunnerEnv) {
-        self.func.build(env)
     }
 }
 
