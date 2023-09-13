@@ -44,7 +44,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
                 &Vector3::z_axis(),
                 rod_a_angle,
             ))
-            .intertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
             .effector(|Time(_)| Force(vector![0.0, -9.8, 0.0]))
             .material(assets.material(bevy::prelude::StandardMaterial {
@@ -86,7 +86,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
                 rod_a_angle,
             ))
             .trace(Vector3::new(0., -0.5, 0.))
-            .intertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
             .effector(|Time(_)| Force(vector![0.0, -9.8, 0.0]))
             .material(assets.material(Color::hex("FF9838").unwrap().into())),
