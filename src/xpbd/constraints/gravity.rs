@@ -3,21 +3,21 @@ use bevy_ecs::{component::Component, entity::Entity, system::Query};
 use crate::xpbd::components::{Effect, EntityQuery};
 
 #[derive(Component)]
-pub struct GravityConstriant {
+pub struct GravityConstraint {
     entity_a: Entity,
     entity_b: Entity,
 }
 
 const G: f64 = 6.649e-11;
 
-impl GravityConstriant {
+impl GravityConstraint {
     pub fn new(entity_a: Entity, entity_b: Entity) -> Self {
         Self { entity_a, entity_b }
     }
 }
 
 pub fn gravity_system(
-    query: Query<&mut GravityConstriant>,
+    query: Query<&mut GravityConstraint>,
     mut bodies: Query<(EntityQuery, &mut Effect)>,
 ) {
     for constraint in &query {

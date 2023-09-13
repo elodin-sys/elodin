@@ -68,7 +68,7 @@ impl EntityBuilder {
         self
     }
 
-    pub fn intertia(mut self, inertia: Inertia) -> Self {
+    pub fn inertia(mut self, inertia: Inertia) -> Self {
         self.inertia = inertia.0;
         self.inverse_inertia = inertia.0.try_inverse().unwrap();
         self

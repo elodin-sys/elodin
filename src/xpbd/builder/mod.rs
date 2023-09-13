@@ -16,7 +16,7 @@ use crate::{effector::concrete_effector, sensor::Sensor, Time};
 
 use super::{
     components::*,
-    constraints::{DistanceConstraint, GravityConstriant, RevoluteJoint},
+    constraints::{DistanceConstraint, GravityConstraint, RevoluteJoint},
     editor::traces::TraceAnchor,
 };
 
@@ -76,9 +76,9 @@ impl<'a> XpbdBuilder<'a> {
         entity
     }
 
-    pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
+    pub fn distance_constraint(&mut self, distance_constraint: DistanceConstraint) {
         self.queue.push(Spawn {
-            bundle: distance_constriant,
+            bundle: distance_constraint,
         });
     }
 
@@ -88,7 +88,7 @@ impl<'a> XpbdBuilder<'a> {
         });
     }
 
-    pub fn gravity_constraint(&mut self, gravity: GravityConstriant) {
+    pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
         self.queue.push(Spawn { bundle: gravity });
     }
 }
