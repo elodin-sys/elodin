@@ -29,6 +29,7 @@ use bevy_egui::{
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
+use paracosm_macros::Editable;
 use std::ops::DerefMut;
 
 pub(crate) mod traces;
@@ -188,11 +189,6 @@ impl<'a> FromEnv<EditorEnv> for XpbdBuilder<'a> {
     }
 }
 
-#[derive(Resource, Clone, Debug, Default)]
+#[derive(Editable, Resource, Clone, Debug, Default)]
+#[editable(slider, range_min = "-1.25", range_max = 1.25, name = "input")]
 pub struct ObservableInput(pub ObservableNum<f64>);
-impl Editable for ObservableInput {
-    fn build(&mut self, ui: &mut Ui) {
-        let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
-    }
-}
