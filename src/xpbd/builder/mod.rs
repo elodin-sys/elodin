@@ -111,14 +111,14 @@ pub trait Env {
     fn param(&mut self) -> Self::Param<'_>;
 }
 
-pub trait SimBuilder<T, E: Env> {
-    fn build(self, env: &mut E);
+pub trait SimFunc<T, E: Env> {
+    fn build(&mut self, env: &mut E);
 }
 
 macro_rules! impl_sim_builder {
      ($($ty:tt),+) => {
          #[allow(non_snake_case)]
-         impl<F, $($ty,)* E> SimBuilder<($($ty, )*), E> for F
+         impl<F, $($ty,)* E> SimFunc<($($ty, )*), E> for F
          where
              E: Env,
              F: Fn($($ty, )*),
@@ -126,7 +126,7 @@ macro_rules! impl_sim_builder {
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(self, env: &mut E)  {
+             fn build(&mut self, env: &mut E)  {
 
                  $(
                          $ty::init(env);

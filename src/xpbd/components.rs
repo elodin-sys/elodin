@@ -1,4 +1,10 @@
-use std::ops::AddAssign;
+use std::{
+    ops::AddAssign,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use bevy_ecs::{
     prelude::{Bundle, Component},
@@ -10,10 +16,7 @@ use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
 use crate::{FromState, Time, Torque};
 
-use super::{
-    builder::{XpbdEffector, XpbdSensor},
-    SUBSTEPS,
-};
+use super::builder::{XpbdEffector, XpbdSensor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PrevPos(pub Vector3<f64>);
@@ -28,14 +31,17 @@ pub struct Fixed(pub bool);
 pub struct Config {
     pub dt: f64,
     pub sub_dt: f64,
+    pub substep_count: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
         let dt = 1.0 / 60.0;
+        let substep_count = 24;
         Self {
             dt,
-            sub_dt: dt / SUBSTEPS as f64,
+            sub_dt: dt / substep_count as f64,
+            substep_count,
         }
     }
 }
@@ -208,5 +214,18 @@ impl From<Torque> for Effect {
             torque: val,
             force: Force(Vector3::zeros()),
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LockStepSignal(Arc<AtomicBool>);
+
+impl LockStepSignal {
+    pub fn signal(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn can_continue(&self) -> bool {
+        self.0.swap(false, Ordering::Acquire)
     }
 }
