@@ -1,6 +1,6 @@
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
-    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, SimFunc, XpbdBuilder},
+    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
     ObservableNum, SharedNum,
 };
 use bevy::{
@@ -28,7 +28,7 @@ use bevy_polyline::PolylinePlugin;
 use macros::Editable;
 use std::ops::DerefMut;
 
-use super::runner::{IntoSimRunner, SimRunner, SimRunnerEnv};
+use super::runner::{IntoSimRunner, SimRunnerEnv};
 
 pub(crate) mod traces;
 mod ui;
