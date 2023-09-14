@@ -4,10 +4,11 @@ use paracosm::xpbd::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     constraints::GravityConstraint,
     editor::editor,
+    runner::IntoSimRunner,
 };
 
 fn main() {
-    editor(sim)
+    editor(sim.substep_count(1))
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {

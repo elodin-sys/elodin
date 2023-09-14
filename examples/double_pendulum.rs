@@ -13,12 +13,13 @@ use paracosm::{
         builder::{Assets, EntityBuilder, XpbdBuilder},
         constraints::{Angle, RevoluteJoint},
         editor::{editor, ObservableInput},
+        runner::IntoSimRunner,
     },
     Force, Pos, Time,
 };
 
 fn main() {
-    editor(sim)
+    editor(sim.substep_count(32))
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput) {
