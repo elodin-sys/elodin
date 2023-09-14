@@ -3,6 +3,7 @@ use bevy_ecs::{
     query::WorldQuery,
     system::{Query, Res, ResMut},
 };
+use bevy_utils::tracing;
 
 use super::{body, components::*};
 
@@ -21,32 +22,37 @@ pub(crate) struct SensorQuery {
     entity: EntityQueryReadOnly,
 }
 
+#[tracing::instrument]
 pub(crate) fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) {
-    query.par_iter_mut().for_each_mut(|mut q| {
+    query.iter_mut().for_each(|mut q| {
         for effector in &q.effectors.0 {
             *q.effect += effector.effect(*time, EntityStateRef::from_query(&q.entity))
         }
     })
 }
 
+#[tracing::instrument]
 pub(crate) fn calculate_sensors(mut query: Query<SensorQuery>, time: Res<Time>) {
-    query.par_iter_mut().for_each_mut(|mut q| {
+    query.iter_mut().for_each(|mut q| {
         for effector in &mut q.sensors.0 {
             effector.sense(*time, EntityStateRef::from_query(&q.entity));
         }
     })
 }
 
+#[tracing::instrument]
 pub(crate) fn clear_effects(mut query: Query<&mut Effect>) {
-    query.par_iter_mut().for_each_mut(|mut q| {
+    query.iter_mut().for_each(|mut q| {
         *q = Effect::default();
     });
 }
 
+#[tracing::instrument]
 pub(crate) fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
     time.0 += config.sub_dt;
 }
 
+#[tracing::instrument]
 pub(crate) fn integrate_pos(
     mut query: Query<(
         &mut Pos,
@@ -59,8 +65,8 @@ pub(crate) fn integrate_pos(
     config: Res<Config>,
 ) {
     query
-        .par_iter_mut()
-        .for_each_mut(|(mut pos, mut prev_pos, mut vel, effect, mass, fixed)| {
+        .iter_mut()
+        .for_each(|(mut pos, mut prev_pos, mut vel, effect, mass, fixed)| {
             if fixed.0 {
                 return;
             }
@@ -75,6 +81,7 @@ pub(crate) fn integrate_pos(
         })
 }
 
+#[tracing::instrument]
 pub(crate) fn integrate_att(
     mut query: Query<(
         &mut Att,
@@ -87,7 +94,7 @@ pub(crate) fn integrate_att(
     )>,
     config: Res<Config>,
 ) {
-    query.par_iter_mut().for_each_mut(
+    query.iter_mut().for_each(
         |(mut att, mut prev_att, mut ang_vel, effect, inertia, inverse_inertia, fixed)| {
             if fixed.0 {
                 return;
@@ -105,13 +112,14 @@ pub(crate) fn integrate_att(
     )
 }
 
+#[tracing::instrument]
 pub(crate) fn update_vel(
     mut query: Query<(&Pos, &PrevPos, &mut Vel, &Fixed)>,
     config: Res<Config>,
 ) {
     query
-        .par_iter_mut()
-        .for_each_mut(|(pos, prev_pos, mut vel, fixed)| {
+        .iter_mut()
+        .for_each(|(pos, prev_pos, mut vel, fixed)| {
             if fixed.0 {
                 return;
             }
@@ -119,13 +127,14 @@ pub(crate) fn update_vel(
         })
 }
 
+#[tracing::instrument]
 pub(crate) fn update_ang_vel(
     mut query: Query<(&Att, &PrevAtt, &mut AngVel, &Fixed)>,
     config: Res<Config>,
 ) {
     query
-        .par_iter_mut()
-        .for_each_mut(|(att, prev_att, mut ang_vel, fixed)| {
+        .iter_mut()
+        .for_each(|(att, prev_att, mut ang_vel, fixed)| {
             if fixed.0 {
                 return;
             }
