@@ -103,7 +103,7 @@ impl MonteCarlo {
                     vars,
                     rng: ThreadRng::default().into(),
                 };
-                for i in 0..n {
+                for _ in 0..n {
                     let job_spec = if let Some(ref job) = job {
                         job.build(&mut env)
                     } else {

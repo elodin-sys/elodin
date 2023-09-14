@@ -35,7 +35,7 @@ impl<'a> SimRunner<'a> {
 
     pub fn substep_count(mut self, count: usize) -> Self {
         self.config.substep_count = count;
-        self.config.sub_dt = self.config.dt / self.config.sub_dt;
+        self.config.sub_dt = self.config.dt / count as f64;
         self
     }
 
