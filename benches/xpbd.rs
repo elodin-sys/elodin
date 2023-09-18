@@ -7,7 +7,7 @@ use paracosm::{
     forces::gravity,
     runtime::JobSpec,
     xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
+        builder::{EntityBuilder, XpbdBuilder},
         constraints::DistanceConstraint,
         runner::{IntoSimRunner, RunMode},
     },
