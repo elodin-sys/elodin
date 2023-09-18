@@ -25,7 +25,7 @@ use bevy_egui::{
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use paracosm_macros::Editable;
+use macros::Editable;
 use std::ops::DerefMut;
 
 use super::runner::{SimRunner, SimRunnerEnv};
