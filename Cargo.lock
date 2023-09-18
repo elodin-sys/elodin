@@ -3974,6 +3974,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "macros"
+version = "0.1.0"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.31",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4593,22 +4603,12 @@ dependencies = [
  "bevy_polyline",
  "bevy_utils",
  "criterion",
+ "macros",
  "nalgebra",
- "paracosm_macros",
  "plotters",
  "rand",
  "rerun",
  "stable-vec",
-]
-
-[[package]]
-name = "paracosm_macros"
-version = "0.1.0"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn 2.0.31",
 ]
 
 [[package]]
