@@ -26,7 +26,7 @@ bevy_atmosphere = "0.7.0"
 bevy_infinite_grid = "0.8.1"
 bevy_polyline = "0.7"
 
-macros.path = "./macros"
+paracosm-macros.path = "../paracosm-macros"
 
 rerun.version = "0.8.0"
 rerun.optional = true
