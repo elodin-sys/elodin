@@ -51,11 +51,21 @@ pub fn derive_proc_macro_impl(input: TokenStream) -> TokenStream {
         };
 
         let EditableAttributes {
+            slider,
             range_min,
             range_max,
             name,
             ..
         } = editable_attributes;
+
+        if !slider {
+            return syn::Error::new(
+                item_identifier.span(),
+                "Unknown `editable` element type (currently only `slider` is supported).",
+            )
+            .into_compile_error()
+            .into();
+        }
 
         quote! {
             impl Editable for #item_identifier #generics #where_clause {
