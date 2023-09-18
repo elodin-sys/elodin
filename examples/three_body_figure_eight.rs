@@ -2,12 +2,13 @@ use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::xpbd::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
-    constraints::GravityConstriant,
+    constraints::GravityConstraint,
     editor::editor,
+    runner::IntoSimRunner,
 };
 
 fn main() {
-    editor(sim)
+    editor(sim.substep_count(1))
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
@@ -64,7 +65,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             })),
     );
 
-    builder.gravity_constraint(GravityConstriant::new(a, b));
-    builder.gravity_constraint(GravityConstriant::new(a, c));
-    builder.gravity_constraint(GravityConstriant::new(b, c));
+    builder.gravity_constraint(GravityConstraint::new(a, b));
+    builder.gravity_constraint(GravityConstraint::new(a, c));
+    builder.gravity_constraint(GravityConstraint::new(b, c));
 }
