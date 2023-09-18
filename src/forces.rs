@@ -45,9 +45,7 @@ mod tests {
             points.push((six_dof.state.pos.x, six_dof.state.pos.y));
             time += dt;
         }
-        chart
-            .draw_series(LineSeries::new(points.into_iter(), &BLACK))
-            .unwrap();
+        chart.draw_series(LineSeries::new(points, &BLACK)).unwrap();
         area.present().unwrap();
         assert_relative_eq!(six_dof.state.pos, Vector3::new(1.0, 0., 0.), epsilon = 0.01)
     }
