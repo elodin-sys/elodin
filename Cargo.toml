@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = [
+    "libs/paracosm-core",
+    "libs/paracosm-macros"
+]
