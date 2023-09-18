@@ -16,7 +16,7 @@ use crate::{effector::concrete_effector, sensor::Sensor, Time};
 
 use super::{
     components::*,
-    constraints::{DistanceConstraint, GravityConstriant, RevoluteJoint},
+    constraints::{DistanceConstraint, GravityConstraint, RevoluteJoint},
     editor::traces::TraceAnchor,
 };
 
@@ -76,9 +76,9 @@ impl<'a> XpbdBuilder<'a> {
         entity
     }
 
-    pub fn distance_constraint(&mut self, distance_constriant: DistanceConstraint) {
+    pub fn distance_constraint(&mut self, distance_constraint: DistanceConstraint) {
         self.queue.push(Spawn {
-            bundle: distance_constriant,
+            bundle: distance_constraint,
         });
     }
 
@@ -88,7 +88,7 @@ impl<'a> XpbdBuilder<'a> {
         });
     }
 
-    pub fn gravity_constraint(&mut self, gravity: GravityConstriant) {
+    pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
         self.queue.push(Spawn { bundle: gravity });
     }
 }
@@ -111,22 +111,22 @@ pub trait Env {
     fn param(&mut self) -> Self::Param<'_>;
 }
 
-pub trait SimFunc<T, E: Env> {
-    fn build(&mut self, env: &mut E);
+pub trait SimFunc<T, E: Env, R = ()> {
+    fn build(&self, env: &mut E) -> R;
 }
 
 macro_rules! impl_sim_builder {
      ($($ty:tt),+) => {
          #[allow(non_snake_case)]
-         impl<F, $($ty,)* E> SimFunc<($($ty, )*), E> for F
+         impl<F, $($ty,)* E, R> SimFunc<($($ty, )*), E, R> for F
          where
              E: Env,
-             F: Fn($($ty, )*),
-             F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) ,
+             F: Fn($($ty, )*) -> R,
+             F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) -> R ,
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(&mut self, env: &mut E)  {
+             fn build(&self, env: &mut E) -> R{
 
                  $(
                          $ty::init(env);
@@ -155,3 +155,25 @@ impl_sim_builder!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
 impl_sim_builder!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_sim_builder!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_sim_builder!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+
+pub struct ConcreteSimFunc<F, T, R> {
+    func: F,
+    _phantom_data: PhantomData<(T, fn() -> R)>,
+}
+
+impl<E, T, R> ConcreteSimFunc<E, T, R> {
+    pub(crate) fn new(func: E) -> Self {
+        Self {
+            func,
+            _phantom_data: PhantomData,
+        }
+    }
+}
+impl<F, T, E: Env, R> SimFunc<(), E, R> for ConcreteSimFunc<F, T, R>
+where
+    F: for<'s> SimFunc<T, E, R>,
+{
+    fn build(&self, env: &mut E) -> R {
+        self.func.build(env)
+    }
+}
