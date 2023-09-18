@@ -34,7 +34,7 @@ pub fn lagrange_multiplier_delta(
     (-c - alpha_tilde * lagrange_multiplier) / (sum_inverse_masses + alpha_tilde)
 }
 
-/// Calculate the positonal impulse from a lagrangian delta
+/// Calculate the positional impulse from a lagrangian delta
 pub fn impulse(delta_lagrange: f64, n: UnitVector3<f64>) -> Vector3<f64> {
     delta_lagrange * n.into_inner()
 }

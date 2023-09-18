@@ -1,6 +1,6 @@
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
-    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, SimFunc, XpbdBuilder},
+    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
     ObservableNum, SharedNum,
 };
 use bevy::{
@@ -28,7 +28,7 @@ use bevy_polyline::PolylinePlugin;
 use macros::Editable;
 use std::ops::DerefMut;
 
-use super::runner::{SimRunner, SimRunnerEnv};
+use super::runner::{IntoSimRunner, SimRunnerEnv};
 
 pub(crate) mod traces;
 mod ui;
@@ -47,8 +47,8 @@ impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
     fn init(_: &mut SimRunnerEnv) {}
 }
 
-pub fn editor<T>(sim_func: impl SimFunc<T, SimRunnerEnv>) {
-    let runner = SimRunner::new(sim_func);
+pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T>) {
+    let runner = func.into_runner();
     let mut app = runner.build_with_plugins(EditorPlugin);
     app.run()
 }
