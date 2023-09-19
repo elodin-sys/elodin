@@ -32,6 +32,7 @@ pub struct Config {
     pub dt: f64,
     pub sub_dt: f64,
     pub substep_count: usize,
+    pub scale: f32,
 }
 
 impl Default for Config {
@@ -42,6 +43,7 @@ impl Default for Config {
             dt,
             sub_dt: dt / substep_count as f64,
             substep_count,
+            scale: 1.0,
         }
     }
 }
