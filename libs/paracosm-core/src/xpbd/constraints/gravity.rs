@@ -6,13 +6,23 @@ use crate::xpbd::components::{Effect, EntityQuery};
 pub struct GravityConstraint {
     entity_a: Entity,
     entity_b: Entity,
+    g_constant: f64,
 }
 
 const G: f64 = 6.649e-11;
 
 impl GravityConstraint {
     pub fn new(entity_a: Entity, entity_b: Entity) -> Self {
-        Self { entity_a, entity_b }
+        Self {
+            entity_a,
+            entity_b,
+            g_constant: G,
+        }
+    }
+
+    pub fn constant(mut self, constant: f64) -> Self {
+        self.g_constant = constant;
+        self
     }
 }
 
@@ -27,7 +37,7 @@ pub fn gravity_system(
             return;
         };
         let r = entity_a.pos.0 - entity_b.pos.0;
-        let mu = (r / r.norm().powi(3) * G) * entity_a.mass.0 * entity_b.mass.0;
+        let mu = (r / r.norm().powi(3) * constraint.g_constant) * entity_a.mass.0 * entity_b.mass.0;
         effect_a.force.0 -= mu;
         effect_b.force.0 += mu;
     }

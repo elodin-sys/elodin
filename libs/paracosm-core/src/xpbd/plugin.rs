@@ -63,11 +63,12 @@ pub fn tick(world: &mut World) {
     }
 }
 
-pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>) {
+pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>, config: Res<Config>) {
     query
         .par_iter_mut()
         .for_each_mut(|(mut transform, Pos(pos), Att(att))| {
-            transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32);
+            transform.translation =
+                Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale;
             transform.rotation =
                 Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
             // TODO: Is `Quat` a JPL quat who knows?!
