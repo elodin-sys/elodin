@@ -4,7 +4,7 @@ use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
 use crate::xpbd::{
-    components::EntityQuery,
+    components::{Config, EntityQuery},
     plugin::{SubstepSchedule, SubstepSet},
 };
 
@@ -45,6 +45,7 @@ fn update_lines(
     mut query: Query<(&TraceEntity, &TraceAnchor, &mut Handle<Polyline>)>,
     bodies: Query<EntityQuery>,
     mut polylines: ResMut<Assets<Polyline>>,
+    config: Res<Config>,
 ) {
     for (trace, anchor, polyline) in &mut query {
         let body = bodies.get(trace.0).unwrap();
@@ -52,7 +53,7 @@ fn update_lines(
         let pos = (body.att.0 * anchor.anchor) + body.pos.0;
         polyline
             .vertices
-            .push(Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32));
+            .push(Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale);
     }
 }
 
