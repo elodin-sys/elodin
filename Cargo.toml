@@ -1,53 +1,6 @@
-[package]
-name = "paracosm"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-default = ["rerun"]
-rerun = ["dep:rerun"]
-
-[dependencies]
-nalgebra = "0.32"
-stable-vec = "0.4"
-
-# core bevy
-bevy_ecs = "0.11"
-bevy_utils = "0.11"
-
-# editor
-bevy.version = "0.11"
-bevy.features = ["wayland", "trace"]
-bevy_egui = "0.21"
-bevy_panorbit_camera = "0.8.0"
-bevy_atmosphere = "0.7.0"
-bevy_infinite_grid = "0.8.1"
-bevy_polyline = "0.7"
-
-macros.path = "./macros"
-
-rerun.version = "0.8.0"
-rerun.optional = true
-
-# monte carlo
-rand = "0.8.5"
-rand_distr = "0.4.3"
-clap.version = "4.4"
-clap.features = ["derive"]
-serde.version = "1.0"
-serde.features = ["derive"]
-serde_json = "1.0"
-
-[dev-dependencies]
-plotters = "0.3.5"
-approx = "0.5"
-bevy = "0.11"
-anyhow = "1"
-criterion.version = "0.4"
-criterion.features = ["html_reports"]
-
-[[bench]]
-name = "xpbd"
-harness = false
+[workspace]
+resolver = "2"
+members = [
+    "libs/paracosm-core",
+    "libs/paracosm-macros"
+]
