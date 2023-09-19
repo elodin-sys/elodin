@@ -29,7 +29,7 @@ impl<'a> SimRunner<'a> {
 
     pub fn delta_t(mut self, dt: f64) -> Self {
         self.config.dt = dt;
-        self.config.sub_dt = dt / self.config.sub_dt;
+        self.config.sub_dt = dt / self.config.substep_count as f64;
         self
     }
 
@@ -41,6 +41,11 @@ impl<'a> SimRunner<'a> {
 
     pub fn lockstep(mut self, lockstep: impl Into<Option<LockStepSignal>>) -> Self {
         self.lockstep = lockstep.into();
+        self
+    }
+
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.config.scale = scale;
         self
     }
 
@@ -111,6 +116,7 @@ pub trait IntoSimRunner<'a, T>: Sized {
     fn substep_count(self, count: usize) -> SimRunner<'a>;
     fn lockstep(self, lockstep: impl Into<Option<LockStepSignal>>) -> SimRunner<'a>;
     fn run_mode(self, mode: RunMode) -> SimRunner<'a>;
+    fn scale(self, scale: f32) -> SimRunner<'a>;
 
     fn build_app(self) -> App;
 }
@@ -143,6 +149,10 @@ where
     fn build_app(self) -> App {
         self.into_runner().build()
     }
+
+    fn scale(self, scale: f32) -> SimRunner<'a> {
+        self.into_runner().scale(scale)
+    }
 }
 
 impl<'a> IntoSimRunner<'a, ()> for SimRunner<'a> {
@@ -168,6 +178,10 @@ impl<'a> IntoSimRunner<'a, ()> for SimRunner<'a> {
 
     fn build_app(self) -> App {
         SimRunner::build(self)
+    }
+
+    fn scale(self, scale: f32) -> SimRunner<'a> {
+        self.scale(scale)
     }
 }
 
