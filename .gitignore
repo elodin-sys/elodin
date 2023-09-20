@@ -3,3 +3,8 @@ target
 out.png
 out.rrd
 .idea
+
+paracosm_bg.wasm
+paracosm_bg.wasm.d.ts
+paracosm.d.ts
+paracosm.js
