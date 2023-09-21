@@ -6,8 +6,8 @@ use crate::{
 use bevy::{
     core_pipeline::{
         bloom::BloomSettings,
-        tonemapping::Tonemapping,
         experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        tonemapping::Tonemapping,
     },
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
@@ -82,13 +82,13 @@ impl Plugin for EditorPlugin {
         // For adding features incompatible with wasm:
         if cfg!(not(target_arch = "wasm32")) {
             app.add_plugins(TemporalAntiAliasPlugin)
-            .add_plugins(AtmospherePlugin)
-            .insert_resource(AtmosphereModel::new(Gradient {
-                sky: Color::hex("1B2642").unwrap(),
-                horizon: Color::hex("00081E").unwrap(),
-                ground: Color::hex("#00081E").unwrap(),
-            }))
-            .insert_resource(DirectionalLightShadowMap { size: 8192 });
+                .add_plugins(AtmospherePlugin)
+                .insert_resource(AtmosphereModel::new(Gradient {
+                    sky: Color::hex("1B2642").unwrap(),
+                    horizon: Color::hex("00081E").unwrap(),
+                    ground: Color::hex("#00081E").unwrap(),
+                }))
+                .insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
 }
@@ -128,18 +128,18 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
         if let Some(mut entity_commands) = commands.get_entity(cam_bundle_id) {
             entity_commands
-            .insert(AtmosphereCamera::default())
-            .insert(EnvironmentMapLight {
-                diffuse_map: asset_server.load("diffuse.ktx2"),
-                specular_map: asset_server.load("specular.ktx2"),
-            })
-            .insert(ScreenSpaceAmbientOcclusionBundle {
-                settings: ScreenSpaceAmbientOcclusionSettings {
-                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
-                },
-                ..Default::default()
-            })
-            .insert(TemporalAntiAliasBundle::default());
+                .insert(AtmosphereCamera::default())
+                .insert(EnvironmentMapLight {
+                    diffuse_map: asset_server.load("diffuse.ktx2"),
+                    specular_map: asset_server.load("specular.ktx2"),
+                })
+                .insert(ScreenSpaceAmbientOcclusionBundle {
+                    settings: ScreenSpaceAmbientOcclusionSettings {
+                        quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                    },
+                    ..Default::default()
+                })
+                .insert(TemporalAntiAliasBundle::default());
         }
     }
 }
