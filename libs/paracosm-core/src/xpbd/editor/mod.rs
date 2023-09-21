@@ -104,7 +104,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     });
 
-    commands
+    let cam_bundle_id = commands
         .spawn(Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
             camera: Camera {
@@ -115,27 +115,31 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
             ..default()
         })
         .insert(BloomSettings { ..default() })
-        // .insert(AtmosphereCamera::default())
         .insert(PanOrbitCamera::default())
-        .insert(GridShadowCamera);
+        .insert(GridShadowCamera).id();
 
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
-        })
-        .insert(AtmosphereCamera::default())
-        .insert(EnvironmentMapLight {
-            diffuse_map: asset_server.load("diffuse.ktx2"),
-            specular_map: asset_server.load("specular.ktx2"),
-        })
-        .insert(ScreenSpaceAmbientOcclusionBundle {
-            settings: ScreenSpaceAmbientOcclusionSettings {
-                quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
-            },
-            ..Default::default()
-        })
-        .insert(TemporalAntiAliasBundle::default());
+        });
+
+        if let Some(mut entity_commands) = commands.get_entity(cam_bundle_id) {
+            // adds a single component to the entity
+            entity_commands
+            .insert(AtmosphereCamera::default())
+            .insert(EnvironmentMapLight {
+                diffuse_map: asset_server.load("diffuse.ktx2"),
+                specular_map: asset_server.load("specular.ktx2"),
+            })
+            .insert(ScreenSpaceAmbientOcclusionBundle {
+                settings: ScreenSpaceAmbientOcclusionSettings {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                },
+                ..Default::default()
+            })
+            .insert(TemporalAntiAliasBundle::default());
+        }
     }
 }
 
