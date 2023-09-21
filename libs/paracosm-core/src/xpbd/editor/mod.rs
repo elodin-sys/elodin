@@ -104,6 +104,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     });
 
+    // return the id so it can be fetched below
     let cam_bundle_id = commands
         .spawn(Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
@@ -116,7 +117,8 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         })
         .insert(BloomSettings { ..default() })
         .insert(PanOrbitCamera::default())
-        .insert(GridShadowCamera).id();
+        .insert(GridShadowCamera)
+        .id();
 
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
@@ -125,7 +127,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         });
 
         if let Some(mut entity_commands) = commands.get_entity(cam_bundle_id) {
-            // adds a single component to the entity
             entity_commands
             .insert(AtmosphereCamera::default())
             .insert(EnvironmentMapLight {
