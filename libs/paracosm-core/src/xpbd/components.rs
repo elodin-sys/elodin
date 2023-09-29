@@ -26,6 +26,8 @@ pub struct PrevAtt(pub UnitQuaternion<f64>);
 pub struct InverseInertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Fixed(pub bool);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct Picked(pub bool);
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 pub struct Config {
@@ -90,6 +92,8 @@ pub struct EntityBundle {
 
     pub effectors: Effectors,
     pub sensors: Sensors,
+
+    pub picked: Picked,
 }
 
 #[derive(WorldQuery, Debug)]
