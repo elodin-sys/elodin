@@ -18,15 +18,11 @@ use bevy::{
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
-use bevy_egui::{
-    egui::{self, Ui},
-    EguiPlugin,
-};
+use bevy_egui::EguiPlugin;
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use paracosm_macros::Editable;
-use std::ops::DerefMut;
 
 use super::runner::{IntoSimRunner, SimRunnerEnv};
 

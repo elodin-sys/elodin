@@ -172,5 +172,5 @@ pub fn att_delta_ang_impulse(
     ang_impulse: Vector3<f64>,
     q: Quaternion<f64>,
 ) -> Quaternion<f64> {
-    0.5 * Quaternion::from_parts(0.0, (inverse_mass * ang_impulse)) * q
+    0.5 * Quaternion::from_parts(0.0, inverse_mass * ang_impulse) * q
 }

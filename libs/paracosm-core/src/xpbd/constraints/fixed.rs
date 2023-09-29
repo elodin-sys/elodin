@@ -1,5 +1,3 @@
-use std::{f64::consts::PI, fmt::Debug, ops::Range};
-
 use bevy_ecs::{
     component::Component,
     entity::Entity,
@@ -8,9 +6,8 @@ use bevy_ecs::{
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use crate::{
-    effector::{concrete_effector, Effector},
     xpbd::components::{Config, EntityQuery},
-    FromState, Pos, Time,
+    Pos,
 };
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
