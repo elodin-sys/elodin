@@ -69,7 +69,8 @@ fn sim(
             .effector(move |Att(a)| motor(*motor_d_rpm.0.load(), a, motor_d_pos))
             .sensor(move |Att(a), Pos(p), Vel(v), Time(time)| {
                 let (yaw, pitch, roll) = a.euler_angles();
-                let euler_angles = Vector3::new(roll, pitch, yaw);
+                //let euler_angles = Vector3::new(roll, pitch, yaw);
+                let euler_angles = Vector3::new(yaw, pitch, roll);
                 tx.send(SensorInputs {
                     euler_angles,
                     alt: p.y,
@@ -136,7 +137,7 @@ pub struct MotorCRPM(pub SharedNum<f64>);
 pub struct MotorDRPM(pub SharedNum<f64>);
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "0", range_max = 80.0, name = "alt")]
+#[editable(slider, range_min = "0", range_max = 90.0, name = "alt")]
 pub struct Alt(pub SharedNum<f64>);
 
 struct FSWActor {
@@ -190,9 +191,9 @@ struct PIDController {
 }
 
 impl PIDController {
-    const P: f64 = 0.01;
+    const P: f64 = -0.1;
     const I: f64 = 0.0;
-    const D: f64 = 0.0;
+    const D: f64 = -0.01;
 
     const P_ALT: f64 = 1.0;
     const I_ALT: f64 = 0.0;
@@ -222,10 +223,10 @@ impl PIDController {
         let d = Self::D * d_state;
         let pid = p + i + d;
 
-        let motor_a = (alt_pid - pid[0] - pid[1] + pid[2]) * default_rpm;
-        let motor_b = (alt_pid + pid[0] - pid[1] - pid[2]) * default_rpm;
-        let motor_c = (alt_pid - pid[0] + pid[1] - pid[2]) * default_rpm;
-        let motor_d = (alt_pid + pid[0] + pid[1] + pid[2]) * default_rpm;
+        let motor_a = (alt_pid - pid[1] - pid[2]) * default_rpm;
+        let motor_b = (alt_pid - pid[0] + pid[2]) * default_rpm;
+        let motor_c = (alt_pid + pid[1] - pid[2]) * default_rpm;
+        let motor_d = (alt_pid + pid[0] + pid[2]) * default_rpm;
 
         self.state = input.euler_angles;
         self.last_time = input.time;
