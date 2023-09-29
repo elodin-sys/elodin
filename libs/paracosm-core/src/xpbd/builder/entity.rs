@@ -150,6 +150,7 @@ impl EntityBuilder {
 
             effect: Effect::default(),
             fixed: Fixed(self.fixed),
+            picked: Picked(false),
         }
     }
 }

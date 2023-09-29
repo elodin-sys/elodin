@@ -8,7 +8,7 @@ use paracosm::xpbd::{
 };
 
 fn main() {
-    editor(sim.substep_count(1))
+    editor(sim.substep_count(10))
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
