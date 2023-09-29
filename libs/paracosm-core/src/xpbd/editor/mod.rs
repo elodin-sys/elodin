@@ -32,6 +32,7 @@ use super::runner::{IntoSimRunner, SimRunnerEnv};
 
 pub(crate) mod traces;
 mod ui;
+pub use ui::Editable;
 
 impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
     type Item<'e> = Assets<'e>;
@@ -40,8 +41,13 @@ impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
         let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
         let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
         let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
+        let server = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
 
-        Assets(Some(AssetsInner { meshes, materials }))
+        Assets(Some(AssetsInner {
+            meshes,
+            materials,
+            server,
+        }))
     }
 
     fn init(_: &mut SimRunnerEnv) {}

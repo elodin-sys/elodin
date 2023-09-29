@@ -1,4 +1,7 @@
-use bevy::prelude::{Mesh, PbrBundle, StandardMaterial};
+use bevy::{
+    prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
+    scene::Scene,
+};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{effector::Effector, sensor::Sensor, xpbd::components::*};
@@ -18,6 +21,7 @@ pub struct EntityBuilder {
     sensors: Sensors,
 
     pub(crate) editor_bundle: Option<PbrBundle>,
+    pub(crate) scene: Option<Handle<Scene>>,
 
     fixed: bool,
     pub(crate) trace: Option<Vector3<f64>>,
@@ -38,6 +42,7 @@ impl Default for EntityBuilder {
             editor_bundle: Default::default(),
             fixed: false,
             trace: None,
+            scene: None,
         }
     }
 }
@@ -92,6 +97,11 @@ impl EntityBuilder {
     {
         let erased = ConcreteSensor::new(sensor);
         self.sensors.0.push(Box::new(erased));
+        self
+    }
+
+    pub fn model(mut self, model: AssetHandle<Scene>) -> Self {
+        self.scene = model.0;
         self
     }
 

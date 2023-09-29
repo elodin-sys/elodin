@@ -1,6 +1,7 @@
 mod assets;
 mod entity;
 
+use bevy::scene::SceneBundle;
 use bevy_ecs::{
     entity::Entities,
     prelude::Entity,
@@ -67,6 +68,15 @@ impl<'a> XpbdBuilder<'a> {
             self.queue.push(Insert {
                 entity,
                 bundle: pbr,
+            });
+        }
+        if let Some(scene) = entity_builder.scene.take() {
+            self.queue.push(Insert {
+                entity,
+                bundle: SceneBundle {
+                    scene,
+                    ..Default::default()
+                },
             });
         }
         self.queue.push(Insert {
