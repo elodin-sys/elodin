@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use bevy::{
     asset::{Asset, AssetPath},
     prelude::*,
