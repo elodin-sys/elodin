@@ -69,9 +69,10 @@ pub fn derive_proc_macro_impl(input: TokenStream) -> TokenStream {
 
         quote! {
             impl Editable for #item_identifier #generics #where_clause {
-                fn build(&mut self, ui: &mut Ui) {
+                fn build(&mut self, ui: &mut bevy_egui::egui::Ui) {
+                    use std::ops::DerefMut;
                     let mut num = self.0.load();
-                    ui.add(egui::Slider::new(num.deref_mut(), #range_min..=#range_max).text(#name));
+                    ui.add(bevy_egui::egui::Slider::new(num.deref_mut(), #range_min..=#range_max).text(#name));
                 }
             }
         }
@@ -79,9 +80,10 @@ pub fn derive_proc_macro_impl(input: TokenStream) -> TokenStream {
     } else {
         quote! {
             impl Editable for #item_identifier #generics #where_clause {
-                fn build(&mut self, ui: &mut Ui) {
+                fn build(&mut self, ui: &mut bevy_egui::egui::Ui) {
+                    use std::ops::DerefMut;
                     let mut num = self.0.load();
-                    ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
+                    ui.add(bevy_egui::egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
                 }
             }
         }
