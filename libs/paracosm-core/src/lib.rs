@@ -1,5 +1,6 @@
 pub mod effector;
 pub mod forces;
+pub mod history;
 pub mod monte_carlo;
 pub mod runtime;
 pub mod sensor;

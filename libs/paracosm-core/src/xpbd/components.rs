@@ -109,6 +109,8 @@ pub struct EntityQuery {
     pub mass: &'static mut Mass,
     pub inertia: &'static mut Inertia,
     pub inverse_inertia: &'static mut InverseInertia,
+
+    pub effect: &'static mut Effect,
 }
 
 pub struct EntityStateRef<'a> {
