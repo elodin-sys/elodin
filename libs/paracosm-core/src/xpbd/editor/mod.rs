@@ -148,5 +148,5 @@ impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
 }
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-1.25", range_max = 1.25, name = "input")]
+#[editable(slider, range = -1.25..=1.25, name = "input")]
 pub struct ObservableInput(pub ObservableNum<f64>);
