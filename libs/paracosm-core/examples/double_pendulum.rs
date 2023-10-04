@@ -55,7 +55,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
                 ..Default::default()
             })),
     );
-    builder.revolute_join(
+    builder.revolute_joint(
         RevoluteJoint::new(root, rod_a)
             .join_axis(Vector3::z_axis())
             .anchor_b(Pos(vector![0., 0.5, 0.0]))
@@ -93,7 +93,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             .material(assets.material(Color::hex("FF9838").unwrap().into())),
     );
 
-    builder.revolute_join(
+    builder.revolute_joint(
         RevoluteJoint::new(rod_a, rod_b)
             .ang_damping(0.5)
             .pos_damping(0.5)
