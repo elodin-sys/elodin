@@ -1,18 +1,65 @@
+use std::ops::RangeInclusive;
+
 use darling::ast::NestedMeta;
 use darling::Error;
 use darling::FromMeta;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
+use syn::Expr;
+use syn::Lit;
+use syn::RangeLimits;
+use syn::UnOp;
 use syn::{parse_macro_input, punctuated::Punctuated, DeriveInput, Meta, Token};
+
+#[derive(Debug)]
+struct InputRange(RangeInclusive<f64>);
+
+impl InputRange {
+    fn parse_boundary_lit(lit: &syn::Lit, neg: bool) -> darling::Result<f64> {
+        let multi = if neg { -1_f64 } else { 1_f64 };
+        match lit {
+            Lit::Float(ref lit) => Ok(multi * lit.base10_parse::<f64>().unwrap()),
+            Lit::Int(ref lit) => Ok(multi * lit.base10_parse::<f64>().unwrap()),
+            _ => Err(Error::unexpected_lit_type(lit)),
+        }
+    }
+
+    fn get_boundary(expr: &syn::Expr) -> darling::Result<f64> {
+        match *expr {
+            Expr::Unary(ref u) => match u.op {
+                UnOp::Neg(_) => match *u.expr {
+                    Expr::Lit(ref l) => Self::parse_boundary_lit(&l.lit, true),
+                    _ => Err(Error::unexpected_expr_type(expr)),
+                },
+                _ => Err(Error::unexpected_expr_type(expr)),
+            },
+            Expr::Lit(ref l) => Self::parse_boundary_lit(&l.lit, false),
+            _ => Err(Error::unexpected_expr_type(expr)),
+        }
+    }
+}
+
+impl FromMeta for InputRange {
+    fn from_expr(expr: &syn::Expr) -> darling::Result<Self> {
+        match *expr {
+            Expr::Range(ref range) => match range.limits {
+                RangeLimits::Closed(_) => {
+                    let start = Self::get_boundary(range.start.as_ref().unwrap())?;
+                    let end = Self::get_boundary(range.end.as_ref().unwrap())?;
+                    Ok(InputRange(start..=end))
+                }
+                _ => Err(Error::unexpected_type("Only support RangeInclusive<f64>")),
+            },
+            _ => Err(Error::unexpected_expr_type(expr)),
+        }
+    }
+}
 
 #[derive(Debug, FromMeta)]
 pub struct EditableAttributes {
     #[darling(default)]
     slider: bool,
-    #[darling(default)]
-    range_min: f64,
-    #[darling(default)]
-    range_max: f64,
+    range: InputRange,
     name: String,
 }
 
@@ -52,11 +99,13 @@ pub fn derive_proc_macro_impl(input: TokenStream) -> TokenStream {
 
         let EditableAttributes {
             slider,
-            range_min,
-            range_max,
+            range,
             name,
             ..
         } = editable_attributes;
+
+        let range_min = range.0.start();
+        let range_max = range.0.end();
 
         if !slider {
             return syn::Error::new(
