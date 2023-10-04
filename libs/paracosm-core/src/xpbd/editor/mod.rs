@@ -105,42 +105,40 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     // return the id so it can be fetched below
-    let cam_bundle_id = commands
-        .spawn(Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
-            camera: Camera {
-                hdr: true,
-                ..Default::default()
-            },
-            tonemapping: Tonemapping::TonyMcMapface,
-            ..default()
-        })
+    let mut camera = commands.spawn(Camera3dBundle {
+        transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+        camera: Camera {
+            hdr: true,
+            ..Default::default()
+        },
+        tonemapping: Tonemapping::TonyMcMapface,
+        ..default()
+    });
+
+    camera
         .insert(BloomSettings { ..default() })
         .insert(PanOrbitCamera::default())
-        .insert(GridShadowCamera)
-        .id();
+        .insert(GridShadowCamera);
 
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
+        camera
+            .insert(AtmosphereCamera::default())
+            .insert(EnvironmentMapLight {
+                diffuse_map: asset_server.load("diffuse.ktx2"),
+                specular_map: asset_server.load("specular.ktx2"),
+            })
+            .insert(ScreenSpaceAmbientOcclusionBundle {
+                settings: ScreenSpaceAmbientOcclusionSettings {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                },
+                ..Default::default()
+            })
+            .insert(TemporalAntiAliasBundle::default());
+
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
         });
-
-        if let Some(mut entity_commands) = commands.get_entity(cam_bundle_id) {
-            entity_commands
-                .insert(AtmosphereCamera::default())
-                .insert(EnvironmentMapLight {
-                    diffuse_map: asset_server.load("diffuse.ktx2"),
-                    specular_map: asset_server.load("specular.ktx2"),
-                })
-                .insert(ScreenSpaceAmbientOcclusionBundle {
-                    settings: ScreenSpaceAmbientOcclusionSettings {
-                        quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
-                    },
-                    ..Default::default()
-                })
-                .insert(TemporalAntiAliasBundle::default());
-        }
     }
 }
 
