@@ -14,7 +14,7 @@ use bevy::{
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
-    window::WindowTheme,
+    window::{PresentMode, WindowTheme},
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
@@ -63,6 +63,7 @@ impl Plugin for EditorPlugin {
             primary_window: Some(Window {
                 window_theme: Some(WindowTheme::Dark),
                 title: "Paracosm Editor".into(),
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
             ..default()
@@ -79,8 +80,7 @@ impl Plugin for EditorPlugin {
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, ui_system)
-        .add_systems(Update, picked_system)
+        .add_systems(Update, (picked_system, ui_system, timeline_system))
         .add_systems(Update, make_pickable)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),

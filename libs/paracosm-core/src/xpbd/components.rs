@@ -6,6 +6,7 @@ use std::{
     },
 };
 
+use bevy::prelude::FixedTime;
 use bevy_ecs::{
     prelude::{Bundle, Component},
     query::WorldQuery,
@@ -28,6 +29,18 @@ pub struct InverseInertia(pub Matrix3<f64>);
 pub struct Fixed(pub bool);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Picked(pub bool);
+#[derive(Debug, Clone, Copy, PartialEq, Resource)]
+pub struct Paused(pub bool);
+
+#[derive(Debug, Resource)]
+pub struct PhysicsFixedTime(pub FixedTime);
+
+#[derive(Debug, Resource)]
+pub enum TickMode {
+    FreeRun,
+    Fixed,
+    Lockstep(LockStepSignal),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 pub struct Config {
@@ -109,8 +122,6 @@ pub struct EntityQuery {
     pub mass: &'static mut Mass,
     pub inertia: &'static mut Inertia,
     pub inverse_inertia: &'static mut InverseInertia,
-
-    pub effect: &'static mut Effect,
 }
 
 pub struct EntityStateRef<'a> {

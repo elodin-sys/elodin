@@ -1,36 +1,62 @@
-use bevy_ecs::{entity::Entity, system::Query};
+use bevy::prelude::{App, Assets, Handle, Plugin, Quat, Transform, Update, Vec3};
+use bevy_ecs::{
+    entity::Entity,
+    event::{Event, EventReader},
+    query::WorldQuery,
+    schedule::IntoSystemConfigs,
+    system::{Query, Res, ResMut, Resource},
+};
+use bevy_polyline::prelude::Polyline;
 use nalgebra::{UnitQuaternion, Vector3};
 use std::collections::HashMap;
 
-use crate::xpbd::components::{Effect, EntityQuery, EntityQueryItem, EntityQueryReadOnlyItem};
+use crate::xpbd::{
+    components::{Config, Effect, EntityQuery},
+    plugin::{PhysicsSchedule, TickSet},
+};
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct HistoryStore {
     entities: HashMap<Entity, EntityHistory>,
+    count: usize,
+    current_index: usize,
 }
 
 impl HistoryStore {
     pub fn record<'a>(
         &mut self,
-        query: impl Iterator<Item = (Entity, EntityQueryReadOnlyItem<'a>)>,
+        query: impl Iterator<Item = (Entity, HistoryQueryReadOnlyItem<'a>)>,
     ) {
-        for (entity, data) in query {
-            let history = self.entities.entry(entity).or_default();
-            history.record(data);
+        self.current_index += 1;
+        if self.current_index > self.count {
+            self.count = self.current_index;
+            for (entity, data) in query {
+                let history = self.entities.entry(entity).or_default();
+                history.record(data);
+            }
         }
     }
 
-    pub fn rollback(&mut self, index: usize, mut query: Query<EntityQuery>) {
+    pub fn rollback(&mut self, index: usize, query: &mut Query<HistoryQuery>, scale: f32) {
+        self.current_index = index;
         for (entity, history) in &self.entities {
             let Ok(entity) = query.get_mut(*entity) else {
                 continue;
             };
-            history.rollback(index, entity);
+            history.rollback(index, entity, scale);
         }
     }
 
     pub fn history(&self, entity: &Entity) -> Option<&EntityHistory> {
         self.entities.get(entity)
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn current_index(&self) -> usize {
+        self.current_index
     }
 }
 
@@ -47,22 +73,29 @@ pub struct EntityHistory {
 }
 
 impl EntityHistory {
-    fn record(&mut self, data: EntityQueryReadOnlyItem<'_>) {
+    fn record(&mut self, query: HistoryQueryReadOnlyItem<'_>) {
+        let data = query.entity;
         self.pos.push(data.pos.0);
         self.vel.push(data.vel.0);
         self.att.push(data.att.0);
         self.ang_vel.push(data.ang_vel.0);
         self.mass.push(data.mass.0);
-        self.effects.push(*data.effect);
+        self.effects.push(*query.effect);
     }
 
-    fn rollback(&self, index: usize, mut entity: EntityQueryItem<'_>) {
-        entity.pos.0 = self.pos[index];
+    fn rollback(&self, index: usize, mut query: HistoryQueryItem<'_>, scale: f32) {
+        let mut entity = query.entity;
+        let att = self.att[index];
+        let pos = self.pos[index];
+        entity.pos.0 = pos;
         entity.vel.0 = self.vel[index];
-        entity.att.0 = self.att[index];
+        entity.att.0 = att;
         entity.ang_vel.0 = self.ang_vel[index];
         entity.mass.0 = self.mass[index];
-        *entity.effect = self.effects[index];
+        *query.effect = self.effects[index];
+        query.transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * scale;
+        query.transform.rotation =
+            Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
     }
 
     pub fn pos(&self) -> &[Vector3<f64>] {
@@ -88,6 +121,52 @@ impl EntityHistory {
     pub fn effects(&self) -> &[Effect] {
         &self.effects
     }
+}
+
+pub fn record_system(
+    mut history: ResMut<HistoryStore>,
+    query: Query<(Entity, HistoryQueryReadOnly)>,
+) {
+    history.record(query.iter())
+}
+
+#[derive(Event)]
+pub struct RollbackEvent(pub usize);
+
+pub fn rollback_system(
+    mut history: ResMut<HistoryStore>,
+    mut event_reader: EventReader<RollbackEvent>,
+    mut query: Query<HistoryQuery>,
+    config: Res<Config>,
+    mut polyline: Query<&mut Handle<Polyline>>,
+    mut polylines: ResMut<Assets<Polyline>>,
+) {
+    for event in &mut event_reader {
+        history.rollback(event.0, &mut query, config.scale);
+
+        for polyline in &mut polyline {
+            let polyline = polylines.get_mut(&polyline).unwrap();
+            polyline.vertices.clear()
+        }
+    }
+}
+
+pub struct HistoryPlugin;
+impl Plugin for HistoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_event::<RollbackEvent>();
+        app.insert_resource(HistoryStore::default());
+        app.add_systems(PhysicsSchedule, (record_system,).in_set(TickSet::SyncPos));
+        app.add_systems(Update, rollback_system);
+    }
+}
+
+#[derive(WorldQuery, Debug)]
+#[world_query(mutable, derive(Debug))]
+pub struct HistoryQuery {
+    entity: EntityQuery,
+    transform: &'static mut Transform,
+    effect: &'static mut Effect,
 }
 
 #[cfg(test)]
