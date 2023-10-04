@@ -47,6 +47,7 @@ bevy = "0.11"
 anyhow = "1"
 criterion.version = "0.4"
 criterion.features = ["html_reports"]
+flume = "0.11"
 
 [[bench]]
 name = "xpbd"
