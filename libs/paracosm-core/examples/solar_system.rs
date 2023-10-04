@@ -36,7 +36,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
                 2.123378844575767e-4,
             ]))
             .vel(helio_to_bevy(vector![
-                1.072468396698360e-3,
+                1.072_468_396_698_36e-3,
                 1.708345322037895e-2,
                 -3.545157932769615e-7
             ]))
@@ -56,14 +56,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(1.89e27)
             .pos(helio_to_bevy(vector![
-                4.006423068610660e00,
-                2.921866864588122e00,
-                -1.017570096026684e-01
+                4.006_423_068_610_66,
+                2.921_866_864_588_122,
+                -1.017_570_096_026_684e-1
             ]))
             .vel(helio_to_bevy(vector![
-                -4.529782018388927e-03,
-                6.452946144697471e-03,
-                7.457109084988199e-05
+                -4.529_782_018_388_927e-3,
+                6.452_946_144_697_471e-3,
+                7.457_109_084_988_2e-5
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -81,14 +81,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(6.39e23)
             .pos(helio_to_bevy(vector![
-                -1.455093533090440e+00,
-                -7.026325579976354e-01,
-                2.101911966287818e-02,
+                -1.455_093_533_090_44,
+                -7.026_325_579_976_354e-1,
+                2.101_911_966_287_818e-2,
             ]))
             .vel(helio_to_bevy(vector![
-                6.625189920311338e-03,
-                -1.140793077770015e-02,
-                -4.013568238263378e-04
+                6.625_189_920_311_338e-3,
+                -1.140_793_077_770_015e-2,
+                -4.013_568_238_263_378e-4
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -106,14 +106,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(4.867e24)
             .pos(helio_to_bevy(vector![
-                2.028847101112924e-01,
-                2.308731142232934e-01,
-                -1.276223148323567e-04
+                2.028_847_101_112_924e-1,
+                2.308_731_142_232_934e-1,
+                -1.276_223_148_323_567e-4
             ]))
             .vel(helio_to_bevy(vector![
-                -2.640829017559176e-02,
-                2.006600272464892e-02,
-                4.063076271928278e-03
+                -2.640_829_017_559_176e-2,
+                2.006_600_272_464_892e-2,
+                4.063_076_271_928_278e-3
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -131,14 +131,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(4.867e24)
             .pos(helio_to_bevy(vector![
-                6.798017112259706e-01,
-                2.237111260436163e-01,
-                -3.639561594712085e-02
+                6.798_017_112_259_706e-1,
+                2.237_111_260_436_163e-1,
+                -3.639_561_594_712_085e-2
             ]))
             .vel(helio_to_bevy(vector![
-                -6.371222592894960e-03,
-                1.912020851757406e-02,
-                6.305071804394223e-04
+                -6.371_222_592_894_96e-3,
+                1.912_020_851_757_406e-2,
+                6.305_071_804_394_223e-4
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -156,14 +156,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(5.683e26)
             .pos(helio_to_bevy(vector![
-                8.783226102061334e+00,
-                -4.247296553985379e+00,
-                -2.758526575085964e-01
+                8.783_226_102_061_334,
+                -4.247_296_553_985_379,
+                -2.758_526_575_085_964e-1
             ]))
             .vel(helio_to_bevy(vector![
-                2.116571054761369e-03,
-                5.012229319169293e-03,
-                -1.716983622031672e-04,
+                2.116_571_054_761_369e-3,
+                5.012_229_319_169_293e-3,
+                -1.716_983_622_031_672e-4,
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -181,14 +181,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(1.024e26)
             .pos(helio_to_bevy(vector![
-                2.981579078855878e+01,
-                -2.121513644468658e+00,
-                -6.434483800948522e-01,
+                2.981_579_078_855_878e1,
+                -2.121_513_644_468_658,
+                -6.434_483_800_948_522e-1,
             ]))
             .vel(helio_to_bevy(vector![
-                2.021264053090830e-04,
-                3.149741242740432e-03,
-                -6.967831155254172e-05,
+                2.021_264_053_090_83e-4,
+                3.149_741_242_740_432e-3,
+                -6.967_831_155_254_172e-5,
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
@@ -206,14 +206,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(1.024e26)
             .pos(helio_to_bevy(vector![
-                1.258255102521142e+01,
-                1.505737113095830e+01,
-                -1.070858413350803e-01,
+                1.258_255_102_521_142e1,
+                1.505_737_113_095_83e1,
+                -1.070_858_413_350_803e-1,
             ]))
             .vel(helio_to_bevy(vector![
-                -3.046918944187991e-03,
-                2.338765156267450e-03,
-                4.819887062168329e-05,
+                -3.046_918_944_187_991e-3,
+                2.338_765_156_267_45e-3,
+                4.819_887_062_168_329e-5,
             ]))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
