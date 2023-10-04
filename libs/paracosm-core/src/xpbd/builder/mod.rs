@@ -1,6 +1,7 @@
 mod assets;
 mod entity;
 
+use bevy::scene::SceneBundle;
 use bevy_ecs::{
     entity::Entities,
     prelude::Entity,
@@ -16,7 +17,7 @@ use crate::{effector::concrete_effector, sensor::Sensor, Time};
 
 use super::{
     components::*,
-    constraints::{DistanceConstraint, GravityConstraint, RevoluteJoint},
+    constraints::{DistanceConstraint, FixedJoint, GravityConstraint, RevoluteJoint},
     editor::traces::TraceAnchor,
 };
 
@@ -69,6 +70,15 @@ impl<'a> XpbdBuilder<'a> {
                 bundle: pbr,
             });
         }
+        if let Some(scene) = entity_builder.scene.take() {
+            self.queue.push(Insert {
+                entity,
+                bundle: SceneBundle {
+                    scene,
+                    ..Default::default()
+                },
+            });
+        }
         self.queue.push(Insert {
             entity,
             bundle: entity_builder.bundle(),
@@ -82,7 +92,7 @@ impl<'a> XpbdBuilder<'a> {
         });
     }
 
-    pub fn revolute_join(&mut self, revolute_join: RevoluteJoint) {
+    pub fn revolute_joint(&mut self, revolute_join: RevoluteJoint) {
         self.queue.push(Spawn {
             bundle: revolute_join,
         });
@@ -90,6 +100,10 @@ impl<'a> XpbdBuilder<'a> {
 
     pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
         self.queue.push(Spawn { bundle: gravity });
+    }
+
+    pub fn fixed_joint(&mut self, fixed: FixedJoint) {
+        self.queue.push(Spawn { bundle: fixed });
     }
 }
 

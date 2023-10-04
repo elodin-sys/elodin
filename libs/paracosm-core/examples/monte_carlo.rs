@@ -7,7 +7,7 @@ use paracosm::{
         builder::{EntityBuilder, XpbdBuilder},
         runner::{IntoSimRunner, RunMode},
     },
-    Force, Pos, Time,
+    Force, Time,
 };
 
 fn main() {

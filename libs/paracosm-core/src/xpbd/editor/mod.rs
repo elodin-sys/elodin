@@ -18,20 +18,17 @@ use bevy::{
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
-use bevy_egui::{
-    egui::{self, Ui},
-    EguiPlugin,
-};
+use bevy_egui::EguiPlugin;
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use paracosm_macros::Editable;
-use std::ops::DerefMut;
 
 use super::runner::{IntoSimRunner, SimRunnerEnv};
 
 pub(crate) mod traces;
 mod ui;
+pub use ui::Editable;
 
 impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
     type Item<'e> = Assets<'e>;
@@ -40,8 +37,13 @@ impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
         let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
         let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
         let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
+        let server = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
 
-        Assets(Some(AssetsInner { meshes, materials }))
+        Assets(Some(AssetsInner {
+            meshes,
+            materials,
+            server,
+        }))
     }
 
     fn init(_: &mut SimRunnerEnv) {}
@@ -159,5 +161,5 @@ impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
 }
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-1.25", range_max = 1.25, name = "input")]
+#[editable(slider, range = -1.25..=1.25, name = "input")]
 pub struct ObservableInput(pub ObservableNum<f64>);
