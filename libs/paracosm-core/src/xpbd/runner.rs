@@ -49,15 +49,36 @@ impl<'a> SimRunner<'a> {
         self
     }
 
+    pub fn lockstep(mut self, lockstep: impl Into<Option<LockStepSignal>>) -> Self {
+        self.lockstep = lockstep.into();
+        self
+    }
+
     pub fn build(self) -> App {
         self.build_with_plugins(())
     }
 
-    pub fn build_with_plugins<M>(self, plugins: impl Plugins<M>) -> App {
+    fn tick_mode(&mut self) -> TickMode {
+        match self.run_mode {
+            RunMode::FixedTicks(_)
+            | RunMode::FixedTime(_)
+            | RunMode::OneShot
+            | RunMode::FreeRun => {
+                if let Some(lockstep) = self.lockstep.take() {
+                    TickMode::Lockstep(lockstep)
+                } else {
+                    TickMode::FreeRun
+                }
+            }
+            RunMode::RealTime | RunMode::Scaled(_) => TickMode::Fixed,
+        }
+    }
+
+    pub fn build_with_plugins<M>(mut self, plugins: impl Plugins<M>) -> App {
         let mut app = App::new();
+        app.insert_resource(self.tick_mode());
         match self.run_mode {
             RunMode::FixedTicks(n) => {
-                app.insert_resource(TickMode::FreeRun);
                 app.set_runner(move |mut app| {
                     for _ in 0..n {
                         app.update();
@@ -65,7 +86,6 @@ impl<'a> SimRunner<'a> {
                 });
             }
             RunMode::FixedTime(time) => {
-                app.insert_resource(TickMode::FreeRun);
                 let n: usize = (time / self.config.dt) as usize;
                 app.set_runner(move |mut app| {
                     for _ in 0..n {
@@ -74,25 +94,20 @@ impl<'a> SimRunner<'a> {
                 });
             }
             RunMode::OneShot => {
-                app.insert_resource(TickMode::FreeRun);
                 app.set_runner(|mut app| {
                     app.update();
                 });
             }
             RunMode::RealTime => {
-                app.insert_resource(TickMode::Fixed);
                 let duration = Duration::from_secs_f64(self.config.dt);
                 app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
             }
             RunMode::Scaled(scale) => {
-                app.insert_resource(TickMode::Fixed);
                 let duration = Duration::from_secs_f64(self.config.dt / scale);
                 app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
             }
 
-            RunMode::FreeRun => {
-                app.insert_resource(TickMode::FreeRun);
-            }
+            RunMode::FreeRun => {}
         }
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
