@@ -121,23 +121,23 @@ fn force_at_point(r: Vector3<f64>, force: Vector3<f64>, att: UnitQuaternion<f64>
 }
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-20800", range_max = 20800.0, name = "motor a")]
+#[editable(slider, range = -20800..=20800.0, name = "motor a")]
 pub struct MotorARPM(pub SharedNum<f64>);
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-20800", range_max = 20800.0, name = "motor b")]
+#[editable(slider, range =-20800..=20800.0, name = "motor b")]
 pub struct MotorBRPM(pub SharedNum<f64>);
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-20080", range_max = 20800.0, name = "motor c")]
+#[editable(slider, range = -20080..=20800.0, name = "motor c")]
 pub struct MotorCRPM(pub SharedNum<f64>);
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "-20080", range_max = 20800.0, name = "motor d")]
+#[editable(slider, range= -20080..=20800.0, name = "motor d")]
 pub struct MotorDRPM(pub SharedNum<f64>);
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range_min = "0", range_max = 90.0, name = "alt")]
+#[editable(slider, range=0..=90.0, name = "alt")]
 pub struct Alt(pub SharedNum<f64>);
 
 struct FSWActor {

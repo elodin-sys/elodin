@@ -66,36 +66,36 @@ impl Plugin for EditorPlugin {
             }),
             ..default()
         }))
-        .add_plugins(TemporalAntiAliasPlugin)
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
-        .add_plugins(AtmospherePlugin)
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
-        .insert_resource(AtmosphereModel::new(Gradient {
-            sky: Color::hex("1B2642").unwrap(),
-            horizon: Color::hex("00081E").unwrap(),
-            ground: Color::hex("#00081E").unwrap(),
-        }))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
         })
         .insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
-        .insert_resource(DirectionalLightShadowMap { size: 8192 })
         .insert_resource(Msaa::Off);
+
+        // For adding features incompatible with wasm:
+        if cfg!(not(target_arch = "wasm32")) {
+            app.add_plugins(TemporalAntiAliasPlugin)
+                .add_plugins(AtmospherePlugin)
+                .insert_resource(AtmosphereModel::new(Gradient {
+                    sky: Color::hex("1B2642").unwrap(),
+                    horizon: Color::hex("00081E").unwrap(),
+                    ground: Color::hex("#00081E").unwrap(),
+                }))
+                .insert_resource(DirectionalLightShadowMap { size: 8192 });
+        }
     }
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn(ScreenSpaceAmbientOcclusionSettings {
-        quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
-    });
-
     commands.spawn(InfiniteGridBundle {
         grid: InfiniteGrid {
             minor_line_color: Color::hex("#00081E").unwrap(),
@@ -106,31 +106,42 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ..default()
     });
 
-    commands
-        .spawn(Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
-            camera: Camera {
-                hdr: true,
-                ..Default::default()
-            },
-            tonemapping: Tonemapping::TonyMcMapface,
-            ..default()
-        })
-        .insert(BloomSettings { ..default() })
-        .insert(AtmosphereCamera::default())
-        .insert(PanOrbitCamera::default())
-        .insert(GridShadowCamera)
-        .insert(EnvironmentMapLight {
-            diffuse_map: asset_server.load("diffuse.ktx2"),
-            specular_map: asset_server.load("specular.ktx2"),
-        })
-        .insert(ScreenSpaceAmbientOcclusionBundle {
-            settings: ScreenSpaceAmbientOcclusionSettings {
-                quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
-            },
+    // return the id so it can be fetched below
+    let mut camera = commands.spawn(Camera3dBundle {
+        transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+        camera: Camera {
+            hdr: true,
             ..Default::default()
-        })
-        .insert(TemporalAntiAliasBundle::default());
+        },
+        tonemapping: Tonemapping::TonyMcMapface,
+        ..default()
+    });
+
+    camera
+        .insert(BloomSettings { ..default() })
+        .insert(PanOrbitCamera::default())
+        .insert(GridShadowCamera);
+
+    // For adding features incompatible with wasm:
+    if cfg!(not(target_arch = "wasm32")) {
+        camera
+            .insert(AtmosphereCamera::default())
+            .insert(EnvironmentMapLight {
+                diffuse_map: asset_server.load("diffuse.ktx2"),
+                specular_map: asset_server.load("specular.ktx2"),
+            })
+            .insert(ScreenSpaceAmbientOcclusionBundle {
+                settings: ScreenSpaceAmbientOcclusionSettings {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                },
+                ..Default::default()
+            })
+            .insert(TemporalAntiAliasBundle::default());
+
+        commands.spawn(ScreenSpaceAmbientOcclusionSettings {
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+        });
+    }
 }
 
 #[derive(Resource, Clone, Debug, Default)]
