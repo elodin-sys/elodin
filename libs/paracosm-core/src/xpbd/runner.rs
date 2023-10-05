@@ -109,6 +109,7 @@ impl<'a> SimRunner<'a> {
 
             RunMode::FreeRun => {}
         }
+        app.insert_resource(bevy::time::Time::default());
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
         app.add_plugins(XpbdPlugin);
