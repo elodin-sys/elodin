@@ -139,14 +139,16 @@ pub fn rollback_system(
     mut query: Query<HistoryQuery>,
     config: Res<Config>,
     mut polyline: Query<&mut Handle<Polyline>>,
-    mut polylines: ResMut<Assets<Polyline>>,
+    mut polylines: Option<ResMut<Assets<Polyline>>>,
 ) {
     for event in &mut event_reader {
         history.rollback(event.0, &mut query, config.scale);
 
-        for polyline in &mut polyline {
-            let polyline = polylines.get_mut(&polyline).unwrap();
-            polyline.vertices.clear()
+        if let Some(ref mut polylines) = polylines {
+            for polyline in &mut polyline {
+                let polyline = polylines.get_mut(&polyline).unwrap();
+                polyline.vertices.clear()
+            }
         }
     }
 }
@@ -174,10 +176,7 @@ mod tests {
     use bevy_ecs::{schedule::Schedule, world::World};
     use nalgebra::vector;
 
-    use crate::{
-        xpbd::{builder::EntityBuilder, components::EntityQueryReadOnly},
-        Pos,
-    };
+    use crate::{xpbd::builder::EntityBuilder, Pos};
 
     use super::*;
 
@@ -185,31 +184,34 @@ mod tests {
     fn test_record() {
         let mut world = World::default();
         let a = world
-            .spawn(
+            .spawn((
                 EntityBuilder::default()
                     .pos(vector![1.0, 0.0, 0.0])
                     .bundle(),
-            )
+                Transform::default(),
+            ))
             .id();
         let b = world
-            .spawn(
+            .spawn((
                 EntityBuilder::default()
                     .pos(vector![0.0, 1.0, 0.0])
                     .bundle(),
-            )
+                Transform::default(),
+            ))
             .id();
-        world.spawn(
+        world.spawn((
             EntityBuilder::default()
                 .pos(vector![0.0, 0.0, 1.0])
                 .bundle(),
-        );
+            Transform::default(),
+        ));
         let mut history = HistoryStore::default();
-        history.record(world.query::<(Entity, EntityQueryReadOnly)>().iter(&world));
+        history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
         a_entity.get_mut::<Pos>().unwrap().0 = vector![2.0, 0.0, 0.0];
         let mut b_entity = world.get_entity_mut(b).unwrap();
         b_entity.get_mut::<Pos>().unwrap().0 = vector![0.0, 2.0, 0.0];
-        history.record(world.query::<(Entity, EntityQueryReadOnly)>().iter(&world));
+        history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let a_history = history.history(&a).unwrap();
         assert_eq!(a_history.pos()[0], vector![1.0, 0.0, 0.0]);
         assert_eq!(a_history.pos()[1], vector![2.0, 0.0, 0.0]);
@@ -219,34 +221,37 @@ mod tests {
     fn test_rewind() {
         let mut world = World::default();
         let a = world
-            .spawn(
+            .spawn((
                 EntityBuilder::default()
                     .pos(vector![1.0, 0.0, 0.0])
                     .bundle(),
-            )
+                Transform::default(),
+            ))
             .id();
         let b = world
-            .spawn(
+            .spawn((
                 EntityBuilder::default()
                     .pos(vector![0.0, 1.0, 0.0])
                     .bundle(),
-            )
+                Transform::default(),
+            ))
             .id();
-        world.spawn(
+        world.spawn((
             EntityBuilder::default()
                 .pos(vector![0.0, 0.0, 1.0])
                 .bundle(),
-        );
+            Transform::default(),
+        ));
         let mut history = HistoryStore::default();
-        history.record(world.query::<(Entity, EntityQueryReadOnly)>().iter(&world));
+        history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
         a_entity.get_mut::<Pos>().unwrap().0 = vector![2.0, 0.0, 0.0];
         let mut b_entity = world.get_entity_mut(b).unwrap();
         b_entity.get_mut::<Pos>().unwrap().0 = vector![0.0, 2.0, 0.0];
-        history.record(world.query::<(Entity, EntityQueryReadOnly)>().iter(&world));
+        history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut rollback = Schedule::default();
-        rollback.add_systems(move |query: Query<EntityQuery>| {
-            history.rollback(0, query);
+        rollback.add_systems(move |mut query: Query<HistoryQuery>| {
+            history.rollback(0, &mut query, 1.0);
         });
         rollback.run(&mut world);
         let a_entity = world.get_entity_mut(a).unwrap();
