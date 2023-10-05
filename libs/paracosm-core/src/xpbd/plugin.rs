@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 
-use crate::{Att, Pos};
+use crate::{history::HistoryPlugin, Att, Pos};
 
 use super::{
-    components::{Config, LockStepSignal},
+    components::{Config, Paused, PhysicsFixedTime, TickMode},
     constraints::{
         clear_distance_lagrange, clear_revolute_lagrange, distance_system, gravity_system,
         revolute_damping, revolute_system,
@@ -19,30 +19,51 @@ pub enum TickSet {
     SyncPos,
 }
 
-#[derive(Default)]
-pub struct XpbdPlugin {
-    pub lockstep: Option<LockStepSignal>,
+#[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
+pub struct PhysicsSchedule;
+
+fn run_physics_system(world: &mut World) {
+    if world.resource::<Paused>().0 {
+        return;
+    }
+    let delta_time = world.resource::<Time>().delta();
+    let mut tick_mode = world.resource_mut::<TickMode>();
+    match tick_mode.as_mut() {
+        TickMode::FreeRun => {
+            world.run_schedule(PhysicsSchedule);
+        }
+        TickMode::Lockstep(l) => {
+            if l.can_continue() {
+                world.run_schedule(PhysicsSchedule);
+            }
+        }
+        TickMode::Fixed => {
+            let mut fixed_time = world.resource_mut::<PhysicsFixedTime>();
+            fixed_time.0.tick(delta_time);
+            let _ = world.try_schedule_scope(PhysicsSchedule, |world, schedule| {
+                while world.resource_mut::<PhysicsFixedTime>().0.expend().is_ok() {
+                    schedule.run(world);
+                }
+            });
+        }
+    }
 }
+
+#[derive(Default)]
+pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(Paused(false));
+        app.add_plugins(HistoryPlugin);
+        app.add_systems(Update, run_physics_system);
         app.add_systems(
-            Update,
+            PhysicsSchedule,
             (clear_distance_lagrange, clear_revolute_lagrange)
                 .in_set(TickSet::ClearConstraintLagrange),
         );
-        if let Some(ref lockstep) = self.lockstep {
-            let lockstep = lockstep.clone();
-            app.add_systems(
-                Update,
-                (tick)
-                    .in_set(TickSet::TickPhysics)
-                    .run_if(IntoSystem::into_system(move || lockstep.can_continue())),
-            );
-        } else {
-            app.add_systems(Update, (tick).in_set(TickSet::TickPhysics));
-        }
-        app.add_systems(Update, (sync_pos).in_set(TickSet::SyncPos))
+        app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
+        app.add_systems(PhysicsSchedule, sync_pos.in_set(TickSet::SyncPos))
             .configure_sets(
                 Update,
                 (

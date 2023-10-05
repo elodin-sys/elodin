@@ -3,17 +3,14 @@ use bevy_ecs::entity::Entity;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
-use crate::xpbd::{
-    components::{Config, EntityQuery},
-    plugin::{SubstepSchedule, SubstepSet},
-};
+use crate::{history::HistoryStore, xpbd::components::Config};
 
 pub struct TracesPlugin;
 
 impl Plugin for TracesPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_systems(PostStartup, setup_query);
-        app.add_systems(SubstepSchedule, update_lines.after(SubstepSet::UpdateTime));
+        app.add_systems(Update, update_lines);
     }
 }
 
@@ -43,17 +40,28 @@ fn setup_query(
 
 fn update_lines(
     mut query: Query<(&TraceEntity, &TraceAnchor, &mut Handle<Polyline>)>,
-    bodies: Query<EntityQuery>,
     mut polylines: ResMut<Assets<Polyline>>,
     config: Res<Config>,
+    history: Res<HistoryStore>,
 ) {
     for (trace, anchor, polyline) in &mut query {
-        let body = bodies.get(trace.0).unwrap();
         let polyline = polylines.get_mut(&polyline).unwrap();
-        let pos = (body.att.0 * anchor.anchor) + body.pos.0;
-        polyline
-            .vertices
-            .push(Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale);
+        let Some(hist) = history.history(&trace.0) else {
+            continue;
+        };
+        let end = history.current_index();
+        let len = history
+            .current_index()
+            .saturating_sub(polyline.vertices.len());
+        let start = end - len;
+        for (pos, att) in hist.pos()[start..end]
+            .iter()
+            .zip(hist.att()[start..end].iter())
+        {
+            let pos = (att * anchor.anchor) + pos;
+            let pos = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale;
+            polyline.vertices.push(pos);
+        }
     }
 }
 

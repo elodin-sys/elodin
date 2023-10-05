@@ -4,11 +4,16 @@ use paracosm::xpbd::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     constraints::GravityConstraint,
     editor::editor,
-    runner::IntoSimRunner,
+    runner::{IntoSimRunner, RunMode},
 };
 
 fn main() {
-    editor(sim.substep_count(64).scale(2.).delta_t(100. / 60.))
+    editor(
+        sim.substep_count(64)
+            .scale(2.)
+            .delta_t(100. / 60.)
+            .run_mode(RunMode::Scaled(100.)),
+    )
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {

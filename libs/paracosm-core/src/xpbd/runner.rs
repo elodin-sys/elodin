@@ -1,14 +1,14 @@
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
-    components::{Config, LockStepSignal},
+    components::{Config, LockStepSignal, PhysicsFixedTime, TickMode},
     plugin::XpbdPlugin,
 };
-use bevy::{app::Plugins, prelude::App};
-use bevy_ecs::system::CommandQueue;
-use std::{
-    cell::RefCell,
-    time::{Duration, Instant},
+use bevy::{
+    app::Plugins,
+    prelude::{App, FixedTime},
 };
+use bevy_ecs::system::CommandQueue;
+use std::{cell::RefCell, time::Duration};
 
 pub struct SimRunner<'a> {
     sim_func: Box<dyn SimFunc<(), SimRunnerEnv> + 'a>,
@@ -23,7 +23,7 @@ impl<'a> SimRunner<'a> {
             sim_func: Box::new(ConcreteSimFunc::new(sim_func)),
             config: Config::default(),
             lockstep: None,
-            run_mode: RunMode::Default,
+            run_mode: RunMode::RealTime,
         }
     }
 
@@ -39,11 +39,6 @@ impl<'a> SimRunner<'a> {
         self
     }
 
-    pub fn lockstep(mut self, lockstep: impl Into<Option<LockStepSignal>>) -> Self {
-        self.lockstep = lockstep.into();
-        self
-    }
-
     pub fn scale(mut self, scale: f32) -> Self {
         self.config.scale = scale;
         self
@@ -54,12 +49,34 @@ impl<'a> SimRunner<'a> {
         self
     }
 
+    pub fn lockstep(mut self, lockstep: impl Into<Option<LockStepSignal>>) -> Self {
+        self.lockstep = lockstep.into();
+        self
+    }
+
     pub fn build(self) -> App {
         self.build_with_plugins(())
     }
 
-    pub fn build_with_plugins<M>(self, plugins: impl Plugins<M>) -> App {
+    fn tick_mode(&mut self) -> TickMode {
+        match self.run_mode {
+            RunMode::FixedTicks(_)
+            | RunMode::FixedTime(_)
+            | RunMode::OneShot
+            | RunMode::FreeRun => {
+                if let Some(lockstep) = self.lockstep.take() {
+                    TickMode::Lockstep(lockstep)
+                } else {
+                    TickMode::FreeRun
+                }
+            }
+            RunMode::RealTime | RunMode::Scaled(_) => TickMode::Fixed,
+        }
+    }
+
+    pub fn build_with_plugins<M>(mut self, plugins: impl Plugins<M>) -> App {
         let mut app = App::new();
+        app.insert_resource(self.tick_mode());
         match self.run_mode {
             RunMode::FixedTicks(n) => {
                 app.set_runner(move |mut app| {
@@ -83,19 +100,19 @@ impl<'a> SimRunner<'a> {
             }
             RunMode::RealTime => {
                 let duration = Duration::from_secs_f64(self.config.dt);
-                app.set_runner(move |mut app| {
-                    let start = Instant::now();
-                    app.update();
-                    std::thread::sleep(duration - start.elapsed())
-                });
+                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
             }
-            RunMode::Default => {}
+            RunMode::Scaled(scale) => {
+                let duration = Duration::from_secs_f64(self.config.dt / scale);
+                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
+            }
+
+            RunMode::FreeRun => {}
         }
+        app.insert_resource(bevy::time::Time::default());
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
-        app.add_plugins(XpbdPlugin {
-            lockstep: self.lockstep,
-        });
+        app.add_plugins(XpbdPlugin);
         app.add_plugins(plugins);
         let mut env = SimRunnerEnv::new(app);
         self.sim_func.build(&mut env);
@@ -211,6 +228,7 @@ pub enum RunMode {
     FixedTicks(usize),
     FixedTime(f64),
     OneShot,
+    FreeRun,
     RealTime,
-    Default,
+    Scaled(f64),
 }
