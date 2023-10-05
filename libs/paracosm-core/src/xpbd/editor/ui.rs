@@ -1,7 +1,11 @@
 use super::Input;
-use crate::xpbd::{
-    builder::{Env, FromEnv},
-    runner::SimRunnerEnv,
+use crate::{
+    history::{HistoryStore, RollbackEvent},
+    xpbd::{
+        builder::{Env, FromEnv},
+        components::{EntityQuery, Paused, Picked},
+        runner::SimRunnerEnv,
+    },
 };
 use bevy::prelude::*;
 use bevy_egui::{
@@ -11,6 +15,7 @@ use bevy_egui::{
     },
     EguiContexts,
 };
+use nalgebra::Vector3;
 use std::ops::DerefMut;
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);
@@ -89,6 +94,84 @@ pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editab
                 editable.build(ui);
             }
         });
+}
+
+pub(crate) fn picked_system(
+    mut contexts: EguiContexts,
+    picked: Query<(EntityQuery, &Picked, Entity)>,
+) {
+    egui::Window::new("picked components")
+        .title_bar(false)
+        .resizable(false)
+        .show(contexts.ctx_mut(), |ui| {
+            picked
+                .iter()
+                .filter(|(_, picked, _)| picked.0)
+                .for_each(|(entity, _, e)| {
+                    ui.collapsing(format!("entity {:?}", e), |ui| {
+                        vec3_component(ui, "pos (m/s)", &entity.pos.0);
+                        vec3_component(ui, "vel (m/s)", &entity.vel.0);
+                        let euler_angles = vec_from_tuple(entity.att.0.euler_angles());
+                        vec3_component(ui, "euler angle (rad)", &euler_angles);
+                        vec3_component(ui, "ang vel (m/s)", &entity.ang_vel.0);
+                    });
+                })
+        });
+}
+
+pub(crate) fn timeline_system(
+    mut contexts: EguiContexts,
+    mut paused: ResMut<Paused>,
+    history: Res<HistoryStore>,
+    mut event_writer: EventWriter<RollbackEvent>,
+    window: Query<&Window>,
+) {
+    let window = window.single();
+    let width = window.resolution.width();
+    let height = window.resolution.height();
+    egui::Window::new("timeline")
+        .title_bar(false)
+        .resizable(false)
+        .fixed_size(egui::vec2(500.0, 50.0))
+        .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
+        .show(contexts.ctx_mut(), |ui| {
+            ui.horizontal(|ui| {
+                let paused_val = paused.0;
+                ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
+                let max_count = history.count() - 1;
+                let mut selected_index = history.current_index();
+                ui.spacing_mut().slider_width = 450.0;
+                let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
+                if res.changed() {
+                    event_writer.send(RollbackEvent(selected_index))
+                }
+            })
+        });
+}
+
+fn vec_from_tuple(tuple: (f64, f64, f64)) -> Vector3<f64> {
+    Vector3::new(tuple.0, tuple.1, tuple.2)
+}
+
+fn vec3_component(ui: &mut Ui, label: &str, vec3: &Vector3<f64>) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let x = format!("{:+.5}", vec3.x);
+        let y = format!("{:+.5}", vec3.y);
+        let z = format!("{:+.5}", vec3.z);
+        ui.add_sized(
+            egui::vec2(70., 16.),
+            egui::TextEdit::singleline(&mut x.as_str()),
+        );
+        ui.add_sized(
+            egui::vec2(70., 16.),
+            egui::TextEdit::singleline(&mut y.as_str()),
+        );
+        ui.add_sized(
+            egui::vec2(70., 16.),
+            egui::TextEdit::singleline(&mut z.as_str()),
+        );
+    });
 }
 
 impl Editable for Input {

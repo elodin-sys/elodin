@@ -14,12 +14,13 @@ use bevy::{
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
-    window::WindowTheme,
+    window::{PresentMode, WindowTheme},
     DefaultPlugins,
 };
 use bevy_atmosphere::prelude::*;
 use bevy_egui::EguiPlugin;
 use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
+use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use paracosm_macros::Editable;
@@ -62,17 +63,25 @@ impl Plugin for EditorPlugin {
             primary_window: Some(Window {
                 window_theme: Some(WindowTheme::Dark),
                 title: "Paracosm Editor".into(),
+                present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
             ..default()
         }))
+        .add_plugins(
+            DefaultPickingPlugins
+                .build()
+                .disable::<DebugPickingPlugin>()
+                .disable::<DefaultHighlightingPlugin>(),
+        )
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, ui_system)
+        .add_systems(Update, (picked_system, ui_system, timeline_system))
+        .add_systems(Update, make_pickable)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
@@ -118,6 +127,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 
     camera
+        .insert(RaycastPickCamera::default())
         .insert(BloomSettings { ..default() })
         .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera);
@@ -141,6 +151,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
         });
+    }
+}
+
+fn make_pickable(
+    mut commands: Commands,
+    meshes: Query<Entity, (With<Handle<Mesh>>, Without<Pickable>)>,
+) {
+    for entity in meshes.iter() {
+        commands
+            .entity(entity)
+            .insert((PickableBundle::default(), RaycastPickTarget::default()));
     }
 }
 
