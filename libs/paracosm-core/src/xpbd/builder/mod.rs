@@ -1,7 +1,7 @@
 mod assets;
 mod entity;
 
-use bevy::scene::SceneBundle;
+use bevy::{prelude::AddChild, scene::SceneBundle};
 use bevy_ecs::{
     entity::Entities,
     prelude::Entity,
@@ -14,7 +14,7 @@ pub use assets::*;
 use bevy_mod_picking::prelude::*;
 pub use entity::*;
 
-use crate::{effector::concrete_effector, sensor::Sensor, Time};
+use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
 
 use super::{
     components::*,
@@ -94,9 +94,15 @@ impl<'a> XpbdBuilder<'a> {
                 },
             });
         }
+        if let Some(parent) = entity_builder.parent {
+            self.queue.push(AddChild {
+                parent,
+                child: entity,
+            });
+        }
         self.queue.push(Insert {
             entity,
-            bundle: entity_builder.bundle(),
+            bundle: (entity_builder.bundle(), NoPropagate),
         });
         entity
     }

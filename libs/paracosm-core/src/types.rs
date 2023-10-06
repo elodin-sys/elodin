@@ -18,8 +18,6 @@ pub struct Torque(pub Vector3<f64>);
 pub struct Mass(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct Pos(pub Vector3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
-pub struct Time(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct Vel(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
@@ -28,6 +26,17 @@ pub struct Att(pub UnitQuaternion<f64>);
 pub struct AngVel(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Inertia(pub Matrix3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
+pub struct Time(pub f64);
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
+pub struct WorldPos(pub Vector3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
+pub struct WorldVel(pub Vector3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldAtt(pub UnitQuaternion<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldAngVel(pub Vector3<f64>);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {

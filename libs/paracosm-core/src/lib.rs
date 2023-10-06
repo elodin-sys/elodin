@@ -1,3 +1,4 @@
+mod bevy_transform;
 pub mod effector;
 pub mod forces;
 pub mod history;
