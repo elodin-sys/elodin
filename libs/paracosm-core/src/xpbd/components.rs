@@ -15,9 +15,12 @@ use bevy_ecs::{
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
-use crate::{FromState, Time, Torque};
+use crate::{FromState, Time, Torque, WorldAngVel, WorldAtt, WorldPos, WorldVel};
 
-use super::builder::{XpbdEffector, XpbdSensor};
+use super::{
+    builder::{XpbdEffector, XpbdSensor},
+    tree::Joint,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PrevPos(pub Vector3<f64>);
@@ -89,12 +92,16 @@ pub struct EntityBundle {
     // pos
     pub prev_pos: PrevPos,
     pub pos: Pos,
+    pub world_pos: WorldPos,
     pub vel: Vel,
+    pub world_vel: WorldVel,
 
     // attitude
     pub prev_att: PrevAtt,
     pub att: Att,
+    pub world_att: WorldAtt,
     pub ang_vel: AngVel,
+    pub world_ang_vel: WorldAngVel,
 
     // mass
     pub mass: Mass,
@@ -107,6 +114,8 @@ pub struct EntityBundle {
     pub sensors: Sensors,
 
     pub picked: Picked,
+
+    pub joint: Joint,
 }
 
 #[derive(WorldQuery, Debug)]

@@ -1,5 +1,6 @@
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
+    bevy_transform::TransformPlugin,
     xpbd::builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
     ObservableNum, SharedNum,
 };
@@ -59,15 +60,21 @@ pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T>) {
 pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                window_theme: Some(WindowTheme::Dark),
-                title: "Paracosm Editor".into(),
-                present_mode: PresentMode::AutoNoVsync,
-                ..default()
-            }),
-            ..default()
-        }))
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        window_theme: Some(WindowTheme::Dark),
+                        title: "Paracosm Editor".into(),
+                        present_mode: PresentMode::AutoNoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .build()
+                .disable::<bevy::transform::TransformPlugin>(),
+        )
+        .add_plugins(TransformPlugin)
         .add_plugins(
             DefaultPickingPlugins
                 .build()

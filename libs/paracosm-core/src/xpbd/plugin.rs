@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 
-use crate::{history::HistoryPlugin, Att, Pos};
+use crate::{history::HistoryPlugin, Att, Pos, WorldAtt, WorldPos};
 
 use super::{
     components::{Config, Paused, PhysicsFixedTime, TickMode},
@@ -10,6 +10,7 @@ use super::{
         revolute_damping, revolute_system,
     },
     systems::*,
+    tree::kinematic_system,
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
@@ -84,10 +85,10 @@ pub fn tick(world: &mut World) {
     }
 }
 
-pub fn sync_pos(mut query: Query<(&mut Transform, &Pos, &Att)>, config: Res<Config>) {
+pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos, &WorldAtt)>, config: Res<Config>) {
     query
         .par_iter_mut()
-        .for_each_mut(|(mut transform, Pos(pos), Att(att))| {
+        .for_each_mut(|(mut transform, WorldPos(pos), WorldAtt(att))| {
             transform.translation =
                 Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale;
             transform.rotation =
@@ -101,6 +102,7 @@ pub struct SubstepSchedule;
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum SubstepSet {
+    ForwardKinematics,
     CalcEffects,
     Integrate,
     SolveConstraints,
@@ -114,6 +116,7 @@ pub fn substep_schedule() -> Schedule {
     let mut schedule = Schedule::default();
     schedule.configure_sets(
         (
+            SubstepSet::ForwardKinematics,
             SubstepSet::CalcEffects,
             SubstepSet::Integrate,
             SubstepSet::SolveConstraints,
@@ -124,6 +127,7 @@ pub fn substep_schedule() -> Schedule {
         )
             .chain(),
     );
+    schedule.add_systems((kinematic_system).in_set(SubstepSet::ForwardKinematics));
     schedule.add_systems(
         (calculate_effects, calculate_sensors, gravity_system).in_set(SubstepSet::CalcEffects),
     );

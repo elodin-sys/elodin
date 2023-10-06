@@ -2,9 +2,15 @@ use bevy::{
     prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
     scene::Scene,
 };
+use bevy_ecs::entity::Entity;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
-use crate::{effector::Effector, sensor::Sensor, xpbd::components::*};
+use crate::{
+    effector::Effector,
+    sensor::Sensor,
+    xpbd::{components::*, tree::Joint},
+    WorldAngVel, WorldAtt, WorldPos, WorldVel,
+};
 
 use super::{AssetHandle, ConcreteEffector, ConcreteSensor};
 
@@ -25,6 +31,9 @@ pub struct EntityBuilder {
 
     fixed: bool,
     pub(crate) trace: Option<Vector3<f64>>,
+
+    pub(crate) parent: Option<Entity>,
+    pub(crate) joint: Joint,
 }
 
 impl Default for EntityBuilder {
@@ -43,6 +52,11 @@ impl Default for EntityBuilder {
             fixed: false,
             trace: None,
             scene: None,
+            parent: None,
+            joint: Joint {
+                pos: Vector3::zeros(),
+                joint_type: crate::xpbd::tree::JointType::Free,
+            },
         }
     }
 }
@@ -131,6 +145,12 @@ impl EntityBuilder {
         self
     }
 
+    pub fn parent(mut self, parent: Entity, joint: Joint) -> Self {
+        self.parent = Some(parent);
+        self.joint = joint;
+        self
+    }
+
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
             pos: Pos(self.pos),
@@ -151,6 +171,12 @@ impl EntityBuilder {
             effect: Effect::default(),
             fixed: Fixed(self.fixed),
             picked: Picked(false),
+            joint: self.joint,
+
+            world_pos: WorldPos(Default::default()),
+            world_vel: WorldVel(Default::default()),
+            world_att: WorldAtt(Default::default()),
+            world_ang_vel: WorldAngVel(Default::default()),
         }
     }
 }

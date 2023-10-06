@@ -6,3 +6,4 @@ pub mod editor;
 pub mod plugin;
 pub mod runner;
 pub mod systems;
+pub mod tree;
