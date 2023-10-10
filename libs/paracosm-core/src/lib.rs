@@ -12,6 +12,7 @@ pub mod plugin;
 pub mod runner;
 pub mod runtime;
 pub mod sensor;
+mod spatial;
 pub mod systems;
 pub mod tree;
 
