@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 
-use crate::{history::HistoryPlugin, Att, Pos, WorldAtt, WorldPos};
+use crate::{history::HistoryPlugin, WorldAtt, WorldPos};
 
 use super::{
     constraints::{
