@@ -9,7 +9,8 @@ use std::{
 
 use crate::{
     builder::{XpbdEffector, XpbdSensor},
-    tree::{Joint, SpatialForce, SpatialMotion},
+    spatial::*,
+    tree::Joint,
     FromState,
 };
 use bevy::prelude::FixedTime;

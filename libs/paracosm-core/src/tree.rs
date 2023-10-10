@@ -1,5 +1,6 @@
 use crate::{
     hierarchy::{Link, TopologicalSort},
+    spatial::{SpatialForce, SpatialInertia, SpatialMotion, SpatialPos},
     types::{BiasForce, Effect, JointForce, WorldAccel},
     AngVel, Att, Inertia, Mass, Pos, Vel, WorldAtt, WorldVel,
 };
@@ -10,12 +11,11 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, ResMut},
 };
-use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
-use std::ops::{Add, AddAssign, Mul, Sub};
+use nalgebra::{UnitVector3, Vector3};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
-        JointType::Free => WorldPos(child.clone()),
+        JointType::Free => WorldPos(*child),
         JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
             let att = parent.att * child.att;
             let pos = parent.pos + parent.att * joint.pos + att * child.pos;
@@ -123,8 +123,8 @@ pub fn rne_system(
             };
             forward_rne_step(
                 child.joint,
-                &parent_vel,
-                &parent_accel,
+                parent_vel,
+                parent_accel,
                 &SpatialPos {
                     pos: child.pos.0,
                     att: child.att.0,
@@ -134,7 +134,7 @@ pub fn rne_system(
                     ang_vel: child.ang_vel.0,
                 },
                 &SpatialInertia {
-                    inertia: *child.inertia,
+                    inertia: child.inertia.0,
                     momentum: child.vel.0 * child.mass.0, // TODO: this should maybe be world
                     mass: child.mass.0,
                 },
@@ -198,24 +198,6 @@ fn forward_rne_step(
     (vel, accel, force)
 }
 
-pub struct SpatialInertia {
-    inertia: Inertia,
-    momentum: Vector3<f64>,
-    mass: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct SpatialMotion {
-    vel: Vector3<f64>,
-    ang_vel: Vector3<f64>,
-}
-
-#[derive(Clone, Copy)]
-pub struct SpatialPos {
-    pos: Vector3<f64>,
-    att: UnitQuaternion<f64>,
-}
-
 pub struct WorldPos(SpatialPos);
 
 #[derive(Component, Debug)]
@@ -235,7 +217,7 @@ pub enum JointType {
 impl Joint {
     fn apply_force_subspace(&self, force: &SpatialForce) -> SpatialForce {
         match self.joint_type {
-            JointType::Free => force.clone(),
+            JointType::Free => *force,
             JointType::Revolute { axis } => SpatialForce {
                 force: Vector3::zeros(),
                 torque: unit_project(force.torque, axis),
@@ -253,7 +235,7 @@ impl Joint {
 
     fn apply_motion_subspace(&self, vel: &SpatialMotion) -> SpatialMotion {
         match self.joint_type {
-            JointType::Free => vel.clone(),
+            JointType::Free => *vel,
             JointType::Revolute { axis } => SpatialMotion {
                 vel: Vector3::zeros(),
                 ang_vel: unit_project(vel.ang_vel, axis),
@@ -271,7 +253,7 @@ impl Joint {
 
     fn apply_transform_motion(&self, child: &SpatialPos, motion: &SpatialMotion) -> SpatialMotion {
         match self.joint_type {
-            JointType::Free => motion.clone(),
+            JointType::Free => *motion,
             JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
                 motion.offset(&SpatialPos {
                     pos: child.att * self.pos + child.pos,
@@ -295,92 +277,6 @@ impl Joint {
             }
         }
     }
-}
-
-impl Sub for SpatialForce {
-    type Output = SpatialForce;
-
-    fn sub(self, rhs: SpatialForce) -> Self::Output {
-        SpatialForce {
-            force: self.force - rhs.force,
-            torque: self.torque - rhs.torque,
-        }
-    }
-}
-
-impl Add for SpatialForce {
-    type Output = SpatialForce;
-
-    fn add(self, rhs: SpatialForce) -> Self::Output {
-        SpatialForce {
-            force: self.force + rhs.force,
-            torque: self.torque + rhs.torque,
-        }
-    }
-}
-
-impl AddAssign for SpatialForce {
-    fn add_assign(&mut self, rhs: Self) {
-        self.force += rhs.force;
-        self.torque += rhs.torque;
-    }
-}
-
-impl Add for SpatialMotion {
-    type Output = SpatialMotion;
-
-    fn add(self, rhs: SpatialMotion) -> Self::Output {
-        SpatialMotion {
-            vel: self.vel + rhs.vel,
-            ang_vel: self.ang_vel + rhs.ang_vel,
-        }
-    }
-}
-
-impl<'a> Mul<SpatialMotion> for &'a SpatialInertia {
-    type Output = SpatialForce;
-
-    fn mul(self, rhs: SpatialMotion) -> Self::Output {
-        SpatialForce {
-            force: self.mass * rhs.vel - self.momentum.cross(&rhs.ang_vel),
-            torque: self.inertia.0 * rhs.ang_vel + self.momentum.cross(&rhs.vel),
-        }
-    }
-}
-
-impl Mul<SpatialMotion> for SpatialInertia {
-    type Output = SpatialForce;
-
-    fn mul(self, rhs: SpatialMotion) -> Self::Output {
-        (&self).mul(rhs)
-    }
-}
-
-impl SpatialMotion {
-    fn offset(&self, pos: &SpatialPos) -> SpatialMotion {
-        let ang_vel = pos.att * self.ang_vel;
-        let vel = pos.att * self.vel + ang_vel.cross(&pos.pos);
-        SpatialMotion { vel, ang_vel }
-    }
-
-    fn cross(&self, other: &SpatialMotion) -> SpatialMotion {
-        let ang_vel = self.ang_vel.cross(&other.ang_vel);
-        let vel = self.ang_vel.cross(&other.vel) + self.vel.cross(&other.ang_vel);
-        SpatialMotion { vel, ang_vel }
-    }
-
-    fn cross_dual(&self, other: &SpatialForce) -> SpatialForce {
-        SpatialForce {
-            force: self.ang_vel.cross(&other.torque) + self.vel.cross(&other.force),
-            torque: self.ang_vel.cross(&other.force),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpatialForce {
-    force: Vector3<f64>,
-    torque: Vector3<f64>,
 }
 
 fn unit_project(a: Vector3<f64>, b: UnitVector3<f64>) -> Vector3<f64> {
