@@ -1,11 +1,9 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
-    xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
-        constraints::DistanceConstraint,
-        editor::{editor, Input},
-    },
+    builder::{Assets, EntityBuilder, XpbdBuilder},
+    constraints::DistanceConstraint,
+    editor::{editor, Input},
     Force, Time,
 };
 

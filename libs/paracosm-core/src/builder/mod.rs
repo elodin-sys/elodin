@@ -17,9 +17,9 @@ pub use entity::*;
 use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
 
 use super::{
-    components::*,
     constraints::{DistanceConstraint, FixedJoint, GravityConstraint, RevoluteJoint},
     editor::traces::TraceAnchor,
+    types::*,
 };
 
 concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);

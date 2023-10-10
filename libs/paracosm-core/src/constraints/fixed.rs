@@ -6,7 +6,7 @@ use bevy_ecs::{
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use crate::{
-    xpbd::components::{Config, EntityQuery},
+    types::{Config, EntityQuery},
     Pos,
 };
 

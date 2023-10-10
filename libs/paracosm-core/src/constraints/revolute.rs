@@ -9,7 +9,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
 use crate::{
     effector::{concrete_effector, Effector},
-    xpbd::components::{Config, EntityQuery},
+    types::{Config, EntityQuery},
     FromState, Pos, Time,
 };
 

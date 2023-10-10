@@ -1,11 +1,9 @@
 use super::Input;
 use crate::{
+    builder::{Env, FromEnv},
     history::{HistoryStore, RollbackEvent},
-    xpbd::{
-        builder::{Env, FromEnv},
-        components::{EntityQuery, Paused, Picked},
-        runner::SimRunnerEnv,
-    },
+    runner::SimRunnerEnv,
+    types::{EntityQuery, Paused, Picked},
 };
 use bevy::prelude::*;
 use bevy_egui::{
@@ -54,7 +52,7 @@ fn set_theme(context: &mut egui::Context) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "berkeley".to_owned(),
-        FontData::from_static(include_bytes!("../../../assets/BerkeleyMono-Regular.ttf")),
+        FontData::from_static(include_bytes!("../../assets/BerkeleyMono-Regular.ttf")),
     );
 
     fonts

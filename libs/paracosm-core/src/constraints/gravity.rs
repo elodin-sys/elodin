@@ -1,6 +1,6 @@
 use bevy_ecs::{component::Component, entity::Entity, system::Query};
 
-use crate::xpbd::components::{Effect, EntityQuery};
+use crate::types::{Effect, EntityQuery};
 
 #[derive(Component)]
 pub struct GravityConstraint {

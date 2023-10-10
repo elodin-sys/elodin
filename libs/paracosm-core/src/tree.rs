@@ -1,5 +1,8 @@
-use std::ops::{Add, AddAssign, Mul, Sub};
-
+use crate::{
+    hierarchy::{Link, TopologicalSort},
+    types::{BiasForce, Effect, JointForce, WorldAccel},
+    AngVel, Att, Inertia, Mass, Pos, Vel, WorldAtt, WorldVel,
+};
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
     component::Component,
@@ -8,13 +11,7 @@ use bevy_ecs::{
     system::{Query, ResMut},
 };
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
-
-use crate::{
-    hierarchy::{Link, TopologicalSort},
-    AngVel, Att, Inertia, Mass, Pos, Vel, WorldAtt, WorldVel,
-};
-
-use super::components::{BiasForce, Effect, JointForce, WorldAccel};
+use std::ops::{Add, AddAssign, Mul, Sub};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {

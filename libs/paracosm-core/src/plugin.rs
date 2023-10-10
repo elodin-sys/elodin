@@ -4,13 +4,13 @@ use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use crate::{history::HistoryPlugin, Att, Pos, WorldAtt, WorldPos};
 
 use super::{
-    components::{Config, Paused, PhysicsFixedTime, TickMode},
     constraints::{
         clear_distance_lagrange, clear_revolute_lagrange, distance_system, gravity_system,
         revolute_damping, revolute_system,
     },
     systems::*,
     tree::kinematic_system,
+    types::{Config, Paused, PhysicsFixedTime, TickMode},
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]

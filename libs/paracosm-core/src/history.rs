@@ -10,9 +10,9 @@ use bevy_polyline::prelude::Polyline;
 use nalgebra::{UnitQuaternion, Vector3};
 use std::collections::HashMap;
 
-use crate::xpbd::{
-    components::{Config, Effect, EntityQuery},
+use crate::{
     plugin::{PhysicsSchedule, TickSet},
+    types::{Config, Effect, EntityQuery},
 };
 
 #[derive(Default, Resource)]

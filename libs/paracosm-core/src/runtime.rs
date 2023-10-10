@@ -2,7 +2,7 @@ use std::{collections::HashMap, panic::resume_unwind, path::PathBuf};
 
 use bevy::prelude::App;
 
-use crate::xpbd::runner::IntoSimRunner;
+use crate::runner::IntoSimRunner;
 
 #[derive(Default)]
 pub struct JobSpec {
