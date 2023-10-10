@@ -1,6 +1,7 @@
 mod bevy_transform;
 pub mod effector;
 pub mod forces;
+pub mod hierarchy;
 pub mod history;
 pub mod monte_carlo;
 pub mod runtime;

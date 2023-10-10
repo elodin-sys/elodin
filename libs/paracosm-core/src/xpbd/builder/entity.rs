@@ -9,7 +9,7 @@ use crate::{
     effector::Effector,
     sensor::Sensor,
     xpbd::{components::*, tree::Joint},
-    WorldAngVel, WorldAtt, WorldPos, WorldVel,
+    WorldAtt, WorldPos, WorldVel,
 };
 
 use super::{AssetHandle, ConcreteEffector, ConcreteSensor};
@@ -176,7 +176,6 @@ impl EntityBuilder {
             world_pos: WorldPos(Default::default()),
             world_vel: WorldVel(Default::default()),
             world_att: WorldAtt(Default::default()),
-            world_ang_vel: WorldAngVel(Default::default()),
         }
     }
 }

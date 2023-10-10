@@ -10,6 +10,8 @@ use std::{
 use bevy_ecs::{prelude::Component, system::Resource};
 use nalgebra::{matrix, Matrix3, UnitQuaternion, Vector3};
 
+use crate::xpbd::tree::SpatialMotion;
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
 pub struct Force(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
@@ -32,11 +34,9 @@ pub struct Time(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct WorldPos(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
-pub struct WorldVel(pub Vector3<f64>);
+pub struct WorldVel(pub SpatialMotion);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct WorldAtt(pub UnitQuaternion<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct WorldAngVel(pub Vector3<f64>);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
