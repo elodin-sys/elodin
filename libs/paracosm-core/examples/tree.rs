@@ -1,8 +1,8 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, UnitQuaternion, Vector3};
-use paracosm::xpbd::{
+use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
-    editor::{editor, ObservableInput},
+    editor::editor,
     runner::IntoSimRunner,
     tree::{Joint, JointType},
 };

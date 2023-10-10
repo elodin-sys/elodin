@@ -1,12 +1,10 @@
 use nalgebra::{vector, Vector3};
 use paracosm::{
+    builder::{EntityBuilder, XpbdBuilder},
     forces::gravity,
     monte_carlo::{DistributionSpec, MonteCarlo, Normal},
+    runner::{IntoSimRunner, RunMode},
     runtime::JobSpec,
-    xpbd::{
-        builder::{EntityBuilder, XpbdBuilder},
-        runner::{IntoSimRunner, RunMode},
-    },
     Force, Time,
 };
 

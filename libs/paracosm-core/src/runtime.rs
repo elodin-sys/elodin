@@ -61,11 +61,9 @@ mod tests {
     use nalgebra::{vector, Vector3};
 
     use crate::{
+        builder::{EntityBuilder, XpbdBuilder},
         forces::gravity,
-        xpbd::{
-            builder::{EntityBuilder, XpbdBuilder},
-            components::LockStepSignal,
-        },
+        types::LockStepSignal,
     };
 
     use super::*;
@@ -85,7 +83,7 @@ mod tests {
         JobSpec::default()
             .sim(
                 sim.lockstep(lockstep.clone())
-                    .run_mode(crate::xpbd::runner::RunMode::FixedTicks(100)),
+                    .run_mode(crate::runner::RunMode::FixedTicks(100)),
             )
             .fn_task(move || {
                 for _ in 0..100 {
@@ -107,7 +105,7 @@ mod tests {
             );
         }
         JobSpec::default()
-            .sim(sim.run_mode(crate::xpbd::runner::RunMode::FixedTicks(1000)))
+            .sim(sim.run_mode(crate::runner::RunMode::FixedTicks(1000)))
             .run()
     }
 }

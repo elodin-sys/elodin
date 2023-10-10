@@ -1,6 +1,6 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
-use paracosm::xpbd::{
+use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     constraints::GravityConstraint,
     editor::editor,
