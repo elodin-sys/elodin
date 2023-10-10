@@ -1,15 +1,12 @@
 use bevy_ecs::system::Resource;
 use nalgebra::{vector, UnitQuaternion, Vector3, Vector4};
 use paracosm::{
+    builder::{Assets, EntityBuilder, XpbdBuilder},
+    editor::editor,
+    editor::Editable,
     forces::earth_gravity,
-    xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
-        components::Effect,
-        editor::editor,
-        editor::Editable,
-        runner::IntoSimRunner,
-    },
-    Att, Force, Pos, SharedNum, Time, Vel,
+    runner::IntoSimRunner,
+    Att, Effect, Force, Pos, SharedNum, Time, Vel,
 };
 use paracosm_macros::Editable;
 

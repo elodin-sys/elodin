@@ -176,7 +176,7 @@ mod tests {
     use bevy_ecs::{schedule::Schedule, world::World};
     use nalgebra::vector;
 
-    use crate::{xpbd::builder::EntityBuilder, Pos};
+    use crate::{builder::EntityBuilder, Pos};
 
     use super::*;
 

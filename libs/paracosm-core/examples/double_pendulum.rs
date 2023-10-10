@@ -1,21 +1,18 @@
+use bevy::prelude::{shape, Color, Mesh};
+use nalgebra::{vector, UnitQuaternion, Vector3};
+use paracosm::{
+    builder::{Assets, EntityBuilder, XpbdBuilder},
+    constraints::{Angle, RevoluteJoint},
+    editor::{editor, ObservableInput},
+    runner::IntoSimRunner,
+    Force, Pos, Time,
+};
 use std::{
     f64::consts::PI,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-};
-
-use bevy::prelude::{shape, Color, Mesh};
-use nalgebra::{vector, UnitQuaternion, Vector3};
-use paracosm::{
-    xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
-        constraints::{Angle, RevoluteJoint},
-        editor::{editor, ObservableInput},
-        runner::IntoSimRunner,
-    },
-    Force, Pos, Time,
 };
 
 fn main() {
