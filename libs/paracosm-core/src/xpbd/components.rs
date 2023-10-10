@@ -15,11 +15,11 @@ use bevy_ecs::{
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 pub use crate::{AngVel, Att, Force, Inertia, Mass, Pos, Vel};
-use crate::{FromState, Time, Torque, WorldAngVel, WorldAtt, WorldPos, WorldVel};
+use crate::{FromState, Time, Torque, WorldAtt, WorldPos, WorldVel};
 
 use super::{
     builder::{XpbdEffector, XpbdSensor},
-    tree::Joint,
+    tree::{Joint, SpatialForce, SpatialMotion},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
@@ -28,6 +28,13 @@ pub struct PrevPos(pub Vector3<f64>);
 pub struct PrevAtt(pub UnitQuaternion<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct InverseInertia(pub Matrix3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldAccel(pub SpatialMotion);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct BiasForce(pub SpatialForce);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct JointForce(pub SpatialForce);
+
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Fixed(pub bool);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
@@ -101,7 +108,6 @@ pub struct EntityBundle {
     pub att: Att,
     pub world_att: WorldAtt,
     pub ang_vel: AngVel,
-    pub world_ang_vel: WorldAngVel,
 
     // mass
     pub mass: Mass,
