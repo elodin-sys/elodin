@@ -1,7 +1,7 @@
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
-    components::{Config, LockStepSignal, PhysicsFixedTime, TickMode},
     plugin::XpbdPlugin,
+    types::{Config, LockStepSignal, PhysicsFixedTime, TickMode},
 };
 use bevy::{
     app::Plugins,

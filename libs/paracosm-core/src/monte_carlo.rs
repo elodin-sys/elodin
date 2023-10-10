@@ -13,8 +13,8 @@ use rand_distr::Distribution as _;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    builder::{ConcreteSimFunc, Env, FromEnv, SimFunc},
     runtime::JobSpec,
-    xpbd::builder::{ConcreteSimFunc, Env, FromEnv, SimFunc},
 };
 
 #[derive(Default)]
@@ -228,7 +228,7 @@ impl<T: RandVar> FromEnv<MonteCarloEnv> for T {
 
     fn init(_env: &mut MonteCarloEnv) {}
 
-    fn from_env(env: <MonteCarloEnv as crate::xpbd::builder::Env>::Param<'_>) -> Self::Item<'_> {
+    fn from_env(env: <MonteCarloEnv as crate::builder::Env>::Param<'_>) -> Self::Item<'_> {
         let Some(dist) = env.vars.get(T::type_path()) else {
             panic!("no monte carlo var for type {}", type_name::<T>())
         };

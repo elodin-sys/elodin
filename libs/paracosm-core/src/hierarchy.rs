@@ -6,7 +6,7 @@ use bevy_ecs::{
 };
 use bevy_utils::HashSet;
 
-use crate::xpbd::{components::EntityQuery, tree::Joint};
+use crate::{tree::Joint, EntityQuery};
 
 #[derive(Clone, Resource)]
 pub struct TopologicalSort(pub Vec<Link>);

@@ -1,14 +1,21 @@
 mod bevy_transform;
+pub mod body;
+pub mod builder;
+pub mod constraints;
+pub mod editor;
 pub mod effector;
 pub mod forces;
 pub mod hierarchy;
 pub mod history;
 pub mod monte_carlo;
+pub mod plugin;
+pub mod runner;
 pub mod runtime;
 pub mod sensor;
-pub mod six_dof;
+pub mod systems;
+pub mod tree;
+
 mod types;
-pub mod xpbd;
 
 pub use types::*;
 

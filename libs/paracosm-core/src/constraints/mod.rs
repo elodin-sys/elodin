@@ -11,7 +11,7 @@ pub use revolute::*;
 
 use crate::Pos;
 
-use super::components::EntityQueryItem;
+use super::types::EntityQueryItem;
 
 /// Calculate the update of the lagrange multiplier for some
 /// generalized coordinate `c`

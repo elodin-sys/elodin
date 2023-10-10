@@ -3,7 +3,7 @@ use bevy_ecs::entity::Entity;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
-use crate::{history::HistoryStore, xpbd::components::Config};
+use crate::{history::HistoryStore, types::Config};
 
 pub struct TracesPlugin;
 

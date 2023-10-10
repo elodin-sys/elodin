@@ -1,7 +1,7 @@
 use self::{traces::TracesPlugin, ui::*};
 use crate::{
     bevy_transform::TransformPlugin,
-    xpbd::builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
+    builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
     ObservableNum, SharedNum,
 };
 use bevy::{

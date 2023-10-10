@@ -6,13 +6,10 @@ use bevy_ecs::entity::Entity;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{
-    effector::Effector,
-    sensor::Sensor,
-    xpbd::{components::*, tree::Joint},
-    WorldAtt, WorldPos, WorldVel,
+    effector::Effector, sensor::Sensor, tree::Joint, types::*, WorldAtt, WorldPos, WorldVel,
 };
 
-use super::{AssetHandle, ConcreteEffector, ConcreteSensor};
+use crate::builder::{AssetHandle, ConcreteEffector, ConcreteSensor};
 
 pub struct EntityBuilder {
     mass: f64,
@@ -55,7 +52,7 @@ impl Default for EntityBuilder {
             parent: None,
             joint: Joint {
                 pos: Vector3::zeros(),
-                joint_type: crate::xpbd::tree::JointType::Free,
+                joint_type: crate::tree::JointType::Free,
             },
         }
     }
