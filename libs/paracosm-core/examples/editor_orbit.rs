@@ -4,7 +4,7 @@ use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     editor::{editor, Input},
     forces::gravity,
-    Force, Pos, Time,
+    BodyPos, Force, Time,
 };
 
 fn main() {
@@ -38,7 +38,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .pos(vector![0.0, 1.0, 0.0])
             .vel(vector![0.0, 0.0, 1.0])
             .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
-            .effector(move |Pos(pos)| Force(*input.0.load() * pos.normalize()))
+            .effector(move |BodyPos(pos)| Force(*input.0.load() * pos.pos.normalize()))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.05,

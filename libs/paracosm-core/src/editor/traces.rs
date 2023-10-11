@@ -3,7 +3,7 @@ use bevy_ecs::entity::Entity;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
-use crate::{history::HistoryStore, types::Config};
+use crate::{history::HistoryStore, spatial::SpatialPos, types::Config};
 
 pub struct TracesPlugin;
 
@@ -54,10 +54,7 @@ fn update_lines(
             .current_index()
             .saturating_sub(polyline.vertices.len());
         let start = end - len;
-        for (pos, att) in hist.pos()[start..end]
-            .iter()
-            .zip(hist.att()[start..end].iter())
-        {
+        for SpatialPos { pos, att } in &hist.pos()[start..end] {
             let pos = (att * anchor.anchor) + pos;
             let pos = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale;
             polyline.vertices.push(pos);

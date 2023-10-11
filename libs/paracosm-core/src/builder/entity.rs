@@ -6,7 +6,12 @@ use bevy_ecs::entity::Entity;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use crate::{
-    effector::Effector, sensor::Sensor, tree::Joint, types::*, WorldAtt, WorldPos, WorldVel,
+    effector::Effector,
+    sensor::Sensor,
+    spatial::{SpatialMotion, SpatialPos},
+    tree::Joint,
+    types::*,
+    WorldPos, WorldVel,
 };
 
 use crate::builder::{AssetHandle, ConcreteEffector, ConcreteSensor};
@@ -150,13 +155,17 @@ impl EntityBuilder {
 
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
-            pos: Pos(self.pos),
+            pos: BodyPos(SpatialPos {
+                pos: self.pos,
+                att: self.att,
+            }),
             prev_pos: PrevPos(Vector3::zeros()),
-            vel: Vel(self.vel),
+            vel: BodyVel(SpatialMotion {
+                vel: self.vel,
+                ang_vel: self.ang_vel,
+            }),
 
-            att: Att(self.att),
             prev_att: PrevAtt(UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0)),
-            ang_vel: AngVel(self.ang_vel),
 
             mass: Mass(self.mass),
             inertia: Inertia(self.inertia),
@@ -172,7 +181,6 @@ impl EntityBuilder {
 
             world_pos: WorldPos(Default::default()),
             world_vel: WorldVel(Default::default()),
-            world_att: WorldAtt(Default::default()),
         }
     }
 }

@@ -9,8 +9,6 @@ pub use fixed::*;
 pub use gravity::*;
 pub use revolute::*;
 
-use crate::Pos;
-
 use super::types::EntityQueryItem;
 
 /// Calculate the update of the lagrange multiplier for some
@@ -78,8 +76,8 @@ pub fn apply_distance_constraint(
     lagrange_multiplier: &mut f64,
     compliance: f64,
     sub_dt: f64,
-    world_anchor_a: Pos,
-    world_anchor_b: Pos,
+    world_anchor_a: Vector3<f64>,
+    world_anchor_b: Vector3<f64>,
 ) {
     if c <= f64::EPSILON {
         return;
@@ -95,27 +93,27 @@ pub fn apply_distance_constraint(
     *lagrange_multiplier += delta_lagrange;
     let pos_impulse = impulse(delta_lagrange, n);
     if !entity_a.fixed.0 {
-        entity_a.pos.0 += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
-        entity_a.att.0 = UnitQuaternion::new_normalize(
-            entity_a.att.0.into_inner()
+        entity_a.pos.0.pos += pos_delta_pos_impulse(pos_impulse, entity_a.mass.0);
+        entity_a.pos.0.att = UnitQuaternion::new_normalize(
+            entity_a.pos.0.att.into_inner()
                 + att_delta_pos_impulse(
-                    *entity_a.att.0,
+                    *entity_a.pos.0.att,
                     pos_impulse,
-                    world_anchor_a.0,
-                    entity_a.inverse_inertia.to_world(entity_a).0,
+                    world_anchor_a,
+                    entity_a.pos.0.transform() * entity_a.inverse_inertia.0,
                 ),
         );
     }
     if !entity_b.fixed.0 {
-        entity_b.pos.0 -= pos_delta_pos_impulse(pos_impulse, entity_b.mass.0);
-        let att = entity_b.att.0.into_inner();
+        entity_b.pos.0.pos -= pos_delta_pos_impulse(pos_impulse, entity_b.mass.0);
+        let att = entity_b.pos.0.att.into_inner();
         let delta = att_delta_pos_impulse(
-            *entity_b.att.0,
+            *entity_b.pos.0.att,
             pos_impulse,
-            world_anchor_b.0,
-            entity_b.inverse_inertia.to_world(entity_b).0,
+            world_anchor_b,
+            entity_b.pos.0.transform() * entity_b.inverse_inertia.0,
         );
-        entity_b.att.0 = UnitQuaternion::new_normalize(att - delta);
+        entity_b.pos.0.att = UnitQuaternion::new_normalize(att - delta);
     }
 }
 
@@ -133,10 +131,10 @@ pub fn apply_rot_constraint(
         return;
     }
     let axis = UnitVector3::new_normalize(delta_q);
-    let inverse_inertia_a = entity_a.inverse_inertia.to_world(entity_a);
-    let inverse_inertia_b = entity_b.inverse_inertia.to_world(entity_b);
-    let inverse_mass_a = rot_generalized_inverse_mass(inverse_inertia_a.0, axis);
-    let inverse_mass_b = rot_generalized_inverse_mass(inverse_inertia_b.0, axis);
+    let inverse_inertia_a = entity_a.pos.0.transform() * entity_a.inverse_inertia.0;
+    let inverse_inertia_b = entity_b.pos.0.transform() * entity_b.inverse_inertia.0;
+    let inverse_mass_a = rot_generalized_inverse_mass(inverse_inertia_a, axis);
+    let inverse_mass_b = rot_generalized_inverse_mass(inverse_inertia_b, axis);
 
     let delta_lagrange = lagrange_multiplier_delta(
         angle,
@@ -150,15 +148,18 @@ pub fn apply_rot_constraint(
     let ang_impulse = -1. * impulse(delta_lagrange, axis);
 
     if !entity_a.fixed.0 {
-        let inverse_inertia = entity_a.inverse_inertia.to_world(entity_a).0;
-        entity_a.att.0 = UnitQuaternion::new_normalize(
-            *entity_a.att.0 + att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_a.att.0),
+        let inverse_inertia = entity_a.pos.0.transform() * entity_a.inverse_inertia.0;
+
+        entity_a.pos.0.att = UnitQuaternion::new_normalize(
+            *entity_a.pos.0.att
+                + att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_a.pos.0.att),
         );
     }
     if !entity_b.fixed.0 {
-        let inverse_inertia = entity_b.inverse_inertia.to_world(entity_b).0;
-        entity_b.att.0 = UnitQuaternion::new_normalize(
-            *entity_b.att.0 - att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_b.att.0),
+        let inverse_inertia = entity_b.pos.0.transform() * entity_b.inverse_inertia.0;
+        entity_b.pos.0.att = UnitQuaternion::new_normalize(
+            *entity_b.pos.0.att
+                - att_delta_ang_impulse(inverse_inertia, ang_impulse, *entity_b.pos.0.att),
         );
     }
 }

@@ -1,4 +1,4 @@
-use bevy::prelude::{App, Assets, Handle, Plugin, Quat, Transform, Update, Vec3};
+use bevy::prelude::{App, Assets, Handle, Plugin, Transform, Update};
 use bevy_ecs::{
     entity::Entity,
     event::{Event, EventReader},
@@ -7,11 +7,11 @@ use bevy_ecs::{
     system::{Query, Res, ResMut, Resource},
 };
 use bevy_polyline::prelude::Polyline;
-use nalgebra::{UnitQuaternion, Vector3};
 use std::collections::HashMap;
 
 use crate::{
     plugin::{PhysicsSchedule, TickSet},
+    spatial::{SpatialMotion, SpatialPos},
     types::{Config, Effect, EntityQuery},
 };
 
@@ -62,11 +62,8 @@ impl HistoryStore {
 
 #[derive(Default)]
 pub struct EntityHistory {
-    pos: Vec<Vector3<f64>>,
-    vel: Vec<Vector3<f64>>,
-
-    att: Vec<UnitQuaternion<f64>>,
-    ang_vel: Vec<Vector3<f64>>,
+    pos: Vec<SpatialPos>,
+    vel: Vec<SpatialMotion>,
 
     mass: Vec<f64>,
     effects: Vec<Effect>,
@@ -77,41 +74,29 @@ impl EntityHistory {
         let data = query.entity;
         self.pos.push(data.pos.0);
         self.vel.push(data.vel.0);
-        self.att.push(data.att.0);
-        self.ang_vel.push(data.ang_vel.0);
         self.mass.push(data.mass.0);
         self.effects.push(*query.effect);
     }
 
     fn rollback(&self, index: usize, mut query: HistoryQueryItem<'_>, scale: f32) {
         let mut entity = query.entity;
-        let att = self.att[index];
         let pos = self.pos[index];
         entity.pos.0 = pos;
         entity.vel.0 = self.vel[index];
-        entity.att.0 = att;
-        entity.ang_vel.0 = self.ang_vel[index];
         entity.mass.0 = self.mass[index];
         *query.effect = self.effects[index];
-        query.transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * scale;
-        query.transform.rotation =
-            Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
+        // query.transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * scale;
+        // query.transform.rotation =
+        //     Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
+        // FIXME
     }
 
-    pub fn pos(&self) -> &[Vector3<f64>] {
+    pub fn pos(&self) -> &[SpatialPos] {
         &self.pos
     }
 
-    pub fn vel(&self) -> &[Vector3<f64>] {
+    pub fn vel(&self) -> &[SpatialMotion] {
         &self.vel
-    }
-
-    pub fn ang_vel(&self) -> &[Vector3<f64>] {
-        &self.ang_vel
-    }
-
-    pub fn att(&self) -> &[UnitQuaternion<f64>] {
-        &self.att
     }
 
     pub fn mass(&self) -> &[f64] {
@@ -176,7 +161,7 @@ mod tests {
     use bevy_ecs::{schedule::Schedule, world::World};
     use nalgebra::vector;
 
-    use crate::{builder::EntityBuilder, Pos};
+    use crate::{builder::EntityBuilder, BodyPos};
 
     use super::*;
 
@@ -208,13 +193,13 @@ mod tests {
         let mut history = HistoryStore::default();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
-        a_entity.get_mut::<Pos>().unwrap().0 = vector![2.0, 0.0, 0.0];
+        a_entity.get_mut::<BodyPos>().unwrap().0.pos = vector![2.0, 0.0, 0.0];
         let mut b_entity = world.get_entity_mut(b).unwrap();
-        b_entity.get_mut::<Pos>().unwrap().0 = vector![0.0, 2.0, 0.0];
+        b_entity.get_mut::<BodyPos>().unwrap().0.pos = vector![0.0, 2.0, 0.0];
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let a_history = history.history(&a).unwrap();
-        assert_eq!(a_history.pos()[0], vector![1.0, 0.0, 0.0]);
-        assert_eq!(a_history.pos()[1], vector![2.0, 0.0, 0.0]);
+        assert_eq!(a_history.pos()[0].pos, vector![1.0, 0.0, 0.0]);
+        assert_eq!(a_history.pos()[1].pos, vector![2.0, 0.0, 0.0]);
     }
 
     #[test]
@@ -245,9 +230,9 @@ mod tests {
         let mut history = HistoryStore::default();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
-        a_entity.get_mut::<Pos>().unwrap().0 = vector![2.0, 0.0, 0.0];
+        a_entity.get_mut::<BodyPos>().unwrap().0.pos = vector![2.0, 0.0, 0.0];
         let mut b_entity = world.get_entity_mut(b).unwrap();
-        b_entity.get_mut::<Pos>().unwrap().0 = vector![0.0, 2.0, 0.0];
+        b_entity.get_mut::<BodyPos>().unwrap().0.pos = vector![0.0, 2.0, 0.0];
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut rollback = Schedule::default();
         rollback.add_systems(move |mut query: Query<HistoryQuery>| {
@@ -255,6 +240,9 @@ mod tests {
         });
         rollback.run(&mut world);
         let a_entity = world.get_entity_mut(a).unwrap();
-        assert_eq!(a_entity.get::<Pos>().unwrap().0, vector![1.0, 0.0, 0.0])
+        assert_eq!(
+            a_entity.get::<BodyPos>().unwrap().0.pos,
+            vector![1.0, 0.0, 0.0]
+        )
     }
 }

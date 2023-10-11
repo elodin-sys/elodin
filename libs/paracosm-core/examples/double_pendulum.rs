@@ -5,7 +5,7 @@ use paracosm::{
     constraints::{Angle, RevoluteJoint},
     editor::{editor, ObservableInput},
     runner::IntoSimRunner,
-    Force, Pos, Time,
+    Force, Time,
 };
 use std::{
     f64::consts::PI,
@@ -55,7 +55,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
     builder.revolute_joint(
         RevoluteJoint::new(root, rod_a)
             .join_axis(Vector3::z_axis())
-            .anchor_b(Pos(vector![0., 0.5, 0.0]))
+            .anchor_b(vector![0., 0.5, 0.0])
             .angle_limits(-PI / 2.0..PI / 2.0)
             .compliance(0.0)
             .ang_damping(0.5)
@@ -95,8 +95,8 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             .ang_damping(0.5)
             .pos_damping(0.5)
             .join_axis(Vector3::z_axis())
-            .anchor_a(Pos(vector![0., -0.5, 0.0]))
-            .anchor_b(Pos(vector![0., 0.5, 0.0]))
+            .anchor_a(vector![0., -0.5, 0.0])
+            .anchor_b(vector![0., 0.5, 0.0])
             .compliance(0.0),
     );
 }
