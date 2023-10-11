@@ -27,25 +27,19 @@ pub struct Force(pub Vector3<f64>);
 pub struct Torque(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct Mass(pub f64);
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
-pub struct Pos(pub Vector3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
-pub struct Vel(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct Att(pub UnitQuaternion<f64>);
+pub struct BodyPos(pub SpatialPos);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct AngVel(pub Vector3<f64>);
+pub struct BodyVel(pub SpatialMotion);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Inertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
 pub struct Time(pub f64);
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
-pub struct WorldPos(pub Vector3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldPos(pub SpatialPos);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct WorldVel(pub SpatialMotion);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct WorldAtt(pub UnitQuaternion<f64>);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
@@ -266,16 +260,13 @@ pub struct EntityBundle {
 
     // pos
     pub prev_pos: PrevPos,
-    pub pos: Pos,
+    pub pos: BodyPos,
     pub world_pos: WorldPos,
-    pub vel: Vel,
+    pub vel: BodyVel,
     pub world_vel: WorldVel,
 
     // attitude
     pub prev_att: PrevAtt,
-    pub att: Att,
-    pub world_att: WorldAtt,
-    pub ang_vel: AngVel,
 
     // mass
     pub mass: Mass,
@@ -296,11 +287,8 @@ pub struct EntityBundle {
 #[world_query(mutable, derive(Debug))]
 pub struct EntityQuery {
     pub fixed: &'static Fixed,
-    pub pos: &'static mut Pos,
-    pub vel: &'static mut Vel,
-
-    pub att: &'static mut Att,
-    pub ang_vel: &'static mut AngVel,
+    pub pos: &'static mut BodyPos,
+    pub vel: &'static mut BodyVel,
 
     pub mass: &'static mut Mass,
     pub inertia: &'static mut Inertia,
@@ -309,11 +297,8 @@ pub struct EntityQuery {
 
 pub struct EntityStateRef<'a> {
     pub fixed: &'a Fixed,
-    pub pos: &'a Pos,
-    pub vel: &'a Vel,
-
-    pub att: &'a Att,
-    pub ang_vel: &'a AngVel,
+    pub pos: &'a BodyPos,
+    pub vel: &'a BodyVel,
 
     pub mass: &'a Mass,
     pub inertia: &'a Inertia,
@@ -325,8 +310,6 @@ impl<'a> EntityStateRef<'a> {
         Self {
             pos: value.pos,
             vel: value.vel,
-            att: value.att,
-            ang_vel: value.ang_vel,
             mass: value.mass,
             inertia: value.inertia,
             inverse_inertia: value.inverse_inertia,
@@ -335,33 +318,33 @@ impl<'a> EntityStateRef<'a> {
     }
 }
 
-impl Pos {
-    pub fn to_world<S>(&self, state: &S) -> Self
-    where
-        Pos: FromState<S>,
-        Att: FromState<S>,
-    {
-        Pos(Att::from_state(Time(0.0), state).0 * self.0 + Pos::from_state(Time(0.0), state).0)
-    }
+// impl Pos {
+//     pub fn to_world<S>(&self, state: &S) -> Self
+//     where
+//         Pos: FromState<S>,
+//         Att: FromState<S>,
+//     {
+//         Pos(Att::from_state(Time(0.0), state).0 * self.0 + Pos::from_state(Time(0.0), state).0)
+//     }
 
-    pub fn to_world_basis<S>(&self, state: &S) -> Self
-    where
-        Pos: FromState<S>,
-        Att: FromState<S>,
-    {
-        Pos(Att::from_state(Time(0.0), state).0 * self.0)
-    }
-}
+//     pub fn to_world_basis<S>(&self, state: &S) -> Self
+//     where
+//         Pos: FromState<S>,
+//         Att: FromState<S>,
+//     {
+//         Pos(Att::from_state(Time(0.0), state).0 * self.0)
+//     }
+// }
 
-impl InverseInertia {
-    pub fn to_world<S>(&self, state: &S) -> Self
-    where
-        Att: FromState<S>,
-    {
-        let att = Att::from_state(Time(0.0), state);
-        InverseInertia(att.0.to_rotation_matrix() * self.0)
-    }
-}
+// impl InverseInertia {
+//     pub fn to_world<S>(&self, state: &S) -> Self
+//     where
+//         Att: FromState<S>,
+//     {
+//         let att = Att::from_state(Time(0.0), state);
+//         InverseInertia(att.0.to_rotation_matrix() * self.0)
+//     }
+// }
 
 impl<'a> EntityQueryReadOnlyItem<'a> {
     pub fn state_ref(&self) -> EntityStateRef<'_> {
@@ -388,10 +371,8 @@ macro_rules! impl_entity_state {
 }
 
 impl_entity_state!(Mass, mass);
-impl_entity_state!(Pos, pos);
-impl_entity_state!(Vel, vel);
-impl_entity_state!(Att, att);
-impl_entity_state!(AngVel, ang_vel);
+impl_entity_state!(BodyPos, pos);
+impl_entity_state!(BodyVel, vel);
 impl_entity_state!(Inertia, inertia);
 impl_entity_state!(InverseInertia, inverse_inertia);
 

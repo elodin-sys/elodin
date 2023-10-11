@@ -2,7 +2,7 @@ use crate::{
     hierarchy::{Link, TopologicalSort},
     spatial::{SpatialForce, SpatialInertia, SpatialMotion, SpatialPos},
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    AngVel, Att, Inertia, Mass, Pos, Vel, WorldAtt, WorldVel,
+    BodyPos, BodyVel, Inertia, Mass, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
@@ -29,12 +29,8 @@ pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> 
 pub struct KinematicQuery {
     world_pos: &'static mut crate::types::WorldPos,
     world_vel: &'static mut crate::types::WorldVel,
-    pos: &'static mut Pos,
-    vel: &'static mut Vel,
-
-    world_att: &'static mut WorldAtt,
-    att: &'static mut Att,
-    ang_vel: &'static mut AngVel,
+    pos: &'static mut BodyPos,
+    vel: &'static mut BodyVel,
 
     joint: &'static mut Joint,
 }
@@ -54,13 +50,9 @@ pub fn kinematic_system(
             let Ok((_, mut kinematic)) = query.get_mut(*child) else {
                 continue;
             };
-            let child_pos = SpatialPos {
-                pos: kinematic.pos.0,
-                att: kinematic.att.0,
-            };
+            let child_pos = kinematic.pos.0;
             let world_pos = pos_tree_step(parent_pos, &child_pos, &kinematic.joint);
-            kinematic.world_pos.0 = world_pos.0.pos;
-            kinematic.world_att.0 = world_pos.0.att;
+            kinematic.world_pos.0 = world_pos.0;
             let children = children_query.get(*child);
             let Ok(Some(children)) = children else {
                 continue;
@@ -70,28 +62,24 @@ pub fn kinematic_system(
     }
 
     for (_, children, mut parent_kinematics) in root_query.iter_mut() {
-        let parent_pos = SpatialPos {
-            pos: parent_kinematics.pos.0,
-            att: parent_kinematics.att.0,
-        };
-
         parent_kinematics.world_pos.0 = parent_kinematics.pos.0;
-        parent_kinematics.world_att.0 = parent_kinematics.att.0;
 
         let Some(children) = children else { continue };
 
-        recurisve_step(&parent_pos, children, &mut query, &children_query)
+        recurisve_step(
+            &parent_kinematics.pos.0,
+            children,
+            &mut query,
+            &children_query,
+        )
     }
 }
 
 #[derive(WorldQuery, Debug)]
 #[world_query(mutable, derive(Debug))]
 pub struct RNEChildQuery {
-    pos: &'static Pos,
-    vel: &'static Vel,
-
-    att: &'static Att,
-    ang_vel: &'static AngVel,
+    pos: &'static BodyPos,
+    vel: &'static BodyVel,
 
     inertia: &'static Inertia,
     mass: &'static Mass,
@@ -125,17 +113,11 @@ pub fn rne_system(
                 child.joint,
                 parent_vel,
                 parent_accel,
-                &SpatialPos {
-                    pos: child.pos.0,
-                    att: child.att.0,
-                },
-                &SpatialMotion {
-                    vel: child.vel.0,
-                    ang_vel: child.ang_vel.0,
-                },
+                &child.pos.0,
+                &child.vel.0,
                 &SpatialInertia {
                     inertia: child.inertia.0,
-                    momentum: child.vel.0 * child.mass.0, // TODO: this should maybe be world
+                    momentum: child.vel.0.vel * child.mass.0, // TODO: this should maybe be world
                     mass: child.mass.0,
                 },
                 SpatialForce {
@@ -145,10 +127,7 @@ pub fn rne_system(
             )
         } else {
             (
-                SpatialMotion {
-                    vel: child.vel.0,
-                    ang_vel: child.ang_vel.0,
-                },
+                child.vel.0,
                 SpatialMotion::default(),
                 SpatialForce {
                     force: child.effect.force.0,
@@ -170,13 +149,9 @@ pub fn rne_system(
             let Ok((_, _, mut bias_force)) = parent_query.get_mut(*parent) else {
                 continue;
             };
-            bias_force.0 += child.joint.apply_transpose_force(
-                &SpatialPos {
-                    pos: child.pos.0,
-                    att: child.att.0,
-                },
-                &child.bias_force.0,
-            );
+            bias_force.0 += child
+                .joint
+                .apply_transpose_force(&child.pos.0, &child.bias_force.0);
         }
     }
 }

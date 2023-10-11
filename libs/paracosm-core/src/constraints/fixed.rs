@@ -5,10 +5,7 @@ use bevy_ecs::{
 };
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
-use crate::{
-    types::{Config, EntityQuery},
-    Pos,
-};
+use crate::types::{Config, EntityQuery};
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
 
@@ -16,8 +13,8 @@ use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inv
 pub struct FixedJoint {
     pub entity_a: Entity,
     pub entity_b: Entity,
-    pub anchor_a: Pos,
-    pub anchor_b: Pos,
+    pub anchor_a: Vector3<f64>,
+    pub anchor_b: Vector3<f64>,
     pub compliance: f64,
 
     pub pos_lagrange: f64,
@@ -32,8 +29,8 @@ impl FixedJoint {
         FixedJoint {
             entity_a,
             entity_b,
-            anchor_a: Pos(Vector3::default()),
-            anchor_b: Pos(Vector3::default()),
+            anchor_a: Vector3::default(),
+            anchor_b: Vector3::default(),
             compliance: 0.0,
             pos_lagrange: 0.0,
             angle_lagrange: 0.0,
@@ -42,13 +39,13 @@ impl FixedJoint {
         }
     }
 
-    pub fn anchor_a(mut self, pos: impl Into<Pos>) -> Self {
-        self.anchor_a = pos.into();
+    pub fn anchor_a(mut self, pos: Vector3<f64>) -> Self {
+        self.anchor_a = pos;
         self
     }
 
-    pub fn anchor_b(mut self, pos: impl Into<Pos>) -> Self {
-        self.anchor_b = pos.into();
+    pub fn anchor_b(mut self, pos: Vector3<f64>) -> Self {
+        self.anchor_b = pos;
         self
     }
 
@@ -87,13 +84,13 @@ pub fn fixed_joint_system(
             return;
         };
 
-        let world_anchor_a = constraint.anchor_a.to_world_basis(&entity_a);
-        let world_anchor_b = constraint.anchor_b.to_world_basis(&entity_b);
-        let dist = (world_anchor_a.0 + entity_a.pos.0) - (world_anchor_b.0 + entity_b.pos.0);
+        let world_anchor_a = entity_a.pos.0.att * constraint.anchor_a;
+        let world_anchor_b = entity_b.pos.0.att * constraint.anchor_b;
+        let dist = (world_anchor_a + entity_a.pos.0.pos) - (world_anchor_b + entity_b.pos.0.pos);
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
         let compliance = constraint.compliance;
-        let delta_q = delta_q(entity_a.att.0, entity_b.att.0);
+        let delta_q = delta_q(entity_a.pos.0.att, entity_b.pos.0.att);
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
@@ -105,14 +102,14 @@ pub fn fixed_joint_system(
 
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
-            entity_a.inverse_inertia.to_world(&entity_a).0,
-            world_anchor_a.0,
+            entity_b.pos.0.transform() * entity_a.inverse_inertia.0,
+            world_anchor_a,
             n,
         );
         let inverse_mass_b = pos_generalized_inverse_mass(
             entity_b.mass.0,
-            entity_b.inverse_inertia.to_world(&entity_b).0,
-            world_anchor_b.0,
+            entity_b.pos.0.transform() * entity_a.inverse_inertia.0,
+            world_anchor_b,
             n,
         );
 
@@ -144,18 +141,18 @@ pub fn fixed_damping(
             return;
         };
 
-        let delta_v =
-            (entity_b.vel.0 - entity_a.vel.0) * (constraint.pos_damping * config.sub_dt).min(1.0);
+        let delta_v = (entity_b.vel.0.vel - entity_a.vel.0.vel)
+            * (constraint.pos_damping * config.sub_dt).min(1.0);
 
-        let delta_omega = (entity_b.ang_vel.0 - entity_a.ang_vel.0)
+        let delta_omega = (entity_b.vel.0.ang_vel - entity_a.vel.0.ang_vel)
             * (constraint.ang_damping * config.sub_dt).min(1.0);
 
         if !entity_a.fixed.0 {
-            entity_a.ang_vel.0 += delta_omega;
+            entity_a.vel.0.ang_vel += delta_omega;
         }
 
         if !entity_b.fixed.0 {
-            entity_b.ang_vel.0 -= delta_omega;
+            entity_b.vel.0.ang_vel -= delta_omega;
         }
 
         let w_a = if entity_a.fixed.0 {
@@ -175,10 +172,10 @@ pub fn fixed_damping(
         }
         let p = delta_v / w_sum;
         if !entity_a.fixed.0 {
-            entity_a.vel.0 += w_a * p;
+            entity_a.vel.0.vel += w_a * p;
         }
         if !entity_b.fixed.0 {
-            entity_b.vel.0 -= w_b * p;
+            entity_b.vel.0.vel -= w_b * p;
         }
     }
 }
