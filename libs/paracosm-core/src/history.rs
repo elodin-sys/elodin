@@ -65,6 +65,9 @@ pub struct EntityHistory {
     pos: Vec<SpatialPos>,
     vel: Vec<SpatialMotion>,
 
+    world_pos: Vec<SpatialPos>,
+    world_vel: Vec<SpatialMotion>,
+
     mass: Vec<f64>,
     effects: Vec<Effect>,
 }
@@ -76,6 +79,8 @@ impl EntityHistory {
         self.vel.push(data.vel.0);
         self.mass.push(data.mass.0);
         self.effects.push(*query.effect);
+        self.world_pos.push(data.world_pos.0);
+        self.world_vel.push(data.world_vel.0);
     }
 
     fn rollback(&self, index: usize, mut query: HistoryQueryItem<'_>, scale: f32) {
@@ -85,10 +90,7 @@ impl EntityHistory {
         entity.vel.0 = self.vel[index];
         entity.mass.0 = self.mass[index];
         *query.effect = self.effects[index];
-        // query.transform.translation = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * scale;
-        // query.transform.rotation =
-        //     Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32);
-        // FIXME
+        *query.transform = self.world_pos[index].bevy(scale);
     }
 
     pub fn pos(&self) -> &[SpatialPos] {

@@ -1,3 +1,4 @@
+use bevy::prelude::{Quat, Vec3};
 use nalgebra::{UnitQuaternion, Vector3};
 
 use super::SpatialTransform;
@@ -14,6 +15,15 @@ impl SpatialPos {
         SpatialTransform {
             linear: self.pos,
             angular: self.att,
+        }
+    }
+
+    pub fn bevy(self, scale: f32) -> bevy::prelude::Transform {
+        let SpatialPos { pos, att } = self;
+        bevy::prelude::Transform {
+            translation: Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * scale,
+            rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
+            ..Default::default()
         }
     }
 }

@@ -290,6 +290,9 @@ pub struct EntityQuery {
     pub pos: &'static mut BodyPos,
     pub vel: &'static mut BodyVel,
 
+    pub world_pos: &'static mut WorldPos,
+    pub world_vel: &'static mut WorldVel,
+
     pub mass: &'static mut Mass,
     pub inertia: &'static mut Inertia,
     pub inverse_inertia: &'static mut InverseInertia,
