@@ -1,11 +1,17 @@
 use std::ops::{Add, AddAssign, Sub};
 
-use nalgebra::Vector3;
+use nalgebra::{Vector3, Vector6};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialForce {
     pub force: Vector3<f64>,
     pub torque: Vector3<f64>,
+}
+
+impl SpatialForce {
+    pub fn vector(&self) -> Vector6<f64> {
+        Vector6::from_iterator(self.torque.into_iter().chain(&self.force).copied())
+    }
 }
 
 impl Sub for SpatialForce {

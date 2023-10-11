@@ -1,8 +1,10 @@
 use crate::{
     hierarchy::{Link, TopologicalSort},
-    spatial::{SpatialForce, SpatialInertia, SpatialMotion, SpatialPos},
+    spatial::{
+        SpatialForce, SpatialInertia, SpatialMotion, SpatialPos, SpatialSubspace, SpatialTransform,
+    },
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    BodyPos, BodyVel, Inertia, Mass, WorldVel,
+    BodyPos, BodyVel, Inertia, Mass, SubtreeInertia, TreeIndex, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
@@ -11,7 +13,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, ResMut},
 };
-use nalgebra::{UnitVector3, Vector3};
+use nalgebra::{vector, DMatrix, Matrix6, UnitVector3, Vector3};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
@@ -238,6 +240,16 @@ impl Joint {
         }
     }
 
+    fn transform(&self, child: &SpatialPos) -> SpatialTransform {
+        match self.joint_type {
+            JointType::Free => SpatialTransform::identity(),
+            JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => SpatialTransform {
+                linear: child.att * self.pos + child.pos,
+                angular: child.att,
+            },
+        }
+    }
+
     fn apply_transpose_force(&self, child: &SpatialPos, force: &SpatialForce) -> SpatialForce {
         match self.joint_type {
             JointType::Free => SpatialForce {
@@ -252,8 +264,88 @@ impl Joint {
             }
         }
     }
+
+    fn subspace(&self) -> SpatialSubspace {
+        SpatialSubspace(match self.joint_type {
+            JointType::Free => Matrix6::identity(),
+            JointType::Revolute { axis } => {
+                let mut subspace = Matrix6::zeros();
+                let axis = axis.into_inner();
+                subspace
+                    .fixed_view_mut::<3, 3>(0, 0)
+                    .copy_from(&(axis * axis.transpose()));
+                subspace
+            }
+            JointType::Sphere => {
+                let mut subspace = Matrix6::zeros();
+                subspace.set_diagonal(&vector![1., 1., 1., 0., 0., 0.]);
+                subspace
+            }
+            JointType::Fixed => Matrix6::zeros(),
+        })
+    }
 }
 
 fn unit_project(a: Vector3<f64>, b: UnitVector3<f64>) -> Vector3<f64> {
     a.dot(&b) * *b
+}
+
+pub fn cri_system(mut query: Query<CRIQuery>, sort: ResMut<TopologicalSort>) {
+    let dof_count = sort.0.len() * 6;
+    let mut matrix = DMatrix::zeros(dof_count, dof_count);
+    for mut x in &mut query {
+        x.subtree_inertia.0 = SpatialInertia {
+            inertia: x.inertia.0,
+            momentum: x.body_pos.0.pos, // TODO world or nah?
+            mass: x.mass.0,
+        }
+    }
+
+    for (i, Link { parent, child }) in sort.0.iter().enumerate() {
+        if let Some(parent) = parent {
+            let Ok([mut parent, child]) = query.get_many_mut([*parent, *child]) else {
+                continue;
+            };
+
+            parent.subtree_inertia.0 += child.joint.transform(&child.body_pos.0).transpose()
+                * child.subtree_inertia.0.clone();
+        }
+
+        let Ok(mut child) = query.get(*child) else {
+            continue;
+        };
+        let subspace = child.joint.subspace();
+        let mut f = &child.subtree_inertia.0 * child.body_vel.0;
+        matrix
+            .view_mut((6 * i, 6 * i), (6, 6))
+            .copy_from(&(subspace.0.transpose() * f.vector()));
+
+        let i = child.tree_index.0;
+        while let Some(p) = child.parent {
+            f = child.joint.apply_transpose_force(&child.body_pos.0, &f);
+            let Ok(q) = query.get(**p) else { break };
+            child = q;
+            let j = child.tree_index.0;
+            let h_block = f.vector().transpose() * child.joint.subspace().0;
+            matrix.view_mut((6 * i, 6 * j), (6, 6)).copy_from(&h_block);
+            matrix
+                .view_mut((6 * j, 6 * i), (6, 6))
+                .copy_from(&h_block.transpose());
+        }
+    }
+}
+
+#[derive(WorldQuery, Debug)]
+#[world_query(mutable, derive(Debug))]
+pub struct CRIQuery {
+    mass: &'static Mass,
+    inertia: &'static Inertia,
+    subtree_inertia: &'static mut SubtreeInertia,
+
+    joint: &'static Joint,
+    body_pos: &'static BodyPos,
+    body_vel: &'static BodyVel,
+
+    parent: Option<&'static Parent>,
+    tree_index: &'static TreeIndex,
 }

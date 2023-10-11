@@ -2,9 +2,26 @@ use std::ops::Mul;
 
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
+use super::{SpatialInertia, SpatialMotion};
+
+pub struct Trans<T>(pub T);
+
 pub struct SpatialTransform {
     pub linear: Vector3<f64>,
     pub angular: UnitQuaternion<f64>,
+}
+
+impl SpatialTransform {
+    pub fn identity() -> SpatialTransform {
+        SpatialTransform {
+            linear: Vector3::zeros(),
+            angular: UnitQuaternion::identity(),
+        }
+    }
+
+    pub fn transpose(self) -> Trans<Self> {
+        Trans(self)
+    }
 }
 
 impl<'a> Mul<SpatialTransform> for &'a SpatialTransform {
@@ -29,11 +46,43 @@ impl Mul<SpatialTransform> for SpatialTransform {
     }
 }
 
+impl Mul<SpatialMotion> for SpatialTransform {
+    type Output = SpatialMotion;
+
+    fn mul(self, rhs: SpatialMotion) -> Self::Output {
+        let ang_vel = self.angular * rhs.ang_vel;
+        SpatialMotion {
+            vel: self.angular * rhs.vel + ang_vel.cross(&self.linear),
+            ang_vel,
+        }
+    }
+}
+
 impl Mul<Vector3<f64>> for SpatialTransform {
     type Output = Vector3<f64>;
 
     fn mul(self, rhs: Vector3<f64>) -> Self::Output {
         self.linear + self.angular * rhs
+    }
+}
+
+impl Mul<SpatialInertia> for Trans<SpatialTransform> {
+    type Output = SpatialInertia;
+
+    fn mul(self, rhs: SpatialInertia) -> Self::Output {
+        let ang_inverse = self.0.angular.inverse();
+        let rot = self.0.angular.to_rotation_matrix();
+        let rot_trans = rot.transpose();
+        let momentum = self.0.angular.inverse() * rhs.momentum + rhs.mass * self.0.linear;
+        let inertia = rot_trans * rhs.inertia * rot
+            - self.0.linear.cross_matrix() * (ang_inverse * rhs.momentum).cross_matrix()
+            - momentum.cross_matrix() * self.0.linear.cross_matrix();
+
+        SpatialInertia {
+            momentum,
+            mass: rhs.mass,
+            inertia,
+        }
     }
 }
 
