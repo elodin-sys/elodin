@@ -1,11 +1,13 @@
-use std::ops::Mul;
+use std::ops::{AddAssign, Mul};
 
 use nalgebra::{Matrix3, Vector3};
 
 use super::{SpatialForce, SpatialMotion};
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpatialInertia {
     pub inertia: Matrix3<f64>,
+    // mass * COM
     pub momentum: Vector3<f64>,
     pub mass: f64,
 }
@@ -21,10 +23,10 @@ impl<'a> Mul<SpatialMotion> for &'a SpatialInertia {
     }
 }
 
-impl Mul<SpatialMotion> for SpatialInertia {
-    type Output = SpatialForce;
-
-    fn mul(self, rhs: SpatialMotion) -> Self::Output {
-        (&self).mul(rhs)
+impl AddAssign for SpatialInertia {
+    fn add_assign(&mut self, rhs: Self) {
+        self.inertia += rhs.inertia;
+        self.mass += rhs.mass;
+        self.momentum += rhs.momentum;
     }
 }

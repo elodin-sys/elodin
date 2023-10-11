@@ -12,3 +12,6 @@ pub use inertia::*;
 
 mod transform;
 pub use transform::*;
+
+mod subspace;
+pub use subspace::*;

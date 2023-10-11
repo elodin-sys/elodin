@@ -35,11 +35,14 @@ pub struct BodyVel(pub SpatialMotion);
 pub struct Inertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
 pub struct Time(pub f64);
-
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct WorldPos(pub SpatialPos);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct WorldVel(pub SpatialMotion);
+#[derive(Debug, Clone, PartialEq, Component)]
+pub struct SubtreeInertia(pub SpatialInertia);
+#[derive(Debug, Clone, PartialEq, Component)]
+pub struct TreeIndex(pub usize);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {

@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use nalgebra::Vector3;
+use nalgebra::{Vector3, Vector6};
 
 use super::{SpatialForce, SpatialPos};
 
@@ -8,6 +8,12 @@ use super::{SpatialForce, SpatialPos};
 pub struct SpatialMotion {
     pub vel: Vector3<f64>,
     pub ang_vel: Vector3<f64>,
+}
+
+impl SpatialMotion {
+    pub fn vector(self) -> Vector6<f64> {
+        Vector6::from_iterator(self.ang_vel.into_iter().chain(&self.vel).cloned())
+    }
 }
 
 impl SpatialMotion {

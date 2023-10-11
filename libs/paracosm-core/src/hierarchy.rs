@@ -6,7 +6,7 @@ use bevy_ecs::{
 };
 use bevy_utils::HashSet;
 
-use crate::{tree::Joint, EntityQuery};
+use crate::{tree::Joint, EntityQuery, TreeIndex};
 
 #[derive(Clone, Resource)]
 pub struct TopologicalSort(pub Vec<Link>);
@@ -20,6 +20,7 @@ pub struct Link {
 pub fn sort_system(
     mut sort: ResMut<TopologicalSort>,
     children_query: Query<&Children, With<Joint>>,
+    mut index_query: Query<&mut TreeIndex>,
     roots: Query<(EntityQuery, Entity, Option<&Children>), Without<Parent>>,
 ) {
     fn recurse(
@@ -66,7 +67,13 @@ pub fn sort_system(
         })
     }
 
-    sort.0.reverse()
+    sort.0.reverse();
+    for (i, link) in sort.0.iter().enumerate() {
+        let Ok(mut index) = index_query.get_mut(link.child) else {
+            continue;
+        };
+        index.0 = i;
+    }
 }
 
 pub struct TopologicalSortPlugin;
