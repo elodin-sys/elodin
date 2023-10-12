@@ -4,7 +4,7 @@ use nalgebra::{Matrix3, Vector3};
 
 use super::{SpatialForce, SpatialMotion};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SpatialInertia {
     pub inertia: Matrix3<f64>,
     // mass * COM

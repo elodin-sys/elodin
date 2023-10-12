@@ -8,7 +8,7 @@ use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 use crate::{
     effector::Effector,
     sensor::Sensor,
-    spatial::{SpatialMotion, SpatialPos},
+    spatial::{SpatialInertia, SpatialMotion, SpatialPos},
     tree::Joint,
     types::*,
     WorldPos, WorldVel,
@@ -181,6 +181,9 @@ impl EntityBuilder {
 
             world_pos: WorldPos(Default::default()),
             world_vel: WorldVel(Default::default()),
+            joint_accel: JointAccel(SpatialMotion::default()),
+            tree_index: TreeIndex(0),
+            subtree_inertia: SubtreeInertia(SpatialInertia::default()),
         }
     }
 }

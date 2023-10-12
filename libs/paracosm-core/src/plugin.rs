@@ -1,7 +1,12 @@
 use bevy::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 
-use crate::{history::HistoryPlugin, WorldPos};
+use crate::{
+    hierarchy::TopologicalSortPlugin,
+    history::HistoryPlugin,
+    tree::{cri_system, forward_dynamics, rne_system},
+    WorldPos,
+};
 
 use super::{
     constraints::{
@@ -57,6 +62,7 @@ impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
         app.add_plugins(HistoryPlugin);
+        app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);
         app.add_systems(
             PhysicsSchedule,
@@ -99,6 +105,9 @@ pub struct SubstepSchedule;
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum SubstepSet {
     ForwardKinematics,
+    RecursiveNewtonEuler,
+    CompositeRigidBodyInertia,
+    ForwardDynamics,
     CalcEffects,
     Integrate,
     SolveConstraints,
@@ -114,6 +123,9 @@ pub fn substep_schedule() -> Schedule {
         (
             SubstepSet::ForwardKinematics,
             SubstepSet::CalcEffects,
+            SubstepSet::RecursiveNewtonEuler,
+            SubstepSet::CompositeRigidBodyInertia,
+            SubstepSet::ForwardDynamics,
             SubstepSet::Integrate,
             SubstepSet::SolveConstraints,
             SubstepSet::UpdateVel,
@@ -127,6 +139,9 @@ pub fn substep_schedule() -> Schedule {
     schedule.add_systems(
         (calculate_effects, calculate_sensors, gravity_system).in_set(SubstepSet::CalcEffects),
     );
+    schedule.add_systems((rne_system).in_set(SubstepSet::RecursiveNewtonEuler));
+    schedule.add_systems((cri_system).in_set(SubstepSet::CompositeRigidBodyInertia));
+    schedule.add_systems((forward_dynamics).in_set(SubstepSet::ForwardDynamics));
     schedule.add_systems((integrate_pos).in_set(SubstepSet::Integrate));
     schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
     schedule.add_systems((update_vel).in_set(SubstepSet::UpdateVel));
