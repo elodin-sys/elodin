@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Sub};
 
 use nalgebra::{Vector3, Vector6};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SpatialForce {
     pub force: Vector3<f64>,
     pub torque: Vector3<f64>,

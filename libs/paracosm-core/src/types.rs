@@ -289,6 +289,9 @@ pub struct EntityBundle {
 
     pub joint: Joint,
     pub joint_accel: JointAccel,
+    pub joint_force: JointForce,
+    pub bias_force: BiasForce,
+    pub world_accel: WorldAccel,
 
     pub tree_index: TreeIndex,
     pub subtree_inertia: SubtreeInertia,

@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
+use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
     tree::{cri_system, forward_dynamics, rne_system},
-    WorldPos,
+    TreeMassMatrix, WorldPos,
 };
 
 use super::{
@@ -61,6 +62,7 @@ pub struct XpbdPlugin;
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
+        app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);

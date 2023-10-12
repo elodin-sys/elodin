@@ -3,7 +3,7 @@ use nalgebra::{vector, Vector3};
 use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     editor::{editor, Input},
-    Time, Torque,
+    Time, Torque, Force
 };
 
 fn main() {
@@ -17,7 +17,7 @@ fn sim(mut builder: XpbdBuilder, mut assets: Assets, input: Input) {
             .pos(vector![0.0, 0.75, 0.0])
             .effector(move |Time(_)| {
                 let torque = *input.0.load();
-                Torque(Vector3::new(0.0, torque, 0.0))
+                Force(Vector3::new(0.0, torque, 0.0))
             })
             .mesh(assets.mesh(Mesh::from(shape::Cube { size: 1.5 })))
             .material(assets.material(bevy::prelude::StandardMaterial {

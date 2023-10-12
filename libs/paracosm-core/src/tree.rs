@@ -14,7 +14,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{vector, DMatrix, Matrix6, MatrixXx6, UnitVector3, Vector3};
+use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
@@ -98,61 +98,59 @@ pub struct RNEChildQuery {
     joint: &'static Joint,
 }
 
-pub fn rne_system(
-    mut parent_query: Query<(&WorldAccel, &WorldVel, &mut BiasForce)>,
-    mut child_query: Query<RNEChildQuery>,
-    sort: ResMut<TopologicalSort>,
-) {
+pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<TopologicalSort>) {
     for Link { parent, child } in &sort.0 {
-        let Ok(mut child) = child_query.get_mut(*child) else {
-            continue;
-        };
-        let (vel, accel, force) = if let Some(parent) = parent {
-            let Ok((WorldAccel(parent_accel), WorldVel(parent_vel), _)) = parent_query.get(*parent)
-            else {
+        if let Some(parent) = parent {
+            let Ok([parent, mut child]) = child_query.get_many_mut([*parent, *child]) else {
                 continue;
             };
-            forward_rne_step(
+            let (vel, accel, force) = forward_rne_step(
                 child.joint,
-                parent_vel,
-                parent_accel,
+                &parent.world_vel.0,
+                &parent.world_accel.0,
                 &child.pos.0,
                 &child.vel.0,
                 &SpatialInertia {
                     inertia: child.inertia.0,
-                    momentum: child.vel.0.vel * child.mass.0, // TODO: this should maybe be world
+                    momentum: Vector3::zeros(),
+                    // momentum: child.pos.0.pos * child.mass.0, // TODO: this should maybe be world
                     mass: child.mass.0,
                 },
                 SpatialForce {
                     force: child.effect.force.0,
                     torque: child.effect.torque.0,
                 },
-            )
+            );
+
+            child.world_vel.0 = vel;
+            child.world_accel.0 = accel;
+            child.bias_force.0 = force;
         } else {
-            (
-                child.vel.0,
-                SpatialMotion::default(),
-                SpatialForce {
-                    force: child.effect.force.0,
-                    torque: child.effect.torque.0,
-                },
-            )
-        };
-        child.world_vel.0 = vel;
-        child.world_accel.0 = accel;
-        child.bias_force.0 = force;
+            let Ok(mut child) = child_query.get_mut(*child) else {
+                continue;
+            };
+
+            child.world_vel.0 = child.vel.0;
+            child.world_accel.0 = SpatialMotion::default();
+            child.bias_force.0 = SpatialForce {
+                force: child.effect.force.0,
+                torque: child.effect.torque.0,
+            };
+        }
     }
 
     for Link { parent, child } in sort.0.iter().rev() {
-        let Ok(mut child) = child_query.get_mut(*child) else {
-            continue;
-        };
-        child.joint_force.0 = child.joint.apply_force_subspace(&child.bias_force.0);
-        if let Some(parent) = parent {
-            let Ok((_, _, mut bias_force)) = parent_query.get_mut(*parent) else {
+        {
+            let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
-            bias_force.0 += child
+            child.joint_force.0 = child.joint.apply_force_subspace(&child.bias_force.0);
+        }
+        if let Some(parent) = parent {
+            let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
+                continue;
+            };
+            parent.bias_force.0 += child
                 .joint
                 .apply_transpose_force(&child.pos.0, &child.bias_force.0);
         }
@@ -298,6 +296,7 @@ pub fn cri_system(
 ) {
     // // NOTE: There is probably a faster way to do this, in particular
     // // we do not need to zero the whole thing
+    mass_matrix.0 = DMatrix::zeros(6 * sort.0.len(), 6 * sort.0.len());
     // for x in mass_matrix.0.iter_mut() {
     //     *x = 0.0;
     // }
@@ -306,12 +305,12 @@ pub fn cri_system(
     for mut x in &mut query {
         x.subtree_inertia.0 = SpatialInertia {
             inertia: x.inertia.0,
-            momentum: x.body_pos.0.pos, // TODO world or nah?
+            momentum: Vector3::zeros(),
+            //momentum: x.mass.0 * x.body_pos.0.pos, // TODO world or nah?
             mass: x.mass.0,
         }
     }
-
-    for (i, Link { parent, child }) in sort.0.iter().enumerate() {
+    for (i, Link { parent, child }) in sort.0.iter().enumerate().rev() {
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = query.get_many_mut([*parent, *child]) else {
                 continue;
@@ -325,18 +324,35 @@ pub fn cri_system(
             continue;
         };
         let subspace = child.joint.subspace();
-        let mut f = &child.subtree_inertia.0 * child.body_vel.0;
+        let mut f = Matrix6::zeros();
+        for (i, c) in subspace.0.column_iter().enumerate() {
+            let ang_vel = c.fixed_view::<3, 1>(0, 0).into_owned();
+            let vel = c.fixed_view::<3, 1>(3, 0).into_owned();
+            let col = (&child.subtree_inertia.0 * SpatialMotion { vel, ang_vel }).vector();
+            f.column_mut(i).copy_from(&col);
+        }
+        let subspace_force = subspace.0.transpose() * f;
         mass_matrix
             .view_mut((6 * i, 6 * i), (6, 6))
-            .copy_from(&(subspace.0.transpose() * f.vector()));
+            .copy_from(&subspace_force);
 
         let i = child.tree_index.0;
         while let Some(p) = child.parent {
-            f = child.joint.apply_transpose_force(&child.body_pos.0, &f);
+            for mut c in f.column_iter_mut() {
+                let torque = c.fixed_view::<3, 1>(0, 0).into_owned();
+                let force = c.fixed_view::<3, 1>(3, 0).into_owned();
+
+                c.copy_from(
+                    &child
+                        .joint
+                        .apply_transpose_force(&child.body_pos.0, &SpatialForce { force, torque }) // TODO allow borrowed vec for force
+                        .vector(),
+                )
+            }
             let Ok(q) = query.get(**p) else { break };
             child = q;
             let j = child.tree_index.0;
-            let h_block = f.vector().transpose() * child.joint.subspace().0;
+            let h_block = f.transpose() * child.joint.subspace().0;
             mass_matrix
                 .view_mut((6 * i, 6 * j), (6, 6))
                 .copy_from(&h_block);
@@ -368,26 +384,24 @@ pub fn forward_dynamics(
     sort: Res<TopologicalSort>,
     mut mass_matrix: ResMut<TreeMassMatrix>,
 ) {
-    let mut bias_forces = MatrixXx6::zeros(sort.0.len());
+    let mut bias_forces = MatrixXx1::zeros(6 * sort.0.len());
     for (i, Link { child, .. }) in sort.0.iter().enumerate() {
         let Ok(bias_force) = query.get(*child) else {
             return;
         };
         bias_forces
-            .fixed_view_mut::<1, 6>(i, 0)
-            .copy_from(&bias_force.0.vector().transpose());
+            .fixed_view_mut::<6, 1>(i * 6, 0)
+            .copy_from(&bias_force.0.vector());
     }
-    let mass_matrix = std::mem::replace(
-        &mut mass_matrix.0,
-        DMatrix::zeros(sort.0.len() * 6, sort.0.len() * 6),
-    );
-    let Some(inv_mass_matrix) = mass_matrix.try_inverse() else {
+    let mass_matrix = std::mem::replace(&mut mass_matrix.0, DMatrix::zeros(0, 0));
+    let Ok(inv_mass_matrix) = mass_matrix.pseudo_inverse(f64::EPSILON) else {
         return;
     };
     let accel = inv_mass_matrix * bias_forces;
-    for (row, link) in accel.row_iter().zip(sort.0.iter()) {
-        let ang: Vector3<f64> = row.fixed_view::<3, 1>(0, 0).into_owned();
-        let lin: Vector3<f64> = row.fixed_view::<3, 1>(3, 0).into_owned();
+
+    for (i, link) in sort.0.iter().enumerate() {
+        let ang: Vector3<f64> = accel.fixed_view::<3, 1>(i * 6, 0).into_owned();
+        let lin: Vector3<f64> = accel.fixed_view::<3, 1>(i * 6 + 3, 0).into_owned();
         let Ok(mut accel) = accel_query.get_mut(link.child) else {
             continue;
         };
