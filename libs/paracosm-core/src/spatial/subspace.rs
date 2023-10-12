@@ -3,6 +3,7 @@ use std::ops::Mul;
 
 use super::SpatialForce;
 
+#[derive(Debug)]
 pub struct SpatialSubspace(pub Matrix6<f64>);
 
 impl Mul<SpatialForce> for SpatialSubspace {

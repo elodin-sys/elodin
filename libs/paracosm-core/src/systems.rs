@@ -84,7 +84,7 @@ pub(crate) fn integrate_pos(mut query: Query<IntQuery>, config: Res<Config>) {
         body::integrate_att(
             &mut query.body_pos.0.att,
             &mut query.prev_att.0,
-            &mut query.body_vel.0.vel,
+            &mut query.body_vel.0.ang_vel,
             query.joint_accel.0.ang_vel,
             config.sub_dt,
         );

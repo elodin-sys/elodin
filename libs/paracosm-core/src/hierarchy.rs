@@ -26,7 +26,7 @@ pub fn sort_system(
     fn recurse(
         parent: Entity,
         entity: Entity,
-        children: &Children,
+        children: Option<&Children>,
         children_query: &Query<&Children, With<Joint>>,
         sort: &mut TopologicalSort,
         visited: &mut HashSet<Entity>,
@@ -34,9 +34,16 @@ pub fn sort_system(
         if visited.contains(&entity) {
             return;
         }
-        for child in children {
-            if let Ok(children) = children_query.get(*child) {
-                recurse(entity, *child, children, children_query, sort, visited);
+        if let Some(children) = children {
+            for child in children {
+                recurse(
+                    entity,
+                    *child,
+                    children_query.get(*child).ok(),
+                    children_query,
+                    sort,
+                    visited,
+                );
             }
         }
         visited.insert(parent);
@@ -49,16 +56,14 @@ pub fn sort_system(
     for (_, parent, children) in &roots {
         if let Some(children) = children {
             for child in children {
-                if let Ok(children) = children_query.get(*child) {
-                    recurse(
-                        parent,
-                        *child,
-                        children,
-                        &children_query,
-                        &mut sort,
-                        &mut visited,
-                    );
-                }
+                recurse(
+                    parent,
+                    *child,
+                    children_query.get(*child).ok(),
+                    &children_query,
+                    &mut sort,
+                    &mut visited,
+                );
             }
         }
         sort.0.push(Link {

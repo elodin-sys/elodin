@@ -2,22 +2,23 @@ use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, UnitQuaternion, Vector3};
 use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
-    editor::editor,
+    editor::{editor, Input},
     runner::IntoSimRunner,
     tree::{Joint, JointType},
+    BodyPos, Torque,
 };
 
 fn main() {
     editor(sim.substep_count(32))
 }
 
-fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
+fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     let rod_a_angle = f64::to_radians(45.0);
     let rod_a = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .ang_vel(1.0 * Vector3::y())
-            //.effector(move || Torque(*input.0.load() * Vector3::y()))
+            //.ang_vel(1.0 * Vector3::y())
+            .effector(move |BodyPos(p)| Torque(p.att * (*input.0.load() * Vector3::z())))
             .att(UnitQuaternion::from_axis_angle(
                 &Vector3::z_axis(),
                 rod_a_angle,

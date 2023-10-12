@@ -136,7 +136,7 @@ pub(crate) fn timeline_system(
             ui.horizontal(|ui| {
                 let paused_val = paused.0;
                 ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
-                let max_count = history.count() - 1;
+                let max_count = history.count().saturating_sub(1);
                 let mut selected_index = history.current_index();
                 ui.spacing_mut().slider_width = 450.0;
                 let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
