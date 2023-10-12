@@ -64,6 +64,7 @@ pub struct IntQuery {
     inertia: &'static mut Inertia,
     inverse_inertia: &'static mut InverseInertia,
     fixed: &'static Fixed,
+    joint_accel: &'static JointAccel,
 }
 
 #[tracing::instrument]
@@ -76,8 +77,7 @@ pub(crate) fn integrate_pos(mut query: Query<IntQuery>, config: Res<Config>) {
             &mut query.body_pos.0.pos,
             &mut query.prev_pos.0,
             &mut query.body_vel.0.vel,
-            query.effect.force.0,
-            query.mass.0,
+            query.joint_accel.0.vel,
             config.sub_dt,
         );
 
@@ -85,9 +85,7 @@ pub(crate) fn integrate_pos(mut query: Query<IntQuery>, config: Res<Config>) {
             &mut query.body_pos.0.att,
             &mut query.prev_att.0,
             &mut query.body_vel.0.vel,
-            query.inertia.0,
-            query.inverse_inertia.0,
-            query.effect.torque.0,
+            query.joint_accel.0.ang_vel,
             config.sub_dt,
         );
     })

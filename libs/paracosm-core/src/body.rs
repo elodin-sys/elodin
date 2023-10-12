@@ -9,11 +9,10 @@ pub fn integrate_pos(
     pos: &mut Vector3<f64>,
     prev_pos: &mut Vector3<f64>,
     vel: &mut Vector3<f64>,
-    ext_force: Vector3<f64>,
-    mass: f64,
+    joint_accel: Vector3<f64>,
     dt: f64,
 ) {
-    *vel += dt * ext_force / mass;
+    *vel += dt * joint_accel;
     *prev_pos = *pos;
     *pos += *vel * dt;
 }
@@ -26,12 +25,10 @@ pub fn integrate_att(
     att: &mut UnitQuaternion<f64>,
     prev_att: &mut UnitQuaternion<f64>,
     ang_vel: &mut Vector3<f64>,
-    inertia: Matrix3<f64>,
-    inverse_inertia: Matrix3<f64>,
-    torque: Vector3<f64>,
+    joint_ang_accel: Vector3<f64>,
     dt: f64,
 ) {
-    *ang_vel += dt * inverse_inertia * (torque - ang_vel.cross(&(inertia * *ang_vel)));
+    *ang_vel += dt * joint_ang_accel; // FIXME? maybe remove the cross product here -inv_inertia * ang_vel.cross(&(inertia * *ang_vel)));
     *prev_att = *att;
     let non_unit_att = att.into_inner();
     let new_att = non_unit_att

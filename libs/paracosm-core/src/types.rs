@@ -19,7 +19,7 @@ use bevy_ecs::{
     query::WorldQuery,
     system::Resource,
 };
-use nalgebra::{matrix, Matrix3, UnitQuaternion, Vector3};
+use nalgebra::{matrix, DMatrix, Matrix3, UnitQuaternion, Vector3};
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
 pub struct Force(pub Vector3<f64>);
@@ -43,6 +43,10 @@ pub struct WorldVel(pub SpatialMotion);
 pub struct SubtreeInertia(pub SpatialInertia);
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct TreeIndex(pub usize);
+#[derive(Debug, Clone, PartialEq, Resource)]
+pub struct TreeMassMatrix(pub DMatrix<f64>);
+#[derive(Debug, Clone, PartialEq, Component)]
+pub struct JointAccel(pub SpatialMotion);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
@@ -284,6 +288,10 @@ pub struct EntityBundle {
     pub picked: Picked,
 
     pub joint: Joint,
+    pub joint_accel: JointAccel,
+
+    pub tree_index: TreeIndex,
+    pub subtree_inertia: SubtreeInertia,
 }
 
 #[derive(WorldQuery, Debug)]

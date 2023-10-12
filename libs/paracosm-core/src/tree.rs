@@ -4,16 +4,17 @@ use crate::{
         SpatialForce, SpatialInertia, SpatialMotion, SpatialPos, SpatialSubspace, SpatialTransform,
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    BodyPos, BodyVel, Inertia, Mass, SubtreeInertia, TreeIndex, WorldVel,
+    BodyPos, BodyVel, Inertia, JointAccel, Mass, SubtreeInertia, TreeIndex, TreeMassMatrix,
+    WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
     component::Component,
     entity::Entity,
     query::{With, Without, WorldQuery},
-    system::{Query, ResMut},
+    system::{Query, Res, ResMut},
 };
-use nalgebra::{vector, DMatrix, Matrix6, UnitVector3, Vector3};
+use nalgebra::{vector, DMatrix, Matrix6, MatrixXx6, UnitVector3, Vector3};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
@@ -290,9 +291,18 @@ fn unit_project(a: Vector3<f64>, b: UnitVector3<f64>) -> Vector3<f64> {
     a.dot(&b) * *b
 }
 
-pub fn cri_system(mut query: Query<CRIQuery>, sort: ResMut<TopologicalSort>) {
-    let dof_count = sort.0.len() * 6;
-    let mut matrix = DMatrix::zeros(dof_count, dof_count);
+pub fn cri_system(
+    mut query: Query<CRIQuery>,
+    sort: ResMut<TopologicalSort>,
+    mut mass_matrix: ResMut<TreeMassMatrix>,
+) {
+    // // NOTE: There is probably a faster way to do this, in particular
+    // // we do not need to zero the whole thing
+    // for x in mass_matrix.0.iter_mut() {
+    //     *x = 0.0;
+    // }
+    let mass_matrix = &mut mass_matrix.0;
+
     for mut x in &mut query {
         x.subtree_inertia.0 = SpatialInertia {
             inertia: x.inertia.0,
@@ -316,7 +326,7 @@ pub fn cri_system(mut query: Query<CRIQuery>, sort: ResMut<TopologicalSort>) {
         };
         let subspace = child.joint.subspace();
         let mut f = &child.subtree_inertia.0 * child.body_vel.0;
-        matrix
+        mass_matrix
             .view_mut((6 * i, 6 * i), (6, 6))
             .copy_from(&(subspace.0.transpose() * f.vector()));
 
@@ -327,8 +337,10 @@ pub fn cri_system(mut query: Query<CRIQuery>, sort: ResMut<TopologicalSort>) {
             child = q;
             let j = child.tree_index.0;
             let h_block = f.vector().transpose() * child.joint.subspace().0;
-            matrix.view_mut((6 * i, 6 * j), (6, 6)).copy_from(&h_block);
-            matrix
+            mass_matrix
+                .view_mut((6 * i, 6 * j), (6, 6))
+                .copy_from(&h_block);
+            mass_matrix
                 .view_mut((6 * j, 6 * i), (6, 6))
                 .copy_from(&h_block.transpose());
         }
@@ -348,4 +360,40 @@ pub struct CRIQuery {
 
     parent: Option<&'static Parent>,
     tree_index: &'static TreeIndex,
+}
+
+pub fn forward_dynamics(
+    query: Query<&BiasForce>,
+    mut accel_query: Query<&mut JointAccel>,
+    sort: Res<TopologicalSort>,
+    mut mass_matrix: ResMut<TreeMassMatrix>,
+) {
+    let mut bias_forces = MatrixXx6::zeros(sort.0.len());
+    for (i, Link { child, .. }) in sort.0.iter().enumerate() {
+        let Ok(bias_force) = query.get(*child) else {
+            return;
+        };
+        bias_forces
+            .fixed_view_mut::<1, 6>(i, 0)
+            .copy_from(&bias_force.0.vector().transpose());
+    }
+    let mass_matrix = std::mem::replace(
+        &mut mass_matrix.0,
+        DMatrix::zeros(sort.0.len() * 6, sort.0.len() * 6),
+    );
+    let Some(inv_mass_matrix) = mass_matrix.try_inverse() else {
+        return;
+    };
+    let accel = inv_mass_matrix * bias_forces;
+    for (row, link) in accel.row_iter().zip(sort.0.iter()) {
+        let ang: Vector3<f64> = row.fixed_view::<3, 1>(0, 0).into_owned();
+        let lin: Vector3<f64> = row.fixed_view::<3, 1>(3, 0).into_owned();
+        let Ok(mut accel) = accel_query.get_mut(link.child) else {
+            continue;
+        };
+        accel.0 = SpatialMotion {
+            vel: lin,
+            ang_vel: ang,
+        };
+    }
 }
