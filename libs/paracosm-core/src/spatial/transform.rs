@@ -2,7 +2,7 @@ use std::ops::Mul;
 
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
-use super::{SpatialInertia, SpatialMotion};
+use super::{SpatialForce, SpatialInertia, SpatialMotion};
 
 pub struct Trans<T>(pub T);
 
@@ -21,6 +21,12 @@ impl SpatialTransform {
 
     pub fn transpose(self) -> Trans<Self> {
         Trans(self)
+    }
+
+    pub fn dual_mul(&self, other: &SpatialForce) -> SpatialForce {
+        let force = self.angular * other.force;
+        let torque = self.angular * other.torque - self.linear.cross(&force);
+        SpatialForce { force, torque }
     }
 }
 

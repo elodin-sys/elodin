@@ -14,7 +14,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3};
+use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitQuaternion, UnitVector3, Vector3};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
@@ -144,7 +144,13 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
-            child.joint_force.0 = child.joint.apply_force_subspace(&child.bias_force.0);
+            let dual = SpatialTransform {
+                linear: child.joint.pos,
+                angular: UnitQuaternion::identity(),
+            }
+            .dual_mul(&child.bias_force.0);
+
+            child.joint_force.0 = child.joint.apply_force_subspace(&dual);
         }
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
@@ -170,7 +176,7 @@ fn forward_rne_step(
     let vel = joint.apply_transform_motion(child_pos, parent_vel) + joint_vel;
     let accel = joint.apply_transform_motion(child_pos, parent_accel) + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
-    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext;
+    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) + force_ext;
     (vel, accel, force)
 }
 
@@ -285,8 +291,9 @@ impl Joint {
     }
 }
 
-fn unit_project(a: Vector3<f64>, b: UnitVector3<f64>) -> Vector3<f64> {
-    a.dot(&b) * *b
+fn unit_project(vec: Vector3<f64>, axis: UnitVector3<f64>) -> Vector3<f64> {
+    let axis = *axis;
+    (axis * axis.transpose()) * vec
 }
 
 pub fn cri_system(
@@ -379,7 +386,7 @@ pub struct CRIQuery {
 }
 
 pub fn forward_dynamics(
-    query: Query<&BiasForce>,
+    query: Query<&JointForce>,
     mut accel_query: Query<&mut JointAccel>,
     sort: Res<TopologicalSort>,
     mut mass_matrix: ResMut<TreeMassMatrix>,
@@ -389,6 +396,7 @@ pub fn forward_dynamics(
         let Ok(bias_force) = query.get(*child) else {
             return;
         };
+
         bias_forces
             .fixed_view_mut::<6, 1>(i * 6, 0)
             .copy_from(&bias_force.0.vector());
