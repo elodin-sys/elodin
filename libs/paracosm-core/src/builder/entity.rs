@@ -153,6 +153,11 @@ impl EntityBuilder {
         self
     }
 
+    pub fn joint(mut self, joint: Joint) -> Self {
+        self.joint = joint;
+        self
+    }
+
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
             pos: BodyPos(SpatialPos {
