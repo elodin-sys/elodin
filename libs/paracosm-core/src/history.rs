@@ -97,6 +97,10 @@ impl EntityHistory {
         &self.pos
     }
 
+    pub fn world_pos(&self) -> &[SpatialPos] {
+        &self.world_pos
+    }
+
     pub fn vel(&self) -> &[SpatialMotion] {
         &self.vel
     }

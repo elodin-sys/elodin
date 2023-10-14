@@ -5,7 +5,7 @@ use crate::{
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
     BodyPos, BodyVel, Inertia, JointAccel, Mass, SubtreeInertia, TreeIndex, TreeMassMatrix,
-    WorldVel,
+    WorldPos, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
@@ -83,6 +83,7 @@ pub fn kinematic_system(
 pub struct RNEChildQuery {
     pos: &'static BodyPos,
     vel: &'static BodyVel,
+    world_pos: &'static mut WorldPos,
 
     inertia: &'static Inertia,
     mass: &'static Mass,
@@ -108,6 +109,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 child.joint,
                 &parent.world_vel.0,
                 &parent.world_accel.0,
+                &child.world_pos.0,
                 &child.pos.0,
                 &child.vel.0,
                 &SpatialInertia {
@@ -132,10 +134,11 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
 
             child.world_vel.0 = child.vel.0;
             child.world_accel.0 = SpatialMotion::default();
-            child.bias_force.0 = SpatialForce {
+            child.bias_force.0 = child.world_pos.0.transform().dual_mul(&SpatialForce {
                 force: child.effect.force.0,
                 torque: child.effect.torque.0,
-            };
+            });
+            println!("bf = {:?} wp= {:?}", child.bias_force.0, child.world_pos.0);
         }
     }
 
@@ -144,11 +147,8 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
-            let dual = SpatialTransform {
-                linear: child.joint.pos,
-                angular: UnitQuaternion::identity(),
-            }
-            .dual_mul(&child.bias_force.0);
+            //let dual = child.pos.0.transform().dual_mul(&child.bias_force.0);
+            let dual = child.bias_force.0;
 
             child.joint_force.0 = child.joint.apply_force_subspace(&dual);
         }
@@ -167,6 +167,7 @@ fn forward_rne_step(
     joint: &Joint,
     parent_vel: &SpatialMotion,
     parent_accel: &SpatialMotion,
+    child_world_pos: &SpatialPos,
     child_pos: &SpatialPos,
     child_vel: &SpatialMotion,
     child_inertia: &SpatialInertia,
@@ -176,11 +177,9 @@ fn forward_rne_step(
     let vel = joint.apply_transform_motion(child_pos, parent_vel) + joint_vel;
     let accel = joint.apply_transform_motion(child_pos, parent_accel) + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
-    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) + force_ext;
+    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext; // TODO: What frame should this be in? I think subtree com
     (vel, accel, force)
 }
-
-pub struct WorldPos(SpatialPos);
 
 #[derive(Component, Debug)]
 pub struct Joint {
@@ -197,6 +196,13 @@ pub enum JointType {
 }
 
 impl Joint {
+    pub fn fixed() -> Joint {
+        Joint {
+            pos: Vector3::zeros(),
+            joint_type: JointType::Fixed,
+        }
+    }
+
     fn apply_force_subspace(&self, force: &SpatialForce) -> SpatialForce {
         match self.joint_type {
             JointType::Free => *force,
