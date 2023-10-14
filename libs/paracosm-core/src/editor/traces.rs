@@ -54,7 +54,7 @@ fn update_lines(
             .current_index()
             .saturating_sub(polyline.vertices.len());
         let start = end - len;
-        for SpatialPos { pos, att } in &hist.pos()[start..end] {
+        for SpatialPos { pos, att } in &hist.world_pos()[start..end] {
             let pos = (att * anchor.anchor) + pos;
             let pos = Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32) * config.scale;
             polyline.vertices.push(pos);

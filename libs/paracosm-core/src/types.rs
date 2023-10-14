@@ -317,6 +317,9 @@ pub struct EntityStateRef<'a> {
     pub pos: &'a BodyPos,
     pub vel: &'a BodyVel,
 
+    pub world_pos: &'a WorldPos,
+    pub world_vel: &'a WorldVel,
+
     pub mass: &'a Mass,
     pub inertia: &'a Inertia,
     pub inverse_inertia: &'a InverseInertia,
@@ -331,6 +334,8 @@ impl<'a> EntityStateRef<'a> {
             inertia: value.inertia,
             inverse_inertia: value.inverse_inertia,
             fixed: value.fixed,
+            world_pos: value.world_pos,
+            world_vel: value.world_vel,
         }
     }
 }
@@ -389,6 +394,7 @@ macro_rules! impl_entity_state {
 
 impl_entity_state!(Mass, mass);
 impl_entity_state!(BodyPos, pos);
+impl_entity_state!(WorldPos, world_pos);
 impl_entity_state!(BodyVel, vel);
 impl_entity_state!(Inertia, inertia);
 impl_entity_state!(InverseInertia, inverse_inertia);
