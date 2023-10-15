@@ -14,9 +14,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{
-    vector, DMatrix, Matrix6, MatrixXx1, UnitQuaternion, UnitVector3, Vector3, Vector6,
-};
+use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
 
 pub fn pos_tree_step(parent: &SpatialPos, child: &SpatialPos, joint: &Joint) -> WorldPos {
     match joint.joint_type {
@@ -111,12 +109,10 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 child.joint,
                 &parent.world_vel.0,
                 &parent.world_accel.0,
-                &child.world_pos.0,
                 &child.pos.0,
                 &child.vel.0,
                 &SpatialInertia {
                     inertia: child.inertia.0,
-                    //momentum: Vector3::zeros(),
                     momentum: child.pos.0.pos * child.mass.0, // TODO: this should maybe be world
                     mass: child.mass.0,
                 },
@@ -168,15 +164,15 @@ fn forward_rne_step(
     joint: &Joint,
     parent_vel: &SpatialMotion,
     parent_accel: &SpatialMotion,
-    child_world_pos: &SpatialPos,
     child_pos: &SpatialPos,
     child_vel: &SpatialMotion,
     child_inertia: &SpatialInertia,
     force_ext: SpatialForce,
 ) -> (SpatialMotion, SpatialMotion, SpatialForce) {
     let joint_vel = joint.apply_motion_subspace(child_vel, &child_pos);
-    let vel = joint.apply_transform_motion(child_pos, parent_vel) + joint_vel;
-    let accel = joint.apply_transform_motion(child_pos, parent_accel) + vel.cross(&joint_vel);
+    let transform = joint.transform(child_pos);
+    let vel = transform * parent_vel + joint_vel + joint_vel;
+    let accel = transform * parent_accel + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
     let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext; // TODO: What frame should this be in? I think subtree com
     (vel, accel, force)
@@ -240,18 +236,6 @@ impl Joint {
                 vel: Vector3::zeros(),
                 ang_vel: Vector3::zeros(),
             },
-        }
-    }
-
-    fn apply_transform_motion(&self, child: &SpatialPos, motion: &SpatialMotion) -> SpatialMotion {
-        match self.joint_type {
-            JointType::Free => *motion,
-            JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
-                motion.offset(&SpatialPos {
-                    pos: child.att * self.pos + child.pos,
-                    att: child.att,
-                })
-            }
         }
     }
 
