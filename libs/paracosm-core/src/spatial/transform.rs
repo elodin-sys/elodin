@@ -6,6 +6,7 @@ use super::{SpatialForce, SpatialInertia, SpatialMotion};
 
 pub struct Trans<T>(pub T);
 
+#[derive(Clone, Copy)]
 pub struct SpatialTransform {
     pub linear: Vector3<f64>,
     pub angular: UnitQuaternion<f64>,
@@ -56,6 +57,14 @@ impl Mul<SpatialMotion> for SpatialTransform {
     type Output = SpatialMotion;
 
     fn mul(self, rhs: SpatialMotion) -> Self::Output {
+        self * &rhs
+    }
+}
+
+impl<'a> Mul<&'a SpatialMotion> for SpatialTransform {
+    type Output = SpatialMotion;
+
+    fn mul(self, rhs: &'a SpatialMotion) -> Self::Output {
         let ang_vel = self.angular * rhs.ang_vel;
         SpatialMotion {
             vel: self.angular * rhs.vel + ang_vel.cross(&self.linear),
