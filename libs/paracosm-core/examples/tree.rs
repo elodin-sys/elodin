@@ -29,7 +29,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into()))
             .joint(Joint::fixed()),
     );
-    let rod_a_angle = f64::to_radians(45.0);
+    let rod_a_angle = f64::to_radians(0.0);
     let rod_a = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
@@ -41,7 +41,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
             //.effector(move || Torque(*input.0.load() * Vector3::z()))
-            .effector(|WorldPos(p)| Force(Vector3::new(0., -9.8, 0.)))
+            .effector(|WorldPos(p)| Force(p.att.inverse() * Vector3::new(0., -9.8, 0.)))
             .material(assets.material(bevy::prelude::StandardMaterial {
                 base_color: Color::hex("38ACFF").unwrap(),
                 metallic: 0.6,
@@ -51,7 +51,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .parent(
                 root,
                 Joint {
-                    pos: vector![0., -0.0, 0.0],
+                    pos: vector![0., 0.0, 0.0],
                     joint_type: JointType::Revolute {
                         axis: Vector3::z_axis(),
                     },
@@ -65,12 +65,12 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .pos(vector![0., -0.5, 0.0])
             .att(UnitQuaternion::from_axis_angle(
                 &Vector3::z_axis(),
-                0.0, //90.0f64.to_radians(),
+                -10.0f64.to_radians(),
             ))
             .trace(Vector3::new(0., -0.5, 0.))
             .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
-            .effector(|WorldPos(p)| Force(Vector3::new(0., -9.8, 0.)))
+            .effector(|WorldPos(p)| Force(p.att.inverse() * Vector3::new(0., -9.8, 0.)))
             .material(assets.material(Color::hex("FF9838").unwrap().into()))
             .parent(
                 rod_a,
