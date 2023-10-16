@@ -74,14 +74,14 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: ObservableInput)
             }),
     );
 
-    let rod_b_angle = f64::to_radians(0.0);
+    let rod_b_angle = f64::to_radians(70.0);
     let rod_b = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
             .pos(rod_a_pos + vector![1.0 * rod_b_angle.sin(), -1.0 * rod_b_angle.cos(), 0.0])
             .att(UnitQuaternion::from_axis_angle(
                 &Vector3::z_axis(),
-                rod_a_angle,
+                rod_b_angle,
             ))
             .trace(Vector3::new(0., -0.5, 0.))
             .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))

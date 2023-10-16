@@ -12,7 +12,7 @@ use paracosm::{
 };
 
 fn main() {
-    editor(sim.substep_count(32))
+    editor(sim.substep_count(10))
 }
 
 fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
@@ -29,7 +29,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .material(assets.material(Color::rgb(1.0, 0.0, 0.0).into()))
             .joint(Joint::fixed()),
     );
-    let rod_a_angle = f64::to_radians(0.0);
+    let rod_a_angle = f64::to_radians(30.0);
     let rod_a = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
@@ -65,7 +65,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
             .pos(vector![0., -0.5, 0.0])
             .att(UnitQuaternion::from_axis_angle(
                 &Vector3::z_axis(),
-                -10.0f64.to_radians(),
+                70.0f64.to_radians(),
             ))
             .trace(Vector3::new(0., -0.5, 0.))
             .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))

@@ -4,7 +4,7 @@ use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use super::{SpatialForce, SpatialInertia, SpatialMotion};
 
-pub struct Trans<T>(pub T);
+pub struct Transpose<T>(pub T);
 
 #[derive(Clone, Copy)]
 pub struct SpatialTransform {
@@ -20,13 +20,13 @@ impl SpatialTransform {
         }
     }
 
-    pub fn transpose(self) -> Trans<Self> {
-        Trans(self)
+    pub fn transpose(self) -> Transpose<Self> {
+        Transpose(self)
     }
 
     pub fn dual_mul(&self, other: &SpatialForce) -> SpatialForce {
         let force = self.angular * other.force;
-        let torque = self.angular * other.torque - self.linear.cross(&force);
+        let torque = self.angular * (other.torque - self.linear.cross(&other.force));
         SpatialForce { force, torque }
     }
 }
@@ -67,7 +67,7 @@ impl<'a> Mul<&'a SpatialMotion> for SpatialTransform {
     fn mul(self, rhs: &'a SpatialMotion) -> Self::Output {
         let ang_vel = self.angular * rhs.ang_vel;
         SpatialMotion {
-            vel: self.angular * rhs.vel + ang_vel.cross(&self.linear),
+            vel: self.angular * (rhs.vel + rhs.ang_vel.cross(&self.linear)),
             ang_vel,
         }
     }
@@ -81,7 +81,7 @@ impl Mul<Vector3<f64>> for SpatialTransform {
     }
 }
 
-impl Mul<SpatialInertia> for Trans<SpatialTransform> {
+impl Mul<SpatialInertia> for Transpose<SpatialTransform> {
     type Output = SpatialInertia;
 
     fn mul(self, rhs: SpatialInertia) -> Self::Output {
@@ -98,6 +98,16 @@ impl Mul<SpatialInertia> for Trans<SpatialTransform> {
             mass: rhs.mass,
             inertia,
         }
+    }
+}
+
+impl Mul<SpatialForce> for Transpose<SpatialTransform> {
+    type Output = SpatialForce;
+
+    fn mul(self, rhs: SpatialForce) -> Self::Output {
+        let force = self.0.angular.inverse() * rhs.force;
+        let torque = self.0.angular.inverse() * rhs.torque + self.0.linear.cross(&force);
+        SpatialForce { force, torque }
     }
 }
 

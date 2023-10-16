@@ -11,6 +11,10 @@ pub struct SpatialMotion {
 }
 
 impl SpatialMotion {
+    pub fn new(vel: Vector3<f64>, ang_vel: Vector3<f64>) -> Self {
+        Self { vel, ang_vel }
+    }
+
     pub fn vector(self) -> Vector6<f64> {
         Vector6::from_iterator(self.ang_vel.into_iter().chain(&self.vel).cloned())
     }

@@ -153,9 +153,8 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
                 continue;
             };
-            parent.bias_force.0 += child
-                .joint
-                .apply_transpose_force(&child.pos.0, &child.bias_force.0);
+            parent.bias_force.0 +=
+                child.joint.transform(&child.pos.0).transpose() * child.bias_force.0;
         }
     }
 }
@@ -171,7 +170,7 @@ fn forward_rne_step(
 ) -> (SpatialMotion, SpatialMotion, SpatialForce) {
     let joint_vel = joint.apply_motion_subspace(child_vel, &child_pos);
     let transform = joint.transform(child_pos);
-    let vel = transform * parent_vel + joint_vel + joint_vel;
+    let vel = transform * parent_vel + joint_vel;
     let accel = transform * parent_accel + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
     let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext; // TODO: What frame should this be in? I think subtree com
@@ -205,10 +204,10 @@ impl Joint {
             JointType::Free => *force,
             JointType::Revolute { axis } => {
                 let pos = pos.pos;
-                dbg!(SpatialForce {
+                SpatialForce {
                     force: Vector3::zeros(),
                     torque: unit_project(force.torque, axis) + pos.cross(&force.force),
-                })
+                }
             }
             JointType::Sphere => SpatialForce {
                 force: Vector3::zeros(),
@@ -225,8 +224,8 @@ impl Joint {
         match self.joint_type {
             JointType::Free => *vel,
             JointType::Revolute { axis } => SpatialMotion {
-                vel: Vector3::zeros(),
-                ang_vel: unit_project(vel.ang_vel, axis) + pos.pos.cross(&vel.vel),
+                vel: vel.ang_vel.cross(&pos.pos),
+                ang_vel: unit_project(vel.ang_vel, axis),
             },
             JointType::Sphere => SpatialMotion {
                 vel: Vector3::zeros(),
@@ -243,24 +242,9 @@ impl Joint {
         match self.joint_type {
             JointType::Free => SpatialTransform::identity(),
             JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => SpatialTransform {
-                linear: child.att * self.pos + child.pos,
-                angular: child.att,
+                linear: self.pos + child.att * child.pos,
+                angular: child.att.inverse(),
             },
-        }
-    }
-
-    fn apply_transpose_force(&self, child: &SpatialPos, force: &SpatialForce) -> SpatialForce {
-        match self.joint_type {
-            JointType::Free => SpatialForce {
-                force: Vector3::zeros(),
-                torque: Vector3::zeros(),
-            },
-            JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
-                let r = child.att * self.pos + child.pos;
-                let f = child.att.inverse() * force.force;
-                let torque = child.att.inverse() * force.torque + r.cross(&f);
-                SpatialForce { force: f, torque }
-            }
         }
     }
 
@@ -268,10 +252,11 @@ impl Joint {
         SpatialSubspace(match self.joint_type {
             JointType::Free => Matrix6::identity(),
             JointType::Revolute { axis } => {
-                let pos = child_pos.att * child_pos.pos;
-                let offset = axis.cross(&pos);
+                let pos = child_pos.pos;
+                let offset = pos.cross(&axis);
                 let axis = Vector6::new(axis[0], axis[1], axis[2], offset[0], offset[1], offset[2]);
                 axis * axis.transpose()
+                // FIXME
             }
             JointType::Sphere => {
                 let mut subspace = Matrix6::zeros();
@@ -342,10 +327,9 @@ pub fn cri_system(
                 let force = c.fixed_view::<3, 1>(3, 0).into_owned();
 
                 c.copy_from(
-                    &child
-                        .joint
-                        .apply_transpose_force(&child.body_pos.0, &SpatialForce { force, torque }) // TODO allow borrowed vec for force
-                        .vector(),
+                    &(child.joint.transform(&child.body_pos.0).transpose()
+                        * SpatialForce { force, torque })
+                    .vector(),
                 )
             }
             let Ok(q) = query.get(**p) else { break };
@@ -409,5 +393,52 @@ pub fn forward_dynamics(
             vel: lin,
             ang_vel: ang,
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nalgebra::UnitQuaternion;
+
+    use super::*;
+
+    #[test]
+    fn test_joint_motion_transform() {
+        let parent_vel = SpatialMotion::new(Vector3::new(0.0, 1.0, 0.0), Vector3::zeros());
+        let joint = Joint {
+            pos: Vector3::zeros(),
+            joint_type: JointType::Revolute {
+                axis: Vector3::z_axis(),
+            },
+        };
+        let child_vel = joint.transform(&SpatialPos {
+            pos: Vector3::zeros(),
+            att: UnitQuaternion::identity(),
+        }) * parent_vel;
+        assert_eq!(parent_vel, child_vel);
+
+        let child_vel = joint.transform(&SpatialPos {
+            pos: Vector3::zeros(),
+            att: UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 90f64.to_radians()),
+        }) * parent_vel;
+        approx::assert_relative_eq!(Vector3::new(1.0, 0.0, 0.0), child_vel.vel);
+
+        let parent_vel =
+            SpatialMotion::new(Vector3::new(0.0, 1.0, 0.0), Vector3::new(1.0, 0.0, 0.0));
+
+        let joint = Joint {
+            pos: Vector3::new(0.0, 1.0, 0.0),
+            joint_type: JointType::Revolute {
+                axis: Vector3::z_axis(),
+            },
+        };
+        let child_vel = joint.transform(&SpatialPos {
+            pos: Vector3::new(0.0, 1.0, 0.0),
+            att: UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -10f64.to_radians()),
+        }) * parent_vel;
+        approx::assert_relative_eq!(
+            Vector3::new(-0.17364817766693033, 0.984807753012208, 1.9848077530122081),
+            child_vel.vel
+        );
     }
 }
