@@ -55,10 +55,8 @@ pub(crate) fn update_time(mut time: ResMut<Time>, config: Res<Config>) {
 #[derive(WorldQuery, Debug)]
 #[world_query(mutable, derive(Debug))]
 pub struct IntQuery {
-    body_pos: &'static mut BodyPos,
-    prev_pos: &'static mut PrevPos,
-    prev_att: &'static mut PrevAtt,
-    body_vel: &'static mut BodyVel,
+    joint_pos: &'static mut JointPos,
+    joint_vel: &'static mut JointVel,
     effect: &'static mut Effect,
     mass: &'static mut Mass,
     inertia: &'static mut Inertia,
@@ -73,36 +71,13 @@ pub(crate) fn integrate_pos(mut query: Query<IntQuery>, config: Res<Config>) {
         if query.fixed.0 {
             return;
         }
-        body::integrate_pos(
-            &mut query.body_pos.0.pos,
-            &mut query.prev_pos.0,
-            &mut query.body_vel.0.vel,
-            query.joint_accel.0.vel,
-            config.sub_dt,
-        );
-
-        body::integrate_att(
-            &mut query.body_pos.0.att,
-            &mut query.prev_att.0,
-            &mut query.body_vel.0.ang_vel,
-            query.joint_accel.0.ang_vel,
-            config.sub_dt,
-        );
+        query
+            .joint_vel
+            .0
+            .integrate(&query.joint_accel.0, config.sub_dt);
+        query
+            .joint_pos
+            .0
+            .integrate(&query.joint_vel.0, config.sub_dt);
     })
-}
-
-#[tracing::instrument]
-pub(crate) fn update_vel(
-    mut query: Query<(&BodyPos, &PrevPos, &mut BodyVel, &Fixed, &PrevAtt)>,
-    config: Res<Config>,
-) {
-    query
-        .iter_mut()
-        .for_each(|(pos, prev_pos, mut vel, fixed, prev_att)| {
-            if fixed.0 {
-                return;
-            }
-            vel.0.vel = body::calc_vel(pos.0.pos, prev_pos.0, config.sub_dt);
-            vel.0.ang_vel = body::calc_ang_vel(pos.0.att, prev_att.0, config.sub_dt);
-        })
 }

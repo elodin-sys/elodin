@@ -3,7 +3,7 @@ use nalgebra::{vector, Vector3};
 use paracosm::{
     builder::{Assets, EntityBuilder, XpbdBuilder},
     editor::{editor, Input},
-    Time, Torque, Force
+    Force, Time, Torque,
 };
 
 fn main() {

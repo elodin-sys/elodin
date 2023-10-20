@@ -15,3 +15,6 @@ pub use transform::*;
 
 mod subspace;
 pub use subspace::*;
+
+mod generalized;
+pub use generalized::*;

@@ -10,6 +10,13 @@ pub struct SpatialPos {
 }
 
 impl SpatialPos {
+    pub fn linear(pos: Vector3<f64>) -> SpatialPos {
+        SpatialPos {
+            pos,
+            att: UnitQuaternion::identity(),
+        }
+    }
+
     #[inline]
     pub fn transform(self) -> SpatialTransform {
         SpatialTransform {

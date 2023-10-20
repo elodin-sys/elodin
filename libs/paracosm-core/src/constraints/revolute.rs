@@ -123,15 +123,16 @@ pub fn revolute_system(
             return;
         };
 
-        let world_anchor_a = entity_a.pos.0.att * constraint.anchor_a;
-        let world_anchor_b = entity_b.pos.0.att * constraint.anchor_b;
-        let dist = (world_anchor_a + entity_a.pos.0.pos) - (world_anchor_b + entity_b.pos.0.pos);
+        let world_anchor_a = entity_a.world_pos.0.att * constraint.anchor_a;
+        let world_anchor_b = entity_b.world_pos.0.att * constraint.anchor_b;
+        let dist = (world_anchor_a + entity_a.world_pos.0.pos)
+            - (world_anchor_b + entity_b.world_pos.0.pos);
         let n = UnitVector3::new_normalize(dist);
         let c = dist.norm();
         let compliance = constraint.compliance;
         let delta_q = delta_q(
-            entity_a.pos.0.att,
-            entity_b.pos.0.att,
+            entity_a.world_pos.0.att,
+            entity_b.world_pos.0.att,
             constraint.joint_axis,
         );
         apply_rot_constraint(
@@ -145,13 +146,13 @@ pub fn revolute_system(
 
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
-            entity_a.pos.0.transform() * entity_a.inverse_inertia.0,
+            entity_a.world_pos.0.transform() * entity_a.inverse_inertia.0,
             world_anchor_a,
             n,
         );
         let inverse_mass_b = pos_generalized_inverse_mass(
             entity_b.mass.0,
-            entity_b.pos.0.transform() * entity_b.inverse_inertia.0,
+            entity_b.world_pos.0.transform() * entity_b.inverse_inertia.0,
             world_anchor_b,
             n,
         );
@@ -179,8 +180,8 @@ pub fn revolute_system(
                 constraint.joint_axis.x,
                 constraint.joint_axis.y,
             );
-            let b1 = entity_a.pos.0.att * limit_axis;
-            let b2 = entity_b.pos.0.att * limit_axis;
+            let b1 = entity_a.world_pos.0.att * limit_axis;
+            let b2 = entity_b.world_pos.0.att * limit_axis;
             let n = b1.cross(&b2).normalize();
             if let Some(delta_q) = angle_limit.delta_q(&n, b1, b2) {
                 apply_rot_constraint(
@@ -201,9 +202,9 @@ pub fn revolute_system(
                     constraint.joint_axis.x,
                     constraint.joint_axis.y,
                 );
-                let b1 = entity_a.pos.0.att * perp_axis;
-                let b2 = entity_b.pos.0.att * perp_axis;
-                let a1 = entity_a.pos.0.att * constraint.joint_axis;
+                let b1 = entity_a.world_pos.0.att * perp_axis;
+                let b2 = entity_b.world_pos.0.att * perp_axis;
+                let a1 = entity_a.world_pos.0.att * constraint.joint_axis;
                 let b_target = UnitQuaternion::from_axis_angle(&a1, angle) * b1;
                 let delta_q_target = b_target.cross(&b2);
 
@@ -232,18 +233,18 @@ pub fn revolute_damping(
             return;
         };
 
-        let delta_v = (entity_b.vel.0.vel - entity_a.vel.0.vel)
+        let delta_v = (entity_b.world_vel.0.vel - entity_a.world_vel.0.vel)
             * (constraint.pos_damping * config.sub_dt).min(1.0);
 
-        let delta_omega = (entity_b.vel.0.ang_vel - entity_a.vel.0.ang_vel)
+        let delta_omega = (entity_b.world_vel.0.ang_vel - entity_a.world_vel.0.ang_vel)
             * (constraint.ang_damping * config.sub_dt).min(1.0);
 
         if !entity_a.fixed.0 {
-            entity_a.vel.0.ang_vel += delta_omega;
+            entity_a.world_vel.0.ang_vel += delta_omega;
         }
 
         if !entity_b.fixed.0 {
-            entity_b.vel.0.ang_vel -= delta_omega;
+            entity_b.world_vel.0.ang_vel -= delta_omega;
         }
 
         let w_a = if entity_a.fixed.0 {
@@ -263,10 +264,10 @@ pub fn revolute_damping(
         }
         let p = delta_v / w_sum;
         if !entity_a.fixed.0 {
-            entity_a.vel.0.vel += w_a * p;
+            entity_a.world_vel.0.vel += w_a * p;
         }
         if !entity_b.fixed.0 {
-            entity_b.vel.0.vel -= w_b * p;
+            entity_b.world_vel.0.vel -= w_b * p;
         }
     }
 }

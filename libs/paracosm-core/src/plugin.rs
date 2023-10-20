@@ -146,7 +146,6 @@ pub fn substep_schedule() -> Schedule {
     schedule.add_systems((forward_dynamics).in_set(SubstepSet::ForwardDynamics));
     schedule.add_systems((integrate_pos).in_set(SubstepSet::Integrate));
     schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
-    schedule.add_systems((update_vel).in_set(SubstepSet::UpdateVel));
     schedule.add_systems((revolute_damping).in_set(SubstepSet::DampJoints));
     schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
     schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
