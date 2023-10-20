@@ -11,6 +11,12 @@ pub struct SpatialMotion {
 }
 
 impl SpatialMotion {
+    pub fn linear(vel: Vector3<f64>) -> Self {
+        SpatialMotion {
+            vel,
+            ang_vel: Vector3::zeros(),
+        }
+    }
     pub fn new(vel: Vector3<f64>, ang_vel: Vector3<f64>) -> Self {
         Self { vel, ang_vel }
     }
@@ -18,9 +24,7 @@ impl SpatialMotion {
     pub fn vector(self) -> Vector6<f64> {
         Vector6::from_iterator(self.ang_vel.into_iter().chain(&self.vel).cloned())
     }
-}
 
-impl SpatialMotion {
     pub fn offset(&self, pos: &SpatialPos) -> SpatialMotion {
         let ang_vel = pos.att * self.ang_vel;
         let vel = pos.att * self.vel + ang_vel.cross(&pos.pos);

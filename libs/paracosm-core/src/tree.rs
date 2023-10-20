@@ -126,11 +126,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 continue;
             };
 
-            let joint_transform = child
-                .joint
-                .transform(&child.pos.0, child.body_pos.0)
-                .inverse();
-            let momentum = child.mass.0 * (joint_transform.angular * child.body_pos.0.pos);
+            let momentum = child.mass.0 * child.body_pos.0.pos;
             let (vel, accel, force) = forward_rne_step(
                 child.joint,
                 &parent.world_vel.0,
@@ -296,7 +292,7 @@ pub fn cri_system(
 
     for mut x in &mut query {
         let joint_transform = x.joint.transform(&x.joint_pos.0, x.body_pos.0).inverse();
-        let momentum = x.mass.0 * (joint_transform.angular * x.body_pos.0.pos);
+        let momentum = x.mass.0 * x.body_pos.0.pos;
         x.subtree_inertia.0 = SpatialInertia {
             inertia: x.inertia.0,
             momentum, // TODO: this should maybebe world // FIXME
