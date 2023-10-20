@@ -20,7 +20,7 @@ pub struct Link {
 pub fn sort_system(
     mut sort: ResMut<TopologicalSort>,
     children_query: Query<&Children, With<Joint>>,
-    mut index_query: Query<&mut TreeIndex>,
+    mut index_query: Query<(&mut TreeIndex, &Joint)>,
     roots: Query<(EntityQuery, Entity, Option<&Children>), Without<Parent>>,
 ) {
     fn recurse(
@@ -73,11 +73,13 @@ pub fn sort_system(
     }
 
     sort.0.reverse();
-    for (i, link) in sort.0.iter().enumerate() {
-        let Ok(mut index) = index_query.get_mut(link.child) else {
+    let mut i = 0;
+    for link in sort.0.iter() {
+        let Ok((mut index, joint)) = index_query.get_mut(link.child) else {
             continue;
         };
         index.0 = i;
+        i += joint.dof();
     }
 }
 

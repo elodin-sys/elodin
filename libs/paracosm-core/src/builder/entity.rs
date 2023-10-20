@@ -3,13 +3,15 @@ use bevy::{
     scene::Scene,
 };
 use bevy_ecs::entity::Entity;
-use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+use nalgebra::{matrix, vector, Matrix, Matrix3, UnitVector3, Vector3, Vector6};
 
 use crate::{
     effector::Effector,
     sensor::Sensor,
-    spatial::{SpatialForce, SpatialInertia, SpatialMotion, SpatialPos},
-    tree::Joint,
+    spatial::{
+        GeneralizedMotion, GeneralizedPos, SpatialForce, SpatialInertia, SpatialMotion, SpatialPos,
+    },
+    tree::{Joint, JointType},
     types::*,
     WorldPos, WorldVel,
 };
@@ -18,10 +20,6 @@ use crate::builder::{AssetHandle, ConcreteEffector, ConcreteSensor};
 
 pub struct EntityBuilder {
     mass: f64,
-    pos: Vector3<f64>,
-    vel: Vector3<f64>,
-    att: UnitQuaternion<f64>,
-    ang_vel: Vector3<f64>,
     inertia: Matrix3<f64>,
     inverse_inertia: Matrix3<f64>,
 
@@ -35,17 +33,16 @@ pub struct EntityBuilder {
     pub(crate) trace: Option<Vector3<f64>>,
 
     pub(crate) parent: Option<Entity>,
-    pub(crate) joint: Joint,
+    pub(crate) joint: Box<dyn JointBuilder>,
+
+    body_pos: SpatialPos,
+    body_vel: SpatialMotion,
 }
 
 impl Default for EntityBuilder {
     fn default() -> Self {
         Self {
             mass: Default::default(),
-            pos: Default::default(),
-            vel: Default::default(),
-            att: Default::default(),
-            ang_vel: Default::default(),
             inertia: Matrix3::identity(),
             inverse_inertia: Matrix3::identity(),
             effectors: Default::default(),
@@ -55,10 +52,9 @@ impl Default for EntityBuilder {
             trace: None,
             scene: None,
             parent: None,
-            joint: Joint {
-                pos: Vector3::zeros(),
-                joint_type: crate::tree::JointType::Free,
-            },
+            joint: Box::new(Free::default()),
+            body_pos: Default::default(),
+            body_vel: Default::default(),
         }
     }
 }
@@ -66,26 +62,6 @@ impl Default for EntityBuilder {
 impl EntityBuilder {
     pub fn mass(mut self, mass: f64) -> Self {
         self.mass = mass;
-        self
-    }
-
-    pub fn vel(mut self, vel: Vector3<f64>) -> Self {
-        self.vel = vel;
-        self
-    }
-
-    pub fn pos(mut self, pos: Vector3<f64>) -> Self {
-        self.pos = pos;
-        self
-    }
-
-    pub fn att(mut self, att: UnitQuaternion<f64>) -> Self {
-        self.att = att;
-        self
-    }
-
-    pub fn ang_vel(mut self, ang_vel: Vector3<f64>) -> Self {
-        self.ang_vel = ang_vel;
         self
     }
 
@@ -147,31 +123,29 @@ impl EntityBuilder {
         self
     }
 
-    pub fn parent(mut self, parent: Entity, joint: Joint) -> Self {
+    pub fn parent(mut self, parent: Entity, joint: impl JointBuilder) -> Self {
         self.parent = Some(parent);
-        self.joint = joint;
+        self.joint = Box::new(joint);
         self
     }
 
-    pub fn joint(mut self, joint: Joint) -> Self {
-        self.joint = joint;
+    pub fn joint(mut self, joint: impl JointBuilder) -> Self {
+        self.joint = Box::new(joint);
+        self
+    }
+
+    pub fn body_pos(mut self, pos: SpatialPos) -> Self {
+        self.body_pos = pos;
+        self
+    }
+
+    pub fn body_vel(mut self, vel: SpatialMotion) -> Self {
+        self.body_vel = vel;
         self
     }
 
     pub fn bundle(self) -> EntityBundle {
         EntityBundle {
-            pos: BodyPos(SpatialPos {
-                pos: self.pos,
-                att: self.att,
-            }),
-            prev_pos: PrevPos(Vector3::zeros()),
-            vel: BodyVel(SpatialMotion {
-                vel: self.vel,
-                ang_vel: self.ang_vel,
-            }),
-
-            prev_att: PrevAtt(UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0)),
-
             mass: Mass(self.mass),
             inertia: Inertia(self.inertia),
             inverse_inertia: InverseInertia(self.inverse_inertia),
@@ -182,16 +156,129 @@ impl EntityBuilder {
             effect: Effect::default(),
             fixed: Fixed(self.fixed),
             picked: Picked(false),
-            joint: self.joint,
 
             world_pos: WorldPos(Default::default()),
             world_vel: WorldVel(Default::default()),
             world_accel: WorldAccel(Default::default()),
-            joint_accel: JointAccel(SpatialMotion::default()),
-            joint_force: JointForce(SpatialForce::default()),
             tree_index: TreeIndex(0),
             subtree_inertia: SubtreeInertia(SpatialInertia::default()),
             bias_force: BiasForce(SpatialForce::default()),
+
+            joint: self.joint.apply(),
+            body_pos: BodyPos(self.body_pos),
+        }
+    }
+}
+
+pub trait JointBuilder: 'static {
+    fn apply(&self) -> JointBundle;
+}
+
+pub struct Revolute {
+    pos: f64,
+    vel: f64,
+    axis: UnitVector3<f64>,
+    offset: Vector3<f64>,
+}
+
+impl Revolute {
+    pub fn new(axis: UnitVector3<f64>) -> Self {
+        Revolute {
+            pos: 0.0,
+            vel: 0.0,
+            axis,
+            offset: Vector3::zeros(),
+        }
+    }
+
+    pub fn pos(mut self, pos: f64) -> Self {
+        self.pos = pos;
+        self
+    }
+
+    pub fn vel(mut self, vel: f64) -> Self {
+        self.vel = vel;
+        self
+    }
+
+    pub fn offset(mut self, offset: Vector3<f64>) -> Self {
+        self.offset = offset;
+        self
+    }
+}
+
+impl JointBuilder for Revolute {
+    fn apply(&self) -> JointBundle {
+        JointBundle {
+            joint: Joint {
+                pos: self.offset,
+                joint_type: JointType::Revolute { axis: self.axis },
+            },
+            pos: JointPos(GeneralizedPos {
+                dof: 1,
+                is_quat: false,
+                inner: vector![self.pos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }),
+            vel: JointVel(GeneralizedMotion {
+                dof: 1,
+                inner: vector![self.vel, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }),
+            joint_accel: JointAccel(crate::spatial::GeneralizedMotion {
+                dof: 1,
+                inner: Vector6::default(),
+            }),
+            joint_force: JointForce(crate::spatial::GeneralizedForce {
+                dof: 1,
+                inner: Vector6::default(),
+            }),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Free {
+    pos: SpatialPos,
+    vel: SpatialMotion,
+}
+
+impl Free {
+    pub fn pos(mut self, pos: SpatialPos) -> Self {
+        self.pos = pos;
+        self
+    }
+
+    pub fn vel(mut self, vel: SpatialMotion) -> Self {
+        self.vel = vel;
+        self
+    }
+}
+
+impl JointBuilder for Free {
+    fn apply(&self) -> JointBundle {
+        JointBundle {
+            joint: Joint {
+                pos: Vector3::zeros(),
+                joint_type: JointType::Free,
+            },
+            pos: JointPos(GeneralizedPos {
+                dof: 7,
+                is_quat: true,
+                inner: matrix![
+                    self.pos.att[0];
+                    self.pos.att[1];
+                    self.pos.att[2];
+                    self.pos.att[3];
+                    self.pos.pos[0];
+                    self.pos.pos[1];
+                    self.pos.pos[2]
+                ],
+            }),
+            vel: JointVel(GeneralizedMotion {
+                dof: 6,
+                inner: self.vel.vector(),
+            }),
+            joint_accel: JointAccel::default(),
+            joint_force: JointForce::default(),
         }
     }
 }

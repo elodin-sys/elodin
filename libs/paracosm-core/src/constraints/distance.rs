@@ -69,21 +69,22 @@ pub fn distance_system(
         else {
             return;
         };
-        let world_anchor_a = entity_a.pos.0.att * constraint.anchor_a;
-        let world_anchor_b = entity_b.pos.0.att * constraint.anchor_b;
-        let dist = (world_anchor_a + entity_a.pos.0.pos) - (world_anchor_b + entity_b.pos.0.pos);
+        let world_anchor_a = entity_a.world_pos.0.att * constraint.anchor_a;
+        let world_anchor_b = entity_b.world_pos.0.att * constraint.anchor_b;
+        let dist = (world_anchor_a + entity_a.world_pos.0.pos)
+            - (world_anchor_b + entity_b.world_pos.0.pos);
         let c = dist.norm() - constraint.distance_target;
         let n = UnitVector3::new_normalize(dist);
 
         let inverse_mass_a = pos_generalized_inverse_mass(
             entity_a.mass.0,
-            entity_a.pos.0.transform() * entity_a.inverse_inertia.0,
+            entity_a.world_pos.0.transform() * entity_a.inverse_inertia.0,
             world_anchor_a,
             n,
         );
         let inverse_mass_b = pos_generalized_inverse_mass(
             entity_a.mass.0,
-            entity_b.pos.0.transform() * entity_b.inverse_inertia.0,
+            entity_b.world_pos.0.transform() * entity_b.inverse_inertia.0,
             world_anchor_b,
             n,
         );

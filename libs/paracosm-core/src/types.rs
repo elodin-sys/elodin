@@ -28,9 +28,9 @@ pub struct Torque(pub Vector3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct Mass(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct BodyPos(pub SpatialPos);
+pub struct JointPos(pub GeneralizedPos);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct BodyVel(pub SpatialMotion);
+pub struct JointVel(pub GeneralizedMotion);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Inertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
@@ -45,8 +45,29 @@ pub struct SubtreeInertia(pub SpatialInertia);
 pub struct TreeIndex(pub usize);
 #[derive(Debug, Clone, PartialEq, Resource)]
 pub struct TreeMassMatrix(pub DMatrix<f64>);
-#[derive(Debug, Clone, PartialEq, Component)]
-pub struct JointAccel(pub SpatialMotion);
+#[derive(Debug, Clone, PartialEq, Component, Default)]
+pub struct JointAccel(pub GeneralizedMotion);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct PrevPos(pub GeneralizedPos);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct InverseInertia(pub Matrix3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldAccel(pub SpatialMotion);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct BiasForce(pub SpatialForce);
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct JointForce(pub GeneralizedForce);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct Fixed(pub bool);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct Picked(pub bool);
+#[derive(Debug, Clone, Copy, PartialEq, Resource)]
+pub struct Paused(pub bool);
+#[derive(Debug, Resource)]
+pub struct PhysicsFixedTime(pub FixedTime);
+
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct BodyPos(pub SpatialPos);
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
@@ -191,29 +212,6 @@ impl<'a, T: ToU64Storage> Drop for ObservableNumRef<'a, T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct PrevPos(pub Vector3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct PrevAtt(pub UnitQuaternion<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct InverseInertia(pub Matrix3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct WorldAccel(pub SpatialMotion);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct BiasForce(pub SpatialForce);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct JointForce(pub SpatialForce);
-
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct Fixed(pub bool);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct Picked(pub bool);
-#[derive(Debug, Clone, Copy, PartialEq, Resource)]
-pub struct Paused(pub bool);
-
-#[derive(Debug, Resource)]
-pub struct PhysicsFixedTime(pub FixedTime);
-
 #[derive(Debug, Resource)]
 pub enum TickMode {
     FreeRun,
@@ -266,14 +264,8 @@ pub struct EntityBundle {
     pub fixed: Fixed,
 
     // pos
-    pub prev_pos: PrevPos,
-    pub pos: BodyPos,
     pub world_pos: WorldPos,
-    pub vel: BodyVel,
     pub world_vel: WorldVel,
-
-    // attitude
-    pub prev_att: PrevAtt,
 
     // mass
     pub mass: Mass,
@@ -287,22 +279,32 @@ pub struct EntityBundle {
 
     pub picked: Picked,
 
-    pub joint: Joint,
-    pub joint_accel: JointAccel,
-    pub joint_force: JointForce,
+    pub joint: JointBundle,
+
     pub bias_force: BiasForce,
     pub world_accel: WorldAccel,
 
     pub tree_index: TreeIndex,
     pub subtree_inertia: SubtreeInertia,
+
+    pub body_pos: BodyPos,
+}
+
+#[derive(Bundle, Debug)]
+pub struct JointBundle {
+    pub joint: Joint,
+    pub pos: JointPos,
+    pub vel: JointVel,
+    pub joint_accel: JointAccel,
+    pub joint_force: JointForce,
 }
 
 #[derive(WorldQuery, Debug)]
 #[world_query(mutable, derive(Debug))]
 pub struct EntityQuery {
     pub fixed: &'static Fixed,
-    pub pos: &'static mut BodyPos,
-    pub vel: &'static mut BodyVel,
+    pub pos: &'static mut JointPos,
+    pub vel: &'static mut JointVel,
 
     pub world_pos: &'static mut WorldPos,
     pub world_vel: &'static mut WorldVel,
@@ -314,8 +316,8 @@ pub struct EntityQuery {
 
 pub struct EntityStateRef<'a> {
     pub fixed: &'a Fixed,
-    pub pos: &'a BodyPos,
-    pub vel: &'a BodyVel,
+    pub pos: &'a JointPos,
+    pub vel: &'a JointVel,
 
     pub world_pos: &'a WorldPos,
     pub world_vel: &'a WorldVel,
@@ -339,34 +341,6 @@ impl<'a> EntityStateRef<'a> {
         }
     }
 }
-
-// impl Pos {
-//     pub fn to_world<S>(&self, state: &S) -> Self
-//     where
-//         Pos: FromState<S>,
-//         Att: FromState<S>,
-//     {
-//         Pos(Att::from_state(Time(0.0), state).0 * self.0 + Pos::from_state(Time(0.0), state).0)
-//     }
-
-//     pub fn to_world_basis<S>(&self, state: &S) -> Self
-//     where
-//         Pos: FromState<S>,
-//         Att: FromState<S>,
-//     {
-//         Pos(Att::from_state(Time(0.0), state).0 * self.0)
-//     }
-// }
-
-// impl InverseInertia {
-//     pub fn to_world<S>(&self, state: &S) -> Self
-//     where
-//         Att: FromState<S>,
-//     {
-//         let att = Att::from_state(Time(0.0), state);
-//         InverseInertia(att.0.to_rotation_matrix() * self.0)
-//     }
-// }
 
 impl<'a> EntityQueryReadOnlyItem<'a> {
     pub fn state_ref(&self) -> EntityStateRef<'_> {
@@ -393,9 +367,9 @@ macro_rules! impl_entity_state {
 }
 
 impl_entity_state!(Mass, mass);
-impl_entity_state!(BodyPos, pos);
+impl_entity_state!(JointPos, pos);
 impl_entity_state!(WorldPos, world_pos);
-impl_entity_state!(BodyVel, vel);
+impl_entity_state!(JointVel, vel);
 impl_entity_state!(Inertia, inertia);
 impl_entity_state!(InverseInertia, inverse_inertia);
 

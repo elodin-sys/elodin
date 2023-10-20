@@ -24,6 +24,13 @@ impl SpatialTransform {
         Transpose(self)
     }
 
+    pub fn inverse(&self) -> Self {
+        Self {
+            linear: -1.0 * (self.angular * self.linear),
+            angular: self.angular.inverse(),
+        }
+    }
+
     pub fn dual_mul(&self, other: &SpatialForce) -> SpatialForce {
         let force = self.angular * other.force;
         let torque = self.angular * (other.torque - self.linear.cross(&other.force));
@@ -85,13 +92,20 @@ impl Mul<SpatialInertia> for Transpose<SpatialTransform> {
     type Output = SpatialInertia;
 
     fn mul(self, rhs: SpatialInertia) -> Self::Output {
-        let ang_inverse = self.0.angular.inverse();
-        let rot = self.0.angular.to_rotation_matrix();
-        let rot_trans = rot.transpose();
-        let momentum = self.0.angular.inverse() * rhs.momentum + rhs.mass * self.0.linear;
-        let inertia = rot_trans * rhs.inertia * rot
-            - self.0.linear.cross_matrix() * (ang_inverse * rhs.momentum).cross_matrix()
-            - momentum.cross_matrix() * self.0.linear.cross_matrix();
+        // let ang_inverse = self.0.angular.inverse();
+        // let rot = self.0.angular.to_rotation_matrix();
+        // let rot_trans = rot.transpose();
+        // let momentum = ang_inverse * rhs.momentum + rhs.mass * self.0.linear;
+        // let inertia = rot_trans * rhs.inertia * rot
+        //     - self.0.linear.cross_matrix() * (ang_inverse * rhs.momentum).cross_matrix()
+        //     - momentum.cross_matrix() * self.0.linear.cross_matrix();
+
+        let rot = self.0.angular.inverse().to_rotation_matrix();
+        let inertia = rot.transpose() * rhs.inertia * rot
+            - self.0.linear.cross_matrix() * (rot.transpose() * rhs.momentum).cross_matrix()
+            - (rot.transpose() * rhs.momentum + rhs.mass * self.0.linear).cross_matrix()
+                * self.0.linear.cross_matrix();
+        let momentum = rot.transpose() * rhs.momentum + rhs.mass * self.0.linear;
 
         SpatialInertia {
             momentum,

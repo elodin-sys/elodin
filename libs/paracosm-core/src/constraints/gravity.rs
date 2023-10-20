@@ -36,7 +36,7 @@ pub fn gravity_system(
         else {
             return;
         };
-        let r = entity_a.pos.0.pos - entity_b.pos.0.pos;
+        let r = entity_a.world_pos.0.pos - entity_b.world_pos.0.pos;
         let mu = (r / r.norm().powi(3) * constraint.g_constant) * entity_a.mass.0 * entity_b.mass.0;
         effect_a.force.0 -= mu;
         effect_b.force.0 += mu;

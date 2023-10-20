@@ -107,11 +107,11 @@ pub(crate) fn picked_system(
                 .filter(|(_, picked, _)| picked.0)
                 .for_each(|(entity, _, e)| {
                     ui.collapsing(format!("entity {:?}", e), |ui| {
-                        vec3_component(ui, "pos (m/s)", &entity.pos.0.pos);
-                        vec3_component(ui, "vel (m/s)", &entity.vel.0.vel);
-                        let euler_angles = vec_from_tuple(entity.pos.0.att.euler_angles());
+                        vec3_component(ui, "pos (m/s)", &entity.world_pos.0.pos);
+                        vec3_component(ui, "vel (m/s)", &entity.world_vel.0.vel);
+                        let euler_angles = vec_from_tuple(entity.world_pos.0.att.euler_angles());
                         vec3_component(ui, "euler angle (rad)", &euler_angles);
-                        vec3_component(ui, "ang vel (m/s)", &entity.vel.0.vel);
+                        vec3_component(ui, "ang vel (m/s)", &entity.world_vel.0.vel);
                     });
                 })
         });
