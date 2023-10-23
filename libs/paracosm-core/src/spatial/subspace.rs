@@ -25,7 +25,8 @@ impl Mul<SpatialForce> for Transpose<SpatialSubspace> {
     type Output = GeneralizedForce;
 
     fn mul(self, rhs: SpatialForce) -> Self::Output {
-        let out = self.0.matrix().transpose() * rhs.vector();
+        let mat = self.0.matrix();
+        let out = mat.transpose() * rhs.vector();
         let dof = out.shape().0 as u8;
         let mut inner = Vector6::zeros();
         for (row, o) in out.row_iter().zip(inner.iter_mut()) {

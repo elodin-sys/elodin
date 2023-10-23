@@ -6,7 +6,7 @@ use crate::{
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
     BodyPos, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeInertia, TreeIndex,
-    TreeMassMatrix, WorldPos, WorldVel,
+    TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
@@ -15,24 +15,30 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{
-    DMatrix, Matrix, Matrix6, MatrixXx1, UnitQuaternion, UnitVector3, Vector3, Vector6,
-};
+use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
 
 pub fn pos_tree_step(
     parent: &SpatialPos,
     child: &GeneralizedPos,
     body_pos: &SpatialPos,
     joint: &Joint,
-) -> WorldPos {
+) -> (WorldPos, WorldAnchorPos) {
     match joint.joint_type {
-        JointType::Free => WorldPos(child.to_spatial(&joint)),
+        JointType::Free => (
+            WorldPos(child.to_spatial(&joint)),
+            WorldAnchorPos(SpatialTransform::identity()),
+        ),
         JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
-            let pos = parent.transform() * joint.transform(child, *body_pos).inverse();
-            WorldPos(SpatialPos {
-                pos: pos.linear,
-                att: pos.angular,
-            })
+            let anchor_pos = child.to_spatial(&joint);
+            let world_anchor_pos = parent.transform() * anchor_pos.transform();
+            let pos = world_anchor_pos * body_pos.transform();
+            (
+                WorldPos(SpatialPos {
+                    pos: pos.linear,
+                    att: pos.angular,
+                }),
+                WorldAnchorPos(world_anchor_pos),
+            )
         }
     }
 }
@@ -41,6 +47,7 @@ pub fn pos_tree_step(
 #[world_query(mutable, derive(Debug))]
 pub struct KinematicQuery {
     world_pos: &'static mut crate::types::WorldPos,
+    world_anchor_pos: &'static mut crate::types::WorldAnchorPos,
     world_vel: &'static mut crate::types::WorldVel,
 
     pos: &'static mut JointPos,
@@ -67,13 +74,15 @@ pub fn kinematic_system(
                 continue;
             };
             let child_pos = kinematic.pos.0;
-            let world_pos = pos_tree_step(
+            let (world_pos, world_anchor_pos) = pos_tree_step(
                 parent_pos,
                 &child_pos,
                 &kinematic.body_pos.0,
                 &kinematic.joint,
             );
-            kinematic.world_pos.0 = world_pos.0;
+            *kinematic.world_pos = world_pos;
+            *kinematic.world_anchor_pos = world_anchor_pos;
+
             let children = children_query.get(*child);
             let Ok(Some(children)) = children else {
                 continue;
@@ -83,7 +92,8 @@ pub fn kinematic_system(
     }
 
     for (_, children, mut parent_kinematics) in root_query.iter_mut() {
-        parent_kinematics.world_pos.0 = parent_kinematics.pos.0.to_spatial(&Joint::free());
+        parent_kinematics.world_pos.0 =
+            parent_kinematics.pos.0.to_spatial(&parent_kinematics.joint);
 
         let Some(children) = children else { continue };
 
@@ -102,6 +112,7 @@ pub struct RNEChildQuery {
     pos: &'static JointPos,
     vel: &'static JointVel,
     world_pos: &'static mut WorldPos,
+    world_anchor_pos: &'static mut WorldAnchorPos,
 
     inertia: &'static Inertia,
     mass: &'static Mass,
@@ -126,22 +137,21 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 continue;
             };
 
-            let momentum = child.mass.0 * child.body_pos.0.pos;
             let (vel, accel, force) = forward_rne_step(
                 child.joint,
                 &parent.world_vel.0,
                 &parent.world_accel.0,
-                &child.body_pos.0,
-                &child.pos.0,
+                &child.world_anchor_pos,
                 &child.vel.0,
-                &SpatialInertia {
-                    inertia: child.inertia.0,
-                    momentum, // TODO: this should maybe be world // FIXME
-                    mass: child.mass.0,
-                },
+                &SpatialInertia::from_body_inertia(
+                    child.mass.0,
+                    &child.inertia.0,
+                    &child.world_pos.0.pos,
+                    &child.world_pos.0.att,
+                ),
                 SpatialForce {
-                    force: child.effect.force.0,
-                    torque: child.effect.torque.0,
+                    force: -child.effect.force.0,
+                    torque: -child.effect.torque.0,
                 },
             );
 
@@ -154,7 +164,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             };
 
             // child.world_vel.0 = child.vel.0; // FIXME
-            child.world_accel.0 = SpatialMotion::default();
+            child.world_accel.0 = SpatialMotion::linear(vector![0.0, 9.81, 0.0]);
             child.bias_force.0 = SpatialForce {
                 force: -child.effect.force.0,
                 torque: -child.effect.torque.0,
@@ -168,18 +178,17 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 continue;
             };
 
-            child.joint_force.0 =
-                child.joint.subspace(&child.body_pos.0).transpose() * child.bias_force.0;
+            child.joint_force.0 = child
+                .joint
+                .subspace(&child.world_anchor_pos.0.linear)
+                .transpose()
+                * child.bias_force.0;
         }
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
                 continue;
             };
-            parent.bias_force.0 += child
-                .joint
-                .transform(&child.pos.0, child.body_pos.0)
-                .transpose()
-                * child.bias_force.0;
+            parent.bias_force.0 += child.bias_force.0;
         }
     }
 }
@@ -188,18 +197,16 @@ fn forward_rne_step(
     joint: &Joint,
     parent_vel: &SpatialMotion,
     parent_accel: &SpatialMotion,
-    body_pos: &SpatialPos,
-    child_pos: &GeneralizedPos,
+    anchor_pos: &WorldAnchorPos,
     child_vel: &GeneralizedMotion,
     child_inertia: &SpatialInertia,
     force_ext: SpatialForce,
 ) -> (SpatialMotion, SpatialMotion, SpatialForce) {
-    let joint_vel = joint.subspace(body_pos) * child_vel;
-    let transform = joint.transform(child_pos, *body_pos);
-    let vel = transform * parent_vel + joint_vel;
-    let accel = transform * parent_accel + vel.cross(&joint_vel);
+    let joint_vel = joint.subspace(&anchor_pos.0.linear) * child_vel;
+    let vel = *parent_vel + joint_vel;
+    let accel = *parent_accel + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
-    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext; // TODO: What frame should this be in? I think subtree com
+    let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext;
     (vel, accel, force)
 }
 
@@ -232,12 +239,12 @@ impl Joint {
         }
     }
 
-    fn transform(&self, joint_pos: &GeneralizedPos, body_pos: SpatialPos) -> SpatialTransform {
-        let joint_pos = joint_pos.to_spatial(self);
-        (joint_pos.transform() * body_pos.transform()).inverse()
-    }
+    // fn transform(&self, joint_pos: &GeneralizedPos, body_pos: SpatialPos) -> SpatialTransform {
+    //     let joint_pos = joint_pos.to_spatial(self);
+    //     (joint_pos.transform() * body_pos.transform()).inverse()
+    // }
 
-    fn subspace(&self, body_pos: &SpatialPos) -> SpatialSubspace {
+    fn subspace(&self, anchor_pos: &Vector3<f64>) -> SpatialSubspace {
         match self.joint_type {
             JointType::Free => SpatialSubspace {
                 cols: 6,
@@ -245,14 +252,13 @@ impl Joint {
             },
             JointType::Revolute { axis } => {
                 let mut inner = Matrix6::zeros();
-                let offset = axis.cross(&body_pos.pos);
+                let offset = anchor_pos.cross(&axis);
                 inner
                     .fixed_view_mut::<3, 1>(0, 0)
                     .copy_from_slice(axis.as_slice());
                 inner
                     .fixed_view_mut::<3, 1>(3, 0)
                     .copy_from_slice(offset.as_slice());
-
                 SpatialSubspace { cols: 1, inner }
             }
             JointType::Sphere => {
@@ -291,31 +297,26 @@ pub fn cri_system(
     let mass_matrix = &mut mass_matrix.0;
 
     for mut x in &mut query {
-        let joint_transform = x.joint.transform(&x.joint_pos.0, x.body_pos.0).inverse();
-        let momentum = x.mass.0 * x.body_pos.0.pos;
-        x.subtree_inertia.0 = SpatialInertia {
-            inertia: x.inertia.0,
-            momentum, // TODO: this should maybebe world // FIXME
-            mass: x.mass.0,
-        }
+        x.subtree_inertia.0 = SpatialInertia::from_body_inertia(
+            x.mass.0,
+            &x.inertia.0,
+            &x.world_pos.0.pos,
+            &x.world_pos.0.att,
+        );
     }
     for Link { parent, child } in sort.0.iter().rev() {
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = query.get_many_mut([*parent, *child]) else {
                 continue;
             };
-            parent.subtree_inertia.0 += child
-                .joint
-                .transform(&child.joint_pos.0, child.body_pos.0)
-                .transpose()
-                * child.subtree_inertia.0.clone();
+            parent.subtree_inertia.0 += child.subtree_inertia.0.clone();
         }
 
-        let Ok(child) = query.get(*child) else {
+        let Ok(mut child) = query.get(*child) else {
             continue;
         };
         let i = child.tree_index.0;
-        let subspace = child.joint.subspace(&SpatialPos::default());
+        let subspace = child.joint.subspace(&child.anchor_pos.0.linear);
         let mut f = DMatrix::zeros(6, child.joint.dof());
         for (i, c) in subspace.matrix().column_iter().enumerate() {
             let ang_vel = c.fixed_view::<3, 1>(0, 0).into_owned();
@@ -323,33 +324,25 @@ pub fn cri_system(
             let col = (&child.subtree_inertia.0 * SpatialMotion { vel, ang_vel }).vector();
             f.column_mut(i).copy_from(&col);
         }
-        let subspace_force = subspace.matrix().transpose() * f.clone();
+        let h_block = subspace.matrix().transpose() * f.clone();
         mass_matrix
-            .view_mut((i, i), subspace_force.shape())
-            .copy_from(&subspace_force);
+            .view_mut((i, i), h_block.shape())
+            .copy_from(&h_block);
         let child_dof = child.joint.dof();
-        let mut x = child;
-        while let Some(p) = x.parent {
-            for mut c in f.column_iter_mut() {
-                let torque = c.fixed_view::<3, 1>(0, 0).into_owned();
-                let force = c.fixed_view::<3, 1>(3, 0).into_owned();
-
-                c.copy_from(
-                    &(x.joint.transform(&x.joint_pos.0, x.body_pos.0).transpose()
-                        * SpatialForce { force, torque })
-                    .vector(),
-                )
-            }
-            let Ok(q) = query.get(**p) else { break };
-            let j = q.tree_index.0;
-            let h_block = f.transpose() * q.joint.subspace(&SpatialPos::default()).matrix();
+        while let Some(parent) = child.parent {
+            let Ok(parent) = query.get(**parent) else {
+                break;
+            };
+            let j = parent.tree_index.0;
+            let h_block =
+                f.transpose() * parent.joint.subspace(&parent.anchor_pos.0.linear).matrix();
             mass_matrix
-                .view_mut((i, j), (child_dof, q.joint.dof()))
+                .view_mut((i, j), (child_dof, parent.joint.dof()))
                 .copy_from(&h_block);
             mass_matrix
-                .view_mut((j, i), (q.joint.dof(), child_dof))
+                .view_mut((j, i), (parent.joint.dof(), child_dof))
                 .copy_from(&h_block.transpose());
-            x = q;
+            child = parent;
         }
     }
 }
@@ -366,6 +359,8 @@ pub struct CRIQuery {
     body_vel: &'static JointVel,
 
     body_pos: &'static BodyPos,
+    world_pos: &'static WorldPos,
+    anchor_pos: &'static WorldAnchorPos,
 
     parent: Option<&'static Parent>,
     tree_index: &'static TreeIndex,
@@ -388,22 +383,22 @@ pub fn forward_dynamics(
 
     let mut i = 0;
     for Link { child, .. } in sort.0.iter() {
-        let Ok(bias_force) = query.get(*child) else {
+        let Ok(joint_force) = query.get(*child) else {
             return;
         };
-
-        let dof = bias_force.0.dof as usize;
+        let dof = joint_force.0.dof as usize;
         joint_forces
             .view_mut((i, 0), (dof, 1))
-            .copy_from(&bias_force.0.vector());
+            .copy_from(&joint_force.0.vector());
         i += dof;
     }
     let mass_matrix = std::mem::replace(&mut mass_matrix.0, DMatrix::zeros(0, 0));
-    let Some(inv_mass_matrix) = mass_matrix.try_inverse() else {
+    let Ok(inv_mass_matrix) = mass_matrix.pseudo_inverse(f64::EPSILON) else {
         return;
     };
+    println!("joint_forces = {joint_forces:?}");
     let accel = -1.0 * inv_mass_matrix * joint_forces;
-
+    println!("accel = {accel:?}");
     let mut i = 0;
     for link in sort.0.iter() {
         let Ok(bias_force) = query.get(link.child) else {

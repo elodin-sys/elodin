@@ -6,7 +6,7 @@ use super::{SpatialForce, SpatialInertia, SpatialMotion};
 
 pub struct Transpose<T>(pub T);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SpatialTransform {
     pub linear: Vector3<f64>,
     pub angular: UnitQuaternion<f64>,
