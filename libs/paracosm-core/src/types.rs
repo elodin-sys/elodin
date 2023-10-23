@@ -37,6 +37,8 @@ pub struct Inertia(pub Matrix3<f64>);
 pub struct Time(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct WorldPos(pub SpatialPos);
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct WorldAnchorPos(pub SpatialTransform);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct WorldVel(pub SpatialMotion);
 #[derive(Debug, Clone, PartialEq, Component)]
@@ -252,6 +254,19 @@ pub struct Effect {
     pub torque: Torque,
 }
 
+impl Effect {
+    pub fn force_at_point(
+        r: Vector3<f64>,
+        force: Vector3<f64>,
+        att: UnitQuaternion<f64>,
+    ) -> Effect {
+        Effect {
+            torque: Torque(att * r.cross(&force)),
+            force: Force(att * force),
+        }
+    }
+}
+
 impl AddAssign for Effect {
     fn add_assign(&mut self, rhs: Self) {
         self.force.0 += rhs.force.0;
@@ -265,6 +280,7 @@ pub struct EntityBundle {
 
     // pos
     pub world_pos: WorldPos,
+    pub world_anchor_pos: WorldAnchorPos,
     pub world_vel: WorldVel,
 
     // mass

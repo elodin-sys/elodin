@@ -9,7 +9,8 @@ use crate::{
     effector::Effector,
     sensor::Sensor,
     spatial::{
-        GeneralizedMotion, GeneralizedPos, SpatialForce, SpatialInertia, SpatialMotion, SpatialPos,
+        GeneralizedForce, GeneralizedMotion, GeneralizedPos, SpatialForce, SpatialInertia,
+        SpatialMotion, SpatialPos, SpatialTransform,
     },
     tree::{Joint, JointType},
     types::*,
@@ -154,10 +155,11 @@ impl EntityBuilder {
             sensors: self.sensors,
 
             effect: Effect::default(),
-            fixed: Fixed(self.fixed),
+            fixed: crate::Fixed(self.fixed),
             picked: Picked(false),
 
             world_pos: WorldPos(Default::default()),
+            world_anchor_pos: WorldAnchorPos(SpatialTransform::identity()),
             world_vel: WorldVel(Default::default()),
             world_accel: WorldAccel(Default::default()),
             tree_index: TreeIndex(0),
@@ -201,7 +203,7 @@ impl Revolute {
         self
     }
 
-    pub fn offset(mut self, offset: Vector3<f64>) -> Self {
+    pub fn anchor(mut self, offset: Vector3<f64>) -> Self {
         self.offset = offset;
         self
     }
@@ -279,6 +281,37 @@ impl JointBuilder for Free {
             }),
             joint_accel: JointAccel::default(),
             joint_force: JointForce::default(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct FixedJoint;
+
+impl JointBuilder for FixedJoint {
+    fn apply(&self) -> JointBundle {
+        JointBundle {
+            joint: Joint {
+                pos: Vector3::zeros(),
+                joint_type: JointType::Fixed,
+            },
+            pos: JointPos(GeneralizedPos {
+                dof: 0,
+                is_quat: false,
+                inner: matrix![ 0.; 0.; 0.; 0.; 0.; 0.; 0.; ],
+            }),
+            vel: JointVel(GeneralizedMotion {
+                dof: 0,
+                inner: Vector6::zeros(),
+            }),
+            joint_accel: JointAccel(GeneralizedMotion {
+                dof: 0,
+                ..Default::default()
+            }),
+            joint_force: JointForce(GeneralizedForce {
+                dof: 0,
+                ..Default::default()
+            }),
         }
     }
 }

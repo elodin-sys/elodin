@@ -1,6 +1,6 @@
 use std::ops::{AddAssign, Mul};
 
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use super::{SpatialForce, SpatialMotion};
 
@@ -10,6 +10,24 @@ pub struct SpatialInertia {
     // mass * COM
     pub momentum: Vector3<f64>,
     pub mass: f64,
+}
+
+impl SpatialInertia {
+    pub fn from_body_inertia(
+        mass: f64,
+        inertia: &Matrix3<f64>,
+        world_pos: &Vector3<f64>,
+        att: &UnitQuaternion<f64>,
+    ) -> Self {
+        let momentum = mass * world_pos;
+        let rot = att.to_rotation_matrix();
+        let inertia = rot * inertia * rot.transpose(); // TODO not sure which way this is meant to be around
+        SpatialInertia {
+            inertia,
+            momentum,
+            mass,
+        }
+    }
 }
 
 impl<'a> Mul<SpatialMotion> for &'a SpatialInertia {
