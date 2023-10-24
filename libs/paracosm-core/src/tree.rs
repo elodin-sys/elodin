@@ -92,8 +92,13 @@ pub fn kinematic_system(
     }
 
     for (_, children, mut parent_kinematics) in root_query.iter_mut() {
-        parent_kinematics.world_pos.0 =
-            parent_kinematics.pos.0.to_spatial(&parent_kinematics.joint);
+        let (world_pos, _) = pos_tree_step(
+            &SpatialPos::default(),
+            &parent_kinematics.pos.0,
+            &parent_kinematics.body_pos.0,
+            &parent_kinematics.joint,
+        );
+        *parent_kinematics.world_pos = world_pos;
 
         let Some(children) = children else { continue };
 
@@ -177,12 +182,14 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
-
+            println!("bias_force {:?}", child.bias_force.0);
             child.joint_force.0 = child
                 .joint
                 .subspace(&child.world_anchor_pos.0.linear)
                 .transpose()
                 * child.bias_force.0;
+
+            println!("joint_force {:?}", child.joint_force.0);
         }
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
@@ -205,6 +212,7 @@ fn forward_rne_step(
     let joint_vel = joint.subspace(&anchor_pos.0.linear) * child_vel;
     let vel = *parent_vel + joint_vel;
     let accel = *parent_accel + vel.cross(&joint_vel);
+    println!("accel = {:?}", accel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
     let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext;
     (vel, accel, force)
@@ -238,11 +246,6 @@ impl Joint {
             joint_type: JointType::Fixed,
         }
     }
-
-    // fn transform(&self, joint_pos: &GeneralizedPos, body_pos: SpatialPos) -> SpatialTransform {
-    //     let joint_pos = joint_pos.to_spatial(self);
-    //     (joint_pos.transform() * body_pos.transform()).inverse()
-    // }
 
     fn subspace(&self, anchor_pos: &Vector3<f64>) -> SpatialSubspace {
         match self.joint_type {
@@ -393,7 +396,7 @@ pub fn forward_dynamics(
         i += dof;
     }
     let mass_matrix = std::mem::replace(&mut mass_matrix.0, DMatrix::zeros(0, 0));
-    let Ok(inv_mass_matrix) = mass_matrix.pseudo_inverse(f64::EPSILON) else {
+    let Some(inv_mass_matrix) = mass_matrix.try_inverse() else {
         return;
     };
     println!("joint_forces = {joint_forces:?}");

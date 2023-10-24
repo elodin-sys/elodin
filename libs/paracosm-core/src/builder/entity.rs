@@ -3,7 +3,7 @@ use bevy::{
     scene::Scene,
 };
 use bevy_ecs::entity::Entity;
-use nalgebra::{matrix, vector, Matrix, Matrix3, UnitVector3, Vector3, Vector6};
+use nalgebra::{matrix, vector, Matrix3, UnitVector3, Vector3, Vector6};
 
 use crate::{
     effector::Effector,

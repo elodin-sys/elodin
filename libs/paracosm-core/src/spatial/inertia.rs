@@ -19,9 +19,10 @@ impl SpatialInertia {
         world_pos: &Vector3<f64>,
         att: &UnitQuaternion<f64>,
     ) -> Self {
+        let h = world_pos.cross_matrix();
         let momentum = mass * world_pos;
         let rot = att.to_rotation_matrix();
-        let inertia = rot * inertia * rot.transpose(); // TODO not sure which way this is meant to be around
+        let inertia = rot * inertia * rot.transpose() + mass * (h * h.transpose());
         SpatialInertia {
             inertia,
             momentum,

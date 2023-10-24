@@ -5,7 +5,7 @@ use bevy_ecs::{
 };
 use bevy_utils::tracing;
 
-use super::{body, types::*};
+use super::types::*;
 
 #[derive(WorldQuery)]
 #[world_query(mutable)]

@@ -1,4 +1,4 @@
-use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 
 /// Integrate a bodies position and velocity
 ///
