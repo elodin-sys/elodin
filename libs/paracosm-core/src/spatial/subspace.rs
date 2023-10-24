@@ -1,6 +1,4 @@
-use nalgebra::{
-    ArrayStorage, Const, Dyn, Matrix, Matrix6, MatrixView, Vector3, Vector6, ViewStorage, U1, U6,
-};
+use nalgebra::{ArrayStorage, Dyn, Matrix, MatrixView, Vector3, Vector6, U1, U6};
 use std::ops::Mul;
 
 use super::{GeneralizedForce, GeneralizedMotion, SpatialForce, SpatialMotion, Transpose};

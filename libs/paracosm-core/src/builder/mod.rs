@@ -14,10 +14,12 @@ pub use assets::*;
 use bevy_mod_picking::prelude::*;
 pub use entity::*;
 
-use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
+use crate::{
+    bevy_transform::NoPropagate, constraints, effector::concrete_effector, sensor::Sensor, Time,
+};
 
 use super::{
-    constraints::{DistanceConstraint, FixedJoint, GravityConstraint, RevoluteJoint},
+    constraints::{DistanceConstraint, GravityConstraint, RevoluteJoint},
     editor::traces::TraceAnchor,
     types::*,
 };
@@ -123,7 +125,7 @@ impl<'a> XpbdBuilder<'a> {
         self.queue.push(Spawn { bundle: gravity });
     }
 
-    pub fn fixed_joint(&mut self, fixed: FixedJoint) {
+    pub fn fixed_joint(&mut self, fixed: constraints::FixedJoint) {
         self.queue.push(Spawn { bundle: fixed });
     }
 }
