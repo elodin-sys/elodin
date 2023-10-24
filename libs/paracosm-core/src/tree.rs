@@ -5,8 +5,8 @@ use crate::{
         SpatialSubspace, SpatialTransform,
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    BodyPos, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeInertia, TreeIndex,
-    TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
+    BodyPos, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
+    SubtreeInertia, SubtreeMass, TreeIndex, TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
 use bevy_ecs::{
@@ -25,11 +25,11 @@ pub fn pos_tree_step(
 ) -> (WorldPos, WorldAnchorPos) {
     match joint.joint_type {
         JointType::Free => (
-            WorldPos(child.to_spatial(&joint)),
+            WorldPos(child.to_spatial(joint)),
             WorldAnchorPos(SpatialTransform::identity()),
         ),
         JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
-            let anchor_pos = child.to_spatial(&joint);
+            let anchor_pos = child.to_spatial(joint);
             let world_anchor_pos = parent.transform() * anchor_pos.transform();
             let pos = world_anchor_pos * body_pos.transform();
             (
@@ -111,6 +111,57 @@ pub fn kinematic_system(
     }
 }
 
+pub fn com_system(
+    query: Query<(&WorldPos, &Mass)>,
+    mut root_query: Query<(&mut SubtreeMass, &mut SubtreeCoMSum)>,
+    mut com_query: Query<&mut SubtreeCoM>,
+    sort: ResMut<TopologicalSort>,
+) {
+    for Link {
+        child,
+        root,
+        parent,
+    } in &sort.0
+    {
+        let Ok((pos, mass)) = query.get(*child) else {
+            continue;
+        };
+        let Ok((mut mass_sum, mut com_sum)) = root_query.get_mut(*root) else {
+            continue;
+        };
+
+        if parent.is_none() {
+            **com_sum = Vector3::zeros();
+            **mass_sum = 0.0;
+        }
+
+        **com_sum += mass.0 * pos.0.pos;
+        **mass_sum += mass.0;
+    }
+
+    for Link {
+        parent,
+        child,
+        root,
+    } in &sort.0
+    {
+        if parent.is_none() {
+            let Ok(mut com) = com_query.get_mut(*child) else {
+                continue;
+            };
+            let Ok((mass_sum, com_sum)) = root_query.get(*child) else {
+                continue;
+            };
+            **com = **com_sum / **mass_sum;
+        } else {
+            let Ok([mut child_com, root_com]) = com_query.get_many_mut([*child, *root]) else {
+                continue;
+            };
+            *child_com = *root_com;
+        }
+    }
+}
+
 #[derive(WorldQuery, Debug)]
 #[world_query(mutable, derive(Debug))]
 pub struct RNEChildQuery {
@@ -118,6 +169,7 @@ pub struct RNEChildQuery {
     vel: &'static JointVel,
     world_pos: &'static mut WorldPos,
     world_anchor_pos: &'static mut WorldAnchorPos,
+    subtree_com: &'static SubtreeCoM,
 
     inertia: &'static Inertia,
     mass: &'static Mass,
@@ -136,7 +188,7 @@ pub struct RNEChildQuery {
 }
 
 pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<TopologicalSort>) {
-    for Link { parent, child } in &sort.0 {
+    for Link { parent, child, .. } in &sort.0 {
         if let Some(parent) = parent {
             let Ok([parent, mut child]) = child_query.get_many_mut([*parent, *child]) else {
                 continue;
@@ -146,15 +198,17 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                 child.joint,
                 &parent.world_vel.0,
                 &parent.world_accel.0,
-                &child.world_anchor_pos,
+                child.world_anchor_pos.0.linear - **child.subtree_com,
                 &child.vel.0,
                 &SpatialInertia::from_body_inertia(
                     child.mass.0,
                     &child.inertia.0,
-                    &child.world_pos.0.pos,
+                    &(child.world_pos.0.pos - **child.subtree_com),
                     &child.world_pos.0.att,
                 ),
-                child.effect.to_spatial(child.world_pos.0.pos),
+                child
+                    .effect
+                    .to_spatial(child.world_pos.0.pos - **child.subtree_com),
             );
 
             child.world_vel.0 = vel;
@@ -167,18 +221,20 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
 
             // child.world_vel.0 = child.vel.0; // FIXME
             child.world_accel.0 = SpatialMotion::linear(vector![0.0, 9.81, 0.0]);
-            child.bias_force.0 = child.effect.to_spatial(child.world_pos.0.pos);
+            child.bias_force.0 = child
+                .effect
+                .to_spatial(child.world_pos.0.pos - **child.subtree_com);
         }
     }
 
-    for Link { parent, child } in sort.0.iter().rev() {
+    for Link { parent, child, .. } in sort.0.iter().rev() {
         {
             let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
             child.joint_force.0 = child
                 .joint
-                .subspace(&child.world_anchor_pos.0.linear)
+                .subspace(&(child.world_anchor_pos.0.linear - **child.subtree_com))
                 .transpose()
                 * child.bias_force.0;
         }
@@ -195,12 +251,12 @@ fn forward_rne_step(
     joint: &Joint,
     parent_vel: &SpatialMotion,
     parent_accel: &SpatialMotion,
-    anchor_pos: &WorldAnchorPos,
+    anchor_pos: Vector3<f64>,
     child_vel: &GeneralizedMotion,
     child_inertia: &SpatialInertia,
     force_ext: SpatialForce,
 ) -> (SpatialMotion, SpatialMotion, SpatialForce) {
-    let joint_vel = joint.subspace(&anchor_pos.0.linear) * child_vel;
+    let joint_vel = joint.subspace(&anchor_pos) * child_vel;
     let vel = *parent_vel + joint_vel;
     let accel = *parent_accel + vel.cross(&joint_vel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
@@ -293,11 +349,11 @@ pub fn cri_system(
         x.subtree_inertia.0 = SpatialInertia::from_body_inertia(
             x.mass.0,
             &x.inertia.0,
-            &x.world_pos.0.pos,
+            &(x.world_pos.0.pos - **x.subtree_com),
             &x.world_pos.0.att,
         );
     }
-    for Link { parent, child } in sort.0.iter().rev() {
+    for Link { parent, child, .. } in sort.0.iter().rev() {
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = query.get_many_mut([*parent, *child]) else {
                 continue;
@@ -353,6 +409,7 @@ pub struct CRIQuery {
 
     body_pos: &'static BodyPos,
     world_pos: &'static WorldPos,
+    subtree_com: &'static SubtreeCoM,
     anchor_pos: &'static WorldAnchorPos,
 
     parent: Option<&'static Parent>,

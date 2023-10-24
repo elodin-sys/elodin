@@ -13,7 +13,7 @@ use crate::{
     tree::Joint,
     FromState,
 };
-use bevy::prelude::FixedTime;
+use bevy::prelude::{Deref, DerefMut, FixedTime};
 use bevy_ecs::{
     prelude::{Bundle, Component},
     query::WorldQuery,
@@ -35,9 +35,9 @@ pub struct JointVel(pub GeneralizedMotion);
 pub struct Inertia(pub Matrix3<f64>);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Resource)]
 pub struct Time(pub f64);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Component, DerefMut, Deref)]
 pub struct WorldPos(pub SpatialPos);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Component, DerefMut, Deref)]
 pub struct WorldAnchorPos(pub SpatialTransform);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct WorldVel(pub SpatialMotion);
@@ -67,6 +67,13 @@ pub struct Picked(pub bool);
 pub struct Paused(pub bool);
 #[derive(Debug, Resource)]
 pub struct PhysicsFixedTime(pub FixedTime);
+
+#[derive(Debug, Clone, Copy, PartialEq, Component, DerefMut, Deref)]
+pub struct SubtreeMass(pub f64);
+#[derive(Debug, Clone, Copy, PartialEq, Component, DerefMut, Deref)]
+pub struct SubtreeCoMSum(pub Vector3<f64>);
+#[derive(Debug, Clone, Copy, PartialEq, Component, DerefMut, Deref)]
+pub struct SubtreeCoM(pub Vector3<f64>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct BodyPos(pub SpatialPos);
@@ -317,6 +324,10 @@ pub struct EntityBundle {
     pub subtree_inertia: SubtreeInertia,
 
     pub body_pos: BodyPos,
+
+    pub subtree_com: SubtreeCoM,
+    pub subtree_com_sum: SubtreeCoMSum,
+    pub subtree_mass: SubtreeMass,
 }
 
 #[derive(Bundle, Debug)]

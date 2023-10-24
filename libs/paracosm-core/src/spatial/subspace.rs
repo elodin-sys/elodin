@@ -15,7 +15,7 @@ impl SpatialSubspace {
     }
 
     pub fn matrix(&self) -> MatrixView<'_, f64, Dyn, Dyn, U1, U6> {
-        self.inner.view((0, 0), (6, self.cols as usize))
+        self.inner.view((0, 0), (6, self.cols))
     }
 }
 
