@@ -182,14 +182,11 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             let Ok(mut child) = child_query.get_mut(*child) else {
                 continue;
             };
-            println!("bias_force {:?}", child.bias_force.0);
             child.joint_force.0 = child
                 .joint
                 .subspace(&child.world_anchor_pos.0.linear)
                 .transpose()
                 * child.bias_force.0;
-
-            println!("joint_force {:?}", child.joint_force.0);
         }
         if let Some(parent) = parent {
             let Ok([mut parent, child]) = child_query.get_many_mut([*parent, *child]) else {
@@ -212,7 +209,6 @@ fn forward_rne_step(
     let joint_vel = joint.subspace(&anchor_pos.0.linear) * child_vel;
     let vel = *parent_vel + joint_vel;
     let accel = *parent_accel + vel.cross(&joint_vel);
-    println!("accel = {:?}", accel);
     // NOTE: S_i * ddot(q_i)  is not included, because accel is set to zero
     let force = child_inertia * accel + vel.cross_dual(&(child_inertia * vel)) - force_ext;
     (vel, accel, force)
@@ -399,9 +395,7 @@ pub fn forward_dynamics(
     let Some(inv_mass_matrix) = mass_matrix.try_inverse() else {
         return;
     };
-    println!("joint_forces = {joint_forces:?}");
     let accel = -1.0 * inv_mass_matrix * joint_forces;
-    println!("accel = {accel:?}");
     let mut i = 0;
     for link in sort.0.iter() {
         let Ok(bias_force) = query.get(link.child) else {
