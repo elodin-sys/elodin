@@ -154,10 +154,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
                     &child.world_pos.0.pos,
                     &child.world_pos.0.att,
                 ),
-                SpatialForce {
-                    force: -child.effect.force.0,
-                    torque: -child.effect.torque.0,
-                },
+                child.effect.to_spatial(child.world_pos.0.pos),
             );
 
             child.world_vel.0 = vel;
@@ -170,10 +167,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
 
             // child.world_vel.0 = child.vel.0; // FIXME
             child.world_accel.0 = SpatialMotion::linear(vector![0.0, 9.81, 0.0]);
-            child.bias_force.0 = SpatialForce {
-                force: -child.effect.force.0,
-                torque: -child.effect.torque.0,
-            };
+            child.bias_force.0 = child.effect.to_spatial(child.world_pos.0.pos);
         }
     }
 

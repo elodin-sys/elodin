@@ -271,6 +271,13 @@ impl Effect {
             force: Force(att * force),
         }
     }
+
+    pub fn to_spatial(&self, world_pos: Vector3<f64>) -> SpatialForce {
+        SpatialForce {
+            force: -self.force.0 + world_pos.cross(&self.torque.0),
+            torque: -self.torque.0 - world_pos.cross(&self.force.0),
+        }
+    }
 }
 
 impl AddAssign for Effect {
