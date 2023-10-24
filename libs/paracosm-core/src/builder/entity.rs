@@ -53,7 +53,7 @@ impl Default for EntityBuilder {
             trace: None,
             scene: None,
             parent: None,
-            joint: Box::new(Free::default()),
+            joint: Box::<Free>::default(),
             body_pos: Default::default(),
             body_vel: Default::default(),
         }
@@ -168,6 +168,9 @@ impl EntityBuilder {
 
             joint: self.joint.apply(),
             body_pos: BodyPos(self.body_pos),
+            subtree_com: SubtreeCoM(Default::default()),
+            subtree_com_sum: SubtreeCoMSum(Default::default()),
+            subtree_mass: SubtreeMass(Default::default()),
         }
     }
 }

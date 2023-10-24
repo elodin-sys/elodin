@@ -5,7 +5,7 @@ use nalgebra::DMatrix;
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
-    tree::{cri_system, forward_dynamics, rne_system},
+    tree::{com_system, cri_system, forward_dynamics, rne_system},
     TreeMassMatrix, WorldPos,
 };
 
@@ -107,6 +107,7 @@ pub struct SubstepSchedule;
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum SubstepSet {
     ForwardKinematics,
+    CoMPos,
     RecursiveNewtonEuler,
     CompositeRigidBodyInertia,
     ForwardDynamics,
@@ -124,6 +125,7 @@ pub fn substep_schedule() -> Schedule {
     schedule.configure_sets(
         (
             SubstepSet::ForwardKinematics,
+            SubstepSet::CoMPos,
             SubstepSet::CalcEffects,
             SubstepSet::RecursiveNewtonEuler,
             SubstepSet::CompositeRigidBodyInertia,
@@ -138,6 +140,7 @@ pub fn substep_schedule() -> Schedule {
             .chain(),
     );
     schedule.add_systems((kinematic_system).in_set(SubstepSet::ForwardKinematics));
+    schedule.add_systems((com_system).in_set(SubstepSet::CoMPos));
     schedule.add_systems(
         (calculate_effects, calculate_sensors, gravity_system).in_set(SubstepSet::CalcEffects),
     );
