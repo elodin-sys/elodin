@@ -83,6 +83,12 @@ impl Inertia {
             0.0, 0.0, k * (w + h)
         ])
     }
+
+    pub fn sphere(radius: f64, mass: f64) -> Inertia {
+        Inertia(Matrix3::from_diagonal_element(
+            2.0 / 5.0 * mass * radius.powi(2),
+        ))
+    }
 }
 
 #[derive(Clone, Debug)]
