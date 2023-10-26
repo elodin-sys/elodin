@@ -167,7 +167,10 @@ mod tests {
     use bevy_ecs::{schedule::Schedule, world::World};
     use nalgebra::vector;
 
-    use crate::{builder::EntityBuilder, JointPos};
+    use crate::{
+        builder::{EntityBuilder, Free},
+        JointPos,
+    };
 
     use super::*;
 
@@ -177,7 +180,7 @@ mod tests {
         let a = world
             .spawn((
                 EntityBuilder::default()
-                    .pos(vector![1.0, 0.0, 0.0])
+                    .joint(Free::default().pos(SpatialPos::linear(vector![1.0, 0.0, 0.0])))
                     .bundle(),
                 Transform::default(),
             ))
@@ -185,27 +188,35 @@ mod tests {
         let b = world
             .spawn((
                 EntityBuilder::default()
-                    .pos(vector![0.0, 1.0, 0.0])
+                    .joint(Free::default().pos(SpatialPos::linear(vector![0.0, 1.0, 0.0])))
                     .bundle(),
                 Transform::default(),
             ))
             .id();
         world.spawn((
             EntityBuilder::default()
-                .pos(vector![0.0, 0.0, 1.0])
+                .joint(Free::default().pos(SpatialPos::linear(vector![0.0, 0.0, 1.0])))
                 .bundle(),
             Transform::default(),
         ));
         let mut history = HistoryStore::default();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
-        a_entity.get_mut::<JointPos>().unwrap().0.pos = vector![2.0, 0.0, 0.0];
+        a_entity.get_mut::<JointPos>().unwrap().0.inner =
+            SpatialPos::linear(vector![2.0, 0.0, 0.0]).vector();
         let mut b_entity = world.get_entity_mut(b).unwrap();
-        b_entity.get_mut::<JointPos>().unwrap().0.pos = vector![0.0, 2.0, 0.0];
+        b_entity.get_mut::<JointPos>().unwrap().0.inner =
+            SpatialPos::linear(vector![0.0, 2.0, 0.0]).vector();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let a_history = history.history(&a).unwrap();
-        assert_eq!(a_history.pos()[0].pos, vector![1.0, 0.0, 0.0]);
-        assert_eq!(a_history.pos()[1].pos, vector![2.0, 0.0, 0.0]);
+        assert_eq!(
+            a_history.pos()[0].inner.as_slice(),
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            a_history.pos()[1].inner.as_slice(),
+            &[0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0]
+        );
     }
 
     #[test]
@@ -214,7 +225,7 @@ mod tests {
         let a = world
             .spawn((
                 EntityBuilder::default()
-                    .pos(vector![1.0, 0.0, 0.0])
+                    .joint(Free::default().pos(SpatialPos::linear(vector![1.0, 0.0, 0.0])))
                     .bundle(),
                 Transform::default(),
             ))
@@ -222,23 +233,25 @@ mod tests {
         let b = world
             .spawn((
                 EntityBuilder::default()
-                    .pos(vector![0.0, 1.0, 0.0])
+                    .joint(Free::default().pos(SpatialPos::linear(vector![0.0, 1.0, 0.0])))
                     .bundle(),
                 Transform::default(),
             ))
             .id();
         world.spawn((
             EntityBuilder::default()
-                .pos(vector![0.0, 0.0, 1.0])
+                .joint(Free::default().pos(SpatialPos::linear(vector![0.0, 0.0, 1.0])))
                 .bundle(),
             Transform::default(),
         ));
         let mut history = HistoryStore::default();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut a_entity = world.get_entity_mut(a).unwrap();
-        a_entity.get_mut::<JointPos>().unwrap().0.pos = vector![2.0, 0.0, 0.0];
+        a_entity.get_mut::<JointPos>().unwrap().0.inner =
+            SpatialPos::linear(vector![2.0, 0.0, 0.0]).vector();
         let mut b_entity = world.get_entity_mut(b).unwrap();
-        b_entity.get_mut::<JointPos>().unwrap().0.pos = vector![0.0, 2.0, 0.0];
+        b_entity.get_mut::<JointPos>().unwrap().0.inner =
+            SpatialPos::linear(vector![0.0, 2.0, 0.0]).vector();
         history.record(world.query::<(Entity, HistoryQueryReadOnly)>().iter(&world));
         let mut rollback = Schedule::default();
         rollback.add_systems(move |mut query: Query<HistoryQuery>| {
@@ -247,8 +260,8 @@ mod tests {
         rollback.run(&mut world);
         let a_entity = world.get_entity_mut(a).unwrap();
         assert_eq!(
-            a_entity.get::<JointPos>().unwrap().0.pos,
-            vector![1.0, 0.0, 0.0]
+            a_entity.get::<JointPos>().unwrap().0.inner.as_slice(),
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
         )
     }
 }

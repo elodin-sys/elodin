@@ -61,8 +61,9 @@ mod tests {
     use nalgebra::{vector, Vector3};
 
     use crate::{
-        builder::{EntityBuilder, XpbdBuilder},
+        builder::{EntityBuilder, Free, XpbdBuilder},
         forces::gravity,
+        spatial::{SpatialMotion, SpatialPos},
         types::LockStepSignal,
     };
 
@@ -74,8 +75,11 @@ mod tests {
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
-                    .pos(vector![0.0, 0.0, 1.0])
-                    .vel(vector![1.0, 0.0, 0.0])
+                    .joint(
+                        Free::default()
+                            .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                            .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+                    )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
         }
@@ -99,8 +103,11 @@ mod tests {
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
-                    .pos(vector![0.0, 0.0, 1.0])
-                    .vel(vector![1.0, 0.0, 0.0])
+                    .joint(
+                        Free::default()
+                            .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                            .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+                    )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
         }

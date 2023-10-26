@@ -10,7 +10,7 @@ use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 use crate::{
     effector::{concrete_effector, Effector},
     types::{Config, EntityQuery},
-    FromState, Time,
+    Effect, FromState, Time,
 };
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
@@ -112,12 +112,12 @@ pub fn clear_revolute_lagrange(mut query: Query<&mut RevoluteJoint>) {
 
 pub fn revolute_system(
     mut query: Query<&mut RevoluteJoint>,
-    mut bodies: Query<EntityQuery>,
+    mut bodies: Query<(EntityQuery, &mut Effect)>,
     config: Res<Config>,
     time: Res<Time>,
 ) {
     query.for_each_mut(|mut constraint| {
-        let Ok([mut entity_a, mut entity_b]) =
+        let Ok([(mut entity_a, mut effect_a), (mut entity_b, mut effect_b)]) =
             bodies.get_many_mut([constraint.entity_a, constraint.entity_b])
         else {
             return;
@@ -138,6 +138,8 @@ pub fn revolute_system(
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
+            &mut effect_a,
+            &mut effect_b,
             delta_q,
             &mut constraint.angle_lagrange,
             compliance,
@@ -160,6 +162,8 @@ pub fn revolute_system(
         apply_distance_constraint(
             &mut entity_a,
             &mut entity_b,
+            &mut effect_a,
+            &mut effect_b,
             c,
             n,
             inverse_mass_a,
@@ -187,6 +191,8 @@ pub fn revolute_system(
                 apply_rot_constraint(
                     &mut entity_a,
                     &mut entity_b,
+                    &mut effect_a,
+                    &mut effect_b,
                     delta_q,
                     &mut constraint.angle_limit_lagrange,
                     compliance,
@@ -211,6 +217,8 @@ pub fn revolute_system(
                 apply_rot_constraint(
                     &mut entity_a,
                     &mut entity_b,
+                    &mut effect_a,
+                    &mut effect_b,
                     delta_q_target,
                     &mut constraint.angle_lagrange,
                     compliance,

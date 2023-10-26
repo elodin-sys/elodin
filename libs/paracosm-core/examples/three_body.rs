@@ -3,9 +3,10 @@ use std::f64::consts::PI;
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
-    builder::{Assets, EntityBuilder, XpbdBuilder},
+    builder::{Assets, EntityBuilder, Free, XpbdBuilder},
     constraints::GravityConstraint,
     editor::editor,
+    spatial::{SpatialMotion, SpatialPos},
 };
 
 fn main() {
@@ -16,8 +17,13 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let a = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(vector![1.0, 0.0, 0.0])
-            .vel(0.55 * vector![(0.5 * PI).cos(), (0.5 * PI).sin(), 0.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![1.0, 0.0, 0.0]))
+                    .vel(SpatialMotion::linear(
+                        0.55 * vector![(0.5 * PI).cos(), (0.5 * PI).sin(), 0.0],
+                    )),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
@@ -32,8 +38,17 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let b = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(vector![(2. / 3. * PI).cos(), (2. / 3. * PI).sin(), 0.0])
-            .vel(0.55 * vector![(1.166 * PI).cos(), (1.166 * PI).sin(), 0.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![
+                        (2. / 3. * PI).cos(),
+                        (2. / 3. * PI).sin(),
+                        0.0
+                    ]))
+                    .vel(SpatialMotion::linear(
+                        0.55 * vector![(1.166 * PI).cos(), (1.166 * PI).sin(), 0.0],
+                    )),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
@@ -49,8 +64,17 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let c = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(vector![(4. / 3. * PI).cos(), (4. / 3. * PI).sin(), 0.0])
-            .vel(0.55 * vector![(1.833 * PI).cos(), (1.833 * PI).sin(), 0.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![
+                        (4. / 3. * PI).cos(),
+                        (4. / 3. * PI).sin(),
+                        0.0
+                    ]))
+                    .vel(SpatialMotion::linear(
+                        0.55 * vector![(1.833 * PI).cos(), (1.833 * PI).sin(), 0.0],
+                    )),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,

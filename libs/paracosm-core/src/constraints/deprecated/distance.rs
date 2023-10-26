@@ -4,7 +4,10 @@ use bevy_ecs::{
 };
 use nalgebra::{UnitVector3, Vector3};
 
-use crate::types::{Config, EntityQuery};
+use crate::{
+    types::{Config, EntityQuery},
+    Effect,
+};
 
 use super::{apply_distance_constraint, pos_generalized_inverse_mass};
 
@@ -60,11 +63,11 @@ pub fn clear_distance_lagrange(mut query: Query<&mut DistanceConstraint>) {
 
 pub fn distance_system(
     mut query: Query<&mut DistanceConstraint>,
-    mut bodies: Query<EntityQuery>,
+    mut bodies: Query<(EntityQuery, &mut Effect)>,
     config: Res<Config>,
 ) {
     query.for_each_mut(|mut constraint| {
-        let Ok([mut entity_a, mut entity_b]) =
+        let Ok([(mut entity_a, mut effect_a), (mut entity_b, mut effect_b)]) =
             bodies.get_many_mut([constraint.entity_a, constraint.entity_b])
         else {
             return;
@@ -93,6 +96,8 @@ pub fn distance_system(
         apply_distance_constraint(
             &mut entity_a,
             &mut entity_b,
+            &mut effect_a,
+            &mut effect_b,
             c,
             n,
             inverse_mass_a,

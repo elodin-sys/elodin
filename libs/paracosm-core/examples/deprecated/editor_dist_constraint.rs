@@ -1,10 +1,11 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
-    builder::{Assets, EntityBuilder, XpbdBuilder},
+    builder::{Assets, EntityBuilder, FixedJoint, Free, XpbdBuilder},
     constraints::DistanceConstraint,
     editor::{editor, Input},
-    Force, Time,
+    spatial::SpatialPos,
+    Fixed, Force, Time,
 };
 
 fn main() {
@@ -15,8 +16,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     let a = builder.entity(
         EntityBuilder::default()
             .mass(10.0)
-            .pos(vector![1.0, 0.0, 0.0])
-            .vel(vector![0.0, 0.0, 0.0])
+            .joint(Free::default().pos(SpatialPos::linear(vector![1.3, 0.0, 0.0])))
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.1,
                 ..Default::default()
@@ -26,9 +26,8 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     );
     let b = builder.entity(
         EntityBuilder::default()
-            .fixed()
+            .joint(FixedJoint)
             .mass(1.0)
-            .pos(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.1,
                 ..Default::default()
@@ -38,6 +37,6 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     builder.distance_constraint(
         DistanceConstraint::new(a, b)
             .distance_target(1.0)
-            .compliance(0.001),
+            .compliance(0.00000001),
     );
 }
