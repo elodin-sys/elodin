@@ -1,0 +1,26 @@
+[package]
+name = "paracosm-editor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# core
+paracosm.path = "../paracosm-core"
+paracosm-macros.path = "../paracosm-macros"
+
+# math
+nalgebra = "0.32"
+
+# bevy
+bevy.version = "0.11"
+bevy.features = ["wayland", "trace"]
+bevy_egui = "0.21"
+bevy_panorbit_camera.version = "0.8.0"
+bevy_panorbit_camera.features = ["bevy_egui"]
+bevy_atmosphere = "0.7.0"
+bevy_infinite_grid = "0.8.1"
+bevy_polyline = "0.7"
+bevy_mod_picking.version = "0.15"
+bevy_mod_picking.features = ["backend_egui"]

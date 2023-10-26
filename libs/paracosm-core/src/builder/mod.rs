@@ -5,18 +5,20 @@ use bevy::{prelude::AddChild, scene::SceneBundle};
 use bevy_ecs::{
     entity::Entities,
     prelude::Entity,
-    system::{CommandQueue, Insert, Query, Spawn},
+    system::{CommandQueue, Insert, Spawn},
 };
 use std::cell::RefMut;
 use std::marker::PhantomData;
 
 pub use assets::*;
-use bevy_mod_picking::prelude::*;
 pub use entity::*;
 
-use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
+use crate::{
+    bevy_transform::NoPropagate, effector::concrete_effector, runner::SimRunnerEnv, sensor::Sensor,
+    Time,
+};
 
-use super::{constraints::GravityConstraint, editor::traces::TraceAnchor, types::*};
+use super::{constraints::GravityConstraint, types::*};
 
 concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
 
@@ -61,20 +63,21 @@ impl<'a> XpbdBuilder<'a> {
                 bundle: TraceAnchor { anchor },
             });
         }
-        if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
-            self.queue.push(Insert {
-                entity,
-                bundle: (
-                    PickableBundle::default(),
-                    RaycastPickTarget::default(),
-                    On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
-                        if let Ok(mut picked) = query.get_mut(entity) {
-                            picked.0 = !picked.0;
-                        }
-                    }),
-                ),
-            })
-        }
+        // if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
+        //     self.queue.push(Insert {
+        //         entity,
+        //         bundle: (
+        //             PickableBundle::default(),
+        //             RaycastPickTarget::default(),
+        //             On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
+        //                 if let Ok(mut picked) = query.get_mut(entity) {
+        //                     picked.0 = !picked.0;
+        //                 }
+        //             }),
+        //         ),
+        //     })
+        // }
+        // TODO: Add this to editor module
         if let Some(pbr) = entity_builder.editor_bundle.take() {
             self.queue.push(Insert {
                 entity,
@@ -190,5 +193,18 @@ where
 {
     fn build(&self, env: &mut E) -> R {
         self.func.build(env)
+    }
+}
+
+impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
+    type Item<'t> = XpbdBuilder<'t>;
+
+    fn init(_env: &mut SimRunnerEnv) {}
+
+    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
+        XpbdBuilder {
+            queue: env.command_queue.borrow_mut(),
+            entities: env.app.world.entities(),
+        }
     }
 }

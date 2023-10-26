@@ -15,6 +15,7 @@ use crate::{
 };
 use bevy::prelude::{Deref, DerefMut, FixedTime};
 use bevy_ecs::{
+    entity::Entity,
     prelude::{Bundle, Component},
     query::WorldQuery,
     system::Resource,
@@ -77,6 +78,14 @@ pub struct SubtreeCoM(pub Vector3<f64>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct BodyPos(pub SpatialPos);
+
+#[derive(Component)]
+pub struct TraceEntity(Entity);
+
+#[derive(Component, Clone)]
+pub struct TraceAnchor {
+    pub anchor: Vector3<f64>,
+}
 
 impl Inertia {
     pub fn solid_box(width: f64, height: f64, depth: f64, mass: f64) -> Inertia {
