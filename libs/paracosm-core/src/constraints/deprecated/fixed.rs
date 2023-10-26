@@ -5,7 +5,10 @@ use bevy_ecs::{
 };
 use nalgebra::{UnitQuaternion, UnitVector3, Vector3};
 
-use crate::types::{Config, EntityQuery};
+use crate::{
+    types::{Config, EntityQuery},
+    Effect,
+};
 
 use super::{apply_distance_constraint, apply_rot_constraint, pos_generalized_inverse_mass};
 
@@ -74,11 +77,11 @@ pub fn clear_fixed_lagrange(mut query: Query<&mut FixedJoint>) {
 
 pub fn fixed_joint_system(
     mut query: Query<&mut FixedJoint>,
-    mut bodies: Query<EntityQuery>,
+    mut bodies: Query<(EntityQuery, &mut Effect)>,
     config: Res<Config>,
 ) {
     query.for_each_mut(|mut constraint| {
-        let Ok([mut entity_a, mut entity_b]) =
+        let Ok([(mut entity_a, mut effect_a), (mut entity_b, mut effect_b)]) =
             bodies.get_many_mut([constraint.entity_a, constraint.entity_b])
         else {
             return;
@@ -95,6 +98,8 @@ pub fn fixed_joint_system(
         apply_rot_constraint(
             &mut entity_a,
             &mut entity_b,
+            &mut effect_a,
+            &mut effect_b,
             delta_q,
             &mut constraint.angle_lagrange,
             compliance,
@@ -117,6 +122,8 @@ pub fn fixed_joint_system(
         apply_distance_constraint(
             &mut entity_a,
             &mut entity_b,
+            &mut effect_a,
+            &mut effect_b,
             c,
             n,
             inverse_mass_a,

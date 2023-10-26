@@ -1,5 +1,5 @@
 use bevy::prelude::{Quat, Vec3};
-use nalgebra::{UnitQuaternion, Vector3};
+use nalgebra::{matrix, ArrayStorage, Matrix, UnitQuaternion, Vector3, U1, U7};
 
 use super::SpatialTransform;
 
@@ -10,6 +10,10 @@ pub struct SpatialPos {
 }
 
 impl SpatialPos {
+    pub fn new(pos: Vector3<f64>, att: UnitQuaternion<f64>) -> Self {
+        Self { pos, att }
+    }
+
     pub fn linear(pos: Vector3<f64>) -> SpatialPos {
         SpatialPos {
             pos,
@@ -32,5 +36,17 @@ impl SpatialPos {
             rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
             ..Default::default()
         }
+    }
+
+    pub fn vector(&self) -> Matrix<f64, U7, U1, ArrayStorage<f64, 7, 1>> {
+        matrix![
+            self.att[0];
+            self.att[1];
+            self.att[2];
+            self.att[3];
+            self.pos[0];
+            self.pos[1];
+            self.pos[2]
+        ]
     }
 }

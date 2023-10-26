@@ -10,10 +10,7 @@ use crate::{
 };
 
 use super::{
-    constraints::{
-        clear_distance_lagrange, clear_revolute_lagrange, distance_system, gravity_system,
-        revolute_damping, revolute_system,
-    },
+    constraints::gravity_system,
     systems::*,
     tree::kinematic_system,
     types::{Config, Paused, PhysicsFixedTime, TickMode},
@@ -66,11 +63,6 @@ impl Plugin for XpbdPlugin {
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);
-        app.add_systems(
-            PhysicsSchedule,
-            (clear_distance_lagrange, clear_revolute_lagrange)
-                .in_set(TickSet::ClearConstraintLagrange),
-        );
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
         app.add_systems(PhysicsSchedule, sync_pos.in_set(TickSet::SyncPos))
             .configure_sets(
@@ -131,9 +123,7 @@ pub fn substep_schedule() -> Schedule {
             SubstepSet::CompositeRigidBodyInertia,
             SubstepSet::ForwardDynamics,
             SubstepSet::Integrate,
-            SubstepSet::SolveConstraints,
             SubstepSet::UpdateVel,
-            SubstepSet::DampJoints,
             SubstepSet::ClearEffects,
             SubstepSet::UpdateTime,
         )
@@ -148,8 +138,6 @@ pub fn substep_schedule() -> Schedule {
     schedule.add_systems((cri_system).in_set(SubstepSet::CompositeRigidBodyInertia));
     schedule.add_systems((forward_dynamics).in_set(SubstepSet::ForwardDynamics));
     schedule.add_systems((integrate_pos).in_set(SubstepSet::Integrate));
-    schedule.add_systems((distance_system, revolute_system).in_set(SubstepSet::SolveConstraints));
-    schedule.add_systems((revolute_damping).in_set(SubstepSet::DampJoints));
     schedule.add_systems((clear_effects).in_set(SubstepSet::ClearEffects));
     schedule.add_systems((update_time).in_set(SubstepSet::UpdateTime));
     schedule

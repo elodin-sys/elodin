@@ -14,15 +14,9 @@ pub use assets::*;
 use bevy_mod_picking::prelude::*;
 pub use entity::*;
 
-use crate::{
-    bevy_transform::NoPropagate, constraints, effector::concrete_effector, sensor::Sensor, Time,
-};
+use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
 
-use super::{
-    constraints::{DistanceConstraint, GravityConstraint, RevoluteJoint},
-    editor::traces::TraceAnchor,
-    types::*,
-};
+use super::{constraints::GravityConstraint, editor::traces::TraceAnchor, types::*};
 
 concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
 
@@ -109,24 +103,8 @@ impl<'a> XpbdBuilder<'a> {
         entity
     }
 
-    pub fn distance_constraint(&mut self, distance_constraint: DistanceConstraint) {
-        self.queue.push(Spawn {
-            bundle: distance_constraint,
-        });
-    }
-
-    pub fn revolute_joint(&mut self, revolute_join: RevoluteJoint) {
-        self.queue.push(Spawn {
-            bundle: revolute_join,
-        });
-    }
-
     pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
         self.queue.push(Spawn { bundle: gravity });
-    }
-
-    pub fn fixed_joint(&mut self, fixed: constraints::FixedJoint) {
-        self.queue.push(Spawn { bundle: fixed });
     }
 }
 
