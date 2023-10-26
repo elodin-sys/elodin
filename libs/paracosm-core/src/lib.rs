@@ -2,7 +2,6 @@ mod bevy_transform;
 pub mod body;
 pub mod builder;
 pub mod constraints;
-pub mod editor;
 pub mod effector;
 pub mod forces;
 pub mod hierarchy;

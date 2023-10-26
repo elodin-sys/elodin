@@ -5096,13 +5096,7 @@ dependencies = [
  "approx",
  "arrow",
  "bevy",
- "bevy_atmosphere",
  "bevy_ecs",
- "bevy_egui",
- "bevy_infinite_grid",
- "bevy_mod_picking",
- "bevy_panorbit_camera",
- "bevy_polyline",
  "bevy_utils",
  "clap 4.4.6",
  "criterion",
@@ -5116,6 +5110,22 @@ dependencies = [
  "serde",
  "serde_json",
  "stable-vec",
+]
+
+[[package]]
+name = "paracosm-editor"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_atmosphere",
+ "bevy_egui",
+ "bevy_infinite_grid",
+ "bevy_mod_picking",
+ "bevy_panorbit_camera",
+ "bevy_polyline",
+ "nalgebra",
+ "paracosm",
+ "paracosm-macros",
 ]
 
 [[package]]

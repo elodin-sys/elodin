@@ -1,9 +1,5 @@
 use self::{traces::TracesPlugin, ui::*};
-use crate::{
-    bevy_transform::TransformPlugin,
-    builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
-    ObservableNum, SharedNum,
-};
+use bevy::transform::TransformPlugin;
 use bevy::{
     core_pipeline::{
         bloom::BloomSettings,
@@ -24,32 +20,16 @@ use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, Inf
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
+use paracosm::runner::{IntoSimRunner, SimRunnerEnv};
+use paracosm::{
+    builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
+    ObservableNum, SharedNum,
+};
 use paracosm_macros::Editable;
-
-use super::runner::{IntoSimRunner, SimRunnerEnv};
 
 pub(crate) mod traces;
 mod ui;
 pub use ui::Editable;
-
-impl<'a> FromEnv<SimRunnerEnv> for Assets<'a> {
-    type Item<'e> = Assets<'e>;
-
-    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        let unsafe_world_cell = env.app.world.as_unsafe_world_cell_readonly();
-        let meshes = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
-        let materials = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
-        let server = unsafe { unsafe_world_cell.get_resource_mut().unwrap() };
-
-        Assets(Some(AssetsInner {
-            meshes,
-            materials,
-            server,
-        }))
-    }
-
-    fn init(_: &mut SimRunnerEnv) {}
-}
 
 pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T>) {
     let runner = func.into_runner();
@@ -174,19 +154,6 @@ fn make_pickable(
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Input(pub SharedNum<f64>);
-
-impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
-    type Item<'t> = XpbdBuilder<'t>;
-
-    fn init(_env: &mut SimRunnerEnv) {}
-
-    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        XpbdBuilder {
-            queue: env.command_queue.borrow_mut(),
-            entities: env.app.world.entities(),
-        }
-    }
-}
 
 #[derive(Editable, Resource, Clone, Debug, Default)]
 #[editable(slider, range = -1.25..=1.25, name = "input")]
