@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["rerun", "criterion"]
+default = ["criterion"]
 rerun = ["dep:rerun"]
 criterion = ["dep:criterion"]
 
