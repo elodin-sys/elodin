@@ -29,7 +29,7 @@ use paracosm_macros::Editable;
 
 pub(crate) mod traces;
 mod ui;
-pub use ui::Editable;
+//pub use ui::Editable;
 
 pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T>) {
     let runner = func.into_runner();
@@ -67,13 +67,13 @@ impl Plugin for EditorPlugin {
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, (picked_system, ui_system, timeline_system))
+        .add_systems(Update, (picked_system, timeline_system))
         .add_systems(Update, make_pickable)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
         })
-        .insert_resource(Editables::default())
+        //.insert_resource(Editables::default())
         .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
         .insert_resource(Msaa::Off);
 
@@ -155,6 +155,6 @@ fn make_pickable(
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Input(pub SharedNum<f64>);
 
-#[derive(Editable, Resource, Clone, Debug, Default)]
-#[editable(slider, range = -1.25..=1.25, name = "input")]
-pub struct ObservableInput(pub ObservableNum<f64>);
+// #[derive(Editable, Resource, Clone, Debug, Default)]
+// #[editable(slider, range = -1.25..=1.25, name = "input")]
+// pub struct ObservableInput(pub ObservableNum<f64>);

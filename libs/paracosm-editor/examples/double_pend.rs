@@ -2,10 +2,10 @@ use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
     builder::{Assets, EntityBuilder, FixedJoint, Revolute, XpbdBuilder},
-    editor::editor,
     runner::IntoSimRunner,
     spatial::SpatialPos,
 };
+use paracosm_editor::editor;
 
 fn main() {
     editor(sim.substep_count(10))
@@ -28,7 +28,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
         EntityBuilder::default()
             .mass(1.0)
             .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
-            .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            //.inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
             .material(assets.material(bevy::prelude::StandardMaterial {
                 base_color: Color::hex("38ACFF").unwrap(),
@@ -38,23 +38,23 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
             }))
             .parent(
                 root,
-                Revolute::new(Vector3::z_axis()).pos(-170f64.to_radians()),
+                Revolute::new(Vector3::z_axis()).pos(-90f64.to_radians()),
             ),
     );
 
-    builder.entity(
-        EntityBuilder::default()
-            .mass(1.0)
-            .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
-            .trace(Vector3::new(0., -0.5, 0.))
-            .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
-            .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
-            .material(assets.material(Color::hex("FF9838").unwrap().into()))
-            .parent(
-                rod_a,
-                Revolute::new(Vector3::z_axis())
-                    .anchor(vector![0., -0.5, 0.0])
-                    .pos(-70f64.to_radians()),
-            ),
-    );
+    // builder.entity(
+    //     EntityBuilder::default()
+    //         .mass(1.0)
+    //         .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
+    //         .trace(Vector3::new(0., -0.5, 0.))
+    //         .inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+    //         .mesh(assets.mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2))))
+    //         .material(assets.material(Color::hex("FF9838").unwrap().into()))
+    //         .parent(
+    //             rod_a,
+    //             Revolute::new(Vector3::z_axis())
+    //                 .anchor(vector![0., -0.5, 0.0])
+    //                 .pos(-70f64.to_radians()),
+    //         ),
+    // );
 }
