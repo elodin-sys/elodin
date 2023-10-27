@@ -15,7 +15,7 @@ pub use entity::*;
 
 use crate::{
     bevy_transform::NoPropagate, effector::concrete_effector, runner::SimRunnerEnv, sensor::Sensor,
-    Time,
+    types::Time,
 };
 
 use super::{constraints::GravityConstraint, types::*};
@@ -40,7 +40,7 @@ impl<ER, T> XpbdSensor for ConcreteSensor<ER, T>
 where
     ER: for<'a> Sensor<T, EntityStateRef<'a>>,
 {
-    fn sense(&mut self, time: crate::Time, state: EntityStateRef<'_>) {
+    fn sense(&mut self, time: Time, state: EntityStateRef<'_>) {
         self.sensor.sense(time, &state)
     }
 }

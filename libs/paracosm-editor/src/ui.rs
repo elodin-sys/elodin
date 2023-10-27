@@ -82,22 +82,23 @@ fn set_widget_visuals(visuals: &mut WidgetVisuals) {
     visuals.rounding = Rounding::none();
 }
 
-pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
-    set_theme(contexts.ctx_mut());
-    egui::Window::new("Inputs")
-        .title_bar(false)
-        .resizable(false)
-        .show(contexts.ctx_mut(), |ui| {
-            for editable in &mut editables.0 {
-                editable.build(ui);
-            }
-        });
-}
+// pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
+//     set_theme(contexts.ctx_mut());
+//     egui::Window::new("Inputs")
+//         .title_bar(false)
+//         .resizable(false)
+//         .show(contexts.ctx_mut(), |ui| {
+//             for editable in &mut editables.0 {
+//                 editable.build(ui);
+//             }
+//         });
+// }
 
 pub(crate) fn picked_system(
     mut contexts: EguiContexts,
     picked: Query<(EntityQuery, &Picked, Entity)>,
 ) {
+    set_theme(contexts.ctx_mut());
     egui::Window::new("picked components")
         .title_bar(false)
         .resizable(false)
