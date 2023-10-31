@@ -20,3 +20,5 @@ mod shared;
 pub use shared::*;
 mod effectors;
 pub use effectors::*;
+mod sync;
+pub use sync::*;
