@@ -1,5 +1,4 @@
 use self::{traces::TracesPlugin, ui::*};
-use bevy::transform::TransformPlugin;
 use bevy::{
     core_pipeline::{
         bloom::BloomSettings,
@@ -21,8 +20,6 @@ use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use paracosm::runner::{IntoSimRunner, SimRunnerEnv};
-use paracosm::{ObservableNum, SharedNum};
-use paracosm_macros::Editable;
 
 pub(crate) mod traces;
 mod ui;
@@ -119,10 +116,10 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     if cfg!(not(target_arch = "wasm32")) {
         camera
             .insert(AtmosphereCamera::default())
-            .insert(EnvironmentMapLight {
-                diffuse_map: asset_server.load("diffuse.ktx2"),
-                specular_map: asset_server.load("specular.ktx2"),
-            })
+            // .insert(EnvironmentMapLight {
+            //     diffuse_map: asset_server.load("diffuse.ktx2"),
+            //     specular_map: asset_server.load("specular.ktx2"),
+            // })
             .insert(ScreenSpaceAmbientOcclusionBundle {
                 settings: ScreenSpaceAmbientOcclusionSettings {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
@@ -148,8 +145,8 @@ fn make_pickable(
     }
 }
 
-#[derive(Resource, Clone, Debug, Default)]
-pub struct Input(pub SharedNum<f64>);
+// #[derive(Resource, Clone, Debug, Default)]
+// pub struct Input(pub SharedNum<f64>);
 
 // #[derive(Editable, Resource, Clone, Debug, Default)]
 // #[editable(slider, range = -1.25..=1.25, name = "input")]

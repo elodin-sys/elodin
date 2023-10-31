@@ -1,0 +1,20 @@
+[package]
+name = "paracosm-py"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "paracosm_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+paracosm.path = "../paracosm-core/"
+paracosm-editor.path = "../paracosm-editor/"
+
+pyo3 = "0.20.0"
+numpy.version = "0.20"
+numpy.features = ["nalgebra"]
+nalgebra = "0.32"
+
+bevy = "0.11"
