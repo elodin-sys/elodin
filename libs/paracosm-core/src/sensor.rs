@@ -1,7 +1,7 @@
 use crate::{FromState, Time};
 
 pub trait Sensor<T, S> {
-    fn sense(&mut self, time: Time, state: &S);
+    fn sense(&self, time: Time, state: &S);
 }
 
 macro_rules! impl_sensor {
@@ -9,11 +9,11 @@ macro_rules! impl_sensor {
         #[allow(non_snake_case)]
         impl<F, $($ty,)*  S> Sensor<($($ty, )*), S> for F
         where
-            F: FnMut($($ty, )*),
+            F: Fn($($ty, )*),
             $($ty: FromState<S>, )*
         {
 
-            fn sense(&mut self, time: Time, state: &S) {
+            fn sense(&self, time: Time, state: &S) {
                 $(
                     let $ty = $ty::from_state(time, &state);
                 )*

@@ -1,3 +1,5 @@
+use crate::builder::SimBuilder;
+
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
     plugin::XpbdPlugin,
@@ -11,14 +13,14 @@ use bevy_ecs::system::CommandQueue;
 use std::{cell::RefCell, time::Duration};
 
 pub struct SimRunner<'a> {
-    sim_func: Box<dyn SimFunc<(), SimRunnerEnv> + 'a>,
+    sim_func: Box<dyn SimFunc<(), SimRunnerEnv, SimBuilder> + 'a>,
     config: Config,
     lockstep: Option<LockStepSignal>,
     run_mode: RunMode,
 }
 
 impl<'a> SimRunner<'a> {
-    pub fn new<T: 'a, F: SimFunc<T, SimRunnerEnv> + 'a>(sim_func: F) -> Self {
+    pub fn new<T: 'a, F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a>(sim_func: F) -> Self {
         SimRunner {
             sim_func: Box::new(ConcreteSimFunc::new(sim_func)),
             config: Config::default(),
@@ -115,13 +117,9 @@ impl<'a> SimRunner<'a> {
         app.add_plugins(XpbdPlugin);
         app.add_plugins(plugins);
         let mut env = SimRunnerEnv::new(app);
-        self.sim_func.build(&mut env);
-        let SimRunnerEnv {
-            mut app,
-            command_queue,
-        } = env;
-        let mut command_queue = command_queue.into_inner();
-        command_queue.apply(&mut app.world);
+        let builder = self.sim_func.build(&mut env);
+        let SimRunnerEnv { mut app, .. } = env;
+        builder.apply(&mut app.world);
         app
     }
 }
@@ -141,7 +139,7 @@ pub trait IntoSimRunner<'a, T>: Sized {
 impl<'a, T, F> IntoSimRunner<'a, T> for F
 where
     T: 'a,
-    F: SimFunc<T, SimRunnerEnv> + 'a,
+    F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a,
 {
     fn into_runner(self) -> SimRunner<'a> {
         SimRunner::new(self)
