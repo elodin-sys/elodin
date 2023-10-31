@@ -60,6 +60,7 @@ impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
         app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
+        app.add_plugins(crate::bevy_transform::TransformPlugin);
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);

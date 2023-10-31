@@ -21,10 +21,7 @@ use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use paracosm::runner::{IntoSimRunner, SimRunnerEnv};
-use paracosm::{
-    builder::{Assets, AssetsInner, Env, FromEnv, XpbdBuilder},
-    ObservableNum, SharedNum,
-};
+use paracosm::{ObservableNum, SharedNum};
 use paracosm_macros::Editable;
 
 pub(crate) mod traces;
@@ -54,7 +51,6 @@ impl Plugin for EditorPlugin {
                 .build()
                 .disable::<bevy::transform::TransformPlugin>(),
         )
-        .add_plugins(TransformPlugin)
         .add_plugins(
             DefaultPickingPlugins
                 .build()

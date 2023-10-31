@@ -1,21 +1,17 @@
 mod assets;
 mod entity;
 
-use bevy::{prelude::AddChild, scene::SceneBundle};
-use bevy_ecs::{
-    entity::Entities,
-    prelude::Entity,
-    system::{CommandQueue, Insert, Spawn},
+use bevy::{
+    prelude::{Assets, BuildWorldChildren, Deref, Handle, PbrBundle},
+    scene::Scene,
 };
-use std::cell::RefMut;
+use bevy_ecs::world::{Mut, World};
 use std::marker::PhantomData;
 
-pub use assets::*;
 pub use entity::*;
 
 use crate::{
-    bevy_transform::NoPropagate, effector::concrete_effector, runner::SimRunnerEnv, sensor::Sensor,
-    types::Time,
+    bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, types::Time,
 };
 
 use super::{constraints::GravityConstraint, types::*};
@@ -40,76 +36,113 @@ impl<ER, T> XpbdSensor for ConcreteSensor<ER, T>
 where
     ER: for<'a> Sensor<T, EntityStateRef<'a>>,
 {
-    fn sense(&mut self, time: Time, state: EntityStateRef<'_>) {
+    fn sense(&self, time: Time, state: EntityStateRef<'_>) {
         self.sensor.sense(time, &state)
     }
 }
 
 pub trait XpbdSensor {
-    fn sense(&mut self, time: Time, state: EntityStateRef<'_>);
+    fn sense(&self, time: Time, state: EntityStateRef<'_>);
 }
 
-pub struct XpbdBuilder<'a> {
-    pub(crate) queue: RefMut<'a, CommandQueue>,
-    pub(crate) entities: &'a Entities,
+#[derive(Default, Clone)]
+pub struct SimBuilder {
+    entity_builders: Vec<EntityBuilder>,
+    gravity_constraints: Vec<(RigidBodyHandle, RigidBodyHandle)>,
 }
 
-impl<'a> XpbdBuilder<'a> {
-    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
-        let entity = self.entities.reserve_entity();
-        if let Some(anchor) = entity_builder.trace {
-            self.queue.push(Insert {
-                entity,
-                bundle: TraceAnchor { anchor },
-            });
-        }
-        // if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
-        //     self.queue.push(Insert {
-        //         entity,
-        //         bundle: (
-        //             PickableBundle::default(),
-        //             RaycastPickTarget::default(),
-        //             On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
-        //                 if let Ok(mut picked) = query.get_mut(entity) {
-        //                     picked.0 = !picked.0;
-        //                 }
-        //             }),
-        //         ),
-        //     })
-        // }
-        // TODO: Add this to editor module
-        if let Some(pbr) = entity_builder.editor_bundle.take() {
-            self.queue.push(Insert {
-                entity,
-                bundle: pbr,
-            });
-        }
-        if let Some(scene) = entity_builder.scene.take() {
-            self.queue.push(Insert {
-                entity,
-                bundle: SceneBundle {
-                    scene,
-                    ..Default::default()
-                },
-            });
-        }
-        if let Some(parent) = entity_builder.parent {
-            self.queue.push(AddChild {
-                parent,
-                child: entity,
-            });
-        }
-        self.queue.push(Insert {
-            entity,
-            bundle: (entity_builder.bundle(), NoPropagate),
-        });
-        entity
+impl SimBuilder {
+    pub fn entity(&mut self, entity: EntityBuilder) -> RigidBodyHandle {
+        let handle = RigidBodyHandle(self.entity_builders.len());
+        self.entity_builders.push(entity);
+        handle
     }
 
-    pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
-        self.queue.push(Spawn { bundle: gravity });
+    pub fn gravity(&mut self, a: RigidBodyHandle, b: RigidBodyHandle) {
+        self.gravity_constraints.push((a, b));
+    }
+
+    pub fn apply(self, world: &mut World) {
+        let entities = world
+            .entities()
+            .reserve_entities(self.entity_builders.len() as u32)
+            .collect::<Vec<_>>();
+        for (mut builder, entity_id) in self
+            .entity_builders
+            .into_iter()
+            .zip(entities.iter().copied())
+        {
+            let pbr = if let Some(mesh) = builder.mesh.take() {
+                let mut pbr = PbrBundle::default();
+                let mut mesh_assets: Mut<'_, Assets<bevy::prelude::Mesh>> =
+                    world.get_resource_mut().unwrap();
+                pbr.mesh = mesh_assets.add(*mesh);
+
+                if let Some(material) = builder.material.take() {
+                    let mut material_assets: Mut<'_, Assets<bevy::prelude::StandardMaterial>> =
+                        world.get_resource_mut().unwrap();
+                    pbr.material = material_assets.add(*material);
+                }
+                Some(pbr)
+            } else {
+                None
+            };
+
+            let scene: Option<Handle<Scene>> = if let Some(scene) = builder.scene.take() {
+                let server: Mut<'_, bevy::prelude::AssetServer> = world.get_resource_mut().unwrap();
+                Some(server.load(&scene))
+            } else {
+                None
+            };
+
+            let mut entity = world.get_or_spawn(entity_id).expect("entity not found");
+
+            if let Some(pbr) = pbr {
+                entity.insert(pbr);
+            }
+
+            if let Some(anchor) = builder.trace {
+                entity.insert(TraceAnchor { anchor });
+            }
+
+            if let Some(scene) = scene {
+                entity.insert(scene);
+            }
+            // if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
+            //     self.queue.push(Insert {
+            //         entity,
+            //         bundle: (
+            //             PickableBundle::default(),
+            //             RaycastPickTarget::default(),
+            //             On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
+            //                 if let Ok(mut picked) = query.get_mut(entity) {
+            //                     picked.0 = !picked.0;
+            //                 }
+            //             }),
+            //         ),
+            //     })
+            // }
+            // TODO: Add this to editor module
+
+            let parent = builder.parent.take();
+
+            entity.insert((builder.bundle(), NoPropagate));
+
+            if let Some(parent) = parent {
+                let parent = entities[parent.0];
+                let mut parent = world.get_entity_mut(parent).expect("entity not found");
+                parent.add_child(entity_id);
+            }
+        }
+
+        for (a, b) in self.gravity_constraints.into_iter() {
+            world.spawn(GravityConstraint::new(entities[*a], entities[*b]));
+        }
     }
 }
+
+#[derive(Debug, Clone, Deref)]
+pub struct RigidBodyHandle(usize);
 
 pub trait FromEnv<E: Env> {
     type Item<'a>
@@ -133,6 +166,17 @@ pub trait SimFunc<T, E: Env, R = ()> {
     fn build(&self, env: &mut E) -> R;
 }
 
+impl<F, R, E> SimFunc<(), E, R> for F
+where
+    E: Env,
+    F: Fn() -> R,
+{
+    fn build(&self, _env: &mut E) -> R {
+        let res = (self)();
+        res
+    }
+}
+
 macro_rules! impl_sim_builder {
      ($($ty:tt),+) => {
          #[allow(non_snake_case)]
@@ -144,7 +188,7 @@ macro_rules! impl_sim_builder {
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(&self, env: &mut E) -> R{
+             fn build(&self, env: &mut E) -> R {
 
                  $(
                          $ty::init(env);
@@ -193,18 +237,5 @@ where
 {
     fn build(&self, env: &mut E) -> R {
         self.func.build(env)
-    }
-}
-
-impl<'a> FromEnv<SimRunnerEnv> for XpbdBuilder<'a> {
-    type Item<'t> = XpbdBuilder<'t>;
-
-    fn init(_env: &mut SimRunnerEnv) {}
-
-    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        XpbdBuilder {
-            queue: env.command_queue.borrow_mut(),
-            entities: env.app.world.entities(),
-        }
     }
 }
