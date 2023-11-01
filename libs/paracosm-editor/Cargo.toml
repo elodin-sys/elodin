@@ -24,3 +24,6 @@ bevy_infinite_grid = "0.8.1"
 bevy_polyline = "0.7"
 bevy_mod_picking.version = "0.15"
 bevy_mod_picking.features = ["backend_egui"]
+
+# channel
+flume = "0.11"

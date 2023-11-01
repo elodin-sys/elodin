@@ -67,10 +67,11 @@ impl SimBuilder {
             .entities()
             .reserve_entities(self.entity_builders.len() as u32)
             .collect::<Vec<_>>();
-        for (mut builder, entity_id) in self
+        for (i, (mut builder, entity_id)) in self
             .entity_builders
             .into_iter()
             .zip(entities.iter().copied())
+            .enumerate()
         {
             let pbr = if let Some(mesh) = builder.mesh.take() {
                 let mut pbr = PbrBundle::default();
@@ -126,7 +127,7 @@ impl SimBuilder {
 
             let parent = builder.parent.take();
 
-            entity.insert((builder.bundle(), NoPropagate));
+            entity.insert((builder.bundle(), NoPropagate, Uuid(i as u128)));
 
             if let Some(parent) = parent {
                 let parent = entities[parent.0];
@@ -162,13 +163,14 @@ pub trait Env {
     fn param(&mut self) -> Self::Param<'_>;
 }
 
-pub trait SimFunc<T, E: Env, R = ()> {
+pub trait SimFunc<T, E: Env, R = ()>: Send + Sync {
     fn build(&self, env: &mut E) -> R;
 }
 
 impl<F, R, E> SimFunc<(), E, R> for F
 where
     E: Env,
+    F: Send + Sync,
     F: Fn() -> R,
 {
     fn build(&self, _env: &mut E) -> R {
@@ -183,6 +185,7 @@ macro_rules! impl_sim_builder {
          impl<F, $($ty,)* E, R> SimFunc<($($ty, )*), E, R> for F
          where
              E: Env,
+             F: Sync + Send,
              F: Fn($($ty, )*) -> R,
              F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) -> R ,
              $($ty: FromEnv<E>, )*
@@ -231,7 +234,7 @@ impl<E, T, R> ConcreteSimFunc<E, T, R> {
         }
     }
 }
-impl<F, T, E: Env, R> SimFunc<(), E, R> for ConcreteSimFunc<F, T, R>
+impl<F, T: Send + Sync, E: Env, R> SimFunc<(), E, R> for ConcreteSimFunc<F, T, R>
 where
     F: for<'s> SimFunc<T, E, R>,
 {

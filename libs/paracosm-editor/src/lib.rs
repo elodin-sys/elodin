@@ -19,20 +19,39 @@ use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, Inf
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use paracosm::runner::{IntoSimRunner, SimRunnerEnv};
+use paracosm::{
+    plugin::sync_pos,
+    sync::{channel_pair, recv_data, EntityMap},
+};
+use paracosm::{runner::IntoSimRunner, sync::ClientRx};
 
 pub(crate) mod traces;
 mod ui;
-//pub use ui::Editable;
 
-pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T>) {
-    let runner = func.into_runner();
-    let mut app = runner.build_with_plugins(EditorPlugin);
+pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
+    let (tx, rx) = channel_pair();
+    std::thread::spawn(move || {
+        let runner = func.into_runner();
+        let mut app = runner
+            .run_mode(paracosm::runner::RunMode::RealTime)
+            .build(tx);
+        app.run()
+    });
+    let mut app = App::new();
+    app.add_plugins(EditorPlugin::new(rx));
     app.run()
 }
 
-pub struct EditorPlugin;
-impl Plugin for EditorPlugin {
+pub struct EditorPlugin<Rx: ClientRx> {
+    rx: Rx,
+}
+
+impl<Rx: ClientRx> EditorPlugin<Rx> {
+    pub fn new(rx: Rx) -> Self {
+        Self { rx }
+    }
+}
+impl<Rx: ClientRx> Plugin for EditorPlugin<Rx> {
     fn build(&self, app: &mut App) {
         app.add_plugins(
             DefaultPlugins
@@ -45,9 +64,10 @@ impl Plugin for EditorPlugin {
                     }),
                     ..default()
                 })
-                .build()
-                .disable::<bevy::transform::TransformPlugin>(),
+                .build(),
         )
+        .insert_resource(self.rx.clone())
+        .insert_resource(EntityMap::default())
         .add_plugins(
             DefaultPickingPlugins
                 .build()
@@ -58,10 +78,11 @@ impl Plugin for EditorPlugin {
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(PolylinePlugin)
-        .add_plugins(TracesPlugin)
+        //.add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, (picked_system, timeline_system))
+        .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)
+        .add_systems(Update, (recv_data::<Rx>, sync_pos))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
