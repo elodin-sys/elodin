@@ -365,7 +365,9 @@ pub fn cri_system(
             continue;
         };
         let i = child.tree_index.0;
-        let subspace = child.joint.subspace(&child.anchor_pos.0.linear);
+        let subspace = child
+            .joint
+            .subspace(&(child.anchor_pos.0.linear - **child.subtree_com));
         let mut f = DMatrix::zeros(6, child.joint.dof());
         for (i, c) in subspace.matrix().column_iter().enumerate() {
             let ang_vel = c.fixed_view::<3, 1>(0, 0).into_owned();
@@ -383,8 +385,11 @@ pub fn cri_system(
                 break;
             };
             let j = parent.tree_index.0;
-            let h_block =
-                f.transpose() * parent.joint.subspace(&parent.anchor_pos.0.linear).matrix();
+            let h_block = f.transpose()
+                * parent
+                    .joint
+                    .subspace(&(parent.anchor_pos.0.linear - **parent.subtree_com))
+                    .matrix();
             mass_matrix
                 .view_mut((i, j), (child_dof, parent.joint.dof()))
                 .copy_from(&h_block);
