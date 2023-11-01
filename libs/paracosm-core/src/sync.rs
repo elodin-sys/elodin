@@ -73,7 +73,7 @@ pub trait ServerTx: Send + Sync + Resource + Clone {
     fn send_msg(&self, msg: ClientMsg);
 }
 
-pub fn send_pos<Tx: ServerTx>(query: Query<(&WorldPos, &Uuid)>, mut tx: ResMut<Tx>) {
+pub fn send_pos<Tx: ServerTx>(query: Query<(&WorldPos, &Uuid)>, tx: ResMut<Tx>) {
     for (pos, body_id) in query.iter() {
         tx.send_msg(ClientMsg::SyncWorldPos(crate::SyncWorldPos {
             body_id: *body_id,

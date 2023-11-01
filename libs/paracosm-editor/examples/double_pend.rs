@@ -22,7 +22,7 @@ fn sim() -> SimBuilder {
                 ..Default::default()
             }))
             .material(Color::rgb(1.0, 0.0, 0.0).into())
-            .body_pos(SpatialPos::linear(vector![0., 1.0, 0.0]))
+            .body_pos(SpatialPos::linear(vector![0., 0.0, 0.0]))
             .joint(FixedJoint),
     );
     let rod_a = builder.entity(

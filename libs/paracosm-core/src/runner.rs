@@ -74,7 +74,7 @@ impl<'a> SimRunner<'a> {
                     TickMode::FreeRun
                 }
             }
-            RunMode::RealTime | RunMode::Scaled(_) => TickMode::FreeRun,
+            RunMode::RealTime | RunMode::Scaled(_) => TickMode::Fixed,
         }
     }
 
@@ -104,9 +104,10 @@ impl<'a> SimRunner<'a> {
             }
             RunMode::RealTime => {
                 let duration = Duration::from_secs_f64(self.config.dt);
+                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
                 app.add_plugins(ScheduleRunnerPlugin {
                     run_mode: bevy::app::RunMode::Loop {
-                        wait: Some(duration),
+                        wait: Some(duration), // TODO: This uses an inaccurate timer, and so we probably want to modify it to be more time accurate
                     },
                 });
             }
