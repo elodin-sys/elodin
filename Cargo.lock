@@ -4786,6 +4786,7 @@ dependencies = [
  "bevy_mod_picking",
  "bevy_panorbit_camera",
  "bevy_polyline",
+ "flume",
  "nalgebra",
  "paracosm",
  "paracosm-macros",

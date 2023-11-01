@@ -1,10 +1,16 @@
-use bevy::prelude::*;
+use std::{
+    marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use bevy::{pbr::PbrPlugin, prelude::*, winit::WinitPlugin};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
+    sync::{send_model, send_pos, EntityMap, ServerTx},
     tree::{com_system, cri_system, forward_dynamics, rne_system},
     TreeMassMatrix, WorldPos,
 };
@@ -34,6 +40,7 @@ fn run_physics_system(world: &mut World) {
     let mut tick_mode = world.resource_mut::<TickMode>();
     match tick_mode.as_mut() {
         TickMode::FreeRun => {
+            //println!("run {:?}", SystemTime::now().duration_since(UNIX_EPOCH));
             world.run_schedule(PhysicsSchedule);
         }
         TickMode::Lockstep(l) => {
@@ -54,18 +61,35 @@ fn run_physics_system(world: &mut World) {
 }
 
 #[derive(Default)]
-pub struct XpbdPlugin;
+pub struct XpbdPlugin<Tx: ServerTx> {
+    tx: Tx,
+}
 
-impl Plugin for XpbdPlugin {
+impl<Tx: ServerTx> XpbdPlugin<Tx> {
+    pub fn new(tx: Tx) -> Self {
+        Self { tx }
+    }
+}
+
+impl<Tx: ServerTx> Plugin for XpbdPlugin<Tx> {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
         app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
+        app.insert_resource(self.tx.clone());
+        app.insert_resource(EntityMap::default());
         app.add_plugins(crate::bevy_transform::TransformPlugin);
+        app.add_plugins(
+            DefaultPlugins
+                .build()
+                .disable::<WinitPlugin>()
+                .disable::<bevy::transform::TransformPlugin>(), //.disable::<WindowPlugin>(),
+        );
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);
+        app.add_systems(PostStartup, send_model::<Tx>);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
-        app.add_systems(PhysicsSchedule, sync_pos.in_set(TickSet::SyncPos))
+        app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos))
             .configure_sets(
                 Update,
                 (
@@ -86,12 +110,10 @@ pub fn tick(world: &mut World) {
     }
 }
 
-pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>, config: Res<Config>) {
-    query
-        .par_iter_mut()
-        .for_each_mut(|(mut transform, WorldPos(pos))| {
-            *transform = pos.bevy(config.scale);
-        });
+pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
+    query.iter_mut().for_each(|(mut transform, WorldPos(pos))| {
+        *transform = pos.bevy(1.0);
+    });
 }
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]

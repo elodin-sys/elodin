@@ -118,35 +118,35 @@ pub(crate) fn picked_system(
         });
 }
 
-pub(crate) fn timeline_system(
-    mut contexts: EguiContexts,
-    mut paused: ResMut<Paused>,
-    history: Res<HistoryStore>,
-    mut event_writer: EventWriter<RollbackEvent>,
-    window: Query<&Window>,
-) {
-    let window = window.single();
-    let width = window.resolution.width();
-    let height = window.resolution.height();
-    egui::Window::new("timeline")
-        .title_bar(false)
-        .resizable(false)
-        .fixed_size(egui::vec2(500.0, 50.0))
-        .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
-        .show(contexts.ctx_mut(), |ui| {
-            ui.horizontal(|ui| {
-                let paused_val = paused.0;
-                ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
-                let max_count = history.count().saturating_sub(1);
-                let mut selected_index = history.current_index();
-                ui.spacing_mut().slider_width = 450.0;
-                let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
-                if res.changed() {
-                    event_writer.send(RollbackEvent(selected_index))
-                }
-            })
-        });
-}
+// pub(crate) fn timeline_system(
+//     mut contexts: EguiContexts,
+//     mut paused: ResMut<Paused>,
+//     history: Res<HistoryStore>,
+//     mut event_writer: EventWriter<RollbackEvent>,
+//     window: Query<&Window>,
+// ) {
+//     let window = window.single();
+//     let width = window.resolution.width();
+//     let height = window.resolution.height();
+//     egui::Window::new("timeline")
+//         .title_bar(false)
+//         .resizable(false)
+//         .fixed_size(egui::vec2(500.0, 50.0))
+//         .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
+//         .show(contexts.ctx_mut(), |ui| {
+//             ui.horizontal(|ui| {
+//                 let paused_val = paused.0;
+//                 ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
+//                 let max_count = history.count().saturating_sub(1);
+//                 let mut selected_index = history.current_index();
+//                 ui.spacing_mut().slider_width = 450.0;
+//                 let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
+//                 if res.changed() {
+//                     event_writer.send(RollbackEvent(selected_index))
+//                 }
+//             })
+//         });
+// }
 
 fn vec_from_tuple(tuple: (f64, f64, f64)) -> Vector3<f64> {
     Vector3::new(tuple.0, tuple.1, tuple.2)

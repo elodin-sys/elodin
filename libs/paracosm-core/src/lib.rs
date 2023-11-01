@@ -12,6 +12,7 @@ pub mod runner;
 pub mod runtime;
 pub mod sensor;
 pub mod spatial;
+pub mod sync;
 pub mod systems;
 pub mod tree;
 

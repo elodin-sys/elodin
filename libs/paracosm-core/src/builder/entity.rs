@@ -168,6 +168,8 @@ impl EntityBuilder {
             subtree_com: SubtreeCoM(Default::default()),
             subtree_com_sum: SubtreeCoMSum(Default::default()),
             subtree_mass: SubtreeMass(Default::default()),
+
+            synced: Synced(false),
         }
     }
 }
