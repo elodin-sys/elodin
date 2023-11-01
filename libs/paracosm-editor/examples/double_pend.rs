@@ -41,5 +41,25 @@ fn sim() -> SimBuilder {
             .joint(Revolute::new(Vector3::z_axis()).pos(-90f64.to_radians())),
     );
 
+    let rod_b = builder.entity(
+        EntityBuilder::default()
+            .mass(1.0)
+            .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
+            //.inertia(paracosm::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            .mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2)))
+            .material(bevy::prelude::StandardMaterial {
+                base_color: Color::hex("38ACFF").unwrap(),
+                metallic: 0.6,
+                perceptual_roughness: 0.1,
+                ..Default::default()
+            })
+            .parent(rod_a)
+            .joint(
+                Revolute::new(Vector3::z_axis())
+                    .anchor(vector![0., -0.5, 0.0])
+                    .pos(0f64.to_radians()),
+            ),
+    );
+
     builder
 }

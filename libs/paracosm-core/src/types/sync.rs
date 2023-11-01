@@ -16,6 +16,7 @@ use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use crate::spatial::SpatialPos;
 
 pub enum ServerMsg {
+    Exit,
     RequestModel(Uuid),
 }
 

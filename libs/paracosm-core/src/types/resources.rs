@@ -4,6 +4,9 @@ use std::sync::{
 };
 
 use bevy::prelude::{FixedTime, Resource};
+use nalgebra::Vector3;
+
+use crate::spatial::SpatialMotion;
 
 #[derive(Debug, Resource)]
 pub struct PhysicsFixedTime(pub FixedTime);
@@ -25,6 +28,7 @@ pub struct Config {
     pub sub_dt: f64,
     pub substep_count: usize,
     pub scale: f32,
+    pub global_gravity: SpatialMotion,
 }
 
 impl Default for Config {
@@ -36,6 +40,7 @@ impl Default for Config {
             sub_dt: dt / substep_count as f64,
             substep_count,
             scale: 1.0,
+            global_gravity: SpatialMotion::linear(Vector3::new(0., 9.81, 0.)),
         }
     }
 }

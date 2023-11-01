@@ -1,4 +1,4 @@
-use crate::{builder::SimBuilder, sync::ServerTx};
+use crate::{builder::SimBuilder, sync::ServerTransport};
 
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
@@ -58,7 +58,7 @@ impl<'a> SimRunner<'a> {
         self
     }
 
-    pub fn build(self, tx: impl ServerTx) -> App {
+    pub fn build(self, tx: impl ServerTransport) -> App {
         self.build_with_plugins(tx, ())
     }
 
@@ -78,7 +78,11 @@ impl<'a> SimRunner<'a> {
         }
     }
 
-    pub fn build_with_plugins<M>(mut self, tx: impl ServerTx, plugins: impl Plugins<M>) -> App {
+    pub fn build_with_plugins<M>(
+        mut self,
+        tx: impl ServerTransport,
+        plugins: impl Plugins<M>,
+    ) -> App {
         let mut app = App::new();
         app.insert_resource(self.tick_mode());
         match self.run_mode {
@@ -134,24 +138,6 @@ impl<'a> SimRunner<'a> {
 pub trait IntoSimRunner<'a, T>: Sized {
     fn into_runner(self) -> SimRunner<'a>;
 
-    fn delta_t(self, dt: f64) -> SimRunner<'a>;
-    fn substep_count(self, count: usize) -> SimRunner<'a>;
-    fn lockstep(self, lockstep: impl Into<Option<LockStepSignal>>) -> SimRunner<'a>;
-    fn run_mode(self, mode: RunMode) -> SimRunner<'a>;
-    fn scale(self, scale: f32) -> SimRunner<'a>;
-
-    fn build_app(self, tx: impl ServerTx) -> App;
-}
-
-impl<'a, T, F> IntoSimRunner<'a, T> for F
-where
-    T: Send + Sync + 'a,
-    F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a,
-{
-    fn into_runner(self) -> SimRunner<'a> {
-        SimRunner::new(self)
-    }
-
     fn delta_t(self, dt: f64) -> SimRunner<'a> {
         self.into_runner().delta_t(dt)
     }
@@ -168,12 +154,22 @@ where
         self.into_runner().run_mode(mode)
     }
 
-    fn build_app(self, tx: impl ServerTx) -> App {
+    fn build_app(self, tx: impl ServerTransport) -> App {
         self.into_runner().build(tx)
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {
         self.into_runner().scale(scale)
+    }
+}
+
+impl<'a, T, F> IntoSimRunner<'a, T> for F
+where
+    T: Send + Sync + 'a,
+    F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a,
+{
+    fn into_runner(self) -> SimRunner<'a> {
+        SimRunner::new(self)
     }
 }
 
@@ -198,12 +194,18 @@ impl<'a> IntoSimRunner<'a, ()> for SimRunner<'a> {
         SimRunner::run_mode(self, mode)
     }
 
-    fn build_app(self, tx: impl ServerTx) -> App {
+    fn build_app(self, tx: impl ServerTransport) -> App {
         SimRunner::build(self, tx)
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {
         self.scale(scale)
+    }
+}
+
+impl<'a> IntoSimRunner<'a, ()> for SimBuilder {
+    fn into_runner(self) -> SimRunner<'a> {
+        SimRunner::new(Box::new(move || self.clone()))
     }
 }
 
