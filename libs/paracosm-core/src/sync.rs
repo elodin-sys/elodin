@@ -1,20 +1,22 @@
 use std::collections::HashMap;
 
-use bevy::prelude::{
-    shape, Assets, Color, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial,
+use bevy::{
+    app::AppExit,
+    prelude::{shape, Assets, Color, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial},
 };
 use bevy_ecs::{
     entity::Entity,
+    event::EventWriter,
     system::{Commands, Query, Res, ResMut, Resource},
 };
 
-use crate::{ClientMsg, MeshData, ModelData, ReflectSerde, Synced, Uuid, WorldPos};
+use crate::{ClientMsg, MeshData, ModelData, ReflectSerde, ServerMsg, Synced, Uuid, WorldPos};
 use flume::{Receiver, Sender};
 
 #[derive(Resource, DerefMut, Deref, Default)]
 pub struct EntityMap(HashMap<Uuid, Entity>);
 
-pub fn recv_data<S: ClientRx>(
+pub fn recv_data<S: ClientTransport>(
     mut commands: Commands,
     mut world_pos: Query<&mut WorldPos>,
     mut entity_map: ResMut<EntityMap>,
@@ -65,15 +67,17 @@ pub fn recv_data<S: ClientRx>(
     }
 }
 
-pub trait ClientRx: Clone + Send + Sync + Resource {
+pub trait ClientTransport: Clone + Send + Sync + Resource {
     fn try_recv_msg(&self) -> Option<ClientMsg>;
+    fn send_msg(&self, msg: ServerMsg);
 }
 
-pub trait ServerTx: Send + Sync + Resource + Clone {
+pub trait ServerTransport: Send + Sync + Resource + Clone {
     fn send_msg(&self, msg: ClientMsg);
+    fn try_recv_msg(&self) -> Option<ServerMsg>;
 }
 
-pub fn send_pos<Tx: ServerTx>(query: Query<(&WorldPos, &Uuid)>, tx: ResMut<Tx>) {
+pub fn send_pos<Tx: ServerTransport>(query: Query<(&WorldPos, &Uuid)>, tx: ResMut<Tx>) {
     for (pos, body_id) in query.iter() {
         tx.send_msg(ClientMsg::SyncWorldPos(crate::SyncWorldPos {
             body_id: *body_id,
@@ -82,7 +86,7 @@ pub fn send_pos<Tx: ServerTx>(query: Query<(&WorldPos, &Uuid)>, tx: ResMut<Tx>) 
     }
 }
 
-pub fn send_model<Tx: ServerTx>(
+pub fn send_model<Tx: ServerTransport>(
     mut pbr_query: Query<(&Handle<Mesh>, &Handle<StandardMaterial>, &Uuid, &mut Synced)>,
     mesh_assets: ResMut<Assets<Mesh>>,
     material_assets: ResMut<Assets<StandardMaterial>>,
@@ -102,25 +106,58 @@ pub fn send_model<Tx: ServerTx>(
     }
 }
 
-#[derive(Debug, Clone, Resource, Deref, DerefMut)]
-pub struct ChannelSender(Sender<ClientMsg>);
-
-impl ServerTx for ChannelSender {
-    fn send_msg(&self, msg: ClientMsg) {
-        let _ = self.send(msg);
+pub fn recv_server<T: ServerTransport>(transport: Res<T>, mut event: EventWriter<AppExit>) {
+    if let Some(msg) = transport.try_recv_msg() {
+        match msg {
+            ServerMsg::Exit => event.send(AppExit),
+            ServerMsg::RequestModel(_) => todo!(),
+        }
     }
 }
 
-#[derive(Debug, Clone, Resource, Deref, DerefMut)]
-pub struct ChannelReceiver(Receiver<ClientMsg>);
-
-pub fn channel_pair() -> (ChannelSender, ChannelReceiver) {
-    let (tx, rx) = flume::unbounded();
-    (ChannelSender(tx), ChannelReceiver(rx))
+#[derive(Debug, Clone, Resource)]
+pub struct ServerChannel {
+    tx: Sender<ClientMsg>,
+    rx: Receiver<ServerMsg>,
 }
 
-impl ClientRx for ChannelReceiver {
+impl ServerTransport for ServerChannel {
+    fn send_msg(&self, msg: ClientMsg) {
+        let _ = self.tx.send(msg);
+    }
+
+    fn try_recv_msg(&self) -> Option<ServerMsg> {
+        self.rx.try_recv().ok()
+    }
+}
+
+#[derive(Debug, Clone, Resource)]
+pub struct ClientChannel {
+    rx: Receiver<ClientMsg>,
+    tx: Sender<ServerMsg>,
+}
+
+pub fn channel_pair() -> (ServerChannel, ClientChannel) {
+    let (client_tx, client_rx) = flume::unbounded();
+    let (server_tx, server_rx) = flume::unbounded();
+    (
+        ServerChannel {
+            tx: client_tx,
+            rx: server_rx,
+        },
+        ClientChannel {
+            rx: client_rx,
+            tx: server_tx,
+        },
+    )
+}
+
+impl ClientTransport for ClientChannel {
     fn try_recv_msg(&self) -> Option<ClientMsg> {
-        self.try_recv().ok()
+        self.rx.try_recv().ok()
+    }
+
+    fn send_msg(&self, msg: ServerMsg) {
+        self.tx.send(msg);
     }
 }

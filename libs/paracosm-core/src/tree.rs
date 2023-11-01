@@ -5,7 +5,7 @@ use crate::{
         SpatialSubspace, SpatialTransform,
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    BodyPos, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
+    BodyPos, Config, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
     SubtreeInertia, SubtreeMass, TreeIndex, TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
@@ -187,7 +187,11 @@ pub struct RNEChildQuery {
     body_pos: &'static BodyPos,
 }
 
-pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<TopologicalSort>) {
+pub fn rne_system(
+    mut child_query: Query<RNEChildQuery>,
+    sort: ResMut<TopologicalSort>,
+    config: Res<Config>,
+) {
     for Link { parent, child, .. } in &sort.0 {
         if let Some(parent) = parent {
             let Ok([parent, mut child]) = child_query.get_many_mut([*parent, *child]) else {
@@ -220,7 +224,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             };
 
             // child.world_vel.0 = child.vel.0; // FIXME
-            child.world_accel.0 = SpatialMotion::linear(vector![0.0, 9.81, 0.0]);
+            child.world_accel.0 = config.global_gravity;
             child.bias_force.0 = child
                 .effect
                 .to_spatial(child.world_pos.0.pos - **child.subtree_com);

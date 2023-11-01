@@ -6,12 +6,14 @@ use bevy::{
     scene::Scene,
 };
 use bevy_ecs::world::{Mut, World};
+use nalgebra::Vector3;
 use std::marker::PhantomData;
 
 pub use entity::*;
 
 use crate::{
-    bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, types::Time,
+    bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor,
+    spatial::SpatialMotion, types::Time,
 };
 
 use super::{constraints::GravityConstraint, types::*};
@@ -45,13 +47,32 @@ pub trait XpbdSensor {
     fn sense(&self, time: Time, state: EntityStateRef<'_>);
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct SimBuilder {
     entity_builders: Vec<EntityBuilder>,
     gravity_constraints: Vec<(RigidBodyHandle, RigidBodyHandle)>,
+    gravity_accel: SpatialMotion,
+}
+
+impl Default for SimBuilder {
+    fn default() -> Self {
+        Self {
+            entity_builders: Default::default(),
+            gravity_constraints: Default::default(),
+            gravity_accel: SpatialMotion::linear(Vector3::new(0., 9.81, 0.)),
+        }
+    }
 }
 
 impl SimBuilder {
+    pub fn zero_g(&mut self) {
+        self.gravity_accel = SpatialMotion::default();
+    }
+
+    pub fn g_accel(&mut self, grav: SpatialMotion) {
+        self.gravity_accel = grav;
+    }
+
     pub fn entity(&mut self, entity: EntityBuilder) -> RigidBodyHandle {
         let handle = RigidBodyHandle(self.entity_builders.len());
         self.entity_builders.push(entity);
@@ -139,6 +160,8 @@ impl SimBuilder {
         for (a, b) in self.gravity_constraints.into_iter() {
             world.spawn(GravityConstraint::new(entities[*a], entities[*b]));
         }
+
+        world.get_resource_mut::<Config>().unwrap().global_gravity = self.gravity_accel;
     }
 }
 

@@ -23,7 +23,7 @@ use paracosm::{
     plugin::sync_pos,
     sync::{channel_pair, recv_data, EntityMap},
 };
-use paracosm::{runner::IntoSimRunner, sync::ClientRx};
+use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
 
 pub(crate) mod traces;
 mod ui;
@@ -42,16 +42,16 @@ pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
     app.run()
 }
 
-pub struct EditorPlugin<Rx: ClientRx> {
+pub struct EditorPlugin<Rx: ClientTransport> {
     rx: Rx,
 }
 
-impl<Rx: ClientRx> EditorPlugin<Rx> {
+impl<Rx: ClientTransport> EditorPlugin<Rx> {
     pub fn new(rx: Rx) -> Self {
         Self { rx }
     }
 }
-impl<Rx: ClientRx> Plugin for EditorPlugin<Rx> {
+impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
     fn build(&self, app: &mut App) {
         app.add_plugins(
             DefaultPlugins
@@ -59,7 +59,6 @@ impl<Rx: ClientRx> Plugin for EditorPlugin<Rx> {
                     primary_window: Some(Window {
                         window_theme: Some(WindowTheme::Dark),
                         title: "Paracosm Editor".into(),
-                        present_mode: PresentMode::AutoNoVsync,
                         ..default()
                     }),
                     ..default()

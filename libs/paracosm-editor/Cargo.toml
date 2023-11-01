@@ -27,3 +27,16 @@ bevy_mod_picking.features = ["backend_egui"]
 
 # channel
 flume = "0.11"
+
+# args
+clap.version = "4.4"
+clap.features = ["derive"]
+
+# python
+pyo3.version = "0.20.0"
+paracosm-py.path = "../paracosm-py"
+
+# errors
+anyhow = "1"
+
+notify = "6.1"

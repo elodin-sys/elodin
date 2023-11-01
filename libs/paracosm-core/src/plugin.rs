@@ -1,16 +1,11 @@
-use std::{
-    marker::PhantomData,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use bevy::{pbr::PbrPlugin, prelude::*, winit::WinitPlugin};
+use bevy::{prelude::*, winit::WinitPlugin};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
-    sync::{send_model, send_pos, EntityMap, ServerTx},
+    sync::{recv_server, send_model, send_pos, EntityMap, ServerTransport},
     tree::{com_system, cri_system, forward_dynamics, rne_system},
     TreeMassMatrix, WorldPos,
 };
@@ -61,17 +56,17 @@ fn run_physics_system(world: &mut World) {
 }
 
 #[derive(Default)]
-pub struct XpbdPlugin<Tx: ServerTx> {
+pub struct XpbdPlugin<Tx: ServerTransport> {
     tx: Tx,
 }
 
-impl<Tx: ServerTx> XpbdPlugin<Tx> {
+impl<Tx: ServerTransport> XpbdPlugin<Tx> {
     pub fn new(tx: Tx) -> Self {
         Self { tx }
     }
 }
 
-impl<Tx: ServerTx> Plugin for XpbdPlugin<Tx> {
+impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
         app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
@@ -89,17 +84,20 @@ impl<Tx: ServerTx> Plugin for XpbdPlugin<Tx> {
         app.add_systems(Update, run_physics_system);
         app.add_systems(PostStartup, send_model::<Tx>);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
-        app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos))
-            .configure_sets(
-                Update,
-                (
-                    TickSet::ClearConstraintLagrange,
-                    TickSet::TickPhysics,
-                    TickSet::SyncPos,
-                )
-                    .chain(),
+        app.add_systems(
+            PhysicsSchedule,
+            (send_pos::<Tx>, recv_server::<Tx>).in_set(TickSet::SyncPos),
+        )
+        .configure_sets(
+            Update,
+            (
+                TickSet::ClearConstraintLagrange,
+                TickSet::TickPhysics,
+                TickSet::SyncPos,
             )
-            .add_schedule(SubstepSchedule, substep_schedule());
+                .chain(),
+        )
+        .add_schedule(SubstepSchedule, substep_schedule());
     }
 }
 

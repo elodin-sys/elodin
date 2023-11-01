@@ -97,7 +97,7 @@ impl RigidBody {
 
 #[pyclass]
 #[derive(Clone)]
-pub struct SimBuilder(paracosm::builder::SimBuilder);
+pub struct SimBuilder(pub paracosm::builder::SimBuilder);
 
 #[pymethods]
 impl SimBuilder {
@@ -108,6 +108,19 @@ impl SimBuilder {
 
     fn body(&mut self, entity: RigidBody) -> RigidBodyHandle {
         RigidBodyHandle(self.0.entity(entity.inner))
+    }
+
+    fn zero_g(&mut self) {
+        self.0.zero_g();
+    }
+
+    fn g_accel(&mut self, accel: PyReadonlyArray1<f64>) -> PyResult<()> {
+        let Some(accel): Option<MatrixView3x1<f64>> = accel.try_as_matrix() else {
+            return Err(PyErr::new::<PyTypeError, _>("gravity must be a 1x3 matrix"));
+        };
+
+        self.0.g_accel(SpatialMotion::linear(accel.into_owned()));
+        Ok(())
     }
 }
 
@@ -266,22 +279,22 @@ impl Joint {
     }
 }
 
-#[pyfunction]
-fn editor(py: Python<'_>, callable: PyObject) -> PyResult<()> {
-    let builder = callable.call0(py)?;
-    let builder: SimBuilder = builder.extract(py).unwrap();
-    let builder = builder.0;
-    paracosm_editor::editor(|| builder.clone());
-    Ok(())
-}
+// #[pyfunction]
+// fn editor(py: Python<'_>, callable: PyObject) -> PyResult<()> {
+// let builder = callable.call0(py)?;
+// let builder: SimBuilder = builder.extract(py).unwrap();
+// let builder = builder.0;
+//     paracosm_editor::editor(move || builder.clone());
+//     Ok(())
+// }
 
 #[pymodule]
-fn paracosm_py(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn paracosm_py(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<RigidBody>()?;
     m.add_class::<SimBuilder>()?;
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Joint>()?;
-    m.add_function(wrap_pyfunction!(editor, m)?)?;
+    // m.add_function(wrap_pyfunction!(editor, m)?)?;
     Ok(())
 }
