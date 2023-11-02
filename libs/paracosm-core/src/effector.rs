@@ -1,6 +1,5 @@
 use super::FromState;
 use crate::Time;
-use std::marker::PhantomData;
 
 pub trait Effector<T, S> {
     type Effect;
@@ -10,35 +9,6 @@ pub trait Effector<T, S> {
 
 pub trait StateEffect<S> {
     fn apply(&self, time: Time, init_state: &S, inc_state: &mut S);
-}
-
-pub(crate) struct ErasedStateEffector<T, S, ER> {
-    effector: ER,
-    _phantom: PhantomData<(T, S)>,
-}
-
-impl<T, ER, E, S> ErasedStateEffector<T, S, ER>
-where
-    ER: Effector<T, S, Effect = E> + 'static,
-    E: StateEffect<S> + 'static,
-    S: 'static,
-    T: 'static,
-{
-    pub(crate) fn boxed(effector: ER) -> Box<dyn StateEffect<S>> {
-        Box::new(ErasedStateEffector {
-            effector,
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl<T, ER: Effector<T, S, Effect = E>, E: StateEffect<S>, S> StateEffect<S>
-    for ErasedStateEffector<T, S, ER>
-{
-    fn apply(&self, time: Time, init_state: &S, inc_state: &mut S) {
-        let effect = self.effector.effect(time, init_state);
-        effect.apply(time, init_state, inc_state)
-    }
 }
 
 macro_rules! impl_effector {
