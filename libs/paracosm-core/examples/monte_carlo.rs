@@ -1,12 +1,11 @@
 use nalgebra::{vector, Vector3};
 use paracosm::{
+    builder::{EntityBuilder, Free, XpbdBuilder},
     forces::gravity,
     monte_carlo::{DistributionSpec, MonteCarlo, Normal},
+    runner::{IntoSimRunner, RunMode},
     runtime::JobSpec,
-    xpbd::{
-        builder::{EntityBuilder, XpbdBuilder},
-        runner::{IntoSimRunner, RunMode},
-    },
+    spatial::{SpatialMotion, SpatialPos},
     Force, Time,
 };
 
@@ -30,8 +29,11 @@ fn sim(mut builder: XpbdBuilder<'_>, thrust: f64) {
     builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(vector![0.0, 0.0, 1.0])
-            .vel(vector![1.0, 0.0, 0.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                    .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+            )
             .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
             .effector(move |Time(t)| {
                 if (9.42..10.0).contains(&t) {

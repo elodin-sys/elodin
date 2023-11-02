@@ -1,12 +1,11 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
+    builder::{Assets, EntityBuilder, Free, XpbdBuilder},
+    editor::{editor, Input},
     forces::gravity,
-    xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
-        editor::{editor, Input},
-    },
-    Force, Pos, Time,
+    spatial::{SpatialMotion, SpatialPos},
+    Force, Time, WorldPos,
 };
 
 fn main() {
@@ -17,8 +16,11 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(vector![0.0, 0.0, 1.0])
-            .vel(vector![1.0, 0.0, 0.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                    .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+            )
             .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
             .effector(|Time(t)| {
                 if (9.42..10.0).contains(&t) {
@@ -37,10 +39,13 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(vector![0.0, 1.0, 0.0])
-            .vel(vector![0.0, 0.0, 1.0])
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(vector![0.0, 1.0, 0.0]))
+                    .vel(SpatialMotion::linear(vector![0.0, 0.0, 1.0])),
+            )
             .effector(gravity(1.0 / 6.649e-11, Vector3::zeros()))
-            .effector(move |Pos(pos)| Force(*input.0.load() * pos.normalize()))
+            .effector(move |WorldPos(pos)| Force(*input.0.load() * pos.pos.normalize()))
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.05,
@@ -52,7 +57,7 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets, input: Input) {
     builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(Vector3::zeros())
+            .joint(Free::default().pos(SpatialPos::linear(Vector3::zeros())))
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
                 ..Default::default()

@@ -1,11 +1,10 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
 use paracosm::{
-    xpbd::{
-        builder::{Assets, EntityBuilder, XpbdBuilder},
-        editor::{editor, Input},
-    },
-    Time, Torque,
+    builder::{Assets, EntityBuilder, Free, XpbdBuilder},
+    editor::{editor, Input},
+    spatial::SpatialPos,
+    Force,
 };
 
 fn main() {
@@ -16,10 +15,10 @@ fn sim(mut builder: XpbdBuilder, mut assets: Assets, input: Input) {
     builder.entity(
         EntityBuilder::default()
             .mass(1.0)
-            .pos(vector![0.0, 0.75, 0.0])
-            .effector(move |Time(_)| {
+            .joint(Free::default().pos(SpatialPos::linear(vector![0.0, 0.75, 0.0])))
+            .effector(move || {
                 let torque = *input.0.load();
-                Torque(Vector3::new(0.0, torque, 0.0))
+                Force(Vector3::new(0.0, torque, 0.0))
             })
             .mesh(assets.mesh(Mesh::from(shape::Cube { size: 1.5 })))
             .material(assets.material(bevy::prelude::StandardMaterial {

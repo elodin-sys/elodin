@@ -2,7 +2,7 @@ use std::{collections::HashMap, panic::resume_unwind, path::PathBuf};
 
 use bevy::prelude::App;
 
-use crate::xpbd::runner::IntoSimRunner;
+use crate::runner::IntoSimRunner;
 
 #[derive(Default)]
 pub struct JobSpec {
@@ -61,11 +61,10 @@ mod tests {
     use nalgebra::{vector, Vector3};
 
     use crate::{
+        builder::{EntityBuilder, Free, XpbdBuilder},
         forces::gravity,
-        xpbd::{
-            builder::{EntityBuilder, XpbdBuilder},
-            components::LockStepSignal,
-        },
+        spatial::{SpatialMotion, SpatialPos},
+        types::LockStepSignal,
     };
 
     use super::*;
@@ -76,8 +75,11 @@ mod tests {
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
-                    .pos(vector![0.0, 0.0, 1.0])
-                    .vel(vector![1.0, 0.0, 0.0])
+                    .joint(
+                        Free::default()
+                            .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                            .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+                    )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
         }
@@ -85,7 +87,7 @@ mod tests {
         JobSpec::default()
             .sim(
                 sim.lockstep(lockstep.clone())
-                    .run_mode(crate::xpbd::runner::RunMode::FixedTicks(100)),
+                    .run_mode(crate::runner::RunMode::FixedTicks(100)),
             )
             .fn_task(move || {
                 for _ in 0..100 {
@@ -101,13 +103,16 @@ mod tests {
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
-                    .pos(vector![0.0, 0.0, 1.0])
-                    .vel(vector![1.0, 0.0, 0.0])
+                    .joint(
+                        Free::default()
+                            .pos(SpatialPos::linear(vector![0.0, 0.0, 1.0]))
+                            .vel(SpatialMotion::linear(vector![1.0, 0.0, 0.0])),
+                    )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
         }
         JobSpec::default()
-            .sim(sim.run_mode(crate::xpbd::runner::RunMode::FixedTicks(1000)))
+            .sim(sim.run_mode(crate::runner::RunMode::FixedTicks(1000)))
             .run()
     }
 }

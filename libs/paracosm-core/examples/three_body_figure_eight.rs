@@ -1,10 +1,11 @@
 use bevy::prelude::{shape, Color, Mesh};
 use nalgebra::{vector, Vector3};
-use paracosm::xpbd::{
-    builder::{Assets, EntityBuilder, XpbdBuilder},
+use paracosm::{
+    builder::{Assets, EntityBuilder, Free, XpbdBuilder},
     constraints::GravityConstraint,
     editor::editor,
     runner::IntoSimRunner,
+    spatial::{SpatialMotion, SpatialPos},
 };
 
 fn main() {
@@ -18,8 +19,11 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let a = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(figure_eight_pos)
-            .vel(-0.5 * figure_eight_vel)
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(figure_eight_pos))
+                    .vel(SpatialMotion::linear(-0.5 * figure_eight_vel)),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
@@ -34,8 +38,11 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let b = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(-1.0 * figure_eight_pos)
-            .vel(-0.5 * figure_eight_vel)
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(-1.0 * figure_eight_pos))
+                    .vel(SpatialMotion::linear(-0.5 * figure_eight_vel)),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
@@ -51,8 +58,11 @@ fn sim(mut builder: XpbdBuilder<'_>, mut assets: Assets) {
     let c = builder.entity(
         EntityBuilder::default()
             .mass(1.0 / 6.649e-11)
-            .pos(Vector3::zeros())
-            .vel(figure_eight_vel)
+            .joint(
+                Free::default()
+                    .pos(SpatialPos::linear(Vector3::zeros()))
+                    .vel(SpatialMotion::linear(figure_eight_vel)),
+            )
             .trace(Vector3::zeros())
             .mesh(assets.mesh(Mesh::from(shape::UVSphere {
                 radius: 0.2,
