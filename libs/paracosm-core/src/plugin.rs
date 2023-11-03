@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use bevy::{prelude::*, winit::WinitPlugin};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
@@ -84,20 +86,18 @@ impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
         app.add_systems(Update, run_physics_system);
         app.add_systems(PostStartup, send_model::<Tx>);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
-        app.add_systems(
-            PhysicsSchedule,
-            (send_pos::<Tx>, recv_server::<Tx>).in_set(TickSet::SyncPos),
-        )
-        .configure_sets(
-            Update,
-            (
-                TickSet::ClearConstraintLagrange,
-                TickSet::TickPhysics,
-                TickSet::SyncPos,
+        app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos));
+        app.add_systems(Update, recv_server::<Tx>)
+            .configure_sets(
+                Update,
+                (
+                    TickSet::ClearConstraintLagrange,
+                    TickSet::TickPhysics,
+                    TickSet::SyncPos,
+                )
+                    .chain(),
             )
-                .chain(),
-        )
-        .add_schedule(SubstepSchedule, substep_schedule());
+            .add_schedule(SubstepSchedule, substep_schedule());
     }
 }
 

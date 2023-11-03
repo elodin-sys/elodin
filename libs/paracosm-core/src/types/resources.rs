@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use bevy::prelude::{FixedTime, Resource};
+use bevy::prelude::{Deref, DerefMut, FixedTime, Resource};
 use nalgebra::Vector3;
 
 use crate::spatial::SpatialMotion;
@@ -12,7 +12,7 @@ use crate::spatial::SpatialMotion;
 pub struct PhysicsFixedTime(pub FixedTime);
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Resource)]
 pub struct Time(pub f64);
-#[derive(Debug, Clone, Copy, PartialEq, Resource)]
+#[derive(Debug, Clone, Copy, PartialEq, Resource, Deref, DerefMut)]
 pub struct Paused(pub bool);
 
 #[derive(Debug, Resource)]
