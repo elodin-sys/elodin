@@ -1,4 +1,3 @@
-use super::Input;
 use bevy::prelude::*;
 use bevy_egui::{
     egui::{
@@ -8,14 +7,7 @@ use bevy_egui::{
     EguiContexts,
 };
 use nalgebra::Vector3;
-use paracosm::{
-    builder::{Env, FromEnv},
-    history::{HistoryStore, RollbackEvent},
-    runner::SimRunnerEnv,
-    sync::ClientTransport,
-    EntityQuery, Paused, Picked, SimState,
-};
-use std::ops::DerefMut;
+use paracosm::{sync::ClientTransport, EntityQuery, Picked, SimState};
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);
 const DARK_BLUE: Color32 = Color32::from_rgb(0x1F, 0x2C, 0x4C);

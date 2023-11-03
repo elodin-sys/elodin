@@ -67,9 +67,7 @@ pub struct MeshData {
 
 impl From<MeshData> for bevy::prelude::Mesh {
     fn from(data: MeshData) -> Self {
-        use bevy::render::mesh::VertexAttributeValues::{
-            Float32x2, Float32x3, Float32x4, Uint16x4,
-        };
+        use bevy::render::mesh::VertexAttributeValues::Uint16x4;
         let mesh_type_enum = match data.mesh_type {
             0 => PrimitiveTopology::PointList,
             1 => PrimitiveTopology::LineList,

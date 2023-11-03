@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{
     app::AppExit,
-    prelude::{shape, Assets, Color, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial},
+    prelude::{Assets, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial},
 };
 use bevy_ecs::{
     entity::Entity,

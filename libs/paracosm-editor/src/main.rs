@@ -88,15 +88,9 @@ fn setup_file(
 
 fn poll_file(mut commands: Commands, mut task: Query<(Entity, &mut FileTask)>) {
     for (entity, mut task) in &mut task {
-        if let Some(res) = future::block_on(future::poll_once(&mut task.0)) {
+        if let Some(_res) = future::block_on(future::poll_once(&mut task.0)) {
             commands.entity(entity).remove::<FileTask>();
         }
-    }
-}
-
-fn error_handler(In(result): In<anyhow::Result<()>>) {
-    if let Err(err) = result {
-        println!("error {:?}", err);
     }
 }
 
@@ -141,7 +135,7 @@ fn load_python(path: PathBuf, tx: ServerChannel) -> anyhow::Result<()> {
                 println!("thread finished run");
                 Ok(())
             },
-        );
+        )?;
     Ok(())
 }
 

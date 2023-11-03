@@ -15,7 +15,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
+use nalgebra::{DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
 
 pub fn pos_tree_step(
     parent: &SpatialPos,

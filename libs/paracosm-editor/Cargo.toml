@@ -8,6 +8,7 @@ edition = "2021"
 name = "Paracosm Editor"
 identifier = "systems.elodin.paracosm"
 icon = ["assets/512x512@2x.png"]
+osx_minimum_system_version = "10.11"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

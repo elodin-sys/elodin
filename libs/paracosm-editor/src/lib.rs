@@ -1,4 +1,4 @@
-use self::{traces::TracesPlugin, ui::*};
+use self::ui::*;
 use bevy::{
     core_pipeline::{
         bloom::BloomSettings,
@@ -108,7 +108,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
     }
 }
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
     commands.spawn(InfiniteGridBundle {
         grid: InfiniteGrid {
             minor_line_color: Color::hex("#00081E").unwrap(),
