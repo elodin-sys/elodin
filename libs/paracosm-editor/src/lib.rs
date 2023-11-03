@@ -22,6 +22,7 @@ use bevy_polyline::PolylinePlugin;
 use paracosm::{
     plugin::sync_pos,
     sync::{channel_pair, recv_data, EntityMap},
+    SimState,
 };
 use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
 
@@ -59,6 +60,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                     primary_window: Some(Window {
                         window_theme: Some(WindowTheme::Dark),
                         title: "Paracosm Editor".into(),
+                        present_mode: PresentMode::AutoNoVsync,
                         ..default()
                     }),
                     ..default()
@@ -67,6 +69,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
         )
         .insert_resource(self.rx.clone())
         .insert_resource(EntityMap::default())
+        .insert_resource(SimState::default())
         .add_plugins(
             DefaultPickingPlugins
                 .build()
@@ -81,6 +84,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
         .add_systems(Startup, setup)
         .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)
+        .add_systems(Update, timeline_system::<Rx>)
         .add_systems(Update, (recv_data::<Rx>, sync_pos))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
@@ -164,10 +168,3 @@ fn make_pickable(
             .insert((PickableBundle::default(), RaycastPickTarget::default()));
     }
 }
-
-// #[derive(Resource, Clone, Debug, Default)]
-// pub struct Input(pub SharedNum<f64>);
-
-// #[derive(Editable, Resource, Clone, Debug, Default)]
-// #[editable(slider, range = -1.25..=1.25, name = "input")]
-// pub struct ObservableInput(pub ObservableNum<f64>);

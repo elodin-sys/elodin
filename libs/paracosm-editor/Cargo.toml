@@ -1,7 +1,13 @@
 [package]
 name = "paracosm-editor"
+description = "Paracosm Editor"
 version = "0.1.0"
 edition = "2021"
+
+[package.metadata.bundle]
+name = "Paracosm Editor"
+identifier = "systems.elodin.paracosm"
+icon = ["assets/512x512@2x.png"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -39,4 +45,14 @@ paracosm-py.path = "../paracosm-py"
 # errors
 anyhow = "1"
 
+# file notifications
 notify = "6.1"
+
+# thread priority
+thread-priority = "0.13.1"
+
+# ui
+rfd = "0.12.1"
+
+# futures
+futures-lite = "2.0"

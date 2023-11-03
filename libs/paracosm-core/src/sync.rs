@@ -10,7 +10,11 @@ use bevy_ecs::{
     system::{Commands, Query, Res, ResMut, Resource},
 };
 
-use crate::{ClientMsg, MeshData, ModelData, ReflectSerde, ServerMsg, Synced, Uuid, WorldPos};
+use crate::{
+    history::{HistoryStore, RollbackEvent},
+    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, Synced, Uuid,
+    WorldPos,
+};
 use flume::{Receiver, Sender};
 
 #[derive(Resource, DerefMut, Deref, Default)]
@@ -23,10 +27,14 @@ pub fn recv_data<S: ClientTransport>(
     client: Res<S>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
     mut material_assets: ResMut<Assets<StandardMaterial>>,
+    mut sim_state: ResMut<SimState>,
 ) {
     while let Some(msg) = client.try_recv_msg() {
         match msg {
             ClientMsg::Clear => todo!(),
+            ClientMsg::SimSate(state) => {
+                *sim_state = state;
+            }
             ClientMsg::SyncWorldPos(msg) => {
                 if let Some(e) = entity_map.get(&msg.body_id) {
                     if let Ok(mut world_pos) = world_pos.get_mut(*e) {
@@ -77,13 +85,23 @@ pub trait ServerTransport: Send + Sync + Resource + Clone {
     fn try_recv_msg(&self) -> Option<ServerMsg>;
 }
 
-pub fn send_pos<Tx: ServerTransport>(query: Query<(&WorldPos, &Uuid)>, tx: ResMut<Tx>) {
+pub fn send_pos<Tx: ServerTransport>(
+    query: Query<(&WorldPos, &Uuid)>,
+    tx: ResMut<Tx>,
+    history: Res<HistoryStore>,
+    paused: Res<Paused>,
+) {
     for (pos, body_id) in query.iter() {
         tx.send_msg(ClientMsg::SyncWorldPos(crate::SyncWorldPos {
             body_id: *body_id,
             pos: pos.0,
         }))
     }
+    tx.send_msg(ClientMsg::SimSate(SimState {
+        paused: **paused,
+        history_count: history.count(),
+        history_index: history.current_index(),
+    }))
 }
 
 pub fn send_model<Tx: ServerTransport>(
@@ -106,11 +124,18 @@ pub fn send_model<Tx: ServerTransport>(
     }
 }
 
-pub fn recv_server<T: ServerTransport>(transport: Res<T>, mut event: EventWriter<AppExit>) {
-    if let Some(msg) = transport.try_recv_msg() {
+pub fn recv_server<T: ServerTransport>(
+    transport: Res<T>,
+    mut event: EventWriter<AppExit>,
+    mut paused: ResMut<Paused>,
+    mut rollback: EventWriter<RollbackEvent>,
+) {
+    while let Some(msg) = transport.try_recv_msg() {
         match msg {
             ServerMsg::Exit => event.send(AppExit),
             ServerMsg::RequestModel(_) => todo!(),
+            ServerMsg::Pause(pause) => paused.0 = pause,
+            ServerMsg::Rollback(time) => rollback.send(RollbackEvent(time)),
         }
     }
 }
@@ -123,7 +148,7 @@ pub struct ServerChannel {
 
 impl ServerTransport for ServerChannel {
     fn send_msg(&self, msg: ClientMsg) {
-        let _ = self.tx.send(msg);
+        self.tx.send(msg).unwrap();
     }
 
     fn try_recv_msg(&self) -> Option<ServerMsg> {
@@ -158,6 +183,6 @@ impl ClientTransport for ClientChannel {
     }
 
     fn send_msg(&self, msg: ServerMsg) {
-        self.tx.send(msg);
+        self.tx.send(msg).unwrap();
     }
 }

@@ -12,7 +12,8 @@ use paracosm::{
     builder::{Env, FromEnv},
     history::{HistoryStore, RollbackEvent},
     runner::SimRunnerEnv,
-    EntityQuery, Paused, Picked,
+    sync::ClientTransport,
+    EntityQuery, Paused, Picked, SimState,
 };
 use std::ops::DerefMut;
 
@@ -118,35 +119,40 @@ pub(crate) fn picked_system(
         });
 }
 
-// pub(crate) fn timeline_system(
-//     mut contexts: EguiContexts,
-//     mut paused: ResMut<Paused>,
-//     history: Res<HistoryStore>,
-//     mut event_writer: EventWriter<RollbackEvent>,
-//     window: Query<&Window>,
-// ) {
-//     let window = window.single();
-//     let width = window.resolution.width();
-//     let height = window.resolution.height();
-//     egui::Window::new("timeline")
-//         .title_bar(false)
-//         .resizable(false)
-//         .fixed_size(egui::vec2(500.0, 50.0))
-//         .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
-//         .show(contexts.ctx_mut(), |ui| {
-//             ui.horizontal(|ui| {
-//                 let paused_val = paused.0;
-//                 ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
-//                 let max_count = history.count().saturating_sub(1);
-//                 let mut selected_index = history.current_index();
-//                 ui.spacing_mut().slider_width = 450.0;
-//                 let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
-//                 if res.changed() {
-//                     event_writer.send(RollbackEvent(selected_index))
-//                 }
-//             })
-//         });
-// }
+pub(crate) fn timeline_system<Tx: ClientTransport>(
+    mut contexts: EguiContexts,
+    tx: Res<Tx>,
+    mut sim_state: ResMut<SimState>,
+    window: Query<&Window>,
+) {
+    let window = window.single();
+    let width = window.resolution.width();
+    let height = window.resolution.height();
+    egui::Window::new("timeline")
+        .title_bar(false)
+        .resizable(false)
+        .fixed_size(egui::vec2(500.0, 50.0))
+        .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
+        .show(contexts.ctx_mut(), |ui| {
+            ui.horizontal(|ui| {
+                let paused_val = sim_state.paused;
+                if ui
+                    .toggle_value(&mut sim_state.paused, if paused_val { "⏵" } else { "⏸" })
+                    .changed()
+                {
+                    tx.send_msg(paracosm::ServerMsg::Pause(sim_state.paused));
+                }
+                let max_count = sim_state.history_count.saturating_sub(1);
+                let mut selected_index = sim_state.history_index;
+                ui.spacing_mut().slider_width = 450.0;
+                let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
+                if res.changed() {
+                    tx.send_msg(paracosm::ServerMsg::Rollback(selected_index));
+                    //event_writer.send(RollbackEvent(selected_index))
+                }
+            })
+        });
+}
 
 fn vec_from_tuple(tuple: (f64, f64, f64)) -> Vector3<f64> {
     Vector3::new(tuple.0, tuple.1, tuple.2)
@@ -172,39 +178,3 @@ fn vec3_component(ui: &mut Ui, label: &str, vec3: &Vector3<f64>) {
         );
     });
 }
-
-// impl Editable for Input {
-//     fn build(&mut self, ui: &mut Ui) {
-//         let mut num = self.0.load();
-//         ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
-//     }
-// }
-
-// pub trait Editable: Send + Sync {
-//     fn build(&mut self, ui: &mut Ui);
-// }
-
-// // impl<F: Editable + Clone + Resource + Default> FromEnv<SimRunnerEnv> for F {
-// //     type Item<'a> = F;
-
-// //     fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
-// //         env.app
-// //             .world
-// //             .get_resource::<F>()
-// //             .expect("missing resource")
-// //             .clone()
-// //     }
-
-// //     fn init(env: &mut SimRunnerEnv) {
-// //         let f = F::default();
-// //         let mut editables = env
-// //             .app
-// //             .world
-// //             .get_resource_or_insert_with(|| Editables(vec![]));
-// //         editables.0.push(Box::new(f.clone()));
-// //         env.app.world.insert_resource(f);
-// //     }
-// // }
-
-// #[derive(Resource, Default)]
-// pub struct Editables(Vec<Box<dyn Editable>>);

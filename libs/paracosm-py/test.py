@@ -40,7 +40,7 @@ def sim() -> SimBuilder:
                 pos=to_rad(-0)
             ),
             parent=rod_a,
-            body_pos=np.array([-0.0, -1 * length / 2.0, -0.2]),
+            body_pos=np.array([-0.0, -1 * length / 2.0, -0.0]),
         )
     )
 

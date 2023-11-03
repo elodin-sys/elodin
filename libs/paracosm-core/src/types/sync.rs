@@ -9,21 +9,31 @@ use bevy::{
     },
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
-use bevy_ecs::component::Component;
-use nalgebra::Vector3;
+use bevy_ecs::{component::Component, system::Resource};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::spatial::SpatialPos;
 
+#[derive(Debug)]
 pub enum ServerMsg {
     Exit,
     RequestModel(Uuid),
+    Rollback(usize),
+    Pause(bool),
 }
 
 pub enum ClientMsg {
     Clear,
     SyncWorldPos(SyncWorldPos),
     ModelDataResp(ModelData),
+    SimSate(SimState),
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct SimState {
+    pub paused: bool,
+    pub history_count: usize,
+    pub history_index: usize,
 }
 
 pub struct SyncWorldPos {

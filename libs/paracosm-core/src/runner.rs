@@ -111,7 +111,8 @@ impl<'a> SimRunner<'a> {
                 app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
                 app.add_plugins(ScheduleRunnerPlugin {
                     run_mode: bevy::app::RunMode::Loop {
-                        wait: Some(duration), // TODO: This uses an inaccurate timer, and so we probably want to modify it to be more time accurate
+                        //wait: Some(duration), // TODO: This uses an inaccurate timer, and so we probably want to modify it to be more time accurate
+                        wait: None,
                     },
                 });
             }
