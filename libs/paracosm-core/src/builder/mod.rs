@@ -197,8 +197,7 @@ where
     F: Fn() -> R,
 {
     fn build(&self, _env: &mut E) -> R {
-        let res = (self)();
-        res
+        (self)()
     }
 }
 

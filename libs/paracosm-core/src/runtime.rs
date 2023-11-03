@@ -15,8 +15,8 @@ impl JobSpec {
         self
     }
 
-    pub fn sim<'a, T>(mut self, func: impl IntoSimRunner<'a, T>) -> Self {
-        let runner = func.into_runner();
+    pub fn sim<'a, T>(self, func: impl IntoSimRunner<'a, T>) -> Self {
+        let _runner = func.into_runner();
         //self.tasks.push(Task::Sim(runner.build())); // FIXME
         self
     }

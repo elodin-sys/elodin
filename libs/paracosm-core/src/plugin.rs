@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use bevy::{prelude::*, winit::WinitPlugin};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
