@@ -61,7 +61,7 @@ mod tests {
     use nalgebra::{vector, Vector3};
 
     use crate::{
-        builder::{EntityBuilder, Free, XpbdBuilder},
+        builder::{EntityBuilder, Free, SimBuilder},
         forces::gravity,
         spatial::{SpatialMotion, SpatialPos},
         types::LockStepSignal,
@@ -71,7 +71,8 @@ mod tests {
 
     #[test]
     fn test_basic_lockstep_sim_run() {
-        fn sim(mut builder: XpbdBuilder<'_>) {
+        fn sim() -> SimBuilder {
+            let mut builder = SimBuilder::default();
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
@@ -82,6 +83,7 @@ mod tests {
                     )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
+            builder
         }
         let lockstep = LockStepSignal::default();
         JobSpec::default()
@@ -99,7 +101,8 @@ mod tests {
 
     #[test]
     fn test_basic_sim_run() {
-        fn sim(mut builder: XpbdBuilder<'_>) {
+        fn sim() -> SimBuilder {
+            let mut builder = SimBuilder::default();
             builder.entity(
                 EntityBuilder::default()
                     .mass(1.0)
@@ -110,6 +113,7 @@ mod tests {
                     )
                     .effector(gravity(1.0 / 6.649e-11, Vector3::zeros())),
             );
+            builder
         }
         JobSpec::default()
             .sim(sim.run_mode(crate::runner::RunMode::FixedTicks(1000)))

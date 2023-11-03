@@ -41,7 +41,7 @@ fn sim() -> SimBuilder {
             .joint(Revolute::new(Vector3::z_axis()).pos(-90f64.to_radians())),
     );
 
-    let rod_b = builder.entity(
+    let _rod_b = builder.entity(
         EntityBuilder::default()
             .mass(1.0)
             .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
