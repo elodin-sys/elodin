@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use nalgebra::Vector3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct Fixed(pub bool);
+pub struct FixedBody(pub bool);
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Picked(pub bool);
 #[derive(Component)]

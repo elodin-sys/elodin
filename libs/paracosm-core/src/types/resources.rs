@@ -3,13 +3,40 @@ use std::sync::{
     Arc,
 };
 
-use bevy::prelude::{Deref, DerefMut, FixedTime, Resource};
+use bevy::prelude::{Deref, DerefMut, Resource};
+use bevy_utils::Duration;
 use nalgebra::Vector3;
 
 use crate::spatial::SpatialMotion;
 
-#[derive(Debug, Resource)]
-pub struct PhysicsFixedTime(pub FixedTime);
+#[derive(Debug, Default)]
+pub struct PhysFixed {
+    pub(crate) timestep: Duration,
+    pub(crate) overstep: Duration,
+}
+
+#[derive(Resource, Debug)]
+pub struct PhysicsFixedTime(pub bevy::time::Time<PhysFixed>);
+
+impl PhysicsFixedTime {
+    pub fn accumulate(&mut self, delta: Duration) {
+        self.0.context_mut().overstep += delta;
+    }
+
+    pub fn expend(&mut self) -> bool {
+        let timestep = self.0.context().timestep;
+        if let Some(new_value) = self.0.context_mut().overstep.checked_sub(timestep) {
+            // reduce accumulated and increase elapsed by period
+            self.0.context_mut().overstep = new_value;
+            self.0.advance_by(timestep);
+            true
+        } else {
+            // no more periods left in accumulated
+            false
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Resource)]
 pub struct Time(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, Resource, Deref, DerefMut)]

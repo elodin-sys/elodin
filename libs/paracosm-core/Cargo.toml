@@ -15,9 +15,9 @@ nalgebra = "0.32"
 stable-vec = "0.4"
 
 # core bevy
-bevy_ecs = "0.11"
-bevy_utils = "0.11"
-bevy.version = "0.11"
+bevy_ecs = "0.12"
+bevy_utils = "0.12"
+bevy.version = "0.12"
 bevy.features = ["wayland", "trace"]
 
 paracosm-macros.path = "../paracosm-macros"
@@ -45,7 +45,7 @@ flume = "0.11"
 [dev-dependencies]
 plotters = "0.3.5"
 approx = "0.5"
-bevy = "0.11"
+bevy = "0.12"
 anyhow = "1"
 flume = "0.11"
 

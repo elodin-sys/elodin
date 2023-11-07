@@ -21,15 +21,15 @@ paracosm-macros.path = "../paracosm-macros"
 nalgebra = "0.32"
 
 # bevy
-bevy.version = "0.11"
+bevy.version = "0.12"
 bevy.features = ["wayland", "trace"]
-bevy_egui = "0.21"
-bevy_panorbit_camera.version = "0.8.0"
+bevy_egui = "0.23"
+bevy_panorbit_camera.version = "0.9.0"
 bevy_panorbit_camera.features = ["bevy_egui"]
-bevy_atmosphere = "0.7.0"
-bevy_infinite_grid = "0.8.1"
-bevy_polyline = "0.7"
-bevy_mod_picking.version = "0.15"
+bevy_atmosphere.git = "https://github.com/elodin-sys/bevy_atmosphere.git"
+bevy_infinite_grid.git = "https://github.com/elodin-sys/bevy_infinite_grid.git"
+bevy_mod_picking.git = "https://github.com/elodin-sys/bevy_mod_picking.git"
+bevy_mod_picking.branch = "bevy-0.12"
 bevy_mod_picking.features = ["backend_egui"]
 
 # channel

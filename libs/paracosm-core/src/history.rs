@@ -131,7 +131,7 @@ pub fn rollback_system(
     //mut polyline: Query<&mut Handle<Polyline>>,
     //mut polylines: Option<ResMut<Assets<Polyline>>>,
 ) {
-    for event in &mut event_reader {
+    for event in &mut event_reader.read() {
         history.rollback(event.0, &mut query, config.scale);
 
         // TODO: move to editor

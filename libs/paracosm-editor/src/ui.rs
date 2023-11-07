@@ -72,7 +72,7 @@ fn set_widget_visuals(visuals: &mut WidgetVisuals) {
     visuals.expansion = 1.0;
     visuals.weak_bg_fill = Color32::TRANSPARENT;
 
-    visuals.rounding = Rounding::none();
+    visuals.rounding = Rounding::ZERO;
 }
 
 // pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
