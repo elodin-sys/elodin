@@ -17,6 +17,6 @@ numpy.version = "0.20"
 numpy.features = ["nalgebra"]
 nalgebra = "0.32"
 
-bevy = "0.11"
+bevy = "0.12"
 
 notify = "6.1.1"

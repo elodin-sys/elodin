@@ -15,10 +15,12 @@ use bevy::{
 };
 use bevy_atmosphere::prelude::*;
 use bevy_egui::EguiPlugin;
-use bevy_infinite_grid::{GridShadowCamera, InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
+use bevy_infinite_grid::{
+    GridShadowCamera, InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings,
+};
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use bevy_polyline::PolylinePlugin;
+//use bevy_polyline::PolylinePlugin;
 use paracosm::{
     plugin::sync_pos,
     sync::{channel_pair, recv_data, EntityMap},
@@ -26,7 +28,7 @@ use paracosm::{
 };
 use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
 
-pub(crate) mod traces;
+//pub(crate) mod traces;
 mod ui;
 
 pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
@@ -79,7 +81,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
-        .add_plugins(PolylinePlugin)
+        // .add_plugins(PolylinePlugin)
         //.add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (picked_system,))
@@ -110,10 +112,11 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
 
 fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
     commands.spawn(InfiniteGridBundle {
-        grid: InfiniteGrid {
+        settings: InfiniteGridSettings {
             minor_line_color: Color::hex("#00081E").unwrap(),
             major_line_color: Color::hex("#00081E").unwrap(),
             x_axis_color: Color::hex("F46E22").unwrap(),
+            shadow_color: None,
             ..Default::default()
         },
         ..default()
@@ -131,7 +134,6 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
     });
 
     camera
-        .insert(RaycastPickCamera::default())
         .insert(BloomSettings { ..default() })
         .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera);
@@ -163,8 +165,6 @@ fn make_pickable(
     meshes: Query<Entity, (With<Handle<Mesh>>, Without<Pickable>)>,
 ) {
     for entity in meshes.iter() {
-        commands
-            .entity(entity)
-            .insert((PickableBundle::default(), RaycastPickTarget::default()));
+        commands.entity(entity).insert((PickableBundle::default(),));
     }
 }

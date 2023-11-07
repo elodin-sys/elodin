@@ -12,7 +12,7 @@ use crate::{
     },
     tree::{Joint, JointType},
     types::*,
-    WorldPos, WorldVel,
+    FixedBody, WorldPos, WorldVel,
 };
 
 use crate::builder::{ConcreteEffector, ConcreteSensor};
@@ -152,7 +152,7 @@ impl EntityBuilder {
             sensors: self.sensors,
 
             effect: Effect::default(),
-            fixed: crate::Fixed(self.fixed),
+            fixed: FixedBody(self.fixed),
             picked: Picked(false),
 
             world_pos: WorldPos(Default::default()),

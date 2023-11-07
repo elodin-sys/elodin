@@ -45,9 +45,9 @@ fn run_physics_system(world: &mut World) {
         }
         TickMode::Fixed => {
             let mut fixed_time = world.resource_mut::<PhysicsFixedTime>();
-            fixed_time.0.tick(delta_time);
+            fixed_time.accumulate(delta_time);
             let _ = world.try_schedule_scope(PhysicsSchedule, |world, schedule| {
-                while world.resource_mut::<PhysicsFixedTime>().0.expend().is_ok() {
+                while world.resource_mut::<PhysicsFixedTime>().expend() {
                     schedule.run(world);
                 }
             });
@@ -85,17 +85,16 @@ impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
         app.add_systems(PostStartup, send_model::<Tx>);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
         app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos));
-        app.add_systems(Update, recv_server::<Tx>)
-            .configure_sets(
-                Update,
-                (
-                    TickSet::ClearConstraintLagrange,
-                    TickSet::TickPhysics,
-                    TickSet::SyncPos,
-                )
-                    .chain(),
+        app.add_systems(Update, recv_server::<Tx>).configure_sets(
+            Update,
+            (
+                TickSet::ClearConstraintLagrange,
+                TickSet::TickPhysics,
+                TickSet::SyncPos,
             )
-            .add_schedule(SubstepSchedule, substep_schedule());
+                .chain(),
+        );
+        app.add_schedule(substep_schedule());
     }
 }
 
@@ -132,7 +131,7 @@ pub enum SubstepSet {
 }
 
 pub fn substep_schedule() -> Schedule {
-    let mut schedule = Schedule::default();
+    let mut schedule = Schedule::new(SubstepSchedule);
     schedule.configure_sets(
         (
             SubstepSet::ForwardKinematics,

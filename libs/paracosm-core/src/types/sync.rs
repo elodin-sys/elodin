@@ -5,7 +5,7 @@ use bevy::{
     },
     reflect::{
         serde::{TypedReflectDeserializer, TypedReflectSerializer},
-        FromReflect, GetTypeRegistration, Reflect, TypeRegistryInternal,
+        FromReflect, GetTypeRegistration, Reflect, TypeRegistry,
     },
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
@@ -199,16 +199,17 @@ pub struct Uuid(pub u128);
 pub struct Synced(pub bool);
 
 pub trait RecursiveReg {
-    fn register(register: &mut TypeRegistryInternal);
+    fn register(register: &mut TypeRegistry);
 }
 
 impl RecursiveReg for StandardMaterial {
-    fn register(register: &mut TypeRegistryInternal) {
+    fn register(register: &mut TypeRegistry) {
         register.register::<Self>();
         register.register::<Color>();
         register.register::<Option<Handle<Image>>>();
         register.register::<AlphaMode>();
         register.register::<ParallaxMappingMethod>();
+        register.register::<bevy::pbr::OpaqueRendererMethod>();
     }
 }
 
@@ -220,7 +221,7 @@ impl<T: Reflect + GetTypeRegistration + RecursiveReg> Serialize for ReflectSerde
     where
         S: serde::Serializer,
     {
-        let mut reg = TypeRegistryInternal::default();
+        let mut reg = TypeRegistry::default();
         T::register(&mut reg);
         let serializer = TypedReflectSerializer::new(self.0.as_reflect(), &reg);
 
@@ -235,7 +236,7 @@ impl<'de, T: Reflect + GetTypeRegistration + RecursiveReg + FromReflect> Deseria
     where
         D: serde::Deserializer<'de>,
     {
-        let mut reg = TypeRegistryInternal::default();
+        let mut reg = TypeRegistry::default();
         T::register(&mut reg);
 
         let type_reg = T::get_type_registration();
@@ -255,14 +256,15 @@ mod tests {
     fn test_serialize_mesh() {
         //let mesh = Mesh::from(shape::Box::new(0.2, 1.0, 0.2));
         let mat = bevy::prelude::StandardMaterial {
-            base_color: Color::hex("38ACFF").unwrap(),
+            base_color: Color::hex("F8ACFF").unwrap(),
             metallic: 0.6,
             perceptual_roughness: 0.1,
+            attenuation_distance: 0.0,
             ..Default::default()
         };
         let mat = ReflectSerde(mat);
-        let data = serde_json::to_string(&mat).unwrap();
-        println!("{:?}", data);
+        let data = serde_json::to_string_pretty(&mat).unwrap();
+        println!("{}", data);
         let mat_b: ReflectSerde<StandardMaterial> = serde_json::from_str(&data).unwrap();
         assert_eq!(mat.0.base_color, mat_b.0.base_color)
     }

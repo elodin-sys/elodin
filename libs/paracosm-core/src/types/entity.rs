@@ -5,7 +5,7 @@ pub use super::*;
 
 #[derive(Bundle)]
 pub struct EntityBundle {
-    pub fixed: Fixed,
+    pub fixed: FixedBody,
 
     // pos
     pub world_pos: WorldPos,
@@ -53,7 +53,7 @@ pub struct JointBundle {
 #[derive(WorldQuery, Debug)]
 #[world_query(mutable, derive(Debug))]
 pub struct EntityQuery {
-    pub fixed: &'static Fixed,
+    pub fixed: &'static FixedBody,
     pub pos: &'static mut JointPos,
     pub vel: &'static mut JointVel,
 
@@ -66,7 +66,7 @@ pub struct EntityQuery {
 }
 
 pub struct EntityStateRef<'a> {
-    pub fixed: &'a Fixed,
+    pub fixed: &'a FixedBody,
     pub pos: &'a JointPos,
     pub vel: &'a JointVel,
 

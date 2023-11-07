@@ -1,4 +1,4 @@
-use crate::{builder::SimBuilder, sync::ServerTransport};
+use crate::{builder::SimBuilder, sync::ServerTransport, PhysFixed};
 
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
@@ -7,7 +7,8 @@ use super::{
 };
 use bevy::{
     app::{Plugins, ScheduleRunnerPlugin},
-    prelude::{App, FixedTime},
+    prelude::App,
+    time::{Time, Virtual},
 };
 use bevy_ecs::system::CommandQueue;
 use std::{cell::RefCell, time::Duration};
@@ -108,7 +109,9 @@ impl<'a> SimRunner<'a> {
             }
             RunMode::RealTime => {
                 let duration = Duration::from_secs_f64(self.config.dt);
-                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
+                let mut time = Time::<PhysFixed>::default();
+                time.context_mut().timestep = duration;
+                app.insert_resource(PhysicsFixedTime(time));
                 app.add_plugins(ScheduleRunnerPlugin {
                     run_mode: bevy::app::RunMode::Loop {
                         //wait: Some(duration), // TODO: This uses an inaccurate timer, and so we probably want to modify it to be more time accurate
@@ -118,12 +121,14 @@ impl<'a> SimRunner<'a> {
             }
             RunMode::Scaled(scale) => {
                 let duration = Duration::from_secs_f64(self.config.dt / scale);
-                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
+                let mut time = Time::<PhysFixed>::default();
+                time.context_mut().timestep = duration;
+                app.insert_resource(PhysicsFixedTime(time));
             }
 
             RunMode::FreeRun => {}
         }
-        app.insert_resource(bevy::time::Time::default());
+        app.insert_resource(bevy::time::Time::<Virtual>::default());
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
         app.add_plugins(XpbdPlugin::new(tx));
