@@ -61,7 +61,7 @@ pub struct IntQuery {
     mass: &'static mut Mass,
     inertia: &'static mut Inertia,
     inverse_inertia: &'static mut InverseInertia,
-    fixed: &'static Fixed,
+    fixed: &'static FixedBody,
     joint_accel: &'static JointAccel,
 }
 

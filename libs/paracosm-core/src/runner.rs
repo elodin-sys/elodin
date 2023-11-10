@@ -1,24 +1,29 @@
+use crate::{builder::SimBuilder, sync::ServerTransport, PhysFixed};
+
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
     plugin::XpbdPlugin,
     types::{Config, LockStepSignal, PhysicsFixedTime, TickMode},
 };
 use bevy::{
-    app::Plugins,
-    prelude::{App, FixedTime},
+    app::{Plugins, ScheduleRunnerPlugin},
+    prelude::App,
+    time::{Time, Virtual},
 };
 use bevy_ecs::system::CommandQueue;
 use std::{cell::RefCell, time::Duration};
 
 pub struct SimRunner<'a> {
-    sim_func: Box<dyn SimFunc<(), SimRunnerEnv> + 'a>,
+    sim_func: Box<dyn SimFunc<(), SimRunnerEnv, SimBuilder> + 'a>,
     config: Config,
     lockstep: Option<LockStepSignal>,
     run_mode: RunMode,
 }
 
 impl<'a> SimRunner<'a> {
-    pub fn new<T: 'a, F: SimFunc<T, SimRunnerEnv> + 'a>(sim_func: F) -> Self {
+    pub fn new<T: Send + Sync + 'a, F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a>(
+        sim_func: F,
+    ) -> Self {
         SimRunner {
             sim_func: Box::new(ConcreteSimFunc::new(sim_func)),
             config: Config::default(),
@@ -54,8 +59,8 @@ impl<'a> SimRunner<'a> {
         self
     }
 
-    pub fn build(self) -> App {
-        self.build_with_plugins(())
+    pub fn build(self, tx: impl ServerTransport) -> App {
+        self.build_with_plugins(tx, ())
     }
 
     fn tick_mode(&mut self) -> TickMode {
@@ -74,7 +79,11 @@ impl<'a> SimRunner<'a> {
         }
     }
 
-    pub fn build_with_plugins<M>(mut self, plugins: impl Plugins<M>) -> App {
+    pub fn build_with_plugins<M>(
+        mut self,
+        tx: impl ServerTransport,
+        plugins: impl Plugins<M>,
+    ) -> App {
         let mut app = App::new();
         app.insert_resource(self.tick_mode());
         match self.run_mode {
@@ -100,52 +109,40 @@ impl<'a> SimRunner<'a> {
             }
             RunMode::RealTime => {
                 let duration = Duration::from_secs_f64(self.config.dt);
-                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
+                let mut time = Time::<PhysFixed>::default();
+                time.context_mut().timestep = duration;
+                app.insert_resource(PhysicsFixedTime(time));
+                app.add_plugins(ScheduleRunnerPlugin {
+                    run_mode: bevy::app::RunMode::Loop {
+                        //wait: Some(duration), // TODO: This uses an inaccurate timer, and so we probably want to modify it to be more time accurate
+                        wait: None,
+                    },
+                });
             }
             RunMode::Scaled(scale) => {
                 let duration = Duration::from_secs_f64(self.config.dt / scale);
-                app.insert_resource(PhysicsFixedTime(FixedTime::new(duration)));
+                let mut time = Time::<PhysFixed>::default();
+                time.context_mut().timestep = duration;
+                app.insert_resource(PhysicsFixedTime(time));
             }
 
             RunMode::FreeRun => {}
         }
-        app.insert_resource(bevy::time::Time::default());
+        app.insert_resource(bevy::time::Time::<Virtual>::default());
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
-        app.add_plugins(XpbdPlugin);
+        app.add_plugins(XpbdPlugin::new(tx));
         app.add_plugins(plugins);
         let mut env = SimRunnerEnv::new(app);
-        self.sim_func.build(&mut env);
-        let SimRunnerEnv {
-            mut app,
-            command_queue,
-        } = env;
-        let mut command_queue = command_queue.into_inner();
-        command_queue.apply(&mut app.world);
+        let builder = self.sim_func.build(&mut env);
+        let SimRunnerEnv { mut app, .. } = env;
+        builder.apply(&mut app.world);
         app
     }
 }
 
 pub trait IntoSimRunner<'a, T>: Sized {
     fn into_runner(self) -> SimRunner<'a>;
-
-    fn delta_t(self, dt: f64) -> SimRunner<'a>;
-    fn substep_count(self, count: usize) -> SimRunner<'a>;
-    fn lockstep(self, lockstep: impl Into<Option<LockStepSignal>>) -> SimRunner<'a>;
-    fn run_mode(self, mode: RunMode) -> SimRunner<'a>;
-    fn scale(self, scale: f32) -> SimRunner<'a>;
-
-    fn build_app(self) -> App;
-}
-
-impl<'a, T, F> IntoSimRunner<'a, T> for F
-where
-    T: 'a,
-    F: SimFunc<T, SimRunnerEnv> + 'a,
-{
-    fn into_runner(self) -> SimRunner<'a> {
-        SimRunner::new(self)
-    }
 
     fn delta_t(self, dt: f64) -> SimRunner<'a> {
         self.into_runner().delta_t(dt)
@@ -163,12 +160,22 @@ where
         self.into_runner().run_mode(mode)
     }
 
-    fn build_app(self) -> App {
-        self.into_runner().build()
+    fn build_app(self, tx: impl ServerTransport) -> App {
+        self.into_runner().build(tx)
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {
         self.into_runner().scale(scale)
+    }
+}
+
+impl<'a, T, F> IntoSimRunner<'a, T> for F
+where
+    T: Send + Sync + 'a,
+    F: SimFunc<T, SimRunnerEnv, SimBuilder> + 'a,
+{
+    fn into_runner(self) -> SimRunner<'a> {
+        SimRunner::new(self)
     }
 }
 
@@ -193,12 +200,18 @@ impl<'a> IntoSimRunner<'a, ()> for SimRunner<'a> {
         SimRunner::run_mode(self, mode)
     }
 
-    fn build_app(self) -> App {
-        SimRunner::build(self)
+    fn build_app(self, tx: impl ServerTransport) -> App {
+        SimRunner::build(self, tx)
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {
         self.scale(scale)
+    }
+}
+
+impl<'a> IntoSimRunner<'a, ()> for SimBuilder {
+    fn into_runner(self) -> SimRunner<'a> {
+        SimRunner::new(Box::new(move || self.clone()))
     }
 }
 

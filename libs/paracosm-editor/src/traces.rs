@@ -1,9 +1,9 @@
+use bevy::ecs::entity::Entity;
 use bevy::prelude::*;
-use bevy_ecs::entity::Entity;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
 use nalgebra::Vector3;
 
-use crate::{history::HistoryStore, spatial::SpatialPos, types::Config};
+use paracosm::{history::HistoryStore, spatial::SpatialPos, Config};
 
 pub struct TracesPlugin;
 

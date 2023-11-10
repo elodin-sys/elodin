@@ -7,7 +7,7 @@ env:
 jobs:
   clippy:
     name: clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-large
     steps:
       - uses: actions/checkout@v2
       - name: Install Nix
@@ -23,7 +23,7 @@ jobs:
           RUSTC_WRAPPER: "sccache"
   test:
     name: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-large
     steps:
       - uses: actions/checkout@v2
       - name: Install Nix
@@ -39,7 +39,7 @@ jobs:
           RUSTC_WRAPPER: "sccache"
   fmt:
     name: rustfmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-large
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

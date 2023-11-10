@@ -1,8 +1,6 @@
-use bevy::{
-    prelude::{Handle, Mesh, PbrBundle, StandardMaterial},
-    scene::Scene,
-};
-use bevy_ecs::entity::Entity;
+use std::sync::Arc;
+
+use bevy::prelude::{Mesh, StandardMaterial};
 use nalgebra::{matrix, vector, Matrix3, UnitVector3, Vector3, Vector6};
 
 use crate::{
@@ -14,11 +12,14 @@ use crate::{
     },
     tree::{Joint, JointType},
     types::*,
-    WorldPos, WorldVel,
+    FixedBody, WorldPos, WorldVel,
 };
 
-use crate::builder::{AssetHandle, ConcreteEffector, ConcreteSensor};
+use crate::builder::{ConcreteEffector, ConcreteSensor};
 
+use super::RigidBodyHandle;
+
+#[derive(Clone)]
 pub struct EntityBuilder {
     mass: f64,
     inertia: Matrix3<f64>,
@@ -27,14 +28,16 @@ pub struct EntityBuilder {
     effectors: Effectors,
     sensors: Sensors,
 
-    pub(crate) editor_bundle: Option<PbrBundle>,
-    pub(crate) scene: Option<Handle<Scene>>,
-
     fixed: bool,
+
     pub(crate) trace: Option<Vector3<f64>>,
 
-    pub(crate) parent: Option<Entity>,
-    pub(crate) joint: Box<dyn JointBuilder>,
+    pub(crate) material: Option<Box<StandardMaterial>>,
+    pub(crate) mesh: Option<Box<Mesh>>,
+    pub(crate) scene: Option<String>,
+
+    pub(crate) parent: Option<RigidBodyHandle>,
+    pub(crate) joint: Arc<dyn JointBuilder>,
 
     body_pos: SpatialPos,
     body_vel: SpatialMotion,
@@ -48,14 +51,15 @@ impl Default for EntityBuilder {
             inverse_inertia: Matrix3::identity(),
             effectors: Default::default(),
             sensors: Default::default(),
-            editor_bundle: Default::default(),
             fixed: false,
             trace: None,
-            scene: None,
             parent: None,
-            joint: Box::<Free>::default(),
+            joint: Arc::<Free>::default(),
             body_pos: Default::default(),
             body_vel: Default::default(),
+            material: None,
+            mesh: None,
+            scene: None,
         }
     }
 }
@@ -79,7 +83,7 @@ impl EntityBuilder {
         EF: Into<Effect> + Send + Sync,
     {
         let unified: ConcreteEffector<E, T> = ConcreteEffector::new(effector);
-        self.effectors.0.push(Box::new(unified));
+        self.effectors.0.push(Arc::new(unified));
         self
     }
 
@@ -89,28 +93,22 @@ impl EntityBuilder {
         E: for<'a> Sensor<T, EntityStateRef<'a>> + Send + Sync + 'static,
     {
         let erased = ConcreteSensor::new(sensor);
-        self.sensors.0.push(Box::new(erased));
+        self.sensors.0.push(Arc::new(erased));
         self
     }
 
-    pub fn model(mut self, model: AssetHandle<Scene>) -> Self {
-        self.scene = model.0;
+    pub fn model(mut self, model: String) -> Self {
+        self.scene = Some(model);
         self
     }
 
-    pub fn mesh(mut self, mesh: AssetHandle<Mesh>) -> Self {
-        if let Some(mesh) = mesh.0 {
-            let editor_bundle = self.editor_bundle.get_or_insert_with(Default::default);
-            editor_bundle.mesh = mesh;
-        }
+    pub fn mesh(mut self, mesh: Mesh) -> Self {
+        self.mesh = Some(Box::new(mesh));
         self
     }
 
-    pub fn material(mut self, material: AssetHandle<StandardMaterial>) -> Self {
-        if let Some(material) = material.0 {
-            let editor_bundle = self.editor_bundle.get_or_insert_with(Default::default);
-            editor_bundle.material = material;
-        }
+    pub fn material(mut self, material: StandardMaterial) -> Self {
+        self.material = Some(Box::new(material));
         self
     }
 
@@ -124,14 +122,13 @@ impl EntityBuilder {
         self
     }
 
-    pub fn parent(mut self, parent: Entity, joint: impl JointBuilder) -> Self {
+    pub fn parent(mut self, parent: RigidBodyHandle) -> Self {
         self.parent = Some(parent);
-        self.joint = Box::new(joint);
         self
     }
 
     pub fn joint(mut self, joint: impl JointBuilder) -> Self {
-        self.joint = Box::new(joint);
+        self.joint = Arc::new(joint);
         self
     }
 
@@ -155,7 +152,7 @@ impl EntityBuilder {
             sensors: self.sensors,
 
             effect: Effect::default(),
-            fixed: crate::Fixed(self.fixed),
+            fixed: FixedBody(self.fixed),
             picked: Picked(false),
 
             world_pos: WorldPos(Default::default()),
@@ -171,11 +168,13 @@ impl EntityBuilder {
             subtree_com: SubtreeCoM(Default::default()),
             subtree_com_sum: SubtreeCoMSum(Default::default()),
             subtree_mass: SubtreeMass(Default::default()),
+
+            synced: Synced(false),
         }
     }
 }
 
-pub trait JointBuilder: 'static {
+pub trait JointBuilder: Send + Sync + 'static {
     fn apply(&self) -> JointBundle;
 }
 

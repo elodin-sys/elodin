@@ -42,12 +42,12 @@ pub fn sync_simple_transforms(
     query
         .p0()
         .par_iter_mut()
-        .for_each_mut(|(transform, mut global_transform)| {
+        .for_each(|(transform, mut global_transform)| {
             *global_transform = GlobalTransform::from(*transform);
         });
     // Update orphaned entities.
     let mut query = query.p1();
-    let mut iter = query.iter_many_mut(orphaned.iter());
+    let mut iter = query.iter_many_mut(orphaned.read());
     while let Some((transform, mut global_transform)) = iter.fetch_next() {
         if !transform.is_changed() && !global_transform.is_added() {
             *global_transform = GlobalTransform::from(*transform);
@@ -73,9 +73,9 @@ pub fn propagate_transforms(
     mut orphaned_entities: Local<Vec<Entity>>,
 ) {
     orphaned_entities.clear();
-    orphaned_entities.extend(orphaned.iter());
+    orphaned_entities.extend(orphaned.read());
     orphaned_entities.sort_unstable();
-    root_query.par_iter_mut().for_each_mut(
+    root_query.par_iter_mut().for_each(
         |(entity, children, transform, mut global_transform)| {
             let changed = transform.is_changed() || global_transform.is_added() || orphaned_entities.binary_search(&entity).is_ok();
             if changed {
@@ -215,7 +215,7 @@ impl Plugin for TransformPlugin {
         app.register_type::<Transform>()
             .register_type::<GlobalTransform>()
             .add_plugins(ValidParentCheckPlugin::<GlobalTransform>::default())
-            .configure_set(
+            .configure_sets(
                 PostStartup,
                 PropagateTransformsSet.in_set(TransformSystem::TransformPropagate),
             )
@@ -232,7 +232,7 @@ impl Plugin for TransformPlugin {
                     propagate_transforms.in_set(PropagateTransformsSet),
                 ),
             )
-            .configure_set(
+            .configure_sets(
                 PostUpdate,
                 PropagateTransformsSet.in_set(TransformSystem::TransformPropagate),
             )

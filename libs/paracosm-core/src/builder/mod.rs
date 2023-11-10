@@ -1,22 +1,22 @@
 mod assets;
 mod entity;
 
-use bevy::{prelude::AddChild, scene::SceneBundle};
-use bevy_ecs::{
-    entity::Entities,
-    prelude::Entity,
-    system::{CommandQueue, Insert, Query, Spawn},
+use bevy::{
+    prelude::{Assets, BuildWorldChildren, Deref, Handle, PbrBundle},
+    scene::Scene,
 };
-use std::cell::RefMut;
+use bevy_ecs::world::{Mut, World};
+use nalgebra::Vector3;
 use std::marker::PhantomData;
 
-pub use assets::*;
-use bevy_mod_picking::prelude::*;
 pub use entity::*;
 
-use crate::{bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor, Time};
+use crate::{
+    bevy_transform::NoPropagate, effector::concrete_effector, sensor::Sensor,
+    spatial::SpatialMotion, types::Time,
+};
 
-use super::{constraints::GravityConstraint, editor::traces::TraceAnchor, types::*};
+use super::{constraints::GravityConstraint, types::*};
 
 concrete_effector!(ConcreteEffector, XpbdEffector, EntityStateRef<'s>, Effect);
 
@@ -38,75 +38,135 @@ impl<ER, T> XpbdSensor for ConcreteSensor<ER, T>
 where
     ER: for<'a> Sensor<T, EntityStateRef<'a>>,
 {
-    fn sense(&mut self, time: crate::Time, state: EntityStateRef<'_>) {
+    fn sense(&self, time: Time, state: EntityStateRef<'_>) {
         self.sensor.sense(time, &state)
     }
 }
 
 pub trait XpbdSensor {
-    fn sense(&mut self, time: Time, state: EntityStateRef<'_>);
+    fn sense(&self, time: Time, state: EntityStateRef<'_>);
 }
 
-pub struct XpbdBuilder<'a> {
-    pub(crate) queue: RefMut<'a, CommandQueue>,
-    pub(crate) entities: &'a Entities,
+#[derive(Clone)]
+pub struct SimBuilder {
+    entity_builders: Vec<EntityBuilder>,
+    gravity_constraints: Vec<(RigidBodyHandle, RigidBodyHandle)>,
+    gravity_accel: SpatialMotion,
 }
 
-impl<'a> XpbdBuilder<'a> {
-    pub fn entity(&mut self, mut entity_builder: EntityBuilder) -> Entity {
-        let entity = self.entities.reserve_entity();
-        if let Some(anchor) = entity_builder.trace {
-            self.queue.push(Insert {
-                entity,
-                bundle: TraceAnchor { anchor },
-            });
+impl Default for SimBuilder {
+    fn default() -> Self {
+        Self {
+            entity_builders: Default::default(),
+            gravity_constraints: Default::default(),
+            gravity_accel: SpatialMotion::linear(Vector3::new(0., 9.81, 0.)),
         }
-        if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
-            self.queue.push(Insert {
-                entity,
-                bundle: (
-                    PickableBundle::default(),
-                    RaycastPickTarget::default(),
-                    On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
-                        if let Ok(mut picked) = query.get_mut(entity) {
-                            picked.0 = !picked.0;
-                        }
-                    }),
-                ),
-            })
-        }
-        if let Some(pbr) = entity_builder.editor_bundle.take() {
-            self.queue.push(Insert {
-                entity,
-                bundle: pbr,
-            });
-        }
-        if let Some(scene) = entity_builder.scene.take() {
-            self.queue.push(Insert {
-                entity,
-                bundle: SceneBundle {
-                    scene,
-                    ..Default::default()
-                },
-            });
-        }
-        if let Some(parent) = entity_builder.parent {
-            self.queue.push(AddChild {
-                parent,
-                child: entity,
-            });
-        }
-        self.queue.push(Insert {
-            entity,
-            bundle: (entity_builder.bundle(), NoPropagate),
-        });
-        entity
-    }
-
-    pub fn gravity_constraint(&mut self, gravity: GravityConstraint) {
-        self.queue.push(Spawn { bundle: gravity });
     }
 }
+
+impl SimBuilder {
+    pub fn zero_g(&mut self) {
+        self.gravity_accel = SpatialMotion::default();
+    }
+
+    pub fn g_accel(&mut self, grav: SpatialMotion) {
+        self.gravity_accel = grav;
+    }
+
+    pub fn entity(&mut self, entity: EntityBuilder) -> RigidBodyHandle {
+        let handle = RigidBodyHandle(self.entity_builders.len());
+        self.entity_builders.push(entity);
+        handle
+    }
+
+    pub fn gravity(&mut self, a: RigidBodyHandle, b: RigidBodyHandle) {
+        self.gravity_constraints.push((a, b));
+    }
+
+    pub fn apply(self, world: &mut World) {
+        let entities = world
+            .entities()
+            .reserve_entities(self.entity_builders.len() as u32)
+            .collect::<Vec<_>>();
+        for (i, (mut builder, entity_id)) in self
+            .entity_builders
+            .into_iter()
+            .zip(entities.iter().copied())
+            .enumerate()
+        {
+            let pbr = if let Some(mesh) = builder.mesh.take() {
+                let mut pbr = PbrBundle::default();
+                let mut mesh_assets: Mut<'_, Assets<bevy::prelude::Mesh>> =
+                    world.get_resource_mut().unwrap();
+                pbr.mesh = mesh_assets.add(*mesh);
+
+                if let Some(material) = builder.material.take() {
+                    let mut material_assets: Mut<'_, Assets<bevy::prelude::StandardMaterial>> =
+                        world.get_resource_mut().unwrap();
+                    pbr.material = material_assets.add(*material);
+                }
+                Some(pbr)
+            } else {
+                None
+            };
+
+            let scene: Option<Handle<Scene>> = if let Some(scene) = builder.scene.take() {
+                let server: Mut<'_, bevy::prelude::AssetServer> = world.get_resource_mut().unwrap();
+                Some(server.load(&scene))
+            } else {
+                None
+            };
+
+            let mut entity = world.get_or_spawn(entity_id).expect("entity not found");
+
+            if let Some(pbr) = pbr {
+                entity.insert(pbr);
+            }
+
+            if let Some(anchor) = builder.trace {
+                entity.insert(TraceAnchor { anchor });
+            }
+
+            if let Some(scene) = scene {
+                entity.insert(scene);
+            }
+            // if entity_builder.editor_bundle.is_some() || entity_builder.scene.is_some() {
+            //     self.queue.push(Insert {
+            //         entity,
+            //         bundle: (
+            //             PickableBundle::default(),
+            //             RaycastPickTarget::default(),
+            //             On::<Pointer<Click>>::run(move |mut query: Query<&mut Picked>| {
+            //                 if let Ok(mut picked) = query.get_mut(entity) {
+            //                     picked.0 = !picked.0;
+            //                 }
+            //             }),
+            //         ),
+            //     })
+            // }
+            // TODO: Add this to editor module
+
+            let parent = builder.parent.take();
+
+            entity.insert((builder.bundle(), NoPropagate, Uuid(i as u128)));
+
+            if let Some(parent) = parent {
+                let parent = entities[parent.0];
+                let mut parent = world.get_entity_mut(parent).expect("entity not found");
+                parent.add_child(entity_id);
+            }
+        }
+
+        for (a, b) in self.gravity_constraints.into_iter() {
+            world.spawn(GravityConstraint::new(entities[*a], entities[*b]));
+        }
+
+        world.get_resource_mut::<Config>().unwrap().global_gravity = self.gravity_accel;
+    }
+}
+
+#[derive(Debug, Clone, Deref)]
+pub struct RigidBodyHandle(usize);
 
 pub trait FromEnv<E: Env> {
     type Item<'a>
@@ -126,8 +186,19 @@ pub trait Env {
     fn param(&mut self) -> Self::Param<'_>;
 }
 
-pub trait SimFunc<T, E: Env, R = ()> {
+pub trait SimFunc<T, E: Env, R = ()>: Send + Sync {
     fn build(&self, env: &mut E) -> R;
+}
+
+impl<F, R, E> SimFunc<(), E, R> for F
+where
+    E: Env,
+    F: Send + Sync,
+    F: Fn() -> R,
+{
+    fn build(&self, _env: &mut E) -> R {
+        (self)()
+    }
 }
 
 macro_rules! impl_sim_builder {
@@ -136,12 +207,13 @@ macro_rules! impl_sim_builder {
          impl<F, $($ty,)* E, R> SimFunc<($($ty, )*), E, R> for F
          where
              E: Env,
+             F: Sync + Send,
              F: Fn($($ty, )*) -> R,
              F: for<'a> Fn($(<$ty as FromEnv<E>>::Item<'a>, )*) -> R ,
              $($ty: FromEnv<E>, )*
          {
 
-             fn build(&self, env: &mut E) -> R{
+             fn build(&self, env: &mut E) -> R {
 
                  $(
                          $ty::init(env);
@@ -184,7 +256,7 @@ impl<E, T, R> ConcreteSimFunc<E, T, R> {
         }
     }
 }
-impl<F, T, E: Env, R> SimFunc<(), E, R> for ConcreteSimFunc<F, T, R>
+impl<F, T: Send + Sync, E: Env, R> SimFunc<(), E, R> for ConcreteSimFunc<F, T, R>
 where
     F: for<'s> SimFunc<T, E, R>,
 {

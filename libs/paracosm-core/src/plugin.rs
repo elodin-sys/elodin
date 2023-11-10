@@ -1,10 +1,11 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, winit::WinitPlugin};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
+    sync::{recv_server, send_model, send_pos, EntityMap, ServerTransport},
     tree::{com_system, cri_system, forward_dynamics, rne_system},
     TreeMassMatrix, WorldPos,
 };
@@ -34,6 +35,7 @@ fn run_physics_system(world: &mut World) {
     let mut tick_mode = world.resource_mut::<TickMode>();
     match tick_mode.as_mut() {
         TickMode::FreeRun => {
+            //println!("run {:?}", SystemTime::now().duration_since(UNIX_EPOCH));
             world.run_schedule(PhysicsSchedule);
         }
         TickMode::Lockstep(l) => {
@@ -43,9 +45,9 @@ fn run_physics_system(world: &mut World) {
         }
         TickMode::Fixed => {
             let mut fixed_time = world.resource_mut::<PhysicsFixedTime>();
-            fixed_time.0.tick(delta_time);
+            fixed_time.accumulate(delta_time);
             let _ = world.try_schedule_scope(PhysicsSchedule, |world, schedule| {
-                while world.resource_mut::<PhysicsFixedTime>().0.expend().is_ok() {
+                while world.resource_mut::<PhysicsFixedTime>().expend() {
                     schedule.run(world);
                 }
             });
@@ -54,27 +56,45 @@ fn run_physics_system(world: &mut World) {
 }
 
 #[derive(Default)]
-pub struct XpbdPlugin;
+pub struct XpbdPlugin<Tx: ServerTransport> {
+    tx: Tx,
+}
 
-impl Plugin for XpbdPlugin {
+impl<Tx: ServerTransport> XpbdPlugin<Tx> {
+    pub fn new(tx: Tx) -> Self {
+        Self { tx }
+    }
+}
+
+impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
     fn build(&self, app: &mut App) {
         app.insert_resource(Paused(false));
         app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
+        app.insert_resource(self.tx.clone());
+        app.insert_resource(EntityMap::default());
+        app.add_plugins(crate::bevy_transform::TransformPlugin);
+        app.add_plugins(
+            DefaultPlugins
+                .build()
+                .disable::<WinitPlugin>()
+                .disable::<bevy::transform::TransformPlugin>(), //.disable::<WindowPlugin>(),
+        );
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);
+        app.add_systems(PostStartup, send_model::<Tx>);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
-        app.add_systems(PhysicsSchedule, sync_pos.in_set(TickSet::SyncPos))
-            .configure_sets(
-                Update,
-                (
-                    TickSet::ClearConstraintLagrange,
-                    TickSet::TickPhysics,
-                    TickSet::SyncPos,
-                )
-                    .chain(),
+        app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos));
+        app.add_systems(Update, recv_server::<Tx>).configure_sets(
+            Update,
+            (
+                TickSet::ClearConstraintLagrange,
+                TickSet::TickPhysics,
+                TickSet::SyncPos,
             )
-            .add_schedule(SubstepSchedule, substep_schedule());
+                .chain(),
+        );
+        app.add_schedule(substep_schedule());
     }
 }
 
@@ -85,12 +105,10 @@ pub fn tick(world: &mut World) {
     }
 }
 
-pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>, config: Res<Config>) {
-    query
-        .par_iter_mut()
-        .for_each_mut(|(mut transform, WorldPos(pos))| {
-            *transform = pos.bevy(config.scale);
-        });
+pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
+    query.iter_mut().for_each(|(mut transform, WorldPos(pos))| {
+        *transform = pos.bevy(1.0);
+    });
 }
 
 #[derive(ScheduleLabel, Debug, PartialEq, Eq, Hash, Clone)]
@@ -113,7 +131,7 @@ pub enum SubstepSet {
 }
 
 pub fn substep_schedule() -> Schedule {
-    let mut schedule = Schedule::default();
+    let mut schedule = Schedule::new(SubstepSchedule);
     schedule.configure_sets(
         (
             SubstepSet::ForwardKinematics,

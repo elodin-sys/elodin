@@ -5,7 +5,7 @@ use crate::{
         SpatialSubspace, SpatialTransform,
     },
     types::{BiasForce, Effect, JointForce, WorldAccel},
-    BodyPos, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
+    BodyPos, Config, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
     SubtreeInertia, SubtreeMass, TreeIndex, TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
 };
 use bevy::prelude::{Children, Parent};
@@ -15,7 +15,7 @@ use bevy_ecs::{
     query::{With, Without, WorldQuery},
     system::{Query, Res, ResMut},
 };
-use nalgebra::{vector, DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
+use nalgebra::{DMatrix, Matrix6, MatrixXx1, UnitVector3, Vector3, Vector6};
 
 pub fn pos_tree_step(
     parent: &SpatialPos,
@@ -187,7 +187,11 @@ pub struct RNEChildQuery {
     body_pos: &'static BodyPos,
 }
 
-pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<TopologicalSort>) {
+pub fn rne_system(
+    mut child_query: Query<RNEChildQuery>,
+    sort: ResMut<TopologicalSort>,
+    config: Res<Config>,
+) {
     for Link { parent, child, .. } in &sort.0 {
         if let Some(parent) = parent {
             let Ok([parent, mut child]) = child_query.get_many_mut([*parent, *child]) else {
@@ -220,7 +224,7 @@ pub fn rne_system(mut child_query: Query<RNEChildQuery>, sort: ResMut<Topologica
             };
 
             // child.world_vel.0 = child.vel.0; // FIXME
-            child.world_accel.0 = SpatialMotion::linear(vector![0.0, 9.81, 0.0]);
+            child.world_accel.0 = config.global_gravity;
             child.bias_force.0 = child
                 .effect
                 .to_spatial(child.world_pos.0.pos - **child.subtree_com);
@@ -365,7 +369,9 @@ pub fn cri_system(
             continue;
         };
         let i = child.tree_index.0;
-        let subspace = child.joint.subspace(&child.anchor_pos.0.linear);
+        let subspace = child
+            .joint
+            .subspace(&(child.anchor_pos.0.linear - **child.subtree_com));
         let mut f = DMatrix::zeros(6, child.joint.dof());
         for (i, c) in subspace.matrix().column_iter().enumerate() {
             let ang_vel = c.fixed_view::<3, 1>(0, 0).into_owned();
@@ -383,8 +389,11 @@ pub fn cri_system(
                 break;
             };
             let j = parent.tree_index.0;
-            let h_block =
-                f.transpose() * parent.joint.subspace(&parent.anchor_pos.0.linear).matrix();
+            let h_block = f.transpose()
+                * parent
+                    .joint
+                    .subspace(&(parent.anchor_pos.0.linear - **parent.subtree_com))
+                    .matrix();
             mass_matrix
                 .view_mut((i, j), (child_dof, parent.joint.dof()))
                 .copy_from(&h_block);

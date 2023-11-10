@@ -2,7 +2,6 @@ mod bevy_transform;
 pub mod body;
 pub mod builder;
 pub mod constraints;
-pub mod editor;
 pub mod effector;
 pub mod forces;
 pub mod hierarchy;
@@ -13,6 +12,7 @@ pub mod runner;
 pub mod runtime;
 pub mod sensor;
 pub mod spatial;
+pub mod sync;
 pub mod systems;
 pub mod tree;
 
