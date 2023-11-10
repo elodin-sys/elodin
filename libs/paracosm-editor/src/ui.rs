@@ -1,10 +1,3 @@
-use super::Input;
-use crate::{
-    builder::{Env, FromEnv},
-    history::{HistoryStore, RollbackEvent},
-    runner::SimRunnerEnv,
-    types::{EntityQuery, Paused, Picked},
-};
 use bevy::prelude::*;
 use bevy_egui::{
     egui::{
@@ -14,7 +7,7 @@ use bevy_egui::{
     EguiContexts,
 };
 use nalgebra::Vector3;
-use std::ops::DerefMut;
+use paracosm::{sync::ClientTransport, EntityQuery, Picked, SimState};
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);
 const DARK_BLUE: Color32 = Color32::from_rgb(0x1F, 0x2C, 0x4C);
@@ -52,7 +45,7 @@ fn set_theme(context: &mut egui::Context) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "berkeley".to_owned(),
-        FontData::from_static(include_bytes!("../../assets/BerkeleyMono-Regular.ttf")),
+        FontData::from_static(include_bytes!("../assets/BerkeleyMono-Regular.ttf")),
     );
 
     fonts
@@ -79,25 +72,26 @@ fn set_widget_visuals(visuals: &mut WidgetVisuals) {
     visuals.expansion = 1.0;
     visuals.weak_bg_fill = Color32::TRANSPARENT;
 
-    visuals.rounding = Rounding::none();
+    visuals.rounding = Rounding::ZERO;
 }
 
-pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
-    set_theme(contexts.ctx_mut());
-    egui::Window::new("Inputs")
-        .title_bar(false)
-        .resizable(false)
-        .show(contexts.ctx_mut(), |ui| {
-            for editable in &mut editables.0 {
-                editable.build(ui);
-            }
-        });
-}
+// pub(crate) fn ui_system(mut contexts: EguiContexts, mut editables: ResMut<Editables>) {
+//     set_theme(contexts.ctx_mut());
+//     egui::Window::new("Inputs")
+//         .title_bar(false)
+//         .resizable(false)
+//         .show(contexts.ctx_mut(), |ui| {
+//             for editable in &mut editables.0 {
+//                 editable.build(ui);
+//             }
+//         });
+// }
 
 pub(crate) fn picked_system(
     mut contexts: EguiContexts,
     picked: Query<(EntityQuery, &Picked, Entity)>,
 ) {
+    set_theme(contexts.ctx_mut());
     egui::Window::new("picked components")
         .title_bar(false)
         .resizable(false)
@@ -117,11 +111,10 @@ pub(crate) fn picked_system(
         });
 }
 
-pub(crate) fn timeline_system(
+pub(crate) fn timeline_system<Tx: ClientTransport>(
     mut contexts: EguiContexts,
-    mut paused: ResMut<Paused>,
-    history: Res<HistoryStore>,
-    mut event_writer: EventWriter<RollbackEvent>,
+    tx: Res<Tx>,
+    mut sim_state: ResMut<SimState>,
     window: Query<&Window>,
 ) {
     let window = window.single();
@@ -134,14 +127,20 @@ pub(crate) fn timeline_system(
         .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
         .show(contexts.ctx_mut(), |ui| {
             ui.horizontal(|ui| {
-                let paused_val = paused.0;
-                ui.toggle_value(&mut paused.0, if paused_val { "⏵" } else { "⏸" });
-                let max_count = history.count().saturating_sub(1);
-                let mut selected_index = history.current_index();
+                let paused_val = sim_state.paused;
+                if ui
+                    .toggle_value(&mut sim_state.paused, if paused_val { "⏵" } else { "⏸" })
+                    .changed()
+                {
+                    tx.send_msg(paracosm::ServerMsg::Pause(sim_state.paused));
+                }
+                let max_count = sim_state.history_count.saturating_sub(1);
+                let mut selected_index = sim_state.history_index;
                 ui.spacing_mut().slider_width = 450.0;
                 let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
                 if res.changed() {
-                    event_writer.send(RollbackEvent(selected_index))
+                    tx.send_msg(paracosm::ServerMsg::Rollback(selected_index));
+                    //event_writer.send(RollbackEvent(selected_index))
                 }
             })
         });
@@ -171,39 +170,3 @@ fn vec3_component(ui: &mut Ui, label: &str, vec3: &Vector3<f64>) {
         );
     });
 }
-
-impl Editable for Input {
-    fn build(&mut self, ui: &mut Ui) {
-        let mut num = self.0.load();
-        ui.add(egui::Slider::new(num.deref_mut(), -1.25..=1.25).text("input"));
-    }
-}
-
-pub trait Editable: Send + Sync {
-    fn build(&mut self, ui: &mut Ui);
-}
-
-impl<F: Editable + Clone + Resource + Default> FromEnv<SimRunnerEnv> for F {
-    type Item<'a> = F;
-
-    fn from_env(env: <SimRunnerEnv as Env>::Param<'_>) -> Self::Item<'_> {
-        env.app
-            .world
-            .get_resource::<F>()
-            .expect("missing resource")
-            .clone()
-    }
-
-    fn init(env: &mut SimRunnerEnv) {
-        let f = F::default();
-        let mut editables = env
-            .app
-            .world
-            .get_resource_or_insert_with(|| Editables(vec![]));
-        editables.0.push(Box::new(f.clone()));
-        env.app.world.insert_resource(f);
-    }
-}
-
-#[derive(Resource, Default)]
-pub struct Editables(Vec<Box<dyn Editable>>);

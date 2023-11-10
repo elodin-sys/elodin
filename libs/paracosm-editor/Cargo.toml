@@ -1,0 +1,59 @@
+[package]
+name = "paracosm-editor"
+description = "Paracosm Editor"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.bundle]
+name = "Paracosm Editor"
+identifier = "systems.elodin.paracosm"
+icon = ["assets/512x512@2x.png"]
+osx_minimum_system_version = "10.11"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# core
+paracosm.path = "../paracosm-core"
+paracosm-macros.path = "../paracosm-macros"
+
+# math
+nalgebra = "0.32"
+
+# bevy
+bevy.version = "0.12"
+bevy.features = ["wayland", "trace"]
+bevy_egui = "0.23"
+bevy_panorbit_camera.version = "0.9.0"
+bevy_panorbit_camera.features = ["bevy_egui"]
+bevy_atmosphere.git = "https://github.com/elodin-sys/bevy_atmosphere.git"
+bevy_infinite_grid.git = "https://github.com/elodin-sys/bevy_infinite_grid.git"
+bevy_mod_picking.git = "https://github.com/elodin-sys/bevy_mod_picking.git"
+bevy_mod_picking.branch = "bevy-0.12"
+bevy_mod_picking.features = ["backend_egui"]
+
+# channel
+flume = "0.11"
+
+# args
+clap.version = "4.4"
+clap.features = ["derive"]
+
+# python
+pyo3.version = "0.20.0"
+paracosm-py.path = "../paracosm-py"
+
+# errors
+anyhow = "1"
+
+# file notifications
+notify = "6.1"
+
+# thread priority
+thread-priority = "0.13.1"
+
+# ui
+rfd = "0.12.1"
+
+# futures
+futures-lite = "2.0"

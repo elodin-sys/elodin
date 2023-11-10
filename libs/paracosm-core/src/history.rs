@@ -1,4 +1,4 @@
-use bevy::prelude::{App, Assets, Handle, Plugin, Transform, Update};
+use bevy::prelude::{App, Plugin, Transform, Update};
 use bevy_ecs::{
     entity::Entity,
     event::{Event, EventReader},
@@ -6,7 +6,6 @@ use bevy_ecs::{
     schedule::IntoSystemConfigs,
     system::{Query, Res, ResMut, Resource},
 };
-use bevy_polyline::prelude::Polyline;
 use std::collections::HashMap;
 
 use crate::{
@@ -129,18 +128,19 @@ pub fn rollback_system(
     mut event_reader: EventReader<RollbackEvent>,
     mut query: Query<HistoryQuery>,
     config: Res<Config>,
-    mut polyline: Query<&mut Handle<Polyline>>,
-    mut polylines: Option<ResMut<Assets<Polyline>>>,
+    //mut polyline: Query<&mut Handle<Polyline>>,
+    //mut polylines: Option<ResMut<Assets<Polyline>>>,
 ) {
-    for event in &mut event_reader {
+    for event in &mut event_reader.read() {
         history.rollback(event.0, &mut query, config.scale);
 
-        if let Some(ref mut polylines) = polylines {
-            for polyline in &mut polyline {
-                let polyline = polylines.get_mut(&polyline).unwrap();
-                polyline.vertices.clear()
-            }
-        }
+        // TODO: move to editor
+        // if let Some(ref mut polylines) = polylines {
+        //     for polyline in &mut polyline {
+        //         let polyline = polylines.get_mut(&polyline).unwrap();
+        //         polyline.vertices.clear()
+        //     }
+        // }
     }
 }
 
