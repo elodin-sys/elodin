@@ -16,6 +16,29 @@ pub struct Matrix<T, const R: usize, const C: usize, P: Param = Op> {
     phantom: PhantomData<T>,
 }
 
+impl<T, const R: usize, const C: usize> Matrix<T, R, C, Op> {
+    pub fn fixed_slice<const NR: usize, const NC: usize>(
+        &self,
+        row_offset: usize,
+        col_offset: usize,
+    ) -> Matrix<T, NR, NC> {
+        let row_offset = row_offset as i64;
+        let col_offset = col_offset as i64;
+        Matrix {
+            inner: Arc::new(
+                self.as_op()
+                    .slice(
+                        &[row_offset, col_offset],
+                        &[row_offset + (NR as i64), col_offset + (NC as i64)],
+                        &[1, 1],
+                    )
+                    .unwrap(),
+            ),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<T, const R: usize, const C: usize, P: Param> ToHost for Matrix<T, R, C, P> {
     type HostTy = nalgebra::Matrix<T, Const<R>, Const<C>, ArrayStorage<T, R, C>>;
 }
