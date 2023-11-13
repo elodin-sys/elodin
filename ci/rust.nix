@@ -17,6 +17,6 @@ pkgs.mkShell.override {stdenv = pkgs.gcc10Stdenv; } {
     glibc
     gtk3
     python3
-    
+    openssl
   ];
 }
