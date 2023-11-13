@@ -6,7 +6,7 @@ use nalgebra::{ArrayStorage, ClosedAdd, Const, IsContiguous, Scalar as NalgebraS
 use num_traits::Zero;
 use std::{
     marker::PhantomData,
-    ops::{Add, Mul},
+    ops::{Add, Mul, Sub},
     sync::{atomic::Ordering, Arc},
 };
 use xla::{ArrayElement, NativeType, XlaOp};
@@ -71,6 +71,17 @@ impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Add for Matr
     fn add(self, rhs: Self) -> Self::Output {
         Matrix {
             inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error")),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Sub for Matrix<T, R, C> {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Matrix {
+            inner: Arc::new((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error")),
             phantom: PhantomData,
         }
     }
