@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn test_add() {
-    let client = Client::gpu().unwrap();
+    let client = Client::cpu().unwrap();
     let comp = Matrix::add.build().unwrap();
     let exec = comp.compile(&client).unwrap();
     let out = exec
