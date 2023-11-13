@@ -1,5 +1,5 @@
+use crate::{AsBuffer, Client, FromHost, FromPjrtBuffer};
 use std::marker::PhantomData;
-use crate::{FromHost, AsBuffer, FromPjrtBuffer, Client};
 
 pub struct Exec<T, R> {
     pub(crate) exec: xla::PjRtLoadedExecutable,
