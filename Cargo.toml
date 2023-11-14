@@ -4,7 +4,8 @@ members = [
     "libs/paracosm-core",
     "libs/paracosm-macros",
     "libs/paracosm-editor",
-    "libs/paracosm-py"
+    "libs/paracosm-py",
+    "libs/nox"
 ]
 
 
