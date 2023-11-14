@@ -19,6 +19,28 @@ pub struct Vector<T, const N: usize, P: Param = Op> {
     pub(crate) phantom: PhantomData<T>,
 }
 
+impl<T: NativeType> Vector<T, 3, Op> {
+    pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
+        Vector {
+            inner: Arc::new(
+                self.inner
+                    .concat_in_dim(
+                        &[self
+                            .inner
+                            .builder()
+                            .c0(elem)
+                            .unwrap()
+                            .reshape(&[1])
+                            .unwrap()],
+                        0,
+                    )
+                    .unwrap(),
+            ),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
     fn clone(&self) -> Self {
         Self {
@@ -287,5 +309,14 @@ mod tests {
         let exec = comp.compile(&client).unwrap();
         let out = exec.run(&client, vector![2.0f32], vector![2.0]).unwrap();
         assert_eq!(out, vector![4.0f32])
+    }
+
+    #[test]
+    fn test_extend() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Vector<f32, 3>| a.extend(1.0)).build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec.run(&client, vector![2.0f32, 1.0, 2.0]).unwrap();
+        assert_eq!(out, vector![2.0, 1.0, 2.0, 1.0])
     }
 }
