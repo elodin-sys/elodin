@@ -6,6 +6,12 @@ pub struct Exec<T, R> {
     pub(crate) phantom: PhantomData<(T, R)>,
 }
 
+pub trait ToHost {
+    type HostTy;
+}
+
+// This macro allows us to implement the run function for a series of tuples easily.
+// This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_exec {
       ($($ty:tt),+) => {
         #[allow(non_snake_case, clippy::too_many_arguments)]
@@ -25,10 +31,6 @@ macro_rules! impl_exec {
             }
         }
       }
-}
-
-pub trait ToHost {
-    type HostTy;
 }
 
 impl_exec!(T1);
