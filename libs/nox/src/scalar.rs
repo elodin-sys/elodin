@@ -1,4 +1,4 @@
-use crate::{AsOp, Builder, FromBuilder, Literal, Op, Param};
+use crate::{AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, Tensor, ToHost};
 use nalgebra::ClosedAdd;
 use std::{
     marker::PhantomData,
@@ -8,8 +8,17 @@ use std::{
 use xla::{ArrayElement, NativeType, XlaOp};
 
 pub struct Scalar<T, P: Param = Op> {
-    inner: Arc<P::Inner>,
-    phantom: PhantomData<T>,
+    pub(crate) inner: Arc<P::Inner>,
+    pub(crate) phantom: PhantomData<T>,
+}
+
+impl<T> Tensor for Scalar<T, Op> {
+    fn from_op(op: XlaOp) -> Self {
+        Self {
+            inner: Arc::new(op),
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<T> AsOp for Scalar<T, Op> {
@@ -17,6 +26,29 @@ impl<T> AsOp for Scalar<T, Op> {
         self.inner.as_ref()
     }
 }
+
+impl<T, P: Param> ToHost for Scalar<T, P> {
+    type HostTy = T;
+}
+
+macro_rules! impl_prim_buffer {
+    ($ty:tt) => {
+        impl FromPjrtBuffer for $ty {
+            fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
+                let buf = &pjrt[0][0];
+                let literal = buf.to_literal_sync().unwrap();
+                literal.get_first_element().unwrap()
+            }
+        }
+    };
+}
+
+impl_prim_buffer!(f64);
+impl_prim_buffer!(f32);
+impl_prim_buffer!(u64);
+impl_prim_buffer!(u32);
+impl_prim_buffer!(i64);
+impl_prim_buffer!(i32);
 
 impl<T: ClosedAdd + ArrayElement> Add for Scalar<T, Op> {
     type Output = Scalar<T, Op>;
