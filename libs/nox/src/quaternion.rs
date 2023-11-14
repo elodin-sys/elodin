@@ -57,6 +57,18 @@ impl<T: NalgebraScalar + ClosedSub + ClosedMul + ClosedAdd> Mul for Quaternion<T
     }
 }
 
+impl<T: NalgebraScalar + ClosedSub + ClosedDiv + ClosedMul + ClosedAdd + NativeType + Zero>
+    Mul<Vector<T, 3>> for Quaternion<T>
+{
+    type Output = Vector<T, 3>;
+
+    fn mul(self, rhs: Vector<T, 3>) -> Self::Output {
+        let v = Quaternion(rhs.extend(T::zero()));
+        let inv = self.inverse();
+        (self * v * inv).0.fixed_slice(0)
+    }
+}
+
 impl<T> AsOp for Quaternion<T> {
     fn as_op(&self) -> &XlaOp {
         self.0.as_op()
@@ -113,6 +125,7 @@ where
 mod tests {
     use crate::Client;
     use crate::CompFn;
+    use nalgebra::vector;
     use nalgebra::{UnitQuaternion, Vector3};
 
     use super::*;
@@ -156,5 +169,25 @@ mod tests {
             .unwrap();
 
         assert_eq!(out, correct_out)
+    }
+
+    #[test]
+    fn test_quat_vec_mult() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Quaternion<f32>, b: Vector<f32, 3>| -> Vector<f32, 3> { a * b })
+            .build()
+            .unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec
+            .run(
+                &client,
+                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
+                vector![1.0, 2.0, 3.0],
+            )
+            .unwrap();
+        let correct_out =
+            UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0) * vector![1.0, 2.0, 3.0];
+
+        approx::assert_relative_eq!(out, correct_out, epsilon = 1.0e-6);
     }
 }
