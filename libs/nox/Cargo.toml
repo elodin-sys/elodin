@@ -15,3 +15,6 @@ num-traits = "0.2.15"
 # metal and static linking
 xla.git = "https://github.com/elodin-sys/xla-rs.git"
 xla.branch = "feature/new-ops"
+
+[dev-dependencies]
+approx = "0.5"
