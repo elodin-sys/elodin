@@ -1242,7 +1242,8 @@ dependencies = [
 [[package]]
 name = "bevy_mod_picking"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2392df63bc272d5a546633e0a19ef6d428173e3dd22bad0da0a59c6fddd6f2cf"
 dependencies = [
  "bevy_app",
  "bevy_core",
@@ -1269,9 +1270,21 @@ dependencies = [
 [[package]]
 name = "bevy_mod_raycast"
 version = "0.16.0"
-source = "git+https://github.com/TristanCacqueray/bevy_mod_raycast.git?branch=bevy-0.12#8faa3c850bcc05fc020876e6e98c42fa5258a669"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b127622dcbfd9e6a1661219af65965625901c2549b434f0c44c4460dd055dce"
 dependencies = [
- "bevy",
+ "bevy_app",
+ "bevy_asset",
+ "bevy_derive",
+ "bevy_ecs",
+ "bevy_gizmos",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_render",
+ "bevy_sprite",
+ "bevy_transform",
+ "bevy_utils",
+ "bevy_window",
  "crossbeam-channel",
 ]
 
@@ -1315,7 +1328,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_core"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0799488c4505d68886209afd77ff9c898b634abf7f97fffa8ae37a356cbc8ab2"
 dependencies = [
  "bevy_app",
  "bevy_derive",
@@ -1331,7 +1345,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_egui"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9932cc0ea29aff4f7aa7b5127c04afaeccd6ac41ed069bedd4c85dd0d9afcd3f"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1345,7 +1360,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_highlight"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3cfada25fcbd459b0ecd57a3bb2861820915744bfabadef141a0881a06a7199"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1361,7 +1377,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_input"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16a2b375461e3965c2bd4357d53c772eeafa4747812f54be09de373c0c203da4"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1379,7 +1396,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_raycast"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a2b76420a1e6d9c0fdd4f35056ffb2cfaa052d102d5b1951f517d9fd36b25ab"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1394,7 +1412,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_selection"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "814c784c957653ab0baf77ff5563a90d4150f704ba0a173f9de8abe3037f803c"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1408,7 +1427,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_sprite"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cefe1b3172b06f93887f0ed8a01f8796e2d7486fe68a37035e38f59244c88663"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -1424,7 +1444,8 @@ dependencies = [
 [[package]]
 name = "bevy_picking_ui"
 version = "0.17.0"
-source = "git+https://github.com/elodin-sys/bevy_mod_picking.git?branch=bevy-0.12#5453d46530fdcc97c06f979a8c309025cc69c4f1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a020364f01021b1faf9cc4de85b592505440d5b6274fb39c9d9a916b7639872b"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
