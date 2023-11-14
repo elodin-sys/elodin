@@ -32,6 +32,8 @@ impl<'b> FromBuilder for &'b Builder {
     }
 }
 
+// This macro allows us to implement `CompFn` for a series of tuples easily.
+// This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_comp_fn {
       ($($ty:tt),+) => {
           #[allow(non_snake_case)]

@@ -22,7 +22,9 @@ pub trait BufferForm {
     type BufferTy;
 }
 
-macro_rules! impl_literal_form {
+// This macro allows us to implement `BufferForm` for a series of tuples easily.
+// This essentially a workaround for Rust lacking variadic types / generics.
+macro_rules! impl_buffer_form {
       ($($ty:tt),+) => {
         impl<$($ty,)*> BufferForm for ($($ty,)*)
               where $($ty: BufferForm, )*
@@ -32,15 +34,15 @@ macro_rules! impl_literal_form {
       }
 }
 
-impl_literal_form!(T1);
-impl_literal_form!(T1, T2);
-impl_literal_form!(T1, T2, T3);
-impl_literal_form!(T1, T2, T3, T4);
-impl_literal_form!(T1, T2, T3, T4, T5);
-impl_literal_form!(T1, T2, T3, T4, T5, T6);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
-impl_literal_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+impl_buffer_form!(T1);
+impl_buffer_form!(T1, T2);
+impl_buffer_form!(T1, T2, T3);
+impl_buffer_form!(T1, T2, T3, T4);
+impl_buffer_form!(T1, T2, T3, T4, T5);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
+impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
