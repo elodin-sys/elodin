@@ -1,0 +1,17 @@
+[package]
+name = "nox"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nalgebra = "0.32"
+num-traits = "0.2.15"
+
+# xla-rs - a wrapper around raw xla
+# we are using our own fork, which has diverged from upstream significantly
+# the `feature/new-ops` branch contains a few added operations + changes to support
+# metal and static linking
+xla.git = "https://github.com/elodin-sys/xla-rs.git"
+xla.branch = "feature/new-ops"
