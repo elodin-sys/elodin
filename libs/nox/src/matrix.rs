@@ -1,6 +1,6 @@
 use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, CompFn, FromBuilder, FromHost,
-    FromPjrtBuffer, Literal, Op, Param, Scalar, ToHost,
+    FromPjrtBuffer, Literal, Op, Param, Scalar, Tensor, ToHost,
 };
 use nalgebra::{ArrayStorage, ClosedAdd, Const, IsContiguous, Scalar as NalgebraScalar, Storage};
 use num_traits::Zero;
@@ -34,6 +34,15 @@ impl<T, const R: usize, const C: usize> Matrix<T, R, C, Op> {
                     )
                     .unwrap(),
             ),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T, const R: usize, const C: usize> Tensor for Matrix<T, R, C, Op> {
+    fn from_op(op: XlaOp) -> Self {
+        Self {
+            inner: Arc::new(op),
             phantom: PhantomData,
         }
     }
@@ -87,10 +96,12 @@ impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Sub for Matr
     }
 }
 
-impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Mul for Matrix<T, R, C> {
+impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Mul<Matrix<T, C, R>>
+    for Matrix<T, R, C>
+{
     type Output = Self;
 
-    fn mul(self, rhs: Self) -> Self::Output {
+    fn mul(self, rhs: Matrix<T, C, R>) -> Self::Output {
         Matrix {
             inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
             phantom: PhantomData,
