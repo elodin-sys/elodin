@@ -1,4 +1,6 @@
-use crate::{AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, Tensor, ToHost};
+use crate::{
+    AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, ScalarDim, Tensor, ToHost,
+};
 use nalgebra::ClosedAdd;
 use std::{
     marker::PhantomData,
@@ -7,19 +9,7 @@ use std::{
 };
 use xla::{ArrayElement, NativeType, XlaOp};
 
-pub struct Scalar<T, P: Param = Op> {
-    pub(crate) inner: Arc<P::Inner>,
-    pub(crate) phantom: PhantomData<T>,
-}
-
-impl<T> Tensor for Scalar<T, Op> {
-    fn from_op(op: XlaOp) -> Self {
-        Self {
-            inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-}
+pub type Scalar<T, P = Op> = Tensor<T, ScalarDim, P>;
 
 impl<T> AsOp for Scalar<T, Op> {
     fn as_op(&self) -> &XlaOp {
@@ -49,17 +39,6 @@ impl_prim_buffer!(u64);
 impl_prim_buffer!(u32);
 impl_prim_buffer!(i64);
 impl_prim_buffer!(i32);
-
-impl<T: ClosedAdd + ArrayElement> Add for Scalar<T, Op> {
-    type Output = Scalar<T, Op>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Scalar {
-            inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).unwrap()),
-            phantom: PhantomData,
-        }
-    }
-}
 
 impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
     type Output = Scalar<T, Op>;

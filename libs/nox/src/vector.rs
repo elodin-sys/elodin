@@ -1,12 +1,9 @@
 use std::{
     marker::PhantomData,
-    ops::{Add, Div, Mul, Neg, Sub},
     sync::{atomic::Ordering, Arc},
 };
 
-use nalgebra::{
-    ArrayStorage, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const, Scalar as NalgebraScalar,
-};
+use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
 use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
@@ -14,10 +11,7 @@ use crate::{
     Tensor, ToHost,
 };
 
-pub struct Vector<T, const N: usize, P: Param = Op> {
-    pub(crate) inner: Arc<P::Inner>,
-    pub(crate) phantom: PhantomData<T>,
-}
+pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
 
 impl<T: NativeType> Vector<T, 3, Op> {
     pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
@@ -49,103 +43,6 @@ impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
         }
     }
 }
-
-impl<T, const N: usize> Tensor for Vector<T, N, Op> {
-    fn from_op(op: XlaOp) -> Self {
-        Self {
-            inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedAdd, const N: usize> Add for Vector<T, N> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedSub, const N: usize> Sub for Vector<T, N> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar, const N: usize> Neg for Vector<T, N> {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Vector {
-            inner: Arc::new(self.inner.neg().expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedMul> Mul for Vector<T, 1> {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedMul, const N: usize> Mul<Vector<T, N>> for Scalar<T> {
-    type Output = Vector<T, N>;
-
-    fn mul(self, rhs: Vector<T, N>) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedDiv, const N: usize> Div<Scalar<T>> for Vector<T, N> {
-    type Output = Vector<T, N>;
-
-    fn div(self, rhs: Scalar<T>) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() / rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-macro_rules! impl_prim {
-    ($ty:tt) => {
-        impl<const N: usize> Mul<Vector<$ty, N>> for $ty {
-            type Output = Vector<$ty, N>;
-
-            fn mul(self, rhs: Vector<$ty, N>) -> Self::Output {
-                Vector {
-                    inner: Arc::new((rhs.inner.builder().c0(self).unwrap() * rhs.as_op()).unwrap()),
-                    phantom: PhantomData,
-                }
-            }
-        }
-    };
-}
-
-impl_prim!(f64);
-impl_prim!(f32);
-impl_prim!(u64);
-impl_prim!(u32);
-impl_prim!(i64);
-impl_prim!(i32);
 
 impl<T, const N: usize> AsOp for Vector<T, N, Op> {
     fn as_op(&self) -> &XlaOp {
@@ -200,18 +97,6 @@ impl<T, const R: usize> Vector<T, R, Op> {
         let op = arr[0].concat_in_dim(&arr[1..], 0).unwrap();
         Vector {
             inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn fixed_slice<const NR: usize>(&self, offset: usize) -> Vector<T, NR> {
-        let offset = offset as i64;
-        Vector {
-            inner: Arc::new(
-                self.as_op()
-                    .slice(&[offset], &[offset + (NR as i64)], &[1])
-                    .unwrap(),
-            ),
             phantom: PhantomData,
         }
     }
