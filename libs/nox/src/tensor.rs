@@ -136,10 +136,7 @@ where
     type Output = Self;
 
     fn add(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor {
-            inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
+        Tensor::from_op((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error"))
     }
 }
 
@@ -151,10 +148,7 @@ where
     type Output = Self;
 
     fn mul(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
+        Tensor::from_op((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error"))
     }
 }
 
@@ -166,10 +160,7 @@ where
     type Output = Self;
 
     fn div(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor {
-            inner: Arc::new((self.inner.as_ref() / rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
+        Tensor::from_op((self.inner.as_ref() / rhs.inner.as_ref()).expect("xla build error"))
     }
 }
 
@@ -181,10 +172,7 @@ where
     type Output = Self;
 
     fn sub(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor {
-            inner: Arc::new((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
+        Tensor::from_op((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error"))
     }
 }
 
@@ -192,10 +180,7 @@ impl<T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for Tensor<T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Tensor {
-            inner: Arc::new(self.inner.as_ref().neg().expect("xla build error")),
-            phantom: PhantomData,
-        }
+        Tensor::from_op(self.inner.as_ref().neg().expect("xla build error"))
     }
 }
 
@@ -206,14 +191,11 @@ impl<T, D: TensorDim + DimRank<R>, const R: usize> FixedSliceExt<T, D, R> for Te
         for (i, (a, b)) in offsets.iter().zip(ND::dims().into_iter()).enumerate() {
             new_offsets[i] = a + b as i64;
         }
-        Tensor {
-            inner: Arc::new(
-                self.inner
-                    .slice(&offsets, &new_offsets, &[1i64; R])
-                    .unwrap(),
-            ),
-            phantom: PhantomData,
-        }
+        Tensor::from_op(
+            self.inner
+                .slice(&offsets, &new_offsets, &[1i64; R])
+                .unwrap(),
+        )
     }
 }
 
