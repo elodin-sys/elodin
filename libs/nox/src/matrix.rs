@@ -1,6 +1,6 @@
 use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, CompFn, FromBuilder, FromHost,
-    FromPjrtBuffer, Literal, Op, Param, Scalar, Tensor, ToHost,
+    FromPjrtBuffer, Literal, Op, Param, Scalar, TensorLike, ToHost,
 };
 use nalgebra::{ArrayStorage, ClosedAdd, Const, IsContiguous, Scalar as NalgebraScalar, Storage};
 use num_traits::Zero;
@@ -39,7 +39,7 @@ impl<T, const R: usize, const C: usize> Matrix<T, R, C, Op> {
     }
 }
 
-impl<T, const R: usize, const C: usize> Tensor for Matrix<T, R, C, Op> {
+impl<T, const R: usize, const C: usize> TensorLike for Matrix<T, R, C, Op> {
     fn from_op(op: XlaOp) -> Self {
         Self {
             inner: Arc::new(op),
