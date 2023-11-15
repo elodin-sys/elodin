@@ -9,7 +9,7 @@ use std::{
     ops::{Add, Div, Mul, Neg, Sub},
     sync::Arc,
 };
-use xla::XlaOp;
+use xla::{NativeType, XlaOp};
 
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) inner: Arc<P::Inner>,
@@ -61,6 +61,8 @@ impl<const N: usize> ConstDim<1> for Const<N> {
         [N]
     }
 }
+
+impl<const N: usize> DimRank<1> for Const<N> {}
 
 // This macro allows us to implement `TensorDim` for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
@@ -126,7 +128,11 @@ where
 {
 }
 
+impl DimMul<Const<1>, Const<1>> for ShapeConstraint {}
+
 impl<D: NonScalarDim + TensorDim> DimDiv<D, ScalarDim> for ShapeConstraint {}
+impl<D: NonScalarDim + TensorDim> DimMul<D, ScalarDim> for ShapeConstraint {}
+impl<D: NonScalarDim + TensorDim> DimMul<ScalarDim, D> for ShapeConstraint {}
 
 impl<T: NalgebraScalar + ClosedAdd, D1: TensorDim, D2: TensorDim> Add<Tensor<T, D2>>
     for Tensor<T, D1>
@@ -202,3 +208,35 @@ impl<T, D: TensorDim + DimRank<R>, const R: usize> FixedSliceExt<T, D, R> for Te
 pub trait FixedSliceExt<T, D: TensorDim, const R: usize> {
     fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op>;
 }
+
+impl<T: NalgebraScalar + ClosedMul + NativeType, D1: TensorDim> Mul<T> for Tensor<T, D1>
+where
+    ShapeConstraint: DimMul<D1, ScalarDim>,
+{
+    type Output = Self;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Tensor::from_op(
+            (self.inner.as_ref() * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
+        )
+    }
+}
+
+macro_rules! impl_prim {
+    ($ty:tt) => {
+        impl<D: TensorDim> Mul<Tensor<$ty, D>> for $ty {
+            type Output = Tensor<$ty, D>;
+
+            fn mul(self, rhs: Tensor<$ty, D>) -> Self::Output {
+                Tensor::from_op((rhs.inner.builder().c0(self).unwrap() * rhs.inner).unwrap())
+            }
+        }
+    };
+}
+
+impl_prim!(f64);
+impl_prim!(f32);
+impl_prim!(u64);
+impl_prim!(u32);
+impl_prim!(i64);
+impl_prim!(i32);
