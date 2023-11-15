@@ -1,4 +1,4 @@
-use crate::{AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, Tensor, ToHost};
+use crate::{AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, TensorLike, ToHost};
 use nalgebra::ClosedAdd;
 use std::{
     marker::PhantomData,
@@ -12,7 +12,7 @@ pub struct Scalar<T, P: Param = Op> {
     pub(crate) phantom: PhantomData<T>,
 }
 
-impl<T> Tensor for Scalar<T, Op> {
+impl<T> TensorLike for Scalar<T, Op> {
     fn from_op(op: XlaOp) -> Self {
         Self {
             inner: Arc::new(op),

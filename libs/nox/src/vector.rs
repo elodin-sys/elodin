@@ -11,7 +11,7 @@ use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FromBuilder, FromHost, Op, Param, Scalar,
-    Tensor, ToHost,
+    TensorLike, ToHost,
 };
 
 pub struct Vector<T, const N: usize, P: Param = Op> {
@@ -50,7 +50,7 @@ impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
     }
 }
 
-impl<T, const N: usize> Tensor for Vector<T, N, Op> {
+impl<T, const N: usize> TensorLike for Vector<T, N, Op> {
     fn from_op(op: XlaOp) -> Self {
         Self {
             inner: Arc::new(op),
