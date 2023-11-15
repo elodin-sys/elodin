@@ -9,7 +9,7 @@ use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FromBuilder, FromHost, Op, Param, Scalar,
-    Tensor, TensorLike, ToHost,
+    Tensor, ToHost,
 };
 
 pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
@@ -40,15 +40,6 @@ impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T, const N: usize> TensorLike for Vector<T, N, Op> {
-    fn from_op(op: XlaOp) -> Self {
-        Self {
-            inner: Arc::new(op),
             phantom: PhantomData,
         }
     }
