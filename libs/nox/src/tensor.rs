@@ -1,6 +1,6 @@
 use crate::{AsOp, Op, Param};
 use nalgebra::{
-    constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub,
+    constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
     Scalar as NalgebraScalar,
 };
 use simba::scalar::ClosedNeg;
@@ -20,8 +20,8 @@ pub trait TensorLike: Sized + AsOp {
 }
 
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
-    inner: Arc<P::Inner>,
-    phantom: PhantomData<(T, D)>,
+    pub(crate) inner: Arc<P::Inner>,
+    pub(crate) phantom: PhantomData<(T, D)>,
 }
 
 pub trait TensorDim {}
@@ -50,6 +50,12 @@ impl ConstDim<0> for ScalarDim {
 }
 
 impl DimRank<0> for ScalarDim {}
+
+impl<const N: usize> ConstDim<1> for Const<N> {
+    fn dims() -> [usize; 1] {
+        [N]
+    }
+}
 
 // This macro allows us to implement `TensorDim` for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
