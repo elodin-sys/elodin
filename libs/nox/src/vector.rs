@@ -1,10 +1,10 @@
 use std::{
     marker::PhantomData,
-    ops::{Div, Mul},
+    ops::Mul,
     sync::{atomic::Ordering, Arc},
 };
 
-use nalgebra::{ArrayStorage, ClosedDiv, ClosedMul, Const, Scalar as NalgebraScalar};
+use nalgebra::{ArrayStorage, ClosedMul, Const, Scalar as NalgebraScalar};
 use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
@@ -71,17 +71,6 @@ impl<T: NalgebraScalar + ClosedMul, const N: usize> Mul<Vector<T, N>> for Scalar
     fn mul(self, rhs: Vector<T, N>) -> Self::Output {
         Vector {
             inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedDiv, const N: usize> Div<Scalar<T>> for Vector<T, N> {
-    type Output = Vector<T, N>;
-
-    fn div(self, rhs: Scalar<T>) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() / rhs.inner.as_ref()).expect("xla build error")),
             phantom: PhantomData,
         }
     }
