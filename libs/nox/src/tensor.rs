@@ -34,10 +34,27 @@ impl NonScalarDim for nalgebra::Dyn {}
 impl<const N: usize> TensorDim for nalgebra::Const<N> {}
 impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
+pub trait ConstDim<const RANK: usize> {
+    const RANK: usize = RANK;
+    fn dims() -> [usize; RANK];
+}
+
+pub trait DimRank<const RANK: usize> {
+    const RANK: usize = RANK;
+}
+
+impl ConstDim<0> for ScalarDim {
+    fn dims() -> [usize; 0] {
+        []
+    }
+}
+
+impl DimRank<0> for ScalarDim {}
+
 // This macro allows us to implement `TensorDim` for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_tensor_dim {
-      ($($ty:tt),+) => {
+      ($num:literal; $($ty:tt),+) => {
         impl<$($ty,)*> TensorDim for ($($ty,)*)
               where $($ty: TensorDim, )*
         {
@@ -48,21 +65,34 @@ macro_rules! impl_tensor_dim {
         {
         }
 
+
+        impl<$($ty,)*> DimRank<$num> for ($($ty,)*)
+              where $($ty: NonScalarDim, )*
+        {
+        }
+
+        impl<$($ty,)*> ConstDim<$num> for ($($ty,)*)
+              where $($ty: ConstDim<1>, )*
+        {
+            fn dims() -> [usize; $num] {
+                [$($ty::dims()[0],)*]
+            }
+        }
       }
 }
 
-impl_tensor_dim!(T1);
-impl_tensor_dim!(T1, T2);
-impl_tensor_dim!(T1, T2, T3);
-impl_tensor_dim!(T1, T2, T3, T4);
-impl_tensor_dim!(T1, T2, T3, T4, T5);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
-impl_tensor_dim!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+impl_tensor_dim!(1; T1);
+impl_tensor_dim!(2; T1, T2);
+impl_tensor_dim!(3; T1, T2, T3);
+impl_tensor_dim!(4; T1, T2, T3, T4);
+impl_tensor_dim!(5; T1, T2, T3, T4, T5);
+impl_tensor_dim!(6; T1, T2, T3, T4, T5, T6);
+impl_tensor_dim!(7; T1, T2, T3, T4, T5, T6, T7);
+impl_tensor_dim!(8; T1, T2, T3, T4, T5, T6, T7, T8);
+impl_tensor_dim!(9; T1, T2, T3, T4, T5, T6, T7, T9, T10);
+impl_tensor_dim!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
+impl_tensor_dim!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
+impl_tensor_dim!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
 pub trait DimAdd<D1: TensorDim, D2: TensorDim> {}
 pub trait DimSub<D1: TensorDim, D2: TensorDim> {}
@@ -156,4 +186,26 @@ impl<T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for Tensor<T, D> {
             phantom: PhantomData,
         }
     }
+}
+
+impl<T, D: TensorDim + DimRank<R>, const R: usize> FixedSliceExt<T, D, R> for Tensor<T, D, Op> {
+    fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op> {
+        let offsets = offsets.map(|o| o as i64);
+        let mut new_offsets = [0; R];
+        for (i, (a, b)) in offsets.iter().zip(ND::dims().into_iter()).enumerate() {
+            new_offsets[i] = a + b as i64;
+        }
+        Tensor {
+            inner: Arc::new(
+                self.inner
+                    .slice(&offsets, &new_offsets, &[1i64; R])
+                    .unwrap(),
+            ),
+            phantom: PhantomData,
+        }
+    }
+}
+
+pub trait FixedSliceExt<T, D: TensorDim, const R: usize> {
+    fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op>;
 }
