@@ -1,4 +1,4 @@
-use crate::{AsOp, Op, Param};
+use crate::{Op, Param};
 use nalgebra::{
     constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
     Scalar as NalgebraScalar,
@@ -11,17 +11,22 @@ use std::{
 };
 use xla::XlaOp;
 
-pub trait TensorLike: Sized + AsOp {
-    fn from_op(op: XlaOp) -> Self;
-
-    fn sqrt(&self) -> Self {
-        Self::from_op(self.as_op().sqrt().unwrap())
-    }
-}
-
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) inner: Arc<P::Inner>,
     pub(crate) phantom: PhantomData<(T, D)>,
+}
+
+impl<T, D: TensorDim> Tensor<T, D, Op> {
+    fn from_op(op: XlaOp) -> Self {
+        Self {
+            inner: Arc::new(op),
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn sqrt(&self) -> Self {
+        Self::from_op(self.inner.sqrt().unwrap())
+    }
 }
 
 pub trait TensorDim {}

@@ -1,6 +1,5 @@
 use crate::{
-    AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, ScalarDim, Tensor, TensorLike,
-    ToHost,
+    AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, ScalarDim, Tensor, ToHost,
 };
 use nalgebra::ClosedAdd;
 use std::{
@@ -11,15 +10,6 @@ use std::{
 use xla::{ArrayElement, NativeType, XlaOp};
 
 pub type Scalar<T, P = Op> = Tensor<T, ScalarDim, P>;
-
-impl<T> TensorLike for Scalar<T, Op> {
-    fn from_op(op: XlaOp) -> Self {
-        Self {
-            inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-}
 
 impl<T> AsOp for Scalar<T, Op> {
     fn as_op(&self) -> &XlaOp {
