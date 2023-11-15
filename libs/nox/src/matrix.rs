@@ -2,51 +2,15 @@ use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, CompFn, FromBuilder, FromHost,
     FromPjrtBuffer, Literal, Op, Param, Scalar, Tensor, ToHost,
 };
-use nalgebra::{ArrayStorage, ClosedAdd, Const, IsContiguous, Scalar as NalgebraScalar, Storage};
+use nalgebra::{ArrayStorage, Const, IsContiguous, Scalar as NalgebraScalar, Storage};
 use num_traits::Zero;
 use std::{
     marker::PhantomData,
-    ops::{Add, Mul, Sub},
     sync::{atomic::Ordering, Arc},
 };
 use xla::{ArrayElement, NativeType, XlaOp};
 
-pub struct Matrix<T, const R: usize, const C: usize, P: Param = Op> {
-    pub(crate) inner: Arc<P::Inner>,
-    phantom: PhantomData<T>,
-}
-
-impl<T, const R: usize, const C: usize> Matrix<T, R, C, Op> {
-    pub fn fixed_slice<const NR: usize, const NC: usize>(
-        &self,
-        row_offset: usize,
-        col_offset: usize,
-    ) -> Matrix<T, NR, NC> {
-        let row_offset = row_offset as i64;
-        let col_offset = col_offset as i64;
-        Matrix {
-            inner: Arc::new(
-                self.as_op()
-                    .slice(
-                        &[row_offset, col_offset],
-                        &[row_offset + (NR as i64), col_offset + (NC as i64)],
-                        &[1, 1],
-                    )
-                    .unwrap(),
-            ),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T, const R: usize, const C: usize> Tensor for Matrix<T, R, C, Op> {
-    fn from_op(op: XlaOp) -> Self {
-        Self {
-            inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-}
+pub type Matrix<T, const R: usize, const C: usize, P = Op> = Tensor<T, (Const<R>, Const<C>), P>;
 
 impl<T, const R: usize, const C: usize, P: Param> ToHost for Matrix<T, R, C, P> {
     type HostTy = nalgebra::Matrix<T, Const<R>, Const<C>, ArrayStorage<T, R, C>>;
@@ -69,41 +33,6 @@ impl<T, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
 
         Matrix {
             inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Add for Matrix<T, R, C> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Matrix {
-            inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Sub for Matrix<T, R, C> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Matrix {
-            inner: Arc::new((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedAdd, const R: usize, const C: usize> Mul<Matrix<T, C, R>>
-    for Matrix<T, R, C>
-{
-    type Output = Self;
-
-    fn mul(self, rhs: Matrix<T, C, R>) -> Self::Output {
-        Matrix {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
             phantom: PhantomData,
         }
     }
@@ -237,12 +166,16 @@ impl<T: ArrayElement, const R: usize, const C: usize> MapExt for Matrix<T, R, C>
 mod tests {
     use nalgebra::matrix;
 
+    use crate::FixedSliceExt;
+
     use super::*;
 
     #[test]
     fn test_add() {
         let client = Client::cpu().unwrap();
-        let comp = Matrix::add.build().unwrap();
+        let comp = (|a: Matrix<f32, 1, 2>, b: Matrix<f32, 1, 2>| a + b)
+            .build()
+            .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
             .run(&client, matrix![1.0f32, 2.0], matrix![2.0, 3.0])
@@ -253,7 +186,9 @@ mod tests {
     #[test]
     fn test_sub() {
         let client = Client::cpu().unwrap();
-        let comp = Matrix::sub.build().unwrap();
+        let comp = (|a: Matrix<f32, 1, 2>, b: Matrix<f32, 1, 2>| a - b)
+            .build()
+            .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
             .run(&client, matrix![1.0f32, 2.0], matrix![2.0, 3.0])
@@ -264,7 +199,9 @@ mod tests {
     #[test]
     fn test_mul() {
         let client = Client::cpu().unwrap();
-        let comp = Matrix::mul.build().unwrap();
+        let comp = (|a: Matrix<f32, 2, 2>, b: Matrix<f32, 2, 2>| a * b)
+            .build()
+            .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
             .run(
@@ -301,7 +238,7 @@ mod tests {
     fn test_fixed_slice() {
         let client = Client::cpu().unwrap();
         fn slice(mat: Matrix<f32, 1, 4>) -> Matrix<f32, 1, 1> {
-            mat.fixed_slice::<1, 1>(0, 2)
+            mat.fixed_slice::<(Const<1>, Const<1>)>([0, 2])
         }
         let comp = slice.build().unwrap();
         let exec = match comp.compile(&client) {

@@ -1,24 +1,25 @@
 use std::ops::Mul;
 
-use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, RealField, Scalar as NalgebraScalar};
+use nalgebra::{ClosedDiv, RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
+use simba::scalar::ClosedNeg;
 use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
-    AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FromBuilder, FromHost, FromPjrtBuffer, Op,
-    Param, ToHost, Vector,
+    AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FixedSliceExt, FromBuilder, FromHost,
+    FromPjrtBuffer, Op, Param, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(Vector<T, 4, P>);
 
-impl<T: NalgebraScalar> Quaternion<T> {
+impl<T: NalgebraScalar + ClosedNeg> Quaternion<T> {
     fn parts(&self) -> [Vector<T, 1>; 4] {
         let Quaternion(v) = self;
         [
-            v.fixed_slice(0),
-            v.fixed_slice(1),
-            v.fixed_slice(2),
-            v.fixed_slice(3),
+            v.fixed_slice([0]),
+            v.fixed_slice([1]),
+            v.fixed_slice([2]),
+            v.fixed_slice([3]),
         ]
     }
 
@@ -28,14 +29,14 @@ impl<T: NalgebraScalar> Quaternion<T> {
     }
 }
 
-impl<T: NalgebraScalar + ClosedDiv> Quaternion<T> {
+impl<T: NalgebraScalar + ClosedDiv + ClosedNeg> Quaternion<T> {
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
 }
 
-impl<T: NalgebraScalar + ClosedSub + ClosedMul + ClosedAdd> Mul for Quaternion<T> {
+impl<T: RealField> Mul for Quaternion<T> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -57,15 +58,13 @@ impl<T: NalgebraScalar + ClosedSub + ClosedMul + ClosedAdd> Mul for Quaternion<T
     }
 }
 
-impl<T: NalgebraScalar + ClosedSub + ClosedDiv + ClosedMul + ClosedAdd + NativeType + Zero>
-    Mul<Vector<T, 3>> for Quaternion<T>
-{
+impl<T: NativeType + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
     type Output = Vector<T, 3>;
 
     fn mul(self, rhs: Vector<T, 3>) -> Self::Output {
         let v = Quaternion(rhs.extend(T::zero()));
         let inv = self.inverse();
-        (self * v * inv).0.fixed_slice(0)
+        (self * v * inv).0.fixed_slice([0])
     }
 }
 
