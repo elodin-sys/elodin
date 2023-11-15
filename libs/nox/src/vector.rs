@@ -1,23 +1,18 @@
 use std::{
     marker::PhantomData,
-    ops::{Add, Div, Mul, Neg, Sub},
+    ops::{Div, Mul},
     sync::{atomic::Ordering, Arc},
 };
 
-use nalgebra::{
-    ArrayStorage, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const, Scalar as NalgebraScalar,
-};
+use nalgebra::{ArrayStorage, ClosedDiv, ClosedMul, Const, Scalar as NalgebraScalar};
 use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
     AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FromBuilder, FromHost, Op, Param, Scalar,
-    TensorLike, ToHost,
+    Tensor, TensorLike, ToHost,
 };
 
-pub struct Vector<T, const N: usize, P: Param = Op> {
-    pub(crate) inner: Arc<P::Inner>,
-    pub(crate) phantom: PhantomData<T>,
-}
+pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
 
 impl<T: NativeType> Vector<T, 3, Op> {
     pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
@@ -54,39 +49,6 @@ impl<T, const N: usize> TensorLike for Vector<T, N, Op> {
     fn from_op(op: XlaOp) -> Self {
         Self {
             inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedAdd, const N: usize> Add for Vector<T, N> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedSub, const N: usize> Sub for Vector<T, N> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar, const N: usize> Neg for Vector<T, N> {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Vector {
-            inner: Arc::new(self.inner.neg().expect("xla build error")),
             phantom: PhantomData,
         }
     }
