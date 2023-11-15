@@ -169,7 +169,6 @@ mod tests {
     use crate::FixedSliceExt;
 
     use super::*;
-    use std::ops::Mul;
 
     #[test]
     fn test_add() {
@@ -200,7 +199,9 @@ mod tests {
     #[test]
     fn test_mul() {
         let client = Client::cpu().unwrap();
-        let comp = Matrix::mul.build().unwrap();
+        let comp = (|a: Matrix<f32, 2, 2>, b: Matrix<f32, 2, 2>| a * b)
+            .build()
+            .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
             .run(

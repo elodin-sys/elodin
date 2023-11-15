@@ -1,10 +1,9 @@
 use std::{
     marker::PhantomData,
-    ops::Mul,
     sync::{atomic::Ordering, Arc},
 };
 
-use nalgebra::{ArrayStorage, ClosedMul, Const, Scalar as NalgebraScalar};
+use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
 use xla::{ArrayElement, NativeType, XlaOp};
 
 use crate::{
@@ -44,50 +43,6 @@ impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
         }
     }
 }
-
-impl<T: NalgebraScalar + ClosedMul> Mul for Vector<T, 1> {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: NalgebraScalar + ClosedMul, const N: usize> Mul<Vector<T, N>> for Scalar<T> {
-    type Output = Vector<T, N>;
-
-    fn mul(self, rhs: Vector<T, N>) -> Self::Output {
-        Vector {
-            inner: Arc::new((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error")),
-            phantom: PhantomData,
-        }
-    }
-}
-
-macro_rules! impl_prim {
-    ($ty:tt) => {
-        impl<const N: usize> Mul<Vector<$ty, N>> for $ty {
-            type Output = Vector<$ty, N>;
-
-            fn mul(self, rhs: Vector<$ty, N>) -> Self::Output {
-                Vector {
-                    inner: Arc::new((rhs.inner.builder().c0(self).unwrap() * rhs.as_op()).unwrap()),
-                    phantom: PhantomData,
-                }
-            }
-        }
-    };
-}
-
-impl_prim!(f64);
-impl_prim!(f32);
-impl_prim!(u64);
-impl_prim!(u32);
-impl_prim!(i64);
-impl_prim!(i32);
 
 impl<T, const N: usize> AsOp for Vector<T, N, Op> {
     fn as_op(&self) -> &XlaOp {
@@ -142,18 +97,6 @@ impl<T, const R: usize> Vector<T, R, Op> {
         let op = arr[0].concat_in_dim(&arr[1..], 0).unwrap();
         Vector {
             inner: Arc::new(op),
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn fixed_slice<const NR: usize>(&self, offset: usize) -> Vector<T, NR> {
-        let offset = offset as i64;
-        Vector {
-            inner: Arc::new(
-                self.as_op()
-                    .slice(&[offset], &[offset + (NR as i64)], &[1])
-                    .unwrap(),
-            ),
             phantom: PhantomData,
         }
     }
