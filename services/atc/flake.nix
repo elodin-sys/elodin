@@ -13,22 +13,7 @@
         rustPkgs = pkgs.rustBuilder.makePackageSet {
           rustVersion = "1.73.0";
           packageFun = import ../../Cargo.nix;
-          packageOverrides = pkgs:
-            pkgs.rustBuilder.overrides.all
-            ++ [
-              (pkgs.rustBuilder.rustLib.makeOverride {
-                name = "paracosm-types";
-                overrideAttrs = drv: {
-                  propagatedNativeBuildInputs =
-                    drv.propagatedNativeBuildInputs
-                    or []
-                    ++ [
-                      pkgs.buildPackages.protobuf
-                      pkgs.buildPackages.libiconv
-                    ];
-                };
-              })
-            ];
+          packageOverrides = paracosm.packages.rust-overrides;
         };
       in
         (rustPkgs.workspace.atc {}).bin;
@@ -75,6 +60,7 @@
           packages = {
             atc.default = build_rust pkgs;
             atc.aarch64 = build_rust aarch64_pkgs;
+            atc.x86_64 = build_rust x86_64_pkgs;
             docker.default = build_docker {
               inherit pkgs;
               bin = packages.atc.default;
@@ -82,6 +68,10 @@
             docker.aarch64 = build_docker {
               pkgs = aarch64_pkgs;
               bin = packages.atc.aarch64;
+            };
+            docker.x86_64 = build_docker {
+              pkgs = x86_64_pkgs;
+              bin = packages.atc.x86_64;
             };
           };
         }

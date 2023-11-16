@@ -10,32 +10,23 @@
   outputs = {
     self,
     nixpkgs,
-    get-flake,
-    flake-utils,
     ...
-  } @ inputs: let
-    types = get-flake ./libs/paracosm-types;
-  in rec {
-    packages.rust-overrides = pkgs: let
-      protos = types.packages.${pkgs.system}.default;
-    in
+  } @ inputs: rec {
+    packages.rust-overrides = pkgs:
       pkgs.rustBuilder.overrides.all
       ++ [
         (pkgs.rustBuilder.rustLib.makeOverride {
           name = "paracosm-types";
           overrideAttrs = drv: {
-            propagatedBuildInputs =
-              drv.propagatedBuildInputs
+            propagatedNativeBuildInputs =
+              drv.propagatedNativeBuildInputs
               or []
               ++ [
-                protos
-                pkgs.protobuf
-                pkgs.libiconv
+                pkgs.buildPackages.protobuf
+              ]
+              ++ pkgs.lib.optional pkgs.buildPackages.hostPlatform.isDarwin [
+                pkgs.buildPackages.libiconv
               ];
-            propagatedNativeBuildInputs = drv.propagatedNativeBuildInputs or [] ++ [
-              pkgs.libiconv
-            ];
-            ELODIN_PROTOBUFS = "${protos}/protobufs";
           };
         })
       ];
