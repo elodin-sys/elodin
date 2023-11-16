@@ -3,6 +3,8 @@ target
 out.png
 out.rrd
 .idea
+result
+result-bin
 
 paracosm_bg.wasm
 paracosm_bg.wasm.d.ts
