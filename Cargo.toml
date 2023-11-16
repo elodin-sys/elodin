@@ -5,7 +5,9 @@ members = [
     "libs/paracosm-macros",
     "libs/paracosm-editor",
     "libs/paracosm-py",
-    "libs/nox"
+    "libs/paracosm-types/rust",
+    "libs/nox",
+    "services/atc"
 ]
 
 
