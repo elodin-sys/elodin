@@ -5,35 +5,37 @@
     cargo2nix.follows = "paracosm/cargo2nix";
     rust-overlay.follows = "paracosm/rust-overlay";
     flake-utils.follows = "paracosm/flake-utils";
+    nix2container.url = "github:nlewo/nix2container";
   };
 
   outputs = inputs:
-    with inputs; let
-      build_rust = pkgs: let
-        rustPkgs = pkgs.rustBuilder.makePackageSet {
-          rustVersion = "1.73.0";
-          packageFun = import ../../Cargo.nix;
-          packageOverrides = paracosm.packages.rust-overrides;
-        };
-      in
-        (rustPkgs.workspace.atc {}).bin;
-      build_docker = {
-        bin,
-        pkgs,
-      }:
-        pkgs.dockerTools.buildLayeredImage {
-          name = "atc";
-          contents = [
-            pkgs.cacert
-          ];
-          config = {
-            Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
-            Cmd = ["${bin.bin}/bin/atc"];
-          };
-        };
-    in
+    with inputs;
       flake-utils.lib.eachDefaultSystem (
         system: let
+          build_rust = pkgs: let
+            rustPkgs = pkgs.rustBuilder.makePackageSet {
+              rustVersion = "1.73.0";
+              packageFun = import ../../Cargo.nix;
+              packageOverrides = paracosm.packages.rust-overrides;
+            };
+          in
+            (rustPkgs.workspace.atc {}).bin;
+          build_docker = {
+            bin,
+            pkgs,
+          }:
+            nix2container.packages.${system}.nix2container.buildImage {
+              name = "atc";
+              copyToRoot = pkgs.buildEnv {
+                name = "root";
+                paths = with pkgs; [cacert busybox];
+                pathsToLink = ["/bin" "/etc/ssl/certs"];
+              };
+              config = {
+                Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
+                Cmd = ["${bin.bin}/bin/atc"];
+              };
+            };
           pkgs = import nixpkgs {
             inherit system;
             overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
