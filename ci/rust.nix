@@ -17,6 +17,7 @@ pkgs.mkShell.override { stdenv = pkgs.gcc12Stdenv; } {
     python3
     openssl
     clang
+    protobuf
   ];
   LIBCLANG_PATH = "${pkgs.llvmPackages_14.libclang.lib}/lib";
   BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
