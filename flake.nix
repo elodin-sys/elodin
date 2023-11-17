@@ -5,6 +5,7 @@
     rust-overlay.url = "github:oxalica/rust-overlay/b7a041430733fccaa1ffc3724bb9454289d0f701";
     flake-utils.url = "github:numtide/flake-utils";
     get-flake.url = "github:ursi/get-flake";
+    nix2container.url = "github:nlewo/nix2container";
   };
 
   outputs = {

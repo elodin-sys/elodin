@@ -5,7 +5,7 @@
     cargo2nix.follows = "paracosm/cargo2nix";
     rust-overlay.follows = "paracosm/rust-overlay";
     flake-utils.follows = "paracosm/flake-utils";
-    nix2container.url = "github:nlewo/nix2container";
+    nix2container.follows = "paracosm/nix2container";
   };
 
   outputs = inputs:
