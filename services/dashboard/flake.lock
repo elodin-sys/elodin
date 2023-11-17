@@ -207,7 +207,7 @@
         "type": "github"
       }
     },
-    "root": {
+    "paracosm": {
       "inputs": {
         "cargo2nix": "cargo2nix",
         "flake-utils": "flake-utils_2",
@@ -215,15 +215,44 @@
         "nix2container": "nix2container",
         "nixpkgs": "nixpkgs_3",
         "rust-overlay": "rust-overlay_2"
+      },
+      "locked": {
+        "lastModified": 0,
+        "narHash": "sha256-IC8CSgwJx5kelC9lxWQ+sh2lRdgi2srnMpV2lZ1wvmU=",
+        "path": "../../.",
+        "type": "path"
+      },
+      "original": {
+        "path": "../../.",
+        "type": "path"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": [
+          "paracosm",
+          "flake-utils"
+        ],
+        "nix2container": [
+          "paracosm",
+          "nix2container"
+        ],
+        "nixpkgs": [
+          "paracosm",
+          "nixpkgs"
+        ],
+        "paracosm": "paracosm"
       }
     },
     "rust-overlay": {
       "inputs": {
         "flake-utils": [
+          "paracosm",
           "cargo2nix",
           "flake-utils"
         ],
         "nixpkgs": [
+          "paracosm",
           "cargo2nix",
           "nixpkgs"
         ]
