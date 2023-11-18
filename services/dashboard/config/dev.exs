@@ -1,14 +1,5 @@
 import Config
 
-# Configure your database
-config :paracosm_dashboard, ParacosmDashboard.Repo,
-  username: "sphw",
-  hostname: "localhost",
-  database: "paracosm_dashboard_dev",
-  stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 10
-
 config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
   client_id: "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR",
   client_secret: "Rx5d-nJWafMuEcmSRXiUtlCjArTBtPMsjU588CDjq3RjFe1fTSVng2dWmjnyWHBw",

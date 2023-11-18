@@ -9,8 +9,8 @@ defmodule ParacosmDashboard.Application do
   def start(_type, _args) do
     children = [
       ParacosmDashboardWeb.Telemetry,
-      ParacosmDashboard.Repo,
-      {DNSCluster, query: Application.get_env(:paracosm_dashboard, :dns_cluster_query) || :ignore},
+      {DNSCluster,
+       query: Application.get_env(:paracosm_dashboard, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: ParacosmDashboard.PubSub},
       # Start the Finch HTTP client for sending emails
       {Finch, name: ParacosmDashboard.Finch},
