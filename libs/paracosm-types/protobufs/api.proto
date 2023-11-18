@@ -1,0 +1,17 @@
+syntax = 'proto3';
+
+package paracosm.types.api;
+
+service Api {
+    rpc CreateUser(CreateUserReq) returns (CreateUserResp);
+}
+
+message CreateUserReq {
+    string email = 1;
+    string name = 2;
+    string auth0_id = 3;
+}
+
+message CreateUserResp {
+    bytes id = 1;
+}

@@ -1,0 +1,31 @@
+[package]
+name = "atc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# async
+tokio.version = "1.0"
+tokio.features = ["full"]
+futures = "0.3.29"
+
+# types
+paracosm-types.path = "../../libs/paracosm-types/rust"
+
+# logs
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# config
+serde.version = "1.0"
+serde.features = ["derive"]
+toml.version =  "0.7"
+toml.features = ["parse"]
+
+# errors
+anyhow = "1"
+
+# grpc
+tonic = "0.10"
