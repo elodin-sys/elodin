@@ -14,7 +14,13 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        brand: "#FD4F00",
+        blue: "#1E43E2",
+        "light-blue": "#8EA1F1",
+        tan: "#F3E5C5",
+        orange: "#EF5800",
+        green: "#00CA71",
+        "dark-matte": "#131212",
+        "code": "#282C34"
       }
     },
   },
@@ -23,7 +29,7 @@ module.exports = {
     // Allows prefixing tailwind classes with LiveView classes to add rules
     // only when LiveView classes are applied, for example:
     //
-    //     <div class="phx-click-loading:animate-ping">
+    //     <div class="phx-click-loading:animate-ping">.
     //
     plugin(({addVariant}) => addVariant("phx-no-feedback", [".phx-no-feedback&", ".phx-no-feedback &"])),
     plugin(({addVariant}) => addVariant("phx-click-loading", [".phx-click-loading&", ".phx-click-loading &"])),
@@ -34,7 +40,19 @@ module.exports = {
     // See your `CoreComponents.icon/1` for more information.
     //
     plugin(function({matchComponents, theme}) {
+      let iconsDir = path.join(__dirname, "./vendor/heroicons/optimized")
       let values = {}
+      let icons = [
+        ["", "/24/outline"],
+        ["-solid", "/24/solid"],
+        ["-mini", "/20/solid"]
+      ]
+      icons.forEach(([suffix, dir]) => {
+        fs.readdirSync(path.join(iconsDir, dir)).forEach(file => {
+          let name = path.basename(file, ".svg") + suffix
+          values[name] = {name, fullPath: path.join(iconsDir, dir, file)}
+        })
+      })
       matchComponents({
         "hero": ({name, fullPath}) => {
           let content = fs.readFileSync(fullPath).toString().replace(/\r?\n|\r/g, "")

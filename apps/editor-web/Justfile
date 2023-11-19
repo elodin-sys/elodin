@@ -1,0 +1,6 @@
+build:
+  cargo build --release --target wasm32-unknown-unknown
+  rm -rf out
+  wasm-bindgen --out-dir ./out/ --target web ../../target/wasm32-unknown-unknown/release/editor-web.wasm
+  cp out/editor-web_bg.wasm ../../services/dashboard/priv/static/assets/wasm/
+  cp out/editor-web.js  ../../services/dashboard/assets/js/

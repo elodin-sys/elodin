@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use self::ui::*;
 use bevy::{
     core_pipeline::{
@@ -23,7 +25,7 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 //use bevy_polyline::PolylinePlugin;
 use paracosm::{
     plugin::sync_pos,
-    sync::{channel_pair, recv_data, EntityMap},
+    sync::{channel_pair, recv_data, ClientChannel, EntityMap},
     SimState,
 };
 use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
@@ -41,17 +43,26 @@ pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
         app.run()
     });
     let mut app = App::new();
-    app.add_plugins(EditorPlugin::new(rx));
+    app.insert_non_send_resource(rx);
+    app.add_plugins(EditorPlugin::<ClientChannel>::new());
     app.run()
 }
 
 pub struct EditorPlugin<Rx: ClientTransport> {
-    rx: Rx,
+    phantom_data: PhantomData<fn() -> Rx>,
 }
 
 impl<Rx: ClientTransport> EditorPlugin<Rx> {
-    pub fn new(rx: Rx) -> Self {
-        Self { rx }
+    pub fn new() -> Self {
+        Self {
+            phantom_data: PhantomData,
+        }
+    }
+}
+
+impl<Rx: ClientTransport> Default for EditorPlugin<Rx> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
@@ -63,13 +74,14 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                         window_theme: Some(WindowTheme::Dark),
                         title: "Paracosm Editor".into(),
                         present_mode: PresentMode::AutoNoVsync,
+                        fit_canvas_to_parent: true,
+                        canvas: Some("#editor".to_string()),
                         ..default()
                     }),
                     ..default()
                 })
                 .build(),
         )
-        .insert_resource(self.rx.clone())
         .insert_resource(EntityMap::default())
         .insert_resource(SimState::default())
         .add_plugins(

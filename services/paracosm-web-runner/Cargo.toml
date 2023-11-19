@@ -1,0 +1,38 @@
+[package]
+name = "paracosm-web-runner"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# web
+axum.version = "0.6.20"
+axum.features = ["ws", "headers"]
+tower-http.version = "0.4.4"
+tower-http.features = ["cors"]
+
+# async
+tokio.version = "1.0"
+tokio.features = ["full"]
+flume = "0.11"
+futures = "0.3.29"
+
+# logs
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# errors
+anyhow = "1"
+
+# paracosm
+paracosm.path = "../../libs/paracosm-core"
+bevy.version = "0.12"
+
+# types
+postcard.version = "1.0.8"
+postcard.features = ["alloc"]
+
+# python
+pyo3.version = "0.20.0"
+paracosm-py.path = "../../libs/paracosm-py"

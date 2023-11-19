@@ -39,8 +39,8 @@ clap.version = "4.4"
 clap.features = ["derive"]
 
 # python
-pyo3.version = "0.20.0"
-paracosm-py.path = "../paracosm-py"
+# pyo3.version = "0.20.0"
+# paracosm-py.path = "../paracosm-py"
 
 # errors
 anyhow = "1"
@@ -49,7 +49,7 @@ anyhow = "1"
 notify = "6.1"
 
 # thread priority
-thread-priority = "0.13.1"
+# thread-priority = "0.13.1"
 
 # ui
 rfd = "0.12.1"
