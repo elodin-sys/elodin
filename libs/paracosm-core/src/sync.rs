@@ -7,7 +7,7 @@ use bevy::{
 use bevy_ecs::{
     entity::Entity,
     event::EventWriter,
-    system::{Commands, Query, Res, ResMut, Resource},
+    system::{Commands, Query, Res, ResMut, Resource, NonSend},
 };
 
 use crate::{
@@ -24,7 +24,7 @@ pub fn recv_data<S: ClientTransport>(
     mut commands: Commands,
     mut world_pos: Query<&mut WorldPos>,
     mut entity_map: ResMut<EntityMap>,
-    client: Res<S>,
+    client: NonSend<S>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
     mut material_assets: ResMut<Assets<StandardMaterial>>,
     mut sim_state: ResMut<SimState>,
@@ -75,7 +75,7 @@ pub fn recv_data<S: ClientTransport>(
     }
 }
 
-pub trait ClientTransport: Clone + Send + Sync + Resource {
+pub trait ClientTransport: Clone + 'static {
     fn try_recv_msg(&self) -> Option<ClientMsg>;
     fn send_msg(&self, msg: ServerMsg);
 }
@@ -142,8 +142,8 @@ pub fn recv_server<T: ServerTransport>(
 
 #[derive(Debug, Clone, Resource)]
 pub struct ServerChannel {
-    tx: Sender<ClientMsg>,
-    rx: Receiver<ServerMsg>,
+    pub tx: Sender<ClientMsg>,
+    pub rx: Receiver<ServerMsg>,
 }
 
 impl ServerTransport for ServerChannel {
@@ -158,8 +158,8 @@ impl ServerTransport for ServerChannel {
 
 #[derive(Debug, Clone, Resource)]
 pub struct ClientChannel {
-    rx: Receiver<ClientMsg>,
-    tx: Sender<ServerMsg>,
+    pub rx: Receiver<ClientMsg>,
+    pub tx: Sender<ServerMsg>,
 }
 
 pub fn channel_pair() -> (ServerChannel, ClientChannel) {

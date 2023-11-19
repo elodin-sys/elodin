@@ -21,9 +21,34 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
+import { CodeEditorHook } from "../../deps/live_monaco_editor/priv/static/live_monaco_editor.esm"
+import editor_init from './editor-web.js'
+
+let Hooks = {}
+Hooks.CodeEditorHook = CodeEditorHook
+Hooks.EditorWasmHook = {
+    mounted() {
+        editor_init("/assets/wasm/editor-web_bg.wasm")
+    }
+}
+
+window.addEventListener("lme:editor_mounted", (ev) => {
+  const hook = ev.detail.hook
+
+  // https://microsoft.github.io/monaco-editor/docs.html#interfaces/editor.IStandaloneCodeEditor.html
+  const editor = ev.detail.editor.standalone_code_editor
+
+  // push an event to the parent liveview containing the editor current value when the editor loses focus
+  editor.onDidBlurEditorWidget(() => {
+      document.querySelector("#editor-container").dispatchEvent(new CustomEvent("code-update", {
+          detail: editor.getValue()
+      }))
+  })
+})
+
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
-let liveSocket = new LiveSocket("/live", Socket, {params: {_csrf_token: csrfToken}})
+let liveSocket = new LiveSocket("/live", Socket, { hooks: Hooks, params: {_csrf_token: csrfToken}})
 
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})

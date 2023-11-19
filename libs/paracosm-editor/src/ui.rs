@@ -113,7 +113,7 @@ pub(crate) fn picked_system(
 
 pub(crate) fn timeline_system<Tx: ClientTransport>(
     mut contexts: EguiContexts,
-    tx: Res<Tx>,
+    tx: NonSendMut<Tx>,
     mut sim_state: ResMut<SimState>,
     window: Query<&Window>,
 ) {

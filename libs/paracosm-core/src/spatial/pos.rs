@@ -1,9 +1,10 @@
 use bevy::prelude::{Quat, Vec3};
 use nalgebra::{matrix, ArrayStorage, Matrix, UnitQuaternion, Vector3, U1, U7};
+use serde::{Serialize, Deserialize};
 
 use super::SpatialTransform;
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Deserialize, Serialize)]
 pub struct SpatialPos {
     pub pos: Vector3<f64>,
     pub att: UnitQuaternion<f64>,
