@@ -22,7 +22,7 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 import { CodeEditorHook } from "../../deps/live_monaco_editor/priv/static/live_monaco_editor.esm"
-import editor_init from './editor-web.js'
+import editor_init from '../../priv/static/assets/wasm/editor-web.js'
 
 let Hooks = {}
 Hooks.CodeEditorHook = CodeEditorHook
