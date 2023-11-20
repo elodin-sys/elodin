@@ -12,7 +12,6 @@ members = [
     "services/paracosm-web-runner"
 ]
 
-
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"
