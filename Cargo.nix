@@ -4,6 +4,7 @@
 args@{
   release ? true,
   rootFeatures ? [
+    "editor-web/default"
     "paracosm/default"
     "paracosm-macros/default"
     "paracosm-editor/default"
@@ -11,6 +12,7 @@ args@{
     "paracosm-types/default"
     "nox/default"
     "atc/default"
+    "paracosm-web-runner/default"
   ],
   rustPackages,
   buildRustPackages,
@@ -30,7 +32,7 @@ args@{
   ignoreLockHash,
 }:
 let
-  nixifiedLockHash = "9a343e32edada8693e3b34a5938525dec42ac316b5fa262c98504c0d258ba35d";
+  nixifiedLockHash = "9be52e68a50ffa1f1a95814fcebf92c792aae5dcebc65489f3d9078a5a38e70b";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash
@@ -53,6 +55,7 @@ in
 {
   cargo2nixVersion = "0.11.0";
   workspace = {
+    editor-web = rustPackages.unknown.editor-web."0.1.0";
     paracosm = rustPackages.unknown.paracosm."0.1.0";
     paracosm-macros = rustPackages.unknown.paracosm-macros."0.1.0";
     paracosm-editor = rustPackages.unknown.paracosm-editor."0.1.0";
@@ -60,6 +63,7 @@ in
     paracosm-types = rustPackages.unknown.paracosm-types."0.1.0";
     nox = rustPackages.unknown.nox."0.1.0";
     atc = rustPackages.unknown.atc."0.1.0";
+    paracosm-web-runner = rustPackages.unknown.paracosm-web-runner."0.1.0";
   };
   "registry+https://github.com/rust-lang/crates.io-index".ab_glyph."0.2.23" = overridableMkRustCrate (profileName: rec {
     name = "ab_glyph";
@@ -320,16 +324,6 @@ in
     dependencies = {
       libc = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".libc."0.2.150" { inherit profileName; }).out;
     };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".anes."0.1.6" = overridableMkRustCrate (profileName: rec {
-    name = "anes";
-    version = "0.1.6";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"; };
-    features = builtins.concatLists [
-      [ "default" ]
-    ];
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".anstream."0.6.4" = overridableMkRustCrate (profileName: rec {
@@ -642,17 +636,17 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".async-executor."1.6.0" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".async-executor."1.7.2" = overridableMkRustCrate (profileName: rec {
     name = "async-executor";
-    version = "1.6.0";
+    version = "1.7.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "4b0c4a4f319e45986f347ee47fef8bf5e81c9abc3f6f58dc2391439f30df65f0"; };
+    src = fetchCratesIo { inherit name version; sha256 = "fc5ea910c42e5ab19012bab31f53cb4d63d54c3a27730f9a833a88efcf4bb52d"; };
     dependencies = {
-      async_lock = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."2.8.0" { inherit profileName; }).out;
+      async_lock = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.1" { inherit profileName; }).out;
       async_task = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-task."4.5.0" { inherit profileName; }).out;
       concurrent_queue = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".concurrent-queue."2.3.0" { inherit profileName; }).out;
       fastrand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".fastrand."2.0.1" { inherit profileName; }).out;
-      futures_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-lite."1.13.0" { inherit profileName; }).out;
+      futures_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-lite."2.0.1" { inherit profileName; }).out;
       slab = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".slab."0.4.9" { inherit profileName; }).out;
     };
   });
@@ -683,7 +677,7 @@ in
     ];
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "async_channel" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-channel."1.9.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "async_executor" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.6.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "async_executor" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.7.2" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "async_io" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-io."1.13.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "async_lock" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."2.8.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "blocking" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".blocking."1.5.1" { inherit profileName; }).out;
@@ -721,14 +715,14 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "41ed9d5715c2d329bf1b4da8d60455b99b187f27ba726df2883799af9af60997"; };
     dependencies = {
-      ${ if rootFeatures' ? "paracosm/rerun" then "async_lock" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "async_lock" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "concurrent_queue" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".concurrent-queue."2.3.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "futures_io" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-io."0.3.29" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "futures_lite" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-lite."2.0.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "parking" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".parking."2.2.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "polling" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".polling."3.3.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "slab" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".slab."0.4.9" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "tracing" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing."0.1.40" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "waker_fn" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".waker-fn."1.1.1" { inherit profileName; }).out;
@@ -746,11 +740,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.0" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.1" = overridableMkRustCrate (profileName: rec {
     name = "async-lock";
-    version = "3.1.0";
+    version = "3.1.1";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "deb2ab2aa8a746e221ab826c73f48bc6ba41be6763f0855cb249eb6d154cf1d7"; };
+    src = fetchCratesIo { inherit name version; sha256 = "655b9c7fe787d3b25cc0f804a1a8401790f0c5bc395beb5a64dc77d8de079105"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "std" ]
@@ -775,7 +769,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "event_listener" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".event-listener."3.1.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "futures_lite" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-lite."1.13.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "windows_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".windows-sys."0.48.0" { inherit profileName; }).out;
     };
   });
@@ -804,7 +798,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "futures_core" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-core."0.3.29" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "futures_io" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-io."0.3.29" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isUnix then "signal_hook_registry" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".signal-hook-registry."1.4.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "slab" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".slab."0.4.9" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "windows_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".windows-sys."0.48.0" { inherit profileName; }).out;
@@ -941,6 +935,16 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".atomic-polyfill."0.1.11" = overridableMkRustCrate (profileName: rec {
+    name = "atomic-polyfill";
+    version = "0.1.11";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "e3ff7eb3f316534d83a8a2c3d1674ace8a5a71198eba31e2e2b597833f699b28"; };
+    dependencies = {
+      critical_section = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".critical-section."1.1.2" { inherit profileName; }).out;
+    };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".atomic-waker."1.1.2" = overridableMkRustCrate (profileName: rec {
     name = "atomic-waker";
     version = "1.1.2";
@@ -958,18 +962,6 @@ in
     ];
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".atty."0.2.14" = overridableMkRustCrate (profileName: rec {
-    name = "atty";
-    version = "0.2.14";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"; };
-    dependencies = {
-      ${ if hostPlatform.parsed.kernel.name == "hermit" then "hermit_abi" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hermit-abi."0.1.19" { inherit profileName; }).out;
-      ${ if hostPlatform.isUnix then "libc" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".libc."0.2.150" { inherit profileName; }).out;
-      ${ if hostPlatform.isWindows then "winapi" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".winapi."0.3.9" { inherit profileName; }).out;
-    };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".autocfg."1.1.0" = overridableMkRustCrate (profileName: rec {
     name = "autocfg";
     version = "1.1.0";
@@ -982,12 +974,27 @@ in
     version = "0.6.20";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "3b829e4e32b91e643de6eafe82b1d90675f5874230191a4ffbc1b336dec4d6bf"; };
+    features = builtins.concatLists [
+      [ "default" ]
+      [ "form" ]
+      [ "headers" ]
+      [ "http1" ]
+      [ "json" ]
+      [ "matched-path" ]
+      [ "original-uri" ]
+      [ "query" ]
+      [ "tokio" ]
+      [ "tower-log" ]
+      [ "ws" ]
+    ];
     dependencies = {
       async_trait = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".async-trait."0.1.74" { profileName = "__noProfile"; }).out;
       axum_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".axum-core."0.3.4" { inherit profileName; }).out;
+      base64 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".base64."0.21.5" { inherit profileName; }).out;
       bitflags = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bitflags."1.3.2" { inherit profileName; }).out;
       bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytes."1.5.0" { inherit profileName; }).out;
       futures_util = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-util."0.3.29" { inherit profileName; }).out;
+      headers = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".headers."0.3.9" { inherit profileName; }).out;
       http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
       http_body = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http-body."0.4.5" { inherit profileName; }).out;
       hyper = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hyper."0.14.27" { inherit profileName; }).out;
@@ -998,7 +1005,13 @@ in
       percent_encoding = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".percent-encoding."2.3.0" { inherit profileName; }).out;
       pin_project_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project-lite."0.2.13" { inherit profileName; }).out;
       serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
+      serde_json = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.108" { inherit profileName; }).out;
+      serde_path_to_error = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_path_to_error."0.1.14" { inherit profileName; }).out;
+      serde_urlencoded = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_urlencoded."0.7.1" { inherit profileName; }).out;
+      sha1 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sha1."0.10.6" { inherit profileName; }).out;
       sync_wrapper = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sync_wrapper."0.1.2" { inherit profileName; }).out;
+      tokio = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio."1.34.0" { inherit profileName; }).out;
+      tokio_tungstenite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio-tungstenite."0.20.1" { inherit profileName; }).out;
       tower = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower."0.4.13" { inherit profileName; }).out;
       tower_layer = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower-layer."0.3.2" { inherit profileName; }).out;
       tower_service = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower-service."0.3.2" { inherit profileName; }).out;
@@ -1901,7 +1914,7 @@ in
       bitflags = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bitflags."2.4.1" { inherit profileName; }).out;
       bytemuck = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytemuck."1.14.0" { inherit profileName; }).out;
       fixedbitset = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".fixedbitset."0.4.2" { inherit profileName; }).out;
-      naga_oil = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.0" { inherit profileName; }).out;
+      naga_oil = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.1" { inherit profileName; }).out;
       radsort = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".radsort."0.1.0" { inherit profileName; }).out;
       smallvec = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".smallvec."1.11.2" { inherit profileName; }).out;
       thread_local = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thread_local."1.1.7" { inherit profileName; }).out;
@@ -2114,7 +2127,7 @@ in
       proc_macro2 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".proc-macro2."1.0.69" { inherit profileName; }).out;
       quote = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".quote."1.0.33" { inherit profileName; }).out;
       syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."2.0.39" { inherit profileName; }).out;
-      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
     };
   });
   
@@ -2163,7 +2176,7 @@ in
       ${ if hostPlatform.parsed.cpu.name == "wasm32" then "js_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".js-sys."0.3.65" { inherit profileName; }).out;
       ktx2 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ktx2."0.3.0" { inherit profileName; }).out;
       naga = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".naga."0.13.0" { inherit profileName; }).out;
-      naga_oil = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.0" { inherit profileName; }).out;
+      naga_oil = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.1" { inherit profileName; }).out;
       profiling = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".profiling."1.0.11" { inherit profileName; }).out;
       ruzstd = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ruzstd."0.4.0" { inherit profileName; }).out;
       serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
@@ -2212,7 +2225,7 @@ in
       ron = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ron."0.8.1" { inherit profileName; }).out;
       serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
       thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
-      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
     };
   });
   
@@ -2256,7 +2269,7 @@ in
     ];
     dependencies = {
       async_channel = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-channel."1.9.0" { inherit profileName; }).out;
-      async_executor = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.6.0" { inherit profileName; }).out;
+      async_executor = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.7.2" { inherit profileName; }).out;
       async_task = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-task."4.5.0" { inherit profileName; }).out;
       concurrent_queue = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".concurrent-queue."2.3.0" { inherit profileName; }).out;
       futures_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-lite."1.13.0" { inherit profileName; }).out;
@@ -2368,11 +2381,11 @@ in
       ${ if hostPlatform.parsed.cpu.name == "wasm32" then "getrandom" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".getrandom."0.2.11" { inherit profileName; }).out;
       hashbrown = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hashbrown."0.14.2" { inherit profileName; }).out;
       instant = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".instant."0.1.12" { inherit profileName; }).out;
-      nonmax = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".nonmax."0.5.4" { inherit profileName; }).out;
+      nonmax = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".nonmax."0.5.5" { inherit profileName; }).out;
       petgraph = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".petgraph."0.6.4" { inherit profileName; }).out;
       thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
       tracing = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing."0.1.40" { inherit profileName; }).out;
-      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
     };
   });
   
@@ -2628,7 +2641,7 @@ in
     src = fetchCratesIo { inherit name version; sha256 = "6a37913e8dc4ddcc604f0c6d3bf2887c995153af3611de9e23c352b44c1b9118"; };
     dependencies = {
       async_channel = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-channel."2.1.0" { inherit profileName; }).out;
-      async_lock = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.0" { inherit profileName; }).out;
+      async_lock = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."3.1.1" { inherit profileName; }).out;
       async_task = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-task."4.5.0" { inherit profileName; }).out;
       fastrand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".fastrand."2.0.1" { inherit profileName; }).out;
       futures_io = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-io."0.3.29" { inherit profileName; }).out;
@@ -2782,11 +2795,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".cargo-platform."0.1.4" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".cargo-platform."0.1.5" = overridableMkRustCrate (profileName: rec {
     name = "cargo-platform";
-    version = "0.1.4";
+    version = "0.1.5";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "12024c4645c97566567129c204f65d5815a8c9aecf30fcbe682b2fe034996d36"; };
+    src = fetchCratesIo { inherit name version; sha256 = "e34637b3140142bdf929fb439e8aa4ebad7651ebf7b1080b3930aa16ac1459ff"; };
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "serde" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
     };
@@ -2802,19 +2815,12 @@ in
     ];
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "camino" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".camino."1.1.6" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "cargo_platform" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cargo-platform."0.1.4" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "cargo_platform" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cargo-platform."0.1.5" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "semver" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".semver."1.0.20" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "serde" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "serde_json" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.108" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "thiserror" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
     };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".cast."0.3.0" = overridableMkRustCrate (profileName: rec {
-    name = "cast";
-    version = "0.3.0";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"; };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".cc."1.0.83" = overridableMkRustCrate (profileName: rec {
@@ -2907,44 +2913,6 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".ciborium."0.2.1" = overridableMkRustCrate (profileName: rec {
-    name = "ciborium";
-    version = "0.2.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "effd91f6c78e5a4ace8a5d3c0b6bfaec9e2baaef55f3efc00e45fb2e477ee926"; };
-    features = builtins.concatLists [
-      [ "default" ]
-      [ "std" ]
-    ];
-    dependencies = {
-      ciborium_io = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ciborium-io."0.2.1" { inherit profileName; }).out;
-      ciborium_ll = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ciborium-ll."0.2.1" { inherit profileName; }).out;
-      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".ciborium-io."0.2.1" = overridableMkRustCrate (profileName: rec {
-    name = "ciborium-io";
-    version = "0.2.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "cdf919175532b369853f5d5e20b26b43112613fd6fe7aee757e35f7a44642656"; };
-    features = builtins.concatLists [
-      [ "alloc" ]
-      [ "std" ]
-    ];
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".ciborium-ll."0.2.1" = overridableMkRustCrate (profileName: rec {
-    name = "ciborium-ll";
-    version = "0.2.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "defaa24ecc093c77630e6c15e17c51f5e187bf35ee514f4e2d67baaa96dae22b"; };
-    dependencies = {
-      ciborium_io = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ciborium-io."0.2.1" { inherit profileName; }).out;
-      half = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".half."1.8.2" { inherit profileName; }).out;
-    };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".cipher."0.4.4" = overridableMkRustCrate (profileName: rec {
     name = "cipher";
     version = "0.4.4";
@@ -2990,22 +2958,6 @@ in
     };
     buildDependencies = {
       glob = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".glob."0.3.1" { profileName = "__noProfile"; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".clap."3.2.25" = overridableMkRustCrate (profileName: rec {
-    name = "clap";
-    version = "3.2.25";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "4ea181bf566f71cb9a5d17a59e1871af638180a18fb0035c92ae62b705207123"; };
-    features = builtins.concatLists [
-      [ "std" ]
-    ];
-    dependencies = {
-      bitflags = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bitflags."1.3.2" { inherit profileName; }).out;
-      clap_lex = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap_lex."0.2.4" { inherit profileName; }).out;
-      indexmap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".indexmap."1.9.3" { inherit profileName; }).out;
-      textwrap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".textwrap."0.16.0" { inherit profileName; }).out;
     };
   });
   
@@ -3067,16 +3019,6 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".clap_lex."0.2.4" = overridableMkRustCrate (profileName: rec {
-    name = "clap_lex";
-    version = "0.2.4";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "2850f2f5a82cbf437dd5af4d49848fbdfc27c157c3d010345776f952765261c5"; };
-    dependencies = {
-      os_str_bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".os_str_bytes."6.6.1" { inherit profileName; }).out;
-    };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".clap_lex."0.6.0" = overridableMkRustCrate (profileName: rec {
     name = "clap_lex";
     version = "0.6.0";
@@ -3111,6 +3053,13 @@ in
     dependencies = {
       cc = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cc."1.0.83" { inherit profileName; }).out;
     };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".cobs."0.2.3" = overridableMkRustCrate (profileName: rec {
+    name = "cobs";
+    version = "0.2.3";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"; };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".cocoa."0.24.1" = overridableMkRustCrate (profileName: rec {
@@ -3451,49 +3400,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".criterion."0.4.0" = overridableMkRustCrate (profileName: rec {
-    name = "criterion";
-    version = "0.4.0";
+  "registry+https://github.com/rust-lang/crates.io-index".critical-section."1.1.2" = overridableMkRustCrate (profileName: rec {
+    name = "critical-section";
+    version = "1.1.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "e7c76e09c1aae2bc52b3d2f29e13c6572553b30c4aa1b8a49fd70de6412654cb"; };
-    features = builtins.concatLists [
-      [ "cargo_bench_support" ]
-      [ "default" ]
-      [ "html_reports" ]
-      [ "plotters" ]
-      [ "rayon" ]
-    ];
-    dependencies = {
-      anes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".anes."0.1.6" { inherit profileName; }).out;
-      atty = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".atty."0.2.14" { inherit profileName; }).out;
-      cast = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cast."0.3.0" { inherit profileName; }).out;
-      ciborium = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ciborium."0.2.1" { inherit profileName; }).out;
-      clap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap."3.2.25" { inherit profileName; }).out;
-      criterion_plot = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".criterion-plot."0.5.0" { inherit profileName; }).out;
-      itertools = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itertools."0.10.5" { inherit profileName; }).out;
-      lazy_static = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".lazy_static."1.4.0" { inherit profileName; }).out;
-      num_traits = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".num-traits."0.2.17" { inherit profileName; }).out;
-      oorandom = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".oorandom."11.1.3" { inherit profileName; }).out;
-      plotters = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".plotters."0.3.5" { inherit profileName; }).out;
-      rayon = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rayon."1.8.0" { inherit profileName; }).out;
-      regex = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".regex."1.10.2" { inherit profileName; }).out;
-      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
-      serde_derive = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_derive."1.0.192" { profileName = "__noProfile"; }).out;
-      serde_json = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.108" { inherit profileName; }).out;
-      tinytemplate = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tinytemplate."1.2.1" { inherit profileName; }).out;
-      walkdir = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".walkdir."2.4.0" { inherit profileName; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".criterion-plot."0.5.0" = overridableMkRustCrate (profileName: rec {
-    name = "criterion-plot";
-    version = "0.5.0";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"; };
-    dependencies = {
-      cast = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cast."0.3.0" { inherit profileName; }).out;
-      itertools = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itertools."0.10.5" { inherit profileName; }).out;
-    };
+    src = fetchCratesIo { inherit name version; sha256 = "7059fff8937831a9ae6f0fe4d658ffabf58f2ca96aa9dec1c889f936f705f216"; };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".crossbeam."0.8.2" = overridableMkRustCrate (profileName: rec {
@@ -3542,15 +3453,15 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "ce6fd6f855243022dcecf8702fef0c297d4338e226845fe067f6341ad9fa0cef"; };
     features = builtins.concatLists [
-      [ "crossbeam-epoch" ]
-      [ "crossbeam-utils" ]
-      [ "default" ]
-      [ "std" ]
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "crossbeam-epoch")
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "crossbeam-utils")
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "default")
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "std")
     ];
     dependencies = {
-      cfg_if = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
-      crossbeam_epoch = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-epoch."0.9.15" { inherit profileName; }).out;
-      crossbeam_utils = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "crossbeam_epoch" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-epoch."0.9.15" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "crossbeam_utils" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
     };
   });
   
@@ -3560,17 +3471,17 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "ae211234986c545741a7dc064309f67ee1e5ad243d0e48335adc0484d960bcc7"; };
     features = builtins.concatLists [
-      [ "alloc" ]
-      [ "std" ]
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "alloc")
+      (lib.optional (rootFeatures' ? "paracosm/rerun") "std")
     ];
     dependencies = {
-      cfg_if = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
-      crossbeam_utils = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
-      memoffset = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".memoffset."0.9.0" { inherit profileName; }).out;
-      scopeguard = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".scopeguard."1.2.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "crossbeam_utils" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "memoffset" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".memoffset."0.9.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "scopeguard" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".scopeguard."1.2.0" { inherit profileName; }).out;
     };
     buildDependencies = {
-      autocfg = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".autocfg."1.1.0" { profileName = "__noProfile"; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "autocfg" else null } = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".autocfg."1.1.0" { profileName = "__noProfile"; }).out;
     };
   });
   
@@ -3834,10 +3745,10 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "e493c573fce17f00dcab13b6ac057994f3ce17d1af4dc39bfd482b83c6eb6157"; };
     features = builtins.concatLists [
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "default")
+      [ "default" ]
     ];
     dependencies = {
-      ${ if rootFeatures' ? "paracosm/rerun" then "litrs" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".litrs."0.2.3" { inherit profileName; }).out;
+      litrs = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".litrs."0.2.3" { inherit profileName; }).out;
     };
   });
   
@@ -3900,6 +3811,24 @@ in
     ];
     dependencies = {
       bytemuck = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytemuck."1.14.0" { inherit profileName; }).out;
+    };
+  });
+  
+  "unknown".editor-web."0.1.0" = overridableMkRustCrate (profileName: rec {
+    name = "editor-web";
+    version = "0.1.0";
+    registry = "unknown";
+    src = fetchCrateLocal workspaceSrc;
+    dependencies = {
+      anyhow = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".anyhow."1.0.75" { inherit profileName; }).out;
+      bevy = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bevy."0.12.0" { inherit profileName; }).out;
+      ewebsock = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ewebsock."0.4.0" { inherit profileName; }).out;
+      paracosm = (rustPackages."unknown".paracosm."0.1.0" { inherit profileName; }).out;
+      paracosm_editor = (rustPackages."unknown".paracosm-editor."0.1.0" { inherit profileName; }).out;
+      postcard = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".postcard."1.0.8" { inherit profileName; }).out;
+      tracing = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing."0.1.40" { inherit profileName; }).out;
+      wasm_bindgen = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen."0.2.88" { inherit profileName; }).out;
+      web_sys = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-sys."0.3.65" { inherit profileName; }).out;
     };
   });
   
@@ -4100,7 +4029,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "document_features" else null } = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".document-features."0.2.7" { profileName = "__noProfile"; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "futures_util" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-util."0.3.29" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "js_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".js-sys."0.3.65" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.parsed.cpu.name == "wasm32") then "ureq" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ureq."2.8.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.parsed.cpu.name == "wasm32") then "ureq" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ureq."2.9.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen."0.2.88" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen_futures" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen-futures."0.4.38" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "wasm_streams" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-streams."0.3.0" { inherit profileName; }).out;
@@ -4148,6 +4077,16 @@ in
     dependencies = {
       bytemuck = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytemuck."1.14.0" { inherit profileName; }).out;
     };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".embedded-io."0.4.0" = overridableMkRustCrate (profileName: rec {
+    name = "embedded-io";
+    version = "0.4.0";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"; };
+    features = builtins.concatLists [
+      [ "alloc" ]
+    ];
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".encase."0.6.1" = overridableMkRustCrate (profileName: rec {
@@ -4494,6 +4433,31 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen."0.2.88" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen_futures" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen-futures."0.4.38" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "web_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-sys."0.3.65" { inherit profileName; }).out;
+    };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".ewebsock."0.4.0" = overridableMkRustCrate (profileName: rec {
+    name = "ewebsock";
+    version = "0.4.0";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "7340666282406cb008c4d7206e6d7e157a82486afddd26deaad3ce9ebff3f238"; };
+    features = builtins.concatLists [
+      [ "default" ]
+      [ "tokio" ]
+    ];
+    dependencies = {
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "async_stream" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-stream."0.3.5" { inherit profileName; }).out;
+      document_features = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".document-features."0.2.7" { profileName = "__noProfile"; }).out;
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "futures" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures."0.3.29" { inherit profileName; }).out;
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "futures_util" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-util."0.3.29" { inherit profileName; }).out;
+      ${ if hostPlatform.parsed.cpu.name == "wasm32" then "js_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".js-sys."0.3.65" { inherit profileName; }).out;
+      log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "tokio" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio."1.34.0" { inherit profileName; }).out;
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "tokio_tungstenite" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio-tungstenite."0.20.1" { inherit profileName; }).out;
+      ${ if !(hostPlatform.parsed.cpu.name == "wasm32") then "tungstenite" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tungstenite."0.20.1" { inherit profileName; }).out;
+      ${ if hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen."0.2.88" { inherit profileName; }).out;
+      ${ if hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen_futures" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen-futures."0.4.38" { inherit profileName; }).out;
+      web_sys = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-sys."0.3.65" { inherit profileName; }).out;
     };
   });
   
@@ -5104,7 +5068,7 @@ in
       fnv = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".fnv."1.0.7" { inherit profileName; }).out;
       gilrs_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".gilrs-core."0.5.9" { inherit profileName; }).out;
       log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
-      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       vec_map = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".vec_map."0.8.2" { inherit profileName; }).out;
     };
   });
@@ -5127,7 +5091,7 @@ in
       ${ if hostPlatform.parsed.kernel.name == "linux" || hostPlatform.parsed.kernel.name == "dragonfly" || hostPlatform.parsed.kernel.name == "freebsd" then "libudev_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".libudev-sys."0.1.4" { inherit profileName; }).out;
       log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
       ${ if hostPlatform.parsed.kernel.name == "linux" || hostPlatform.parsed.kernel.name == "dragonfly" || hostPlatform.parsed.kernel.name == "freebsd" then "nix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".nix."0.27.1" { inherit profileName; }).out;
-      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      uuid = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       ${ if hostPlatform.parsed.kernel.name == "linux" || hostPlatform.parsed.kernel.name == "dragonfly" || hostPlatform.parsed.kernel.name == "freebsd" || hostPlatform.parsed.kernel.name == "darwin" then "vec_map" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".vec_map."0.8.2" { inherit profileName; }).out;
       ${ if hostPlatform.parsed.cpu.name == "wasm32" then "wasm_bindgen" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wasm-bindgen."0.2.88" { inherit profileName; }).out;
       ${ if hostPlatform.parsed.cpu.name == "wasm32" then "web_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-sys."0.3.65" { inherit profileName; }).out;
@@ -5503,13 +5467,6 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".half."1.8.2" = overridableMkRustCrate (profileName: rec {
-    name = "half";
-    version = "1.8.2";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"; };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".half."2.2.1" = overridableMkRustCrate (profileName: rec {
     name = "half";
     version = "2.2.1";
@@ -5524,6 +5481,16 @@ in
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "bytemuck" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytemuck."1.14.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "spirv" then "crunchy" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crunchy."0.2.2" { inherit profileName; }).out;
+    };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".hash32."0.2.1" = overridableMkRustCrate (profileName: rec {
+    name = "hash32";
+    version = "0.2.1";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"; };
+    dependencies = {
+      byteorder = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".byteorder."1.5.0" { inherit profileName; }).out;
     };
   });
   
@@ -5580,6 +5547,54 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".headers."0.3.9" = overridableMkRustCrate (profileName: rec {
+    name = "headers";
+    version = "0.3.9";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"; };
+    dependencies = {
+      base64 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".base64."0.21.5" { inherit profileName; }).out;
+      bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytes."1.5.0" { inherit profileName; }).out;
+      headers_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".headers-core."0.2.0" { inherit profileName; }).out;
+      http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
+      httpdate = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".httpdate."1.0.3" { inherit profileName; }).out;
+      mime = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".mime."0.3.17" { inherit profileName; }).out;
+      sha1 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sha1."0.10.6" { inherit profileName; }).out;
+    };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".headers-core."0.2.0" = overridableMkRustCrate (profileName: rec {
+    name = "headers-core";
+    version = "0.2.0";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"; };
+    dependencies = {
+      http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
+    };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".heapless."0.7.16" = overridableMkRustCrate (profileName: rec {
+    name = "heapless";
+    version = "0.7.16";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "db04bc24a18b9ea980628ecf00e6c0264f3c1426dac36c00cb49b6fbad8b0743"; };
+    features = builtins.concatLists [
+      [ "atomic-polyfill" ]
+      [ "cas" ]
+      [ "serde" ]
+    ];
+    dependencies = {
+      ${ if hostPlatform.config == "riscv32i-unknown-none-elf" || hostPlatform.config == "riscv32imc-unknown-none-elf" || hostPlatform.config == "thumbv6m-none-eabi" || hostPlatform.parsed.cpu.name == "avr" then "atomic_polyfill" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".atomic-polyfill."0.1.11" { inherit profileName; }).out;
+      hash32 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hash32."0.2.1" { inherit profileName; }).out;
+      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
+      ${ if hostPlatform.parsed.cpu.name == "x86_64" then "spin" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".spin."0.9.8" { inherit profileName; }).out;
+      stable_deref_trait = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".stable_deref_trait."1.2.0" { inherit profileName; }).out;
+    };
+    buildDependencies = {
+      rustc_version = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".rustc_version."0.4.0" { profileName = "__noProfile"; }).out;
+    };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".heck."0.3.3" = overridableMkRustCrate (profileName: rec {
     name = "heck";
     version = "0.3.3";
@@ -5598,19 +5613,6 @@ in
     features = builtins.concatLists [
       [ "default" ]
     ];
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".hermit-abi."0.1.19" = overridableMkRustCrate (profileName: rec {
-    name = "hermit-abi";
-    version = "0.1.19";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"; };
-    features = builtins.concatLists [
-      [ "default" ]
-    ];
-    dependencies = {
-      libc = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".libc."0.2.150" { inherit profileName; }).out;
-    };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".hermit-abi."0.3.3" = overridableMkRustCrate (profileName: rec {
@@ -5698,6 +5700,13 @@ in
       http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
       pin_project_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project-lite."0.2.13" { inherit profileName; }).out;
     };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".http-range-header."0.3.1" = overridableMkRustCrate (profileName: rec {
+    name = "http-range-header";
+    version = "0.3.1";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"; };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".httparse."1.8.0" = overridableMkRustCrate (profileName: rec {
@@ -6045,23 +6054,8 @@ in
     src = fetchCratesIo { inherit name version; sha256 = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"; };
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.kernel.name == "hermit" then "hermit_abi" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hermit-abi."0.3.3" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.isWindows || hostPlatform.parsed.kernel.name == "hermit" || hostPlatform.parsed.kernel.name == "unknown") then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.isWindows || hostPlatform.parsed.kernel.name == "hermit" || hostPlatform.parsed.kernel.name == "unknown") then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "windows_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".windows-sys."0.48.0" { inherit profileName; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".itertools."0.10.5" = overridableMkRustCrate (profileName: rec {
-    name = "itertools";
-    version = "0.10.5";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"; };
-    features = builtins.concatLists [
-      [ "default" ]
-      [ "use_alloc" ]
-      [ "use_std" ]
-    ];
-    dependencies = {
-      either = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".either."1.9.0" { inherit profileName; }).out;
     };
   });
   
@@ -6811,11 +6805,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.0" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".naga_oil."0.10.1" = overridableMkRustCrate (profileName: rec {
     name = "naga_oil";
-    version = "0.10.0";
+    version = "0.10.1";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "a1fa9518ff79ae8a98c3abe3897d873a85561d1b5642981c2245c1c4b9b2429d"; };
+    src = fetchCratesIo { inherit name version; sha256 = "4ac54c77b3529887f9668d3dd81e955e58f252b31a333f836e3548c06460b958"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "glsl" ]
@@ -6847,6 +6841,9 @@ in
       [ "macros" ]
       [ "matrixmultiply" ]
       [ "nalgebra-macros" ]
+      [ "serde" ]
+      [ "serde-serialize" ]
+      [ "serde-serialize-no-std" ]
       [ "std" ]
     ];
     dependencies = {
@@ -6856,6 +6853,7 @@ in
       num_complex = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".num-complex."0.4.4" { inherit profileName; }).out;
       num_rational = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".num-rational."0.4.1" { inherit profileName; }).out;
       num_traits = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".num-traits."0.2.17" { inherit profileName; }).out;
+      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
       simba = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".simba."0.8.1" { inherit profileName; }).out;
       typenum = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".typenum."1.17.0" { inherit profileName; }).out;
     };
@@ -7120,11 +7118,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".nonmax."0.5.4" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".nonmax."0.5.5" = overridableMkRustCrate (profileName: rec {
     name = "nonmax";
-    version = "0.5.4";
+    version = "0.5.5";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "6e4a593ea4fffed8684ad13d75c82cf0b6dc2b88947e0ed85b9e70f555a7e422"; };
+    src = fetchCratesIo { inherit name version; sha256 = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "std" ]
@@ -7205,10 +7203,12 @@ in
     src = fetchCratesIo { inherit name version; sha256 = "1ba157ca0885411de85d6ca030ba7e2a83a28636056c7c699b07c8b6f7383214"; };
     features = builtins.concatLists [
       [ "default" ]
+      [ "serde" ]
       [ "std" ]
     ];
     dependencies = {
       num_traits = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".num-traits."0.2.17" { inherit profileName; }).out;
+      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
     };
   });
   
@@ -7538,13 +7538,6 @@ in
     ];
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".oorandom."11.1.3" = overridableMkRustCrate (profileName: rec {
-    name = "oorandom";
-    version = "11.1.3";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"; };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".openssl."0.10.59" = overridableMkRustCrate (profileName: rec {
     name = "openssl";
     version = "0.10.59";
@@ -7633,16 +7626,6 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".os_str_bytes."6.6.1" = overridableMkRustCrate (profileName: rec {
-    name = "os_str_bytes";
-    version = "6.6.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"; };
-    features = builtins.concatLists [
-      [ "raw_os_str" ]
-    ];
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".overload."0.1.1" = overridableMkRustCrate (profileName: rec {
     name = "overload";
     version = "0.1.1";
@@ -7689,8 +7672,6 @@ in
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     features = builtins.concatLists [
-      [ "criterion" ]
-      [ "default" ]
       (lib.optional (rootFeatures' ? "paracosm/rerun") "rerun")
     ];
     dependencies = {
@@ -7698,7 +7679,6 @@ in
       bevy_ecs = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bevy_ecs."0.12.0" { inherit profileName; }).out;
       bevy_utils = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bevy_utils."0.12.0" { inherit profileName; }).out;
       clap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap."4.4.8" { inherit profileName; }).out;
-      criterion = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".criterion."0.4.0" { inherit profileName; }).out;
       flume = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".flume."0.11.0" { inherit profileName; }).out;
       nalgebra = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".nalgebra."0.32.3" { inherit profileName; }).out;
       paracosm_macros = (buildRustPackages."unknown".paracosm-macros."0.1.0" { profileName = "__noProfile"; }).out;
@@ -7738,10 +7718,7 @@ in
       notify = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".notify."6.1.1" { inherit profileName; }).out;
       paracosm = (rustPackages."unknown".paracosm."0.1.0" { inherit profileName; }).out;
       paracosm_macros = (buildRustPackages."unknown".paracosm-macros."0.1.0" { profileName = "__noProfile"; }).out;
-      paracosm_py = (rustPackages."unknown".paracosm-py."0.1.0" { inherit profileName; }).out;
-      pyo3 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pyo3."0.20.0" { inherit profileName; }).out;
       rfd = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rfd."0.12.1" { inherit profileName; }).out;
-      thread_priority = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thread-priority."0.13.1" { inherit profileName; }).out;
     };
   });
   
@@ -7779,11 +7756,33 @@ in
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
-      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.1" { inherit profileName; }).out;
+      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.2" { inherit profileName; }).out;
       tonic = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tonic."0.10.2" { inherit profileName; }).out;
     };
     buildDependencies = {
       tonic_build = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".tonic-build."0.10.2" { profileName = "__noProfile"; }).out;
+    };
+  });
+  
+  "unknown".paracosm-web-runner."0.1.0" = overridableMkRustCrate (profileName: rec {
+    name = "paracosm-web-runner";
+    version = "0.1.0";
+    registry = "unknown";
+    src = fetchCrateLocal workspaceSrc;
+    dependencies = {
+      anyhow = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".anyhow."1.0.75" { inherit profileName; }).out;
+      axum = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".axum."0.6.20" { inherit profileName; }).out;
+      bevy = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bevy."0.12.0" { inherit profileName; }).out;
+      flume = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".flume."0.11.0" { inherit profileName; }).out;
+      futures = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures."0.3.29" { inherit profileName; }).out;
+      paracosm = (rustPackages."unknown".paracosm."0.1.0" { inherit profileName; }).out;
+      paracosm_py = (rustPackages."unknown".paracosm-py."0.1.0" { inherit profileName; }).out;
+      postcard = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".postcard."1.0.8" { inherit profileName; }).out;
+      pyo3 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pyo3."0.20.0" { inherit profileName; }).out;
+      tokio = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio."1.34.0" { inherit profileName; }).out;
+      tower_http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower-http."0.4.4" { inherit profileName; }).out;
+      tracing = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing."0.1.40" { inherit profileName; }).out;
+      tracing_subscriber = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing-subscriber."0.3.18" { inherit profileName; }).out;
     };
   });
   
@@ -8145,7 +8144,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "cfg_if" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "concurrent_queue" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".concurrent-queue."2.3.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "pin_project_lite" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project-lite."0.2.13" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && (hostPlatform.isUnix || hostPlatform.parsed.kernel.name == "fuchsia" || hostPlatform.parsed.kernel.name == "vxworks") then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && (hostPlatform.isUnix || hostPlatform.parsed.kernel.name == "fuchsia" || hostPlatform.parsed.kernel.name == "vxworks") then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "tracing" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing."0.1.40" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.isWindows then "windows_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".windows-sys."0.48.0" { inherit profileName; }).out;
     };
@@ -8156,6 +8155,26 @@ in
     version = "0.3.0";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "22686f4785f02a4fcc856d3b3bb19bf6c8160d103f7a99cc258bddd0251dc7f2"; };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".postcard."1.0.8" = overridableMkRustCrate (profileName: rec {
+    name = "postcard";
+    version = "1.0.8";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "a55c51ee6c0db07e68448e336cf8ea4131a620edefebf9893e759b2d793420f8"; };
+    features = builtins.concatLists [
+      [ "alloc" ]
+      [ "default" ]
+      [ "embedded-io" ]
+      [ "heapless" ]
+      [ "heapless-cas" ]
+    ];
+    dependencies = {
+      cobs = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cobs."0.2.3" { inherit profileName; }).out;
+      embedded_io = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".embedded-io."0.4.0" { inherit profileName; }).out;
+      heapless = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".heapless."0.7.16" { inherit profileName; }).out;
+      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
+    };
   });
   
   "registry+https://github.com/rust-lang/crates.io-index".powerfmt."0.2.0" = overridableMkRustCrate (profileName: rec {
@@ -8289,11 +8308,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".prost."0.12.1" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".prost."0.12.2" = overridableMkRustCrate (profileName: rec {
     name = "prost";
-    version = "0.12.1";
+    version = "0.12.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "f4fdd22f3b9c31b53c060df4a0613a1c7f062d4115a2b984dd15b1858f7e340d"; };
+    src = fetchCratesIo { inherit name version; sha256 = "5a5a410fc7882af66deb8d01d01737353cf3ad6204c408177ba494291a626312"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "prost-derive" ]
@@ -8301,15 +8320,15 @@ in
     ];
     dependencies = {
       bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytes."1.5.0" { inherit profileName; }).out;
-      prost_derive = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-derive."0.12.1" { profileName = "__noProfile"; }).out;
+      prost_derive = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-derive."0.12.2" { profileName = "__noProfile"; }).out;
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".prost-build."0.12.1" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".prost-build."0.12.2" = overridableMkRustCrate (profileName: rec {
     name = "prost-build";
-    version = "0.12.1";
+    version = "0.12.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"; };
+    src = fetchCratesIo { inherit name version; sha256 = "1fa3d084c8704911bfefb2771be2f9b6c5c0da7343a71e0021ee3c665cada738"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "format" ]
@@ -8325,8 +8344,8 @@ in
       once_cell = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".once_cell."1.18.0" { inherit profileName; }).out;
       petgraph = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".petgraph."0.6.4" { inherit profileName; }).out;
       prettyplease = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prettyplease."0.2.15" { inherit profileName; }).out;
-      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.1" { inherit profileName; }).out;
-      prost_types = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-types."0.12.1" { inherit profileName; }).out;
+      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.2" { inherit profileName; }).out;
+      prost_types = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-types."0.12.2" { inherit profileName; }).out;
       regex = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".regex."1.10.2" { inherit profileName; }).out;
       syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."2.0.39" { inherit profileName; }).out;
       tempfile = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tempfile."3.8.1" { inherit profileName; }).out;
@@ -8334,11 +8353,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".prost-derive."0.12.1" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".prost-derive."0.12.2" = overridableMkRustCrate (profileName: rec {
     name = "prost-derive";
-    version = "0.12.1";
+    version = "0.12.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"; };
+    src = fetchCratesIo { inherit name version; sha256 = "065717a5dfaca4a83d2fe57db3487b311365200000551d7a364e715dbf4346bc"; };
     dependencies = {
       anyhow = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".anyhow."1.0.75" { inherit profileName; }).out;
       itertools = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itertools."0.11.0" { inherit profileName; }).out;
@@ -8348,13 +8367,13 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".prost-types."0.12.1" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".prost-types."0.12.2" = overridableMkRustCrate (profileName: rec {
     name = "prost-types";
-    version = "0.12.1";
+    version = "0.12.2";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "e081b29f63d83a4bc75cfc9f3fe424f9156cf92d8a4f0c9407cce9a1b67327cf"; };
+    src = fetchCratesIo { inherit name version; sha256 = "8339f32236f590281e2f6368276441394fcd1b2133b549cc895d0ae80f2f9a52"; };
     dependencies = {
-      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.1" { inherit profileName; }).out;
+      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.2" { inherit profileName; }).out;
     };
   });
   
@@ -8602,8 +8621,8 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "9c27db03db7734835b3f53954b534c91069375ce6ccaa2e065441e07d9b6cdb1"; };
     dependencies = {
-      either = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".either."1.9.0" { inherit profileName; }).out;
-      rayon_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rayon-core."1.12.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "either" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".either."1.9.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "rayon_core" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rayon-core."1.12.0" { inherit profileName; }).out;
     };
   });
   
@@ -8613,8 +8632,8 @@ in
     registry = "registry+https://github.com/rust-lang/crates.io-index";
     src = fetchCratesIo { inherit name version; sha256 = "5ce3fb6ad83f861aac485e76e1985cd109d9a3713802152be56c3b1f0e0658ed"; };
     dependencies = {
-      crossbeam_deque = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-deque."0.8.3" { inherit profileName; }).out;
-      crossbeam_utils = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "crossbeam_deque" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-deque."0.8.3" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "crossbeam_utils" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".crossbeam-utils."0.8.16" { inherit profileName; }).out;
     };
   });
   
@@ -8635,8 +8654,8 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "sha2" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sha2."0.10.8" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "thiserror" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "time" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".time."0.3.30" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.parsed.cpu.name == "wasm32") then "ureq" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ureq."2.8.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" && !(hostPlatform.parsed.cpu.name == "wasm32") then "ureq" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ureq."2.9.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" && hostPlatform.parsed.cpu.name == "wasm32" then "web_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-sys."0.3.65" { inherit profileName; }).out;
     };
     buildDependencies = {
@@ -8737,7 +8756,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "re_tracing" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".re_tracing."0.8.2" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "re_types" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".re_types."0.8.2" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "thiserror" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "zune_core" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".zune-core."0.2.14" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "zune_jpeg" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".zune-jpeg."0.3.17" { inherit profileName; }).out;
     };
@@ -8934,7 +8953,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "thiserror" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "time" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".time."0.3.30" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "typenum" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".typenum."1.17.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "web_time" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".web-time."0.2.3" { inherit profileName; }).out;
     };
   });
@@ -9555,7 +9574,7 @@ in
       ${ if rootFeatures' ? "paracosm/rerun" then "serde" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "slotmap" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".slotmap."1.0.6" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "thiserror" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "uuid" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "vec1" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".vec1."1.10.1" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "wgpu" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".wgpu."0.16.3" { inherit profileName; }).out;
     };
@@ -10121,11 +10140,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" = overridableMkRustCrate (profileName: rec {
     name = "rustix";
-    version = "0.38.24";
+    version = "0.38.25";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "9ad981d6c340a49cdc40a1028d9c6084ec7e9fa33fcb839cab656a267071e234"; };
+    src = fetchCratesIo { inherit name version; sha256 = "dc99bc2d4f1fed22595588a013687477aedf3cdcfb26558c559edb67b4d9b22e"; };
     features = builtins.concatLists [
       [ "alloc" ]
       [ "default" ]
@@ -10148,11 +10167,11 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".rustls."0.21.8" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".rustls."0.21.9" = overridableMkRustCrate (profileName: rec {
     name = "rustls";
-    version = "0.21.8";
+    version = "0.21.9";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "446e14c5cda4f3f30fe71863c34ec70f5ac79d6087097ad0bb433e1be5edf04c"; };
+    src = fetchCratesIo { inherit name version; sha256 = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"; };
     features = builtins.concatLists [
       (lib.optional (rootFeatures' ? "paracosm/rerun") "default")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "log")
@@ -10213,7 +10232,7 @@ in
     ];
     dependencies = {
       byteorder = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".byteorder."1.5.0" { inherit profileName; }).out;
-      thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror-core."1.0.38" { inherit profileName; }).out;
+      thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror-core."1.0.50" { inherit profileName; }).out;
       twox_hash = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".twox-hash."1.6.3" { inherit profileName; }).out;
     };
   });
@@ -10421,6 +10440,17 @@ in
     dependencies = {
       itoa = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itoa."1.0.9" { inherit profileName; }).out;
       ryu = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".ryu."1.0.15" { inherit profileName; }).out;
+      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
+    };
+  });
+  
+  "registry+https://github.com/rust-lang/crates.io-index".serde_path_to_error."0.1.14" = overridableMkRustCrate (profileName: rec {
+    name = "serde_path_to_error";
+    version = "0.1.14";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "4beec8bce849d58d06238cb50db2e1c417cfeafa4c63f692b15c82b7c80f8335"; };
+    dependencies = {
+      itoa = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itoa."1.0.9" { inherit profileName; }).out;
       serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
     };
   });
@@ -10791,6 +10821,13 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".stable_deref_trait."1.2.0" = overridableMkRustCrate (profileName: rec {
+    name = "stable_deref_trait";
+    version = "1.2.0";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"; };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".static_assertions."1.1.0" = overridableMkRustCrate (profileName: rec {
     name = "static_assertions";
     version = "1.1.0";
@@ -11055,7 +11092,7 @@ in
       cfg_if = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
       fastrand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".fastrand."2.0.1" { inherit profileName; }).out;
       ${ if hostPlatform.parsed.kernel.name == "redox" then "syscall" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".redox_syscall."0.4.1" { inherit profileName; }).out;
-      ${ if hostPlatform.isUnix || hostPlatform.parsed.kernel.name == "wasi" then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      ${ if hostPlatform.isUnix || hostPlatform.parsed.kernel.name == "wasi" then "rustix" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
       ${ if hostPlatform.isWindows then "windows_sys" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".windows-sys."0.48.0" { inherit profileName; }).out;
     };
   });
@@ -11070,13 +11107,6 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".textwrap."0.16.0" = overridableMkRustCrate (profileName: rec {
-    name = "textwrap";
-    version = "0.16.0";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "222a222a5bfe1bba4a77b45ec488a741b3cb8872e5e499451fd7d0129c9c7c3d"; };
-  });
-  
   "registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" = overridableMkRustCrate (profileName: rec {
     name = "thiserror";
     version = "1.0.50";
@@ -11087,31 +11117,31 @@ in
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".thiserror-core."1.0.38" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".thiserror-core."1.0.50" = overridableMkRustCrate (profileName: rec {
     name = "thiserror-core";
-    version = "1.0.38";
+    version = "1.0.50";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "0d97345f6437bb2004cd58819d8a9ef8e36cdd7661c2abc4bbde0a7c40d9f497"; };
+    src = fetchCratesIo { inherit name version; sha256 = "c001ee18b7e5e3f62cbf58c7fe220119e68d902bb7443179c0c8aef30090e999"; };
     features = builtins.concatLists [
       [ "std" ]
     ];
     dependencies = {
-      thiserror_impl = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror-core-impl."1.0.38" { profileName = "__noProfile"; }).out;
+      thiserror_impl = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror-core-impl."1.0.50" { profileName = "__noProfile"; }).out;
     };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".thiserror-core-impl."1.0.38" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".thiserror-core-impl."1.0.50" = overridableMkRustCrate (profileName: rec {
     name = "thiserror-core-impl";
-    version = "1.0.38";
+    version = "1.0.50";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "10ac1c5050e43014d16b2f94d0d2ce79e65ffdd8b38d8048f9c8f6a8a6da62ac"; };
+    src = fetchCratesIo { inherit name version; sha256 = "e4c60d69f36615a077cc7663b9cb8e42275722d23e58a7fa3d2c7f2915d09d04"; };
     features = builtins.concatLists [
       [ "std" ]
     ];
     dependencies = {
       proc_macro2 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".proc-macro2."1.0.69" { inherit profileName; }).out;
       quote = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".quote."1.0.33" { inherit profileName; }).out;
-      syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."1.0.109" { inherit profileName; }).out;
+      syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."2.0.39" { inherit profileName; }).out;
     };
   });
   
@@ -11124,21 +11154,6 @@ in
       proc_macro2 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".proc-macro2."1.0.69" { inherit profileName; }).out;
       quote = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".quote."1.0.33" { inherit profileName; }).out;
       syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."2.0.39" { inherit profileName; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".thread-priority."0.13.1" = overridableMkRustCrate (profileName: rec {
-    name = "thread-priority";
-    version = "0.13.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "0c56ce92f1285eaaa11fc1a3201e25de97898c50e87caa4c2aee836fe05288de"; };
-    dependencies = {
-      bitflags = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bitflags."1.3.2" { inherit profileName; }).out;
-      cfg_if = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".cfg-if."1.0.0" { inherit profileName; }).out;
-      ${ if hostPlatform.parsed.kernel.name == "linux" || hostPlatform.parsed.kernel.name == "android" || hostPlatform.parsed.kernel.name == "darwin" || hostPlatform.parsed.kernel.name == "dragonfly" || hostPlatform.parsed.kernel.name == "freebsd" || hostPlatform.parsed.kernel.name == "openbsd" || hostPlatform.parsed.kernel.name == "netbsd" || hostPlatform.isWindows then "libc" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".libc."0.2.150" { inherit profileName; }).out;
-      log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
-      rustversion = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".rustversion."1.0.14" { profileName = "__noProfile"; }).out;
-      ${ if hostPlatform.isWindows then "winapi" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".winapi."0.3.9" { inherit profileName; }).out;
     };
   });
   
@@ -11246,17 +11261,6 @@ in
       arrayref = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".arrayref."0.3.7" { inherit profileName; }).out;
       bytemuck = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytemuck."1.14.0" { inherit profileName; }).out;
       strict_num = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".strict-num."0.1.1" { inherit profileName; }).out;
-    };
-  });
-  
-  "registry+https://github.com/rust-lang/crates.io-index".tinytemplate."1.2.1" = overridableMkRustCrate (profileName: rec {
-    name = "tinytemplate";
-    version = "1.2.1";
-    registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"; };
-    dependencies = {
-      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
-      serde_json = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.108" { inherit profileName; }).out;
     };
   });
   
@@ -11408,6 +11412,25 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".tokio-tungstenite."0.20.1" = overridableMkRustCrate (profileName: rec {
+    name = "tokio-tungstenite";
+    version = "0.20.1";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "212d5dcb2a1ce06d81107c3d0ffa3121fe974b73f068c8282cb1c32328113b6c"; };
+    features = builtins.concatLists [
+      [ "connect" ]
+      [ "default" ]
+      [ "handshake" ]
+      [ "stream" ]
+    ];
+    dependencies = {
+      futures_util = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-util."0.3.29" { inherit profileName; }).out;
+      log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
+      tokio = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio."1.34.0" { inherit profileName; }).out;
+      tungstenite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tungstenite."0.20.1" { inherit profileName; }).out;
+    };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".tokio-util."0.7.10" = overridableMkRustCrate (profileName: rec {
     name = "tokio-util";
     version = "0.7.10";
@@ -11552,7 +11575,7 @@ in
       hyper_timeout = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".hyper-timeout."0.4.1" { inherit profileName; }).out;
       percent_encoding = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".percent-encoding."2.3.0" { inherit profileName; }).out;
       pin_project = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project."1.1.3" { inherit profileName; }).out;
-      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.1" { inherit profileName; }).out;
+      prost = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost."0.12.2" { inherit profileName; }).out;
       tokio = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio."1.34.0" { inherit profileName; }).out;
       tokio_stream = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tokio-stream."0.1.14" { inherit profileName; }).out;
       tower = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower."0.4.13" { inherit profileName; }).out;
@@ -11576,7 +11599,7 @@ in
     dependencies = {
       prettyplease = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prettyplease."0.2.15" { inherit profileName; }).out;
       proc_macro2 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".proc-macro2."1.0.69" { inherit profileName; }).out;
-      prost_build = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-build."0.12.1" { inherit profileName; }).out;
+      prost_build = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".prost-build."0.12.2" { inherit profileName; }).out;
       quote = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".quote."1.0.33" { inherit profileName; }).out;
       syn = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".syn."2.0.39" { inherit profileName; }).out;
     };
@@ -11597,6 +11620,7 @@ in
       [ "indexmap" ]
       [ "limit" ]
       [ "load" ]
+      [ "log" ]
       [ "make" ]
       [ "pin-project" ]
       [ "pin-project-lite" ]
@@ -11625,6 +11649,29 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".tower-http."0.4.4" = overridableMkRustCrate (profileName: rec {
+    name = "tower-http";
+    version = "0.4.4";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "61c5bb1d698276a2443e5ecfabc1008bf15a36c12e6a7176e7bf089ea9131140"; };
+    features = builtins.concatLists [
+      [ "cors" ]
+      [ "default" ]
+    ];
+    dependencies = {
+      bitflags = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bitflags."2.4.1" { inherit profileName; }).out;
+      bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytes."1.5.0" { inherit profileName; }).out;
+      futures_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-core."0.3.29" { inherit profileName; }).out;
+      futures_util = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".futures-util."0.3.29" { inherit profileName; }).out;
+      http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
+      http_body = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http-body."0.4.5" { inherit profileName; }).out;
+      http_range_header = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http-range-header."0.3.1" { inherit profileName; }).out;
+      pin_project_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project-lite."0.2.13" { inherit profileName; }).out;
+      tower_layer = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower-layer."0.3.2" { inherit profileName; }).out;
+      tower_service = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tower-service."0.3.2" { inherit profileName; }).out;
+    };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".tower-layer."0.3.2" = overridableMkRustCrate (profileName: rec {
     name = "tower-layer";
     version = "0.3.2";
@@ -11647,12 +11694,12 @@ in
     features = builtins.concatLists [
       [ "attributes" ]
       [ "default" ]
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "log")
+      [ "log" ]
       [ "std" ]
       [ "tracing-attributes" ]
     ];
     dependencies = {
-      ${ if rootFeatures' ? "paracosm/rerun" then "log" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
+      log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
       pin_project_lite = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".pin-project-lite."0.2.13" { inherit profileName; }).out;
       tracing_attributes = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing-attributes."0.1.27" { profileName = "__noProfile"; }).out;
       tracing_core = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".tracing-core."0.1.32" { inherit profileName; }).out;
@@ -11845,6 +11892,35 @@ in
     };
   });
   
+  "registry+https://github.com/rust-lang/crates.io-index".tungstenite."0.20.1" = overridableMkRustCrate (profileName: rec {
+    name = "tungstenite";
+    version = "0.20.1";
+    registry = "registry+https://github.com/rust-lang/crates.io-index";
+    src = fetchCratesIo { inherit name version; sha256 = "9e3dac10fd62eaf6617d3a904ae222845979aec67c615d1c842b4002c7666fb9"; };
+    features = builtins.concatLists [
+      [ "data-encoding" ]
+      [ "default" ]
+      [ "handshake" ]
+      [ "http" ]
+      [ "httparse" ]
+      [ "sha1" ]
+      [ "url" ]
+    ];
+    dependencies = {
+      byteorder = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".byteorder."1.5.0" { inherit profileName; }).out;
+      bytes = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".bytes."1.5.0" { inherit profileName; }).out;
+      data_encoding = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".data-encoding."2.4.0" { inherit profileName; }).out;
+      http = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".http."0.2.11" { inherit profileName; }).out;
+      httparse = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".httparse."1.8.0" { inherit profileName; }).out;
+      log = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
+      rand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rand."0.8.5" { inherit profileName; }).out;
+      sha1 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sha1."0.10.6" { inherit profileName; }).out;
+      thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.50" { inherit profileName; }).out;
+      url = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".url."2.4.1" { inherit profileName; }).out;
+      utf8 = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".utf-8."0.7.6" { inherit profileName; }).out;
+    };
+  });
+  
   "registry+https://github.com/rust-lang/crates.io-index".twox-hash."1.6.3" = overridableMkRustCrate (profileName: rec {
     name = "twox-hash";
     version = "1.6.3";
@@ -11963,29 +12039,23 @@ in
     src = fetchCratesIo { inherit name version; sha256 = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"; };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".ureq."2.8.0" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".ureq."2.9.0" = overridableMkRustCrate (profileName: rec {
     name = "ureq";
-    version = "2.8.0";
+    version = "2.9.0";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "f5ccd538d4a604753ebc2f17cd9946e89b77bf87f6a8e2309667c6f2e87855e3"; };
+    src = fetchCratesIo { inherit name version; sha256 = "7830e33f6e25723d41a63f77e434159dad02919f18f55a512b5f16f3b1d77138"; };
     features = builtins.concatLists [
       (lib.optional (rootFeatures' ? "paracosm/rerun") "default")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "flate2")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "gzip")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "json")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "rustls")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "serde")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "serde_json")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "tls")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "webpki")
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "webpki-roots")
     ];
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "base64" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".base64."0.21.5" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "flate2" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".flate2."1.0.28" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "log" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".log."0.4.20" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "once_cell" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".once_cell."1.18.0" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "rustls" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustls."0.21.8" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "rustls" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustls."0.21.9" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "webpki" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustls-webpki."0.101.7" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "serde" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.192" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "serde_json" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.108" { inherit profileName; }).out;
@@ -12035,11 +12105,11 @@ in
     ];
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".uuid."1.5.0" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".uuid."1.6.1" = overridableMkRustCrate (profileName: rec {
     name = "uuid";
-    version = "1.5.0";
+    version = "1.6.1";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"; };
+    src = fetchCratesIo { inherit name version; sha256 = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"; };
     features = builtins.concatLists [
       [ "default" ]
       [ "getrandom" ]
@@ -12491,7 +12561,7 @@ in
       [ "AudioScheduledSourceNode" ]
       [ "BaseAudioContext" ]
       [ "BeforeUnloadEvent" ]
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "BinaryType")
+      [ "BinaryType" ]
       [ "Blob" ]
       [ "BlobPropertyBag" ]
       [ "CanvasRenderingContext2d" ]
@@ -12499,6 +12569,7 @@ in
       (lib.optional (rootFeatures' ? "paracosm/rerun") "ClipboardEvent")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "CompositionEvent")
       [ "CssStyleDeclaration" ]
+      [ "CustomEvent" ]
       (lib.optional (rootFeatures' ? "paracosm/rerun") "DataTransfer")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "DataTransferItem")
       (lib.optional (rootFeatures' ? "paracosm/rerun") "DataTransferItemList")
@@ -12508,7 +12579,7 @@ in
       [ "DomRectReadOnly" ]
       (lib.optional (rootFeatures' ? "paracosm/rerun") "DragEvent")
       [ "Element" ]
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "ErrorEvent")
+      [ "ErrorEvent" ]
       [ "Event" ]
       (lib.optional (rootFeatures' ? "paracosm/rerun") "EventListener")
       [ "EventListenerOptions" ]
@@ -12677,7 +12748,7 @@ in
       [ "Performance" ]
       [ "PerformanceTiming" ]
       [ "PointerEvent" ]
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "ProgressEvent")
+      [ "ProgressEvent" ]
       [ "ReadableStream" ]
       [ "Request" ]
       [ "RequestCredentials" ]
@@ -12707,7 +12778,7 @@ in
       [ "WebGlTransformFeedback" ]
       [ "WebGlUniformLocation" ]
       [ "WebGlVertexArrayObject" ]
-      (lib.optional (rootFeatures' ? "paracosm/rerun") "WebSocket")
+      [ "WebSocket" ]
       [ "WebglColorBufferFloat" ]
       [ "WebglCompressedTextureAstc" ]
       [ "WebglCompressedTextureEtc" ]
@@ -13089,7 +13160,7 @@ in
       either = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".either."1.9.0" { inherit profileName; }).out;
       ${ if hostPlatform.isWindows || hostPlatform.isUnix || hostPlatform.parsed.kernel.name == "redox" then "home" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".home."0.5.5" { inherit profileName; }).out;
       ${ if hostPlatform.isWindows then "once_cell" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".once_cell."1.18.0" { inherit profileName; }).out;
-      rustix = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.24" { inherit profileName; }).out;
+      rustix = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rustix."0.38.25" { inherit profileName; }).out;
     };
   });
   
@@ -13884,7 +13955,7 @@ in
     ];
     dependencies = {
       ${ if rootFeatures' ? "paracosm/rerun" then "async_broadcast" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-broadcast."0.5.1" { inherit profileName; }).out;
-      ${ if rootFeatures' ? "paracosm/rerun" then "async_executor" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.6.0" { inherit profileName; }).out;
+      ${ if rootFeatures' ? "paracosm/rerun" then "async_executor" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-executor."1.7.2" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "async_fs" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-fs."1.6.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "async_io" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-io."1.13.0" { inherit profileName; }).out;
       ${ if rootFeatures' ? "paracosm/rerun" then "async_lock" else null } = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".async-lock."2.8.0" { inherit profileName; }).out;

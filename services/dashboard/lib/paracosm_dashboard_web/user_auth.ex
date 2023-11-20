@@ -12,7 +12,10 @@ defmodule ParacosmDashboardWeb.UserAuth do
   @remember_me_options [sign: true, max_age: @max_age, same_site: "Lax"]
 
   def assent_config() do
-    Application.get_env(:paracosm_dashboard, ParacosmDashboardWeb.UserAuth)
+    Keyword.merge(
+      Application.get_env(:paracosm_dashboard, ParacosmDashboardWeb.UserAuth),
+      http_adapter: {Assent.HTTPAdapter.Finch, [supervisor: ParacosmDashboard.Finch]}
+    )
   end
 
   def get_user_by_token(token) do
