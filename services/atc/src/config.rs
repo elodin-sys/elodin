@@ -6,11 +6,19 @@ use tracing::info;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     pub api: Option<ApiConfig>,
+    pub database_url: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ApiConfig {
     pub address: SocketAddr,
+    pub auth0: Auth0Config,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Auth0Config {
+    pub domain: String,
+    pub client_id: String,
 }
 
 impl Config {

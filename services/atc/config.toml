@@ -1,2 +1,6 @@
+database_url = "postgres://sphw@localhost/atc_dev"
+
 [api]
 address = "[::]:50051"
+auth0.domain = "dev-i2ytsp68gngieek3.us.auth0.com"
+auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"

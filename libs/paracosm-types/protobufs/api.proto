@@ -4,14 +4,34 @@ package paracosm.types.api;
 
 service Api {
     rpc CreateUser(CreateUserReq) returns (CreateUserResp);
+
+    rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
+    rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
 }
 
 message CreateUserReq {
     string email = 1;
     string name = 2;
-    string auth0_id = 3;
 }
 
 message CreateUserResp {
     bytes id = 1;
 }
+
+
+message CreateSandboxReq {
+    string name = 1;
+    string code = 2;
+}
+
+message CreateSandboxResp {
+    bytes id = 1;
+}
+
+message UpdateSandboxReq {
+    bytes id = 1;
+    string name = 2;
+    string code = 3;
+}
+
+message UpdateSandboxResp {}
