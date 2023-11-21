@@ -44,6 +44,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
       |> Assent.Config.put(:session_params, %{state: state})
       |> Assent.Strategy.Auth0.callback(params)
 
+    IO.inspect(token)
     log_in_user(conn, token["access_token"])
   end
 

@@ -5,6 +5,8 @@ use tracing::info;
 
 mod api;
 mod config;
+mod error;
+mod orca;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -13,7 +15,8 @@ async fn main() -> anyhow::Result<()> {
     info!(?config, "config");
     let mut services = vec![];
     if let Some(api_config) = config.api {
-        services.push(tokio::spawn(Api.run(api_config)));
+        let api = Api::new(api_config, config.database_url.clone()).await?;
+        services.push(tokio::spawn(api.run()));
     }
     let (res, _, _) = future::select_all(services.into_iter()).await;
     res?
