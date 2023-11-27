@@ -196,7 +196,9 @@ impl From<bevy::prelude::Mesh> for MeshData {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, Debug, Serialize, Deserialize,
+)]
 pub struct Uuid(pub u128);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, DerefMut, Deref, Debug)]

@@ -1,6 +1,6 @@
 use bevy::prelude::{Quat, Vec3};
 use nalgebra::{matrix, ArrayStorage, Matrix, UnitQuaternion, Vector3, U1, U7};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use super::SpatialTransform;
 
