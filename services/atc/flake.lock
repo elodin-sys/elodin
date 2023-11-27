@@ -3,8 +3,8 @@
     "cargo2nix": {
       "inputs": {
         "flake-compat": "flake-compat",
-        "flake-utils": "flake-utils_2",
-        "nixpkgs": "nixpkgs_2",
+        "flake-utils": "flake-utils",
+        "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay"
       },
       "locked": {
@@ -127,8 +127,8 @@
     },
     "nix2container": {
       "inputs": {
-        "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "flake-utils": "flake-utils_3",
+        "nixpkgs": "nixpkgs_2"
       },
       "locked": {
         "lastModified": 1697285352,
@@ -146,21 +146,6 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1697269602,
-        "narHash": "sha256-dSzV7Ud+JH4DPVD9od53EgDrxUVQOcSj4KGjggCDVJI=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "9cb540e9c1910d74a7e10736277f6eb9dff51c81",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs_2": {
-      "locked": {
         "lastModified": 1697382362,
         "narHash": "sha256-PvFjWFmSYOF6TjNZ/WjOeqa+sgaWm+83Fz37vEuATHA=",
         "owner": "nixos",
@@ -171,6 +156,21 @@
       "original": {
         "owner": "nixos",
         "ref": "release-23.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1697269602,
+        "narHash": "sha256-dSzV7Ud+JH4DPVD9od53EgDrxUVQOcSj4KGjggCDVJI=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "9cb540e9c1910d74a7e10736277f6eb9dff51c81",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -210,14 +210,15 @@
     "paracosm": {
       "inputs": {
         "cargo2nix": "cargo2nix",
-        "flake-utils": "flake-utils_3",
+        "flake-utils": "flake-utils_2",
         "get-flake": "get-flake",
+        "nix2container": "nix2container",
         "nixpkgs": "nixpkgs_3",
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
         "lastModified": 0,
-        "narHash": "sha256-GwiMX0tMqRYHeABWRWUIB6+LAA2yYtQqF8l1C5QkLTo=",
+        "narHash": "sha256-qq9jzMHgkTo1WYYbV49zQLzM4Ry8udjlkyMaRdXlh/4=",
         "path": "../../.",
         "type": "path"
       },
@@ -236,7 +237,10 @@
           "paracosm",
           "flake-utils"
         ],
-        "nix2container": "nix2container",
+        "nix2container": [
+          "paracosm",
+          "nix2container"
+        ],
         "nixpkgs": [
           "paracosm",
           "nixpkgs"
