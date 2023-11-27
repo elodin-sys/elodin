@@ -1,12 +1,16 @@
 use std::{net::SocketAddr, str::FromStr};
 
-use crate::error::Error;
+use crate::{
+    error::Error,
+    orca::{OrcaMsg, VmManager},
+};
 use atc_entity::{
     sandbox,
     user::{self, EntityType, Permission, Permissions, Verb},
-    User,
+    vm, User,
 };
 use enumflags2::BitFlag;
+use flume::Sender;
 use futures::Future;
 use jsonwebtoken::{
     decode, decode_header,
@@ -15,8 +19,8 @@ use jsonwebtoken::{
 };
 use paracosm_types::api::{
     api_server::{self, ApiServer},
-    CreateSandboxReq, CreateSandboxResp, CreateUserReq, CreateUserResp, UpdateSandboxReq,
-    UpdateSandboxResp,
+    BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, CreateUserReq,
+    CreateUserResp, UpdateSandboxReq, UpdateSandboxResp,
 };
 use sea_orm::{
     prelude::Uuid, ActiveModelTrait, ActiveValue, ColumnTrait, Database, DatabaseConnection,
@@ -33,10 +37,15 @@ pub struct Api {
     db: DatabaseConnection,
     auth0_keys: JwkSet,
     config: ApiConfig,
+    vm_manager: VmManager,
 }
 
 impl Api {
-    pub async fn new(config: ApiConfig, db_url: String) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: ApiConfig,
+        db_url: String,
+        vm_manager: VmManager,
+    ) -> anyhow::Result<Self> {
         let db = Database::connect(&db_url).await?;
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
         Ok(Self {
@@ -44,6 +53,7 @@ impl Api {
             db,
             auth0_keys,
             config,
+            vm_manager,
         })
     }
 
@@ -141,6 +151,50 @@ impl Api {
         Ok(UpdateSandboxResp {})
     }
 
+    async fn boot_sandbox(
+        &self,
+        req: BootSandboxReq,
+        CurrentUser { user, .. }: CurrentUser,
+    ) -> Result<BootSandboxResp, Error> {
+        let id = req.id()?;
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
+        {
+            return Err(Error::Unauthorized);
+        }
+        let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
+            return Err(Error::NotFound);
+        };
+        let vm_id = if let Some(vm_id) = sandbox.vm_id {
+            vm_id
+        } else {
+            let vm_id = Uuid::now_v7();
+            vm::ActiveModel {
+                id: Set(vm_id),
+                pod_name: Set(vm_id.to_string()),
+                status: Set(vm::Status::Pending),
+            }
+            .insert(&self.db)
+            .await?;
+            sandbox::ActiveModel {
+                id: Unchanged(id),
+                vm_id: Set(Some(vm_id)),
+                ..Default::default()
+            }
+            .update(&self.db)
+            .await?;
+            vm_id
+        };
+        if let Some(vm) = vm::Entity::find_by_id(vm_id).one(&self.db).await? {
+            if vm.status == vm::Status::Pending {
+                self.vm_manager.spawn_vm(vm_id, "nginx".to_string()).await?;
+            }
+        }
+
+        Ok(BootSandboxResp {})
+    }
+
     async fn authed_route<Req, Resp, RespFuture>(
         &self,
         req: Request<Req>,
@@ -198,14 +252,14 @@ impl Api {
     }
 }
 
-macro_rules! current_user_route {
+macro_rules! current_user_route_txn {
     ($self:ident, $req:ident, $handler:expr) => {
         $self
             .authed_route($req, move |req, claims| async move {
                 let txn = $self.db.begin().await?;
                 let user = User::find()
                     .filter(user::Column::Auth0Id.eq(&claims.sub))
-                    .one(&$self.db)
+                    .one(&txn)
                     .await?
                     .ok_or_else(|| Error::Unauthorized)?;
                 let res = $handler($self, req, CurrentUser { user, claims }, &txn).await;
@@ -215,6 +269,21 @@ macro_rules! current_user_route {
                     txn.rollback().await?;
                 }
                 res
+            })
+            .await
+    };
+}
+
+macro_rules! current_user_route {
+    ($self:ident, $req:ident, $handler:expr) => {
+        $self
+            .authed_route($req, move |req, claims| async move {
+                let user = User::find()
+                    .filter(user::Column::Auth0Id.eq(&claims.sub))
+                    .one(&$self.db)
+                    .await?
+                    .ok_or_else(|| Error::Unauthorized)?;
+                $handler($self, req, CurrentUser { user, claims }).await
             })
             .await
     };
@@ -247,14 +316,21 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<CreateSandboxReq>,
     ) -> Result<Response<CreateSandboxResp>, Status> {
-        current_user_route!(self, req, Self::create_sandbox)
+        current_user_route_txn!(self, req, Self::create_sandbox)
     }
 
     async fn update_sandbox(
         &self,
         req: tonic::Request<UpdateSandboxReq>,
     ) -> Result<Response<UpdateSandboxResp>, Status> {
-        current_user_route!(self, req, Self::update_sandbox)
+        current_user_route_txn!(self, req, Self::update_sandbox)
+    }
+
+    async fn boot_sandbox(
+        &self,
+        req: tonic::Request<BootSandboxReq>,
+    ) -> Result<Response<BootSandboxResp>, Status> {
+        current_user_route!(self, req, Self::boot_sandbox)
     }
 }
 

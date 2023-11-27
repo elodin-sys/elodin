@@ -7,6 +7,7 @@ service Api {
 
     rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
     rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
+    rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
 }
 
 message CreateUserReq {
@@ -35,3 +36,9 @@ message UpdateSandboxReq {
 }
 
 message UpdateSandboxResp {}
+
+message BootSandboxReq {
+    bytes id = 1;
+}
+
+message BootSandboxResp {}

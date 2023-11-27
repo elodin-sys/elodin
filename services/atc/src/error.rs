@@ -12,6 +12,16 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("invalid request")]
     InvalidRequest,
+    #[error("kube error: {0}")]
+    Kube(#[from] kube::Error),
+    #[error("vm boot error: {0}")]
+    VMBootFailed(String),
+    #[error("recv error: {0}")]
+    FlumeRecv(#[from] flume::RecvError),
+    #[error("send error")]
+    FlumeSend,
+    #[error("not found")]
+    NotFound,
 }
 
 impl From<TransactionError<Error>> for Error {
@@ -24,8 +34,14 @@ impl From<TransactionError<Error>> for Error {
 }
 
 impl From<ValidationError> for Error {
-    fn from(value: ValidationError) -> Self {
+    fn from(_: ValidationError) -> Self {
         Error::InvalidRequest
+    }
+}
+
+impl<T> From<flume::SendError<T>> for Error {
+    fn from(_: flume::SendError<T>) -> Self {
+        Error::FlumeSend
     }
 }
 
@@ -38,6 +54,11 @@ impl Error {
             Error::InvalidRequest => {
                 Status::new(Code::InvalidArgument, "invalid request".to_string())
             }
+            Error::Kube(err) => Status::new(Code::Internal, err.to_string()),
+            Error::VMBootFailed(err) => Status::new(Code::Internal, err),
+            Error::FlumeRecv(err) => Status::new(Code::Internal, err.to_string()),
+            Error::FlumeSend => Status::new(Code::Internal, "flume send".to_string()),
+            Error::NotFound => Status::new(Code::NotFound, "not found".to_string()),
         }
     }
 }

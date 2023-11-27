@@ -10,6 +10,12 @@ pub mod api {
             uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
         }
     }
+
+    impl BootSandboxReq {
+        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
+            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
+        }
+    }
 }
 
 pub struct ValidationError;

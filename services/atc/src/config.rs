@@ -6,6 +6,7 @@ use tracing::info;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     pub api: Option<ApiConfig>,
+    pub orca: Option<OrcaConfig>,
     pub database_url: String,
 }
 
@@ -19,6 +20,11 @@ pub struct ApiConfig {
 pub struct Auth0Config {
     pub domain: String,
     pub client_id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct OrcaConfig {
+    pub vm_namespace: String,
 }
 
 impl Config {
