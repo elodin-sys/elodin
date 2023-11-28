@@ -56,9 +56,18 @@ defmodule ParacosmDashboard.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:live_monaco_editor, "~> 0.1.7"},
       {:grpc, "~> 0.7"},
-      {:paracosm_types, path: "../../libs/paracosm-types/elixir"},
-      {:poolboy, "~> 1.5.1"}
+      {:protobuf, "~> 0.10.0"},
+      {:poolboy, "~> 1.5.1"},
+      paracosm_types_dep()
     ]
+  end
+
+  defp paracosm_types_dep() do
+    if path = System.get_env("PARACOSM_TYPES_PATH") do
+      {:paracosm_types, path: path }
+    else
+      {:paracosm_types, path: "../../libs/paracosm-types/elixir"}
+    end
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
