@@ -1,16 +1,13 @@
 use std::{net::SocketAddr, str::FromStr};
 
-use crate::{
-    error::Error,
-    orca::{OrcaMsg, VmManager},
-};
+use crate::{error::Error, events::DbExt};
 use atc_entity::{
     sandbox,
     user::{self, EntityType, Permission, Permissions, Verb},
     vm, User,
 };
 use enumflags2::BitFlag;
-use flume::Sender;
+
 use futures::Future;
 use jsonwebtoken::{
     decode, decode_header,
@@ -22,9 +19,10 @@ use paracosm_types::api::{
     BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, CreateUserReq,
     CreateUserResp, UpdateSandboxReq, UpdateSandboxResp,
 };
+use redis::aio::MultiplexedConnection;
 use sea_orm::{
-    prelude::Uuid, ActiveModelTrait, ActiveValue, ColumnTrait, Database, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, QueryFilter, Set, TransactionTrait, Unchanged,
+    prelude::Uuid, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, Set, TransactionTrait, Unchanged,
 };
 use serde::{Deserialize, Serialize};
 use tonic::{async_trait, transport::Server, Request, Response, Status};
@@ -37,28 +35,27 @@ pub struct Api {
     db: DatabaseConnection,
     auth0_keys: JwkSet,
     config: ApiConfig,
-    vm_manager: VmManager,
+    redis: MultiplexedConnection,
 }
 
 impl Api {
     pub async fn new(
         config: ApiConfig,
-        db_url: String,
-        vm_manager: VmManager,
+        db: DatabaseConnection,
+        redis: MultiplexedConnection,
     ) -> anyhow::Result<Self> {
-        let db = Database::connect(&db_url).await?;
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
         Ok(Self {
             address: config.address,
             db,
             auth0_keys,
             config,
-            vm_manager,
+            redis,
         })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let address = self.address.clone();
+        let address = self.address;
         let svc = ApiServer::new(self);
         info!(api.addr = ?address, "api listening");
         let reflection = tonic_reflection::server::Builder::configure()
@@ -81,6 +78,7 @@ impl Api {
         req: CreateUserReq,
         claims: Claims,
     ) -> Result<CreateUserResp, Error> {
+        let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
         user::ActiveModel {
             id: Set(id),
@@ -89,7 +87,7 @@ impl Api {
             auth0_id: Set(claims.sub),
             permissions: Set(Permissions::default()),
         }
-        .insert(&self.db)
+        .insert_with_event(&self.db, &mut redis)
         .await?;
         Ok(CreateUserResp {
             id: id.as_bytes().to_vec(),
@@ -102,6 +100,7 @@ impl Api {
         CurrentUser { mut user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<CreateSandboxResp, Error> {
+        let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
         sandbox::ActiveModel {
             id: Set(id),
@@ -111,7 +110,7 @@ impl Api {
             status: Set(sandbox::Status::Off),
             vm_id: Set(None),
         }
-        .insert(txn)
+        .insert_with_event(txn, &mut redis)
         .await?;
         user.permissions
             .insert(id, Permission::new(EntityType::Sandbox, Verb::all()));
@@ -120,7 +119,7 @@ impl Api {
             permissions: ActiveValue::Set(user.permissions),
             ..Default::default()
         }
-        .update(txn)
+        .update_with_event(txn, &mut redis)
         .await?;
         Ok(CreateSandboxResp {
             id: id.as_bytes().to_vec(),
@@ -133,6 +132,7 @@ impl Api {
         CurrentUser { user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<UpdateSandboxResp, Error> {
+        let mut redis = self.redis.clone();
         let id = req.id()?;
         if !user
             .permissions
@@ -146,7 +146,7 @@ impl Api {
             code: Set(req.code),
             ..Default::default()
         }
-        .update(txn)
+        .update_with_event(txn, &mut redis)
         .await?;
         Ok(UpdateSandboxResp {})
     }
@@ -156,6 +156,7 @@ impl Api {
         req: BootSandboxReq,
         CurrentUser { user, .. }: CurrentUser,
     ) -> Result<BootSandboxResp, Error> {
+        let mut redis = self.redis.clone();
         let id = req.id()?;
         if !user
             .permissions
@@ -166,31 +167,24 @@ impl Api {
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
         };
-        let vm_id = if let Some(vm_id) = sandbox.vm_id {
-            vm_id
-        } else {
-            let vm_id = Uuid::now_v7();
-            vm::ActiveModel {
-                id: Set(vm_id),
-                pod_name: Set(vm_id.to_string()),
-                status: Set(vm::Status::Pending),
-            }
-            .insert(&self.db)
-            .await?;
-            sandbox::ActiveModel {
-                id: Unchanged(id),
-                vm_id: Set(Some(vm_id)),
-                ..Default::default()
-            }
-            .update(&self.db)
-            .await?;
-            vm_id
-        };
-        if let Some(vm) = vm::Entity::find_by_id(vm_id).one(&self.db).await? {
-            if vm.status == vm::Status::Pending {
-                self.vm_manager.spawn_vm(vm_id, "nginx".to_string()).await?;
-            }
+        if sandbox.vm_id.is_some() {
+            return Ok(BootSandboxResp {});
         }
+        let vm_id = Uuid::now_v7();
+        vm::ActiveModel {
+            id: Set(vm_id),
+            pod_name: Set(vm_id.to_string()),
+            status: Set(vm::Status::Pending),
+        }
+        .insert_with_event(&self.db, &mut redis)
+        .await?;
+        sandbox::ActiveModel {
+            id: Unchanged(id),
+            vm_id: Set(Some(vm_id)),
+            ..Default::default()
+        }
+        .update_with_event(&self.db, &mut redis)
+        .await?;
 
         Ok(BootSandboxResp {})
     }
@@ -242,8 +236,8 @@ impl Api {
         );
         validation.validate_exp = true;
         validation.set_audience(&[&self.config.auth0.client_id]);
-        let claims = dbg!(decode::<Claims>(token, &decoding_key, &validation))
-            .map_err(|_| Error::Unauthorized)?;
+        let claims =
+            decode::<Claims>(token, &decoding_key, &validation).map_err(|_| Error::Unauthorized)?;
 
         handler(req.into_inner(), claims.claims)
             .await

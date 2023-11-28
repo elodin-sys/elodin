@@ -22,6 +22,12 @@ pub enum Error {
     FlumeSend,
     #[error("not found")]
     NotFound,
+    #[error("postcard: {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error("redis: {0}")]
+    Redis(#[from] redis::RedisError),
+    #[error("kube watcher: {0}")]
+    KubeWatcher(#[from] kube::runtime::watcher::Error),
 }
 
 impl From<TransactionError<Error>> for Error {
@@ -59,6 +65,8 @@ impl Error {
             Error::FlumeRecv(err) => Status::new(Code::Internal, err.to_string()),
             Error::FlumeSend => Status::new(Code::Internal, "flume send".to_string()),
             Error::NotFound => Status::new(Code::NotFound, "not found".to_string()),
+            Error::Postcard(err) => Status::new(Code::Internal, err.to_string()),
+            err => Status::new(Code::Internal, err.to_string()),
         }
     }
 }

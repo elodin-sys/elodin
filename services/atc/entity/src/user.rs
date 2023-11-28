@@ -72,7 +72,7 @@ pub enum Verb {
 impl Permissions {
     pub fn has_perm(&self, id: &Uuid, entity_type: EntityType, verb: BitFlags<Verb>) -> bool {
         let Permissions(ref perms) = self;
-        let Some(perm) = perms.get(&id) else {
+        let Some(perm) = perms.get(id) else {
             return false;
         };
         perm.entity_type == entity_type && perm.verb.contains(verb)

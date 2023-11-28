@@ -1,15 +1,15 @@
-use anyhow::anyhow;
 use api::Api;
 use config::Config;
 use futures::future;
+use sea_orm::Database;
 use tracing::info;
 
-use crate::orca::{Orca, VmManager};
+use crate::orca::Orca;
 
-mod actor;
 mod api;
 mod config;
 mod error;
+mod events;
 mod orca;
 
 #[tokio::main]
@@ -18,21 +18,19 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::parse()?;
     info!(?config, "config");
     let mut services = vec![];
-    let vm_manager = if let Some(orca_config) = config.orca {
-        let vm_manager =
-            VmManager::new(orca_config.vm_namespace, config.database_url.clone()).await?;
-        let orca = Orca::new(vm_manager.clone()).await?;
-        let (handle, _) = orca.run();
+    let db = Database::connect(config.database_url).await?;
+    let redis = redis::Client::open(config.redis_url)?;
+
+    if let Some(orca_config) = config.orca {
+        let redis = redis.get_tokio_connection().await?;
+        let redis = redis.into_pubsub();
+        let orca = Orca::new(orca_config, db.clone()).await?;
+        let handle = orca.run(redis);
         services.push(handle);
-        Some(vm_manager)
-    } else {
-        None
-    };
+    }
     if let Some(api_config) = config.api {
-        let Some(vm_manager) = vm_manager else {
-            return Err(anyhow!("orca config required for api"))?;
-        };
-        let api = Api::new(api_config, config.database_url.clone(), vm_manager).await?;
+        let redis = redis.get_multiplexed_tokio_connection().await?;
+        let api = Api::new(api_config, db.clone(), redis).await?;
         services.push(tokio::spawn(api.run()));
     }
 

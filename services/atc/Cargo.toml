@@ -20,6 +20,7 @@ uuid.version = "1.6.1"
 uuid.features = ["fast-rng", "v7"]
 enumflags2.version = "0.7.8"
 enumflags2.features = ["serde"]
+compact_str = "0.8.0-beta"
 
 # logs
 tracing = "0.1"
@@ -27,10 +28,14 @@ tracing-subscriber.version = "0.3"
 tracing-subscriber.features = ["env-filter"]
 
 # config
-serde.version = "1.0"
-serde.features = ["derive"]
 toml.version =  "0.7"
 toml.features = ["parse"]
+
+# serialize
+postcard.version = "1.0"
+postcard.features = ["alloc"]
+serde.version = "1.0"
+serde.features = ["derive"]
 
 # errors
 anyhow = "1"
@@ -47,6 +52,7 @@ sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uu
 # crypto
 jsonwebtoken = "9"
 
+
 # http
 reqwest.version = "0.11"
 reqwest.features = ["json"]
@@ -54,3 +60,7 @@ reqwest.features = ["json"]
 # k8s
 kube = { version = "0.87.1", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.20.0", features = ["latest"] }
+
+# queue
+redis.version = "0.23"
+redis.features = ["tokio-comp", "streams", "r2d2"]
