@@ -21,3 +21,6 @@ lto = "fat"
 codegen-units = 1
 
 
+[patch.crates-io]
+sea-orm.git = "https://github.com/elodin-sys/sea-orm.git"
+sea-orm.branch = "serialize-deserialize" # add serialize and deserialize to active models

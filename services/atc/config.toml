@@ -1,4 +1,5 @@
 database_url = "postgres://sphw@localhost/atc_dev"
+redis_url = "redis://localhost:6379"
 
 [api]
 address = "[::]:50051"
@@ -7,3 +8,4 @@ auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
 
 [orca]
 vm_namespace = "vms"
+image_name = "nginx"
