@@ -10,6 +10,8 @@ config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
   secret_key_base: "XWrHUuJkZCZKVZwM3rfec7YyKWBsE/cS3tjRba7dIy+KMZ0UIkkRDHeKbZpWpd7X",
   server: false
 
+config :paracosm_dashboard, ParacasmDashboardWeb.Atc, addr: "localhost:50051"
+
 # In test we don't send emails.
 config :paracosm_dashboard, ParacosmDashboard.Mailer, adapter: Swoosh.Adapters.Test
 
