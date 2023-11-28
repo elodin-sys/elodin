@@ -56,7 +56,8 @@ defmodule ParacosmDashboard.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:live_monaco_editor, "~> 0.1.7"},
       {:grpc, "~> 0.7"},
-      {:paracosm_types, path: "../../libs/paracosm-types/elixir"}
+      {:paracosm_types, path: "../../libs/paracosm-types/elixir"},
+      {:poolboy, "~> 1.5.1"}
     ]
   end
 

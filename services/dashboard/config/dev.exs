@@ -11,6 +11,8 @@ config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
   authorization_params: [scope: "openid profile email"],
   auth_method: :client_secret_post
 
+config :paracosm_dashboard, ParacasmDashboardWeb.Atc, addr: "localhost:50051"
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
