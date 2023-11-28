@@ -3,10 +3,14 @@ syntax = 'proto3';
 package paracosm.types.api;
 
 service Api {
+    // User Ops
     rpc CreateUser(CreateUserReq) returns (CreateUserResp);
     rpc CurrentUser(CurrentUserReq) returns (CurrentUserResp);
 
+    // Sandbox Ops
+    rpc GetSandbox(GetSandboxReq) returns (Sandbox);
     rpc ListSandboxes(ListSandboxesReq) returns (ListSandboxesResp);
+
     rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
     rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
     rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
@@ -14,7 +18,7 @@ service Api {
 
 message CurrentUserReq {}
 message CurrentUserResp {
-    string id = 1;
+    bytes id = 1;
     string email = 2;
     string name = 3;
 }
@@ -52,8 +56,9 @@ message BootSandboxReq {
 message BootSandboxResp {}
 
 message Sandbox {
-    string name = 1;
-    string code = 2;
+    bytes id = 1;
+    string name = 2;
+    string code = 3;
 }
 
 message Page {
@@ -68,4 +73,8 @@ message ListSandboxesReq {
 message ListSandboxesResp {
     repeated Sandbox sandboxes = 1;
     Page next_page = 2;
+}
+
+message GetSandboxReq {
+    bytes id = 1;
 }
