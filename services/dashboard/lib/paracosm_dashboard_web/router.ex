@@ -43,6 +43,12 @@ defmodule ParacosmDashboardWeb.Router do
     end
   end
 
+  ## Health route
+
+  scope "/", ParacosmDashboardWeb do
+    get("/healthz", HealthCheckController, :callback)
+  end
+
   ## Authentication routes
 
   scope "/", ParacosmDashboardWeb do
