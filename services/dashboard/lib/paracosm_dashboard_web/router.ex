@@ -19,8 +19,6 @@ defmodule ParacosmDashboardWeb.Router do
 
   scope "/", ParacosmDashboardWeb do
     pipe_through(:browser)
-
-    get("/", PageController, :home)
   end
 
   # Other scopes may use custom stacks.
@@ -59,6 +57,7 @@ defmodule ParacosmDashboardWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{ParacosmDashboardWeb.UserAuth, :ensure_authenticated}] do
       live("/users/settings", UserSettingsLive, :edit)
+      live("/", EditorLive, :edit)
     end
   end
 
