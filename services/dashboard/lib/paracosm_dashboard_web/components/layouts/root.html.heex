@@ -5,46 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <.live_title suffix=" · Phoenix Framework">
-      <%= assigns[:page_title] || "ParacosmDashboard" %>
+      <%= assigns[:page_title] || "Paracosm Dashboard" %>
     </.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
   </head>
   <body class="bg-white antialiased">
-    <ul class="relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-end">
-      <%= if @current_user do %>
-        <li class="text-[0.8125rem] leading-6 text-zinc-900">
-          <%= @current_user["email"] %>
-        </li>
+    <div class="h-full w-full flex-col">
+      <ul class="relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-14 bg-blue text-white shrink-0">
         <li>
-          <.link
-            href={~p"/users/settings"}
-            class="text-[0.8125rem] leading-6 text-zinc-900 font-semibold hover:text-zinc-700"
-          >
-            Settings
-          </.link>
+          <img src="/images/logo.svg" class="w-24">
         </li>
-        <li>
-          <.link
-            href={~p"/users/log_out"}
-            method="delete"
-            class="text-[0.8125rem] leading-6 text-zinc-900 font-semibold hover:text-zinc-700"
-          >
-            Log out
-          </.link>
+        <li class="flex-grow text-xl border-l pl-4 border-light-blue font-bold font-mono">
+          Paracosm
         </li>
-      <% else %>
-        <li>
-          <.link
-            href={~p"/users/log_in"}
-            class="text-[0.8125rem] leading-6 text-zinc-900 font-semibold hover:text-zinc-700"
-          >
-            Log in
-          </.link>
-        </li>
-      <% end %>
-    </ul>
-    <%= @inner_content %>
+        <%= if @current_user do %>
+          <li class="text-[0.8125rem] leading-6">
+            <%= @current_user["email"] %>
+          </li>
+          <li>
+            <.link
+              patch={~p"/users/settings"}
+              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200"
+            >
+              Settings
+            </.link>
+          </li>
+          <li>
+            <.link
+              href={~p"/users/log_out"}
+              method="delete"
+              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200 justify-self-center"
+            >
+              Log out
+            </.link>
+          </li>
+        <% else %>
+          <li>
+            <.link
+              href={~p"/users/log_in"}
+              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200"
+            >
+              Log in
+            </.link>
+          </li>
+        <% end %>
+      </ul>
+      <div  style="height: calc(100% - 50px);">
+        <%= @inner_content %>
+      </div>
+    </div>
   </body>
 </html>

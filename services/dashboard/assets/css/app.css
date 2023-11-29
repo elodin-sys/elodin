@@ -1,5 +1,14 @@
 @import "tailwindcss/base";
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
+@import "../../deps/live_monaco_editor/priv/static/live_monaco_editor.min.css";
 
 /* This file is for your main application CSS */
+
+html, body, [data-phx-main], main {
+    height: 100%;
+}
+
+.code-editor {
+    height: 100% !important;
+}

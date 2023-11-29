@@ -1,15 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
+    "apps/editor-web",
     "libs/paracosm-core",
     "libs/paracosm-macros",
     "libs/paracosm-editor",
     "libs/paracosm-py",
     "libs/paracosm-types/rust",
     "libs/nox",
-    "services/atc"
+    "services/atc",
+    "services/paracosm-web-runner"
 ]
-
 
 [profile.wasm-release]
 inherits = "release"

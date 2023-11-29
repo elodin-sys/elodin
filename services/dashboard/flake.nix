@@ -4,12 +4,14 @@
     nixpkgs.follows = "paracosm/nixpkgs";
     flake-utils.follows = "paracosm/flake-utils";
     nix2container.follows = "paracosm/nix2container";
+    get-flake.follows = "paracosm/get-flake";
   };
 
   outputs = inputs:
     with inputs;
       flake-utils.lib.eachDefaultSystem (
         system: let
+          editor-web = get-flake ../../apps/editor-web;
           build_phoenix = pkgs: let
             beam_pkgs = with pkgs; beam.packagesWith beam.interpreters.erlang;
           in
@@ -22,10 +24,16 @@
                 src = ./.;
                 version = "0.0.1";
                 pname = "mix-deps-dashboard";
-                hash = "sha256-SEFa/bBEiMWYZ1WsAg+S2EZ3Q+p1piZaPJELkzfKQIE";
+                hash = "sha256-XuwikAB2K8Rx5fTKWS3VFbo9ZPJ01sk+gGtI+3QyR6Y";
               };
+              preBuild = ''
+                mkdir -p ./priv/static/assets/wasm
+                cp --no-preserve=mode,ownership -r ${editor-web.packages.${system}.default}/* ./priv/static/assets/wasm/
+                ls -la ./priv/static/assets/wasm/
+                cp -R --no-preserve=mode,ownership  ${./priv/static/images} ./priv/static/images
+              '';
               postBuild = ''
-                # mix assets.deploy
+                mix assets.deploy
                 # for external task you need a workaround for the no deps check flag
                 # https://github.com/phoenixframework/phoenix/issues/2690
                 mix do deps.loadpaths --no-deps-check, phx.digest

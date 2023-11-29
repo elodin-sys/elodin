@@ -233,6 +233,10 @@
           "paracosm",
           "flake-utils"
         ],
+        "get-flake": [
+          "paracosm",
+          "get-flake"
+        ],
         "nix2container": [
           "paracosm",
           "nix2container"

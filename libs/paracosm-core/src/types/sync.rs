@@ -14,7 +14,7 @@ use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::spatial::SpatialPos;
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub enum ServerMsg {
     Exit,
     RequestModel(Uuid),
@@ -22,6 +22,7 @@ pub enum ServerMsg {
     Pause(bool),
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum ClientMsg {
     Clear,
     SyncWorldPos(SyncWorldPos),
@@ -29,18 +30,20 @@ pub enum ClientMsg {
     SimSate(SimState),
 }
 
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug, Default, Serialize, Deserialize)]
 pub struct SimState {
     pub paused: bool,
     pub history_count: usize,
     pub history_index: usize,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct SyncWorldPos {
     pub body_id: Uuid,
     pub pos: SpatialPos,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum ModelData {
     Pbr {
         body_id: Uuid,
@@ -53,6 +56,7 @@ pub enum ModelData {
     },
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MeshData {
     mesh_type: u8,
     positions: Option<Vec<[f32; 3]>>,
@@ -192,7 +196,9 @@ impl From<bevy::prelude::Mesh> for MeshData {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, Debug)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, Debug, Serialize, Deserialize,
+)]
 pub struct Uuid(pub u128);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, DerefMut, Deref, Debug)]
