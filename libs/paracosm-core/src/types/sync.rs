@@ -22,7 +22,7 @@ pub enum ServerMsg {
     Pause(bool),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ClientMsg {
     Clear,
     SyncWorldPos(SyncWorldPos),
@@ -30,20 +30,20 @@ pub enum ClientMsg {
     SimSate(SimState),
 }
 
-#[derive(Resource, Debug, Default, Serialize, Deserialize)]
+#[derive(Resource, Debug, Default, Serialize, Deserialize, Clone)]
 pub struct SimState {
     pub paused: bool,
     pub history_count: usize,
     pub history_index: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SyncWorldPos {
     pub body_id: Uuid,
     pub pos: SpatialPos,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ModelData {
     Pbr {
         body_id: Uuid,
@@ -56,7 +56,7 @@ pub enum ModelData {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MeshData {
     mesh_type: u8,
     positions: Option<Vec<[f32; 3]>>,
@@ -219,7 +219,7 @@ impl RecursiveReg for StandardMaterial {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct ReflectSerde<T>(pub T);
 
 impl<T: Reflect + GetTypeRegistration + RecursiveReg> Serialize for ReflectSerde<T> {

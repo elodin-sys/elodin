@@ -1,22 +1,27 @@
-use axum::{
-    extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        ConnectInfo, TypedHeader,
-    },
-    headers,
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use futures::{sink::SinkExt, stream::StreamExt};
-use paracosm::{
-    runner::IntoSimRunner,
-    sync::{ClientChannel, ClientTransport, ServerChannel},
-};
+use bytes::Bytes;
+use futures::future::select_all;
+use futures::{SinkExt, StreamExt};
+use paracosm::runner::IntoSimRunner;
+use paracosm::sync::ServerTransport;
+use paracosm::{ClientMsg, ServerMsg};
 use paracosm_py::SimBuilder;
-use pyo3::{types::PyModule, Python};
-use std::{net::SocketAddr, thread, time::Duration};
-use tracing::{error, info, trace};
+use paracosm_types::sandbox;
+use paracosm_types::sandbox::sandbox_control_server::SandboxControlServer;
+use paracosm_types::sandbox::{
+    sandbox_control_server::SandboxControl, UpdateCodeReq, UpdateCodeResp,
+};
+use pyo3::types::PyModule;
+use pyo3::Python;
+use std::net::SocketAddr;
+use std::thread;
+use tokio::net::TcpListener;
+use tokio::sync::broadcast;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tonic::transport::Server;
+use tonic::{async_trait, Response, Status};
+use tracing::info;
+
+mod config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,104 +30,184 @@ async fn main() -> anyhow::Result<()> {
         pyo3::append_to_inittab!(paracosm_py);
     }
 
-    let app = Router::new()
-        .layer(tower_http::cors::CorsLayer::very_permissive())
-        .route("/ws", get(ws_handler));
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    tracing::debug!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
-    Ok(())
+    let (sim_channels, client_channels) = channel_pair();
+    let config = crate::config::Config::new()?;
+    let control = ControlService::new(sim_channels, config.control_addr);
+    let control = tokio::spawn(control.run());
+    let sim = SimServer::new(client_channels, config.sim_addr);
+    let sim = tokio::spawn(sim.run());
+    let (res, _, _) = select_all([control, sim]).await;
+    res?
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    user_agent: Option<TypedHeader<headers::UserAgent>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) -> impl IntoResponse {
-    let user_agent = if let Some(TypedHeader(user_agent)) = user_agent {
-        user_agent.to_string()
-    } else {
-        String::from("unknown")
-    };
-    info!(?user_agent, ?addr, "client connected");
-    ws.on_upgrade(move |socket| handle_socket(socket, addr))
+struct SimServer {
+    address: SocketAddr,
+    client_channels: ClientChannels,
 }
 
-async fn handle_socket(socket: WebSocket, _who: SocketAddr) {
-    let (server, client) = paracosm::sync::channel_pair();
-    let code_client = client.clone();
-    let ClientChannel { rx, .. } = client;
-    let (mut sender, mut receiver) = socket.split();
-    let mut loaded = false;
-    let mut recv = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
-            match msg {
-                Message::Text(code) => {
-                    if loaded {
-                        code_client.send_msg(paracosm::ServerMsg::Exit);
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                    loaded = true;
-                    if let Err(err) = load_python(code, server.clone()) {
-                        trace!(?err, "error loading python");
-                    }
-                }
-                Message::Binary(buf) => {
-                    let msg: paracosm::ServerMsg = postcard::from_bytes(&buf).unwrap();
-                    code_client.send_msg(msg);
-                }
-                _ => {}
-            }
+impl SimServer {
+    fn new(client_channels: ClientChannels, address: SocketAddr) -> Self {
+        Self {
+            address,
+            client_channels,
         }
-    });
+    }
 
-    let mut send = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv_async().await {
-            let bytes = postcard::to_allocvec(&msg).unwrap();
-            sender.send(Message::Binary(bytes)).await.unwrap();
-        }
-    });
-    tokio::select! {
-        res = (&mut send) => {
-            if let Err(err) = res {
-                error!(?err, "socket send error");
-            }
-            recv.abort();
-        }
-        res = (&mut recv) => {
-            if let Err(err) = res {
-                error!(?err, "socket rec error");
-            }
-            send.abort();
+    async fn run(self) -> anyhow::Result<()> {
+        let listener = TcpListener::bind(self.address).await?;
+        loop {
+            let (socket, _addr) = listener.accept().await?;
+            let mut client_channels = self.client_channels.clone();
+            tokio::spawn(async move {
+                let (rx, tx) = socket.into_split();
+                let mut tx = FramedWrite::new(tx, LengthDelimitedCodec::new());
+                let mut rx = FramedRead::new(rx, LengthDelimitedCodec::new());
+                let tx = async move {
+                    while let Ok(msg) = client_channels.rx.recv().await {
+                        tx.send(msg).await?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                };
+                let rx = async move {
+                    while let Some(buf) = rx.next().await {
+                        let buf = buf?;
+                        let Ok(msg) = postcard::from_bytes::<ServerMsg>(&buf[..]) else {
+                            continue;
+                        };
+                        client_channels.tx.send_async(msg).await?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                };
+                tokio::select! {
+                    res = tx => { res }
+                    res = rx => { res }
+                }
+            });
         }
     }
 }
 
-fn load_python(code: String, server: ServerChannel) -> anyhow::Result<()> {
-    thread::spawn(move || -> anyhow::Result<()> {
+#[derive(Clone)]
+struct ControlService {
+    sim_channels: SimChannels,
+    address: SocketAddr,
+}
+
+impl ControlService {
+    fn new(sim_channels: SimChannels, address: SocketAddr) -> Self {
+        Self {
+            sim_channels,
+            address,
+        }
+    }
+
+    pub async fn run(self) -> anyhow::Result<()> {
+        let address = self.address;
+        let svc = SandboxControlServer::new(self);
+        info!(api.addr = ?address, "control api listening");
+        let reflection = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(paracosm_types::FILE_DESCRIPTOR_SET)
+            .build()
+            .unwrap();
+
+        Server::builder()
+            .add_service(svc)
+            .add_service(reflection)
+            .serve(address)
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl SandboxControl for ControlService {
+    async fn update_code(
+        &self,
+        req: tonic::Request<UpdateCodeReq>,
+    ) -> Result<Response<UpdateCodeResp>, Status> {
+        let req = req.into_inner();
         pyo3::prepare_freethreaded_python();
-        let builder = Python::with_gil(|py| {
-            let sim = PyModule::from_code(py, &code, "./test.py", "./")?;
+        let builder = match Python::with_gil(|py| {
+            let sim = PyModule::from_code(py, &req.code, "./test.py", "./")?;
             let callable = sim.getattr("sim")?;
             let builder = callable.call0()?;
             let builder: SimBuilder = builder.extract().unwrap();
 
             pyo3::PyResult::Ok(builder.0)
-        })
-        .map_err(|e| {
-            Python::with_gil(|py| {
-                e.print_and_set_sys_last_vars(py);
-                e
-            })
-        })?;
-        let runner = builder.into_runner();
-        let mut app = runner
-            .run_mode(paracosm::runner::RunMode::RealTime)
-            .build(server);
-        app.run();
-        Ok(())
-    });
-    Ok(())
+        }) {
+            Ok(builder) => builder,
+            Err(e) => {
+                let err = Python::with_gil(|py| {
+                    e.print_and_set_sys_last_vars(py);
+                    e
+                });
+                let err = err.to_string();
+                return Ok(Response::new(UpdateCodeResp {
+                    status: sandbox::Status::Error.into(),
+                    errors: vec![err],
+                }));
+            }
+        };
+        let channels = self.sim_channels.clone();
+        thread::spawn(move || -> anyhow::Result<()> {
+            let runner = builder.into_runner();
+            let mut app = runner
+                .run_mode(paracosm::runner::RunMode::RealTime)
+                .build(channels);
+            app.run();
+            Ok(())
+        });
+
+        Ok(Response::new(UpdateCodeResp {
+            status: sandbox::Status::Success.into(),
+            errors: vec![],
+        }))
+    }
+}
+
+#[derive(Clone, bevy::prelude::Resource)]
+struct SimChannels {
+    tx: tokio::sync::broadcast::Sender<Bytes>,
+    rx: flume::Receiver<ServerMsg>,
+}
+
+impl ServerTransport for SimChannels {
+    fn send_msg(&self, msg: ClientMsg) {
+        let bytes = postcard::to_allocvec(&msg).unwrap();
+        let bytes = Bytes::from(bytes);
+        self.tx.send(bytes).unwrap();
+    }
+
+    fn try_recv_msg(&self) -> Option<ServerMsg> {
+        self.rx.try_recv().ok()
+    }
+}
+
+struct ClientChannels {
+    rx: tokio::sync::broadcast::Receiver<Bytes>,
+    tx: flume::Sender<ServerMsg>,
+}
+
+fn channel_pair() -> (SimChannels, ClientChannels) {
+    let (client_tx, client_rx) = broadcast::channel(128);
+    let (server_tx, server_rx) = flume::unbounded();
+    (
+        SimChannels {
+            tx: client_tx,
+            rx: server_rx,
+        },
+        ClientChannels {
+            tx: server_tx,
+            rx: client_rx,
+        },
+    )
+}
+
+impl Clone for ClientChannels {
+    fn clone(&self) -> Self {
+        Self {
+            rx: self.rx.resubscribe(),
+            tx: self.tx.clone(),
+        }
+    }
 }

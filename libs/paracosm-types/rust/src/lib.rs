@@ -28,6 +28,10 @@ pub mod api {
     }
 }
 
+pub mod sandbox {
+    tonic::include_proto!("paracosm.types.sandbox");
+}
+
 pub struct ValidationError;
 
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("paracosm_types");
