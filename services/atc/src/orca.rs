@@ -1,15 +1,17 @@
-use atc_entity::vm::{self, Status};
+use atc_entity::{
+    sandbox,
+    vm::{self, Status},
+};
 use futures::{stream, StreamExt};
+use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec};
 use kube::{api::PostParams, core::ObjectMeta, runtime::watcher, runtime::watcher::Event, Api};
-
-use k8s_openapi::api::core::v1::{Container, Pod, PodSpec};
 use redis::aio::PubSub;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set, Unchanged};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
 use uuid::Uuid;
 
-use crate::{config::OrcaConfig, error::Error, events::DbEvent};
+use crate::{config::OrcaConfig, error::Error, events::DbEvent, sandbox::update_sandbox_code};
 
 pub struct Orca {
     k8s: kube::Client,
@@ -54,7 +56,7 @@ impl Orca {
                     }
                     Ok(OrcaMsg::K8sEvent(Event::Applied(pod))) => {
                         if let Err(err) = self.handle_pod_change(&pod).await {
-                            warn!(?err, "error handling pot update");
+                            warn!(?err, "error handling pod update");
                         }
                     }
                     Ok(OrcaMsg::K8sEvent(Event::Deleted(_pod))) => {
@@ -91,6 +93,18 @@ impl Orca {
                         containers: vec![Container {
                             name: "payload".to_string(),
                             image: Some(self.image_name.clone()),
+                            env: Some(vec![
+                                EnvVar {
+                                    name: "ELODIN_CONTROL_ADDR".to_string(),
+                                    value: Some("[::]:50051".to_string()),
+                                    ..Default::default()
+                                },
+                                EnvVar {
+                                    name: "ELODIN_SIM_ADDR".to_string(),
+                                    value: Some("[::]:3563".to_string()),
+                                    ..Default::default()
+                                },
+                            ]),
                             ..Default::default()
                         }],
                         ..Default::default()
@@ -134,13 +148,47 @@ impl Orca {
         let Ok(id) = Uuid::parse_str(name) else {
             return Ok(());
         };
-        vm::ActiveModel {
+        let pod_ip = pod.status.as_ref().and_then(|s| s.pod_ip.clone());
+        let vm = vm::ActiveModel {
             id: Unchanged(id),
             pod_name: Unchanged(name.clone()),
             status: Set(status),
+            pod_ip: Set(pod_ip),
+            ..Default::default()
         }
         .update(&self.db)
         .await?;
+        if let Some(sandbox_id) = vm.sandbox_id {
+            self.propagate_sandbox(sandbox_id, &vm).await?;
+        }
+        Ok(())
+    }
+
+    async fn propagate_sandbox(&self, sandbox_id: Uuid, vm: &vm::Model) -> Result<(), Error> {
+        let Some(sandbox) = sandbox::Entity::find_by_id(sandbox_id)
+            .one(&self.db)
+            .await?
+        else {
+            warn!(?vm, "vm has invalid sandbox id");
+            return Ok(());
+        };
+        let new_sandbox_state = match vm.status {
+            Status::Pending => sandbox::Status::Off,
+            Status::Booting => sandbox::Status::VmBooting,
+            Status::Error => sandbox::Status::Error,
+            Status::Running => sandbox::Status::Running,
+        };
+        match (sandbox.status, new_sandbox_state) {
+            (sandbox::Status::Running, sandbox::Status::Running) => {}
+            (_, sandbox::Status::Running) => {
+                let Some(ref pod_ip) = vm.pod_ip else {
+                    warn!("supposed to be unreachable - vm with out pod ip running");
+                    return Err(Error::VMBootFailed("pod missing ip".to_string()));
+                };
+                update_sandbox_code(pod_ip, sandbox.code).await?;
+            }
+            (_, _) => {}
+        }
         Ok(())
     }
 }

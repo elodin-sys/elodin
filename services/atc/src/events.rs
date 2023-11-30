@@ -14,7 +14,7 @@ pub trait EventModel {
 }
 
 #[async_trait]
-pub trait DbExt: ActiveModelTrait + Serialize {
+pub trait DbExt: ActiveModelTrait {
     async fn update_with_event(
         self,
         db: &impl ConnectionTrait,
@@ -28,9 +28,9 @@ pub trait DbExt: ActiveModelTrait + Serialize {
 }
 
 #[async_trait]
-impl<A: ActiveModelTrait + Serialize + ActiveModelBehavior + Send + Sync> DbExt for A
+impl<A: ActiveModelTrait + ActiveModelBehavior + Send + Sync> DbExt for A
 where
-    <Self::Entity as EntityTrait>::Model: IntoActiveModel<Self> + Serialize + EventModel,
+    <Self::Entity as EntityTrait>::Model: IntoActiveModel<Self> + EventModel + Serialize,
 {
     async fn update_with_event(
         self,

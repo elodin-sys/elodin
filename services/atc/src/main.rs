@@ -11,6 +11,7 @@ mod config;
 mod error;
 mod events;
 mod orca;
+mod sandbox;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
