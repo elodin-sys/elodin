@@ -6,14 +6,14 @@ use bevy::{
 };
 use bevy_ecs::{
     entity::Entity,
-    event::EventWriter,
+    event::{EventReader, EventWriter},
     system::{Commands, NonSend, Query, Res, ResMut, Resource},
 };
 
 use crate::{
     history::{HistoryStore, RollbackEvent},
-    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, Synced, Uuid,
-    WorldPos,
+    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels, Synced,
+    Uuid, WorldPos,
 };
 use flume::{Receiver, Sender};
 
@@ -104,14 +104,19 @@ pub fn send_pos<Tx: ServerTransport>(
     }))
 }
 
+pub fn startup_sync_model(mut event_writer: EventWriter<SyncModels>) {
+    event_writer.send(SyncModels);
+}
+
 pub fn send_model<Tx: ServerTransport>(
-    mut pbr_query: Query<(&Handle<Mesh>, &Handle<StandardMaterial>, &Uuid, &mut Synced)>,
+    mut pbr_query: Query<(&Handle<Mesh>, &Handle<StandardMaterial>, &Uuid)>,
     mesh_assets: ResMut<Assets<Mesh>>,
     material_assets: ResMut<Assets<StandardMaterial>>,
     tx: Res<Tx>,
+    mut event_reader: EventReader<SyncModels>,
 ) {
-    for (mesh, material, body_id, mut synced) in pbr_query.iter_mut() {
-        if !**synced {
+    for _ in &mut event_reader.read() {
+        for (mesh, material, body_id) in pbr_query.iter_mut() {
             let material = ReflectSerde(material_assets.get(material).unwrap().clone());
             let mesh = MeshData::from(mesh_assets.get(mesh).unwrap().clone());
             tx.send_msg(ClientMsg::ModelDataResp(ModelData::Pbr {
@@ -119,7 +124,6 @@ pub fn send_model<Tx: ServerTransport>(
                 material,
                 mesh,
             }));
-            **synced = true;
         }
     }
 }
@@ -129,11 +133,14 @@ pub fn recv_server<T: ServerTransport>(
     mut event: EventWriter<AppExit>,
     mut paused: ResMut<Paused>,
     mut rollback: EventWriter<RollbackEvent>,
+    mut sync_models: EventWriter<SyncModels>,
 ) {
     while let Some(msg) = transport.try_recv_msg() {
         match msg {
             ServerMsg::Exit => event.send(AppExit),
-            ServerMsg::RequestModel(_) => todo!(),
+            ServerMsg::RequestModels => {
+                sync_models.send(SyncModels);
+            }
             ServerMsg::Pause(pause) => paused.0 = pause,
             ServerMsg::Rollback(time) => rollback.send(RollbackEvent(time)),
         }

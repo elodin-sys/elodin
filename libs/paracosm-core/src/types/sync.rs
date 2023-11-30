@@ -9,15 +9,18 @@ use bevy::{
     },
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
-use bevy_ecs::{component::Component, system::Resource};
+use bevy_ecs::{component::Component, event::Event, system::Resource};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::spatial::SpatialPos;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Event)]
+pub struct SyncModels;
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMsg {
     Exit,
-    RequestModel(Uuid),
+    RequestModels,
     Rollback(usize),
     Pause(bool),
 }

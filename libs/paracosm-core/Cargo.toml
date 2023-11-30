@@ -17,7 +17,7 @@ stable-vec = "0.4"
 bevy_ecs = "0.12"
 bevy_utils = "0.12"
 bevy.version = "0.12"
-bevy.features = ["wayland", "trace"]
+bevy.features = ["trace"]
 
 paracosm-macros.path = "../paracosm-macros"
 

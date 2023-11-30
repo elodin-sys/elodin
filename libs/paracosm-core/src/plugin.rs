@@ -1,13 +1,17 @@
-use bevy::{prelude::*, winit::WinitPlugin};
+use bevy::{
+    prelude::*,
+    render::{settings::WgpuSettings, RenderPlugin},
+    winit::WinitPlugin,
+};
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
 use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
-    sync::{recv_server, send_model, send_pos, EntityMap, ServerTransport},
+    sync::{recv_server, send_model, send_pos, startup_sync_model, EntityMap, ServerTransport},
     tree::{com_system, cri_system, forward_dynamics, rne_system},
-    TreeMassMatrix, WorldPos,
+    SyncModels, TreeMassMatrix, WorldPos,
 };
 
 use super::{
@@ -72,9 +76,17 @@ impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
         app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
         app.insert_resource(self.tx.clone());
         app.insert_resource(EntityMap::default());
+        app.add_event::<SyncModels>();
         app.add_plugins(crate::bevy_transform::TransformPlugin);
         app.add_plugins(
             DefaultPlugins
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        backends: None,
+                        ..default()
+                    }
+                    .into(),
+                })
                 .build()
                 .disable::<WinitPlugin>()
                 .disable::<bevy::transform::TransformPlugin>(), //.disable::<WindowPlugin>(),
@@ -82,7 +94,8 @@ impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
         app.add_plugins(HistoryPlugin);
         app.add_plugins(TopologicalSortPlugin);
         app.add_systems(Update, run_physics_system);
-        app.add_systems(PostStartup, send_model::<Tx>);
+        app.add_systems(Update, send_model::<Tx>);
+        app.add_systems(PostStartup, startup_sync_model);
         app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
         app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos));
         app.add_systems(Update, recv_server::<Tx>).configure_sets(
