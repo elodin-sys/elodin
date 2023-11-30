@@ -13,7 +13,10 @@ use paracosm_types::sandbox::{
 use pyo3::types::PyModule;
 use pyo3::Python;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -32,7 +35,11 @@ async fn main() -> anyhow::Result<()> {
 
     let (sim_channels, client_channels) = channel_pair();
     let config = crate::config::Config::new()?;
-    let control = ControlService::new(sim_channels, config.control_addr);
+    let control = ControlService::new(
+        sim_channels,
+        client_channels.tx.clone(),
+        config.control_addr,
+    );
     let control = tokio::spawn(control.run());
     let sim = SimServer::new(client_channels, config.sim_addr);
     let sim = tokio::spawn(sim.run());
@@ -90,14 +97,22 @@ impl SimServer {
 #[derive(Clone)]
 struct ControlService {
     sim_channels: SimChannels,
+    server_tx: flume::Sender<ServerMsg>,
+    loaded: Arc<AtomicBool>,
     address: SocketAddr,
 }
 
 impl ControlService {
-    fn new(sim_channels: SimChannels, address: SocketAddr) -> Self {
+    fn new(
+        sim_channels: SimChannels,
+        server_tx: flume::Sender<ServerMsg>,
+        address: SocketAddr,
+    ) -> Self {
         Self {
             sim_channels,
             address,
+            server_tx,
+            loaded: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -127,6 +142,8 @@ impl SandboxControl for ControlService {
     ) -> Result<Response<UpdateCodeResp>, Status> {
         let req = req.into_inner();
         pyo3::prepare_freethreaded_python();
+        let loaded = self.loaded.clone();
+        let server_tx = self.server_tx.clone();
         let builder = match Python::with_gil(|py| {
             let sim = PyModule::from_code(py, &req.code, "./test.py", "./")?;
             let callable = sim.getattr("sim")?;
@@ -150,6 +167,11 @@ impl SandboxControl for ControlService {
         };
         let channels = self.sim_channels.clone();
         thread::spawn(move || -> anyhow::Result<()> {
+            if loaded.swap(true, Ordering::SeqCst) {
+                server_tx.send(paracosm::ServerMsg::Exit)?;
+                thread::sleep(Duration::from_millis(100));
+            }
+
             let runner = builder.into_runner();
             let mut app = runner
                 .run_mode(paracosm::runner::RunMode::RealTime)

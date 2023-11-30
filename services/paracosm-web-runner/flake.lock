@@ -4,7 +4,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs",
+        "nixpkgs": "nixpkgs_2",
         "rust-overlay": "rust-overlay"
       },
       "locked": {
@@ -19,6 +19,24 @@
         "owner": "cargo2nix",
         "ref": "release-0.11.0",
         "repo": "cargo2nix",
+        "type": "github"
+      }
+    },
+    "crane": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1701220101,
+        "narHash": "sha256-EBuCZ/Vjp3ovx8ZvfALfuUk4/76Ey/6cJmzmeXBRmDk=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "514cd663e5af505a244e55ad013733638574aff9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
         "type": "github"
       }
     },
@@ -128,7 +146,7 @@
     "nix2container": {
       "inputs": {
         "flake-utils": "flake-utils_3",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
         "lastModified": 1700389764,
@@ -146,6 +164,22 @@
     },
     "nixpkgs": {
       "locked": {
+        "lastModified": 1700108881,
+        "narHash": "sha256-+Lqybl8kj0+nD/IlAWPPG/RDTa47gff9nbei0u7BntE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "7414e9ee0b3e9903c24d3379f577a417f0aae5f1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
         "lastModified": 1697382362,
         "narHash": "sha256-PvFjWFmSYOF6TjNZ/WjOeqa+sgaWm+83Fz37vEuATHA=",
         "owner": "nixos",
@@ -160,7 +194,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_2": {
+    "nixpkgs_3": {
       "locked": {
         "lastModified": 1697269602,
         "narHash": "sha256-dSzV7Ud+JH4DPVD9od53EgDrxUVQOcSj4KGjggCDVJI=",
@@ -175,7 +209,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_3": {
+    "nixpkgs_4": {
       "locked": {
         "lastModified": 1700110549,
         "narHash": "sha256-ew5T+Lj3Jv+V/AJKiSoqbEyrLee2MGs4SjGJihDV33I=",
@@ -191,7 +225,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_4": {
+    "nixpkgs_5": {
       "locked": {
         "lastModified": 1681358109,
         "narHash": "sha256-eKyxW4OohHQx9Urxi7TQlFBTDWII+F+x2hklDOQPB50=",
@@ -207,23 +241,61 @@
         "type": "github"
       }
     },
-    "root": {
+    "paracosm": {
       "inputs": {
         "cargo2nix": "cargo2nix",
         "flake-utils": "flake-utils_2",
         "get-flake": "get-flake",
         "nix2container": "nix2container",
-        "nixpkgs": "nixpkgs_3",
+        "nixpkgs": "nixpkgs_4",
         "rust-overlay": "rust-overlay_2"
+      },
+      "locked": {
+        "lastModified": 0,
+        "narHash": "sha256-9jRPYjsGGuaV1cqzu/rbsUM1bvubpAmmJ8uPuy9ysHY=",
+        "path": "../../.",
+        "type": "path"
+      },
+      "original": {
+        "path": "../../.",
+        "type": "path"
+      }
+    },
+    "root": {
+      "inputs": {
+        "cargo2nix": [
+          "paracosm",
+          "cargo2nix"
+        ],
+        "crane": "crane",
+        "flake-utils": [
+          "paracosm",
+          "flake-utils"
+        ],
+        "nix2container": [
+          "paracosm",
+          "nix2container"
+        ],
+        "nixpkgs": [
+          "paracosm",
+          "nixpkgs"
+        ],
+        "paracosm": "paracosm",
+        "rust-overlay": [
+          "paracosm",
+          "rust-overlay"
+        ]
       }
     },
     "rust-overlay": {
       "inputs": {
         "flake-utils": [
+          "paracosm",
           "cargo2nix",
           "flake-utils"
         ],
         "nixpkgs": [
+          "paracosm",
           "cargo2nix",
           "nixpkgs"
         ]
@@ -245,7 +317,7 @@
     "rust-overlay_2": {
       "inputs": {
         "flake-utils": "flake-utils_4",
-        "nixpkgs": "nixpkgs_4"
+        "nixpkgs": "nixpkgs_5"
       },
       "locked": {
         "lastModified": 1700100993,
