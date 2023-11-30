@@ -28,40 +28,13 @@ impl super::Api {
             .split("Bearer ")
             .nth(1)
             .ok_or(Error::Unauthorized)?;
-        let header = decode_header(token).map_err(|_| Error::Unauthorized)?;
-        let kid = header.kid.ok_or(Error::Unauthorized)?;
-        let Some(j) = self.auth0_keys.find(&kid) else {
-            return Err(Error::Unauthorized.status());
-        };
+        let claims = validate_auth_header(
+            token,
+            &self.auth_context.auth_config.client_id,
+            &self.auth_context.auth0_keys,
+        )?;
 
-        let AlgorithmParameters::RSA(rsa) = &j.algorithm else {
-            return Err(Error::Unauthorized.into());
-        };
-
-        let decoding_key = DecodingKey::from_rsa_components(&rsa.n, &rsa.e).unwrap();
-
-        let mut validation = Validation::new(
-            Algorithm::from_str(
-                j.common
-                    .key_algorithm
-                    .ok_or_else(|| {
-                        warn!("missing key algo field in jwks");
-                        Error::Unauthorized
-                    })?
-                    .to_string()
-                    .as_str(),
-            )
-            .map_err(|_| {
-                warn!("invalid jwks algo");
-                Error::Unauthorized
-            })?,
-        );
-        validation.validate_exp = true;
-        validation.set_audience(&[&self.config.auth0.client_id]);
-        let claims =
-            decode::<Claims>(token, &decoding_key, &validation).map_err(|_| Error::Unauthorized)?;
-
-        handler(req.into_inner(), claims.claims)
+        handler(req.into_inner(), claims)
             .await
             .map_err(Error::status)
             .map(Response::new)
@@ -127,4 +100,44 @@ pub async fn get_keyset(domain: &str) -> Result<JwkSet, Error> {
         .json()
         .await
         .map_err(Error::from)
+}
+
+pub fn validate_auth_header(
+    token: &str,
+    client_id: &str,
+    auth0_keys: &JwkSet,
+) -> Result<Claims, Error> {
+    let header = decode_header(token).map_err(|_| Error::Unauthorized)?;
+    let kid = header.kid.ok_or(Error::Unauthorized)?;
+    let Some(j) = auth0_keys.find(&kid) else {
+        return Err(Error::Unauthorized);
+    };
+
+    let AlgorithmParameters::RSA(rsa) = &j.algorithm else {
+        return Err(Error::Unauthorized);
+    };
+
+    let decoding_key = DecodingKey::from_rsa_components(&rsa.n, &rsa.e).unwrap();
+
+    let mut validation = Validation::new(
+        Algorithm::from_str(
+            j.common
+                .key_algorithm
+                .ok_or_else(|| {
+                    warn!("missing key algo field in jwks");
+                    Error::Unauthorized
+                })?
+                .to_string()
+                .as_str(),
+        )
+        .map_err(|_| {
+            warn!("invalid jwks algo");
+            Error::Unauthorized
+        })?,
+    );
+    validation.validate_exp = true;
+    validation.set_audience(&[&client_id]);
+    let claims =
+        decode::<Claims>(token, &decoding_key, &validation).map_err(|_| Error::Unauthorized)?;
+    Ok(claims.claims)
 }

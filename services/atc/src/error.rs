@@ -1,5 +1,6 @@
 use paracosm_types::ValidationError;
 use sea_orm::TransactionError;
+use std::io;
 use thiserror::Error;
 use tonic::{Code, Status};
 #[derive(Debug, Error)]
@@ -28,6 +29,14 @@ pub enum Error {
     Redis(#[from] redis::RedisError),
     #[error("kube watcher: {0}")]
     KubeWatcher(#[from] kube::runtime::watcher::Error),
+    #[error("sandbox not booted")]
+    SandboxNotBooted,
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("axum error: {0}")]
+    Axum(#[from] axum::Error),
+    #[error("tonic transport error: {0}")]
+    TonicTransport(#[from] tonic::transport::Error),
 }
 
 impl From<TransactionError<Error>> for Error {
@@ -66,6 +75,7 @@ impl Error {
             Error::FlumeSend => Status::new(Code::Internal, "flume send".to_string()),
             Error::NotFound => Status::new(Code::NotFound, "not found".to_string()),
             Error::Postcard(err) => Status::new(Code::Internal, err.to_string()),
+            Error::SandboxNotBooted => Status::new(Code::FailedPrecondition, "sandbox not booted"),
             err => Status::new(Code::Internal, err.to_string()),
         }
     }
@@ -74,5 +84,26 @@ impl Error {
 impl From<Error> for Status {
     fn from(val: Error) -> Self {
         val.status()
+    }
+}
+
+impl axum::response::IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        use axum::http::StatusCode;
+        match self {
+            Error::Db(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            Error::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized".to_string()),
+            Error::Reqwest(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            Error::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid request".to_string()),
+            Error::Kube(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            Error::VMBootFailed(err) => (StatusCode::INTERNAL_SERVER_ERROR, err),
+            Error::FlumeRecv(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            Error::FlumeSend => (StatusCode::INTERNAL_SERVER_ERROR, "flume send".to_string()),
+            Error::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            Error::Postcard(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            Error::SandboxNotBooted => (StatusCode::BAD_REQUEST, "sandbox not booted".to_string()),
+            err => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+        }
+        .into_response()
     }
 }
