@@ -8,6 +8,8 @@ pub struct Model {
     pub id: Uuid,
     pub pod_name: String,
     pub status: Status,
+    pub pod_ip: Option<String>,
+    pub sandbox_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

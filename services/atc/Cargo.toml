@@ -11,7 +11,8 @@ tokio.version = "1.34"
 tokio.features = ["full"]
 futures = "0.3.29"
 flume = "0.11"
-
+tokio-util.version = "0.7"
+tokio-util.features = ["codec"]
 
 # types
 paracosm-types.path = "../../libs/paracosm-types/rust"
@@ -45,6 +46,15 @@ thiserror = "1.0"
 tonic = "0.10"
 tonic-reflection = "0.10.2"
 
+# http
+axum.version = "0.6.20"
+axum.features = ["ws", "headers"]
+tower.version = "0.4"
+tower-http.version = "0.4.4"
+tower-http.features = ["cors"]
+hyper.version = "0.14.24"
+hyper.features = ["stream"]
+
 # sql
 sea-orm.version = "0.12"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid" ]
@@ -52,10 +62,8 @@ sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uu
 # crypto
 jsonwebtoken = "9"
 
-
 # http
-reqwest.version = "0.11"
-reqwest.features = ["json"]
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 
 # k8s
 kube = { version = "0.87.1", features = ["runtime", "derive"] }

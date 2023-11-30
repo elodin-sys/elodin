@@ -1,11 +1,18 @@
-use super::{Api, CurrentUser};
+use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
 use crate::{error::Error, events::DbExt};
 use atc_entity::{
     sandbox,
     user::{EntityType, Permission, Verb},
     vm,
 };
+use axum::{
+    extract::{ws, Path, Query, State, WebSocketUpgrade},
+    headers::{self, authorization::Bearer},
+    response::IntoResponse,
+    TypedHeader,
+};
 use enumflags2::BitFlag;
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use paracosm_types::api::{
     BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, GetSandboxReq,
     ListSandboxesReq, ListSandboxesResp, Page, Sandbox, UpdateSandboxReq, UpdateSandboxResp,
@@ -14,6 +21,14 @@ use sea_orm::{
     prelude::Uuid, ActiveValue, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set,
     Unchanged,
 };
+use serde::Deserialize;
+use std::io;
+use tokio::net::TcpSocket;
+use tokio_util::{
+    bytes::Bytes,
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
+};
+use tracing::trace;
 
 impl Api {
     pub async fn get_sandbox(
@@ -187,6 +202,8 @@ impl Api {
             id: Set(vm_id),
             pod_name: Set(vm_id.to_string()),
             status: Set(vm::Status::Pending),
+            sandbox_id: Set(Some(id)),
+            ..Default::default()
         }
         .insert_with_event(&self.db, &mut redis)
         .await?;
@@ -200,4 +217,83 @@ impl Api {
 
         Ok(BootSandboxResp {})
     }
+}
+
+#[derive(Deserialize)]
+pub struct WsAuth {
+    token: String,
+}
+
+pub async fn sim_socket(
+    ws: WebSocketUpgrade,
+    Path(sandbox_id): Path<Uuid>,
+    State(context): State<WSContext>,
+    auth: Query<WsAuth>,
+) -> Result<impl IntoResponse, Error> {
+    trace!(?sandbox_id, "sandbox id");
+    let claims = validate_auth_header(
+        &auth.token,
+        &context.auth_context.auth_config.client_id,
+        &context.auth_context.auth0_keys,
+    )?;
+    let user = atc_entity::User::find()
+        .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
+        .one(&context.db)
+        .await?
+        .ok_or_else(|| Error::Unauthorized)?;
+    if !user
+        .permissions
+        .has_perm(&sandbox_id, EntityType::Sandbox, Verb::Read.into())
+    {
+        return Err(Error::NotFound);
+    }
+    let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(sandbox_id)
+        .one(&context.db)
+        .await?
+    else {
+        return Err(Error::NotFound);
+    };
+    trace!(?sandbox, "found sandbox");
+    let Some(vm_id) = sandbox.vm_id else {
+        return Err(Error::SandboxNotBooted);
+    };
+    let Some(vm) = vm::Entity::find_by_id(vm_id).one(&context.db).await? else {
+        return Err(Error::SandboxNotBooted);
+    };
+    let Some(pod_ip) = vm.pod_ip else {
+        return Err(Error::SandboxNotBooted);
+    };
+    let sim_socket = TcpSocket::new_v4()?;
+    let Ok(ip) = format!("{}:3563", pod_ip).parse() else {
+        return Err(Error::VMBootFailed("vm has invalid ip".to_string()));
+    };
+    let sim_stream = sim_socket.connect(ip).await?;
+    let (rx, tx) = sim_stream.into_split();
+    let sim_tx = FramedWrite::new(tx, LengthDelimitedCodec::new());
+    let sim_rx = FramedRead::new(rx, LengthDelimitedCodec::new());
+
+    Ok(ws.on_upgrade(move |socket| async move {
+        let (ws_tx, ws_rx) = socket.split();
+        let ws_rx = ws_rx
+            .try_filter_map(|msg| async move {
+                let ws::Message::Binary(bytes) = msg else {
+                    return Ok(None);
+                };
+                Ok(Some(Bytes::from(bytes)))
+            })
+            .map_err(|err| std::io::Error::new(io::ErrorKind::Other, err));
+        let ws_to_sim = ws_rx.forward(sim_tx).map_err(Error::from);
+        let sim_to_ws = sim_rx
+            .map(|m| m.map(|b| ws::Message::Binary(b.to_vec())))
+            .map_err(|err| axum::Error::new(err))
+            .forward(ws_tx)
+            .map_err(Error::from);
+        let res = tokio::select! {
+            res = ws_to_sim => { res }
+            res = sim_to_ws=> { res }
+        };
+        if let Err(err) = res {
+            trace!(?err, "error in sim proxy");
+        }
+    }))
 }

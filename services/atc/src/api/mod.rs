@@ -1,4 +1,10 @@
-use crate::{current_user_route, current_user_route_txn, error::Error};
+use crate::{
+    api::{multiplex::MultiplexService, sandbox::sim_socket},
+    config::Auth0Config,
+    current_user_route, current_user_route_txn,
+    error::Error,
+};
+use axum::routing::get;
 use jsonwebtoken::jwk::JwkSet;
 use paracosm_types::api::{
     api_server::{self, ApiServer},
@@ -16,6 +22,7 @@ use tracing::info;
 
 use crate::config::ApiConfig;
 
+mod multiplex;
 mod sandbox;
 mod user;
 mod utils;
@@ -24,9 +31,20 @@ use utils::*;
 pub struct Api {
     address: SocketAddr,
     db: DatabaseConnection,
-    auth0_keys: JwkSet,
-    config: ApiConfig,
+    auth_context: AuthContext,
     redis: MultiplexedConnection,
+}
+
+#[derive(Clone)]
+pub struct AuthContext {
+    auth0_keys: JwkSet,
+    auth_config: Auth0Config,
+}
+
+#[derive(Clone)]
+pub struct WSContext {
+    auth_context: AuthContext,
+    db: DatabaseConnection,
 }
 
 impl Api {
@@ -36,29 +54,43 @@ impl Api {
         redis: MultiplexedConnection,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
+        let auth_context = AuthContext {
+            auth0_keys,
+            auth_config: config.auth0.clone(),
+        };
         Ok(Self {
             address: config.address,
             db,
-            auth0_keys,
-            config,
             redis,
+            auth_context,
         })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
         let address = self.address;
-        let svc = ApiServer::new(self);
         info!(api.addr = ?address, "api listening");
+
+        let rest = axum::Router::new()
+            .route("/sim/ws/:id", get(sim_socket))
+            .with_state(WSContext {
+                auth_context: self.auth_context.clone(),
+                db: self.db.clone(),
+            });
+
+        let svc = ApiServer::new(self);
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(paracosm_types::FILE_DESCRIPTOR_SET)
-            .build()
-            .unwrap();
+            .build()?;
 
-        Server::builder()
+        let grpc = Server::builder()
             .add_service(svc)
             .add_service(reflection)
-            .serve(address)
+            .into_service();
+        let service = MultiplexService::new(rest, grpc);
+        axum::Server::bind(&address)
+            .serve(tower::make::Shared::new(service))
             .await?;
+
         Ok(())
     }
 }

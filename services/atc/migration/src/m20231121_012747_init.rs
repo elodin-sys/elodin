@@ -62,6 +62,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Vms::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Vms::PodName).string().not_null())
                     .col(ColumnDef::new(Vms::Status).integer().not_null())
+                    .col(ColumnDef::new(Vms::PodIp).string())
+                    .col(ColumnDef::new(Vms::SandboxId).uuid())
                     .to_owned(),
             )
             .await?;
@@ -114,4 +116,6 @@ enum Vms {
     Id,
     PodName,
     Status,
+    PodIp,
+    SandboxId,
 }
