@@ -8,7 +8,6 @@ use tracing::error;
 use wasm_bindgen::prelude::*;
 
 fn main() -> anyhow::Result<()> {
-    let transport = Transport::connect("ws://localhost:3000/ws")?;
     let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
     let document = window
         .document()
@@ -16,13 +15,11 @@ fn main() -> anyhow::Result<()> {
     let container = document
         .get_element_by_id("editor-container")
         .ok_or_else(|| anyhow!("missing editor container div"))?;
+    let url = container
+        .get_attribute("data-ws-url")
+        .ok_or_else(|| anyhow!("data-ws-url required"))?;
+    let transport = Transport::connect(&url)?;
     let code_transport = transport.clone();
-    let a = Closure::<dyn Fn(web_sys::CustomEvent)>::new(move |event: web_sys::CustomEvent| {
-        if let Some(code) = event.detail().as_string() {
-            let mut tx = code_transport.tx.borrow_mut();
-            tx.send(WsMessage::Text(code));
-        }
-    });
     container
         .add_event_listener_with_callback("code-update", a.as_ref().unchecked_ref())
         .map_err(|_| anyhow!("failed to add event listener"))?;
