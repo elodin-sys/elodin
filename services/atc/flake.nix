@@ -24,13 +24,9 @@
             bin,
             pkgs,
           }:
-            nix2container.packages.${system}.nix2container.buildImage {
+            pkgs.dockerTools.buildLayeredImage {
               name = "atc";
-              copyToRoot = pkgs.buildEnv {
-                name = "root";
-                paths = with pkgs; [cacert busybox];
-                pathsToLink = ["/bin" "/etc/ssl/certs"];
-              };
+              contents = with pkgs; [cacert busybox];
               config = {
                 Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
                 Cmd = ["${bin.bin}/bin/atc"];
