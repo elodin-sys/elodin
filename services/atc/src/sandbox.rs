@@ -13,6 +13,6 @@ pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<(), Error>
         .update_code(UpdateCodeReq { code })
         .await
         .map_err(|err| Error::VMBootFailed(err.to_string()))?;
-    let res = res.into_inner();
+    let _res = res.into_inner();
     Ok(())
 }

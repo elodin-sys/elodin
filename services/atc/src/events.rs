@@ -19,12 +19,12 @@ pub trait DbExt: ActiveModelTrait {
         self,
         db: &impl ConnectionTrait,
         redis: &mut redis::aio::MultiplexedConnection,
-    ) -> Result<(), Error>;
+    ) -> Result<<Self::Entity as EntityTrait>::Model, Error>;
     async fn insert_with_event(
         self,
         db: &impl ConnectionTrait,
         redis: &mut redis::aio::MultiplexedConnection,
-    ) -> Result<(), Error>;
+    ) -> Result<<Self::Entity as EntityTrait>::Model, Error>;
 }
 
 #[async_trait]
@@ -36,26 +36,33 @@ where
         self,
         db: &impl ConnectionTrait,
         redis: &mut redis::aio::MultiplexedConnection,
-    ) -> Result<(), Error> {
+    ) -> Result<<Self::Entity as EntityTrait>::Model, Error> {
         let model = self.update(db).await?;
         let topic_name = model.topic_name();
         let event = DbEvent::Update(model);
         let buf = postcard::to_allocvec(&event)?;
         redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
-        Ok(())
+        let DbEvent::Insert(model) = event else {
+            unreachable!()
+        };
+
+        Ok(model)
     }
 
     async fn insert_with_event(
         self,
         db: &impl ConnectionTrait,
         redis: &mut redis::aio::MultiplexedConnection,
-    ) -> Result<(), Error> {
+    ) -> Result<<Self::Entity as EntityTrait>::Model, Error> {
         let model = self.insert(db).await?;
         let topic_name = model.topic_name();
         let event = DbEvent::Insert(model);
         let buf = postcard::to_allocvec(&event)?;
         redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
-        Ok(())
+        let DbEvent::Insert(model) = event else {
+            unreachable!()
+        };
+        Ok(model)
     }
 }
 

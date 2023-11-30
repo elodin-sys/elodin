@@ -1,5 +1,5 @@
 use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
-use crate::{error::Error, events::DbExt};
+use crate::{error::Error, events::DbExt, sandbox::update_sandbox_code};
 use atc_entity::{
     sandbox,
     user::{EntityType, Permission, Verb},
@@ -7,9 +7,7 @@ use atc_entity::{
 };
 use axum::{
     extract::{ws, Path, Query, State, WebSocketUpgrade},
-    headers::{self, authorization::Bearer},
     response::IntoResponse,
-    TypedHeader,
 };
 use enumflags2::BitFlag;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
@@ -167,7 +165,7 @@ impl Api {
         {
             return Err(Error::Unauthorized);
         }
-        sandbox::ActiveModel {
+        let sandbox = sandbox::ActiveModel {
             id: Unchanged(id),
             name: Set(req.name),
             code: Set(req.code),
@@ -175,6 +173,15 @@ impl Api {
         }
         .update_with_event(txn, &mut redis)
         .await?;
+        if let Some(vm_id) = sandbox.vm_id {
+            if let Some(vm_ip) = vm::Entity::find_by_id(vm_id)
+                .one(txn)
+                .await?
+                .and_then(|vm| vm.pod_ip)
+            {
+                update_sandbox_code(&vm_ip, sandbox.code).await?;
+            }
+        }
         Ok(UpdateSandboxResp {})
     }
 
