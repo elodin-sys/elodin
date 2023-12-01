@@ -37,8 +37,6 @@ pub struct EntityBundle {
     pub subtree_com: SubtreeCoM,
     pub subtree_com_sum: SubtreeCoMSum,
     pub subtree_mass: SubtreeMass,
-
-    pub synced: Synced,
 }
 
 #[derive(Bundle, Debug)]
