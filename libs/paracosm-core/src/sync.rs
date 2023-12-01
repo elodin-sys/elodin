@@ -1,5 +1,8 @@
-use std::collections::HashMap;
-
+use crate::{
+    history::{HistoryStore, RollbackEvent},
+    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels,
+    SyncedModel, Uuid, WorldPos,
+};
 use bevy::{
     app::AppExit,
     prelude::{Assets, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial},
@@ -9,14 +12,8 @@ use bevy_ecs::{
     event::{EventReader, EventWriter},
     system::{Commands, NonSend, Query, Res, ResMut, Resource},
 };
-use bevy_utils::tracing::info;
-
-use crate::{
-    history::{HistoryStore, RollbackEvent},
-    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels,
-    SyncedModel, Uuid, WorldPos,
-};
 use flume::{Receiver, Sender};
+use std::collections::HashMap;
 
 #[derive(Resource, DerefMut, Deref, Default)]
 pub struct EntityMap(HashMap<Uuid, Entity>);

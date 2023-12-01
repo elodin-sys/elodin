@@ -314,7 +314,7 @@ pub async fn sim_socket(
         let ws_to_sim = ws_rx.forward(sim_tx).map_err(Error::from);
         let sim_to_ws = sim_rx
             .map(|m| m.map(|b| ws::Message::Binary(b.to_vec())))
-            .map_err(|err| axum::Error::new(err))
+            .map_err(axum::Error::new)
             .forward(ws_tx)
             .map_err(Error::from);
         let res = tokio::select! {
