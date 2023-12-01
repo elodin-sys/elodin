@@ -1,10 +1,6 @@
 defmodule ParacosmDashboardWeb.SandboxComponents do
   use Phoenix.Component
 
-  alias Phoenix.LiveView.JS
-  import ParacosmDashboardWeb.Gettext
-  import ParacosmDashboardWeb.CoreComponents
-
   attr(:path, :string, default: nil)
   attr(:name, :string, default: nil)
   attr(:img, :string, default: nil)
@@ -19,7 +15,7 @@ defmodule ParacosmDashboardWeb.SandboxComponents do
       <.link
         patch={@path}
         class="flex w-[198px] h-[41px] items-center justify-center pt-elo-lg pb-elo-lg relative top-[116px] left-px bg-tokens-surface-secondary rounded-elo-xs overflow-hidden"
-    phx-click={@phx_click}
+        phx-click={@phx_click}
       >
         <div class="w-fit font-bold text-primative-colors-white-opacity-900 text-sm text-center">
           <%= @name %>

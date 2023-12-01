@@ -62,7 +62,6 @@ defmodule ParacosmDashboardWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{ParacosmDashboardWeb.UserAuth, :ensure_authenticated}] do
-      live("/users/settings", UserSettingsLive, :edit)
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
       live("/sandbox/:id", EditorLive, :edit)

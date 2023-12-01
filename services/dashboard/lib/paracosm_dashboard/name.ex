@@ -22,7 +22,7 @@ defmodule ParacosmDashboard.NameGen do
     frost voice paper frog smoke star hamster
   )
 
-  def generate(max_id \\ 9999) do
+  def generate() do
     adjective = @adjectives |> Enum.random()
     noun = @nouns |> Enum.random()
 

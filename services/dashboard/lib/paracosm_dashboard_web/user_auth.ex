@@ -19,11 +19,12 @@ defmodule ParacosmDashboardWeb.UserAuth do
   end
 
   def get_user_by_token(token) do
-    with {:ok, user} <-
-           ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
-      {:ok, %{"token" => token, "email" => user.email}}
-    else
-      {:error, err} -> {:error, err}
+    case ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
+      {:ok, user} ->
+        {:ok, %{"token" => token, "email" => user.email}}
+
+      {:error, err} ->
+        {:error, err}
     end
   end
 
@@ -104,8 +105,6 @@ defmodule ParacosmDashboardWeb.UserAuth do
   It clears all session data for safety. See renew_session.
   """
   def log_out_user(conn) do
-    user_token = get_session(conn, :user_token)
-
     if live_socket_id = get_session(conn, :live_socket_id) do
       ParacosmDashboardWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
     end
@@ -121,8 +120,6 @@ defmodule ParacosmDashboardWeb.UserAuth do
   and remember me token.
   """
   def fetch_current_user(conn, _opts) do
-    {user_token, conn} = ensure_user_token(conn)
-
     with {user_token, conn} when not is_nil(user_token) <- ensure_user_token(conn),
          {:ok, user} <- get_user_by_token(user_token) do
       assign(conn, :current_user, user)
