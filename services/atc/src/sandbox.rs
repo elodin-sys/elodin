@@ -1,5 +1,5 @@
-use paracosm_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
 use crate::error::Error;
+use paracosm_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
 use tonic::transport::Channel;
 
 pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<(), Error> {
