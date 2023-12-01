@@ -12,3 +12,28 @@ html, body, [data-phx-main], main {
 .code-editor {
     height: 100% !important;
 }
+
+@layer components {
+  .all-\[unset\] {
+    all: unset;
+  }
+}
+
+:root {
+  --primative-colors-black-black-600: rgba(31, 31, 31, 1);
+  --primative-colors-black-black-800: rgba(13, 13, 13, 1);
+  --primative-colors-brand-hyper-red: rgba(238, 58, 67, 1);
+  --primative-colors-white-opacity-100: rgba(255, 255, 255, 0.1);
+  --primative-colors-white-opacity-50: rgba(255, 255, 255, 0.05);
+  --primative-colors-white-opacity-900: rgba(255, 255, 255, 1);
+  --primative-spacing-1: 4px;
+  --primative-spacing-4: 16px;
+  --primative-spacing-5: 24px;
+  --tokens-proto-terminal-up: none;
+  --tokens-spacing-system-radius-xs: var(--primative-spacing-1);
+  --tokens-spacing-system-spacing-lg: var(--primative-spacing-4);
+  --tokens-spacing-system-spacing-xl: var(--primative-spacing-5);
+  --tokens-spacing-system-spacing-xxs: var(--primative-spacing-1);
+  --tokens-surface-primary: var(--primative-colors-black-black-800);
+  --tokens-surface-secondary: var(--primative-colors-black-black-600);
+}

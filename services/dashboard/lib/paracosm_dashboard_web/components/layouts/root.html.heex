@@ -13,46 +13,20 @@
   </head>
   <body class="bg-white antialiased">
     <div class="h-full w-full flex-col">
-      <ul class="relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-14 bg-blue text-white shrink-0">
-        <li>
-          <img src="/images/logo.svg" class="w-24" />
+      <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-14 bg-surface-secondary text-white shrink-0 fixed">
+        <li class="mr-auto"></li>
+        <li style="position: absolute; left: calc(50% - 25px/2);">
+          <img src="/images/o-logo.svg" class="w-5" />
         </li>
-        <li class="flex-grow text-xl border-l pl-4 border-light-blue font-bold font-mono">
-          Paracosm
-        </li>
-        <%= if @current_user do %>
-          <li class="text-[0.8125rem] leading-6">
+        <li class="text-[0.8125rem] ml-auto">
+          <%= if @current_user do %>
             <%= @current_user["email"] %>
-          </li>
-          <li>
-            <.link
-              patch={~p"/users/settings"}
-              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200"
-            >
-              Settings
-            </.link>
-          </li>
-          <li>
-            <.link
-              href={~p"/users/log_out"}
-              method="delete"
-              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200 justify-self-center"
-            >
-              Log out
-            </.link>
-          </li>
-        <% else %>
-          <li>
-            <.link
-              href={~p"/users/log_in"}
-              class="text-[0.8125rem] leading-6  font-semibold hover:text-sky-200"
-            >
-              Log in
-            </.link>
-          </li>
-        <% end %>
+          <% else %>
+            Log In
+          <% end %>
+        </li>
       </ul>
-      <div style="height: calc(100% - 50px);">
+      <div class="h-full pt-[56px]">
         <%= @inner_content %>
       </div>
     </div>
