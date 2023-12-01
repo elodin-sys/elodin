@@ -3,8 +3,10 @@ use crate::{
     config::Auth0Config,
     current_user_route, current_user_route_txn,
     error::Error,
+    events::DbEvent,
 };
 use axum::routing::get;
+use futures::Stream;
 use jsonwebtoken::jwk::JwkSet;
 use paracosm_types::api::{
     api_server::{self, ApiServer},
@@ -15,7 +17,8 @@ use paracosm_types::api::{
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, pin::Pin};
+use tokio::sync::broadcast;
 use tonic::async_trait;
 use tonic::{transport::Server, Response, Status};
 use tracing::info;
@@ -33,6 +36,7 @@ pub struct Api {
     db: DatabaseConnection,
     auth_context: AuthContext,
     redis: MultiplexedConnection,
+    sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
 }
 
 #[derive(Clone)]
@@ -52,6 +56,7 @@ impl Api {
         config: ApiConfig,
         db: DatabaseConnection,
         redis: MultiplexedConnection,
+        sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
         let auth_context = AuthContext {
@@ -63,6 +68,7 @@ impl Api {
             db,
             redis,
             auth_context,
+            sandbox_events,
         })
     }
 
@@ -158,5 +164,13 @@ impl api_server::Api for Api {
         req: tonic::Request<GetSandboxReq>,
     ) -> Result<Response<Sandbox>, Status> {
         current_user_route_txn!(self, req, Self::get_sandbox)
+    }
+
+    type SandboxEventsStream = Pin<Box<dyn Stream<Item = Result<Sandbox, Status>> + Send + Sync>>;
+    async fn sandbox_events(
+        &self,
+        req: tonic::Request<GetSandboxReq>,
+    ) -> Result<Response<Self::SandboxEventsStream>, Status> {
+        current_user_route!(self, req, Self::sandbox_events)
     }
 }

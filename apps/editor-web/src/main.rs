@@ -5,7 +5,6 @@ use paracosm::sync::ClientTransport;
 use paracosm_editor::EditorPlugin;
 use std::{cell::RefCell, rc::Rc};
 use tracing::error;
-use wasm_bindgen::prelude::*;
 
 fn main() -> anyhow::Result<()> {
     let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;

@@ -1,7 +1,7 @@
 use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
 use crate::{error::Error, events::DbExt, sandbox::update_sandbox_code};
 use atc_entity::{
-    sandbox,
+    sandbox::{self},
     user::{EntityType, Permission, Verb},
     vm,
 };
@@ -12,8 +12,9 @@ use axum::{
 use enumflags2::BitFlag;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use paracosm_types::api::{
-    BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, GetSandboxReq,
-    ListSandboxesReq, ListSandboxesResp, Page, Sandbox, UpdateSandboxReq, UpdateSandboxResp,
+    api_server, BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp,
+    GetSandboxReq, ListSandboxesReq, ListSandboxesResp, Page, Sandbox, UpdateSandboxReq,
+    UpdateSandboxResp,
 };
 use sea_orm::{
     prelude::Uuid, ActiveValue, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set,
@@ -45,11 +46,7 @@ impl Api {
         let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id).one(txn).await? else {
             return Err(Error::NotFound);
         };
-        Ok(Sandbox {
-            id: sandbox.id.as_bytes().to_vec(),
-            name: sandbox.name,
-            code: sandbox.code,
-        })
+        Ok(sandbox.into())
     }
 
     pub async fn list_sandbox(
@@ -92,14 +89,7 @@ impl Api {
             .filter(sandbox::Column::Id.is_in(ids))
             .all(txn)
             .await?;
-        let sandboxes = res
-            .into_iter()
-            .map(|s| Sandbox {
-                id: s.id.as_bytes().to_vec(),
-                name: s.name,
-                code: s.code,
-            })
-            .collect::<Vec<_>>();
+        let sandboxes = res.into_iter().map(Sandbox::from).collect::<Vec<_>>();
         let next_page = if let Some(last_sandbox) = sandboxes.last() {
             if let Some(page) = req.page {
                 let last_id = last_sandbox.id.clone();
@@ -223,6 +213,38 @@ impl Api {
         .await?;
 
         Ok(BootSandboxResp {})
+    }
+
+    pub async fn sandbox_events(
+        &self,
+        req: GetSandboxReq,
+        CurrentUser { user, .. }: CurrentUser,
+    ) -> Result<<Api as api_server::Api>::SandboxEventsStream, Error> {
+        let id = req.id()?;
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
+        {
+            return Err(Error::NotFound);
+        }
+        let Some(_sandbox) = atc_entity::sandbox::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+        else {
+            return Err(Error::NotFound);
+        };
+        let sandbox_events = self.sandbox_events.resubscribe();
+        let stream = tokio_stream::wrappers::BroadcastStream::new(sandbox_events);
+        let stream = stream.filter_map(move |res| async move {
+            if let Ok(event) = res {
+                let model = event.into_model();
+                if model.id == id {
+                    return Some(Ok(model.into()));
+                }
+            }
+            None
+        });
+        Ok(Box::pin(stream))
     }
 }
 

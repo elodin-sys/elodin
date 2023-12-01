@@ -1,7 +1,6 @@
 use paracosm_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
-use tonic::transport::Channel;
-
 use crate::error::Error;
+use tonic::transport::Channel;
 
 pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<(), Error> {
     let Ok(ip) = format!("grpc://{}:50051", vm_ip).parse() else {
