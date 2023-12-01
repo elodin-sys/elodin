@@ -9,6 +9,7 @@ pub struct Config {
     pub orca: Option<OrcaConfig>,
     pub database_url: String,
     pub redis_url: String,
+    pub migrate: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

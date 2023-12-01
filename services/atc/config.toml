@@ -1,5 +1,6 @@
 database_url = "postgres://sphw@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
+migrate = true
 
 [api]
 address = "[::]:50051"

@@ -1,6 +1,7 @@
 use api::Api;
 use config::Config;
 use futures::future;
+use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use tracing::info;
 
@@ -20,6 +21,10 @@ async fn main() -> anyhow::Result<()> {
     info!(?config, "config");
     let mut services = vec![];
     let db = Database::connect(config.database_url).await?;
+    if config.migrate {
+        Migrator::up(&db, None).await?;
+    }
+
     let redis = redis::Client::open(config.redis_url)?;
 
     if let Some(orca_config) = config.orca {
