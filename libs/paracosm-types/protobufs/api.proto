@@ -14,6 +14,8 @@ service Api {
     rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
     rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
     rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
+
+    rpc SandboxEvents(GetSandboxReq) returns (stream Sandbox);
 }
 
 message CurrentUserReq {}
@@ -59,6 +61,13 @@ message Sandbox {
     bytes id = 1;
     string name = 2;
     string code = 3;
+    Status status = 4;
+    enum Status {
+        OFF = 0;
+        VM_BOOTING = 1;
+        ERROR = 2;
+        RUNNING = 3;
+    }
 }
 
 message Page {

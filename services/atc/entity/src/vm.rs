@@ -26,7 +26,7 @@ impl Related<super::sandbox::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Copy)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum Status {
     #[sea_orm(num_value = 0)]

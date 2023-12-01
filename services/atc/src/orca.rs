@@ -5,29 +5,40 @@ use atc_entity::{
 use futures::{stream, StreamExt};
 use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec};
 use kube::{api::PostParams, core::ObjectMeta, runtime::watcher, runtime::watcher::Event, Api};
-use redis::aio::PubSub;
+use redis::aio::{MultiplexedConnection, PubSub};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
 use uuid::Uuid;
 
-use crate::{config::OrcaConfig, error::Error, events::DbEvent, sandbox::update_sandbox_code};
+use crate::{
+    config::OrcaConfig,
+    error::Error,
+    events::{DbEvent, DbExt},
+    sandbox::update_sandbox_code,
+};
 
 pub struct Orca {
     k8s: kube::Client,
     db: DatabaseConnection,
     vm_namespace: String,
     image_name: String,
+    redis: MultiplexedConnection,
 }
 
 impl Orca {
-    pub async fn new(config: OrcaConfig, db: DatabaseConnection) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: OrcaConfig,
+        db: DatabaseConnection,
+        redis: MultiplexedConnection,
+    ) -> anyhow::Result<Self> {
         let k8s = kube::Client::try_default().await?;
         Ok(Self {
             db,
             k8s,
             vm_namespace: config.vm_namespace,
             image_name: config.image_name,
+            redis,
         })
     }
 
@@ -178,6 +189,13 @@ impl Orca {
             Status::Error => sandbox::Status::Error,
             Status::Running => sandbox::Status::Running,
         };
+        sandbox::ActiveModel {
+            id: Unchanged(sandbox_id),
+            status: Set(new_sandbox_state),
+            ..Default::default()
+        }
+        .update_with_event(&self.db, &mut self.redis.clone())
+        .await?;
         match (sandbox.status, new_sandbox_state) {
             (sandbox::Status::Running, sandbox::Status::Running) => {}
             (_, sandbox::Status::Running) => {

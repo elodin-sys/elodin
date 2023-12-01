@@ -677,6 +677,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "toml 0.7.8",
  "tonic",
@@ -693,6 +694,7 @@ name = "atc-entity"
 version = "0.1.0"
 dependencies = [
  "enumflags2",
+ "paracosm-types",
  "sea-orm",
  "serde",
  "serde_json",
@@ -8468,8 +8470,7 @@ dependencies = [
 [[package]]
 name = "sea-orm"
 version = "0.12.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a7b021d2dbc5d04a5d9f6a177e7d5ab36e31b3f27d20a3655ac9181366eaad4"
+source = "git+https://github.com/elodin-sys/sea-orm.git?branch=serialize-deserialize#d783f27659b530f961aa8a330126eb024d521c6b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8513,13 +8514,13 @@ dependencies = [
 [[package]]
 name = "sea-orm-macros"
 version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "816183a751bf9c22087679b20b6142da0b5c6d8981835ebb7b99bf1bf924640a"
+source = "git+https://github.com/elodin-sys/sea-orm.git?branch=serialize-deserialize#d783f27659b530f961aa8a330126eb024d521c6b"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
  "sea-bae",
+ "serde",
  "syn 2.0.39",
  "unicode-ident",
 ]
@@ -9709,6 +9710,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

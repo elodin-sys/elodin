@@ -1,2 +1,2 @@
 gen:
-    cd ../protobufs && protoc --elixir_out=plugins=grpc:../elixir/lib ./api.proto
+    cd ../protobufs && protoc --elixir_out=plugins=grpc:../elixir/lib ./*.proto

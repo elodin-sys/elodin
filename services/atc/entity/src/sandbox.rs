@@ -46,7 +46,7 @@ impl Related<super::vm::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Copy)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum Status {
     #[sea_orm(num_value = 0)]
@@ -57,4 +57,27 @@ pub enum Status {
     Error,
     #[sea_orm(num_value = 3)]
     Running,
+}
+
+impl From<Status> for paracosm_types::api::sandbox::Status {
+    fn from(val: Status) -> Self {
+        use paracosm_types::api::sandbox;
+        match val {
+            Status::Off => sandbox::Status::Off,
+            Status::VmBooting => sandbox::Status::VmBooting,
+            Status::Error => sandbox::Status::Error,
+            Status::Running => sandbox::Status::Running,
+        }
+    }
+}
+
+impl From<Model> for paracosm_types::api::Sandbox {
+    fn from(sandbox: Model) -> Self {
+        paracosm_types::api::Sandbox {
+            id: sandbox.id.as_bytes().to_vec(),
+            name: sandbox.name,
+            code: sandbox.code,
+            status: paracosm_types::api::sandbox::Status::from(sandbox.status).into(),
+        }
+    }
 }
