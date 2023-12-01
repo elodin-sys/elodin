@@ -59,7 +59,7 @@ defmodule ParacosmDashboard.MixProject do
       {:protobuf, "~> 0.10.0"},
       {:poolboy, "~> 1.5.1"},
       paracosm_types_dep(),
-      { :uuid, "~> 1.1" }
+      {:uuid, "~> 1.1"}
     ]
   end
 

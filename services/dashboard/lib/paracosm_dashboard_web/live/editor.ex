@@ -106,7 +106,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
               }
             />
           </div>
-          <EditorComponents.console logs={@sandbox.status}/>
+          <EditorComponents.console logs={@sandbox.status} />
         </div>
         <%= if @sandbox.status == :RUNNING do %>
           <EditorComponents.editor_wasm url={@url} />

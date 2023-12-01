@@ -64,6 +64,15 @@ defmodule ParacosmDashboard.AtcAgent do
     end)
   end
 
+  def list_sandboxes(pid, request, token) do
+    Agent.get(pid, fn channel ->
+      channel
+      |> Paracosm.Types.Api.Api.Stub.list_sandboxes(request = request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
+
   def sandbox_events(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
@@ -115,11 +124,12 @@ defmodule ParacosmDashboard.Atc do
     end)
   end
 
-  # def sandbox_events(request, token) do
-  #   :poolboy.transaction(:atc, fn pid ->
-  #     ParacosmDashboard.AtcAgent.sandbox_events(pid, request, token)
-  #   end)
-  # end
+  def list_sandboxes(request, token) do
+    :poolboy.transaction(:atc, fn pid ->
+      ParacosmDashboard.AtcAgent.list_sandboxes(pid, request, token)
+    end)
+  end
+
   def with_channel(closure) do
     :poolboy.transaction(:atc, fn pid ->
       ParacosmDashboard.AtcAgent.with_channel(pid, closure)
