@@ -17,7 +17,7 @@ mod sandbox;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    let config = Config::parse()?;
+    let config = Config::new()?;
     info!(?config, "config");
     let mut services = vec![];
     let db = Database::connect(config.database_url).await?;
