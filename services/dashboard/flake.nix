@@ -24,18 +24,18 @@
               autoconf = pkgs.buildPackages.autoconf269;
             };
             beam_pkgs = beam.packagesWith erlang;
+            src = ./.;
+            version = "0.0.1";
           in
             beam_pkgs.mixRelease {
+              inherit src version;
               pname = "paracosm-dashboard";
-              src = ./.;
-              version = "0.0.1";
               buildInputs = with pkgs; [nodePackages.tailwindcss];
-               mixFodDeps = beam_pkgs.fetchMixDeps {
-                 src = ./.;
-                 version = "0.0.1";
-                 pname = "mix-deps-dashboard";
-                 hash = "sha256-zr7cfHLd2HFfzocSycNvSQzBrvAHo9GlyAV5UB18fUw";
-               };
+              mixFodDeps = beam_pkgs.fetchMixDeps {
+                inherit src version;
+                pname = "mix-deps-dashboard";
+                hash = "sha256-zr7cfHLd2HFfzocSycNvSQzBrvAHo9GlyAV5UB18fUw";
+              };
               PARACOSM_TYPES_PATH = "./vendor/paracosm_types";
               preConfigure = ''
                 mkdir -p ./vendor/paracosm_types
@@ -68,8 +68,8 @@
               };
             };
           pkgs = import nixpkgs {
-            inherit system;
-          };
+              inherit system;
+            };
         in rec {
           packages = {
             dashboard = build_phoenix pkgs;

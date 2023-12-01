@@ -58,13 +58,14 @@ defmodule ParacosmDashboard.MixProject do
       {:grpc, "~> 0.7"},
       {:protobuf, "~> 0.10.0"},
       {:poolboy, "~> 1.5.1"},
-      paracosm_types_dep()
+      paracosm_types_dep(),
+      { :uuid, "~> 1.1" }
     ]
   end
 
   defp paracosm_types_dep() do
     if path = System.get_env("PARACOSM_TYPES_PATH") do
-      {:paracosm_types, path: path }
+      {:paracosm_types, path: path}
     else
       {:paracosm_types, path: "../../libs/paracosm-types/elixir"}
     end
