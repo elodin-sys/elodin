@@ -660,8 +660,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "atc-entity",
+ "atc-migration",
  "axum",
  "compact_str",
+ "config",
  "enumflags2",
  "flume",
  "futures",
@@ -679,7 +681,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.7.8",
  "tonic",
  "tonic-reflection",
  "tower",
@@ -8470,7 +8471,8 @@ dependencies = [
 [[package]]
 name = "sea-orm"
 version = "0.12.7"
-source = "git+https://github.com/elodin-sys/sea-orm.git?branch=serialize-deserialize#d783f27659b530f961aa8a330126eb024d521c6b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a7b021d2dbc5d04a5d9f6a177e7d5ab36e31b3f27d20a3655ac9181366eaad4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8514,13 +8516,13 @@ dependencies = [
 [[package]]
 name = "sea-orm-macros"
 version = "0.12.6"
-source = "git+https://github.com/elodin-sys/sea-orm.git?branch=serialize-deserialize#d783f27659b530f961aa8a330126eb024d521c6b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "816183a751bf9c22087679b20b6142da0b5c6d8981835ebb7b99bf1bf924640a"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
  "sea-bae",
- "serde",
  "syn 2.0.39",
  "unicode-ident",
 ]
@@ -9763,18 +9765,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
@@ -9801,8 +9791,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap 2.1.0",
- "serde",
- "serde_spanned",
  "toml_datetime",
  "winnow",
 ]

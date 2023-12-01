@@ -18,7 +18,6 @@ tokio-stream.features = ["sync"]
 
 # types
 paracosm-types.path = "../../libs/paracosm-types/rust"
-atc-entity.path = "./entity"
 uuid.version = "1.6.1"
 uuid.features = ["fast-rng", "v7"]
 enumflags2.version = "0.7.8"
@@ -31,8 +30,8 @@ tracing-subscriber.version = "0.3"
 tracing-subscriber.features = ["env-filter"]
 
 # config
-toml.version =  "0.7"
-toml.features = ["parse"]
+config.version = "0.13.1"
+config.features = ["toml"]
 
 # serialize
 postcard.version = "1.0"
@@ -60,6 +59,8 @@ hyper.features = ["stream"]
 # sql
 sea-orm.version = "0.12"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid" ]
+atc-entity.path = "./entity"
+atc-migration.path = "./migration"
 
 # crypto
 jsonwebtoken = "9"
