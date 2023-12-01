@@ -37,6 +37,15 @@ defmodule ParacosmDashboard.AtcAgent do
     end)
   end
 
+  def update_sandbox(pid, request, token) do
+    Agent.get(pid, fn channel ->
+      channel
+      |> Paracosm.Types.Api.Api.Stub.update_sandbox(request = request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
+
   def boot_sandbox(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
@@ -85,6 +94,12 @@ defmodule ParacosmDashboard.Atc do
   def create_sandbox(request, token) do
     :poolboy.transaction(:atc, fn pid ->
       ParacosmDashboard.AtcAgent.create_sandbox(pid, request, token)
+    end)
+  end
+
+  def update_sandbox(request, token) do
+    :poolboy.transaction(:atc, fn pid ->
+      ParacosmDashboard.AtcAgent.update_sandbox(pid, request, token)
     end)
   end
 

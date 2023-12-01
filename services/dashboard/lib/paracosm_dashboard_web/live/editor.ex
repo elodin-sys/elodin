@@ -48,7 +48,12 @@ defmodule ParacosmDashboardWeb.EditorLive do
         {:ok,
          socket
          |> assign(:url, uri)
-         |> assign(:sandbox, %{name: sandbox.name, code: sandbox.code, status: sandbox.status})}
+         |> assign(:sandbox, %{
+           id: sandbox.id,
+           name: sandbox.name,
+           code: sandbox.code,
+           status: sandbox.status
+         })}
       else
         err -> err
       end
@@ -57,7 +62,26 @@ defmodule ParacosmDashboardWeb.EditorLive do
 
   def handle_info({:update_sandbox, sandbox}, socket) do
     {:noreply,
-     socket |> assign(:sandbox, %{name: sandbox.name, code: sandbox.code, status: sandbox.status})}
+     socket
+     |> assign(:sandbox, %{
+       id: sandbox.id,
+       name: sandbox.name,
+       code: sandbox.code,
+       status: sandbox.status
+     })}
+  end
+
+  def handle_event("set_editor_value", %{"value" => value}, socket) do
+    token = socket.assigns[:current_user]["token"]
+    sandbox = socket.assigns[:sandbox]
+
+    {:ok, _} =
+      Atc.update_sandbox(
+        Api.UpdateSandboxReq.new(id: sandbox[:id], code: value, name: sandbox[:name]),
+        token
+      )
+
+    {:noreply, socket}
   end
 
   def render(assigns) do
@@ -69,6 +93,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
             <LiveMonacoEditor.code_editor
               class="code-editor"
               value={@sandbox.code}
+              change="set_editor_value"
               opts={
                 Map.merge(
                   LiveMonacoEditor.default_opts(),

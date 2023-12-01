@@ -25,6 +25,7 @@ defmodule ParacosmDashboardWeb.EditorComponents do
       id="editor-container"
       class="bg-black h-full w-1/2"
       data-ws-url={@url}
+      phx-update="ignore"
     >
       <canvas id="editor" />
     </div>
