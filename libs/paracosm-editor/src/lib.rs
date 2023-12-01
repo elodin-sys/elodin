@@ -122,7 +122,6 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
 }
 
 fn request_models<Tx: ClientTransport>(tx: NonSendMut<Tx>) {
-    info!("requesting models");
     tx.send_msg(ServerMsg::RequestModels);
 }
 

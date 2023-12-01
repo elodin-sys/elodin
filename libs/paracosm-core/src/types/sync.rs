@@ -205,7 +205,7 @@ impl From<bevy::prelude::Mesh> for MeshData {
 pub struct Uuid(pub u128);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, DerefMut, Deref, Debug)]
-pub struct Synced(pub bool);
+pub struct SyncedModel(pub bool);
 
 pub trait RecursiveReg {
     fn register(register: &mut TypeRegistry);

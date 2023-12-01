@@ -9,11 +9,12 @@ use bevy_ecs::{
     event::{EventReader, EventWriter},
     system::{Commands, NonSend, Query, Res, ResMut, Resource},
 };
+use bevy_utils::tracing::info;
 
 use crate::{
     history::{HistoryStore, RollbackEvent},
-    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels, Synced,
-    Uuid, WorldPos,
+    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels,
+    SyncedModel, Uuid, WorldPos,
 };
 use flume::{Receiver, Sender};
 
@@ -22,7 +23,7 @@ pub struct EntityMap(HashMap<Uuid, Entity>);
 
 pub fn recv_data<S: ClientTransport>(
     mut commands: Commands,
-    mut world_pos: Query<&mut WorldPos>,
+    mut world_pos: Query<(&mut WorldPos, &mut SyncedModel)>,
     mut entity_map: ResMut<EntityMap>,
     client: NonSend<S>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
@@ -37,12 +38,16 @@ pub fn recv_data<S: ClientTransport>(
             }
             ClientMsg::SyncWorldPos(msg) => {
                 if let Some(e) = entity_map.get(&msg.body_id) {
-                    if let Ok(mut world_pos) = world_pos.get_mut(*e) {
+                    if let Ok((mut world_pos, synced)) = world_pos.get_mut(*e) {
                         **world_pos = msg.pos;
+                        if !synced.0 {
+                            client.send_msg(ServerMsg::RequestModels);
+                        }
                     }
                 } else {
-                    let entity = commands.spawn(WorldPos(msg.pos)).id();
+                    let entity = commands.spawn((WorldPos(msg.pos), SyncedModel(false))).id();
                     entity_map.insert(msg.body_id, entity);
+                    client.send_msg(ServerMsg::RequestModels);
                 }
             }
             ClientMsg::ModelDataResp(ModelData::Glb { .. }) => {
@@ -69,6 +74,7 @@ pub fn recv_data<S: ClientTransport>(
                         ..Default::default()
                     },
                     WorldPos(Default::default()),
+                    SyncedModel(true),
                 ));
             }
         }

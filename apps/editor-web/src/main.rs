@@ -18,10 +18,6 @@ fn main() -> anyhow::Result<()> {
         .get_attribute("data-ws-url")
         .ok_or_else(|| anyhow!("data-ws-url required"))?;
     let transport = Transport::connect(&url)?;
-    let code_transport = transport.clone();
-    container
-        .add_event_listener_with_callback("code-update", a.as_ref().unchecked_ref())
-        .map_err(|_| anyhow!("failed to add event listener"))?;
     let mut app = App::new();
     app.add_plugins(EditorPlugin::<Transport>::new())
         .insert_non_send_resource(transport.clone());
