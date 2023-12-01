@@ -9,19 +9,24 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
   def mount(_, _, socket) do
     token = socket.assigns[:current_user]["token"]
 
-    with {:ok, sandboxes} <-
-           Atc.list_sandboxes(Api.ListSandboxesReq.new(), token) do
-      sandboxes =
-        Enum.map(sandboxes.sandboxes, fn s ->
-          %{id: UUID.binary_to_string!(s.id), name: s.name}
-        end)
+    case Atc.list_sandboxes(Api.ListSandboxesReq.new(), token) do
+      {:ok, sandboxes} ->
+        sandboxes =
+          Enum.map(sandboxes.sandboxes, fn s ->
+            %{id: UUID.binary_to_string!(s.id), name: s.name}
+          end)
 
-      {:ok,
-       socket
-       |> assign(:sandboxes, sandboxes)
-       |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))}
-    else
-      err -> IO.inspect(err)
+        {:ok,
+         socket
+         |> assign(:sandboxes, sandboxes)
+         |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))}
+
+      {:err, err} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Error creating sandbox: #{err}")
+         |> assign(:sandboxes, [])
+         |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))}
     end
   end
 
@@ -32,16 +37,17 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
   def handle_event("save", %{"name" => name}, socket) do
     token = socket.assigns[:current_user]["token"]
 
-    with {:ok, sandbox} <-
-           Atc.create_sandbox(Api.CreateSandboxReq.new(name: name), token) do
-      id = UUID.binary_to_string!(sandbox.id)
+    case Atc.create_sandbox(Api.CreateSandboxReq.new(name: name), token) do
+      {:ok, sandbox} ->
+        id = UUID.binary_to_string!(sandbox.id)
 
-      {:noreply,
-       socket
-       |> put_flash(:info, "Successfully created sandbox #{name}")
-       |> redirect(to: ~p"/sandbox/#{id}")}
-    else
-      err -> {:noreply, socket |> put_flash(:error, "Error creating sandbox: #{err}")}
+        {:noreply,
+         socket
+         |> put_flash(:info, "Successfully created sandbox #{name}")
+         |> redirect(to: ~p"/sandbox/#{id}")}
+
+      err ->
+        {:noreply, socket |> put_flash(:error, "Error creating sandbox: #{err}")}
     end
   end
 
@@ -67,16 +73,25 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
               img="/images/blue-circle-8.svg"
               path={~p"/sandbox/#{sandbox.id}"}
             />
-            <.sandbox_card name="Create New" img="/images/blue-circle-8.svg" path={~p"/sandbox/new"} phx_click={show_modal("new")}/>
+            <.sandbox_card
+              name="Create New"
+              img="/images/blue-circle-8.svg"
+              path={~p"/sandbox/new"}
+              phx_click={show_modal("new")}
+            />
           </div>
         </div>
       </div>
     </div>
 
     <.modal id="new" show={@live_action == :new} on_cancel={JS.navigate(~p"/")}>
-      <.form for={@new_form} phx-submit="save" class="flex justify-center align-center flex-col mx-elo-lg gap-elo-xl">
-        <.input name="name" label="Name" field={@new_form[:name]}/>
-        <.button class=""> New Sandbox </.button>
+      <.form
+        for={@new_form}
+        phx-submit="save"
+        class="flex justify-center align-center flex-col mx-elo-lg gap-elo-xl"
+      >
+        <.input name="name" label="Name" field={@new_form[:name]} />
+        <.button class="">New Sandbox</.button>
       </.form>
     </.modal>
     """

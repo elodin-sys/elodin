@@ -1,8 +1,6 @@
 defmodule ParacosmDashboardWeb.EditorComponents do
   use Phoenix.Component
 
-  alias Phoenix.LiveView.JS
-  import ParacosmDashboardWeb.Gettext
   import ParacosmDashboardWeb.CoreComponents
 
   def console(assigns) do

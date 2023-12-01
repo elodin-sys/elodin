@@ -13,7 +13,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def current_user(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.current_user(request = request,
+      |> Paracosm.Types.Api.Api.Stub.current_user(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -22,7 +22,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def create_user(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.create_user(request = request,
+      |> Paracosm.Types.Api.Api.Stub.create_user(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -31,7 +31,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def create_sandbox(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.create_sandbox(request = request,
+      |> Paracosm.Types.Api.Api.Stub.create_sandbox(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -40,7 +40,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def update_sandbox(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.update_sandbox(request = request,
+      |> Paracosm.Types.Api.Api.Stub.update_sandbox(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -49,7 +49,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def boot_sandbox(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.boot_sandbox(request = request,
+      |> Paracosm.Types.Api.Api.Stub.boot_sandbox(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -58,7 +58,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def get_sandbox(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.get_sandbox(request = request,
+      |> Paracosm.Types.Api.Api.Stub.get_sandbox(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -67,7 +67,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def list_sandboxes(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.list_sandboxes(request = request,
+      |> Paracosm.Types.Api.Api.Stub.list_sandboxes(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)
@@ -76,7 +76,7 @@ defmodule ParacosmDashboard.AtcAgent do
   def sandbox_events(pid, request, token) do
     Agent.get(pid, fn channel ->
       channel
-      |> Paracosm.Types.Api.Api.Stub.sandbox_events(request = request,
+      |> Paracosm.Types.Api.Api.Stub.sandbox_events(request,
         metadata: %{"Authorization" => "Bearer #{token}"}
       )
     end)

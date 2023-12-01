@@ -34,8 +34,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
           {:ok, stream} =
             channel
             |> Paracosm.Types.Api.Api.Stub.sandbox_events(
-              request =
-                Api.GetSandboxReq.new(id: uuid),
+              Api.GetSandboxReq.new(id: uuid),
               metadata: %{"Authorization" => "Bearer #{token}"}
             )
 
