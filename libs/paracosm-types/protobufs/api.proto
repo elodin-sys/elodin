@@ -26,8 +26,8 @@ message CurrentUserResp {
 }
 
 message CreateUserReq {
-    string email = 1;
-    string name = 2;
+    optional string email = 1;
+    optional string name = 2;
 }
 
 message CreateUserResp {

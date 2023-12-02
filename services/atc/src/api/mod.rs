@@ -112,6 +112,7 @@ pub struct CurrentUser {
 pub struct Claims {
     sub: String,
     name: String,
+    email: String,
 }
 
 #[async_trait]
