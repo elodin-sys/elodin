@@ -19,12 +19,13 @@ defmodule ParacosmDashboardWeb.UserAuth do
   end
 
   def get_user_by_token(token) do
-    # {:ok, user} =
-    #   assent_config()
-    #   |> Assent.Strategy.Auth0.fetch_user(%{"token_type" => "Bearer", "access_token" => token})
+    case ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
+      {:ok, user} ->
+        {:ok, %{"token" => token, "email" => user.email}}
 
-    # user
-    %{"email" => "test@test.com"}
+      {:error, err} ->
+        {:error, err}
+    end
   end
 
   def redirect_to_login(conn) do
@@ -44,7 +45,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
       |> Assent.Config.put(:session_params, %{state: state})
       |> Assent.Strategy.Auth0.callback(params)
 
-    log_in_user(conn, token["access_token"])
+    log_in_user(conn, token["id_token"])
   end
 
   @doc """
@@ -104,8 +105,6 @@ defmodule ParacosmDashboardWeb.UserAuth do
   It clears all session data for safety. See renew_session.
   """
   def log_out_user(conn) do
-    user_token = get_session(conn, :user_token)
-
     if live_socket_id = get_session(conn, :live_socket_id) do
       ParacosmDashboardWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
     end
@@ -121,9 +120,12 @@ defmodule ParacosmDashboardWeb.UserAuth do
   and remember me token.
   """
   def fetch_current_user(conn, _opts) do
-    {user_token, conn} = ensure_user_token(conn)
-    user = user_token && get_user_by_token(user_token)
-    assign(conn, :current_user, user)
+    with {user_token, conn} when not is_nil(user_token) <- ensure_user_token(conn),
+         {:ok, user} <- get_user_by_token(user_token) do
+      assign(conn, :current_user, user)
+    else
+      _ -> conn
+    end
   end
 
   defp ensure_user_token(conn) do
@@ -206,7 +208,8 @@ defmodule ParacosmDashboardWeb.UserAuth do
   defp mount_current_user(socket, session) do
     Phoenix.Component.assign_new(socket, :current_user, fn ->
       if user_token = session["user_token"] do
-        get_user_by_token(user_token)
+        {:ok, user} = get_user_by_token(user_token)
+        user
       end
     end)
   end

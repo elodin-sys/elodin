@@ -11,6 +11,11 @@ config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
   authorization_params: [scope: "openid profile email"],
   auth_method: :client_secret_post
 
+config :paracosm_dashboard, ParacosmDashboard.Atc,
+  internal_addr: "localhost:50051",
+  addr: "localhost:50051",
+  tls: false
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

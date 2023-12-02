@@ -20,7 +20,23 @@ module.exports = {
         orange: "#EF5800",
         green: "#00CA71",
         "dark-matte": "#131212",
-        "code": "#282C34"
+        "code": "#282C34",
+        "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
+        "primative-colors-white-opacity-100": "rgba(255, 255, 255, 0.1)",
+        "primative-colors-white-opacity-50": "rgba(255, 255, 255, 0.05)",
+        "primative-colors-white-opacity-900": "rgba(255, 255, 255, 1)",
+        "tokens-surface-primary": "rgba(31, 31, 31, 1)",
+        "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
+        "surface-secondary": "#1F1F1F",
+        "black-secondary": "rgba(13, 13, 13, 1)"
+      },
+      spacing: {
+        'elo-xxs': "4px",
+        'elo-lg': "16px",
+        'elo-xl': "24px",
+      },
+      borderRadius: {
+        'elo-xs': "4px"
       }
     },
   },

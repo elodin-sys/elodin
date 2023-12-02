@@ -30,6 +30,38 @@
               ];
           };
         })
+        (pkgs.rustBuilder.rustLib.makeOverride {
+          name = "ring";
+          overrideAttrs = drv: {
+            propagatedNativeBuildInputs =
+              (drv.propagatedNativeBuildInputs
+                or [])
+              ++ pkgs.lib.optional pkgs.buildPackages.hostPlatform.isDarwin [
+                pkgs.buildPackages.libiconv
+              ];
+          };
+        })
+        (pkgs.rustBuilder.rustLib.makeOverride {
+          name = "libsqlite3-sys";
+          overrideAttrs = drv: {
+            propagatedNativeBuildInputs =
+              (drv.propagatedNativeBuildInputs
+                or [])
+              ++ pkgs.lib.optional pkgs.buildPackages.hostPlatform.isDarwin [
+                pkgs.buildPackages.libiconv
+              ];
+          };
+        })
+        (pkgs.rustBuilder.rustLib.makeOverride {
+          name = "alsa-sys";
+          overrideAttrs = drv: {
+            buildInputs =
+              (drv.buildInputs
+                or [])
+              ++ [pkgs.alsa-lib];
+          };
+        })
+
       ];
   };
 }

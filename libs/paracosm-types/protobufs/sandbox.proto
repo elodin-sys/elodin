@@ -1,0 +1,20 @@
+syntax = 'proto3';
+
+package paracosm.types.sandbox;
+
+service SandboxControl {
+    rpc UpdateCode(UpdateCodeReq) returns (UpdateCodeResp);
+}
+
+message UpdateCodeReq {
+    string code = 1;
+}
+message UpdateCodeResp {
+    Status status = 1;
+    repeated string errors = 2;
+}
+
+enum Status {
+    Success = 0;
+    Error = 1;
+}

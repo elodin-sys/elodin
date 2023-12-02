@@ -9,20 +9,23 @@ use bevy::{
     },
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
-use bevy_ecs::{component::Component, system::Resource};
+use bevy_ecs::{component::Component, event::Event, system::Resource};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 
 use crate::spatial::SpatialPos;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Event)]
+pub struct SyncModels;
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMsg {
     Exit,
-    RequestModel(Uuid),
+    RequestModels,
     Rollback(usize),
     Pause(bool),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ClientMsg {
     Clear,
     SyncWorldPos(SyncWorldPos),
@@ -30,20 +33,20 @@ pub enum ClientMsg {
     SimSate(SimState),
 }
 
-#[derive(Resource, Debug, Default, Serialize, Deserialize)]
+#[derive(Resource, Debug, Default, Serialize, Deserialize, Clone)]
 pub struct SimState {
     pub paused: bool,
     pub history_count: usize,
     pub history_index: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SyncWorldPos {
     pub body_id: Uuid,
     pub pos: SpatialPos,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ModelData {
     Pbr {
         body_id: Uuid,
@@ -56,7 +59,7 @@ pub enum ModelData {
     },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MeshData {
     mesh_type: u8,
     positions: Option<Vec<[f32; 3]>>,
@@ -202,7 +205,7 @@ impl From<bevy::prelude::Mesh> for MeshData {
 pub struct Uuid(pub u128);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, DerefMut, Deref, Debug)]
-pub struct Synced(pub bool);
+pub struct SyncedModel(pub bool);
 
 pub trait RecursiveReg {
     fn register(register: &mut TypeRegistry);
@@ -219,7 +222,7 @@ impl RecursiveReg for StandardMaterial {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct ReflectSerde<T>(pub T);
 
 impl<T: Reflect + GetTypeRegistration + RecursiveReg> Serialize for ReflectSerde<T> {
