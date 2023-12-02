@@ -3,15 +3,87 @@ syntax = 'proto3';
 package paracosm.types.api;
 
 service Api {
+    // User Ops
     rpc CreateUser(CreateUserReq) returns (CreateUserResp);
+    rpc CurrentUser(CurrentUserReq) returns (CurrentUserResp);
+
+    // Sandbox Ops
+    rpc GetSandbox(GetSandboxReq) returns (Sandbox);
+    rpc ListSandboxes(ListSandboxesReq) returns (ListSandboxesResp);
+
+    rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
+    rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
+    rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
+
+    rpc SandboxEvents(GetSandboxReq) returns (stream Sandbox);
+}
+
+message CurrentUserReq {}
+message CurrentUserResp {
+    bytes id = 1;
+    string email = 2;
+    string name = 3;
 }
 
 message CreateUserReq {
     string email = 1;
     string name = 2;
-    string auth0_id = 3;
 }
 
 message CreateUserResp {
+    bytes id = 1;
+}
+
+message CreateSandboxReq {
+    string name = 1;
+    string code = 2;
+}
+
+message CreateSandboxResp {
+    bytes id = 1;
+}
+
+message UpdateSandboxReq {
+    bytes id = 1;
+    string name = 2;
+    string code = 3;
+}
+
+message UpdateSandboxResp {}
+
+message BootSandboxReq {
+    bytes id = 1;
+}
+
+message BootSandboxResp {}
+
+message Sandbox {
+    bytes id = 1;
+    string name = 2;
+    string code = 3;
+    Status status = 4;
+    enum Status {
+        OFF = 0;
+        VM_BOOTING = 1;
+        ERROR = 2;
+        RUNNING = 3;
+    }
+}
+
+message Page {
+    bytes last_id = 1;
+    uint32 count = 2;
+}
+
+message ListSandboxesReq {
+    Page page = 1;
+}
+
+message ListSandboxesResp {
+    repeated Sandbox sandboxes = 1;
+    Page next_page = 2;
+}
+
+message GetSandboxReq {
     bytes id = 1;
 }

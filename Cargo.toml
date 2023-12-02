@@ -9,6 +9,8 @@ members = [
     "libs/paracosm-types/rust",
     "libs/nox",
     "services/atc",
+    "services/atc/migration",
+    "services/atc/entity",
     "services/paracosm-web-runner"
 ]
 
@@ -17,5 +19,3 @@ inherits = "release"
 opt-level = "z"
 lto = "fat"
 codegen-units = 1
-
-

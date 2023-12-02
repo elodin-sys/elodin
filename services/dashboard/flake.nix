@@ -13,19 +13,34 @@
         system: let
           editor-web = get-flake ../../apps/editor-web;
           build_phoenix = pkgs: let
-            beam_pkgs = with pkgs; beam.packagesWith beam.interpreters.erlang;
+            beam = pkgs.beam.override {
+              wxSupport = false;
+              systemdSupport = false;
+            };
+            erlang = beam.beamLib.callErlang "${nixpkgs}/pkgs/development/interpreters/erlang/26.nix" {
+              parallelBuild = true;
+              wxSupport = false;
+              systemdSupport = false;
+              autoconf = pkgs.buildPackages.autoconf269;
+            };
+            beam_pkgs = beam.packagesWith erlang;
+            src = ./.;
+            version = "0.0.1";
           in
             beam_pkgs.mixRelease {
+              inherit src version;
               pname = "paracosm-dashboard";
-              src = ./.;
-              version = "0.0.1";
-              buildInputs = with pkgs; [nodePackages.tailwindcss ];
+              buildInputs = with pkgs; [nodePackages.tailwindcss];
               mixFodDeps = beam_pkgs.fetchMixDeps {
-                src = ./.;
-                version = "0.0.1";
+                inherit src version;
                 pname = "mix-deps-dashboard";
-                hash = "sha256-XuwikAB2K8Rx5fTKWS3VFbo9ZPJ01sk+gGtI+3QyR6Y";
+                hash = "sha256-V0XGv/2HGiI8lO7aG/nuJqQS19v1gkMb/+XCkc9hPLE";
               };
+              PARACOSM_TYPES_PATH = "./vendor/paracosm_types";
+              preConfigure = ''
+                mkdir -p ./vendor/paracosm_types
+                cp --no-preserve=mode,ownership -r ${../../libs/paracosm-types/elixir}/* ./vendor/paracosm_types
+              '';
               preBuild = ''
                 mkdir -p ./priv/static/assets/wasm
                 cp --no-preserve=mode,ownership -r ${editor-web.packages.${system}.default}/* ./priv/static/assets/wasm/
@@ -53,8 +68,8 @@
               };
             };
           pkgs = import nixpkgs {
-            inherit system;
-          };
+              inherit system;
+            };
         in rec {
           packages = {
             dashboard = build_phoenix pkgs;

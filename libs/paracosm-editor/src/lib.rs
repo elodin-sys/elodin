@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use self::ui::*;
 use bevy::{
     core_pipeline::{
@@ -22,13 +20,13 @@ use bevy_infinite_grid::{
 };
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-//use bevy_polyline::PolylinePlugin;
 use paracosm::{
     plugin::sync_pos,
     sync::{channel_pair, recv_data, ClientChannel, EntityMap},
-    SimState,
+    ServerMsg, SimState,
 };
 use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
+use std::marker::PhantomData;
 
 //pub(crate) mod traces;
 mod ui;
@@ -96,6 +94,7 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
         // .add_plugins(PolylinePlugin)
         //.add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
+        .add_systems(PostStartup, request_models::<Rx>)
         .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)
         .add_systems(Update, timeline_system::<Rx>)
@@ -120,6 +119,10 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                 .insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
+}
+
+fn request_models<Tx: ClientTransport>(tx: NonSendMut<Tx>) {
+    tx.send_msg(ServerMsg::RequestModels);
 }
 
 fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {

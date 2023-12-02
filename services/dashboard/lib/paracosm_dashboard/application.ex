@@ -17,13 +17,23 @@ defmodule ParacosmDashboard.Application do
       # Start a worker by calling: ParacosmDashboard.Worker.start_link(arg)
       # {ParacosmDashboard.Worker, arg},
       # Start to serve requests, typically the last entry
-      ParacosmDashboardWeb.Endpoint
+      ParacosmDashboardWeb.Endpoint,
+      :poolboy.child_spec(:atc, atc_poolboy_config())
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: ParacosmDashboard.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  def atc_poolboy_config() do
+    [
+      name: {:local, :atc},
+      worker_module: ParacosmDashboard.AtcAgent,
+      size: 8,
+      max_overflow: 64
+    ]
   end
 
   # Tell Phoenix to update the endpoint configuration
