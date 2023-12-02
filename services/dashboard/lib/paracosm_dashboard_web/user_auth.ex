@@ -63,6 +63,17 @@ defmodule ParacosmDashboardWeb.UserAuth do
   def log_in_user(conn, token, params \\ %{}) do
     user_return_to = get_session(conn, :user_return_to)
 
+    case get_user_by_token(token) do
+      {:error, %GRPC.RPCError{status: 5}} ->
+        ParacosmDashboard.Atc.create_user(Paracosm.Types.Api.CreateUserReq.new(), token)
+
+      {:error} ->
+        {}
+
+      {:ok, _} ->
+        {}
+    end
+
     conn
     |> renew_session()
     |> put_token_in_session(token)
