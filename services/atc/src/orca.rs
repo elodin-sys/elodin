@@ -4,7 +4,13 @@ use atc_entity::{
 };
 use futures::{stream, StreamExt};
 use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec};
-use kube::{api::PostParams, core::ObjectMeta, runtime::watcher, runtime::watcher::Event, Api};
+use kube::{
+    api::{DeleteParams, PostParams},
+    core::ObjectMeta,
+    runtime::watcher,
+    runtime::watcher::Event,
+    Api,
+};
 use redis::aio::{MultiplexedConnection, PubSub};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
 use tokio::task::JoinHandle;
@@ -14,7 +20,7 @@ use uuid::Uuid;
 use crate::{
     config::OrcaConfig,
     error::Error,
-    events::{DbEvent, DbExt},
+    events::{DbEvent, DbExt, EntityExt},
     sandbox::update_sandbox_code,
 };
 
@@ -70,8 +76,10 @@ impl Orca {
                             warn!(?err, "error handling pod update");
                         }
                     }
-                    Ok(OrcaMsg::K8sEvent(Event::Deleted(_pod))) => {
-                        // TODO(sphw): add pod manual deletion handler, this should set the VM into some sort of "failed" state
+                    Ok(OrcaMsg::K8sEvent(Event::Deleted(pod))) => {
+                        if let Err(err) = self.handle_pod_deleted(&pod).await {
+                            warn!(?err, "error handling pod deleted");
+                        }
                     }
                     Ok(OrcaMsg::K8sEvent(Event::Restarted(_pods))) => {
                         // NOTE(sphw): choosing not to handle stream restarts right now
@@ -80,6 +88,11 @@ impl Orca {
                         trace!(?vm, "vm insert event");
                         if let Err(err) = self.spawn_vm(vm.id).await {
                             error!(?err, "error spawning vm");
+                        }
+                    }
+                    Ok(OrcaMsg::DbEvent(DbEvent::Delete(vm))) => {
+                        if let Err(err) = self.handle_vm_deleted(&vm).await {
+                            warn!(?err, "error handling vm deleted");
                         }
                     }
                     Ok(OrcaMsg::DbEvent(DbEvent::Update(_vm))) => {}
@@ -207,6 +220,46 @@ impl Orca {
             }
             (_, _) => {}
         }
+        Ok(())
+    }
+
+    async fn handle_pod_deleted(&mut self, pod: &Pod) -> Result<(), Error> {
+        let Some(name) = &pod.metadata.name else {
+            return Ok(());
+        };
+        let Ok(id) = Uuid::parse_str(name) else {
+            return Ok(());
+        };
+        let model = match vm::Entity::delete_with_event(id, &self.db, &mut self.redis).await {
+            Ok(model) => model,
+            Err(Error::NotFound) | Err(Error::Db(sea_orm::DbErr::RecordNotFound(_))) => {
+                return Ok(())
+            }
+            Err(err) => return Err(err),
+        };
+        if let Some(sandbox_id) = model.sandbox_id {
+            sandbox::ActiveModel {
+                id: Unchanged(sandbox_id),
+                status: Set(sandbox::Status::Off),
+                vm_id: Set(None),
+                ..Default::default()
+            }
+            .update_with_event(&self.db, &mut self.redis)
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_vm_deleted(&mut self, vm: &vm::Model) -> Result<(), Error> {
+        let pods: Api<Pod> = kube::api::Api::namespaced(self.k8s.clone(), &self.vm_namespace);
+        pods.delete(
+            &vm.pod_name,
+            &DeleteParams {
+                grace_period_seconds: Some(0),
+                ..Default::default()
+            },
+        )
+        .await?;
         Ok(())
     }
 }
