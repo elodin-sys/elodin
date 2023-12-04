@@ -26,8 +26,8 @@ impl Api {
     ) -> Result<CreateUserResp, Error> {
         let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
-        let name = req.name.unwrap_or_else(|| claims.name);
-        let email = req.email.unwrap_or_else(|| claims.email);
+        let name = req.name.unwrap_or(claims.name);
+        let email = req.email.unwrap_or(claims.email);
         user::ActiveModel {
             id: Set(id),
             email: Set(email),
