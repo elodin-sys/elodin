@@ -45,6 +45,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sandboxes::Code).string().not_null())
                     .col(ColumnDef::new(Sandboxes::Status).integer().not_null())
                     .col(ColumnDef::new(Sandboxes::VmId).uuid())
+                    .col(ColumnDef::new(Sandboxes::LastUsed).timestamp_with_time_zone())
                     .foreign_key(
                         ForeignKey::create()
                             .from(Sandboxes::Table, Sandboxes::UserId)
@@ -67,11 +68,21 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-        // manager.foreign_key(
-        //     ForeignKey::create()
-        //         .from(Sandboxs::Table, Sandboxs::VmId)
-        //         .to(Vms::Table, Vms::Id),
-        // );
+        let mut foreign_key = ForeignKey::create();
+        foreign_key
+            .from(Sandboxes::Table, Sandboxes::VmId)
+            .to(Vms::Table, Vms::Id)
+            .on_delete(ForeignKeyAction::SetNull);
+
+        manager.create_foreign_key(foreign_key).await?;
+
+        let mut foreign_key = ForeignKey::create();
+        foreign_key
+            .from(Vms::Table, Vms::SandboxId)
+            .to(Sandboxes::Table, Sandboxes::Id)
+            .on_delete(ForeignKeyAction::SetNull);
+
+        manager.create_foreign_key(foreign_key).await?;
 
         Ok(())
     }
@@ -108,6 +119,7 @@ enum Sandboxes {
     Code,
     Status,
     VmId,
+    LastUsed,
 }
 
 #[derive(DeriveIden)]
