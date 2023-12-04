@@ -14,6 +14,8 @@ pub struct Model {
 
     pub status: Status,
     pub vm_id: Option<Uuid>,
+
+    pub last_used: ChronoDateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

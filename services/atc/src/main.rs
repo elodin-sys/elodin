@@ -5,7 +5,7 @@ use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use tracing::info;
 
-use crate::{events::EventMonitor, orca::Orca};
+use crate::{events::EventMonitor, orca::Orca, sandbox::garbage_collect};
 
 mod api;
 mod config;
@@ -45,6 +45,13 @@ async fn main() -> anyhow::Result<()> {
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let api = Api::new(api_config, db.clone(), redis, sandbox_events).await?;
         services.push(tokio::spawn(api.run()));
+    }
+
+    if let Some(gc) = config.garbage_collect {
+        if gc.enabled {
+            let redis = redis.get_multiplexed_tokio_connection().await?;
+            services.push(tokio::spawn(garbage_collect(db, redis, gc.timeout)));
+        }
     }
 
     let (res, _, _) = future::select_all(services.into_iter()).await;

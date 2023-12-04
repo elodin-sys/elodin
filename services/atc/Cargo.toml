@@ -38,6 +38,7 @@ postcard.version = "1.0"
 postcard.features = ["alloc"]
 serde.version = "1.0"
 serde.features = ["derive"]
+serde_with = "3.4.0"
 
 # errors
 anyhow = "1"
@@ -75,3 +76,6 @@ k8s-openapi = { version = "0.20.0", features = ["latest"] }
 # queue
 redis.version = "0.23"
 redis.features = ["tokio-comp", "streams", "r2d2"]
+
+# time
+chrono = "0.4"

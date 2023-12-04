@@ -4,6 +4,7 @@ use futures::StreamExt;
 use redis::{aio::PubSub, AsyncCommands};
 use sea_orm::{
     ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
+    PrimaryKeyTrait,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::broadcast, task::JoinHandle};
@@ -68,10 +69,46 @@ where
     }
 }
 
+#[async_trait]
+pub trait EntityExt: EntityTrait {
+    async fn delete_with_event(
+        id: <Self::PrimaryKey as PrimaryKeyTrait>::ValueType,
+        db: &impl ConnectionTrait,
+        redis: &mut redis::aio::MultiplexedConnection,
+    ) -> Result<Self::Model, Error>;
+}
+
+#[async_trait]
+impl<M: EntityTrait> EntityExt for M
+where
+    <Self::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone,
+    Self::Model: Serialize + EventModel,
+{
+    async fn delete_with_event(
+        id: <Self::PrimaryKey as PrimaryKeyTrait>::ValueType,
+        db: &impl ConnectionTrait,
+        redis: &mut redis::aio::MultiplexedConnection,
+    ) -> Result<Self::Model, Error> {
+        let topic_name = Self::Model::topic_name();
+        let Some(model) = Self::find_by_id(id.clone()).one(db).await? else {
+            return Err(Error::NotFound);
+        };
+        Self::delete_by_id(id).exec(db).await?;
+        let event = DbEvent::Delete(model);
+        let buf = postcard::to_allocvec(&event)?;
+        redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
+        let DbEvent::Delete(model) = event else {
+            unreachable!()
+        };
+        Ok(model)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEvent<M> {
     Insert(M),
     Update(M),
+    Delete(M),
 }
 
 impl<M> DbEvent<M> {
@@ -79,6 +116,7 @@ impl<M> DbEvent<M> {
         match self {
             DbEvent::Insert(m) => m,
             DbEvent::Update(m) => m,
+            DbEvent::Delete(m) => m,
         }
     }
 }
