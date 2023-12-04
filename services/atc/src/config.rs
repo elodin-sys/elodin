@@ -1,6 +1,7 @@
 use config::{ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use serde_with::serde_as;
+use std::{net::SocketAddr, time::Duration};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
@@ -9,6 +10,7 @@ pub struct Config {
     pub database_url: String,
     pub redis_url: String,
     pub migrate: bool,
+    pub garbage_collect: Option<GarbageCollect>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -27,6 +29,19 @@ pub struct Auth0Config {
 pub struct OrcaConfig {
     pub vm_namespace: String,
     pub image_name: String,
+}
+
+#[serde_as]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GarbageCollect {
+    pub enabled: bool,
+    #[serde(default = "default_gc_timeout")]
+    #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
+    pub timeout: Duration,
+}
+
+fn default_gc_timeout() -> Duration {
+    Duration::from_secs(5 * 60)
 }
 
 impl Config {

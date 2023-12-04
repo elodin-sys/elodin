@@ -9,6 +9,7 @@ use axum::{
     extract::{ws, Path, Query, State, WebSocketUpgrade},
     response::IntoResponse,
 };
+use chrono::Utc;
 use enumflags2::BitFlag;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use paracosm_types::api::{
@@ -124,6 +125,7 @@ impl Api {
             code: Set(req.code),
             status: Set(sandbox::Status::Off),
             vm_id: Set(None),
+            last_used: ActiveValue::Set(Utc::now()),
         }
         .insert_with_event(txn, &mut redis)
         .await?;
@@ -159,6 +161,7 @@ impl Api {
             id: Unchanged(id),
             name: Set(req.name),
             code: Set(req.code),
+            last_used: ActiveValue::Set(Utc::now()),
             ..Default::default()
         }
         .update_with_event(txn, &mut redis)
@@ -192,6 +195,13 @@ impl Api {
             return Err(Error::NotFound);
         };
         if sandbox.vm_id.is_some() {
+            sandbox::ActiveModel {
+                id: Unchanged(id),
+                last_used: ActiveValue::Set(Utc::now()),
+                ..Default::default()
+            }
+            .update_with_event(&self.db, &mut redis)
+            .await?;
             return Ok(BootSandboxResp {});
         }
         let vm_id = Uuid::now_v7();
@@ -207,6 +217,7 @@ impl Api {
         sandbox::ActiveModel {
             id: Unchanged(id),
             vm_id: Set(Some(vm_id)),
+            last_used: ActiveValue::Set(Utc::now()),
             ..Default::default()
         }
         .update_with_event(&self.db, &mut redis)

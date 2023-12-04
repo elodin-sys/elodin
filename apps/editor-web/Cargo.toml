@@ -9,7 +9,6 @@ edition = "2021"
 paracosm.path = "../../libs/paracosm-core"
 paracosm-editor.path = "../../libs/paracosm-editor"
 ewebsock.version = "0.4"
-ewebsock.features = ["tokio"]
 bevy.version = "0.12"
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]

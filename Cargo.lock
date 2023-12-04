@@ -662,6 +662,7 @@ dependencies = [
  "atc-entity",
  "atc-migration",
  "axum",
+ "chrono",
  "compact_str",
  "config",
  "enumflags2",
@@ -677,6 +678,7 @@ dependencies = [
  "reqwest",
  "sea-orm",
  "serde",
+ "serde_with",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -694,6 +696,7 @@ dependencies = [
 name = "atc-entity"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "enumflags2",
  "paracosm-types",
  "sea-orm",
@@ -3555,14 +3558,9 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7340666282406cb008c4d7206e6d7e157a82486afddd26deaad3ce9ebff3f238"
 dependencies = [
- "async-stream",
  "document-features",
- "futures",
- "futures-util",
  "js-sys",
  "log",
- "tokio",
- "tokio-tungstenite 0.20.1",
  "tungstenite 0.20.1",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4661,6 +4659,7 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
+ "serde",
 ]
 
 [[package]]
@@ -4671,6 +4670,7 @@ checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
+ "serde",
 ]
 
 [[package]]
@@ -8764,6 +8764,35 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_with"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64cd236ccc1b7a29e7e2739f27c0b2dd199804abc4290e32f59f3b68d6405c23"
+dependencies = [
+ "base64 0.21.5",
+ "chrono",
+ "hex",
+ "indexmap 1.9.3",
+ "indexmap 2.1.0",
+ "serde",
+ "serde_json",
+ "serde_with_macros",
+ "time",
+]
+
+[[package]]
+name = "serde_with_macros"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93634eb5f75a2323b16de4748022ac4297f9e76b6dced2be287a099f41b5e788"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.39",
 ]
 
 [[package]]
