@@ -37,11 +37,11 @@ scp YOUR_SSH_PUBLIC_KEY USERNAME@VM_IP:~/.ssh/authorized_keys
 ```
 replace `USERNAME` with your username
 11. Now re-run `sudo nixos-rebuild switch`
-12. Next add the following line to /etc/nix/machines
+12. Next add the following line to /etc/nix/machines in macOS
 ```
-ssh://USERNAME@IP x86_64-linux,aarch64-linux PUBLIC_KEY_PATH 20 20 nixos-test,benchmark,big-parallel,kvm - -
+ssh://USERNAME@IP x86_64-linux,aarch64-linux PRIVATE_KEY_PATH 20 20 nixos-test,benchmark,big-parallel,kvm - -
 ```
 Replace `USERNAME` with your username, `IP` with your ip address, and `PUBLIC_KEY_PATH` with the path to your public key.
 13. Last but not least, you need to ssh into your VM as the root user. You can do this with `sudo ssh USERNAME@IP`. This is just to enusre that
 it is a known-host
-14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'`
+14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'` in macOS

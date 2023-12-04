@@ -1,10 +1,4 @@
-# (ATC) Air Traffic Control
-
-ATC manages everything to do with running distributed simulations. It is responsible for spinning up containers, managing telemetry, managing permissions, and everything else.
-
-# Usage
-
-You can run ATC by running `cargo run`. There is an [example config file](./config.toml) in this directory
+# Elodin Web Runner
 
 ## Build Docker Image
 
