@@ -7,6 +7,24 @@ use std::{cell::RefCell, rc::Rc};
 use tracing::error;
 
 fn main() -> anyhow::Result<()> {
+    let url = get_url()?;
+    let transport = Transport::connect(&url)?;
+    let mut app = App::new();
+    app.add_plugins(EditorPlugin::<Transport>::new())
+        .insert_non_send_resource(transport.clone());
+    app.run();
+    Ok(())
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn get_url() -> anyhow::Result<String> {
+    use std::env;
+    let args: Vec<String> = env::args().collect();
+    Ok(args.into_iter().next().unwrap())
+}
+
+#[cfg(target_family = "wasm")]
+fn get_url() -> anyhow::Result<String> {
     let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
     let document = window
         .document()
@@ -16,13 +34,9 @@ fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("missing editor container div"))?;
     let url = container
         .get_attribute("data-ws-url")
-        .ok_or_else(|| anyhow!("data-ws-url required"))?;
-    let transport = Transport::connect(&url)?;
-    let mut app = App::new();
-    app.add_plugins(EditorPlugin::<Transport>::new())
-        .insert_non_send_resource(transport.clone());
-    app.run();
-    Ok(())
+        .ok_or_else(|| anyhow!("data-ws-url required"))?
+        .to_string();
+    Ok(url)
 }
 
 #[derive(Clone)]
