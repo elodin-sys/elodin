@@ -67,7 +67,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
       {:error, %GRPC.RPCError{status: 5}} ->
         ParacosmDashboard.Atc.create_user(Paracosm.Types.Api.CreateUserReq.new(), token)
 
-      {:error} ->
+      {:error, _} ->
         {}
 
       {:ok, _} ->
