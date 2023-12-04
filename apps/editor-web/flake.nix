@@ -29,14 +29,18 @@
             cargoExtraArgs = "--package=editor-web";
             CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
           };
-          cargoArtifacts = craneLibWasm.buildDepsOnly args // {
-            buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.libiconv
-            ];
-          };
-          wasm = craneLibWasm.buildPackage args // {
-            inherit cargoArtifacts;
-          };
+          cargoArtifacts =
+            craneLibWasm.buildDepsOnly args
+            // {
+              buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+                pkgs.libiconv
+              ];
+            };
+          wasm =
+            craneLibWasm.buildPackage args
+            // {
+              inherit cargoArtifacts;
+            };
           bundle = pkgs.runCommand "editor-web-bundle" {} ''
             ${pkgs.wasm-bindgen-cli}/bin/wasm-bindgen --out-dir $out --target web ${wasm}/bin/editor-web.wasm
           '';
