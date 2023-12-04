@@ -23,8 +23,8 @@
           build_docker = {
             bin,
             pkgs,
-          }:
-            pkgs.dockerTools.buildLayeredImage {
+          }: let
+            attrs = {
               name = "atc";
               contents = with pkgs; [cacert busybox];
               config = {
@@ -32,6 +32,10 @@
                 Cmd = ["${bin.bin}/bin/atc"];
               };
             };
+          in {
+            image = pkgs.dockerTools.buildLayeredImage attrs;
+            stream = pkgs.dockerTools.buildLayeredImage attrs;
+          };
           pkgs = import nixpkgs {
             inherit system;
             overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
@@ -59,18 +63,21 @@
             atc.default = build_rust pkgs;
             atc.aarch64 = build_rust aarch64_pkgs;
             atc.x86_64 = build_rust x86_64_pkgs;
-            docker.default = build_docker {
-              inherit pkgs;
-              bin = packages.atc.default;
-            };
-            docker.aarch64 = build_docker {
-              pkgs = aarch64_pkgs;
-              bin = packages.atc.aarch64;
-            };
-            docker.x86_64 = build_docker {
-              pkgs = x86_64_pkgs;
-              bin = packages.atc.x86_64;
-            };
+            docker =
+              build_docker {
+                inherit pkgs;
+                bin = packages.atc.default;
+              }
+              // {
+                aarch64 = build_docker {
+                  pkgs = aarch64_pkgs;
+                  bin = packages.atc.aarch64;
+                };
+                x86_64 = build_docker {
+                  pkgs = x86_64_pkgs;
+                  bin = packages.atc.x86_64;
+                };
+              };
           };
         }
       );
