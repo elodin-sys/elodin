@@ -29,6 +29,7 @@ pub struct Auth0Config {
 pub struct OrcaConfig {
     pub vm_namespace: String,
     pub image_name: String,
+    pub runtime_class: Option<String>,
 }
 
 #[serde_as]

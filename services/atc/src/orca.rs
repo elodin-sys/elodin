@@ -30,6 +30,7 @@ pub struct Orca {
     vm_namespace: String,
     image_name: String,
     redis: MultiplexedConnection,
+    runtime_class: Option<String>,
 }
 
 impl Orca {
@@ -45,6 +46,7 @@ impl Orca {
             vm_namespace: config.vm_namespace,
             image_name: config.image_name,
             redis,
+            runtime_class: config.runtime_class,
         })
     }
 
@@ -114,6 +116,7 @@ impl Orca {
                         ..Default::default()
                     },
                     spec: Some(PodSpec {
+                        runtime_class_name: self.runtime_class.clone(),
                         containers: vec![Container {
                             name: "payload".to_string(),
                             image: Some(self.image_name.clone()),
