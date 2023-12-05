@@ -82,13 +82,15 @@ impl Api {
                 auth_context: self.auth_context.clone(),
                 db: self.db.clone(),
             });
-
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter.set_serving::<ApiServer<Api>>().await;
         let svc = ApiServer::new(self);
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(paracosm_types::FILE_DESCRIPTOR_SET)
             .build()?;
 
         let grpc = Server::builder()
+            .add_service(health_service)
             .add_service(svc)
             .add_service(reflection)
             .into_service();
