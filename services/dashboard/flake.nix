@@ -58,8 +58,8 @@
           build_docker = {
             bin,
             pkgs,
-          }:
-            pkgs.dockerTools.buildLayeredImage {
+          }: let
+            attrs = {
               name = "dashboard";
               contents = with pkgs; [cacert busybox];
               config = {
@@ -67,9 +67,13 @@
                 Cmd = ["${bin}/bin/server"];
               };
             };
+          in {
+            image = pkgs.dockerTools.buildLayeredImage attrs;
+            stream = pkgs.dockerTools.streamLayeredImage attrs;
+          };
           pkgs = import nixpkgs {
-              inherit system;
-            };
+            inherit system;
+          };
         in rec {
           packages = {
             dashboard = build_phoenix pkgs;

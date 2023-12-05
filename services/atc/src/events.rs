@@ -81,7 +81,7 @@ pub trait EntityExt: EntityTrait {
 #[async_trait]
 impl<M: EntityTrait> EntityExt for M
 where
-    <Self::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone,
+    <Self::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone + Send + Sync,
     Self::Model: Serialize + EventModel,
 {
     async fn delete_with_event(
