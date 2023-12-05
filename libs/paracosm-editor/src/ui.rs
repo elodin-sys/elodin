@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{
-        self, epaint::Shadow, style::WidgetVisuals, Color32, FontData, FontDefinitions, FontFamily,
-        Margin, Rounding, Stroke, Ui,
-    },
+    egui::{self, epaint::Shadow, style::WidgetVisuals, Color32, Margin, Rounding, Stroke, Ui},
     EguiContexts,
 };
 use nalgebra::Vector3;
@@ -60,7 +57,7 @@ fn set_theme(context: &mut egui::Context) {
     //     .unwrap()
     //     .insert(0, "berkeley".to_owned());
 
-    context.set_fonts(fonts);
+    //context.set_fonts(fonts);
 
     context.set_style(style)
 }
