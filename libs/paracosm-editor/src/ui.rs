@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{
-        self, epaint::Shadow, style::WidgetVisuals, Color32, FontData, FontDefinitions, FontFamily,
-        Margin, Rounding, Stroke, Ui,
-    },
+    egui::{self, epaint::Shadow, style::WidgetVisuals, Color32, Margin, Rounding, Stroke, Ui},
     EguiContexts,
 };
 use nalgebra::Vector3;
@@ -42,25 +39,25 @@ fn set_theme(context: &mut egui::Context) {
 
     style.spacing.window_margin = Margin::symmetric(10., 10.);
 
-    let mut fonts = FontDefinitions::default();
-    fonts.font_data.insert(
-        "berkeley".to_owned(),
-        FontData::from_static(include_bytes!("../assets/BerkeleyMono-Regular.ttf")),
-    );
+    // let mut fonts = FontDefinitions::default();
+    // fonts.font_data.insert(
+    //     "berkeley".to_owned(),
+    //     FontData::from_static(include_bytes!("../assets/BerkeleyMono-Regular.ttf")),
+    // );
 
-    fonts
-        .families
-        .get_mut(&FontFamily::Proportional)
-        .unwrap()
-        .insert(0, "berkeley".to_owned());
+    // fonts
+    //     .families
+    //     .get_mut(&FontFamily::Proportional)
+    //     .unwrap()
+    //     .insert(0, "berkeley".to_owned());
 
-    fonts
-        .families
-        .get_mut(&FontFamily::Monospace)
-        .unwrap()
-        .insert(0, "berkeley".to_owned());
+    // fonts
+    //     .families
+    //     .get_mut(&FontFamily::Monospace)
+    //     .unwrap()
+    //     .insert(0, "berkeley".to_owned());
 
-    context.set_fonts(fonts);
+    //context.set_fonts(fonts);
 
     context.set_style(style)
 }
