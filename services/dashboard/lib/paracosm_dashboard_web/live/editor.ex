@@ -4,6 +4,8 @@ defmodule ParacosmDashboardWeb.EditorLive do
   alias Paracosm.Types.Api
   alias ParacosmDashboard.Atc
   import ParacosmDashboardWeb.CoreComponents
+  import ParacosmDashboardWeb.NavbarComponents
+  import ParacosmDashboardWeb.IconComponents
 
   def mount(%{"id" => id}, _, socket) do
     token = socket.assigns[:current_user]["token"]
@@ -85,35 +87,47 @@ defmodule ParacosmDashboardWeb.EditorLive do
 
   def render(assigns) do
     ~H"""
-    <div class="flex flex-col h-full">
-      <div class="flex w-full h-full">
-        <div class="w-1/2 h-full">
-          <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
-            <LiveMonacoEditor.code_editor
-              class="code-editor"
-              value={@sandbox.code}
-              change="set_editor_value"
-              opts={
-                Map.merge(
-                  LiveMonacoEditor.default_opts(),
-                  %{
-                    "language" => "python",
-                    "minimap" => %{"enabled" => false},
-                    "automaticLayout" => true
-                  }
-                )
-              }
-            />
+    <.navbar_layout current_user={@current_user}>
+      <:navbar_left>
+        <.link patch={~p"/"}>
+          <.arrow_left class="mr-elo-m" />
+        </.link>
+        <span class="font-semibold">
+          Sandbox - <%= @sandbox.name %>
+        </span>
+      </:navbar_left>
+      <div class="flex flex-col h-full">
+        <div class="flex w-full h-full">
+          <div class="w-1/2 h-full">
+            <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
+              <LiveMonacoEditor.code_editor
+                class="code-editor"
+                value={@sandbox.code}
+                change="set_editor_value"
+                opts={
+                  Map.merge(
+                    LiveMonacoEditor.default_opts(),
+                    %{
+                      "language" => "python",
+                      "minimap" => %{"enabled" => false},
+                      "automaticLayout" => true
+                    }
+                  )
+                }
+              />
+            </div>
+            <EditorComponents.console logs={@sandbox.status} />
           </div>
-          <EditorComponents.console logs={@sandbox.status} />
+          <%= if @sandbox.status == :RUNNING do %>
+            <EditorComponents.editor_wasm url={@url} />
+          <% else %>
+            <div class="w-1/2 h-full flex justify-center items-center">
+              <.spinner class="animate-spin w-16 h-16" />
+            </div>
+          <% end %>
         </div>
-        <%= if @sandbox.status == :RUNNING do %>
-          <EditorComponents.editor_wasm url={@url} />
-        <% else %>
-          Loading
-        <% end %>
       </div>
-    </div>
+    </.navbar_layout>
     """
   end
 end

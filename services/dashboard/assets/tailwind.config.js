@@ -14,6 +14,8 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        "hyper-blue": "#1E43E2",
+        "hyper-blue-dim": "#1736b5",
         blue: "#1E43E2",
         "light-blue": "#8EA1F1",
         tan: "#F3E5C5",
@@ -32,11 +34,17 @@ module.exports = {
       },
       spacing: {
         'elo-xxs': "4px",
+        'elo-m': "8px",
         'elo-lg': "16px",
         'elo-xl': "24px",
       },
       borderRadius: {
-        'elo-xs': "4px"
+        'elo-xs': "4px",
+        'elo-sm': "8px",
+        'elo-md': "12px"
+      },
+      fontFamily: {
+        'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"]
       }
     },
   },

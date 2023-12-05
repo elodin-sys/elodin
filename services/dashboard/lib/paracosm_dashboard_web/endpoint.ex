@@ -20,7 +20,7 @@ defmodule ParacosmDashboardWeb.Endpoint do
   plug(Plug.Static,
     at: "/",
     from: :paracosm_dashboard,
-    gzip: false,
+    gzip: Mix.env() == :prod,
     only: ParacosmDashboardWeb.static_paths()
   )
 

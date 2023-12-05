@@ -19,22 +19,7 @@
   </head>
   <body class="bg-white antialiased">
     <div class="h-full w-full flex-col">
-      <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-14 bg-surface-secondary text-white shrink-0 fixed">
-        <li class="mr-auto"></li>
-        <li style="position: absolute; left: calc(50% - 25px/2);">
-          <img src="/images/o-logo.svg" class="w-5" />
-        </li>
-        <li class="text-[0.8125rem] ml-auto">
-          <%= if @current_user do %>
-            <%= @current_user["email"] %>
-          <% else %>
-            Log In
-          <% end %>
-        </li>
-      </ul>
-      <div class="h-full pt-[56px]">
-        <%= @inner_content %>
-      </div>
+      <%= @inner_content %>
     </div>
   </body>
 </html>
