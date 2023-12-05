@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use bevy::prelude::App;
+use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use paracosm::sync::ClientTransport;
 use paracosm_editor::EditorPlugin;
@@ -11,9 +11,36 @@ fn main() -> anyhow::Result<()> {
     let transport = Transport::connect(&url)?;
     let mut app = App::new();
     app.add_plugins(EditorPlugin::<Transport>::new())
+        .add_systems(PostStartup, hide_loader.pipe(handle_error))
         .insert_non_send_resource(transport.clone());
     app.run();
     Ok(())
+}
+
+fn hide_loader() -> anyhow::Result<()> {
+    let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| anyhow!("document missing"))?;
+    let spinner = document
+        .get_element_by_id("editor-spinner")
+        .ok_or_else(|| anyhow!("missing editor spinner div"))?;
+    let canvas = document
+        .get_element_by_id("editor")
+        .ok_or_else(|| anyhow!("missing editor canvas div"))?;
+    spinner
+        .set_attribute("style", "display: none;")
+        .map_err(|e| anyhow!("set attr err {:?}", e))?;
+    canvas
+        .set_attribute("style", "display: block;")
+        .map_err(|e| anyhow!("set attr err {:?}", e))?;
+    Ok(())
+}
+
+fn handle_error(In(result): In<anyhow::Result<()>>) {
+    if let Err(err) = result {
+        error!(?err, "anyhow error")
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]
