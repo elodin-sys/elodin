@@ -98,7 +98,7 @@
                   pkgs = aarch64_pkgs;
                   bin = packages.elo-web-runner.aarch64;
                 };
-                docker.x86_64 = build_docker {
+                x86_64 = build_docker {
                   pkgs = x86_64_pkgs;
                   bin = packages.elo-web-runner.x86_64;
                 };
