@@ -47,6 +47,8 @@ thiserror = "1.0"
 # grpc
 tonic = "0.10"
 tonic-reflection = "0.10.2"
+tonic-health = "0.10"
+
 
 # http
 axum.version = "0.6.20"
