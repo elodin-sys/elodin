@@ -72,7 +72,7 @@ impl thingbuf::recycling::Recycle<Msg> for MsgRecycle {
     fn new_element(&self) -> Msg {
         Msg {
             msg_type: MsgType::None,
-            buf: Vec::with_capacity(256),
+            buf: Vec::with_capacity(512),
         }
     }
 
@@ -116,7 +116,9 @@ pub(crate) fn ws_connect_impl(
             // Handle difference Text/Binary,...
             if let Ok(abuf) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let array = js_sys::Uint8Array::new(&abuf);
-                let mut send_ref = tx.send_ref().unwrap();
+                let Ok(mut send_ref) = tx.try_send_ref() else {
+                    return;
+                };
                 let len = array.length() as usize;
                 send_ref.buf.resize(len, 0);
                 send_ref.msg_type = MsgType::Buf;
