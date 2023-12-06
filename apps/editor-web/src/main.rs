@@ -1,10 +1,12 @@
 use anyhow::anyhow;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
-use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use paracosm::sync::ClientTransport;
 use paracosm_editor::EditorPlugin;
 use std::{cell::RefCell, rc::Rc};
 use tracing::error;
+use web_sock::{MsgType, WsReceiver, WsSender};
+
+mod web_sock;
 
 fn main() -> anyhow::Result<()> {
     let url = get_url()?;
@@ -74,7 +76,7 @@ struct Transport {
 
 impl Transport {
     fn connect(url: &str) -> anyhow::Result<Self> {
-        let (tx, rx) = ewebsock::connect(url).map_err(|err| anyhow!("websocket err: {}", err))?;
+        let (tx, rx) = web_sock::connect(url).map_err(|err| anyhow!("websocket err: {}", err))?;
         let tx = Rc::new(RefCell::new(tx));
         let rx = Rc::new(rx);
         Ok(Transport { tx, rx })
@@ -83,11 +85,11 @@ impl Transport {
 
 impl ClientTransport for Transport {
     fn try_recv_msg(&self) -> Option<paracosm::ClientMsg> {
-        let event = self.rx.try_recv()?;
-        let WsEvent::Message(WsMessage::Binary(buf)) = event else {
+        let event = self.rx.try_recv_ref().ok()?;
+        if event.msg_type != MsgType::Buf {
             return None;
-        };
-        let Ok(msg) = postcard::from_bytes(&buf) else {
+        }
+        let Ok(msg) = postcard::from_bytes(&event.buf) else {
             error!("error deserializing buf");
             return None;
         };
@@ -100,6 +102,6 @@ impl ClientTransport for Transport {
             return;
         };
         let mut tx = self.tx.borrow_mut();
-        tx.send(WsMessage::Binary(buf));
+        tx.send(buf);
     }
 }
