@@ -56,7 +56,7 @@ defmodule ParacosmDashboard.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:live_monaco_editor, "~> 0.1.7"},
       {:grpc, "~> 0.7"},
-      {:protobuf, "~> 0.10.0"},
+      {:protobuf, "~> 0.12.0"},
       {:poolboy, "~> 1.5.1"},
       paracosm_types_dep(),
       {:uuid, "~> 1.1"}

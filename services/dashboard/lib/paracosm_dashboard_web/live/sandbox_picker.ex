@@ -89,10 +89,11 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
     </.navbar_layout>
 
     <.modal id="new" show={@live_action == :new} on_cancel={JS.navigate(~p"/")}>
+      <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">New Sandbox</h2>
       <.form
         for={@new_form}
         phx-submit="save"
-        class="flex justify-center align-center flex-col mx-elo-lg gap-elo-xl"
+        class="flex justify-center align-center flex-col gap-elo-xl mt-elo-xl"
       >
         <.input name="name" label="Name" field={@new_form[:name]} />
         <.button class="">New Sandbox</.button>
