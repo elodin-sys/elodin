@@ -46,25 +46,37 @@ defmodule ParacosmDashboardWeb.EditorLive do
           end)
         end)
 
+        id_string = UUID.binary_to_string!(sandbox.id)
+
         {:ok,
          socket
          |> assign(:url, uri)
          |> assign(:sandbox, %{
+           id_string: id_string,
            id: sandbox.id,
            name: sandbox.name,
            code: sandbox.code,
            status: sandbox.status
-         })}
+         })
+         |> assign(
+           :share_form,
+           to_form(%{"link" => "https://elodin.dev/sandbox/#{id_string}"})
+         )}
       else
         err -> err
       end
     end
   end
 
+  def handle_params(_, _, socket) do
+    {:noreply, socket}
+  end
+
   def handle_info({:update_sandbox, sandbox}, socket) do
     {:noreply,
      socket
      |> assign(:sandbox, %{
+       id_string: UUID.binary_to_string!(sandbox.id),
        id: sandbox.id,
        name: sandbox.name,
        code: sandbox.code,
@@ -96,6 +108,14 @@ defmodule ParacosmDashboardWeb.EditorLive do
           Sandbox - <%= @sandbox.name %>
         </span>
       </:navbar_left>
+      <:navbar_right>
+        <.link patch={~p"/sandbox/#{@sandbox.id_string}/share"} phx-click={show_modal("share")}>
+          <.button type="outline" class="mr-1.5">
+          Share
+          </.button>
+        </.link>
+      </:navbar_right>
+
       <div class="flex flex-col h-full">
         <div class="flex w-full h-full">
           <div class="w-1/2 h-full">
@@ -128,6 +148,19 @@ defmodule ParacosmDashboardWeb.EditorLive do
         </div>
       </div>
     </.navbar_layout>
+
+
+    <.modal id="share" show={@live_action == :share} on_cancel={JS.patch(~p"/sandbox/#{@sandbox.id_string}")}>
+      <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">Share</h2>
+      <.form
+        for={@share_form}
+        phx-submit="save"
+        class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl"
+      >
+        <.input name="link" field={@share_form[:link]}/>
+        <.button class="h-[36px] mt-2 ">Copy Link</.button>
+      </.form>
+    </.modal>
     """
   end
 end

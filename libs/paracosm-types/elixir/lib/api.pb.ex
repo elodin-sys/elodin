@@ -23,6 +23,7 @@ defmodule Paracosm.Types.Api.CurrentUserResp do
   field :id, 1, type: :bytes
   field :email, 2, type: :string
   field :name, 3, type: :string
+  field :avatar, 4, type: :string
 end
 
 defmodule Paracosm.Types.Api.CreateUserReq do
@@ -30,8 +31,8 @@ defmodule Paracosm.Types.Api.CreateUserReq do
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
-  field :email, 1, type: :string
-  field :name, 2, type: :string
+  field :email, 1, proto3_optional: true, type: :string
+  field :name, 2, proto3_optional: true, type: :string
 end
 
 defmodule Paracosm.Types.Api.CreateUserResp do

@@ -18,4 +18,14 @@ defmodule ParacosmDashboardWeb.IconComponents do
     <img src="/images/spinner.svg" class={["w-[24px] height-[24px]", @class]} {@rest} />
     """
   end
+
+  attr(:class, :string, default: "")
+
+  attr(:rest, :global)
+
+  def x(assigns) do
+    ~H"""
+    <img src="/images/x.svg" class={["w-[24px] height-[24px]", @class]} {@rest} />
+    """
+  end
 end

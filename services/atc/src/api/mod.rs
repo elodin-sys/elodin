@@ -78,6 +78,7 @@ impl Api {
 
         let rest = axum::Router::new()
             .route("/sim/ws/:id", get(sim_socket))
+            .route("/healthz", get(healthz))
             .with_state(WSContext {
                 auth_context: self.auth_context.clone(),
                 db: self.db.clone(),
@@ -115,6 +116,7 @@ pub struct Claims {
     sub: String,
     name: String,
     email: String,
+    picture: String,
 }
 
 #[async_trait]
@@ -176,4 +178,8 @@ impl api_server::Api for Api {
     ) -> Result<Response<Self::SandboxEventsStream>, Status> {
         current_user_route!(self, req, Self::sandbox_events)
     }
+}
+
+async fn healthz() -> impl axum::response::IntoResponse {
+    "OK"
 }

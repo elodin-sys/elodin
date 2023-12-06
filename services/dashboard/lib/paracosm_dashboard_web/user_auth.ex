@@ -21,7 +21,8 @@ defmodule ParacosmDashboardWeb.UserAuth do
   def get_user_by_token(token) do
     case ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
       {:ok, user} ->
-        {:ok, %{"token" => token, "email" => user.email}}
+        {:ok,
+         %{"token" => token, "name" => user.name, "email" => user.email, "avatar" => user.avatar}}
 
       {:error, err} ->
         {:error, err}

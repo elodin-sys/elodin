@@ -23,6 +23,7 @@ message CurrentUserResp {
     bytes id = 1;
     string email = 2;
     string name = 3;
+    string avatar = 4;
 }
 
 message CreateUserReq {

@@ -30,11 +30,17 @@ module.exports = {
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
         "surface-secondary": "#1F1F1F",
-        "black-secondary": "rgba(13, 13, 13, 1)"
+        "surface-secondary-opacity-500": "rgba(31, 31, 31, 0.9)",
+        "black-secondary": "rgba(13, 13, 13, 1)",
+        "white-opacity": {
+          "300": "rgba(255, 255, 255, 0.3)",
+          "200": "rgba(255, 255, 255, 0.2)"
+        },
       },
       spacing: {
         'elo-xxs': "4px",
         'elo-m': "8px",
+        'elo-md': "12px",
         'elo-lg': "16px",
         'elo-xl': "24px",
       },
