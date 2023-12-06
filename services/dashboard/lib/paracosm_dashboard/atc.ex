@@ -14,40 +14,38 @@ defmodule ParacosmDashboard.AtcAgent do
     Agent.get_and_update(
       pid,
       fn channel ->
-        channel =
-          if is_nil(channel) do
-            addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
+        if is_nil(channel) do
+          addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
 
-            case GRPC.Stub.connect(addr, adapter_opts: [retry_timeout: 4]) do
-              {:ok, channel} ->
-                case closure.(channel) do
-                  {:ok, res} ->
-                    {{:ok, res}, channel}
+          case GRPC.Stub.connect(addr, adapter_opts: [retry_timeout: 4]) do
+            {:ok, channel} ->
+              case closure.(channel) do
+                {:ok, res} ->
+                  {{:ok, res}, channel}
 
-                  {:error,
-                   err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
-                    {{:error, err}, nil}
+                {:error,
+                 err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
+                  {{:error, err}, nil}
 
-                  {:error, err} ->
-                    {{:err, err}, channel}
-                end
+                {:error, err} ->
+                  {{:err, err}, channel}
+              end
 
-              {:error, err} ->
-                {{:error, err}, nil}
-            end
-          else
-            case closure.(channel) do
-              {:ok, res} ->
-                {{:ok, res}, channel}
-
-              {:error,
-               err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
-                {{:error, err}, nil}
-
-              {:error, err} ->
-                {{:error, err}, channel}
-            end
+            {:error, err} ->
+              {{:error, err}, nil}
           end
+        else
+          case closure.(channel) do
+            {:ok, res} ->
+              {{:ok, res}, channel}
+
+            {:error, err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
+              {{:error, err}, nil}
+
+            {:error, err} ->
+              {{:error, err}, channel}
+          end
+        end
       end,
       20_000
     )

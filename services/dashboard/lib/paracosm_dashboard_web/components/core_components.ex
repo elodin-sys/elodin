@@ -645,7 +645,7 @@ defmodule ParacosmDashboardWeb.CoreComponents do
   end
 
   def toggle(js \\ %JS{}, selector) do
-    JS.toggle(
+    JS.toggle(js,
       to: selector,
       in:
         {"transition-all transform ease-out duration-300",
