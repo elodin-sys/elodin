@@ -5,6 +5,8 @@ use bevy::{
         experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
         tonemapping::Tonemapping,
     },
+    diagnostic::DiagnosticsPlugin,
+    log::LogPlugin,
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
@@ -78,6 +80,8 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                     }),
                     ..default()
                 })
+                .disable::<LogPlugin>()
+                .disable::<DiagnosticsPlugin>()
                 .build(),
         )
         .insert_resource(EntityMap::default())
