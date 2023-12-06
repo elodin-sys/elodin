@@ -79,7 +79,7 @@ defmodule ParacosmDashboardWeb.CoreComponents do
                   class="-m-3 flex-none p-3 hover:opacity-40"
                   aria-label={gettext("close")}
                 >
-                  <ParacosmDashboardWeb.IconComponents.x/>
+                  <ParacosmDashboardWeb.IconComponents.x />
                 </button>
               </div>
               <div id={"#{@id}-content"}>
