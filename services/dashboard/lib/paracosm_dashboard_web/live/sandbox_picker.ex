@@ -10,7 +10,7 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
   def mount(_, _, socket) do
     token = socket.assigns[:current_user]["token"]
 
-    case Atc.list_sandboxes(Api.ListSandboxesReq.new(), token) do
+    case Atc.list_sandboxes(struct(Api.ListSandboxesReq), token) do
       {:ok, sandboxes} ->
         sandboxes =
           Enum.map(sandboxes.sandboxes, fn s ->
@@ -38,7 +38,7 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
   def handle_event("save", %{"name" => name}, socket) do
     token = socket.assigns[:current_user]["token"]
 
-    case Atc.create_sandbox(Api.CreateSandboxReq.new(name: name), token) do
+    case Atc.create_sandbox(%Api.CreateSandboxReq{name: name}, token) do
       {:ok, sandbox} ->
         id = UUID.binary_to_string!(sandbox.id)
 

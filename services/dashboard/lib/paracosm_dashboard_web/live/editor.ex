@@ -23,8 +23,8 @@ defmodule ParacosmDashboardWeb.EditorLive do
       {:ok, socket}
     else
       with {:ok, sandbox} <-
-             Atc.get_sandbox(Api.GetSandboxReq.new(id: uuid), token),
-           {:ok, _} <- Atc.boot_sandbox(Api.BootSandboxReq.new(id: uuid), token) do
+             Atc.get_sandbox(%Api.GetSandboxReq{id: uuid}, token),
+           {:ok, _} <- Atc.boot_sandbox(%Api.BootSandboxReq{id: uuid}, token) do
         pid = self()
 
         Task.start(fn ->
@@ -36,7 +36,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
           {:ok, stream} =
             channel
             |> Paracosm.Types.Api.Api.Stub.sandbox_events(
-              Api.GetSandboxReq.new(id: uuid),
+              %Api.GetSandboxReq{id: uuid},
               metadata: %{"Authorization" => "Bearer #{token}"}
             )
 
@@ -87,7 +87,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
 
     {:ok, _} =
       Atc.update_sandbox(
-        Api.UpdateSandboxReq.new(id: sandbox[:id], code: value, name: sandbox[:name]),
+        %Api.UpdateSandboxReq{id: sandbox[:id], code: value, name: sandbox[:name]},
         token
       )
 

@@ -19,7 +19,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
   end
 
   def get_user_by_token(token) do
-    case ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
+    case ParacosmDashboard.Atc.current_user(struct(Paracosm.Types.Api.CurrentUserReq), token) do
       {:ok, user} ->
         {:ok,
          %{"token" => token, "name" => user.name, "email" => user.email, "avatar" => user.avatar}}
@@ -66,7 +66,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
 
     case get_user_by_token(token) do
       {:error, %GRPC.RPCError{status: 5}} ->
-        ParacosmDashboard.Atc.create_user(Paracosm.Types.Api.CreateUserReq.new(), token)
+        ParacosmDashboard.Atc.create_user(struct(Paracosm.Types.Api.CreateUserReq), token)
 
       {:error, _} ->
         {}

@@ -34,7 +34,7 @@
               mixFodDeps = beam_pkgs.fetchMixDeps {
                 inherit src version;
                 pname = "mix-deps-dashboard";
-                hash = "sha256-V0XGv/2HGiI8lO7aG/nuJqQS19v1gkMb/+XCkc9hPLE";
+                hash = "sha256-zbBWPq87tEaGYghVUlST3OpzEozHN5v2SHvRTKCfww8=";
               };
               PARACOSM_TYPES_PATH = "./vendor/paracosm_types";
               preConfigure = ''
