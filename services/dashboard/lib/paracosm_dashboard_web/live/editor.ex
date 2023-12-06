@@ -58,10 +58,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
            code: sandbox.code,
            status: sandbox.status
          })
-         |> assign(
-           :share_form,
-           to_form(%{"link" => "https://elodin.dev/sandbox/#{id_string}"})
-         )}
+         |> assign(:share_link, "https://elodin.dev/sandbox/#{id_string}")}
       else
         err -> err
       end
@@ -111,7 +108,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
       <:navbar_right>
         <.link patch={~p"/sandbox/#{@sandbox.id_string}/share"} phx-click={show_modal("share")}>
           <.button type="outline" class="mr-1.5">
-          Share
+            Share
           </.button>
         </.link>
       </:navbar_right>
@@ -149,17 +146,18 @@ defmodule ParacosmDashboardWeb.EditorLive do
       </div>
     </.navbar_layout>
 
-
-    <.modal id="share" show={@live_action == :share} on_cancel={JS.patch(~p"/sandbox/#{@sandbox.id_string}")}>
+    <.modal
+      id="share"
+      show={@live_action == :share}
+      on_cancel={JS.patch(~p"/sandbox/#{@sandbox.id_string}")}
+    >
       <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">Share</h2>
-      <.form
-        for={@share_form}
-        phx-submit="save"
-        class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl"
-      >
-        <.input name="link" field={@share_form[:link]}/>
-        <.button class="h-[36px] mt-2 ">Copy Link</.button>
-      </.form>
+      <div class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl">
+        <.input name="share-link" id="share-link" value={@share_link} />
+        <.button class="h-[36px] mt-2" phx-click={JS.dispatch("phx:copy", to: "\#share-link")}>
+          Copy Link
+        </.button>
+      </div>
     </.modal>
     """
   end
