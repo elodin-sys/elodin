@@ -21,10 +21,6 @@ config :logger, level: :info
 # of environment variables, is done on config/runtime.exs.
 
 config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
-  client_id: "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR",
-  client_secret: "Rx5d-nJWafMuEcmSRXiUtlCjArTBtPMsjU588CDjq3RjFe1fTSVng2dWmjnyWHBw",
-  redirect_uri: "http://localhost:4000/oauth/callback",
-  site: "https://dev-i2ytsp68gngieek3.us.auth0.com",
   authorize_url: "/authorize",
   token_url: "/oauth/token",
   user_url: "/userinfo",
