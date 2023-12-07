@@ -1,8 +1,8 @@
 defmodule ParacosmDashboardWeb.EditorLive do
   use ParacosmDashboardWeb, :live_view
-  alias ParacosmDashboardWeb.EditorComponents
   alias Paracosm.Types.Api
   alias ParacosmDashboard.Atc
+  alias ParacosmDashboardWeb.EditorComponents
   import ParacosmDashboardWeb.CoreComponents
   import ParacosmDashboardWeb.NavbarComponents
   import ParacosmDashboardWeb.IconComponents
@@ -25,28 +25,9 @@ defmodule ParacosmDashboardWeb.EditorLive do
       with {:ok, sandbox} <-
              Atc.get_sandbox(%Api.GetSandboxReq{id: uuid}, token),
            {:ok, _} <- Atc.boot_sandbox(%Api.BootSandboxReq{id: uuid}, token) do
-        pid = self()
-
-        Task.start(fn ->
-          addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
-
-          {:ok, channel} =
-            GRPC.Stub.connect(addr)
-
-          {:ok, stream} =
-            channel
-            |> Paracosm.Types.Api.Api.Stub.sandbox_events(
-              %Api.GetSandboxReq{id: uuid},
-              metadata: %{"Authorization" => "Bearer #{token}"}
-            )
-
-          Enum.each(stream, fn event ->
-            {:ok, sandbox} = event
-            send(pid, {:update_sandbox, sandbox})
-          end)
-        end)
-
         id_string = UUID.binary_to_string!(sandbox.id)
+
+        spawn_sandbox_task(self(), token, uuid)
 
         {:ok,
          socket
@@ -63,6 +44,27 @@ defmodule ParacosmDashboardWeb.EditorLive do
         err -> err
       end
     end
+  end
+
+  defp spawn_sandbox_task(pid, token, uuid) do
+    Task.start(fn ->
+      addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
+
+      {:ok, channel} =
+        GRPC.Stub.connect(addr)
+
+      {:ok, stream} =
+        channel
+        |> Paracosm.Types.Api.Api.Stub.sandbox_events(
+          %Api.GetSandboxReq{id: uuid},
+          metadata: %{"Authorization" => "Bearer #{token}"}
+        )
+
+      Enum.each(stream, fn event ->
+        {:ok, sandbox} = event
+        send(pid, {:update_sandbox, sandbox})
+      end)
+    end)
   end
 
   def handle_params(_, _, socket) do

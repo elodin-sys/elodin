@@ -14,41 +14,35 @@ defmodule ParacosmDashboard.AtcAgent do
     Agent.get_and_update(
       pid,
       fn channel ->
-        if is_nil(channel) do
-          addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
-
-          case GRPC.Stub.connect(addr, adapter_opts: [retry_timeout: 4]) do
-            {:ok, channel} ->
-              case closure.(channel) do
-                {:ok, res} ->
-                  {{:ok, res}, channel}
-
-                {:error,
-                 err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
-                  {{:error, err}, nil}
-
-                {:error, err} ->
-                  {{:err, err}, channel}
-              end
-
-            {:error, err} ->
-              {{:error, err}, nil}
-          end
-        else
-          case closure.(channel) do
-            {:ok, res} ->
-              {{:ok, res}, channel}
-
-            {:error, err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
-              {{:error, err}, nil}
-
-            {:error, err} ->
-              {{:error, err}, channel}
-          end
-        end
+        channel |> call_closure(closure)
       end,
       20_000
     )
+  end
+
+  defp call_closure(channel, closure) when channel == nil do
+    addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
+
+    case GRPC.Stub.connect(addr, adapter_opts: [retry_timeout: 4]) do
+      {:ok, channel} ->
+        call_closure(channel, closure)
+
+      {:error, err} ->
+        {{:error, err}, nil}
+    end
+  end
+
+  defp call_closure(channel, closure) when channel != nil do
+    case closure.(channel) do
+      {:ok, res} ->
+        {{:ok, res}, channel}
+
+      {:error, err = %GRPC.RPCError{status: 4, message: "timeout when waiting for server"}} ->
+        {{:error, err}, nil}
+
+      {:error, err} ->
+        {{:err, err}, channel}
+    end
   end
 
   def current_user(pid, request, token) do

@@ -42,9 +42,15 @@ if config_env() == :prod do
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
-  auth_client_id = System.get_env("AUTH_CLIENT_ID") || raise("environment variable AUTH_CLIENT_ID is missing.")
-  auth_client_secret = System.get_env("AUTH_CLIENT_SECRET") || raise("environment variable AUTH_CLIENT_SECRET is missing.")
-  auth_base_url = System.get_env("AUTH_BASE_URL") || raise("environment variable AUTH_BASE_URL is missing.")
+  auth_client_id =
+    System.get_env("AUTH_CLIENT_ID") || raise("environment variable AUTH_CLIENT_ID is missing.")
+
+  auth_client_secret =
+    System.get_env("AUTH_CLIENT_SECRET") ||
+      raise("environment variable AUTH_CLIENT_SECRET is missing.")
+
+  auth_base_url =
+    System.get_env("AUTH_BASE_URL") || raise("environment variable AUTH_BASE_URL is missing.")
 
   config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
     client_id: auth_client_id,
