@@ -22,7 +22,7 @@ defmodule ParacosmDashboardWeb.SandboxPickerLive do
          |> assign(:sandboxes, sandboxes)
          |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))}
 
-      {:err, err} ->
+      {:error, err} ->
         {:ok,
          socket
          |> put_flash(:error, "Error creating sandbox: #{err}")

@@ -41,7 +41,7 @@ defmodule ParacosmDashboard.AtcAgent do
         {{:error, err}, nil}
 
       {:error, err} ->
-        {{:err, err}, channel}
+        {{:error, err}, channel}
     end
   end
 
