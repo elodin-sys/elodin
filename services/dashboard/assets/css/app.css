@@ -37,3 +37,24 @@ html, body, [data-phx-main], main {
   --tokens-surface-primary: var(--primative-colors-black-black-800);
   --tokens-surface-secondary: var(--primative-colors-black-black-600);
 }
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  src: url(/fonts/IBMPlexSans-Regular.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  src: url(/fonts/IBMPlexSans-Bold.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  src: url(/fonts/IBMPlexSans-SemiBold.ttf);
+}

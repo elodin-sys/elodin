@@ -22,7 +22,7 @@ defmodule ParacosmTypes.MixProject do
   defp deps do
     [
       {:grpc, "~> 0.7"},
-      {:protobuf, "~> 0.10.0"}
+      {:protobuf, "~> 0.12.0"}
     ]
   end
 end

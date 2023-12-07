@@ -1,8 +1,9 @@
 defmodule ParacosmDashboardWeb.UserAuth do
   use ParacosmDashboardWeb, :verified_routes
-
   import Plug.Conn
   import Phoenix.Controller
+
+  alias Assent.Strategy.Auth0
 
   # Make the remember me cookie valid for 60 days.
   # If you want bump or reduce this value, also change
@@ -11,7 +12,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
   @remember_me_cookie "_paracosm_dashboard_web_user_remember_me"
   @remember_me_options [sign: true, max_age: @max_age, same_site: "Lax"]
 
-  def assent_config() do
+  def assent_config do
     Keyword.merge(
       Application.get_env(:paracosm_dashboard, ParacosmDashboardWeb.UserAuth),
       http_adapter: {Assent.HTTPAdapter.Finch, [supervisor: ParacosmDashboard.Finch]}
@@ -19,9 +20,10 @@ defmodule ParacosmDashboardWeb.UserAuth do
   end
 
   def get_user_by_token(token) do
-    case ParacosmDashboard.Atc.current_user(Paracosm.Types.Api.CurrentUserReq.new(), token) do
+    case ParacosmDashboard.Atc.current_user(struct(Paracosm.Types.Api.CurrentUserReq), token) do
       {:ok, user} ->
-        {:ok, %{"token" => token, "email" => user.email}}
+        {:ok,
+         %{"token" => token, "name" => user.name, "email" => user.email, "avatar" => user.avatar}}
 
       {:error, err} ->
         {:error, err}
@@ -30,7 +32,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
 
   def redirect_to_login(conn) do
     {:ok, %{url: url, session_params: session_params}} =
-      assent_config() |> Assent.Strategy.Auth0.authorize_url()
+      assent_config() |> Auth0.authorize_url()
 
     conn
     |> put_session(:session_params, session_params[:state])
@@ -43,7 +45,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
     {:ok, %{token: token}} =
       assent_config()
       |> Assent.Config.put(:session_params, %{state: state})
-      |> Assent.Strategy.Auth0.callback(params)
+      |> Auth0.callback(params)
 
     log_in_user(conn, token["id_token"])
   end
@@ -65,7 +67,7 @@ defmodule ParacosmDashboardWeb.UserAuth do
 
     case get_user_by_token(token) do
       {:error, %GRPC.RPCError{status: 5}} ->
-        ParacosmDashboard.Atc.create_user(Paracosm.Types.Api.CreateUserReq.new(), token)
+        ParacosmDashboard.Atc.create_user(struct(Paracosm.Types.Api.CreateUserReq), token)
 
       {:error, _} ->
         {}

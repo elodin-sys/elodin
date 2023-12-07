@@ -4,8 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title suffix=" · Phoenix Framework">
-      <%= assigns[:page_title] || "Paracosm Dashboard" %>
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#000000" />
+
+    <.live_title>
+      <%= assigns[:page_title] || "Elodin" %>
     </.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
@@ -13,22 +19,7 @@
   </head>
   <body class="bg-white antialiased">
     <div class="h-full w-full flex-col">
-      <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-14 bg-surface-secondary text-white shrink-0 fixed">
-        <li class="mr-auto"></li>
-        <li style="position: absolute; left: calc(50% - 25px/2);">
-          <img src="/images/o-logo.svg" class="w-5" />
-        </li>
-        <li class="text-[0.8125rem] ml-auto">
-          <%= if @current_user do %>
-            <%= @current_user["email"] %>
-          <% else %>
-            Log In
-          <% end %>
-        </li>
-      </ul>
-      <div class="h-full pt-[56px]">
-        <%= @inner_content %>
-      </div>
+      <%= @inner_content %>
     </div>
   </body>
 </html>

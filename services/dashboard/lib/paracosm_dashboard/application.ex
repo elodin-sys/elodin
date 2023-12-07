@@ -27,7 +27,7 @@ defmodule ParacosmDashboard.Application do
     Supervisor.start_link(children, opts)
   end
 
-  def atc_poolboy_config() do
+  def atc_poolboy_config do
     [
       name: {:local, :atc},
       worker_module: ParacosmDashboard.AtcAgent,
