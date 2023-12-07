@@ -64,6 +64,7 @@ defmodule ParacosmDashboardWeb.Router do
       on_mount: [{ParacosmDashboardWeb.UserAuth, :ensure_authenticated}] do
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
+      live("/sandbox/:id/share", EditorLive, :share)
       live("/sandbox/:id", EditorLive, :edit)
     end
   end
@@ -72,6 +73,6 @@ defmodule ParacosmDashboardWeb.Router do
     pipe_through([:browser])
 
     get("/users/log_in", UserSessionController, :log_in)
-    delete("/users/log_out", UserSessionController, :delete)
+    get("/users/log_out", UserSessionController, :delete)
   end
 end

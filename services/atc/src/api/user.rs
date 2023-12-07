@@ -16,6 +16,7 @@ impl Api {
             id: user.id.as_bytes().to_vec(),
             email: user.email,
             name: user.name,
+            avatar: claims.picture,
         })
     }
 

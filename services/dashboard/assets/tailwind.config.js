@@ -14,6 +14,8 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        "hyper-blue": "#1E43E2",
+        "hyper-blue-dim": "#1736b5",
         blue: "#1E43E2",
         "light-blue": "#8EA1F1",
         tan: "#F3E5C5",
@@ -28,15 +30,27 @@ module.exports = {
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
         "surface-secondary": "#1F1F1F",
-        "black-secondary": "rgba(13, 13, 13, 1)"
+        "surface-secondary-opacity-500": "rgba(31, 31, 31, 0.9)",
+        "black-secondary": "rgba(13, 13, 13, 1)",
+        "white-opacity": {
+          "300": "rgba(255, 255, 255, 0.3)",
+          "200": "rgba(255, 255, 255, 0.2)"
+        },
       },
       spacing: {
         'elo-xxs': "4px",
+        'elo-m': "8px",
+        'elo-md': "12px",
         'elo-lg': "16px",
         'elo-xl': "24px",
       },
       borderRadius: {
-        'elo-xs': "4px"
+        'elo-xs': "4px",
+        'elo-sm': "8px",
+        'elo-md': "12px"
+      },
+      fontFamily: {
+        'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"]
       }
     },
   },

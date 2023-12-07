@@ -1,9 +1,11 @@
 defmodule ParacosmDashboardWeb.EditorLive do
   use ParacosmDashboardWeb, :live_view
-  alias ParacosmDashboardWeb.EditorComponents
   alias Paracosm.Types.Api
   alias ParacosmDashboard.Atc
+  alias ParacosmDashboardWeb.EditorComponents
   import ParacosmDashboardWeb.CoreComponents
+  import ParacosmDashboardWeb.NavbarComponents
+  import ParacosmDashboardWeb.IconComponents
 
   def mount(%{"id" => id}, _, socket) do
     token = socket.assigns[:current_user]["token"]
@@ -21,48 +23,59 @@ defmodule ParacosmDashboardWeb.EditorLive do
       {:ok, socket}
     else
       with {:ok, sandbox} <-
-             Atc.get_sandbox(Api.GetSandboxReq.new(id: uuid), token),
-           {:ok, _} <- Atc.boot_sandbox(Api.BootSandboxReq.new(id: uuid), token) do
-        pid = self()
+             Atc.get_sandbox(%Api.GetSandboxReq{id: uuid}, token),
+           {:ok, _} <- Atc.boot_sandbox(%Api.BootSandboxReq{id: uuid}, token) do
+        id_string = UUID.binary_to_string!(sandbox.id)
 
-        Task.start(fn ->
-          addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
-
-          {:ok, channel} =
-            GRPC.Stub.connect(addr)
-
-          {:ok, stream} =
-            channel
-            |> Paracosm.Types.Api.Api.Stub.sandbox_events(
-              Api.GetSandboxReq.new(id: uuid),
-              metadata: %{"Authorization" => "Bearer #{token}"}
-            )
-
-          Enum.each(stream, fn event ->
-            {:ok, sandbox} = event
-            send(pid, {:update_sandbox, sandbox})
-          end)
-        end)
+        spawn_sandbox_task(self(), token, uuid)
 
         {:ok,
          socket
          |> assign(:url, uri)
          |> assign(:sandbox, %{
+           id_string: id_string,
            id: sandbox.id,
            name: sandbox.name,
            code: sandbox.code,
            status: sandbox.status
-         })}
+         })
+         |> assign(:share_link, "https://elodin.dev/sandbox/#{id_string}")}
       else
         err -> err
       end
     end
   end
 
+  defp spawn_sandbox_task(pid, token, uuid) do
+    Task.start(fn ->
+      addr = Application.get_env(:paracosm_dashboard, ParacosmDashboard.Atc)[:internal_addr]
+
+      {:ok, channel} =
+        GRPC.Stub.connect(addr)
+
+      {:ok, stream} =
+        channel
+        |> Paracosm.Types.Api.Api.Stub.sandbox_events(
+          %Api.GetSandboxReq{id: uuid},
+          metadata: %{"Authorization" => "Bearer #{token}"}
+        )
+
+      Enum.each(stream, fn event ->
+        {:ok, sandbox} = event
+        send(pid, {:update_sandbox, sandbox})
+      end)
+    end)
+  end
+
+  def handle_params(_, _, socket) do
+    {:noreply, socket}
+  end
+
   def handle_info({:update_sandbox, sandbox}, socket) do
     {:noreply,
      socket
      |> assign(:sandbox, %{
+       id_string: UUID.binary_to_string!(sandbox.id),
        id: sandbox.id,
        name: sandbox.name,
        code: sandbox.code,
@@ -76,7 +89,7 @@ defmodule ParacosmDashboardWeb.EditorLive do
 
     {:ok, _} =
       Atc.update_sandbox(
-        Api.UpdateSandboxReq.new(id: sandbox[:id], code: value, name: sandbox[:name]),
+        %Api.UpdateSandboxReq{id: sandbox[:id], code: value, name: sandbox[:name]},
         token
       )
 
@@ -85,35 +98,69 @@ defmodule ParacosmDashboardWeb.EditorLive do
 
   def render(assigns) do
     ~H"""
-    <div class="flex flex-col h-full">
-      <div class="flex w-full h-full">
-        <div class="w-1/2 h-full">
-          <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
-            <LiveMonacoEditor.code_editor
-              class="code-editor"
-              value={@sandbox.code}
-              change="set_editor_value"
-              opts={
-                Map.merge(
-                  LiveMonacoEditor.default_opts(),
-                  %{
-                    "language" => "python",
-                    "minimap" => %{"enabled" => false},
-                    "automaticLayout" => true
-                  }
-                )
-              }
-            />
+    <.navbar_layout current_user={@current_user}>
+      <:navbar_left>
+        <.link patch={~p"/"}>
+          <.arrow_left class="mr-elo-m" />
+        </.link>
+        <span class="font-semibold">
+          Sandbox - <%= @sandbox.name %>
+        </span>
+      </:navbar_left>
+      <:navbar_right>
+        <.link patch={~p"/sandbox/#{@sandbox.id_string}/share"} phx-click={show_modal("share")}>
+          <.button type="outline" class="mr-1.5">
+            Share
+          </.button>
+        </.link>
+      </:navbar_right>
+
+      <div class="flex flex-col h-full">
+        <div class="flex w-full h-full">
+          <div class="w-1/2 h-full">
+            <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
+              <LiveMonacoEditor.code_editor
+                class="code-editor"
+                value={@sandbox.code}
+                change="set_editor_value"
+                opts={
+                  Map.merge(
+                    LiveMonacoEditor.default_opts(),
+                    %{
+                      "language" => "python",
+                      "minimap" => %{"enabled" => false},
+                      "automaticLayout" => true
+                    }
+                  )
+                }
+              />
+            </div>
+            <EditorComponents.console logs={@sandbox.status} />
           </div>
-          <EditorComponents.console logs={@sandbox.status} />
+          <%= if @sandbox.status == :RUNNING do %>
+            <EditorComponents.editor_wasm url={@url} />
+          <% else %>
+            <div class="w-1/2 h-full flex justify-center items-center">
+              <.spinner class="animate-spin w-16 h-16" />
+            </div>
+          <% end %>
         </div>
-        <%= if @sandbox.status == :RUNNING do %>
-          <EditorComponents.editor_wasm url={@url} />
-        <% else %>
-          Loading
-        <% end %>
       </div>
-    </div>
+    </.navbar_layout>
+
+    <.modal
+      id="share"
+      show={@live_action == :share}
+      on_cancel={JS.patch(~p"/sandbox/#{@sandbox.id_string}")}
+    >
+      <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">Share</h2>
+      <div class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl">
+        <.input name="share-link" id="share-link" value={@share_link} />
+        <.button class="h-[36px] mt-2" phx-click={JS.dispatch("phx:copy", to: "\#share-link")}>
+          Copy Link
+        </.button>
+      </div>
+    </.modal>
     """
   end
 end
