@@ -11,7 +11,8 @@ members = [
     "services/atc",
     "services/atc/migration",
     "services/atc/entity",
-    "services/paracosm-web-runner"
+    "services/paracosm-web-runner",
+    "tools/starlark-json"
 ]
 
 [profile.wasm-release]

@@ -1,0 +1,11 @@
+[package]
+name = "starlark-json"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+starlark = "0.10"
+clap.version = "4.4"
+clap.features = ["derive"]
