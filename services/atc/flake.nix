@@ -16,7 +16,7 @@
             rustPkgs = pkgs.rustBuilder.makePackageSet {
               rustVersion = "1.73.0";
               packageFun = import ../../Cargo.nix;
-              packageOverrides = paracosm.packages.rust-overrides;
+              packageOverrides = paracosm.${system}.packages.rust-overrides;
             };
           in
             (rustPkgs.workspace.atc {}).bin;
