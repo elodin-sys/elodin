@@ -6,7 +6,15 @@ use starlark::syntax::{AstModule, Dialect};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let content = std::fs::read_to_string(&args.path)?;
-    let ast = AstModule::parse(args.path.to_str().unwrap(), content, &Dialect::Extended)?;
+    let ast = AstModule::parse(
+        args.path.to_str().unwrap(),
+        content,
+        &Dialect {
+            enable_f_strings: true,
+            ..Dialect::Extended
+        },
+    )?;
+
     let globals = Globals::standard();
     let module = Module::new();
     let mut eval = Evaluator::new(&module);
