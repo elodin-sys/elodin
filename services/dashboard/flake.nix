@@ -60,7 +60,8 @@
             pkgs,
           }: let
             attrs = {
-              name = "dashboard";
+              name = "elo-dashboard";
+              tag = "latest";
               contents = with pkgs; [cacert busybox];
               config = {
                 Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];

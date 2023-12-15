@@ -46,7 +46,8 @@
             pkgs,
           }: let
             args = {
-              name = "elo-web-runner";
+              name = "elo-sim-runner";
+              tag = "latest";
               contents = with pkgs; [
                 cacert
                 busybox
