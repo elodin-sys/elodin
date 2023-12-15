@@ -1,9 +1,8 @@
-# -*- python -*-
-# vi: ft=python
+import json
 
-################################################################################
-# plugins
-################################################################################
+"""
+plugins
+"""
 
 def rust_cache_plugin():
   return {
@@ -25,9 +24,9 @@ def gcp_identity_plugin():
     }
   }
 
-################################################################################
-# steps
-################################################################################
+"""
+steps
+"""
 
 def step(label, command, env = {}, plugins = [], skip = False):
   return {
@@ -80,7 +79,7 @@ def group(name, steps = []):
   return {"group": name, "steps": steps}
 
 def pipeline(steps = [], env = {}):
-  return {"steps": steps, "env": env}
+  return print(json.dumps({"steps": steps, "env": env}))
 
 
 pipeline(steps = [
