@@ -1,6 +1,8 @@
 use std::{iter, marker::PhantomData};
 
-use crate::{parser::varint_max, Component, ComponentValue, EntityId, Error};
+use crate::{
+    parser::varint_max, Component, ComponentData, ComponentFilter, ComponentValue, EntityId, Error,
+};
 
 pub struct Builder<B> {
     buf: B,
@@ -16,6 +18,35 @@ impl<B: Extend> Builder<B> {
     pub fn new(mut buf: B, time: u64) -> Result<Self, Error> {
         buf.extend_from_slice(&time.to_le_bytes())?;
         Ok(Builder { buf })
+    }
+
+    pub fn append_data(&mut self, data: ComponentData<'_>) -> Result<&mut Self, Error> {
+        let Some((_, comp)) = data.storage.first() else {
+            return Ok(self);
+        };
+        let ty = comp.ty();
+        let id = data.component_id;
+        let entity_iter = data.storage.iter().map(|(id, _)| id);
+        let value_iter = data.storage.iter().map(|(_, val)| val);
+
+        self.buf.extend_from_slice(&id.0.to_le_bytes())?;
+        self.buf.extend_from_slice(&[ty.into()])?;
+        let entity_len = entity_iter.len();
+        if entity_len != value_iter.len() {
+            return Err(Error::EntityComponentLengthMismatch);
+        }
+        let mut arr = [0; varint_max::<usize>()];
+        self.buf
+            .extend_from_slice(encode_varint_usize(entity_len, &mut arr))?;
+
+        for e in entity_iter {
+            self.buf.extend_from_slice(&e.0.to_le_bytes())?;
+        }
+
+        for value in value_iter {
+            value.encode(&mut self.buf)?;
+        }
+        Ok(self)
     }
 
     pub fn append_builder<
@@ -146,25 +177,25 @@ impl<'l> ComponentValue<'l> {
                 Ok(())
             }
             ComponentValue::QuaternionF32(v) => {
-                for f in v.vector().into_iter() {
+                for f in v.as_vector().into_iter() {
                     out.extend_from_slice(&f.to_le_bytes())?;
                 }
                 Ok(())
             }
             ComponentValue::QuaternionF64(v) => {
-                for f in v.vector().into_iter() {
+                for f in v.as_vector().into_iter() {
                     out.extend_from_slice(&f.to_le_bytes())?;
                 }
                 Ok(())
             }
             ComponentValue::SpatialPosF32((q, v)) => {
-                for f in q.vector().into_iter().chain(v.into_iter()) {
+                for f in q.as_vector().into_iter().chain(v.into_iter()) {
                     out.extend_from_slice(&f.to_le_bytes())?;
                 }
                 Ok(())
             }
             ComponentValue::SpatialPosF64((q, v)) => {
-                for f in q.vector().into_iter().chain(v.into_iter()) {
+                for f in q.as_vector().into_iter().chain(v.into_iter()) {
                     out.extend_from_slice(&f.to_le_bytes())?;
                 }
                 Ok(())
@@ -179,6 +210,11 @@ impl<'l> ComponentValue<'l> {
                 for f in p.into_iter().chain(v.into_iter()) {
                     out.extend_from_slice(&f.to_le_bytes())?;
                 }
+                Ok(())
+            }
+            ComponentValue::Filter(ComponentFilter { id, mask_len }) => {
+                out.extend_from_slice(&id.to_le_bytes())?;
+                out.extend_from_slice(&mask_len.to_le_bytes())?;
                 Ok(())
             }
         }
@@ -213,6 +249,13 @@ impl Extend for Vec<u8> {
     }
 }
 
+impl<'a> Extend for &'a mut Vec<u8> {
+    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
+        Vec::extend_from_slice(self, slice);
+        Ok(())
+    }
+}
+
 impl<'a> Extend for &'a mut [u8] {
     fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
         self.get_mut(..slice.len())
@@ -226,7 +269,10 @@ impl<'a> Extend for &'a mut [u8] {
 
 #[cfg(test)]
 mod tests {
+    use nalgebra::{Quaternion, Vector3};
+
     use crate::{
+        cid,
         parser::{ComponentPair, Parser},
         ComponentType,
     };
@@ -240,7 +286,7 @@ mod tests {
 
         let mut b = vec![];
         b.extend_from_slice(&1234u64.to_le_bytes()); // Time
-        b.extend_from_slice(&0x310_08u64.to_le_bytes()); // Component Id
+        b.extend_from_slice(&cid!(31:0:10).0.to_le_bytes()); // Component Id
         b.extend_from_slice(&[ComponentType::F64.into()]); // Component Type
         b.extend_from_slice(&[1]); // Entity Length
         b.extend_from_slice(&1337u64.to_le_bytes()); // Entity Id
@@ -268,5 +314,56 @@ mod tests {
         assert_eq!(EntityId(1), entity_id);
         assert_eq!(u32::component_id(), component_id);
         assert_eq!(ComponentValue::U32(1), value);
+    }
+
+    #[test]
+    fn test_bytes() {
+        let mut builder = Builder::with_time(1234).unwrap();
+        let a = builder
+            .append_iter([EntityId(1)].into_iter(), [vec![0xBA; 512]].into_iter())
+            .unwrap()
+            .buf();
+        let mut parser = Parser::new(a).unwrap();
+        let ComponentPair {
+            component_id,
+            entity_id,
+            value,
+        } = parser.next().unwrap();
+        assert_eq!(EntityId(1), entity_id);
+        assert_eq!(Vec::<u8>::component_id(), component_id);
+        assert_eq!(ComponentValue::Bytes(vec![0xBA; 512].into()), value);
+    }
+
+    #[test]
+    fn test_spatial_pos() {
+        let mut builder = Builder::with_time(1234).unwrap();
+        let a = builder
+            .append_data(ComponentData {
+                component_id: cid!(0:1),
+                storage: vec![(
+                    EntityId(1),
+                    ComponentValue::SpatialPosF64((
+                        Quaternion::new(1.0, 2.0, 3.0, 4.0),
+                        Vector3::new(5.0, 6.0, 7.0),
+                    )),
+                )],
+            })
+            .unwrap()
+            .buf();
+        let mut parser = Parser::new(a).unwrap();
+        let ComponentPair {
+            component_id,
+            entity_id,
+            value,
+        } = parser.next().unwrap();
+        assert_eq!(EntityId(1), entity_id);
+        assert_eq!(cid!(0:1), component_id);
+        assert_eq!(
+            ComponentValue::SpatialPosF64((
+                Quaternion::new(1.0, 2.0, 3.0, 4.0),
+                Vector3::new(5.0, 6.0, 7.0),
+            )),
+            value
+        );
     }
 }

@@ -22,50 +22,29 @@ use bevy_infinite_grid::{
 };
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use paracosm::{
-    plugin::sync_pos,
-    sync::{channel_pair, recv_data, ClientChannel, EntityMap},
-    ServerMsg, SimState,
-};
-use paracosm::{runner::IntoSimRunner, sync::ClientTransport};
-use std::marker::PhantomData;
+use paracosm::{plugin::sync_pos, SimState};
 
 //pub(crate) mod traces;
 mod ui;
 
-pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
-    let (tx, rx) = channel_pair();
-    std::thread::spawn(move || {
-        let runner = func.into_runner();
-        let mut app = runner
-            .run_mode(paracosm::runner::RunMode::RealTime)
-            .build(tx);
-        app.run()
-    });
-    let mut app = App::new();
-    app.insert_non_send_resource(rx);
-    app.add_plugins(EditorPlugin::<ClientChannel>::new());
-    app.run()
-}
+// pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
+//     let (tx, rx) = channel_pair();
+//     std::thread::spawn(move || {
+//         let runner = func.into_runner();
+//         let mut app = runner
+//             .run_mode(paracosm::runner::RunMode::RealTime)
+//             .build(tx);
+//         app.run()
+//     });
+//     let mut app = App::new();
+//     app.insert_non_send_resource(rx);
+//     app.add_plugins(EditorPlugin::<ClientChannel>::new());
+//     app.run()
+// }
 
-pub struct EditorPlugin<Rx: ClientTransport> {
-    phantom_data: PhantomData<fn() -> Rx>,
-}
+pub struct EditorPlugin;
 
-impl<Rx: ClientTransport> EditorPlugin<Rx> {
-    pub fn new() -> Self {
-        Self {
-            phantom_data: PhantomData,
-        }
-    }
-}
-
-impl<Rx: ClientTransport> Default for EditorPlugin<Rx> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
+impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(
             DefaultPlugins
@@ -84,7 +63,6 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                 .disable::<DiagnosticsPlugin>()
                 .build(),
         )
-        .insert_resource(EntityMap::default())
         .insert_resource(SimState::default())
         .add_plugins(
             DefaultPickingPlugins
@@ -98,11 +76,10 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
         // .add_plugins(PolylinePlugin)
         //.add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(PostStartup, request_models::<Rx>)
         .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)
-        .add_systems(Update, timeline_system::<Rx>)
-        .add_systems(Update, (recv_data::<Rx>, sync_pos))
+        .add_systems(Update, timeline_system)
+        .add_systems(Update, sync_pos)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
@@ -123,10 +100,6 @@ impl<Rx: ClientTransport> Plugin for EditorPlugin<Rx> {
                 .insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
-}
-
-fn request_models<Tx: ClientTransport>(tx: NonSendMut<Tx>) {
-    tx.send_msg(ServerMsg::RequestModels);
 }
 
 fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
@@ -179,9 +152,10 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn make_pickable(
     mut commands: Commands,
-    meshes: Query<Entity, (With<Handle<Mesh>>, Without<Pickable>)>,
+    meshes: Query<Entity, (With<Handle<Mesh>>, Without<Pickable>, Changed<Handle<Mesh>>)>,
 ) {
     for entity in meshes.iter() {
         commands.entity(entity).insert((PickableBundle::default(),));

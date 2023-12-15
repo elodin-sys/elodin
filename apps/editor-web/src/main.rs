@@ -1,21 +1,26 @@
 use anyhow::anyhow;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
-use paracosm::sync::ClientTransport;
+use elo_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
+use paracosm::sync::SyncPlugin;
 use paracosm_editor::EditorPlugin;
-use std::{cell::RefCell, rc::Rc};
 use tracing::error;
-use web_sock::{MsgType, WsReceiver, WsSender};
 
 mod web_sock;
 
 fn main() -> anyhow::Result<()> {
+    //tracing_wasm::set_as_global_default();
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let url = get_url()?;
-    let transport = Transport::connect(&url)?;
+    let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
+    web_sock::spawn_wasm(url, bevy_tx)?;
     let mut app = App::new();
-    app.add_plugins(EditorPlugin::<Transport>::new())
+    app.add_plugins(EditorPlugin)
+        .add_plugins(SyncPlugin {
+            plugin: sub,
+            subscriptions: Subscriptions::default(),
+        })
         .add_systems(PostStartup, hide_loader.pipe(handle_error))
-        .insert_non_send_resource(transport.clone());
-    app.run();
+        .run();
     Ok(())
 }
 
@@ -53,6 +58,7 @@ fn get_url() -> anyhow::Result<String> {
 }
 
 #[cfg(target_family = "wasm")]
+
 fn get_url() -> anyhow::Result<String> {
     let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
     let document = window
@@ -66,42 +72,4 @@ fn get_url() -> anyhow::Result<String> {
         .ok_or_else(|| anyhow!("data-ws-url required"))?
         .to_string();
     Ok(url)
-}
-
-#[derive(Clone)]
-struct Transport {
-    tx: Rc<RefCell<WsSender>>,
-    rx: Rc<WsReceiver>,
-}
-
-impl Transport {
-    fn connect(url: &str) -> anyhow::Result<Self> {
-        let (tx, rx) = web_sock::connect(url).map_err(|err| anyhow!("websocket err: {}", err))?;
-        let tx = Rc::new(RefCell::new(tx));
-        let rx = Rc::new(rx);
-        Ok(Transport { tx, rx })
-    }
-}
-
-impl ClientTransport for Transport {
-    fn try_recv_msg(&self) -> Option<paracosm::ClientMsg> {
-        let event = self.rx.try_recv_ref().ok()?;
-        if event.msg_type != MsgType::Buf {
-            return None;
-        }
-        let Ok(msg) = postcard::from_bytes(&event.buf) else {
-            error!("error deserializing buf");
-            return None;
-        };
-        Some(msg)
-    }
-
-    fn send_msg(&self, msg: paracosm::ServerMsg) {
-        let Ok(buf) = postcard::to_allocvec(&msg) else {
-            error!("error serializing msg");
-            return;
-        };
-        let mut tx = self.tx.borrow_mut();
-        tx.send(buf);
-    }
 }

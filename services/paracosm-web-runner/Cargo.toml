@@ -30,6 +30,8 @@ anyhow = "1"
 # paracosm
 paracosm.path = "../../libs/paracosm-core"
 bevy.version = "0.12"
+elo-conduit.path = "../../libs/elo-conduit"
+elo-conduit.features = ["tokio"]
 
 # types
 serde.version = "1.0"

@@ -11,11 +11,11 @@
 //!  +--------------------------+
 //!    |  Component Id (u64)  |
 //!    +----------------------+
-//!    |  Entity Len (varint) |
-//!    +----------------------+
 //!    |    Value Type (u8)   |
 //!    +----------------------+
-//!    |     Entities (u32)   |
+//!    |  Entity Len (varint) |
+//!    +----------------------+
+//!    |     Entities (u64)   |
 //!    +----------------------+
 //!    |        Values        |
 //!    +----------------------+
@@ -30,7 +30,10 @@
 //!
 //! This packet format is also optimized for space over speed of deserialization. Values are typically unaligned, varints are used for length. This is so the parser can exist on
 //!
-use crate::{ComponentData, ComponentId, ComponentType, ComponentValue, DataMsg, EntityId};
+use crate::{
+    ComponentBatch, ComponentData, ComponentFilter, ComponentId, ComponentType, ComponentValue,
+    EntityId,
+};
 use nalgebra::{Matrix3, Quaternion, Vector3, Vector4};
 use std::{borrow::Cow, mem::size_of};
 
@@ -70,8 +73,8 @@ impl<B: AsRef<[u8]>> Parser<B> {
         self.time
     }
 
-    pub fn parse_data_msg(&mut self) -> Option<DataMsg<'static>> {
-        let mut data_msg = DataMsg {
+    pub fn parse_data_msg(&mut self) -> Option<ComponentBatch<'static>> {
+        let mut data_msg = ComponentBatch {
             time: self.time,
             components: vec![],
         };
@@ -131,7 +134,7 @@ impl ComponentParser {
         let ty = parse_buf.pop_u8()?;
         let ty = ComponentType::try_from(ty).ok()?;
         let len = parse_buf.pop_varint()?;
-        let entity_buf_pos = orig_len - parse_buf.len() + 1;
+        let entity_buf_pos = orig_len - parse_buf.len();
         let component_buf_pos = entity_buf_pos + size_of::<u64>() * len;
         if component_buf_pos >= buf.len() {
             return None;
@@ -146,7 +149,7 @@ impl ComponentParser {
         })
     }
     fn next<'a>(&mut self, buf: &'a [u8]) -> Option<ComponentPair<'a>> {
-        if dbg!(self.pos) >= dbg!(self.len) {
+        if self.pos >= self.len {
             return None;
         }
         let entity_id = (&buf[self.entity_buf_pos..]).get_u64()?;
@@ -238,7 +241,7 @@ impl ComponentType {
                 let len_buf = &mut buf;
                 let len = len_buf.pop_varint()?;
                 let total_len = orig_len - len_buf.len() + len;
-                let bytes = buf.get(..len)?;
+                let bytes = len_buf.get(..len)?;
                 Some((total_len, ComponentValue::Bytes(Cow::from(bytes))))
             }
             ComponentType::Vector3F32 => {
@@ -272,7 +275,7 @@ impl ComponentType {
                         .filter_map(|u| u.try_into().ok())
                         .map(f32::from_le_bytes),
                 );
-                Some((size_of::<f32>() * 3, ComponentValue::Matrix3x3F32(vec)))
+                Some((size_of::<f32>() * 9, ComponentValue::Matrix3x3F32(vec)))
             }
             ComponentType::Matrix3x3F64 => {
                 if buf.len() < size_of::<f64>() * 9 {
@@ -283,7 +286,7 @@ impl ComponentType {
                         .filter_map(|u| u.try_into().ok())
                         .map(f64::from_le_bytes),
                 );
-                Some((size_of::<f64>() * 3, ComponentValue::Matrix3x3F64(vec)))
+                Some((size_of::<f64>() * 9, ComponentValue::Matrix3x3F64(vec)))
             }
             ComponentType::QuaternionF32 => {
                 if buf.len() < size_of::<f32>() * 4 {
@@ -294,7 +297,7 @@ impl ComponentType {
                         .filter_map(|u| u.try_into().ok())
                         .map(f32::from_le_bytes),
                 ));
-                Some((size_of::<f32>() * 3, ComponentValue::QuaternionF32(vec)))
+                Some((size_of::<f32>() * 4, ComponentValue::QuaternionF32(vec)))
             }
             ComponentType::QuaternionF64 => {
                 if buf.len() < size_of::<f64>() * 4 {
@@ -305,10 +308,10 @@ impl ComponentType {
                         .filter_map(|u| u.try_into().ok())
                         .map(f64::from_le_bytes),
                 ));
-                Some((size_of::<f64>() * 3, ComponentValue::QuaternionF64(vec)))
+                Some((size_of::<f64>() * 4, ComponentValue::QuaternionF64(vec)))
             }
             ComponentType::SpatialPosF32 => {
-                if buf.len() < size_of::<f32>() * 9 {
+                if buf.len() < size_of::<f32>() * 7 {
                     return None;
                 }
                 let quat = Quaternion::from_vector(Vector4::from_iterator(
@@ -328,7 +331,7 @@ impl ComponentType {
                 ))
             }
             ComponentType::SpatialPosF64 => {
-                if buf.len() < size_of::<f64>() * 9 {
+                if buf.len() < size_of::<f64>() * 7 {
                     return None;
                 }
                 let quat = Quaternion::from_vector(Vector4::from_iterator(
@@ -348,7 +351,7 @@ impl ComponentType {
                 ))
             }
             ComponentType::SpatialMotionF32 => {
-                if buf.len() < size_of::<f32>() * 9 {
+                if buf.len() < size_of::<f32>() * 6 {
                     return None;
                 }
                 let pos = Vector3::from_iterator(
@@ -363,12 +366,12 @@ impl ComponentType {
                         .map(f32::from_le_bytes),
                 );
                 Some((
-                    size_of::<f32>() * 7,
+                    size_of::<f32>() * 6,
                     ComponentValue::SpatialMotionF32((pos, dot)),
                 ))
             }
             ComponentType::SpatialMotionF64 => {
-                if buf.len() < size_of::<f64>() * 9 {
+                if buf.len() < size_of::<f64>() * 6 {
                     return None;
                 }
                 let pos = Vector3::from_iterator(
@@ -387,6 +390,18 @@ impl ComponentType {
                     ComponentValue::SpatialMotionF64((pos, dot)),
                 ))
             }
+            ComponentType::Filter => {
+                let id = buf
+                    .get(..size_of::<u64>())
+                    .and_then(|u| u.try_into().ok())
+                    .map(u64::from_le_bytes)?;
+                let mask_len = buf
+                    .get(..size_of::<u8>())
+                    .and_then(|u| u.try_into().ok())
+                    .map(u8::from_le_bytes)?;
+                let filter = ComponentFilter { id, mask_len };
+                Some((size_of::<u64>() * 2, ComponentValue::Filter(filter)))
+            }
         }
     }
 }
@@ -404,7 +419,7 @@ pub trait SliceExt {
 
 impl<'a> SliceExt for &'a [u8] {
     fn get_u8(&self) -> Option<u8> {
-        self.get(1).copied()
+        self.first().copied()
     }
 
     fn get_u32(&self) -> Option<u32> {
@@ -427,13 +442,13 @@ impl<'a> SliceExt for &'a [u8] {
 
     fn pop_u32(&mut self) -> Option<u32> {
         let v = self.get_u32()?;
-        *self = &self[3..];
+        *self = &self[4..];
         Some(v)
     }
 
     fn pop_u64(&mut self) -> Option<u64> {
         let v = self.get_u64()?;
-        *self = &self[7..];
+        *self = &self[8..];
         Some(v)
     }
 
@@ -627,5 +642,29 @@ mod tests {
         assert_eq!(component_id, ComponentId(2234));
         assert_eq!(entity_id, EntityId(2337));
         assert_eq!(value, ComponentValue::U8(254));
+    }
+
+    #[test]
+    fn test_pop_u8() {
+        let mut buf = &[1, 2, 3, 4, 5, 6][..];
+        let buf = &mut buf;
+        assert_eq!(buf.pop_u8(), Some(1));
+        assert_eq!(buf.len(), 5);
+    }
+
+    #[test]
+    fn test_pop_varint() {
+        let mut buf = &[128, 4][..];
+        let buf = &mut buf;
+        assert_eq!(buf.pop_varint(), Some(512));
+        assert_eq!(buf.len(), 0);
+    }
+
+    #[test]
+    fn test_pop_u64() {
+        let mut buf = &[1, 0, 0, 0, 0, 0, 0, 0][..];
+        let buf = &mut buf;
+        assert_eq!(buf.pop_u64(), Some(1));
+        assert_eq!(buf.len(), 0);
     }
 }

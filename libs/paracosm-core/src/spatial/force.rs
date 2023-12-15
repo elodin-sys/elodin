@@ -1,5 +1,6 @@
 use std::ops::{Add, AddAssign, Sub};
 
+use elo_conduit::{cid, ComponentType, ComponentValue};
 use nalgebra::{Vector3, Vector6};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -40,5 +41,29 @@ impl AddAssign for SpatialForce {
     fn add_assign(&mut self, rhs: Self) {
         self.force += rhs.force;
         self.torque += rhs.torque;
+    }
+}
+
+impl elo_conduit::Component for SpatialForce {
+    fn component_id() -> elo_conduit::ComponentId {
+        cid!(31;spatial_force)
+    }
+
+    fn component_type() -> elo_conduit::ComponentType {
+        ComponentType::SpatialPosF64
+    }
+
+    fn component_value<'a>(&self) -> elo_conduit::ComponentValue<'a> {
+        elo_conduit::ComponentValue::SpatialMotionF64((self.torque, self.force))
+    }
+
+    fn from_component_value(value: elo_conduit::ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let ComponentValue::SpatialMotionF64((torque, force)) = value else {
+            return None;
+        };
+        Some(Self { force, torque })
     }
 }
