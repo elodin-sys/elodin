@@ -3,14 +3,20 @@ use std::ops::Mul;
 use nalgebra::{ClosedDiv, RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
 use simba::scalar::ClosedNeg;
-use xla::{ArrayElement, NativeType, XlaOp};
+use xla::{ArrayElement, NativeType};
 
 use crate::{
-    AsBuffer, AsOp, Buffer, BufferForm, Builder, Client, FixedSliceExt, FromBuilder, FromHost,
-    FromPjrtBuffer, Op, Param, ToHost, Vector,
+    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, FixedSliceExt, FromBuilder, FromHost,
+    FromPjrtBuffer, IntoOp, MaybeOwned, Op, Param, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(Vector<T, 4, P>);
+
+impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
+    fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
+        Self(Vector::from_pjrt(pjrt))
+    }
+}
 
 impl<T: NalgebraScalar + ClosedNeg> Quaternion<T> {
     fn parts(&self) -> [Vector<T, 1>; 4] {
@@ -40,19 +46,12 @@ impl<T: RealField> Mul for Quaternion<T> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let [l_i, l_j, l_k, l_w] = self.parts();
-        let [r_i, r_j, r_k, r_w] = rhs.parts();
-        let i = l_w.clone() * r_i.clone() + l_i.clone() * r_w.clone() + l_j.clone() * r_k.clone()
-            - l_k.clone() * r_j.clone();
-        let j = l_w.clone() * r_j.clone() - l_i.clone() * r_k.clone()
-            + l_j.clone() * r_w.clone()
-            + l_k.clone() * r_i.clone();
-        let k = l_w.clone() * r_k.clone() + l_i.clone() * r_j.clone() - l_j.clone() * r_i.clone()
-            + l_k.clone() * r_w.clone();
-        let w = l_w.clone() * r_w.clone()
-            - l_i.clone() * r_i.clone()
-            - l_j.clone() * r_j.clone()
-            - l_k.clone() * r_k.clone();
+        let [l_i, l_j, l_k, l_w] = &self.parts();
+        let [r_i, r_j, r_k, r_w] = &rhs.parts();
+        let i = l_w * r_i + l_i * r_w + l_j * r_k - l_k * r_j;
+        let j = l_w * r_j - l_i * r_k + l_j * r_w + l_k * r_i;
+        let k = l_w * r_k + l_i * r_j - l_j * r_i + l_k * r_w;
+        let w = l_w * r_w - l_i * r_i - l_j * r_j - l_k * r_k;
 
         Quaternion(Vector::from_arr([i, j, k, w]))
     }
@@ -68,15 +67,15 @@ impl<T: NativeType + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
     }
 }
 
-impl<T> AsOp for Quaternion<T> {
-    fn as_op(&self) -> &XlaOp {
-        self.0.as_op()
+impl<T> IntoOp for Quaternion<T> {
+    fn into_op(self, builder: &xla::XlaBuilder) -> xla::XlaOp {
+        self.0.into_op(builder)
     }
 }
 
 impl<T> AsBuffer for Quaternion<T, Buffer> {
     fn as_buffer(&self) -> &xla::PjRtBuffer {
-        self.0.inner.as_ref()
+        &self.0.inner
     }
 }
 
@@ -99,8 +98,31 @@ where
     }
 }
 
-impl<T, P: Param> ToHost for Quaternion<T, P> {
+impl<T> BufferArg<Quaternion<T, Buffer>> for nalgebra::Quaternion<T>
+where
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
+{
+    fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
+        let inner = client
+            .0
+            .buffer_from_host_buffer(self.coords.as_slice(), &[4], None)
+            .unwrap();
+        MaybeOwned::Owned(inner)
+    }
+}
+
+impl<T> ToHost for Quaternion<T, Buffer>
+where
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
+{
     type HostTy = nalgebra::Quaternion<T>;
+
+    fn to_host(&self) -> Self::HostTy {
+        let literal = self.0.inner.to_literal_sync().unwrap();
+        let mut out = nalgebra::Quaternion::zero();
+        literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
+        out
+    }
 }
 
 impl<T> BufferForm for Quaternion<T, Op> {
@@ -142,7 +164,8 @@ mod tests {
                 UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
                 UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 1.0).into_inner(),
             )
-            .unwrap();
+            .unwrap()
+            .to_host();
         let correct_out = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner()
             * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 1.0).into_inner();
 
@@ -161,7 +184,8 @@ mod tests {
                 &client,
                 UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
             )
-            .unwrap();
+            .unwrap()
+            .to_host();
         let correct_out = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0)
             .into_inner()
             .try_inverse()
@@ -183,7 +207,8 @@ mod tests {
                 UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
                 vector![1.0, 2.0, 3.0],
             )
-            .unwrap();
+            .unwrap()
+            .to_host();
         let correct_out =
             UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0) * vector![1.0, 2.0, 3.0];
 

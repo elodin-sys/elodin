@@ -10,7 +10,7 @@ def step(label, command, env = {}, plugins = []):
   }
 
 def nix_step(label, flake, command, emoji = ":nix:", env = {}, plugins = []):
-  return step(label = f"{emoji} {label}", command = f"nix develop {flake} --command sh -c \"{command}\"", env = env, plugins = plugins)
+  return step(label = f"{emoji} {label}", command = f"nix develop {flake} --command bash -euo pipefail -c \"{command}\"", env = env, plugins = plugins)
 
 def rust_step(label, command, env = {}):
   return nix_step(
@@ -42,7 +42,7 @@ pipeline(steps = [
   group(name = ":crab: rust", steps = [
     rust_step(
       label = "clippy",
-      command = "cargo clippy",
+      command = "cargo clippy -- -Dwarnings",
     ),
     rust_step(
       label = "cargo test",
