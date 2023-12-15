@@ -1413,7 +1413,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_utils",
  "console_error_panic_hook",
- "tracing-error",
  "tracing-log 0.1.4",
  "tracing-subscriber",
  "tracing-wasm",
@@ -1755,7 +1754,6 @@ dependencies = [
  "ktx2",
  "naga 0.13.0",
  "naga_oil",
- "profiling",
  "ruzstd 0.4.0",
  "serde",
  "smallvec",
@@ -2667,6 +2665,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed3d0b5ff30645a68f35ece8cea4556ca14ef8a1651455f789a099a0513532a6"
 
 [[package]]
+name = "const-fnv1a-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32b13ea120a812beba79e34316b3942a857c86ec1593cb34f27bb28272ce2cca"
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3257,13 +3261,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "console_error_panic_hook",
+ "elo-conduit",
+ "flume",
  "js-sys",
  "paracosm",
  "paracosm-editor",
  "postcard",
  "thingbuf",
  "tracing",
+ "tracing-wasm",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -3432,8 +3441,10 @@ dependencies = [
  "ahash 0.3.8",
  "bevy",
  "bytes",
+ "const-fnv1a-hash",
  "flume",
  "futures",
+ "ip_network_table-deps-treebitmap",
  "nalgebra",
  "num_enum 0.7.1",
  "postcard",
@@ -3441,6 +3452,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -4693,11 +4705,11 @@ dependencies = [
 
 [[package]]
 name = "home"
-version = "0.5.5"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5444c27eef6923071f7ebcc33e3444508466a76f7a2b93da00ed6e19f30c1ddb"
+checksum = "e3d1354bf6b7235cb4a0576c2619fd4ed18183f689b12b006a0ee7329eeff9a5"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5000,6 +5012,12 @@ dependencies = [
  "libc",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "ip_network_table-deps-treebitmap"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e537132deb99c0eb4b752f0346b6a836200eaaa3516dd7e5514b63930a09e5d"
 
 [[package]]
 name = "ipnet"
@@ -6463,10 +6481,13 @@ dependencies = [
  "bevy_ecs",
  "bevy_utils",
  "clap",
+ "elo-conduit",
  "flume",
+ "ip_network_table-deps-treebitmap",
  "nalgebra",
  "paracosm-macros",
  "plotters",
+ "postcard",
  "rand",
  "rand_distr",
  "rerun",
@@ -6500,6 +6521,7 @@ dependencies = [
 name = "paracosm-macros"
 version = "0.1.0"
 dependencies = [
+ "convert_case 0.6.0",
  "darling",
  "proc-macro2",
  "quote",
@@ -6536,6 +6558,7 @@ dependencies = [
  "bevy",
  "bytes",
  "config",
+ "elo-conduit",
  "flume",
  "futures",
  "paracosm",
@@ -7020,20 +7043,6 @@ name = "profiling"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1de09527cd2ea2c2d59fb6c2f8c1ab8c71709ed9d1b6d60b0e1c9fbb6fdcb33c"
-dependencies = [
- "profiling-procmacros",
- "tracing",
-]
-
-[[package]]
-name = "profiling-procmacros"
-version = "1.0.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d8f36e3c621a72254893ed5cc57d1a069162adb3f98bfef610788661db6ad8d"
-dependencies = [
- "quote",
- "syn 2.0.41",
-]
 
 [[package]]
 name = "prost"
@@ -10590,16 +10599,6 @@ checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
  "valuable",
-]
-
-[[package]]
-name = "tracing-error"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
-dependencies = [
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

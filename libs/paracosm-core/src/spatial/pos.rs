@@ -1,4 +1,5 @@
 use bevy::prelude::{Quat, Vec3};
+use elo_conduit::{cid, ComponentType, ComponentValue};
 use nalgebra::{matrix, ArrayStorage, Matrix, UnitQuaternion, Vector3, U1, U7};
 use serde::{Deserialize, Serialize};
 
@@ -49,5 +50,32 @@ impl SpatialPos {
             self.pos[1];
             self.pos[2]
         ]
+    }
+}
+
+impl elo_conduit::Component for SpatialPos {
+    fn component_id() -> elo_conduit::ComponentId {
+        cid!(31;spatial_pos)
+    }
+
+    fn component_type() -> elo_conduit::ComponentType {
+        ComponentType::SpatialPosF64
+    }
+
+    fn component_value<'a>(&self) -> elo_conduit::ComponentValue<'a> {
+        elo_conduit::ComponentValue::SpatialPosF64((*self.att, self.pos))
+    }
+
+    fn from_component_value(value: elo_conduit::ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let ComponentValue::SpatialPosF64((att, pos)) = value else {
+            return None;
+        };
+        Some(Self {
+            pos,
+            att: UnitQuaternion::new_normalize(att),
+        })
     }
 }

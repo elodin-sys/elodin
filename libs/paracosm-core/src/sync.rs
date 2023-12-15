@@ -1,198 +1,128 @@
 use crate::{
-    history::{HistoryStore, RollbackEvent},
-    ClientMsg, MeshData, ModelData, Paused, ReflectSerde, ServerMsg, SimState, SyncModels,
-    SyncedModel, Uuid, WorldPos,
+    types::{SyncMaterial, SyncMeshData},
+    ReflectSerde, SimState,
 };
-use bevy::{
-    app::AppExit,
-    prelude::{Assets, Deref, DerefMut, Handle, Mesh, PbrBundle, StandardMaterial},
+use bevy::prelude::*;
+use elo_conduit::{
+    bevy::{AppExt, ConduitSubscribePlugin, EntityMap, Msg, Subscriptions},
+    Component, EntityId,
 };
-use bevy_ecs::{
-    entity::Entity,
-    event::{EventReader, EventWriter},
-    system::{Commands, NonSend, Query, Res, ResMut, Resource},
-};
-use flume::{Receiver, Sender};
-use std::collections::HashMap;
 
-#[derive(Resource, DerefMut, Deref, Default)]
-pub struct EntityMap(HashMap<Uuid, Entity>);
+use crate::WorldPos;
 
-pub fn recv_data<S: ClientTransport>(
-    mut commands: Commands,
-    mut world_pos: Query<(&mut WorldPos, &mut SyncedModel)>,
-    mut entity_map: ResMut<EntityMap>,
-    client: NonSend<S>,
-    mut mesh_assets: ResMut<Assets<Mesh>>,
-    mut material_assets: ResMut<Assets<StandardMaterial>>,
-    mut sim_state: ResMut<SimState>,
-) {
-    while let Some(msg) = client.try_recv_msg() {
-        match msg {
-            ClientMsg::Clear => todo!(),
-            ClientMsg::SimSate(state) => {
-                *sim_state = state;
-            }
-            ClientMsg::SyncWorldPos(msg) => {
-                if let Some(e) = entity_map.get(&msg.body_id) {
-                    if let Ok((mut world_pos, synced)) = world_pos.get_mut(*e) {
-                        **world_pos = msg.pos;
-                        if !synced.0 {
-                            client.send_msg(ServerMsg::RequestModels);
-                        }
+pub struct SyncPlugin {
+    pub plugin: ConduitSubscribePlugin,
+    pub subscriptions: Subscriptions,
+}
+
+impl SyncPlugin {
+    pub fn new(rx: flume::Receiver<Msg<'static>>) -> Self {
+        Self {
+            plugin: ConduitSubscribePlugin::new(rx),
+            subscriptions: Subscriptions::default(),
+        }
+    }
+}
+
+impl Plugin for SyncPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        let sync_pbr = app.world.register_system(sync_pbr_to_bevy);
+        app.add_plugins(self.plugin.clone())
+            .insert_resource(self.subscriptions.clone())
+            .insert_resource(EntityMap::default())
+            .add_conduit_component::<SimState>()
+            .add_conduit_component::<WorldPos>()
+            .add_conduit_component_with_insert_fn::<SyncMaterial>(Box::new(
+                move |commands, entity_map, entity_id, value| {
+                    let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+                        let Some(e) = commands.get_entity(*entity) else {
+                            return;
+                        };
+                        e
+                    } else {
+                        let e = commands.spawn_empty();
+                        entity_map.0.insert(entity_id, e.id());
+                        e
+                    };
+
+                    if let Some(c) = SyncMaterial::from_component_value(value) {
+                        e.insert(c);
                     }
-                } else {
-                    let entity = commands.spawn((WorldPos(msg.pos), SyncedModel(false))).id();
-                    entity_map.insert(msg.body_id, entity);
-                    client.send_msg(ServerMsg::RequestModels);
-                }
-            }
-            ClientMsg::ModelDataResp(ModelData::Glb { .. }) => {
-                todo!()
-            }
-            ClientMsg::ModelDataResp(ModelData::Pbr {
-                body_id,
-                material,
-                mesh,
-            }) => {
-                let material = material_assets.add(material.0);
-                let mesh = mesh_assets.add(Mesh::from(mesh));
-                // let material = material_assets.add(Color::WHITE.into());
-                // let mesh = mesh_assets.add(Mesh::from(shape::Box::new(1.0, 1.0, 1.0)));
+                    commands.run_system(sync_pbr);
+                },
+            ))
+            .add_conduit_component_with_insert_fn::<SyncMeshData>(Box::new(
+                move |commands, entity_map, entity_id, value| {
+                    let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+                        let Some(e) = commands.get_entity(*entity) else {
+                            return;
+                        };
+                        e
+                    } else {
+                        let e = commands.spawn_empty();
+                        entity_map.0.insert(entity_id, e.id());
+                        e
+                    };
 
-                let entity = entity_map
-                    .entry(body_id)
-                    .or_insert_with(|| commands.spawn_empty().id());
-                let mut entity = commands.entity(*entity);
-                entity.insert((
-                    PbrBundle {
-                        mesh,
-                        material,
-                        ..Default::default()
-                    },
-                    WorldPos(Default::default()),
-                    SyncedModel(true),
-                ));
-            }
-        }
+                    if let Some(c) = SyncMeshData::from_component_value(value) {
+                        e.insert(c);
+                    }
+                    commands.run_system(sync_pbr);
+                },
+            ))
+            .add_conduit_resource::<SimState>();
     }
 }
 
-pub trait ClientTransport: Clone + 'static {
-    fn try_recv_msg(&self) -> Option<ClientMsg>;
-    fn send_msg(&self, msg: ServerMsg);
+pub struct SendPlbPlugin;
+
+impl Plugin for SendPlbPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, sync_pbr);
+    }
 }
 
-pub trait ServerTransport: Send + Sync + Resource + Clone {
-    fn send_msg(&self, msg: ClientMsg);
-    fn try_recv_msg(&self) -> Option<ServerMsg>;
-}
-
-pub fn send_pos<Tx: ServerTransport>(
-    query: Query<(&WorldPos, &Uuid)>,
-    tx: ResMut<Tx>,
-    history: Res<HistoryStore>,
-    paused: Res<Paused>,
+pub fn setup_entity_map(
+    query: Query<(&EntityId, Entity), Changed<EntityId>>,
+    mut map: ResMut<EntityMap>,
 ) {
-    for (pos, body_id) in query.iter() {
-        tx.send_msg(ClientMsg::SyncWorldPos(crate::SyncWorldPos {
-            body_id: *body_id,
-            pos: pos.0,
-        }))
-    }
-    tx.send_msg(ClientMsg::SimSate(SimState {
-        paused: **paused,
-        history_count: history.count(),
-        history_index: history.current_index(),
-    }))
+    *map = EntityMap(query.iter().map(|(id, e)| (*id, e)).collect());
 }
 
-pub fn startup_sync_model(mut event_writer: EventWriter<SyncModels>) {
-    event_writer.send(SyncModels);
-}
-
-pub fn send_model<Tx: ServerTransport>(
-    mut pbr_query: Query<(&Handle<Mesh>, &Handle<StandardMaterial>, &Uuid)>,
+pub fn sync_pbr(
+    mesh_query: Query<(Entity, &Handle<Mesh>), Changed<Handle<Mesh>>>,
+    mat_query: Query<(Entity, &Handle<StandardMaterial>), Changed<Handle<Mesh>>>,
     mesh_assets: ResMut<Assets<Mesh>>,
-    material_assets: ResMut<Assets<StandardMaterial>>,
-    tx: Res<Tx>,
-    mut event_reader: EventReader<SyncModels>,
+    mat_assets: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
 ) {
-    for _ in &mut event_reader.read() {
-        for (mesh, material, body_id) in pbr_query.iter_mut() {
-            let material = ReflectSerde(material_assets.get(material).unwrap().clone());
-            let mesh = MeshData::from(mesh_assets.get(mesh).unwrap().clone());
-            tx.send_msg(ClientMsg::ModelDataResp(ModelData::Pbr {
-                body_id: *body_id,
-                material,
-                mesh,
-            }));
-        }
+    for (entity, mesh) in mesh_query.iter() {
+        //let material = ReflectSerde(material_assets.get(material).unwrap().clone());
+        let mesh = SyncMeshData::from(mesh_assets.get(mesh).unwrap().clone());
+        commands.entity(entity).insert(mesh);
+    }
+
+    for (entity, mat) in mat_query.iter() {
+        let mat = ReflectSerde(mat_assets.get(mat).unwrap().clone());
+        commands.entity(entity).insert(SyncMaterial(mat));
     }
 }
 
-pub fn recv_server<T: ServerTransport>(
-    transport: Res<T>,
-    mut event: EventWriter<AppExit>,
-    mut paused: ResMut<Paused>,
-    mut rollback: EventWriter<RollbackEvent>,
-    mut sync_models: EventWriter<SyncModels>,
+fn sync_pbr_to_bevy(
+    query: Query<(Entity, &SyncMaterial, &SyncMeshData)>,
+    mut mat_assets: ResMut<Assets<StandardMaterial>>,
+    mut mesh_assets: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
 ) {
-    while let Some(msg) = transport.try_recv_msg() {
-        match msg {
-            ServerMsg::Exit => event.send(AppExit),
-            ServerMsg::RequestModels => {
-                sync_models.send(SyncModels);
-            }
-            ServerMsg::Pause(pause) => paused.0 = pause,
-            ServerMsg::Rollback(time) => rollback.send(RollbackEvent(time)),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Resource)]
-pub struct ServerChannel {
-    pub tx: Sender<ClientMsg>,
-    pub rx: Receiver<ServerMsg>,
-}
-
-impl ServerTransport for ServerChannel {
-    fn send_msg(&self, msg: ClientMsg) {
-        self.tx.send(msg).unwrap();
-    }
-
-    fn try_recv_msg(&self) -> Option<ServerMsg> {
-        self.rx.try_recv().ok()
-    }
-}
-
-#[derive(Debug, Clone, Resource)]
-pub struct ClientChannel {
-    pub rx: Receiver<ClientMsg>,
-    pub tx: Sender<ServerMsg>,
-}
-
-pub fn channel_pair() -> (ServerChannel, ClientChannel) {
-    let (client_tx, client_rx) = flume::unbounded();
-    let (server_tx, server_rx) = flume::unbounded();
-    (
-        ServerChannel {
-            tx: client_tx,
-            rx: server_rx,
-        },
-        ClientChannel {
-            rx: client_rx,
-            tx: server_tx,
-        },
-    )
-}
-
-impl ClientTransport for ClientChannel {
-    fn try_recv_msg(&self) -> Option<ClientMsg> {
-        self.rx.try_recv().ok()
-    }
-
-    fn send_msg(&self, msg: ServerMsg) {
-        self.tx.send(msg).unwrap();
+    for (entity, material, mesh) in query.iter() {
+        let material = mat_assets.add(material.0 .0.clone());
+        let asset = Mesh::from(mesh.clone());
+        let mesh = mesh_assets.add(asset);
+        let mut entity = commands.entity(entity);
+        entity.insert((PbrBundle {
+            mesh,
+            material,
+            ..Default::default()
+        },));
     }
 }

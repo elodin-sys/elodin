@@ -4,7 +4,7 @@ use bevy_egui::{
     EguiContexts,
 };
 use nalgebra::Vector3;
-use paracosm::{sync::ClientTransport, EntityQuery, Picked, SimState};
+use paracosm::{EntityQuery, Picked, SimState};
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);
 const DARK_BLUE: Color32 = Color32::from_rgb(0x1F, 0x2C, 0x4C);
@@ -108,9 +108,8 @@ pub(crate) fn picked_system(
         });
 }
 
-pub(crate) fn timeline_system<Tx: ClientTransport>(
+pub(crate) fn timeline_system(
     mut contexts: EguiContexts,
-    tx: NonSendMut<Tx>,
     mut sim_state: ResMut<SimState>,
     window: Query<&Window>,
 ) {
@@ -124,21 +123,14 @@ pub(crate) fn timeline_system<Tx: ClientTransport>(
         .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 100.0))
         .show(contexts.ctx_mut(), |ui| {
             ui.horizontal(|ui| {
-                let paused_val = sim_state.paused;
-                if ui
-                    .toggle_value(&mut sim_state.paused, if paused_val { "⏵" } else { "⏸" })
-                    .changed()
-                {
-                    tx.send_msg(paracosm::ServerMsg::Pause(sim_state.paused));
-                }
+                let paused = sim_state.paused;
+                ui.toggle_value(&mut sim_state.paused, if paused { "⏵" } else { "⏸" });
                 let max_count = sim_state.history_count.saturating_sub(1);
-                let mut selected_index = sim_state.history_index;
                 ui.spacing_mut().slider_width = 450.0;
-                let res = ui.add(egui::Slider::new(&mut selected_index, 0..=max_count));
-                if res.changed() {
-                    tx.send_msg(paracosm::ServerMsg::Rollback(selected_index));
-                    //event_writer.send(RollbackEvent(selected_index))
-                }
+                ui.add(egui::Slider::new(
+                    &mut sim_state.history_index,
+                    0..=max_count,
+                ));
             })
         });
 }

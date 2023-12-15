@@ -9,7 +9,7 @@ use tokio_util::{
 use crate::{
     builder::Builder,
     parser::{ComponentPair, Parser},
-    Component, DataMsg, EntityId, Error,
+    Component, ComponentBatch, ComponentData, EntityId, Error,
 };
 
 pub struct Client<T> {
@@ -50,9 +50,17 @@ where
         self.transport.send(builder.into_buf().freeze()).await?;
         Ok(())
     }
+
+    pub async fn send_data(&mut self, time: u64, data: ComponentData<'_>) -> Result<(), Error> {
+        let mut builder = Builder::new(BytesMut::default(), time)?;
+        builder.append_data(data)?;
+        self.transport.send(builder.into_buf().freeze()).await?;
+        Ok(())
+    }
 }
+
 impl<T: Stream<Item = Result<BytesMut, std::io::Error>> + Unpin> Client<T> {
-    pub async fn recv(&mut self) -> Result<Option<DataMsg<'static>>, Error> {
+    pub async fn recv(&mut self) -> Result<Option<ComponentBatch<'static>>, Error> {
         let Some(res) = self.transport.next().await else {
             return Ok(None);
         };

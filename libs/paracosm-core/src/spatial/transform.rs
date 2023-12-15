@@ -1,5 +1,6 @@
 use std::ops::Mul;
 
+use elo_conduit::{cid, ComponentType, ComponentValue};
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use super::{SpatialForce, SpatialInertia, SpatialMotion};
@@ -131,5 +132,32 @@ impl Mul<Matrix3<f64>> for SpatialTransform {
     fn mul(self, rhs: Matrix3<f64>) -> Self::Output {
         let rot = self.angular.to_rotation_matrix();
         rot * rhs * rot.transpose()
+    }
+}
+
+impl elo_conduit::Component for SpatialTransform {
+    fn component_id() -> elo_conduit::ComponentId {
+        cid!(31;spatial_transform)
+    }
+
+    fn component_type() -> elo_conduit::ComponentType {
+        ComponentType::SpatialPosF64
+    }
+
+    fn component_value<'a>(&self) -> elo_conduit::ComponentValue<'a> {
+        elo_conduit::ComponentValue::SpatialPosF64((*self.angular, self.linear))
+    }
+
+    fn from_component_value(value: elo_conduit::ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let ComponentValue::SpatialPosF64((angular, linear)) = value else {
+            return None;
+        };
+        Some(Self {
+            linear,
+            angular: UnitQuaternion::new_normalize(angular),
+        })
     }
 }

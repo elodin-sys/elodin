@@ -1,11 +1,16 @@
 use bevy::prelude::*;
 use nalgebra::{matrix, Matrix3};
+use paracosm_macros::Component as Comp;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Comp)]
+#[conduit(id = "31;mass")]
 pub struct Mass(pub f64);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Component, Comp)]
+#[conduit(id = "31;intertia")]
 pub struct Inertia(pub Matrix3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Component, Comp)]
+#[conduit(id = "31;inverse_inertia")]
 pub struct InverseInertia(pub Matrix3<f64>);
 
 impl Inertia {

@@ -9,8 +9,9 @@ def rust_cache_plugin():
   return {
     "cache#v0.6.0": {
       "path": "./target",
-      "restore": "all",
-      "save": "all",
+      "manifest": "./Cargo.lock",
+      "restore": "file",
+      "save": "file",
     }
   }
 

@@ -9,16 +9,15 @@ use nalgebra::DMatrix;
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
-    sync::{recv_server, send_model, send_pos, startup_sync_model, EntityMap, ServerTransport},
     tree::{com_system, cri_system, forward_dynamics, rne_system},
-    SyncModels, TreeMassMatrix, WorldPos,
+    SimState, SyncModels, TreeMassMatrix, WorldPos,
 };
 
 use super::{
     constraints::gravity_system,
     systems::*,
     tree::kinematic_system,
-    types::{Config, Paused, PhysicsFixedTime, TickMode},
+    types::{Config, PhysicsFixedTime, TickMode},
 };
 
 #[derive(SystemSet, Debug, PartialEq, Eq, Hash, Clone)]
@@ -32,7 +31,7 @@ pub enum TickSet {
 pub struct PhysicsSchedule;
 
 fn run_physics_system(world: &mut World) {
-    if world.resource::<Paused>().0 {
+    if world.resource::<SimState>().paused {
         return;
     }
     let delta_time = world.resource::<Time>().delta();
@@ -60,53 +59,40 @@ fn run_physics_system(world: &mut World) {
 }
 
 #[derive(Default)]
-pub struct XpbdPlugin<Tx: ServerTransport> {
-    tx: Tx,
-}
+pub struct XpbdPlugin;
 
-impl<Tx: ServerTransport> XpbdPlugin<Tx> {
-    pub fn new(tx: Tx) -> Self {
-        Self { tx }
-    }
-}
-
-impl<Tx: ServerTransport> Plugin for XpbdPlugin<Tx> {
+impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Paused(false));
-        app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))); // FIXME
-        app.insert_resource(self.tx.clone());
-        app.insert_resource(EntityMap::default());
-        app.add_event::<SyncModels>();
-        app.add_plugins(crate::bevy_transform::TransformPlugin);
-        app.add_plugins(
-            DefaultPlugins
-                .set(RenderPlugin {
-                    render_creation: WgpuSettings {
-                        backends: None,
-                        ..default()
-                    }
-                    .into(),
-                })
-                .build()
-                .disable::<WinitPlugin>()
-                .disable::<bevy::transform::TransformPlugin>(), //.disable::<WindowPlugin>(),
-        );
-        app.add_plugins(HistoryPlugin);
-        app.add_plugins(TopologicalSortPlugin);
-        app.add_systems(Update, run_physics_system);
-        app.add_systems(Update, send_model::<Tx>);
-        app.add_systems(PostStartup, startup_sync_model);
-        app.add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics));
-        app.add_systems(PhysicsSchedule, (send_pos::<Tx>).in_set(TickSet::SyncPos));
-        app.add_systems(Update, recv_server::<Tx>).configure_sets(
-            Update,
-            (
-                TickSet::ClearConstraintLagrange,
-                TickSet::TickPhysics,
-                TickSet::SyncPos,
+        app.insert_resource(SimState::default())
+            .insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))) // FIXME
+            .add_event::<SyncModels>()
+            .add_plugins(crate::bevy_transform::TransformPlugin)
+            .add_plugins(
+                DefaultPlugins
+                    .set(RenderPlugin {
+                        render_creation: WgpuSettings {
+                            backends: None,
+                            ..default()
+                        }
+                        .into(),
+                    })
+                    .build()
+                    .disable::<WinitPlugin>()
+                    .disable::<bevy::transform::TransformPlugin>(), //.disable::<WindowPlugin>(),
             )
-                .chain(),
-        );
+            .add_plugins(HistoryPlugin)
+            .add_plugins(TopologicalSortPlugin)
+            .add_systems(Update, run_physics_system)
+            .add_systems(PhysicsSchedule, (tick).in_set(TickSet::TickPhysics))
+            .configure_sets(
+                Update,
+                (
+                    TickSet::ClearConstraintLagrange,
+                    TickSet::TickPhysics,
+                    TickSet::SyncPos,
+                )
+                    .chain(),
+            );
         app.add_schedule(substep_schedule());
     }
 }

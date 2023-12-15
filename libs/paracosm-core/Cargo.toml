@@ -17,7 +17,7 @@ stable-vec = "0.4"
 bevy_ecs = "0.12"
 bevy_utils = "0.12"
 bevy.version = "0.12"
-bevy.features = ["trace"]
+bevy.features = []
 
 paracosm-macros.path = "../paracosm-macros"
 
@@ -35,6 +35,13 @@ serde_json = "1.0"
 
 # channel
 flume = "0.11"
+
+# sync
+elo-conduit.path = "../elo-conduit"
+ip_network_table-deps-treebitmap = "0.5.0"
+postcard.version = "1.0.8"
+postcard.features = ["alloc"]
+
 
 
 [dev-dependencies]

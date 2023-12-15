@@ -10,57 +10,23 @@ use bevy::{
     render::{mesh::Indices, render_resource::PrimitiveTopology},
 };
 use bevy_ecs::{component::Component, event::Event, system::Resource};
+use paracosm_macros::Component as Comp;
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
-
-use crate::spatial::SpatialPos;
 
 #[derive(Event)]
 pub struct SyncModels;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum ServerMsg {
-    Exit,
-    RequestModels,
-    Rollback(usize),
-    Pause(bool),
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum ClientMsg {
-    Clear,
-    SyncWorldPos(SyncWorldPos),
-    ModelDataResp(ModelData),
-    SimSate(SimState),
-}
-
-#[derive(Resource, Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Resource, Debug, Default, Serialize, Deserialize, Clone, Comp, Component)]
+#[conduit(prefix = "32", postcard)]
 pub struct SimState {
     pub paused: bool,
     pub history_count: usize,
     pub history_index: usize,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SyncWorldPos {
-    pub body_id: Uuid,
-    pub pos: SpatialPos,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum ModelData {
-    Pbr {
-        body_id: Uuid,
-        material: ReflectSerde<StandardMaterial>,
-        mesh: MeshData,
-    },
-    Glb {
-        body_id: Uuid,
-        data: Vec<u8>,
-    },
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct MeshData {
+#[derive(Serialize, Deserialize, Clone, Component, Comp)]
+#[conduit(prefix = "31", postcard)]
+pub struct SyncMeshData {
     mesh_type: u8,
     positions: Option<Vec<[f32; 3]>>,
     normals: Option<Vec<[f32; 3]>>,
@@ -72,8 +38,14 @@ pub struct MeshData {
     indices: Option<Vec<u32>>,
 }
 
-impl From<MeshData> for bevy::prelude::Mesh {
-    fn from(data: MeshData) -> Self {
+impl std::fmt::Debug for SyncMeshData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncMeshData").finish()
+    }
+}
+
+impl From<SyncMeshData> for bevy::prelude::Mesh {
+    fn from(data: SyncMeshData) -> Self {
         use bevy::render::mesh::VertexAttributeValues::Uint16x4;
         let mesh_type_enum = match data.mesh_type {
             0 => PrimitiveTopology::PointList,
@@ -122,7 +94,7 @@ impl From<MeshData> for bevy::prelude::Mesh {
     }
 }
 
-impl From<bevy::prelude::Mesh> for MeshData {
+impl From<bevy::prelude::Mesh> for SyncMeshData {
     fn from(mesh: bevy::prelude::Mesh) -> Self {
         use bevy::render::mesh::VertexAttributeValues::{
             Float32x2, Float32x3, Float32x4, Uint16x4,
@@ -185,7 +157,7 @@ impl From<bevy::prelude::Mesh> for MeshData {
             PrimitiveTopology::TriangleStrip => 4,
         };
 
-        MeshData {
+        SyncMeshData {
             mesh_type: mesh_type_num,
             positions,
             normals,
@@ -199,13 +171,17 @@ impl From<bevy::prelude::Mesh> for MeshData {
     }
 }
 
-#[derive(
-    PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, Debug, Serialize, Deserialize,
-)]
-pub struct Uuid(pub u128);
-
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Component, Clone, Copy, DerefMut, Deref, Debug)]
 pub struct SyncedModel(pub bool);
+
+#[derive(Serialize, Deserialize, Clone, Component, Comp)]
+#[conduit(prefix = "31", postcard)]
+pub struct SyncMaterial(pub ReflectSerde<StandardMaterial>);
+impl std::fmt::Debug for SyncMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SyncMaterial").finish()
+    }
+}
 
 pub trait RecursiveReg {
     fn register(register: &mut TypeRegistry);

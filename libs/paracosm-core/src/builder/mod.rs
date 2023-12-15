@@ -1,11 +1,11 @@
 mod assets;
 mod entity;
-
 use bevy::{
     prelude::{Assets, BuildWorldChildren, Deref, Handle, PbrBundle},
     scene::Scene,
 };
 use bevy_ecs::world::{Mut, World};
+use elo_conduit::EntityId;
 use nalgebra::Vector3;
 use std::marker::PhantomData;
 
@@ -148,7 +148,7 @@ impl SimBuilder {
 
             let parent = builder.parent.take();
 
-            entity.insert((builder.bundle(), NoPropagate, Uuid(i as u128)));
+            entity.insert((builder.bundle(), NoPropagate, EntityId(i as u64)));
 
             if let Some(parent) = parent {
                 let parent = entities[parent.0];

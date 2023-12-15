@@ -1,4 +1,4 @@
-use crate::{builder::SimBuilder, sync::ServerTransport, PhysFixed};
+use crate::{builder::SimBuilder, PhysFixed};
 
 use super::{
     builder::{ConcreteSimFunc, Env, SimFunc},
@@ -59,8 +59,8 @@ impl<'a> SimRunner<'a> {
         self
     }
 
-    pub fn build(self, tx: impl ServerTransport) -> App {
-        self.build_with_plugins(tx, ())
+    pub fn build(self) -> App {
+        self.build_with_plugins(())
     }
 
     fn tick_mode(&mut self) -> TickMode {
@@ -79,11 +79,7 @@ impl<'a> SimRunner<'a> {
         }
     }
 
-    pub fn build_with_plugins<M>(
-        mut self,
-        tx: impl ServerTransport,
-        plugins: impl Plugins<M>,
-    ) -> App {
+    pub fn build_with_plugins<M>(mut self, plugins: impl Plugins<M>) -> App {
         let mut app = App::new();
         app.insert_resource(self.tick_mode());
         match self.run_mode {
@@ -131,7 +127,7 @@ impl<'a> SimRunner<'a> {
         app.insert_resource(bevy::time::Time::<Virtual>::default());
         app.insert_resource(crate::Time(0.0))
             .insert_resource(self.config);
-        app.add_plugins(XpbdPlugin::new(tx));
+        app.add_plugins(XpbdPlugin);
         app.add_plugins(plugins);
         let mut env = SimRunnerEnv::new(app);
         let builder = self.sim_func.build(&mut env);
@@ -160,8 +156,8 @@ pub trait IntoSimRunner<'a, T>: Sized {
         self.into_runner().run_mode(mode)
     }
 
-    fn build_app(self, tx: impl ServerTransport) -> App {
-        self.into_runner().build(tx)
+    fn build_app(self) -> App {
+        self.into_runner().build()
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {
@@ -200,8 +196,8 @@ impl<'a> IntoSimRunner<'a, ()> for SimRunner<'a> {
         SimRunner::run_mode(self, mode)
     }
 
-    fn build_app(self, tx: impl ServerTransport) -> App {
-        SimRunner::build(self, tx)
+    fn build_app(self) -> App {
+        SimRunner::build(self)
     }
 
     fn scale(self, scale: f32) -> SimRunner<'a> {

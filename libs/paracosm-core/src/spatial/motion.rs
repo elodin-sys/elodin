@@ -1,5 +1,6 @@
 use std::ops::Add;
 
+use elo_conduit::{cid, ComponentType, ComponentValue};
 use nalgebra::{Vector3, Vector6};
 
 use super::{SpatialForce, SpatialPos};
@@ -53,5 +54,29 @@ impl Add for SpatialMotion {
             vel: self.vel + rhs.vel,
             ang_vel: self.ang_vel + rhs.ang_vel,
         }
+    }
+}
+
+impl elo_conduit::Component for SpatialMotion {
+    fn component_id() -> elo_conduit::ComponentId {
+        cid!(31;spatial_motion)
+    }
+
+    fn component_type() -> elo_conduit::ComponentType {
+        ComponentType::SpatialPosF64
+    }
+
+    fn component_value<'a>(&self) -> elo_conduit::ComponentValue<'a> {
+        elo_conduit::ComponentValue::SpatialMotionF64((self.ang_vel, self.vel))
+    }
+
+    fn from_component_value(value: elo_conduit::ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let ComponentValue::SpatialMotionF64((ang_vel, vel)) = value else {
+            return None;
+        };
+        Some(Self { ang_vel, vel })
     }
 }

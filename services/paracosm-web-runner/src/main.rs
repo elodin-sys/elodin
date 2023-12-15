@@ -1,47 +1,49 @@
-use bytes::Bytes;
+use elo_conduit::bevy::{ConduitSubscribePlugin, Msg, Subscriptions};
 use futures::future::select_all;
-use futures::{SinkExt, StreamExt};
-use paracosm::runner::IntoSimRunner;
-use paracosm::sync::ServerTransport;
-use paracosm::{ClientMsg, ServerMsg};
-use paracosm_py::SimBuilder;
-use paracosm_types::sandbox;
-use paracosm_types::sandbox::sandbox_control_server::SandboxControlServer;
-use paracosm_types::sandbox::{
-    sandbox_control_server::SandboxControl, UpdateCodeReq, UpdateCodeResp,
+use paracosm::{
+    runner::IntoSimRunner,
+    sync::{SendPlbPlugin, SyncPlugin},
 };
-use pyo3::types::PyModule;
-use pyo3::Python;
-use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+use paracosm_py::SimBuilder;
+use paracosm_types::sandbox::{
+    self,
+    sandbox_control_server::{SandboxControl, SandboxControlServer},
+    UpdateCodeReq, UpdateCodeResp,
+};
+use pyo3::{types::PyModule, Python};
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tonic::transport::Server;
-use tonic::{async_trait, Response, Status};
+use tonic::{async_trait, transport::Server, Response, Status};
 use tracing::info;
 
 mod config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     {
         use paracosm_py::paracosm_py;
         pyo3::append_to_inittab!(paracosm_py);
     }
 
-    let (sim_channels, client_channels) = channel_pair();
+    let (server_tx, server_rx) = flume::unbounded();
     let config = crate::config::Config::new()?;
     let control = ControlService::new(
-        sim_channels,
-        client_channels.tx.clone(),
+        server_tx.clone(),
+        server_rx,
         config.control_addr,
+        Subscriptions::default(),
     );
     let control = tokio::spawn(control.run());
-    let sim = SimServer::new(client_channels, config.sim_addr);
+    let sim = SimServer::new(server_tx, config.sim_addr);
     let sim = tokio::spawn(sim.run());
     let (res, _, _) = select_all([control, sim]).await;
     res?
@@ -49,70 +51,50 @@ async fn main() -> anyhow::Result<()> {
 
 struct SimServer {
     address: SocketAddr,
-    client_channels: ClientChannels,
+    bevy_tx: flume::Sender<Msg<'static>>,
 }
 
 impl SimServer {
-    fn new(client_channels: ClientChannels, address: SocketAddr) -> Self {
-        Self {
-            address,
-            client_channels,
-        }
+    fn new(bevy_tx: flume::Sender<elo_conduit::bevy::Msg<'static>>, address: SocketAddr) -> Self {
+        Self { address, bevy_tx }
     }
 
     async fn run(self) -> anyhow::Result<()> {
         let listener = TcpListener::bind(self.address).await?;
         loop {
             let (socket, _addr) = listener.accept().await?;
-            let mut client_channels = self.client_channels.clone();
-            tokio::spawn(async move {
-                let (rx, tx) = socket.into_split();
-                let mut tx = FramedWrite::new(tx, LengthDelimitedCodec::new());
-                let mut rx = FramedRead::new(rx, LengthDelimitedCodec::new());
-                let tx = async move {
-                    while let Ok(msg) = client_channels.rx.recv().await {
-                        tx.send(msg).await?;
-                    }
-                    Ok::<(), anyhow::Error>(())
-                };
-                let rx = async move {
-                    while let Some(buf) = rx.next().await {
-                        let buf = buf?;
-                        let Ok(msg) = postcard::from_bytes::<ServerMsg>(&buf[..]) else {
-                            continue;
-                        };
-                        client_channels.tx.send_async(msg).await?;
-                    }
-                    Ok::<(), anyhow::Error>(())
-                };
-                tokio::select! {
-                    res = tx => { res }
-                    res = rx => { res }
-                }
-            });
+            let (rx_socket, tx_socket) = socket.into_split();
+            tokio::spawn(elo_conduit::bevy::handle_socket(
+                self.bevy_tx.clone(),
+                tx_socket,
+                rx_socket,
+            ));
         }
     }
 }
 
 #[derive(Clone)]
 struct ControlService {
-    sim_channels: SimChannels,
-    server_tx: flume::Sender<ServerMsg>,
+    server_tx: flume::Sender<Msg<'static>>,
+    server_rx: flume::Receiver<Msg<'static>>,
+    subscriptions: Subscriptions,
     loaded: Arc<AtomicBool>,
     address: SocketAddr,
 }
 
 impl ControlService {
     fn new(
-        sim_channels: SimChannels,
-        server_tx: flume::Sender<ServerMsg>,
+        server_tx: flume::Sender<Msg<'static>>,
+        server_rx: flume::Receiver<Msg<'static>>,
         address: SocketAddr,
+        subscriptions: Subscriptions,
     ) -> Self {
         Self {
-            sim_channels,
             address,
             server_tx,
+            server_rx,
             loaded: Arc::new(AtomicBool::new(false)),
+            subscriptions,
         }
     }
 
@@ -165,17 +147,23 @@ impl SandboxControl for ControlService {
                 }));
             }
         };
-        let channels = self.sim_channels.clone();
+        let rx = self.server_rx.clone();
+        let subscriptions = self.subscriptions.clone();
         thread::spawn(move || -> anyhow::Result<()> {
             if loaded.swap(true, Ordering::SeqCst) {
-                server_tx.send(paracosm::ServerMsg::Exit)?;
+                server_tx.send(Msg::Exit)?;
                 thread::sleep(Duration::from_millis(100));
             }
-
             let runner = builder.into_runner();
             let mut app = runner
                 .run_mode(paracosm::runner::RunMode::RealTime)
-                .build(channels);
+                .build_with_plugins((
+                    SyncPlugin {
+                        plugin: ConduitSubscribePlugin::new(rx),
+                        subscriptions,
+                    },
+                    SendPlbPlugin,
+                ));
             app.run();
             Ok(())
         });
@@ -184,52 +172,5 @@ impl SandboxControl for ControlService {
             status: sandbox::Status::Success.into(),
             errors: vec![],
         }))
-    }
-}
-
-#[derive(Clone, bevy::prelude::Resource)]
-struct SimChannels {
-    tx: tokio::sync::broadcast::Sender<Bytes>,
-    rx: flume::Receiver<ServerMsg>,
-}
-
-impl ServerTransport for SimChannels {
-    fn send_msg(&self, msg: ClientMsg) {
-        let bytes = postcard::to_allocvec(&msg).unwrap();
-        let bytes = Bytes::from(bytes);
-        self.tx.send(bytes).unwrap();
-    }
-
-    fn try_recv_msg(&self) -> Option<ServerMsg> {
-        self.rx.try_recv().ok()
-    }
-}
-
-struct ClientChannels {
-    rx: tokio::sync::broadcast::Receiver<Bytes>,
-    tx: flume::Sender<ServerMsg>,
-}
-
-fn channel_pair() -> (SimChannels, ClientChannels) {
-    let (client_tx, client_rx) = broadcast::channel(128);
-    let (server_tx, server_rx) = flume::unbounded();
-    (
-        SimChannels {
-            tx: client_tx,
-            rx: server_rx,
-        },
-        ClientChannels {
-            tx: server_tx,
-            rx: client_rx,
-        },
-    )
-}
-
-impl Clone for ClientChannels {
-    fn clone(&self) -> Self {
-        Self {
-            rx: self.rx.resubscribe(),
-            tx: self.tx.clone(),
-        }
     }
 }
