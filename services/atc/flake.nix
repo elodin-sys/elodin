@@ -16,7 +16,7 @@
             rustPkgs = pkgs.rustBuilder.makePackageSet {
               rustVersion = "1.73.0";
               packageFun = import ../../Cargo.nix;
-              packageOverrides = paracosm.${system}.packages.rust-overrides;
+              packageOverrides = paracosm.packages.${system}.rust-overrides;
             };
           in
             (rustPkgs.workspace.atc {}).bin;
@@ -25,7 +25,8 @@
             pkgs,
           }: let
             attrs = {
-              name = "atc";
+              name = "elo-atc";
+              tag = "latest";
               contents = with pkgs; [cacert busybox];
               config = {
                 Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];

@@ -131,11 +131,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1697285352,
-        "narHash": "sha256-tRGLm/DO8+anGUCgLYxTF5EPqWv8EZ9MVFWRdh285HU=",
+        "lastModified": 1700389764,
+        "narHash": "sha256-hMsZ741ri9c4ZQpB6mgLY8KErk0yXVAOUjfNkP1nbbw=",
         "owner": "nlewo",
         "repo": "nix2container",
-        "rev": "9d7f33ef0058f4df4c0912025f43c758a3289d76",
+        "rev": "4400b77e14f3095ee3215a9a5e0f9143bc0e8f2d",
         "type": "github"
       },
       "original": {
@@ -218,7 +218,7 @@
       },
       "locked": {
         "lastModified": 0,
-        "narHash": "sha256-IC8CSgwJx5kelC9lxWQ+sh2lRdgi2srnMpV2lZ1wvmU=",
+        "narHash": "sha256-GdFRW2R9ELdGo65KtkfXzYsIa0o3zVl2FXKOGZQeYuI=",
         "path": "../../.",
         "type": "path"
       },
