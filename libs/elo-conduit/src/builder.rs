@@ -1,0 +1,272 @@
+use std::{iter, marker::PhantomData};
+
+use crate::{parser::varint_max, Component, ComponentValue, EntityId, Error};
+
+pub struct Builder<B> {
+    buf: B,
+}
+
+impl Builder<Vec<u8>> {
+    pub fn with_time(time: u64) -> Result<Self, Error> {
+        Builder::new(vec![], time)
+    }
+}
+
+impl<B: Extend> Builder<B> {
+    pub fn new(mut buf: B, time: u64) -> Result<Self, Error> {
+        buf.extend_from_slice(&time.to_le_bytes())?;
+        Ok(Builder { buf })
+    }
+
+    pub fn append_builder<
+        E: Iterator<Item = EntityId> + ExactSizeIterator,
+        V: Iterator<Item = C> + ExactSizeIterator,
+        C: Component,
+    >(
+        &mut self,
+        builder: ComponentBuilder<E, V, C>,
+    ) -> Result<&mut Self, Error> {
+        builder.write(&mut self.buf)?;
+        Ok(self)
+    }
+
+    pub fn append_iter<C: Component>(
+        &mut self,
+        entity_iter: impl Iterator<Item = EntityId> + ExactSizeIterator,
+        value_iter: impl Iterator<Item = C> + ExactSizeIterator,
+    ) -> Result<&mut Self, Error> {
+        self.append_builder(ComponentBuilder {
+            _phantom_data: PhantomData,
+            entity_iter,
+            value_iter,
+        })
+    }
+
+    pub fn append_component(
+        &mut self,
+        entity_id: impl Into<EntityId>,
+        value: impl Component,
+    ) -> Result<&mut Self, Error> {
+        self.append_iter(iter::once(entity_id.into()), iter::once(value))
+    }
+
+    pub fn buf(&self) -> &B {
+        &self.buf
+    }
+
+    pub fn into_buf(self) -> B {
+        self.buf
+    }
+}
+
+pub struct ComponentBuilder<E, V, C> {
+    _phantom_data: PhantomData<C>,
+    entity_iter: E,
+    value_iter: V,
+}
+
+impl<
+        E: Iterator<Item = EntityId> + ExactSizeIterator,
+        V: Iterator<Item = C> + ExactSizeIterator,
+        C: Component,
+    > ComponentBuilder<E, V, C>
+{
+    pub fn write(self, out: &mut impl Extend) -> Result<(), Error> {
+        let id = C::component_id();
+        let ty = C::component_type();
+        out.extend_from_slice(&id.0.to_le_bytes())?;
+        out.extend_from_slice(&[ty.into()])?;
+        let entity_len = self.entity_iter.len();
+        if entity_len != self.value_iter.len() {
+            return Err(Error::EntityComponentLengthMismatch);
+        }
+        let mut arr = [0; varint_max::<usize>()];
+        out.extend_from_slice(encode_varint_usize(entity_len, &mut arr))?;
+
+        for e in self.entity_iter {
+            out.extend_from_slice(&e.0.to_le_bytes())?;
+        }
+
+        for value in self.value_iter {
+            let value = value.component_value();
+            value.encode(out)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'l> ComponentValue<'l> {
+    pub fn encode(&self, out: &mut impl Extend) -> Result<(), Error> {
+        match self {
+            ComponentValue::U8(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::U16(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::U32(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::U64(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::I8(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::I16(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::I32(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::I64(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::Bool(v) => out.extend_from_slice(if *v { &[1] } else { &[0] }),
+            ComponentValue::F32(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::F64(v) => out.extend_from_slice(&v.to_le_bytes()),
+            ComponentValue::String(str) => {
+                let bytes = str.as_bytes();
+                let mut arr = [0; varint_max::<usize>()];
+                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr))?;
+                out.extend_from_slice(bytes)
+            }
+            ComponentValue::Bytes(bytes) => {
+                let mut arr = [0; varint_max::<usize>()];
+                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr))?;
+                out.extend_from_slice(bytes)
+            }
+            ComponentValue::Vector3F32(v) => {
+                for f in v.into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::Vector3F64(v) => {
+                for f in v.into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::Matrix3x3F32(v) => {
+                for f in v.into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::Matrix3x3F64(v) => {
+                for f in v.into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::QuaternionF32(v) => {
+                for f in v.vector().into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::QuaternionF64(v) => {
+                for f in v.vector().into_iter() {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::SpatialPosF32((q, v)) => {
+                for f in q.vector().into_iter().chain(v.into_iter()) {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::SpatialPosF64((q, v)) => {
+                for f in q.vector().into_iter().chain(v.into_iter()) {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::SpatialMotionF32((p, v)) => {
+                for f in p.into_iter().chain(v.into_iter()) {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+            ComponentValue::SpatialMotionF64((p, v)) => {
+                for f in p.into_iter().chain(v.into_iter()) {
+                    out.extend_from_slice(&f.to_le_bytes())?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+// source: https://github.com/jamesmunns/postcard/blob/a095b49935f7bd1bab04e6c5914ab11c3bbd5fee/src/varint.rs#L74
+#[inline]
+pub fn encode_varint_usize(n: usize, out: &mut [u8; varint_max::<usize>()]) -> &mut [u8] {
+    let mut value = n;
+    for i in 0..varint_max::<usize>() {
+        out[i] = value.to_le_bytes()[0];
+        if value < 128 {
+            return &mut out[..=i];
+        }
+
+        out[i] |= 0x80;
+        value >>= 7;
+    }
+    debug_assert_eq!(value, 0);
+    &mut out[..]
+}
+
+pub trait Extend {
+    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error>;
+}
+
+impl Extend for Vec<u8> {
+    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
+        self.extend_from_slice(slice);
+        Ok(())
+    }
+}
+
+impl<'a> Extend for &'a mut [u8] {
+    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
+        self.get_mut(..slice.len())
+            .ok_or(Error::BufferOverflow)?
+            .copy_from_slice(slice);
+        let (_, b) = std::mem::take(self).split_at_mut(slice.len());
+        *self = b;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        parser::{ComponentPair, Parser},
+        ComponentType,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_single_component() {
+        let mut builder = Builder::with_time(1234).unwrap();
+        let a = builder.append_component(1337u64, 101.05f64).unwrap().buf();
+
+        let mut b = vec![];
+        b.extend_from_slice(&1234u64.to_le_bytes()); // Time
+        b.extend_from_slice(&0x310_08u64.to_le_bytes()); // Component Id
+        b.extend_from_slice(&[ComponentType::F64.into()]); // Component Type
+        b.extend_from_slice(&[1]); // Entity Length
+        b.extend_from_slice(&1337u64.to_le_bytes()); // Entity Id
+        b.extend_from_slice(&101.05f64.to_le_bytes()); // Component
+
+        assert_eq!(a, &b)
+    }
+
+    #[test]
+    fn test_write_parse() {
+        let mut builder = Builder::with_time(1234).unwrap();
+        let a = builder
+            .append_iter(
+                [EntityId(1), EntityId(2)].into_iter(),
+                [1u32, 2u32].into_iter(),
+            )
+            .unwrap()
+            .buf();
+        let mut parser = Parser::new(a).unwrap();
+        let ComponentPair {
+            component_id,
+            entity_id,
+            value,
+        } = parser.next().unwrap();
+        assert_eq!(EntityId(1), entity_id);
+        assert_eq!(u32::component_id(), component_id);
+        assert_eq!(ComponentValue::U32(1), value);
+    }
+}
