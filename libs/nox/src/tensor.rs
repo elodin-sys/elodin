@@ -1,4 +1,4 @@
-use crate::{Op, Param};
+use crate::{AsBuffer, Buffer, IntoOp, Op, Param};
 use nalgebra::{
     constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
     Scalar as NalgebraScalar,
@@ -7,25 +7,47 @@ use simba::scalar::ClosedNeg;
 use std::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
-    sync::Arc,
 };
 use xla::{NativeType, XlaOp};
 
+#[repr(transparent)]
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
-    pub(crate) inner: Arc<P::Inner>,
+    pub(crate) inner: P::Inner,
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
 impl<T, D: TensorDim> Tensor<T, D, Op> {
     fn from_op(op: XlaOp) -> Self {
         Self {
-            inner: Arc::new(op),
+            inner: op,
             phantom: PhantomData,
         }
     }
 
     pub fn sqrt(&self) -> Self {
         Self::from_op(self.inner.sqrt().unwrap())
+    }
+
+    pub fn log(&self) -> Self {
+        Self::from_op(self.inner.log().unwrap())
+    }
+
+    /// *Safety*: This function is memory safe, it is marked unsafe because you could introduce crashes and/or
+    /// other weirdness in XLA using it. Its only intended use case is as a bogan form of type-erasure for Tensors.
+    /// Essentially you must guarentee that the Op you are casting from is of the correct dimension and type
+    pub(crate) unsafe fn unsafe_mut_cast<NT, ND: TensorDim>(
+        &mut self,
+    ) -> &'_ mut Tensor<NT, ND, Op> {
+        // Safety: this is safe because we are casting between two `Tensor<Op>` types,
+        // which are marked `repr(transparent)`, since the only two types are the inner `Op` and a
+        // ZST PhantomData
+        std::mem::transmute(self)
+    }
+}
+
+impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
+    fn into_op(self, _builder: &xla::XlaBuilder) -> xla::XlaOp {
+        self.inner
     }
 }
 
@@ -44,6 +66,11 @@ pub trait ConstDim<const RANK: usize> {
     fn dims() -> [usize; RANK];
 }
 
+pub trait XlaDim {
+    type Array;
+    fn dims() -> Self::Array;
+}
+
 pub trait DimRank<const RANK: usize> {
     const RANK: usize = RANK;
 }
@@ -54,11 +81,32 @@ impl ConstDim<0> for ScalarDim {
     }
 }
 
+impl XlaDim for ScalarDim {
+    type Array = [i64; 0];
+    fn dims() -> [i64; 0] {
+        []
+    }
+}
+
 impl DimRank<0> for ScalarDim {}
 
 impl<const N: usize> ConstDim<1> for Const<N> {
     fn dims() -> [usize; 1] {
         [N]
+    }
+}
+
+impl<const N: usize> XlaDim for Const<N> {
+    type Array = [i64; 1];
+    fn dims() -> [i64; 1] {
+        [N as i64]
+    }
+}
+
+impl XlaDim for nalgebra::Dyn {
+    type Array = [i64; 1];
+    fn dims() -> [i64; 1] {
+        [-1]
     }
 }
 
@@ -91,6 +139,16 @@ macro_rules! impl_tensor_dim {
                 [$($ty::dims()[0],)*]
             }
         }
+
+        impl<$($ty,)*> XlaDim for ($($ty,)*)
+              where $($ty: XlaDim<Array = [i64; 1]>, )*
+        {
+            type Array = [i64; $num];
+            fn dims() -> [i64; $num] {
+                [$($ty::dims()[0],)*]
+            }
+        }
+
       }
 }
 
@@ -134,59 +192,82 @@ impl<D: NonScalarDim + TensorDim> DimDiv<D, ScalarDim> for ShapeConstraint {}
 impl<D: NonScalarDim + TensorDim> DimMul<D, ScalarDim> for ShapeConstraint {}
 impl<D: NonScalarDim + TensorDim> DimMul<ScalarDim, D> for ShapeConstraint {}
 
-impl<T: NalgebraScalar + ClosedAdd, D1: TensorDim, D2: TensorDim> Add<Tensor<T, D2>>
-    for Tensor<T, D1>
-where
-    ShapeConstraint: DimAdd<D1, D2>,
-{
-    type Output = Self;
+macro_rules! impl_op {
+    ($op: tt, $op_fn:tt, $constraint: tt, $ret: tt, $inner: tt, $($t_bound:tt),+) => {
+        impl<T, D1: TensorDim, D2: TensorDim> $op<Tensor<T, D2>>
+            for Tensor<T, D1>
+        where
+            $(T: $t_bound,)+
+            ShapeConstraint: $constraint<D1, D2>,
+        {
+            type Output = Self;
 
-    fn add(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor::from_op((self.inner.as_ref() + rhs.inner.as_ref()).expect("xla build error"))
-    }
+            fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
+                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+            }
+        }
+
+        impl<'a, T, D1: TensorDim, D2: TensorDim> $op<&'a Tensor<T, D2>>
+            for Tensor<T, D1>
+        where
+            $(T: $t_bound,)+
+            ShapeConstraint: $constraint<D1, D2>,
+        {
+            type Output = Self;
+
+            fn $op_fn(self, rhs: &'a Tensor<T, D2>) -> Self::Output {
+                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+            }
+        }
+
+        impl<'a, T, D1: TensorDim, D2: TensorDim> $op<Tensor<T, D2>>
+            for &'a Tensor<T, D1>
+        where
+            $(T: $t_bound,)+
+            ShapeConstraint: $constraint<D1, D2>,
+        {
+            type Output = $ret<T, D1>;
+
+            fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
+                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+            }
+        }
+
+
+        impl<'a, 'b, T, D1: TensorDim, D2: TensorDim> $op<&'b Tensor<T, D2>>
+            for &'a Tensor<T, D1>
+        where
+            $(T: $t_bound,)+
+            ShapeConstraint: $constraint<D1, D2>,
+        {
+            type Output = $ret<T, D1>;
+
+            fn $op_fn(self, rhs: &'b Tensor<T, D2>) -> Self::Output {
+                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+            }
+        }
+
+    };
 }
 
-impl<T: NalgebraScalar + ClosedMul, D1: TensorDim, D2: TensorDim> Mul<Tensor<T, D2>>
-    for Tensor<T, D1>
-where
-    ShapeConstraint: DimMul<D1, D2>,
-{
-    type Output = Self;
-
-    fn mul(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor::from_op((self.inner.as_ref() * rhs.inner.as_ref()).expect("xla build error"))
-    }
-}
-
-impl<T: NalgebraScalar + ClosedDiv, D1: TensorDim, D2: TensorDim> Div<Tensor<T, D2>>
-    for Tensor<T, D1>
-where
-    ShapeConstraint: DimDiv<D1, D2>,
-{
-    type Output = Self;
-
-    fn div(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor::from_op((self.inner.as_ref() / rhs.inner.as_ref()).expect("xla build error"))
-    }
-}
-
-impl<T: NalgebraScalar + ClosedSub, D1: TensorDim, D2: TensorDim> Sub<Tensor<T, D2>>
-    for Tensor<T, D1>
-where
-    ShapeConstraint: DimSub<D1, D2>,
-{
-    type Output = Self;
-
-    fn sub(self, rhs: Tensor<T, D2>) -> Self::Output {
-        Tensor::from_op((self.inner.as_ref() - rhs.inner.as_ref()).expect("xla build error"))
-    }
-}
+impl_op! {Add, add, DimAdd, Tensor, +, ClosedAdd, NalgebraScalar}
+impl_op! {Mul, mul, DimMul, Tensor, *, ClosedMul, NalgebraScalar}
+impl_op! {Div, div, DimDiv, Tensor, /, ClosedDiv, NalgebraScalar}
+impl_op! {Sub, sub, DimSub, Tensor, -, ClosedSub, NalgebraScalar}
 
 impl<T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for Tensor<T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Tensor::from_op(self.inner.as_ref().neg().expect("xla build error"))
+        Tensor::from_op(self.inner.neg().expect("xla build error"))
+    }
+}
+
+impl<'a, T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for &'a Tensor<T, D> {
+    type Output = Tensor<T, D>;
+
+    fn neg(self) -> Self::Output {
+        Tensor::from_op(self.inner.neg().expect("xla build error"))
     }
 }
 
@@ -217,7 +298,20 @@ where
 
     fn mul(self, rhs: T) -> Self::Output {
         Tensor::from_op(
-            (self.inner.as_ref() * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
+            (&self.inner * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
+        )
+    }
+}
+
+impl<'a, T: NalgebraScalar + ClosedMul + NativeType, D1: TensorDim> Mul<T> for &'a Tensor<T, D1>
+where
+    ShapeConstraint: DimMul<D1, ScalarDim>,
+{
+    type Output = Tensor<T, D1>;
+
+    fn mul(self, rhs: T) -> Self::Output {
+        Tensor::from_op(
+            (&self.inner * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
         )
     }
 }
@@ -231,6 +325,14 @@ macro_rules! impl_prim {
                 Tensor::from_op((rhs.inner.builder().c0(self).unwrap() * rhs.inner).unwrap())
             }
         }
+
+        impl<'a, D: TensorDim> Mul<&'a Tensor<$ty, D>> for $ty {
+            type Output = Tensor<$ty, D>;
+
+            fn mul(self, rhs: &Tensor<$ty, D>) -> Self::Output {
+                Tensor::from_op((rhs.inner.builder().c0(self).unwrap() * &rhs.inner).unwrap())
+            }
+        }
     };
 }
 
@@ -240,3 +342,9 @@ impl_prim!(u64);
 impl_prim!(u32);
 impl_prim!(i64);
 impl_prim!(i32);
+
+impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
+    fn as_buffer(&self) -> &xla::PjRtBuffer {
+        &self.inner
+    }
+}

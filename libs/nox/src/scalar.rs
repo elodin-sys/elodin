@@ -1,44 +1,20 @@
-use crate::{
-    AsOp, Builder, FromBuilder, FromPjrtBuffer, Literal, Op, Param, ScalarDim, Tensor, ToHost,
-};
+use crate::{Buffer, BufferArg, Builder, Literal, MaybeOwned, Op, ScalarDim, Tensor, ToHost};
 use nalgebra::ClosedAdd;
-use std::{
-    marker::PhantomData,
-    ops::Add,
-    sync::{atomic::Ordering, Arc},
-};
-use xla::{ArrayElement, NativeType, XlaOp};
+use nalgebra::Scalar as NalgebraScalar;
+
+use std::{marker::PhantomData, ops::Add};
+use xla::{ArrayElement, NativeType};
 
 pub type Scalar<T, P = Op> = Tensor<T, ScalarDim, P>;
 
-impl<T> AsOp for Scalar<T, Op> {
-    fn as_op(&self) -> &XlaOp {
-        self.inner.as_ref()
+impl<T: NativeType + ArrayElement> ToHost for Scalar<T, Buffer> {
+    type HostTy = T;
+
+    fn to_host(&self) -> Self::HostTy {
+        let literal = self.inner.to_literal_sync().unwrap();
+        literal.get_first_element().unwrap()
     }
 }
-
-impl<T, P: Param> ToHost for Scalar<T, P> {
-    type HostTy = T;
-}
-
-macro_rules! impl_prim_buffer {
-    ($ty:tt) => {
-        impl FromPjrtBuffer for $ty {
-            fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
-                let buf = &pjrt[0][0];
-                let literal = buf.to_literal_sync().unwrap();
-                literal.get_first_element().unwrap()
-            }
-        }
-    };
-}
-
-impl_prim_buffer!(f64);
-impl_prim_buffer!(f32);
-impl_prim_buffer!(u64);
-impl_prim_buffer!(u32);
-impl_prim_buffer!(i64);
-impl_prim_buffer!(i32);
 
 impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
     type Output = Scalar<T, Op>;
@@ -46,7 +22,7 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
     fn add(self, rhs: T) -> Self::Output {
         let rhs = self.inner.builder().c0(rhs).unwrap();
         Scalar {
-            inner: Arc::new((self.inner.as_ref() + rhs).unwrap()),
+            inner: (self.inner + rhs).unwrap(),
             phantom: PhantomData,
         }
     }
@@ -63,18 +39,16 @@ where
 {
     fn literal(self) -> Scalar<Self, Literal> {
         Scalar {
-            inner: Arc::new(xla::Literal::scalar(self)),
+            inner: xla::Literal::scalar(self),
             phantom: PhantomData,
         }
     }
 
     fn constant(self, builder: &Builder) -> Scalar<Self, Op> {
-        let inner = Arc::new(
-            builder
-                .inner
-                .constant_r0(self)
-                .expect("constant creation failed"),
-        );
+        let inner = builder
+            .inner
+            .constant_r0(self)
+            .expect("constant creation failed");
 
         Scalar {
             inner,
@@ -83,19 +57,31 @@ where
     }
 }
 
-impl<T: xla::ArrayElement> FromBuilder for Scalar<T, Op> {
-    type Item<'a> = Self;
+impl<T> BufferArg<Scalar<T, Buffer>> for T
+where
+    T: xla::NativeType + NalgebraScalar + ArrayElement + Copy,
+{
+    fn as_buffer(&self, client: &crate::Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
+        let inner = client
+            .0
+            .buffer_from_host_buffer(std::slice::from_ref(self), &[], None)
+            .unwrap();
+        MaybeOwned::Owned(inner)
+    }
+}
 
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        let i = builder.param_count.fetch_add(1, Ordering::SeqCst);
-        Scalar {
-            inner: Arc::new(
-                builder
-                    .inner
-                    .parameter(i, T::TY, &[], &format!("param_{}", i))
-                    .expect("parameter create failed"),
-            ),
-            phantom: PhantomData,
-        }
+#[cfg(test)]
+mod tests {
+    use crate::{Client, CompFn};
+
+    use super::*;
+
+    #[test]
+    fn test_sqrt_log_opt() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Scalar<f32>| a.sqrt().log()).build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec.run(&client, 3.141592653589793).unwrap().to_host();
+        assert_eq!(out, 0.5723649);
     }
 }

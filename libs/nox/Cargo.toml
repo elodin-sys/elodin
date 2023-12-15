@@ -9,6 +9,8 @@ edition = "2021"
 nalgebra = "0.32"
 num-traits = "0.2.15"
 simba = "0.8.1"
+boxcar = "0.2"
+paste = "1.0.14"
 
 # xla-rs - a wrapper around raw xla
 # we are using our own fork, which has diverged from upstream significantly
@@ -16,6 +18,7 @@ simba = "0.8.1"
 # metal and static linking
 xla.git = "https://github.com/elodin-sys/xla-rs.git"
 xla.branch = "feature/new-ops"
+#xla.path = "../../../xla-rs"
 
 [dev-dependencies]
 approx = "0.5"

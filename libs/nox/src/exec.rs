@@ -1,4 +1,5 @@
-use crate::{AsBuffer, Client, FromHost, FromPjrtBuffer};
+use crate::{AsBuffer, BufferArg, BufferForm, Client, FromPjrtBuffer};
+use paste::paste;
 use std::marker::PhantomData;
 
 pub struct Exec<T, R> {
@@ -8,6 +9,8 @@ pub struct Exec<T, R> {
 
 pub trait ToHost {
     type HostTy;
+
+    fn to_host(&self) -> Self::HostTy;
 }
 
 // This macro allows us to implement the run function for a series of tuples easily.
@@ -17,17 +20,26 @@ macro_rules! impl_exec {
         #[allow(non_snake_case, clippy::too_many_arguments)]
         impl<$($ty,)* R> Exec<($($ty,)*), R>
         where
-            R: ToHost,
-            R::HostTy: FromPjrtBuffer,
-            $($ty: FromHost + AsBuffer, )*
+            R: BufferForm,
+            R::BufferTy: FromPjrtBuffer,
+            $($ty: AsBuffer, )*
         {
-            pub fn run(&self, client: &Client, $($ty: $ty::HostTy,)*) -> Result<R::HostTy, xla::Error> {
+            pub fn run(&self, client: &Client, $(mut $ty: impl BufferArg<$ty>,)*) -> Result<R::BufferTy, xla::Error> {
+                paste! {
                 $(
-                let $ty = $ty::from_host(client, $ty);
-                let $ty = $ty.as_buffer();
+                    let [<buf_$ty>] = $ty.as_buffer(client);
                 )*
-                let res = self.exec.execute_b(&[$($ty,)*])?;
-                Ok(R::HostTy::from_pjrt(res))
+                let mut res = self.exec.execute_b(&[$([<buf_$ty>],)*])?;
+                let tuple = &mut res[0];
+                $(
+                    if $ty.is_mut_borrowed() {
+                        let buf = tuple.pop().unwrap();
+                        $ty.replace_buffer(buf);
+                    }
+                )*
+
+                Ok(R::BufferTy::from_pjrt(res))
+                }
             }
         }
       }
