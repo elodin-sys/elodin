@@ -10,3 +10,11 @@ paracosm_bg.wasm
 paracosm_bg.wasm.d.ts
 paracosm.d.ts
 paracosm.js
+
+# kubernetes
+
+out.yaml
+
+# secrets
+
+elo-dashboard-secret.env
