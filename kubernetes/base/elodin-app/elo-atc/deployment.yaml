@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elo-atc
+spec:
+  replicas: 1
+  template:
+    spec:
+      serviceAccountName: elo-atc
+      containers:
+      - name: elo-atc
+        imagePullPolicy: Always
+        image: elodin-dev/elo-atc:latest
+        env:
+        - name: ELODIN_ORCA.RUNTIME_CLASS
+          value: gvisor
+        - name: RUST_LOG
+          value: info,atc=trace
+        volumeMounts:
+        - name: config
+          mountPath: /etc/elodin
+        ports:
+        - containerPort: 50051
+          name: grpc
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 50051
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 50051
+        resources:
+          requests:
+            cpu: 200m
+      volumes:
+      - name: config
+        configMap:
+          name: elo-atc-config
