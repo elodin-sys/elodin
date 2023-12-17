@@ -1,4 +1,4 @@
-# Paracosm
+# Elodin
 
 ### Directory Layout
 - `apps` - contains binaries that users run

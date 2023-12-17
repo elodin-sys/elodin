@@ -61,9 +61,9 @@ pub enum Status {
     Running,
 }
 
-impl From<Status> for paracosm_types::api::sandbox::Status {
+impl From<Status> for elodin_types::api::sandbox::Status {
     fn from(val: Status) -> Self {
-        use paracosm_types::api::sandbox;
+        use elodin_types::api::sandbox;
         match val {
             Status::Off => sandbox::Status::Off,
             Status::VmBooting => sandbox::Status::VmBooting,
@@ -73,13 +73,13 @@ impl From<Status> for paracosm_types::api::sandbox::Status {
     }
 }
 
-impl From<Model> for paracosm_types::api::Sandbox {
+impl From<Model> for elodin_types::api::Sandbox {
     fn from(sandbox: Model) -> Self {
-        paracosm_types::api::Sandbox {
+        elodin_types::api::Sandbox {
             id: sandbox.id.as_bytes().to_vec(),
             name: sandbox.name,
             code: sandbox.code,
-            status: paracosm_types::api::sandbox::Status::from(sandbox.status).into(),
+            status: elodin_types::api::sandbox::Status::from(sandbox.status).into(),
         }
     }
 }

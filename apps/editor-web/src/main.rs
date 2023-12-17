@@ -1,8 +1,8 @@
 use anyhow::anyhow;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
-use elo_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-use paracosm::sync::SyncPlugin;
-use paracosm_editor::EditorPlugin;
+use elodin::sync::SyncPlugin;
+use elodin_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
+use elodin_editor::EditorPlugin;
 use tracing::error;
 
 mod web_sock;

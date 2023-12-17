@@ -12,16 +12,16 @@ import Config
 # If you use `mix release`, you need to explicitly enable the server
 # by passing the PHX_SERVER=true when you start it:
 #
-#     PHX_SERVER=true bin/paracosm_dashboard start
+#     PHX_SERVER=true bin/elodin_dashboard start
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
-  config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint, server: true
+  config :elodin_dashboard, ElodinDashboardWeb.Endpoint, server: true
 end
 
 if config_env() == :prod do
-  config :paracosm_dashboard, ParacosmDashboard.Atc,
+  config :elodin_dashboard, ElodinDashboard.Atc,
     internal_addr:
       System.get_env("ATC_INTERNAL_ADDR") || raise("environment variable ATC_ADDR is missing."),
     addr: System.get_env("ATC_ADDR") || raise("environment variable ATC_ADDR is missing."),
@@ -52,15 +52,15 @@ if config_env() == :prod do
   auth_base_url =
     System.get_env("AUTH_BASE_URL") || raise("environment variable AUTH_BASE_URL is missing.")
 
-  config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
+  config :elodin_dashboard, ElodinDashboardWeb.UserAuth,
     client_id: auth_client_id,
     client_secret: auth_client_secret,
     redirect_uri: "https://#{host}/oauth/callback",
     base_url: auth_base_url
 
-  config :paracosm_dashboard, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :elodin_dashboard, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
-  config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+  config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
       # Enable IPv6 and bind on all interfaces.
@@ -77,7 +77,7 @@ if config_env() == :prod do
   # To get SSL working, you will need to add the `https` key
   # to your endpoint configuration:
   #
-  #     config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+  #     config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   #       https: [
   #         ...,
   #         port: 443,
@@ -99,7 +99,7 @@ if config_env() == :prod do
   # We also recommend setting `force_ssl` in your endpoint, ensuring
   # no data is ever sent via http, always redirecting to https:
   #
-  #     config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+  #     config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
@@ -110,7 +110,7 @@ if config_env() == :prod do
   # Also, you may need to configure the Swoosh API client of your choice if you
   # are not using SMTP. Here is an example of the configuration:
   #
-  #     config :paracosm_dashboard, ParacosmDashboard.Mailer,
+  #     config :elodin_dashboard, ElodinDashboard.Mailer,
   #       adapter: Swoosh.Adapters.Mailgun,
   #       api_key: System.get_env("MAILGUN_API_KEY"),
   #       domain: System.get_env("MAILGUN_DOMAIN")

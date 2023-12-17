@@ -2,17 +2,17 @@
 resolver = "2"
 members = [
     "apps/editor-web",
-    "libs/paracosm-core",
-    "libs/paracosm-macros",
-    "libs/paracosm-editor",
-    "libs/paracosm-py",
-    "libs/paracosm-types/rust",
-    "libs/elo-conduit",
+    "libs/elodin-core",
+    "libs/elodin-macros",
+    "libs/elodin-editor",
+    "libs/elodin-py",
+    "libs/elodin-types/rust",
+    "libs/elodin-conduit",
     "libs/nox",
     "services/atc",
     "services/atc/migration",
     "services/atc/entity",
-    "services/paracosm-web-runner",
+    "services/elodin-web-runner",
     "tools/starlark-json"
 ]
 

@@ -5,15 +5,15 @@ config :bcrypt_elixir, :log_rounds, 1
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "XWrHUuJkZCZKVZwM3rfec7YyKWBsE/cS3tjRba7dIy+KMZ0UIkkRDHeKbZpWpd7X",
   server: false
 
-config :paracosm_dashboard, ParacasmDashboardWeb.Atc, addr: "localhost:50051"
+config :elodin_dashboard, ParacasmDashboardWeb.Atc, addr: "localhost:50051"
 
 # In test we don't send emails.
-config :paracosm_dashboard, ParacosmDashboard.Mailer, adapter: Swoosh.Adapters.Test
+config :elodin_dashboard, ElodinDashboard.Mailer, adapter: Swoosh.Adapters.Test
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false

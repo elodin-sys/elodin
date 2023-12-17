@@ -7,19 +7,19 @@
 # General application configuration
 import Config
 
-config :paracosm_dashboard,
-  ecto_repos: [ParacosmDashboard.Repo],
+config :elodin_dashboard,
+  ecto_repos: [ElodinDashboard.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Configures the endpoint
-config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Phoenix.Endpoint.Cowboy2Adapter,
   render_errors: [
-    formats: [html: ParacosmDashboardWeb.ErrorHTML, json: ParacosmDashboardWeb.ErrorJSON],
+    formats: [html: ElodinDashboardWeb.ErrorHTML, json: ElodinDashboardWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: ParacosmDashboard.PubSub,
+  pubsub_server: ElodinDashboard.PubSub,
   live_view: [signing_salt: "G7Oeezzb"]
 
 # Configures the mailer
@@ -29,7 +29,7 @@ config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
 #
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
-config :paracosm_dashboard, ParacosmDashboard.Mailer, adapter: Swoosh.Adapters.Local
+config :elodin_dashboard, ElodinDashboard.Mailer, adapter: Swoosh.Adapters.Local
 
 # Configure esbuild (the version is required)
 config :esbuild,

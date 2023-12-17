@@ -17,7 +17,7 @@ tokio-stream.version = "0.1.14"
 tokio-stream.features = ["sync"]
 
 # types
-paracosm-types.path = "../../libs/paracosm-types/rust"
+elodin-types.path = "../../libs/elodin-types/rust"
 uuid.version = "1.6.1"
 uuid.features = ["fast-rng", "v7"]
 enumflags2.version = "0.7.8"

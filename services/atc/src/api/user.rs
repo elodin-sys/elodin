@@ -1,7 +1,7 @@
 use super::{Api, Claims};
 use crate::{error::Error, events::DbExt};
 use atc_entity::user::{self, Permissions};
-use paracosm_types::api::{CreateUserReq, CreateUserResp, CurrentUserResp};
+use elodin_types::api::{CreateUserReq, CreateUserResp, CurrentUserResp};
 use sea_orm::{prelude::Uuid, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 impl Api {

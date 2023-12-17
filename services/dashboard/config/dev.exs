@@ -1,6 +1,6 @@
 import Config
 
-config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
+config :elodin_dashboard, ElodinDashboardWeb.UserAuth,
   client_id: "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR",
   client_secret: "Rx5d-nJWafMuEcmSRXiUtlCjArTBtPMsjU588CDjq3RjFe1fTSVng2dWmjnyWHBw",
   redirect_uri: "http://localhost:4000/oauth/callback",
@@ -11,7 +11,7 @@ config :paracosm_dashboard, ParacosmDashboardWeb.UserAuth,
   authorization_params: [scope: "openid profile email"],
   auth_method: :client_secret_post
 
-config :paracosm_dashboard, ParacosmDashboard.Atc,
+config :elodin_dashboard, ElodinDashboard.Atc,
   internal_addr: "localhost:50051",
   addr: "localhost:50051",
   tls: false
@@ -22,7 +22,7 @@ config :paracosm_dashboard, ParacosmDashboard.Atc,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}, port: 4000],
@@ -59,17 +59,17 @@ config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :paracosm_dashboard, ParacosmDashboardWeb.Endpoint,
+config :elodin_dashboard, ElodinDashboardWeb.Endpoint,
   live_reload: [
     patterns: [
       ~r"priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
-      ~r"lib/paracosm_dashboard_web/(controllers|live|components)/.*(ex|heex)$"
+      ~r"lib/elodin_dashboard_web/(controllers|live|components)/.*(ex|heex)$"
     ]
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :paracosm_dashboard, dev_routes: true
+config :elodin_dashboard, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :console, format: "[$level] $message\n"

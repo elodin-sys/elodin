@@ -11,13 +11,13 @@
 msgid ""
 msgstr ""
 
-#: lib/paracosm_dashboard_web/components/core_components.ex:482
+#: lib/elodin_dashboard_web/components/core_components.ex:482
 #, elixir-autogen, elixir-format
 msgid "Actions"
 msgstr ""
 
-#: lib/paracosm_dashboard_web/components/core_components.ex:76
-#: lib/paracosm_dashboard_web/components/core_components.ex:130
+#: lib/elodin_dashboard_web/components/core_components.ex:76
+#: lib/elodin_dashboard_web/components/core_components.ex:130
 #, elixir-autogen, elixir-format
 msgid "close"
 msgstr ""
