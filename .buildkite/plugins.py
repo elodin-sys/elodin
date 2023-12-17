@@ -16,13 +16,3 @@ def rust_cache_plugin():
       "save": "branch",
     }
   }
-
-def gcp_identity_plugin():
-  return {
-    "gcp-workload-identity-federation#v1.0.0": {
-      "audience": "//iam.googleapis.com/projects/802981626435/locations/global/workloadIdentityPools/buildkite-pipeline/providers/buildkite",
-      "service-account": "buildkite-802981626435@elodin-dev.iam.gserviceaccount.com",
-      # TODO: Not working as intended, needs more investigation
-      # "lifetime": 2 * 60 * 60,
-    }
-  }
