@@ -1,9 +1,9 @@
 {
   inputs = {
-    paracosm.url = "path:../../.";
-    nixpkgs.follows = "paracosm/nixpkgs";
-    rust-overlay.follows = "paracosm/rust-overlay";
-    flake-utils.follows = "paracosm/flake-utils";
+    elodin.url = "path:../../.";
+    nixpkgs.follows = "elodin/nixpkgs";
+    rust-overlay.follows = "elodin/rust-overlay";
+    flake-utils.follows = "elodin/flake-utils";
     crane.url = "github:ipetkov/crane";
   };
 

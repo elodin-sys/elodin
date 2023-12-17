@@ -10,13 +10,13 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use enumflags2::BitFlag;
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
-use paracosm_types::api::{
+use elodin_types::api::{
     api_server, BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp,
     GetSandboxReq, ListSandboxesReq, ListSandboxesResp, Page, Sandbox, UpdateSandboxReq,
     UpdateSandboxResp,
 };
+use enumflags2::BitFlag;
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use sea_orm::{
     prelude::Uuid, ActiveValue, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set,
     Unchanged,

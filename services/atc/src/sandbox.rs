@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::{error::Error, events::EntityExt};
 use atc_entity::{sandbox, vm};
 use chrono::Utc;
-use paracosm_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
+use elodin_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tonic::transport::Channel;

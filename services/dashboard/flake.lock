@@ -207,7 +207,7 @@
         "type": "github"
       }
     },
-    "paracosm": {
+    "elodin": {
       "inputs": {
         "cargo2nix": "cargo2nix",
         "flake-utils": "flake-utils_2",
@@ -230,33 +230,33 @@
     "root": {
       "inputs": {
         "flake-utils": [
-          "paracosm",
+          "elodin",
           "flake-utils"
         ],
         "get-flake": [
-          "paracosm",
+          "elodin",
           "get-flake"
         ],
         "nix2container": [
-          "paracosm",
+          "elodin",
           "nix2container"
         ],
         "nixpkgs": [
-          "paracosm",
+          "elodin",
           "nixpkgs"
         ],
-        "paracosm": "paracosm"
+        "elodin": "elodin"
       }
     },
     "rust-overlay": {
       "inputs": {
         "flake-utils": [
-          "paracosm",
+          "elodin",
           "cargo2nix",
           "flake-utils"
         ],
         "nixpkgs": [
-          "paracosm",
+          "elodin",
           "cargo2nix",
           "nixpkgs"
         ]

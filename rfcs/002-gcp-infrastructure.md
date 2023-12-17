@@ -4,7 +4,7 @@
 
 ## Goals
 
-- It should be possible to move the Paracosm cluster to another cloud infrastructure (GCP > AWS/Azure/etc) without any issues.
+- It should be possible to move the Elodin cluster to another cloud infrastructure (GCP > AWS/Azure/etc) without any issues.
 - Resources should be easily managed.
 - We should be able to scale in either direction without issues.
 
@@ -33,12 +33,12 @@ Unfortunately, it's not possible to scale the amount of CPUs in a single node "o
 
 ### Kubernetes
 
-The primary use of this setup will be to demonstrate simple Monte Carlo runs on Paracosm using a Web Application. So based on these requirements we will need to deploy the following items:
+The primary use of this setup will be to demonstrate simple Monte Carlo runs on Elodin using a Web Application. So based on these requirements we will need to deploy the following items:
 
 - `Ingress` with configured load balancer and domain for public accessible services
 - `Deployment` for Web App / Frontend 
 - `Deployment` for ATC (Air Traffic Controller) / Backend API
-- `Deployment` with Paracosm Simulator pods (considering using [Kata containers](https://katacontainers.io/))
+- `Deployment` with Elodin Simulator pods (considering using [Kata containers](https://katacontainers.io/))
 - SQL Database to store user information (settings, projects, etc.). At this moment we will be okay with our own simple `Deployment`, but managing our own database deployment is often not worth it and better option would be to use an external solution (CockroachDB currently was proposed as an option)
 
 If we use multiple node pools we will need to set up taints and tolerations for said deployments.

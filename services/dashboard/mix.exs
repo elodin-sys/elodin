@@ -1,9 +1,9 @@
-defmodule ParacosmDashboard.MixProject do
+defmodule ElodinDashboard.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :paracosm_dashboard,
+      app: :elodin_dashboard,
       version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -18,7 +18,7 @@ defmodule ParacosmDashboard.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {ParacosmDashboard.Application, []},
+      mod: {ElodinDashboard.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -58,17 +58,17 @@ defmodule ParacosmDashboard.MixProject do
       {:grpc, "~> 0.7"},
       {:protobuf, "~> 0.12.0"},
       {:poolboy, "~> 1.5.1"},
-      paracosm_types_dep(),
+      elodin_types_dep(),
       {:uuid, "~> 1.1"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 
-  defp paracosm_types_dep() do
-    if path = System.get_env("PARACOSM_TYPES_PATH") do
-      {:paracosm_types, path: path}
+  defp elodin_types_dep() do
+    if path = System.get_env("ELODIN_TYPES_PATH") do
+      {:elodin_types, path: path}
     else
-      {:paracosm_types, path: "../../libs/paracosm-types/elixir"}
+      {:elodin_types, path: "../../libs/elodin-types/elixir"}
     end
   end
 

@@ -6,14 +6,14 @@ use crate::{
     events::DbEvent,
 };
 use axum::routing::get;
-use futures::Stream;
-use jsonwebtoken::jwk::JwkSet;
-use paracosm_types::api::{
+use elodin_types::api::{
     api_server::{self, ApiServer},
     BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, CreateUserReq,
     CreateUserResp, CurrentUserReq, CurrentUserResp, GetSandboxReq, ListSandboxesReq,
     ListSandboxesResp, Sandbox, UpdateSandboxReq, UpdateSandboxResp,
 };
+use futures::Stream;
+use jsonwebtoken::jwk::JwkSet;
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
@@ -87,7 +87,7 @@ impl Api {
         health_reporter.set_serving::<ApiServer<Api>>().await;
         let svc = ApiServer::new(self);
         let reflection = tonic_reflection::server::Builder::configure()
-            .register_encoded_file_descriptor_set(paracosm_types::FILE_DESCRIPTOR_SET)
+            .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
             .build()?;
 
         let grpc = Server::builder()

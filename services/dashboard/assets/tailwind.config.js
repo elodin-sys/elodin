@@ -8,8 +8,8 @@ const path = require("path")
 module.exports = {
   content: [
     "./js/**/*.js",
-    "../lib/paracosm_dashboard_web.ex",
-    "../lib/paracosm_dashboard_web/**/*.*ex"
+    "../lib/elodin_dashboard_web.ex",
+    "../lib/elodin_dashboard_web/**/*.*ex"
   ],
   theme: {
     extend: {

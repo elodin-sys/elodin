@@ -1,10 +1,10 @@
 {
   inputs = {
-    paracosm.url = "path:../../.";
-    nixpkgs.follows = "paracosm/nixpkgs";
-    flake-utils.follows = "paracosm/flake-utils";
-    nix2container.follows = "paracosm/nix2container";
-    get-flake.follows = "paracosm/get-flake";
+    elodin.url = "path:../../.";
+    nixpkgs.follows = "elodin/nixpkgs";
+    flake-utils.follows = "elodin/flake-utils";
+    nix2container.follows = "elodin/nix2container";
+    get-flake.follows = "elodin/get-flake";
   };
 
   outputs = inputs:
@@ -29,17 +29,17 @@
           in
             beam_pkgs.mixRelease {
               inherit src version;
-              pname = "paracosm-dashboard";
+              pname = "elodin-dashboard";
               buildInputs = with pkgs; [nodePackages.tailwindcss];
               mixFodDeps = beam_pkgs.fetchMixDeps {
                 inherit src version;
                 pname = "mix-deps-dashboard";
                 hash = "sha256-yCo3MjVyDAd1SbtWBz3H31CnzGRLLWeKsUyugYEsuFA";
               };
-              PARACOSM_TYPES_PATH = "./vendor/paracosm_types";
+              ELODIN_TYPES_PATH = "./vendor/elodin_types";
               preConfigure = ''
-                mkdir -p ./vendor/paracosm_types
-                cp --no-preserve=mode,ownership -r ${../../libs/paracosm-types/elixir}/* ./vendor/paracosm_types
+                mkdir -p ./vendor/elodin_types
+                cp --no-preserve=mode,ownership -r ${../../libs/elodin-types/elixir}/* ./vendor/elodin_types
               '';
               preBuild = ''
                 mkdir -p ./priv/static/assets/wasm

@@ -1,11 +1,11 @@
 {
   inputs = {
-    paracosm.url = "path:../../.";
-    nixpkgs.follows = "paracosm/nixpkgs";
-    cargo2nix.follows = "paracosm/cargo2nix";
-    rust-overlay.follows = "paracosm/rust-overlay";
-    flake-utils.follows = "paracosm/flake-utils";
-    nix2container.follows = "paracosm/nix2container";
+    elodin.url = "path:../../.";
+    nixpkgs.follows = "elodin/nixpkgs";
+    cargo2nix.follows = "elodin/cargo2nix";
+    rust-overlay.follows = "elodin/rust-overlay";
+    flake-utils.follows = "elodin/flake-utils";
+    nix2container.follows = "elodin/nix2container";
   };
 
   outputs = inputs:
@@ -16,7 +16,7 @@
             rustPkgs = pkgs.rustBuilder.makePackageSet {
               rustVersion = "1.73.0";
               packageFun = import ../../Cargo.nix;
-              packageOverrides = paracosm.packages.${system}.rust-overrides;
+              packageOverrides = elodin.packages.${system}.rust-overrides;
             };
           in
             (rustPkgs.workspace.atc {}).bin;

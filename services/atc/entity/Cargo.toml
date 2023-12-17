@@ -10,7 +10,7 @@ edition = "2021"
 uuid = "1.6.1"
 enumflags2.version = "0.7.8"
 enumflags2.features = ["serde"]
-paracosm-types.path = "../../../libs/paracosm-types/rust"
+elodin-types.path = "../../../libs/elodin-types/rust"
 
 # serde
 serde = { version = "1", features = ["derive"] }

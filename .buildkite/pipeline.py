@@ -88,7 +88,7 @@ pipeline(steps = [
       ),
       build_image_step(
         image_name = "elo-sim-runner",
-        service_path = "services/paracosm-web-runner",
+        service_path = "services/elodin-web-runner",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
     ],

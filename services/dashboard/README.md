@@ -1,4 +1,4 @@
-# Paracosm Dashboard
+# Elodin Dashboard
 
 To start your Phoenix server:
 

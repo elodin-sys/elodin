@@ -1,4 +1,4 @@
-use paracosm_types::ValidationError;
+use elodin_types::ValidationError;
 use sea_orm::TransactionError;
 use std::io;
 use thiserror::Error;

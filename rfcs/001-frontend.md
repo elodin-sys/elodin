@@ -3,7 +3,7 @@ Sascha Wise - 2023-11-15
 
 **TLDR** - We will use Phoenix, it is a good combination of stable, easy to use, fast, and feature rich. 
 
-We need a front-end web framework for Paracosm. There are an almost infinite number of options in the frontend world, of wildly varying quality. We are looking for a framework that solves a few things:
+We need a front-end web framework for Elodin. There are an almost infinite number of options in the frontend world, of wildly varying quality. We are looking for a framework that solves a few things:
 
 1. Ease of development - whatever we use needs to be easy and fast to work with
 2. Fast - users should not notice any slowness from the frontend framework

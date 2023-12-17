@@ -1,4 +1,4 @@
-use elo_conduit::{
+use elodin_conduit::{
     bevy::{Msg, SubscribeEvent},
     builder::Builder,
     parser::Parser,

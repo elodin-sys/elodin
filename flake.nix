@@ -80,7 +80,7 @@
         pkgs.rustBuilder.overrides.all
         ++ [
           (pkgs.rustBuilder.rustLib.makeOverride {
-            name = "paracosm-types";
+            name = "elodin-types";
             overrideAttrs = drv: {
               propagatedNativeBuildInputs =
                 drv.propagatedNativeBuildInputs
