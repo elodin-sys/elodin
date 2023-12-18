@@ -1,0 +1,53 @@
+{
+  "name": "Elodin Docs",
+  "logo": {
+    "dark": "/logo/logo.svg",
+    "light": "/logo/logo.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#1E43E2",
+    "light": "#1E43E2",
+    "dark": "#1E43E2",
+    "anchors": {
+      "from": "#1736b5",
+      "to": "#1E43E2"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "Support",
+      "url": "mailto:hi@mintlify.com"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Dashboard",
+    "url": "https://app.elodin.systems"
+  },
+  "anchors": [
+    {
+      "name": "Documentation",
+      "icon": "book-open-cover",
+      "url": "https://docs.elodin.systems"
+    },
+    {
+      "name": "Discord",
+      "icon": "discord",
+      "url": "https://discord.gg/agvGJaZXy5"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Get Started",
+      "pages": ["introduction", "quickstart", "development"]
+    },
+    {
+      "group": "Python SDK",
+      "pages": ["usage"]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/elodin-sys",
+    "linkedin": "https://www.linkedin.com/company/elodin-systems-inc"
+  }
+}
