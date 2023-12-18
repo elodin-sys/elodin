@@ -5,7 +5,7 @@ migrate = true
 
 [api]
 address = "[::]:50051"
-auth0.domain = "auth.elodin.app"
+auth0.domain = "auth.elodin.systems"
 auth0.client_id = "Fduve612Omqy9gUXGxcZ5RoTP9IJ6gly"
 
 [orca]
