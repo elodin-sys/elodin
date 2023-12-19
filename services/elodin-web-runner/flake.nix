@@ -6,7 +6,10 @@
     rust-overlay.follows = "elodin/rust-overlay";
     flake-utils.follows = "elodin/flake-utils";
     nix2container.follows = "elodin/nix2container";
-    crane.url = "github:ipetkov/crane";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs:
