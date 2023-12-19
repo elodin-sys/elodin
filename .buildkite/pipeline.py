@@ -11,12 +11,8 @@ def deploy_k8s_step(label, key = None, depends_on = None):
     key = key,
     depends_on = depends_on,
     command = [
-      # NOTE: Prepare environment
-      "export GCP_WIF_TMPDIR=$(mktemp -d -t 'buildkiteXXXX')",
-      "export GOOGLE_APPLICATION_CREDENTIALS=\$GCP_WIF_TMPDIR/credentials.json",
-      "envsubst < .buildkite/credentials.template.json > \$GOOGLE_APPLICATION_CREDENTIALS",
       # NOTE: Login into GCP (active for 10min)
-      "buildkite-agent oidc request-token --audience \"\$GCP_WIF_AUDIENCE\" > \$GCP_WIF_TMPDIR/token.json",
+      "buildkite-agent oidc request-token --audience \"\$GCP_WIF_AUDIENCE\" > \$BUILDKITE_OIDC_TMPDIR/token.json",
       "gcloud --quiet auth login --cred-file=\$GOOGLE_APPLICATION_CREDENTIALS",
       # NOTE: Deploy cluster
       f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region}",
@@ -24,13 +20,11 @@ def deploy_k8s_step(label, key = None, depends_on = None):
       "kubectl kustomize kubernetes/overlays/dev > out.yaml",
       "envsubst < out.yaml > out-with-envs.yaml",
       "kubectl apply -f out-with-envs.yaml",
-      # NOTE: Clean up
-      "rm -rf \$GCP_WIF_TMPDIR",
     ],
     env = {
       "GCP_WIF_AUDIENCE": "//iam.googleapis.com/projects/802981626435/locations/global/workloadIdentityPools/buildkite-pipeline/providers/buildkite",
-      "GCP_WIF_SERVICE_ACCOUNT": "buildkite-802981626435@elodin-dev.iam.gserviceaccount.com",
     },
+    plugins = [ gcp_identity_plugin() ]
   )
 
 
