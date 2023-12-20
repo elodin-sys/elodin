@@ -12,7 +12,7 @@ spec:
       containers:
       - name: elo-dashboard
         imagePullPolicy: Always
-        image: elodin-dev/elo-dashboard:latest
+        image: elodin-infra/elo-dashboard:latest
         env:
         - name: PORT
           value: "4000"

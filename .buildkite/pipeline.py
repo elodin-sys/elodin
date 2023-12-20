@@ -3,7 +3,8 @@ from steps import *
 from plugins import *
 
 def deploy_k8s_step(label, key = None, depends_on = None):
-  gke_cluster_name = "elodin-dev-development-gke"
+  gke_cluster_name = "elodin-dev-gke"
+  gke_project_id = "elodin-dev"
   gke_region = "us-central1"
   
   return step(
@@ -12,18 +13,14 @@ def deploy_k8s_step(label, key = None, depends_on = None):
     depends_on = depends_on,
     command = [
       # NOTE: Login into GCP (active for 10min)
-      "buildkite-agent oidc request-token --audience \"\$GCP_WIF_AUDIENCE\" > \$BUILDKITE_OIDC_TMPDIR/token.json",
-      "gcloud --quiet auth login --cred-file=\$GOOGLE_APPLICATION_CREDENTIALS",
+      gcp_identity()["cmds"]["login"],
       # NOTE: Deploy cluster
-      f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region}",
+      f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
       "just decrypt-secrets-force",
       "kubectl kustomize kubernetes/overlays/dev > out.yaml",
       "envsubst < out.yaml > out-with-envs.yaml",
       "kubectl apply -f out-with-envs.yaml",
     ],
-    env = {
-      "GCP_WIF_AUDIENCE": "//iam.googleapis.com/projects/802981626435/locations/global/workloadIdentityPools/buildkite-pipeline/providers/buildkite",
-    },
     plugins = [ gcp_identity_plugin() ]
   )
 
