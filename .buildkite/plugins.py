@@ -17,10 +17,20 @@ def rust_cache_plugin():
     }
   }
 
+def gcp_identity():
+  return {
+    "audience": "//iam.googleapis.com/projects/204492191803/locations/global/workloadIdentityPools/buildkite-pipeline/providers/buildkite",
+    "service_account": "buildkite-204492191803@elodin-infra.iam.gserviceaccount.com",
+    "cmds": {
+      "regenerate_token": "buildkite-agent oidc request-token --audience \"\$GCP_WIF_AUDIENCE\" > \$BUILDKITE_OIDC_TMPDIR/token.json",
+      "login": "gcloud --quiet auth login --cred-file=\$GOOGLE_APPLICATION_CREDENTIALS",
+    },
+  }
+
 def gcp_identity_plugin():
   return {
     "gcp-workload-identity-federation#v1.0.0": {
-      "audience": "//iam.googleapis.com/projects/802981626435/locations/global/workloadIdentityPools/buildkite-pipeline/providers/buildkite",
-      "service-account": "buildkite-802981626435@elodin-dev.iam.gserviceaccount.com",
+      "audience": gcp_identity()["audience"],
+      "service-account": gcp_identity()["service_account"],
     }
   }

@@ -18,7 +18,7 @@ patches:
   patch: |-
     - op: replace
       path: /spec/loadBalancerIP
-      value: 34.42.239.233
+      value: 34.173.153.207
 - target:
     namespace: elodin-app
   patch: |-
@@ -62,9 +62,9 @@ secretGenerator:
   - elo-dashboard-secret.env
 
 images:
-- name: elodin-dev/elo-atc
-  newName: us-central1-docker.pkg.dev/elodin-dev/elo-atc/x86_64
+- name: elodin-infra/elo-atc
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64
   newTag: $BUILDKITE_COMMIT
-- name: elodin-dev/elo-dashboard
-  newName: us-central1-docker.pkg.dev/elodin-dev/elo-dashboard/x86_64
+- name: elodin-infra/elo-dashboard
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
   newTag: $BUILDKITE_COMMIT

@@ -10,7 +10,7 @@ spec:
       containers:
       - name: elo-atc
         imagePullPolicy: Always
-        image: elodin-dev/elo-atc:latest
+        image: elodin-infra/elo-atc:latest
         env:
         - name: ELODIN_ORCA.RUNTIME_CLASS
           value: gvisor

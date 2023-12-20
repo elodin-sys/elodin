@@ -10,7 +10,7 @@ auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
 
 [orca]
 vm_namespace = "elodin-vms-dev"
-image_name = "us-central1-docker.pkg.dev/elodin-dev/elo-sim-runner/x86_64:$BUILDKITE_COMMIT"
+image_name = "us-central1-docker.pkg.dev/elodin-infra/elo-sim-runner/x86_64:$BUILDKITE_COMMIT"
 
 [garbage_collect]
 enabled = true
