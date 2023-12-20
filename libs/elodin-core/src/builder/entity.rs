@@ -26,6 +26,8 @@ pub struct EntityBuilder {
     inverse_inertia: Matrix3<f64>,
 
     effectors: Effectors,
+    #[cfg(feature = "nox")]
+    pub xla_effectors: XlaEffectors,
     sensors: Sensors,
 
     fixed: bool,
@@ -50,6 +52,8 @@ impl Default for EntityBuilder {
             inertia: Matrix3::identity(),
             inverse_inertia: Matrix3::identity(),
             effectors: Default::default(),
+            #[cfg(feature = "nox")]
+            xla_effectors: Default::default(),
             sensors: Default::default(),
             fixed: false,
             trace: None,
@@ -149,6 +153,8 @@ impl EntityBuilder {
             inverse_inertia: InverseInertia(self.inverse_inertia),
 
             effectors: self.effectors,
+            #[cfg(feature = "nox")]
+            xla_effectors: self.xla_effectors,
             sensors: self.sensors,
 
             effect: Effect::default(),

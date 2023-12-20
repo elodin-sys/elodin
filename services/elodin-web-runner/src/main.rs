@@ -71,6 +71,7 @@ impl SimServer {
                 self.bevy_tx.clone(),
                 tx_socket,
                 rx_socket,
+                elodin::sync::DEFAULT_SUB_FILTERS,
             ));
         }
     }

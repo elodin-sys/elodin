@@ -1,8 +1,6 @@
-use std::{
-    borrow::Cow,
-    hash::{Hash, Hasher},
-};
+use std::{borrow::Cow, hash::Hash};
 
+use bytemuck::bytes_of;
 use nalgebra::{Matrix3, Quaternion, Vector3};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
@@ -59,41 +57,15 @@ pub struct EntityId(pub u64);
 #[repr(transparent)]
 pub struct ComponentId(pub u64);
 
+impl ComponentId {
+    pub const fn new(str: &str) -> Self {
+        ComponentId(crate::const_fnv1a_hash::fnv1a_hash_str_64(str))
+    }
+}
+
 impl From<u64> for ComponentId {
     fn from(val: u64) -> Self {
         ComponentId(val)
-    }
-}
-
-impl From<String> for ComponentId {
-    fn from(val: String) -> Self {
-        let mut hasher = ahash::AHasher::default();
-        val.hash(&mut hasher);
-        ComponentId(hasher.finish())
-    }
-}
-
-impl<'a> From<&'a [u8]> for ComponentId {
-    fn from(val: &'a [u8]) -> Self {
-        let mut hasher = ahash::AHasher::default();
-        val.hash(&mut hasher);
-        ComponentId(hasher.finish())
-    }
-}
-
-impl From<Vec<u8>> for ComponentId {
-    fn from(val: Vec<u8>) -> Self {
-        let mut hasher = ahash::AHasher::default();
-        val.hash(&mut hasher);
-        ComponentId(hasher.finish())
-    }
-}
-
-impl<const N: usize> From<[u8; N]> for ComponentId {
-    fn from(val: [u8; N]) -> Self {
-        let mut hasher = ahash::AHasher::default();
-        val.hash(&mut hasher);
-        ComponentId(hasher.finish())
     }
 }
 
@@ -134,6 +106,8 @@ pub enum ComponentType {
     SpatialPosF64,
     SpatialMotionF32,
     SpatialMotionF64,
+
+    // Msgs
     Filter,
 }
 
@@ -224,6 +198,60 @@ impl<'a> ComponentValue<'a> {
             ComponentValue::SpatialMotionF32(a) => ComponentValue::SpatialMotionF32(a),
             ComponentValue::SpatialMotionF64(a) => ComponentValue::SpatialMotionF64(a),
             ComponentValue::Filter(filter) => ComponentValue::Filter(filter),
+        }
+    }
+
+    pub fn with_bytes<T>(&self, func: impl FnOnce(&[u8]) -> T) -> T {
+        match self {
+            ComponentValue::U8(b) => func(bytes_of(b)),
+            ComponentValue::U16(b) => func(bytes_of(b)),
+            ComponentValue::U32(b) => func(bytes_of(b)),
+            ComponentValue::U64(b) => func(bytes_of(b)),
+            ComponentValue::I8(b) => func(bytes_of(b)),
+            ComponentValue::I16(b) => func(bytes_of(b)),
+            ComponentValue::I32(b) => func(bytes_of(b)),
+            ComponentValue::I64(b) => func(bytes_of(b)),
+            ComponentValue::Bool(b) => func(bytes_of(b)),
+            ComponentValue::F32(b) => func(bytes_of(b)),
+            ComponentValue::F64(b) => func(bytes_of(b)),
+            ComponentValue::String(b) => func(b.as_bytes()),
+            ComponentValue::Bytes(b) => func(b.as_ref()),
+            ComponentValue::Vector3F32(b) => func(bytes_of(b)),
+            ComponentValue::Vector3F64(b) => func(bytes_of(b)),
+            ComponentValue::Matrix3x3F32(b) => func(bytes_of(b)),
+            ComponentValue::Matrix3x3F64(b) => func(bytes_of(b)),
+            ComponentValue::QuaternionF32(b) => func(bytes_of(b)),
+            ComponentValue::QuaternionF64(b) => func(bytes_of(b)),
+            ComponentValue::SpatialPosF32(b) => {
+                let mut bytes = [0f32; 7];
+                bytes[..4].copy_from_slice(b.0.as_vector().as_slice());
+                bytes[4..].copy_from_slice(b.1.as_slice());
+                func(bytes_of(&bytes))
+            }
+            ComponentValue::SpatialPosF64(b) => {
+                let mut bytes = [0f64; 7];
+                bytes[..4].copy_from_slice(b.0.as_vector().as_slice());
+                bytes[4..].copy_from_slice(b.1.as_slice());
+                func(bytes_of(&bytes))
+            }
+            ComponentValue::SpatialMotionF32(b) => {
+                let mut bytes = [0f32; 6];
+                bytes[..4].copy_from_slice(b.0.as_slice());
+                bytes[4..].copy_from_slice(b.1.as_slice());
+                func(bytes_of(&bytes))
+            }
+            ComponentValue::SpatialMotionF64(b) => {
+                let mut bytes = [0f64; 6];
+                bytes[..4].copy_from_slice(b.0.as_slice());
+                bytes[4..].copy_from_slice(b.1.as_slice());
+                func(bytes_of(&bytes))
+            }
+            ComponentValue::Filter(f) => {
+                let mut bytes = [0u8; 9];
+                bytes[..8].copy_from_slice(&f.id.to_le_bytes());
+                bytes[8] = f.mask_len;
+                func(&bytes)
+            }
         }
     }
 }
@@ -343,13 +371,21 @@ macro_rules! cid_mask {
 
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentFilter {
     pub id: u64,
     pub mask_len: u8,
 }
 
 impl ComponentFilter {
+    pub const fn from_str(str: &str) -> Self {
+        let id = ComponentId::new(str);
+        ComponentFilter {
+            id: id.0,
+            mask_len: 64,
+        }
+    }
+
     const fn mask(&self) -> u64 {
         if self.mask_len == 0 {
             0

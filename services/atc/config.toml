@@ -9,7 +9,7 @@ auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
 
 [orca]
 vm_namespace = "vms"
-image_name = "elo-web-runner:pll3ddyb7d9m7zhw76sxdsyvihz6kjjj"
+image_name = "elo-sim-runner:ybpjb2wwjg1kmcl3m9mv5ayjjrn16j6x"
 
 [garbage_collect]
 enabled = true

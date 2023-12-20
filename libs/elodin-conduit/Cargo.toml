@@ -9,15 +9,17 @@ edition = "2021"
 default = ["bevy"]
 tokio = ["dep:tokio", "tokio-util", "futures", "bytes"]
 bevy = ["dep:bevy", "flume", "ip_network_table-deps-treebitmap"]
+nox = ["dep:nox"]
 
 [dependencies]
 nalgebra.version = "0.32"
-nalgebra.features = ["serde-serialize"]
+nalgebra.features = ["serde-serialize", "bytemuck"]
 serde.version = "1.0"
 serde.features = ["derive"]
-postcard.version = "1.0.8"
-postcard.features = ["alloc"]
 num_enum = "0.7.1"
+bytemuck.version = "1.14"
+bytemuck.features = ["derive"]
+heapless = "0.8"
 
 # async
 tokio.version = "1.34"
@@ -48,6 +50,9 @@ tracing = "0.1"
 ahash = "0.3.8"
 const-fnv1a-hash = "1.1.0"
 
-
 # error
 thiserror = "1"
+
+# nox
+nox.path = "../nox"
+nox.optional = true

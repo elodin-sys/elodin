@@ -1,8 +1,6 @@
 use std::{iter, marker::PhantomData};
 
-use crate::{
-    parser::varint_max, Component, ComponentData, ComponentFilter, ComponentValue, EntityId, Error,
-};
+use crate::{parser::varint_max, Component, ComponentData, ComponentValue, EntityId, Error};
 
 pub struct Builder<B> {
     buf: B,
@@ -130,94 +128,17 @@ impl<
 impl<'l> ComponentValue<'l> {
     pub fn encode(&self, out: &mut impl Extend) -> Result<(), Error> {
         match self {
-            ComponentValue::U8(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::U16(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::U32(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::U64(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::I8(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::I16(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::I32(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::I64(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::Bool(v) => out.extend_from_slice(if *v { &[1] } else { &[0] }),
-            ComponentValue::F32(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::F64(v) => out.extend_from_slice(&v.to_le_bytes()),
-            ComponentValue::String(str) => {
-                let bytes = str.as_bytes();
+            ComponentValue::String(b) => {
                 let mut arr = [0; varint_max::<usize>()];
-                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr))?;
-                out.extend_from_slice(bytes)
+                out.extend_from_slice(encode_varint_usize(b.as_bytes().len(), &mut arr))?;
             }
-            ComponentValue::Bytes(bytes) => {
+            ComponentValue::Bytes(b) => {
                 let mut arr = [0; varint_max::<usize>()];
-                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr))?;
-                out.extend_from_slice(bytes)
+                out.extend_from_slice(encode_varint_usize(b.len(), &mut arr))?;
             }
-            ComponentValue::Vector3F32(v) => {
-                for f in v.into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::Vector3F64(v) => {
-                for f in v.into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::Matrix3x3F32(v) => {
-                for f in v.into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::Matrix3x3F64(v) => {
-                for f in v.into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::QuaternionF32(v) => {
-                for f in v.as_vector().into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::QuaternionF64(v) => {
-                for f in v.as_vector().into_iter() {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::SpatialPosF32((q, v)) => {
-                for f in q.as_vector().into_iter().chain(v.into_iter()) {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::SpatialPosF64((q, v)) => {
-                for f in q.as_vector().into_iter().chain(v.into_iter()) {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::SpatialMotionF32((p, v)) => {
-                for f in p.into_iter().chain(v.into_iter()) {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::SpatialMotionF64((p, v)) => {
-                for f in p.into_iter().chain(v.into_iter()) {
-                    out.extend_from_slice(&f.to_le_bytes())?;
-                }
-                Ok(())
-            }
-            ComponentValue::Filter(ComponentFilter { id, mask_len }) => {
-                out.extend_from_slice(&id.to_le_bytes())?;
-                out.extend_from_slice(&mask_len.to_le_bytes())?;
-                Ok(())
-            }
-        }
+            _ => {}
+        };
+        self.with_bytes(|bytes| out.extend_from_slice(bytes))
     }
 }
 

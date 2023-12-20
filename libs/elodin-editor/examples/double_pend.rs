@@ -1,11 +1,11 @@
 use bevy::prelude::{shape, Color, Mesh};
-use nalgebra::{vector, Vector3};
 use elodin::{
     builder::{EntityBuilder, FixedJoint, Revolute, SimBuilder},
     runner::IntoSimRunner,
     spatial::SpatialPos,
 };
 use elodin_editor::editor;
+use nalgebra::{vector, Vector3};
 
 fn main() {
     editor(sim.substep_count(10))
