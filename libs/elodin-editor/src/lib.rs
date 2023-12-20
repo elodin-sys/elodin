@@ -22,25 +22,48 @@ use bevy_infinite_grid::{
 };
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use elodin::{plugin::sync_pos, SimState};
+use elodin::{
+    plugin::sync_pos,
+    runner::IntoSimRunner,
+    sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS},
+    SimState,
+};
+use elodin_conduit::{
+    bevy::{Msg, SubscribeEvent},
+    cid_mask,
+};
 
 //pub(crate) mod traces;
 mod ui;
 
-// pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
-//     let (tx, rx) = channel_pair();
-//     std::thread::spawn(move || {
-//         let runner = func.into_runner();
-//         let mut app = runner
-//             .run_mode(elodin::runner::RunMode::RealTime)
-//             .build(tx);
-//         app.run()
-//     });
-//     let mut app = App::new();
-//     app.insert_non_send_resource(rx);
-//     app.add_plugins(EditorPlugin::<ClientChannel>::new());
-//     app.run()
-// }
+pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
+    let (server_tx, server_rx) = flume::unbounded();
+    let (client_tx, client_rx) = flume::unbounded();
+    let _ = std::thread::spawn(move || {
+        let runner = func.into_runner();
+        let mut app = runner
+            .run_mode(elodin::runner::RunMode::RealTime)
+            .build_with_plugins((SyncPlugin::new(server_rx), SendPlbPlugin));
+
+        app.run()
+    });
+    server_tx
+        .send(Msg::Subscribe(SubscribeEvent {
+            tx: client_tx.clone(),
+            filters: DEFAULT_SUB_FILTERS.to_vec(),
+        }))
+        .unwrap();
+
+    client_tx
+        .send(Msg::Subscribe(SubscribeEvent {
+            tx: server_tx.clone(),
+            filters: vec![cid_mask!(32;sim_state)],
+        }))
+        .unwrap();
+    let mut app = App::new();
+    app.add_plugins((EditorPlugin, SyncPlugin::new(client_rx)));
+    app.run()
+}
 
 pub struct EditorPlugin;
 

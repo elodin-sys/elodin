@@ -1,10 +1,12 @@
 use crate::{
     eid, Component, ComponentData, ComponentFilter, ComponentId, ComponentValue, EntityId,
-    SUB_COMPONENT_ID,
 };
-use bevy::prelude::{DetectChanges, Event, EventReader, Without};
+use bevy::ecs::system::EntityCommand;
+use bevy::prelude::{DetectChanges, Event, EventReader, Without, World};
+use bevy::ptr::OwningPtr;
 use ip_network_table_deps_treebitmap::address::Address;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -37,13 +39,13 @@ impl<'a> ComponentData<'a> {
         component_map: &ComponentMap,
         commands: &mut Commands,
     ) {
-        let Some(insert_fn) = component_map.0.get(&self.component_id) else {
+        let Some(adapter) = component_map.0.get(&self.component_id) else {
             warn!(?self.component_id, "unknown insert fn");
             return;
         };
 
         for (entity_id, value) in self.storage.into_iter() {
-            (insert_fn)(commands, entity_map, entity_id, value);
+            adapter.insert(commands, entity_map, entity_id, value);
         }
     }
 }
@@ -51,26 +53,168 @@ impl<'a> ComponentData<'a> {
 #[derive(Event, Debug, Clone)]
 pub struct SubscribeEvent<'a> {
     pub filters: Vec<ComponentFilter>,
-    pub tx: flume::Sender<ComponentData<'a>>,
+    pub tx: flume::Sender<Msg<'a>>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Deref)]
 pub struct EntityMap(pub HashMap<EntityId, Entity>);
 
 #[derive(Resource, Default)]
-pub struct ComponentMap(pub HashMap<ComponentId, InsertFn>);
+pub struct ComponentMap(pub HashMap<ComponentId, Box<dyn ComponentAdapter + Send + Sync>>);
 
-type InsertFn = Box<
-    dyn for<'b, 'w, 's, 'a> Fn(&'b mut Commands<'w, 's>, &mut EntityMap, EntityId, ComponentValue)
-        + Sync
-        + Send,
->;
+pub trait ComponentAdapter {
+    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue>;
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        map: &mut EntityMap,
+        entity_id: EntityId,
+        value: ComponentValue,
+    );
+}
+
+struct StaticComponentAdapter<C> {
+    _phantom: PhantomData<C>,
+}
+
+impl<C> Default for StaticComponentAdapter<C> {
+    fn default() -> Self {
+        Self {
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<C> ComponentAdapter for StaticComponentAdapter<C>
+where
+    C: Component + bevy::prelude::Component + std::fmt::Debug,
+{
+    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue> {
+        Some(world.get_entity(entity)?.get::<C>()?.component_value())
+    }
+
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        entity_map: &mut EntityMap,
+        entity_id: EntityId,
+        value: ComponentValue,
+    ) {
+        let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+            let Some(e) = commands.get_entity(*entity) else {
+                return;
+            };
+            e
+        } else {
+            let e = commands.spawn_empty();
+            entity_map.0.insert(entity_id, e.id());
+            e
+        };
+
+        if let Some(c) = C::from_component_value(value) {
+            e.insert((c, Received));
+        }
+    }
+}
+
+struct StaticResourceAdapter<C> {
+    _phantom: PhantomData<C>,
+}
+
+impl<C> Default for StaticResourceAdapter<C> {
+    fn default() -> Self {
+        Self {
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<C: Resource + Component + std::fmt::Debug> ComponentAdapter for StaticResourceAdapter<C> {
+    fn get(&self, world: &World, _entity_id: Entity) -> Option<ComponentValue> {
+        Some(world.get_resource::<C>()?.component_value())
+    }
+
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        _map: &mut EntityMap,
+        _entity_id: EntityId,
+        value: ComponentValue,
+    ) {
+        if let Some(r) = C::from_component_value(value) {
+            commands.insert_resource(r)
+        }
+    }
+}
+
+struct DynamicComponentAdapter {
+    component_id: bevy::ecs::component::ComponentId,
+}
+
+impl ComponentAdapter for DynamicComponentAdapter {
+    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue> {
+        unsafe {
+            Some(
+                world
+                    .get_by_id(entity, self.component_id)?
+                    .deref::<ComponentValue>()
+                    .to_owned(),
+            )
+        }
+    }
+
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        entity_map: &mut EntityMap,
+        entity_id: EntityId,
+        value: ComponentValue,
+    ) {
+        let e = if let Some(entity) = entity_map.0.get(&entity_id) {
+            let Some(e) = commands.get_entity(*entity) else {
+                return;
+            };
+            e
+        } else {
+            let e = commands.spawn_empty();
+            entity_map.0.insert(entity_id, e.id());
+            e
+        };
+        let id = e.id();
+        commands.add(
+            InsertValueById {
+                component_id: self.component_id,
+                value: value.into_owned(),
+            }
+            .with_entity(id),
+        )
+    }
+}
+
+struct InsertValueById {
+    component_id: bevy::ecs::component::ComponentId,
+    value: ComponentValue<'static>,
+}
+
+impl EntityCommand for InsertValueById {
+    fn apply(self, id: Entity, world: &mut World) {
+        if let Some(mut e) = world.get_or_spawn(id) {
+            OwningPtr::make(self.value, |ptr| unsafe {
+                e.insert_by_id(self.component_id, ptr);
+            })
+        }
+    }
+}
 
 pub trait AppExt {
     fn add_conduit_component<C>(&mut self) -> &mut Self
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug;
-    fn add_conduit_component_with_insert_fn<C>(&mut self, insert_fn: InsertFn) -> &mut Self
+
+    fn add_conduit_component_with_adapter<C>(
+        &mut self,
+        adapter: Box<dyn ComponentAdapter + Send + Sync>,
+    ) -> &mut Self
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug;
 
@@ -84,34 +228,20 @@ impl AppExt for bevy::app::App {
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug,
     {
-        self.add_conduit_component_with_insert_fn::<C>(Box::new(
-            |commands, entity_map, entity_id, value| {
-                let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-                    let Some(e) = commands.get_entity(*entity) else {
-                        return;
-                    };
-                    e
-                } else {
-                    let e = commands.spawn_empty();
-                    entity_map.0.insert(entity_id, e.id());
-                    e
-                };
-
-                if let Some(c) = C::from_component_value(value) {
-                    e.insert((c, Received));
-                }
-            },
-        ))
+        self.add_conduit_component_with_adapter::<C>(Box::<StaticComponentAdapter<C>>::default())
     }
 
-    fn add_conduit_component_with_insert_fn<C>(&mut self, insert_fn: InsertFn) -> &mut Self
+    fn add_conduit_component_with_adapter<C>(
+        &mut self,
+        adapter: Box<dyn ComponentAdapter + Send + Sync>,
+    ) -> &mut Self
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug,
     {
         let mut map = self
             .world
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
-        map.0.insert(C::component_id(), insert_fn);
+        map.0.insert(C::component_id(), adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
         self
@@ -126,11 +256,7 @@ impl AppExt for bevy::app::App {
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
         map.0.insert(
             R::component_id(),
-            Box::new(|commands, _, _, value| {
-                if let Some(r) = R::from_component_value(value) {
-                    commands.insert_resource(r)
-                }
-            }),
+            Box::<StaticResourceAdapter<R>>::default(),
         );
 
         self.add_systems(Update, sync_resource::<R>);
@@ -212,7 +338,7 @@ impl Plugin for ConduitTcpSubscriber {
                     .await
                     .expect("tcp client failed")
                     .into_split();
-                handle_socket(bevy_tx, tx_socket, rx_socket).await;
+                handle_socket(bevy_tx, tx_socket, rx_socket, &[]).await;
             });
         });
         app.add_plugins(sub_plugin)
@@ -222,9 +348,10 @@ impl Plugin for ConduitTcpSubscriber {
 
 #[cfg(feature = "tokio")]
 pub async fn handle_socket(
-    bevy_tx: flume::Sender<Msg<'static>>,
+    server_tx: flume::Sender<Msg<'static>>,
     tx_socket: impl tokio::io::AsyncWrite + Unpin,
     rx_socket: impl tokio::io::AsyncRead + Unpin,
+    default_filters: &[ComponentFilter],
 ) {
     use crate::{cid_mask, Error};
     use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -235,10 +362,10 @@ pub async fn handle_socket(
         crate::tokio::Client::new(0, FramedRead::new(rx_socket, LengthDelimitedCodec::new()));
 
     let (out_tx, out_rx) = flume::unbounded();
-    if let Err(err) = bevy_tx
+    if let Err(err) = server_tx
         .send_async(Msg::Subscribe(SubscribeEvent {
             tx: out_tx.clone(),
-            filters: vec![cid_mask!(31)],
+            filters: default_filters.to_vec(),
         }))
         .await
     {
@@ -246,13 +373,13 @@ pub async fn handle_socket(
     }
 
     if let Err(err) = out_tx
-        .send_async(ComponentData::subscribe(cid_mask!(32;sim_state)))
+        .send_async(Msg::Data(ComponentData::subscribe(cid_mask!(32;sim_state))))
         .await
     {
         error!(?err, "initial subscribe error");
     }
     let tx = async move {
-        while let Ok(msg) = out_rx.recv_async().await {
+        while let Ok(Msg::Data(msg)) = out_rx.recv_async().await {
             tx_socket.send_data(0, msg).await?;
         }
         Ok::<(), Error>(())
@@ -262,7 +389,7 @@ pub async fn handle_socket(
             let filters: Vec<_> = batch
                 .components
                 .iter()
-                .filter(|c| c.component_id == SUB_COMPONENT_ID)
+                .filter(|c| c.component_id == crate::SUB_COMPONENT_ID)
                 .flat_map(|c| c.storage.iter())
                 .filter_map(|(_, c)| match c {
                     ComponentValue::Filter(filter) => Some(filter),
@@ -272,13 +399,13 @@ pub async fn handle_socket(
                 .collect();
             if filters.is_empty() {
                 for data in batch.components.into_iter() {
-                    bevy_tx
+                    server_tx
                         .send_async(Msg::Data(data))
                         .await
                         .map_err(|_| Error::SendError)?;
                 }
             } else {
-                bevy_tx
+                server_tx
                     .send_async(Msg::Subscribe(SubscribeEvent {
                         tx: out_tx.clone(),
                         filters,
@@ -364,7 +491,7 @@ pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
             component_id,
             storage,
         };
-        let _ = event.tx.send(data);
+        let _ = event.tx.send(Msg::Data(data));
     }
 }
 
@@ -374,7 +501,7 @@ pub struct Subscriptions {
         Mutex<
             ip_network_table_deps_treebitmap::IpLookupTable<
                 ComponentId,
-                Vec<flume::Sender<ComponentData<'static>>>,
+                Vec<flume::Sender<Msg<'static>>>,
             >,
         >,
     >,
@@ -386,7 +513,7 @@ impl Subscriptions {
         for (_, _, txes) in tree.matches_mut(data.component_id) {
             let mut dead_sockets = vec![];
             for (i, tx) in txes.iter().enumerate() {
-                if tx.send(data.clone()).is_err() {
+                if tx.send(Msg::Data(data.clone())).is_err() {
                     dead_sockets.push(i);
                 }
             }
@@ -397,11 +524,7 @@ impl Subscriptions {
         Ok(())
     }
 
-    pub fn subscribe(
-        &mut self,
-        filter: ComponentFilter,
-        tx: flume::Sender<ComponentData<'static>>,
-    ) {
+    pub fn subscribe(&mut self, filter: ComponentFilter, tx: flume::Sender<Msg<'static>>) {
         info!("add filter {:?}", filter);
         let mut tree = self.tree.lock().unwrap();
         if let Some(vec) = tree.exact_match_mut(ComponentId(filter.id), filter.mask_len as u32) {

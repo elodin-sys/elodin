@@ -25,7 +25,7 @@ pub struct SimState {
 }
 
 #[derive(Serialize, Deserialize, Clone, Component, Comp)]
-#[conduit(prefix = "31", postcard)]
+#[conduit(postcard)]
 pub struct SyncMeshData {
     mesh_type: u8,
     positions: Option<Vec<[f32; 3]>>,
@@ -175,7 +175,7 @@ impl From<bevy::prelude::Mesh> for SyncMeshData {
 pub struct SyncedModel(pub bool);
 
 #[derive(Serialize, Deserialize, Clone, Component, Comp)]
-#[conduit(prefix = "31", postcard)]
+#[conduit(postcard)]
 pub struct SyncMaterial(pub ReflectSerde<StandardMaterial>);
 impl std::fmt::Debug for SyncMaterial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

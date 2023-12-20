@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[cfg(feature = "bevy")]
 pub mod bevy;
+#[cfg(feature = "nox")]
+pub mod nox;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 

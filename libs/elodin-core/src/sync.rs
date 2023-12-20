@@ -3,12 +3,19 @@ use crate::{
     ReflectSerde, SimState,
 };
 use bevy::prelude::*;
+use bevy_ecs::system::SystemId;
 use elodin_conduit::{
-    bevy::{AppExt, ConduitSubscribePlugin, EntityMap, Msg, Subscriptions},
-    Component, EntityId,
+    bevy::{AppExt, ComponentAdapter, ConduitSubscribePlugin, EntityMap, Msg, Subscriptions},
+    Component, ComponentFilter, EntityId,
 };
 
 use crate::WorldPos;
+
+pub const DEFAULT_SUB_FILTERS: &[ComponentFilter] = &[
+    ComponentFilter::from_str("world_pos"),
+    ComponentFilter::from_str("sync_mesh_data"),
+    ComponentFilter::from_str("sync_material"),
+];
 
 pub struct SyncPlugin {
     pub plugin: ConduitSubscribePlugin,
@@ -32,45 +39,81 @@ impl Plugin for SyncPlugin {
             .insert_resource(EntityMap::default())
             .add_conduit_component::<SimState>()
             .add_conduit_component::<WorldPos>()
-            .add_conduit_component_with_insert_fn::<SyncMaterial>(Box::new(
-                move |commands, entity_map, entity_id, value| {
-                    let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-                        let Some(e) = commands.get_entity(*entity) else {
-                            return;
-                        };
-                        e
-                    } else {
-                        let e = commands.spawn_empty();
-                        entity_map.0.insert(entity_id, e.id());
-                        e
-                    };
-
-                    if let Some(c) = SyncMaterial::from_component_value(value) {
-                        e.insert(c);
-                    }
-                    commands.run_system(sync_pbr);
-                },
-            ))
-            .add_conduit_component_with_insert_fn::<SyncMeshData>(Box::new(
-                move |commands, entity_map, entity_id, value| {
-                    let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
-                        let Some(e) = commands.get_entity(*entity) else {
-                            return;
-                        };
-                        e
-                    } else {
-                        let e = commands.spawn_empty();
-                        entity_map.0.insert(entity_id, e.id());
-                        e
-                    };
-
-                    if let Some(c) = SyncMeshData::from_component_value(value) {
-                        e.insert(c);
-                    }
-                    commands.run_system(sync_pbr);
-                },
-            ))
+            .add_conduit_component_with_adapter::<SyncMaterial>(Box::new(SyncMaterialAdaptor {
+                sync_pbr,
+            }))
+            .add_conduit_component_with_adapter::<SyncMeshData>(Box::new(SyncMeshAdapter {
+                sync_pbr,
+            }))
             .add_conduit_resource::<SimState>();
+    }
+}
+
+struct SyncMaterialAdaptor {
+    sync_pbr: SystemId,
+}
+
+impl ComponentAdapter for SyncMaterialAdaptor {
+    fn get(&self, _world: &World, _entity: Entity) -> Option<elodin_conduit::ComponentValue> {
+        None
+    }
+
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        entity_map: &mut EntityMap,
+        entity_id: EntityId,
+        value: elodin_conduit::ComponentValue,
+    ) {
+        let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+            let Some(e) = commands.get_entity(*entity) else {
+                return;
+            };
+            e
+        } else {
+            let e = commands.spawn_empty();
+            entity_map.0.insert(entity_id, e.id());
+            e
+        };
+
+        if let Some(c) = SyncMaterial::from_component_value(value) {
+            e.insert(c);
+        }
+        commands.run_system(self.sync_pbr);
+    }
+}
+
+struct SyncMeshAdapter {
+    sync_pbr: SystemId,
+}
+
+impl ComponentAdapter for SyncMeshAdapter {
+    fn get(&self, _world: &World, _entity: Entity) -> Option<elodin_conduit::ComponentValue> {
+        None
+    }
+
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        entity_map: &mut EntityMap,
+        entity_id: EntityId,
+        value: elodin_conduit::ComponentValue,
+    ) {
+        let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
+            let Some(e) = commands.get_entity(*entity) else {
+                return;
+            };
+            e
+        } else {
+            let e = commands.spawn_empty();
+            entity_map.0.insert(entity_id, e.id());
+            e
+        };
+
+        if let Some(c) = SyncMeshData::from_component_value(value) {
+            e.insert(c);
+        }
+        commands.run_system(self.sync_pbr);
     }
 }
 

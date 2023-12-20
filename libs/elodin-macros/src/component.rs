@@ -9,6 +9,7 @@ use syn::{Generics, Ident};
 pub enum IdAttr {
     Id(String),
     Prefix(String),
+    Ident,
 }
 
 #[derive(Debug, FromDeriveInput)]
@@ -30,7 +31,7 @@ impl Component {
         } else if let Some(prefix) = &self.prefix {
             IdAttr::Prefix(prefix.clone())
         } else {
-            panic!("must include either prefix or id");
+            IdAttr::Ident
         }
     }
 }
@@ -61,6 +62,10 @@ pub fn component(input: TokenStream) -> TokenStream {
         IdAttr::Prefix(prefix) => {
             let ident = ident.to_string().to_case(Case::Snake);
             format!("elodin_conduit::cid!({};{})", prefix, ident)
+        }
+        IdAttr::Ident => {
+            let ident = ident.to_string().to_case(Case::Snake);
+            format!("elodin_conduit::ComponentId::new(\"{}\")", ident)
         }
     };
     let id: proc_macro2::TokenStream = id_string.parse().unwrap();

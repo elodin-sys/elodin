@@ -1,7 +1,9 @@
 use crate::Time;
 use bevy_ecs::{
+    entity::Entity,
     query::WorldQuery,
     system::{Query, Res, ResMut},
+    world::World,
 };
 use bevy_utils::tracing;
 
@@ -29,6 +31,23 @@ pub(crate) fn calculate_effects(mut query: Query<EffectQuery>, time: Res<Time>) 
             *q.effect += effector.effect(*time, EntityStateRef::from_query(&q.entity))
         }
     })
+}
+
+#[cfg(feature = "nox")]
+#[tracing::instrument]
+pub(crate) fn calculate_xla_effects(world: &mut World) {
+    let client = world.get_resource::<XlaClient>().unwrap().clone();
+    let client = client.0.lock().unwrap();
+    let effectors = world
+        .query::<(&crate::XlaEffectors, Entity)>()
+        .iter(world)
+        .map(|(effectors, entity)| (effectors.clone(), entity))
+        .collect::<Vec<_>>();
+    for (effectors, entity) in effectors {
+        for effector in effectors.0 {
+            (effector)(world, entity, &client)
+        }
+    }
 }
 
 #[tracing::instrument]

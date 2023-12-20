@@ -1,14 +1,23 @@
-use bevy::prelude::{shape, Color};
+use std::sync::{Arc, OnceLock};
+
+use bevy::prelude::{shape, Color, Entity, World};
 use elodin::{
     builder::{EntityBuilder, FixedJoint, Free, Revolute},
     spatial::{SpatialMotion, SpatialPos},
-    Inertia,
+    Effect, Force, Inertia, Torque, XlaEffectors,
 };
+use elodin_conduit::{bevy::ComponentMap, ComponentId};
 use nalgebra::{
     MatrixView3, MatrixView3x1, MatrixView4x1, Quaternion, UnitQuaternion, UnitVector3, Vector3,
 };
-use numpy::{PyReadonlyArray1, PyReadonlyArray2};
-use pyo3::{exceptions::PyTypeError, prelude::*};
+use nox::{xla::PjRtLoadedExecutable, Client};
+use numpy::{PyArrayLike1, PyArrayLike2};
+use pyo3::{
+    exceptions::{PyTypeError, PyValueError},
+    intern,
+    prelude::*,
+    types::{PyBytes, PyTuple},
+};
 
 #[derive(Clone)]
 #[pyclass]
@@ -27,16 +36,19 @@ impl RigidBody {
         joint = None,
         parent = None,
         body_pos = None,
+        effectors = None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
+        py: Python<'_>,
         mass: Option<f64>,
-        inertia: Option<PyReadonlyArray2<f64>>,
+        inertia: Option<PyArrayLike2<f64>>,
         mesh: Option<Mesh>,
         material: Option<Material>,
         joint: Option<Joint>,
         parent: Option<RigidBodyHandle>,
-        body_pos: Option<PyReadonlyArray1<f64>>,
+        body_pos: Option<PyArrayLike1<f64>>,
+        effectors: Option<Vec<Effector>>,
     ) -> PyResult<Self> {
         let mut inner = EntityBuilder::default();
         if let Some(mass) = mass {
@@ -91,7 +103,171 @@ impl RigidBody {
 
             inner = inner.body_pos(SpatialPos::linear(body_pos.into_owned()));
         }
+        if let Some(effectors) = effectors {
+            let effectors: PyResult<Vec<_>> = effectors
+                .into_iter()
+                .map(|effector| {
+                    let xla_comp = effector.to_xlo(py)?;
+                    let compiled: OnceLock<PjRtLoadedExecutable> = OnceLock::new();
+                    // NOTE: This code is ugly as hell and super hacky, but
+                    // its ok since we will be deleting it all soon
+                    Ok(Arc::new(
+                        move |world: &mut World, entity: Entity, client: &nox::Client| {
+                            let effect = {
+                                let exec =
+                                    compiled.get_or_init(|| xla_comp.compile(&client.0).unwrap());
+                                let mut args = vec![];
+                                let map = world.get_resource::<ComponentMap>().unwrap();
+                                for component in &effector.components {
+                                    if let Some(value) = map
+                                        .0
+                                        .get(&component.id)
+                                        .and_then(|arg| arg.get(world, entity))
+                                    {
+                                        args.push(value.to_pjrt_buf(client).unwrap());
+                                    }
+                                }
+                                let buf = &exec.execute_b(&args).unwrap()[0][0];
+                                let literal = buf.to_literal_sync().unwrap();
+                                let mut out = [0f64; 6];
+                                literal.copy_raw_to(&mut out).unwrap();
+                                Effect {
+                                    force: Force(Vector3::new(out[0], out[1], out[2])),
+                                    torque: Torque(Vector3::new(out[3], out[4], out[5])),
+                                }
+                            };
+                            *world.get_mut::<Effect>(entity).unwrap() += effect;
+                        },
+                    )
+                        as Arc<
+                            dyn for<'a> Fn(&'a mut World, Entity, &'a Client) + Send + Sync,
+                        >)
+                })
+                .collect();
+            let effectors = effectors?;
+            inner.xla_effectors = XlaEffectors(effectors);
+        }
         Ok(RigidBody { inner })
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Copy)]
+pub enum ComponentType {
+    // Primatives
+    U8 = 0,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    Bool,
+    F32,
+    F64,
+
+    // Variable Size
+    String,
+    Bytes,
+
+    // Tensors
+    Vector3F32,
+    Vector3F64,
+    Matrix3x3F32,
+    Matrix3x3F64,
+    QuaternionF32,
+    QuaternionF64,
+    SpatialPosF32,
+    SpatialPosF64,
+    SpatialMotionF32,
+    SpatialMotionF64,
+
+    // Msgs
+    Filter,
+}
+
+impl ComponentType {
+    fn jax_zero<'py>(&self, py: Python<'py>) -> PyResult<&'py PyAny> {
+        let jnp = PyModule::import(py, "numpy")?;
+        let (shape, dtype) = match self {
+            ComponentType::U8 => (vec![], jnp.getattr(intern!(py, "uint8"))?),
+            ComponentType::U16 => (vec![], jnp.getattr(intern!(py, "uin16"))?),
+            ComponentType::U32 => (vec![], jnp.getattr(intern!(py, "uint32"))?),
+            ComponentType::U64 => (vec![], jnp.getattr(intern!(py, "uint64"))?),
+            ComponentType::I8 => (vec![], jnp.getattr("int8")?),
+            ComponentType::I16 => (vec![], jnp.getattr(intern!(py, "in16"))?),
+            ComponentType::I32 => (vec![], jnp.getattr(intern!(py, "int32"))?),
+            ComponentType::I64 => (vec![], jnp.getattr(intern!(py, "int64"))?),
+            ComponentType::Bool => (vec![], jnp.getattr(intern!(py, "bool"))?),
+            ComponentType::F32 => (vec![], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::F64 => (vec![], jnp.getattr(intern!(py, "float64"))?),
+            ComponentType::Vector3F32 => (vec![3], jnp.getattr("float32")?),
+            ComponentType::Vector3F64 => (vec![3], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::Matrix3x3F32 => (vec![3, 3], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::Matrix3x3F64 => (vec![3, 3], jnp.getattr(intern!(py, "float64"))?),
+            ComponentType::QuaternionF32 => (vec![4], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::QuaternionF64 => (vec![4], jnp.getattr(intern!(py, "float64"))?),
+            ComponentType::SpatialPosF32 => (vec![7], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::SpatialPosF64 => (vec![7], jnp.getattr(intern!(py, "float64"))?),
+            ComponentType::SpatialMotionF32 => (vec![6], jnp.getattr(intern!(py, "float32"))?),
+            ComponentType::SpatialMotionF64 => (vec![6], jnp.getattr(intern!(py, "float64"))?),
+            ComponentType::String => todo!(),
+            ComponentType::Bytes => todo!(),
+            ComponentType::Filter => todo!(),
+        };
+        jnp.call_method1("zeros", (shape, dtype))
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct ComponentRef {
+    id: ComponentId,
+    ty: ComponentType,
+}
+
+#[pymethods]
+impl ComponentRef {
+    #[new]
+    fn new(id: &str, ty: ComponentType) -> Self {
+        ComponentRef {
+            id: ComponentId::new(id),
+            ty,
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Effector {
+    components: Vec<ComponentRef>,
+    closure: PyObject,
+}
+
+#[pymethods]
+impl Effector {
+    #[new]
+    fn new(components: Vec<ComponentRef>, closure: PyObject) -> Effector {
+        Self {
+            components,
+            closure,
+        }
+    }
+}
+
+impl Effector {
+    fn to_xlo(&self, py: Python<'_>) -> PyResult<nox::xla::XlaComputation> {
+        let jax = PyModule::import(py, "jax")?;
+        let args = self.components.iter().map(|r| r.ty.jax_zero(py).unwrap());
+        let comp = jax
+            .call_method1("xla_computation", (&self.closure,))?
+            .call(PyTuple::new(py, args), None)?;
+        let comp = comp.call_method0("as_serialized_hlo_module_proto")?;
+        let comp = comp.downcast::<PyBytes>()?;
+        let hlo_module = nox::xla::HloModuleProto::parse_proto(comp.as_bytes(), true)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(nox::xla::XlaComputation::from_proto(&hlo_module))
     }
 }
 
@@ -114,7 +290,7 @@ impl SimBuilder {
         self.0.zero_g();
     }
 
-    fn g_accel(&mut self, accel: PyReadonlyArray1<f64>) -> PyResult<()> {
+    fn g_accel(&mut self, accel: PyArrayLike1<f64>) -> PyResult<()> {
         let Some(accel): Option<MatrixView3x1<f64>> = accel.try_as_matrix() else {
             return Err(PyErr::new::<PyTypeError, _>("gravity must be a 1x3 matrix"));
         };
@@ -191,10 +367,10 @@ impl Joint {
     #[staticmethod]
     #[pyo3(signature = (pos = None, att = None, vel = None, ang_vel = None))]
     pub fn free(
-        pos: Option<PyReadonlyArray1<f64>>,
-        att: Option<PyReadonlyArray1<f64>>,
-        vel: Option<PyReadonlyArray1<f64>>,
-        ang_vel: Option<PyReadonlyArray1<f64>>,
+        pos: Option<PyArrayLike1<f64>>,
+        att: Option<PyArrayLike1<f64>>,
+        vel: Option<PyArrayLike1<f64>>,
+        ang_vel: Option<PyArrayLike1<f64>>,
     ) -> PyResult<Self> {
         let pos = if let Some(pos) = pos {
             let Some(pos): Option<MatrixView3x1<f64>> = pos.try_as_matrix() else {
@@ -243,8 +419,8 @@ impl Joint {
     #[staticmethod]
     #[pyo3(signature = (axis, anchor = None, pos = 0.0, vel = 0.0))]
     pub fn revolute(
-        axis: PyReadonlyArray1<f64>,
-        anchor: Option<PyReadonlyArray1<f64>>,
+        axis: PyArrayLike1<f64>,
+        anchor: Option<PyArrayLike1<f64>>,
         pos: f64,
         vel: f64,
     ) -> PyResult<Self> {
@@ -279,14 +455,14 @@ impl Joint {
     }
 }
 
-// #[pyfunction]
-// fn editor(py: Python<'_>, callable: PyObject) -> PyResult<()> {
-// let builder = callable.call0(py)?;
-// let builder: SimBuilder = builder.extract(py).unwrap();
-// let builder = builder.0;
-//     elodin_editor::editor(move || builder.clone());
-//     Ok(())
-// }
+#[pyfunction]
+fn editor(py: Python<'_>, callable: PyObject) -> PyResult<()> {
+    let builder = callable.call0(py)?;
+    let builder: SimBuilder = builder.extract(py).unwrap();
+    let builder = builder.0;
+    elodin_editor::editor(move || builder.clone());
+    Ok(())
+}
 
 #[pymodule]
 pub fn elodin_py(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -295,6 +471,9 @@ pub fn elodin_py(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Joint>()?;
-    // m.add_function(wrap_pyfunction!(editor, m)?)?;
+    m.add_class::<Effector>()?;
+    m.add_class::<ComponentRef>()?;
+    m.add_class::<ComponentType>()?;
+    m.add_function(wrap_pyfunction!(editor, m)?)?;
     Ok(())
 }

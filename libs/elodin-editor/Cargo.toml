@@ -38,6 +38,8 @@ flume = "0.11"
 clap.version = "4.4"
 clap.features = ["derive"]
 
+elodin-conduit.path = "../../libs/elodin-conduit"
+
 # python
 # pyo3.version = "0.20.0"
 # elodin-py.path = "../elodin-py"

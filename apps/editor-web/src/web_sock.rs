@@ -32,7 +32,7 @@ pub(crate) fn spawn_wasm(url: String, bevy_tx: flume::Sender<Msg<'static>>) -> a
     let (out_tx, out_rx) = flume::unbounded();
     wasm_bindgen_futures::spawn_local(async move {
         let mut buf = vec![];
-        while let Ok(data) = out_rx.recv_async().await {
+        while let Ok(Msg::Data(data)) = out_rx.recv_async().await {
             buf.clear();
             let mut builder = Builder::new(&mut buf, 0).unwrap_throw();
             builder.append_data(data).unwrap_throw();

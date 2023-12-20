@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use bevy::{
     prelude::*,
     render::{settings::WgpuSettings, RenderPlugin},
@@ -94,6 +96,10 @@ impl Plugin for XpbdPlugin {
                     .chain(),
             );
         app.add_schedule(substep_schedule());
+        #[cfg(feature = "nox")]
+        app.insert_resource(crate::XlaClient(Arc::new(Mutex::new(
+            nox::Client::cpu().unwrap(),
+        ))));
     }
 }
 
@@ -148,9 +154,9 @@ pub fn substep_schedule() -> Schedule {
     );
     schedule.add_systems((kinematic_system).in_set(SubstepSet::ForwardKinematics));
     schedule.add_systems((com_system).in_set(SubstepSet::CoMPos));
-    schedule.add_systems(
-        (calculate_effects, calculate_sensors, gravity_system).in_set(SubstepSet::CalcEffects),
-    );
+    schedule.add_systems((calculate_effects, gravity_system).in_set(SubstepSet::CalcEffects));
+    #[cfg(feature = "nox")]
+    schedule.add_systems(calculate_xla_effects.in_set(SubstepSet::CalcEffects));
     schedule.add_systems((rne_system).in_set(SubstepSet::RecursiveNewtonEuler));
     schedule.add_systems((cri_system).in_set(SubstepSet::CompositeRigidBodyInertia));
     schedule.add_systems((forward_dynamics).in_set(SubstepSet::ForwardDynamics));

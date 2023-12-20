@@ -20,6 +20,8 @@ pub struct EntityBundle {
     pub effect: Effect,
 
     pub effectors: Effectors,
+    #[cfg(feature = "nox")]
+    pub xla_effectors: crate::XlaEffectors,
     pub sensors: Sensors,
 
     pub picked: Picked,

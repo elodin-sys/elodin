@@ -10,7 +10,8 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 elodin.path = "../elodin-core/"
-# elodin-editor.path = "../elodin-editor/"
+elodin.features = ["nox"]
+elodin-editor.path = "../elodin-editor/"
 
 pyo3 = "0.20.0"
 numpy.version = "0.20"
@@ -20,3 +21,8 @@ nalgebra = "0.32"
 bevy = "0.12"
 
 notify = "6.1.1"
+
+elodin-conduit.path = "../elodin-conduit"
+elodin-conduit.features = ["nox"]
+
+nox.path= "../nox"

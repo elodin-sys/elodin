@@ -131,6 +131,11 @@ impl Orca {
                                     value: Some("[::]:3563".to_string()),
                                     ..Default::default()
                                 },
+                                EnvVar {
+                                    name: "JAX_ENABLE_X64".to_string(),
+                                    value: Some("true".to_string()),
+                                    ..Default::default()
+                                },
                             ]),
                             ..Default::default()
                         }],

@@ -13,17 +13,20 @@
         system: let
           editor-web = get-flake ../../apps/editor-web;
           build_phoenix = pkgs: let
-            beam = pkgs.beam.override {
-              wxSupport = false;
-              systemdSupport = false;
-            };
-            erlang = beam.beamLib.callErlang "${nixpkgs}/pkgs/development/interpreters/erlang/26.nix" {
-              parallelBuild = true;
-              wxSupport = false;
-              systemdSupport = false;
-              autoconf = pkgs.buildPackages.autoconf269;
-            };
-            beam_pkgs = beam.packagesWith erlang;
+            beam = pkgs.beam;
+            # Note the below code disables wx widgets and systemd, which drastically reduces image size.
+            # It causes erlang to be fully rebuilt, so it is commented out for now.
+            # beam = pkgs.beam.override {
+            #   wxSupport = false;
+            #   systemdSupport = false;
+            # };
+            # erlang = beam.beamLib.callErlang "${nixpkgs}/pkgs/development/interpreters/erlang/26.nix" {
+            #   parallelBuild = true;
+            #   wxSupport = false;
+            #   systemdSupport = false;
+            #   autoconf = pkgs.buildPackages.autoconf269;
+            # };
+            beam_pkgs = beam.packagesWith beam.interpreters.erlang;
             src = ./.;
             version = "0.0.1";
           in
@@ -34,7 +37,7 @@
               mixFodDeps = beam_pkgs.fetchMixDeps {
                 inherit src version;
                 pname = "mix-deps-dashboard";
-                hash = "sha256-yCo3MjVyDAd1SbtWBz3H31CnzGRLLWeKsUyugYEsuFA";
+                hash = "sha256-U7GzTATLDGbvt9WWecaSi2URryi0XXHhr9xCWaTBrV8";
               };
               ELODIN_TYPES_PATH = "./vendor/elodin_types";
               preConfigure = ''
