@@ -1,4 +1,4 @@
-pub struct Client(pub(crate) xla::PjRtClient);
+pub struct Client(pub xla::PjRtClient);
 
 impl Client {
     /// Create a new [`Client`] using the CPU based backend.
