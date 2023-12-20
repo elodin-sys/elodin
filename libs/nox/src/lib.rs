@@ -24,3 +24,7 @@ mod tensor;
 pub use tensor::*;
 mod quaternion;
 pub use quaternion::*;
+mod error;
+pub use error::*;
+
+pub use xla;
