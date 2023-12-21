@@ -2,27 +2,17 @@ from buildkite import step, group
 from plugins import *
 
 def build_image_step(image_name, service_path, image_tag = "latest", repository = "us-central1-docker.pkg.dev"):
-  remote_image_name = f"{repository}/elodin-infra/{image_name}/x86_64"
+  remote_image_path = f"{repository}/elodin-infra/{image_name}/x86_64:{image_tag}"
 
   return step(
     label = f":docker: {image_name}",
     command = [
-      # NOTE: Build image
       f"cd {service_path}",
       "nix flake update",
-      "nix build .#packages.x86_64-linux.docker.image",
-      "cat result | docker load",
-      f"docker tag {image_name}:latest {remote_image_name}:{image_tag}",
-      # NOTE: Login into GCP (active for 10min)
-      gcp_identity()["cmds"]["regenerate_token"],
-      gcp_identity()["cmds"]["login"],
-      # NOTE: Push image
-      f"gcloud --quiet auth configure-docker {repository}",
-      f"docker push {remote_image_name}:{image_tag}",
+      f"gcloud --quiet auth configure-docker {repository}",      
+      "export IMAGE_PATH=\$(nix build .#packages.x86_64-linux.docker.image --print-out-paths)",
+      f"skopeo --insecure-policy copy docker-archive:\$IMAGE_PATH docker://{remote_image_path}",
     ],
-    env = {
-      "GCP_WIF_AUDIENCE": gcp_identity()["audience"],
-    },
     plugins = [ gcp_identity_plugin() ]
   )
 
