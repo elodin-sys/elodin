@@ -12,9 +12,6 @@ def deploy_k8s_step(label, key = None, depends_on = None):
     key = key,
     depends_on = depends_on,
     command = [
-      # NOTE: Login into GCP (active for 10min)
-      gcp_identity()["cmds"]["login"],
-      # NOTE: Deploy cluster
       f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
       "just decrypt-secrets-force",
       "kubectl kustomize kubernetes/overlays/dev > out.yaml",
