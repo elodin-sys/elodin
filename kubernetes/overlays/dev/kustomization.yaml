@@ -11,7 +11,7 @@ patches:
   patch: |-
     - op: replace
       path: /spec/rules/0/host
-      value: elodin.dev
+      value: app.elodin.dev
 - target:
     kind: Service
     name: traefik-web-service
@@ -48,11 +48,11 @@ configMapGenerator:
 - name: elo-dashboard
   namespace: elodin-app
   literals:
-  - PHX_HOST=elodin.dev
+  - PHX_HOST=app.elodin.dev
   - RELEASE_COOKIE=dummy_cookie
   - SECRET_KEY_BASE=pvS+BSCE9uyDsYR3d4A/vENpQj/0OtpzR+N/FAY1+yQD1OfS8Adp2nh537rzSEb0
   - ATC_INTERNAL_ADDR=elo-atc.elodin-app-dev.svc.cluster.local:50051
-  - ATC_ADDR=elodin.dev
+  - ATC_ADDR=app.elodin.dev
   - AUTH_BASE_URL=https://auth.elodin.dev
 
 secretGenerator:
