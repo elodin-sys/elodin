@@ -11,7 +11,7 @@ spec:
       port:
         number: 80
   rules:
-  - host: elodin.dev
+  - host: app.elodin.dev
     http:
       paths:
       - pathType: Prefix

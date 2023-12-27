@@ -2,7 +2,6 @@ kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: traefik-role-binding
-
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -10,4 +9,3 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: traefik-account
-    namespace: default # Using "default" because we did not specify a namespace when creating the ClusterAccount.
