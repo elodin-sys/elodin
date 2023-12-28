@@ -1,0 +1,21 @@
+name: Buildkite Trigger
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  buildkite-trigger:
+    runs-on: ubuntu-22.04
+  
+    steps:
+      - name: Trigger a Buildkite Build
+        uses: "buildkite/trigger-pipeline-action@v2.0.0"
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_API_TOKEN }} 
+          pipeline: "elodin/paracosm"
+          branch: "main"
+          commit: "HEAD"
+          message: ":github: PR #${{ github.event.pull_request.number }} (\"${{ github.event.pull_request.title }}\") was closed"
+          build_env_vars: '{"TRIGGERED_FROM_GHA": "1", "PR_CLOSED_BRANCH": "${{ github.event.pull_request.head.ref }}"}'
+          ignore_pipeline_branch_filter: true

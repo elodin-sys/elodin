@@ -38,6 +38,7 @@
       pkgs = import nixpkgs {
         inherit system;
         overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
+        config.allowUnfree = true;
       };
       rustPkgs = pkgs.rustBuilder.makePackageSet {
         rustVersion = "1.73.0";
@@ -60,6 +61,21 @@
           cargo metadata --offline
         '';
         cargoHash = "sha256-6uMd+E95qlk/cVOzJwE5ZUaUsWkCmKLd3TbDSqIihic";
+      };
+      packages.wordchain = pkgs.gcc12Stdenv.mkDerivation rec {
+        pname = "wordchain";
+        version = "1.0.1";
+
+        src = pkgs.fetchurl {
+          url = "https://github.com/superorbital/wordchain/releases/download/v${version}/wordchain_linux_amd64";
+          sha256 = "0039cd11ff90fba71de7bbab366bb43a3e1576766153a0ab153d69b1276a7e26";
+        };
+        phases = [ "installPhase" "patchPhase" ];
+        installPhase = ''
+          mkdir -p $out/bin
+          cp $src $out/bin/wordchain
+          chmod +x $out/bin/wordchain
+        '';
       };
       devShells.rust = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
         name = "elo-rust-shell";
@@ -92,6 +108,21 @@
         buildInputs = with pkgs;
           [
             elixir
+          ];
+        doCheck = false;
+      };
+      devShells.ops = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
+        name = "elo-ops-shell";
+        buildInputs = with pkgs;
+          [
+            skopeo
+            gettext
+            just
+            _1password
+            docker
+            kubectl
+            (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
+            packages.wordchain
           ];
         doCheck = false;
       };

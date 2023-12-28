@@ -9,7 +9,13 @@ result-bin
 # kubernetes
 
 out.yaml
+out-with-envs.yaml
 
 # secrets
 
 elo-dashboard-secret.env
+
+# buildkite
+
+.buildkite/__pycache__
+.buildkite/pipeline.json
