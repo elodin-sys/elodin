@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base/
+
+patches:
+- target:
+    kind: Ingress
+    name: elodin
+  patch: |-
+    - op: replace
+      path: /spec/rules/0/host
+      value: $CLUSTER_NAME.elodin.dev
+- target:
+    kind: Service
+    name: traefik-web-service
+  patch: |-
+    - op: replace
+      path: /spec/loadBalancerIP
+      value: 34.173.153.207
+- target:
+    namespace: elodin-app
+  patch: |-
+    - op: replace
+      path: /metadata/namespace
+      value: elodin-app-$CLUSTER_NAME
+- target:
+    kind: Namespace
+    name: elodin-app
+  patch: |-
+    - op: replace
+      path: /metadata/name
+      value: elodin-app-$CLUSTER_NAME
+- target:
+    kind: Namespace
+    name: elodin-vms
+  patch: |-
+    - op: replace
+      path: /metadata/name
+      value: elodin-vms-$CLUSTER_NAME
+
+configMapGenerator:
+- name: elo-atc-config
+  namespace: elodin-app
+  files:
+  - atc.toml=elo-atc-config.toml
+- name: elo-dashboard
+  namespace: elodin-app
+  literals:
+  - PHX_HOST=$CLUSTER_NAME.elodin.dev
+  - RELEASE_COOKIE=${CLUSTER_NAME}_cookie
+  - SECRET_KEY_BASE=pvS+BSCE9uyDsYR3d4A/vENpQj/0OtpzR+N/FAY1+yQD1OfS8Adp2nh537rzSEb0
+  - ATC_INTERNAL_ADDR=elo-atc.elodin-app-$CLUSTER_NAME.svc.cluster.local:50051
+  - ATC_ADDR=$CLUSTER_NAME.elodin.dev
+  - AUTH_BASE_URL=https://auth.elodin.dev
+
+secretGenerator:
+- name: elo-dashboard-secret
+  namespace: elodin-app
+  envs:
+  - elo-dashboard-secret.env
+
+images:
+- name: elodin-infra/elo-atc
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64
+  newTag: $BUILDKITE_COMMIT
+- name: elodin-infra/elo-dashboard
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
+  newTag: $BUILDKITE_COMMIT

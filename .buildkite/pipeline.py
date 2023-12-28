@@ -2,28 +2,66 @@ from buildkite import *
 from steps import *
 from plugins import *
 
-def deploy_k8s_step(label, key = None, depends_on = None):
-  gke_cluster_name = "elodin-dev-gke"
-  gke_project_id = "elodin-dev"
-  gke_region = "us-central1"
+GKE_CONFIG = {
+  "cluster_name": "elodin-dev-gke",
+  "project_id": "elodin-dev",
+  "region": "us-central1",
+}
+
+def generate_cluster_name(branch):
+  return f"\$(wordchain random -s {branch})"
+
+def deploy_k8s_step(is_main = False):
+  gke_cluster_name = GKE_CONFIG["cluster_name"]
+  gke_project_id = GKE_CONFIG["project_id"]
+  gke_region = GKE_CONFIG["region"]
+
+  cluster_name = "app" if is_main else generate_cluster_name("\$BUILDKITE_BRANCH")
+  overlay_name = "dev" if is_main else "dev-branch"
+
+  command = " && ".join([
+    f"export CLUSTER_NAME={cluster_name}",
+    f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
+    "just decrypt-secrets-force",
+    f"kubectl kustomize kubernetes/overlays/{overlay_name} > out.yaml",
+    "envsubst < out.yaml > out-with-envs.yaml",
+    "kubectl apply -f out-with-envs.yaml",
+    "buildkite-agent annotate \"Deployed at https://\$CLUSTER_NAME.elodin.dev\" --style \"success\"",
+  ])
   
-  return step(
-    label = label,
-    key = key,
-    depends_on = depends_on,
-    command = [
-      f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
-      "just decrypt-secrets-force",
-      "kubectl kustomize kubernetes/overlays/dev > out.yaml",
-      "envsubst < out.yaml > out-with-envs.yaml",
-      "kubectl apply -f out-with-envs.yaml",
-    ],
+  return nix_step(
+    label = f":kubernetes: deploy {overlay_name} cluster",
+    flake = ".#ops",
+    command = command,
+    condition = f"build.branch {'==' if is_main else '!='} \"main\"",
+    env = { "ELO_DECRYPT_SECRETS": "1" },
+    plugins = [ gcp_identity_plugin() ]
+  )
+
+def cleanup_k8s_step():
+  gke_cluster_name = GKE_CONFIG["cluster_name"]
+  gke_project_id = GKE_CONFIG["project_id"]
+  gke_region = GKE_CONFIG["region"]
+
+  cluster_name = generate_cluster_name("\$PR_CLOSED_BRANCH")
+
+  command = " && ".join([
+    f"export CLUSTER_NAME={cluster_name}",
+    f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
+    "kubectl delete ns elodin-app-\$CLUSTER_NAME",
+    "kubectl delete ns elodin-vms-\$CLUSTER_NAME",
+  ])
+  
+  return nix_step(
+    label = f":kubernetes: delete dev-branch cluster",
+    flake = ".#ops",
+    command = command,
     plugins = [ gcp_identity_plugin() ]
   )
 
 
-
 pipeline(steps = [
+  # native buildkite trigger
   group(name = ":crab: rust", steps = [
     rust_step(
       label = "clippy",
@@ -60,32 +98,31 @@ pipeline(steps = [
       plugins = [elixir_cache_plugin()],
     )
   ]),
-  group(
-    name = ":docker: docker",
-    key = "build-images",
-    steps = [
-      build_image_step(
-        image_name = "elo-dashboard",
-        service_path = "services/dashboard",
-        image_tag = "\$BUILDKITE_COMMIT",
-      ),
-      build_image_step(
-        image_name = "elo-atc",
-        service_path = "services/atc",
-        image_tag = "\$BUILDKITE_COMMIT",
-      ),
-      build_image_step(
-        image_name = "elo-sim-runner",
-        service_path = "services/elodin-web-runner",
-        image_tag = "\$BUILDKITE_COMMIT",
-      ),
-    ],
-  ),
-  deploy_k8s_step(
-    label = ":kubernetes: deploy dev cluster",
-    key = "kubernetes-deploy",
-    depends_on = "build-images",
-  ),
+  group(name = ":docker: docker", key = "build-images", steps = [
+    build_image_step(
+      image_name = "elo-dashboard",
+      service_path = "services/dashboard",
+      image_tag = "\$BUILDKITE_COMMIT",
+    ),
+    build_image_step(
+      image_name = "elo-atc",
+      service_path = "services/atc",
+      image_tag = "\$BUILDKITE_COMMIT",
+    ),
+    build_image_step(
+      image_name = "elo-sim-runner",
+      service_path = "services/elodin-web-runner",
+      image_tag = "\$BUILDKITE_COMMIT",
+    ),
+  ]),
+  group(name = ":kubernetes: kubernetes", depends_on = "build-images", steps = [
+    deploy_k8s_step(is_main = True),
+    deploy_k8s_step(),
+  ]),
+  # github actions trigger
+  group(name = ":kubernetes: kubernetes", is_gha = True, steps = [
+    cleanup_k8s_step(),
+  ])
 ],
 env = {
   "SCCACHE_DIR": "/buildkite/builds/sscache",
