@@ -13,13 +13,6 @@ patches:
       path: /spec/rules/0/host
       value: app.elodin.systems
 - target:
-    kind: Service
-    name: traefik-web-service
-  patch: |-
-    - op: replace
-      path: /spec/loadBalancerIP
-      value: 34.135.145.200
-- target:
     namespace: elodin-app
   patch: |-
     - op: replace
