@@ -24,7 +24,7 @@ def build_image_step(image_name, service_path, image_tag = "latest", repository 
     plugins = [ gcp_identity_plugin() ]
   )
 
-def nix_step(label, flake, command, emoji = ":nix:", pre_command = None, key = None, depends_on = None, condition = None, env = {}, plugins = []):
+def nix_step(label, flake, command, emoji = ":nix:", pre_command = None, key = None, depends_on = None, env = {}, plugins = []):
   return step(
     label = f"{emoji} {label}",
     command = [
@@ -36,7 +36,6 @@ def nix_step(label, flake, command, emoji = ":nix:", pre_command = None, key = N
     ],
     key = key,
     depends_on = depends_on,
-    condition = condition,
     env = env,
     plugins = plugins,
   )

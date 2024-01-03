@@ -1,6 +1,10 @@
+import os
+
 from buildkite import *
 from steps import *
 from plugins import *
+from utils import *
+
 
 GKE_CONFIG = {
   "cluster_name": "elodin-dev-gke",
@@ -8,48 +12,49 @@ GKE_CONFIG = {
   "region": "us-central1",
 }
 
-def generate_cluster_name(branch):
-  return f"\$(wordchain random -s {branch})"
+GITHUB_ACTION_TRIGGER = os.getenv("TRIGGERED_FROM_GHA", "") == "1"
+BRANCH_NAME = os.environ["PR_CLOSED_BRANCH"] if GITHUB_ACTION_TRIGGER else os.environ["BUILDKITE_BRANCH"]
 
-def deploy_k8s_step(is_main = False):
+
+def deploy_k8s_step(branch_name):
   gke_cluster_name = GKE_CONFIG["cluster_name"]
   gke_project_id = GKE_CONFIG["project_id"]
   gke_region = GKE_CONFIG["region"]
 
-  cluster_name = "app" if is_main else generate_cluster_name("\$BUILDKITE_BRANCH")
+  is_main = branch_name == "main"
+
+  cluster_name = "app" if is_main else codename(branch_name)
   overlay_name = "dev" if is_main else "dev-branch"
 
   command = " && ".join([
-    f"export CLUSTER_NAME={cluster_name}",
     f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
     "just decrypt-secrets-force",
     f"kubectl kustomize kubernetes/overlays/{overlay_name} > out.yaml",
+    f"export CLUSTER_NAME={cluster_name}",
     "envsubst < out.yaml > out-with-envs.yaml",
     "kubectl apply -f out-with-envs.yaml",
-    "buildkite-agent annotate \"Deployed at https://\$CLUSTER_NAME.elodin.dev\" --style \"success\"",
+    f"buildkite-agent annotate \"Deployed at https://{cluster_name}.elodin.dev\" --style \"success\"",
   ])
   
   return nix_step(
     label = f":kubernetes: deploy {overlay_name} cluster",
     flake = ".#ops",
     command = command,
-    condition = f"build.branch {'==' if is_main else '!='} \"main\"",
     env = { "ELO_DECRYPT_SECRETS": "1" },
     plugins = [ gcp_identity_plugin() ]
   )
 
-def cleanup_k8s_step():
+def cleanup_k8s_step(branch_name):
   gke_cluster_name = GKE_CONFIG["cluster_name"]
   gke_project_id = GKE_CONFIG["project_id"]
   gke_region = GKE_CONFIG["region"]
 
-  cluster_name = generate_cluster_name("\$PR_CLOSED_BRANCH")
+  cluster_name = codename(branch_name)
 
   command = " && ".join([
-    f"export CLUSTER_NAME={cluster_name}",
     f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
-    "kubectl delete ns elodin-app-\$CLUSTER_NAME",
-    "kubectl delete ns elodin-vms-\$CLUSTER_NAME",
+    f"kubectl delete ns elodin-app-{cluster_name}",
+    f"kubectl delete ns elodin-vms-{cluster_name}",
   ])
   
   return nix_step(
@@ -60,8 +65,7 @@ def cleanup_k8s_step():
   )
 
 
-pipeline(steps = [
-  # native buildkite trigger
+test_steps = [
   group(name = ":crab: rust", steps = [
     rust_step(
       label = "clippy",
@@ -98,34 +102,71 @@ pipeline(steps = [
       plugins = [elixir_cache_plugin()],
     )
   ]),
-  group(name = ":docker: docker", key = "build-images", steps = [
-    build_image_step(
-      image_name = "elo-dashboard",
-      service_path = "services/dashboard",
-      image_tag = "\$BUILDKITE_COMMIT",
-    ),
-    build_image_step(
-      image_name = "elo-atc",
-      service_path = "services/atc",
-      image_tag = "\$BUILDKITE_COMMIT",
-    ),
-    build_image_step(
-      image_name = "elo-sim-runner",
-      service_path = "services/elodin-web-runner",
-      image_tag = "\$BUILDKITE_COMMIT",
-    ),
-  ]),
-  group(name = ":kubernetes: kubernetes", depends_on = "build-images", steps = [
-    deploy_k8s_step(is_main = True),
-    deploy_k8s_step(),
-  ]),
-  # github actions trigger
-  group(name = ":kubernetes: kubernetes", is_gha = True, steps = [
-    cleanup_k8s_step(),
-  ])
-],
-env = {
-  "SCCACHE_DIR": "/buildkite/builds/sscache",
-  "RUSTC_WRAPPER": "sccache",
-  "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/buildkite/cache",
-})
+]
+
+cluster_app_deploy_steps = [
+  group(
+    name = ":docker: docker",
+    key = "build-images",
+    steps = [
+      build_image_step(
+        image_name = "elo-dashboard",
+        service_path = "services/dashboard",
+        image_tag = "\$BUILDKITE_COMMIT",
+      ),
+      build_image_step(
+        image_name = "elo-atc",
+        service_path = "services/atc",
+        image_tag = "\$BUILDKITE_COMMIT",
+      ),
+      build_image_step(
+        image_name = "elo-sim-runner",
+        service_path = "services/elodin-web-runner",
+        image_tag = "\$BUILDKITE_COMMIT",
+      ),
+    ]
+  ),
+  group(
+    name = ":kubernetes: kubernetes",
+    key = "deploy-app",
+    depends_on = "build-images",
+    steps = [ deploy_k8s_step(BRANCH_NAME) ]
+  )
+]
+
+cluster_app_destroy_steps = [
+  group(
+    name = ":kubernetes: kubernetes",
+    depends_on = None if GITHUB_ACTION_TRIGGER else "deploy-app",
+    steps = [ cleanup_k8s_step(BRANCH_NAME) ]
+  )
+]
+
+
+pipeline_steps = []
+
+if GITHUB_ACTION_TRIGGER:
+  # PR is closed and app needs to be deleted
+  pipeline_steps = cluster_app_destroy_steps
+elif BRANCH_NAME.startswith("gh-readonly-queue"):
+  # GitHub Queue branch - run everything and clean up right away
+  pipeline_steps = [
+    *test_steps,
+    *cluster_app_deploy_steps,
+    *cluster_app_destroy_steps,
+  ]
+else:
+  # Run tests and deploy app
+  pipeline_steps = [
+    *test_steps,
+    *cluster_app_deploy_steps,
+  ]
+
+pipeline(
+  steps = pipeline_steps,
+  env = {
+    "SCCACHE_DIR": "/buildkite/builds/sscache",
+    "RUSTC_WRAPPER": "sccache",
+    "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/buildkite/cache",
+  }
+)
