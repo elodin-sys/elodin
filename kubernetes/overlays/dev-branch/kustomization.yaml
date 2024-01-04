@@ -32,6 +32,19 @@ patches:
     - op: replace
       path: /metadata/name
       value: elodin-vms-$CLUSTER_NAME
+- target:
+    namespace: elodin-vms
+  patch: |-
+    - op: replace
+      path: /metadata/namespace
+      value: elodin-vms-$CLUSTER_NAME
+- target:
+    kind: RoleBinding
+    name: elo-atc
+  patch: |-
+    - op: replace
+      path: /subjects/0/namespace
+      value: elodin-app-$CLUSTER_NAME
 
 configMapGenerator:
 - name: elo-atc-config
