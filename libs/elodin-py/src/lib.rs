@@ -10,7 +10,10 @@ use elodin_conduit::{bevy::ComponentMap, ComponentId};
 use nalgebra::{
     MatrixView3, MatrixView3x1, MatrixView4x1, Quaternion, UnitQuaternion, UnitVector3, Vector3,
 };
-use nox::{xla::PjRtLoadedExecutable, Client};
+use nox::{
+    xla::{BufferArgsRef, PjRtLoadedExecutable},
+    Client,
+};
 use numpy::{PyArrayLike1, PyArrayLike2};
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
@@ -115,7 +118,7 @@ impl RigidBody {
                         move |world: &mut World, entity: Entity, client: &nox::Client| {
                             let effect = {
                                 let exec =
-                                    compiled.get_or_init(|| xla_comp.compile(&client.0).unwrap());
+                                    compiled.get_or_init(|| client.0.compile(&xla_comp).unwrap());
                                 let mut args = vec![];
                                 let map = world.get_resource::<ComponentMap>().unwrap();
                                 for component in &effector.components {
@@ -127,10 +130,10 @@ impl RigidBody {
                                         args.push(value.to_pjrt_buf(client).unwrap());
                                     }
                                 }
-                                let buf = &exec.execute_b(&args).unwrap()[0][0];
+                                let args = args.iter().collect::<BufferArgsRef>();
+                                let buf = &exec.execute_buffers(args).unwrap()[0];
                                 let literal = buf.to_literal_sync().unwrap();
-                                let mut out = [0f64; 6];
-                                literal.copy_raw_to(&mut out).unwrap();
+                                let out = literal.typed_buf::<f64>().unwrap();
                                 Effect {
                                     force: Force(Vector3::new(out[0], out[1], out[2])),
                                     torque: Torque(Vector3::new(out[3], out[4], out[5])),
@@ -265,9 +268,9 @@ impl Effector {
             .call(PyTuple::new(py, args), None)?;
         let comp = comp.call_method0("as_serialized_hlo_module_proto")?;
         let comp = comp.downcast::<PyBytes>()?;
-        let hlo_module = nox::xla::HloModuleProto::parse_proto(comp.as_bytes(), true)
+        let hlo_module = nox::xla::HloModuleProto::parse_binary(comp.as_bytes())
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        Ok(nox::xla::XlaComputation::from_proto(&hlo_module))
+        Ok(hlo_module.computation())
     }
 }
 

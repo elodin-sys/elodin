@@ -67,7 +67,7 @@ impl ComponentValue<'_> {
         self.with_bytes(|bytes| {
             client
                 .0
-                .buffer_from_host_raw_bytes(element_ty, bytes, &dims, None)
+                .copy_raw_host_buffer(element_ty, bytes, &dims)
                 .map_err(nox::Error::from)
         })
     }
