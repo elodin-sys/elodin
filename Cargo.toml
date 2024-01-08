@@ -9,11 +9,13 @@ members = [
     "libs/elodin-types/rust",
     "libs/elodin-conduit",
     "libs/nox",
+    "libs/nox-ecs",
+    "libs/nox-ecs-macros",
     "services/atc",
     "services/atc/migration",
     "services/atc/entity",
     "services/elodin-web-runner",
-    "tools/starlark-json"
+    "tools/starlark-json",
 ]
 
 [profile.wasm-release]
