@@ -1,14 +1,15 @@
-use crate::{AsBuffer, Buffer, IntoOp, Op, Param};
+use crate::{AsBuffer, Buffer, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar};
 use nalgebra::{
     constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
     Scalar as NalgebraScalar,
 };
 use simba::scalar::ClosedNeg;
+use smallvec::{smallvec, SmallVec};
 use std::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
 };
-use xla::{NativeType, XlaOp};
+use xla::{ArrayElement, ElementType, NativeType};
 
 #[repr(transparent)]
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
@@ -16,20 +17,96 @@ pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
-impl<T, D: TensorDim> Tensor<T, D, Op> {
-    fn from_op(op: XlaOp) -> Self {
+pub trait TensorItem {
+    type Item;
+    type Tensor<D>
+    where
+        D: TensorDim;
+    type Dim: TensorDim;
+    const ELEM: ElementType;
+
+    fn from_op(op: Noxpr) -> Self::Item;
+}
+
+impl<T: NativeType + ArrayElement> TensorItem for T {
+    type Item = Scalar<T>;
+    type Tensor<D> = Tensor<T, D> where D: TensorDim;
+    type Dim = ();
+
+    const ELEM: ElementType = T::TY;
+
+    fn from_op(inner: Noxpr) -> Self::Item {
+        Scalar::from_op(inner)
+    }
+}
+
+impl<T: TensorItem, D: TensorDim> TensorItem for Tensor<T, D, Op> {
+    type Item = T::Item; // NOTE: this bound might be wrong
+
+    type Dim = D;
+    type Tensor<TD: TensorDim> = Tensor<T, TD>;
+
+    const ELEM: ElementType = T::ELEM;
+
+    fn from_op(op: Noxpr) -> Self::Item {
+        T::from_op(op)
+    }
+}
+
+pub trait Collapse {
+    type Out;
+    fn collapse(self) -> Self::Out;
+}
+
+impl<T: TensorItem> Collapse for Scalar<T, Op>
+where
+    T::Item: IntoOp,
+{
+    type Out = <T as TensorItem>::Item;
+
+    fn collapse(self) -> Self::Out {
+        T::from_op(self.inner)
+    }
+}
+
+impl<T: TensorItem, InnerDim: TensorDim, D: TensorDim + NonScalarDim> Collapse
+    for Tensor<Tensor<T, InnerDim>, D, Op>
+where
+    (D, InnerDim): DimConcat<D, InnerDim>,
+    <(D, InnerDim) as DimConcat<D, InnerDim>>::Output: TensorDim,
+{
+    type Out = Tensor<T, ConcatDims<D, InnerDim>>;
+    fn collapse(self) -> Self::Out {
+        Tensor {
+            inner: self.inner,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T, D: TensorDim> Clone for Tensor<T, D, Op> {
+    fn clone(&self) -> Self {
         Self {
-            inner: op,
+            inner: self.inner.clone(),
+            phantom: self.phantom,
+        }
+    }
+}
+
+impl<T, D: TensorDim> Tensor<T, D, Op> {
+    fn from_op(inner: Noxpr) -> Self {
+        Self {
+            inner,
             phantom: PhantomData,
         }
     }
 
     pub fn sqrt(&self) -> Self {
-        Self::from_op(self.inner.sqrt().unwrap())
+        Self::from_op(self.inner.clone().sqrt())
     }
 
     pub fn log(&self) -> Self {
-        Self::from_op(self.inner.log().unwrap())
+        Self::from_op(self.inner.clone().log())
     }
 
     /// *Safety*: This function is memory safe, it is marked unsafe because you could introduce crashes and/or
@@ -46,7 +123,7 @@ impl<T, D: TensorDim> Tensor<T, D, Op> {
 }
 
 impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
-    fn into_op(self, _builder: &xla::XlaBuilder) -> xla::XlaOp {
+    fn into_op(self) -> Noxpr {
         self.inner
     }
 }
@@ -54,7 +131,7 @@ impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
 pub trait TensorDim {}
 pub trait NonScalarDim {}
 
-pub struct ScalarDim;
+pub type ScalarDim = ();
 impl TensorDim for ScalarDim {}
 impl TensorDim for nalgebra::Dyn {}
 impl NonScalarDim for nalgebra::Dyn {}
@@ -149,6 +226,7 @@ macro_rules! impl_tensor_dim {
             }
         }
 
+
       }
 }
 
@@ -203,7 +281,7 @@ macro_rules! impl_op {
             type Output = Self;
 
             fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
             }
         }
 
@@ -216,7 +294,7 @@ macro_rules! impl_op {
             type Output = Self;
 
             fn $op_fn(self, rhs: &'a Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
             }
         }
 
@@ -229,7 +307,7 @@ macro_rules! impl_op {
             type Output = $ret<T, D1>;
 
             fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
             }
         }
 
@@ -243,7 +321,7 @@ macro_rules! impl_op {
             type Output = $ret<T, D1>;
 
             fn $op_fn(self, rhs: &'b Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op((&self.inner $inner &rhs.inner).expect("xla build error"))
+                Tensor::from_op((self.inner.clone() $inner rhs.inner.clone()))
             }
         }
 
@@ -259,7 +337,7 @@ impl<T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for Tensor<T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Tensor::from_op(self.inner.neg().expect("xla build error"))
+        Tensor::from_op(self.inner.neg())
     }
 }
 
@@ -267,21 +345,22 @@ impl<'a, T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for &'a Tensor<T, D> {
     type Output = Tensor<T, D>;
 
     fn neg(self) -> Self::Output {
-        Tensor::from_op(self.inner.neg().expect("xla build error"))
+        Tensor::from_op(self.inner.clone().neg())
     }
 }
 
 impl<T, D: TensorDim + DimRank<R>, const R: usize> FixedSliceExt<T, D, R> for Tensor<T, D, Op> {
     fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op> {
-        let offsets = offsets.map(|o| o as i64);
-        let mut new_offsets = [0; R];
-        for (i, (a, b)) in offsets.iter().zip(ND::dims().into_iter()).enumerate() {
-            new_offsets[i] = a + b as i64;
-        }
+        let offsets: SmallVec<_> = offsets.into_iter().map(|o| o as i64).collect();
+        let new_offsets = offsets
+            .iter()
+            .zip(ND::dims())
+            .map(|(a, b)| a + b as i64)
+            .collect();
         Tensor::from_op(
             self.inner
-                .slice(&offsets, &new_offsets, &[1i64; R])
-                .unwrap(),
+                .clone()
+                .slice(offsets, new_offsets, smallvec![1i64; R]),
         )
     }
 }
@@ -290,29 +369,27 @@ pub trait FixedSliceExt<T, D: TensorDim, const R: usize> {
     fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op>;
 }
 
-impl<T: NalgebraScalar + ClosedMul + NativeType, D1: TensorDim> Mul<T> for Tensor<T, D1>
+impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: TensorDim> Mul<T>
+    for Tensor<T, D1>
 where
     ShapeConstraint: DimMul<D1, ScalarDim>,
 {
     type Output = Self;
 
     fn mul(self, rhs: T) -> Self::Output {
-        Tensor::from_op(
-            (&self.inner * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
-        )
+        Tensor::from_op(self.inner.clone() * rhs.constant())
     }
 }
 
-impl<'a, T: NalgebraScalar + ClosedMul + NativeType, D1: TensorDim> Mul<T> for &'a Tensor<T, D1>
+impl<'a, T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: TensorDim> Mul<T>
+    for &'a Tensor<T, D1>
 where
     ShapeConstraint: DimMul<D1, ScalarDim>,
 {
     type Output = Tensor<T, D1>;
 
     fn mul(self, rhs: T) -> Self::Output {
-        Tensor::from_op(
-            (&self.inner * self.inner.builder().c0(rhs).unwrap()).expect("xla build error"),
-        )
+        Tensor::from_op(self.inner.clone() * rhs.constant())
     }
 }
 
@@ -322,7 +399,7 @@ macro_rules! impl_prim {
             type Output = Tensor<$ty, D>;
 
             fn mul(self, rhs: Tensor<$ty, D>) -> Self::Output {
-                Tensor::from_op((rhs.inner.builder().c0(self).unwrap() * rhs.inner).unwrap())
+                Tensor::from_op((self.constant() * rhs.inner))
             }
         }
 
@@ -330,7 +407,7 @@ macro_rules! impl_prim {
             type Output = Tensor<$ty, D>;
 
             fn mul(self, rhs: &Tensor<$ty, D>) -> Self::Output {
-                Tensor::from_op((rhs.inner.builder().c0(self).unwrap() * &rhs.inner).unwrap())
+                Tensor::from_op((self.constant() * rhs.inner.clone()))
             }
         }
     };
@@ -348,3 +425,151 @@ impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
         &self.inner
     }
 }
+
+pub trait MapDim<D> {
+    type Item: TensorDim;
+    type MappedDim: TensorDim;
+    const MAPPED_DIM: usize;
+}
+
+pub struct Mapped;
+
+impl<D: TensorDim> MapDim<D> for Mapped {
+    type Item = ();
+    type MappedDim = D;
+
+    const MAPPED_DIM: usize = 0;
+}
+
+pub trait DefaultMap
+where
+    Self: Sized,
+{
+    type DefaultMapDim: MapDim<Self>;
+}
+
+macro_rules! impl_map {
+    ($num:literal; $($ty:tt),+) => {
+
+         impl<M, $($ty,)*> DefaultMap for (M, $($ty,)*)
+         where
+             M: TensorDim,
+             $($ty: TensorDim, )*
+         {
+             type DefaultMapDim = (Mapped, $($ty,)* );
+         }
+
+        impl_map_inner!($num; TT1; $($ty),*);
+        impl_map_inner!($num; TT1, TT2; $($ty),*);
+        impl_map_inner!($num; TT1, TT2, TT3; $($ty),*);
+        impl_map_inner!($num; TT1, TT2, TT3, TT4 ; $($ty),*);
+
+        impl<M, $($ty,)*> MapDim<(M, $($ty,)*)> for (Mapped, $($ty,)*)
+        where
+            M: TensorDim,
+            $($ty: TensorDim, )*
+        {
+            type Item = ($($ty,)*);
+            type MappedDim = M;
+
+            const MAPPED_DIM: usize = 0;
+        }
+
+        impl<$($ty,)* A> DimConcat<($($ty,)*), A> for (($($ty,)*), A)
+        where
+            $($ty: TensorDim, )*
+            A: TensorDim + NonTupleDim
+        {
+            type Output = ($($ty,)* A);
+        }
+
+        impl<$($ty,)* A> DimConcat<A, ($($ty,)*)> for (A, ($($ty,)*))
+        where
+            $($ty: TensorDim, )*
+            A: TensorDim + NonTupleDim
+        {
+            type Output = (A,$($ty,)*);
+        }
+    };
+}
+
+macro_rules! impl_map_inner {
+    ($num:literal; $($trail_ty:tt),* ; $($ty:tt),*) => {
+        impl<$($ty,)* $($trail_ty,)* M> MapDim<
+            ($($ty,)* Mapped, $($trail_ty,)*)
+            > for ($($ty,)* M, $($trail_ty,)*)
+              where $($ty: TensorDim, )*
+              $($trail_ty: TensorDim, )*
+            M: TensorDim
+        {
+            type Item = ($($ty,)* $($trail_ty,)*);
+            type MappedDim = M;
+
+            const MAPPED_DIM: usize = $num;
+        }
+    };
+}
+
+impl_map!(2; T1, T2);
+impl_map!(3; T1, T2, T3);
+impl_map!(4; T1, T2, T3, T4);
+impl_map!(5; T1, T2, T3, T4, T5);
+impl_map!(6; T1, T2, T3, T4, T5, T6);
+impl_map!(7; T1, T2, T3, T4, T5, T6, T7);
+impl_map!(8; T1, T2, T3, T4, T5, T6, T7, T8);
+
+impl<M, T1> DefaultMap for (M, T1)
+where
+    M: TensorDim,
+    T1: TensorDim,
+{
+    type DefaultMapDim = (Mapped, T1);
+}
+
+pub type DefaultMappedDim<D> = <<D as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim;
+
+impl_map_inner!(1; TT1; T1);
+impl_map_inner!(1; TT1,TT2; T1);
+impl_map_inner!(1; TT1,TT2,TT3; T1);
+impl_map_inner!(1; TT1,TT2,TT3,TT4; T1);
+
+impl<M, T1> MapDim<(M, T1)> for (Mapped, T1)
+where
+    T1: TensorDim,
+    M: TensorDim,
+{
+    type Item = T1;
+    type MappedDim = M;
+    const MAPPED_DIM: usize = 0;
+}
+
+impl<const N: usize> DefaultMap for Const<N> {
+    type DefaultMapDim = Mapped;
+}
+
+pub trait DimConcat<A, B> {
+    type Output;
+}
+
+impl<const A: usize> DimConcat<Const<A>, ()> for (Const<A>, ()) {
+    type Output = Const<A>;
+}
+
+impl<const A: usize> DimConcat<(), Const<A>> for ((), Const<A>) {
+    type Output = Const<A>;
+}
+
+impl<A: NonScalarDim + NonTupleDim, B: NonScalarDim + NonTupleDim> DimConcat<A, B> for (A, B) {
+    type Output = (A, B);
+}
+
+pub trait NonTupleDim {}
+
+impl NonTupleDim for ScalarDim {}
+impl<const N: usize> NonTupleDim for Const<N> {}
+
+// impl<A: NonScalarDim + TensorDim, B: NonScalarDim + TensorDim> DimConcat<A, B> for (A, B) {
+//     type Output = (A, B);
+// }
+
+pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;

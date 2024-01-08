@@ -7,13 +7,13 @@ use xla::{ArrayElement, NativeType};
 
 use crate::{
     AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, FixedSliceExt, FromBuilder, FromHost,
-    FromPjrtBuffer, IntoOp, MaybeOwned, Op, Param, ToHost, Vector,
+    FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(Vector<T, 4, P>);
 
 impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
-    fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
+    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
         Self(Vector::from_pjrt(pjrt))
     }
 }
@@ -57,7 +57,7 @@ impl<T: RealField> Mul for Quaternion<T> {
     }
 }
 
-impl<T: NativeType + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
+impl<T: NativeType + ArrayElement + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
     type Output = Vector<T, 3>;
 
     fn mul(self, rhs: Vector<T, 3>) -> Self::Output {
@@ -68,8 +68,8 @@ impl<T: NativeType + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
 }
 
 impl<T> IntoOp for Quaternion<T> {
-    fn into_op(self, builder: &xla::XlaBuilder) -> xla::XlaOp {
-        self.0.into_op(builder)
+    fn into_op(self) -> Noxpr {
+        self.0.into_op()
     }
 }
 
@@ -79,7 +79,7 @@ impl<T> AsBuffer for Quaternion<T, Buffer> {
     }
 }
 
-impl<T: xla::ArrayElement> FromBuilder for Quaternion<T, Op> {
+impl<T: xla::ArrayElement + NativeType> FromBuilder for Quaternion<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
@@ -105,7 +105,7 @@ where
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client
             .0
-            .buffer_from_host_buffer(self.coords.as_slice(), &[4], None)
+            .copy_host_buffer(self.coords.as_slice(), &[4])
             .unwrap();
         MaybeOwned::Owned(inner)
     }
@@ -120,7 +120,9 @@ where
     fn to_host(&self) -> Self::HostTy {
         let literal = self.0.inner.to_literal_sync().unwrap();
         let mut out = nalgebra::Quaternion::zero();
-        literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
+        out.coords
+            .as_mut_slice()
+            .copy_from_slice(literal.typed_buf::<T>().unwrap());
         out
     }
 }
@@ -133,11 +135,14 @@ impl<T> FromPjrtBuffer for nalgebra::Quaternion<T>
 where
     T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
 {
-    fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
-        let buf = &pjrt[0][0];
+    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
+        let buf = &pjrt[0];
         let literal = buf.to_literal_sync().unwrap();
         let mut out = nalgebra::Quaternion::zero();
-        literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
+        out.coords
+            .as_mut_slice()
+            .copy_from_slice(literal.typed_buf().unwrap());
+        //literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
         out
     }
 }

@@ -1,3 +1,5 @@
+use crate::Noxpr;
+
 pub struct Op;
 
 pub struct Literal;
@@ -9,7 +11,7 @@ pub trait Param {
 }
 
 impl Param for Op {
-    type Inner = xla::XlaOp;
+    type Inner = Noxpr;
 }
 
 impl Param for Literal {

@@ -1,30 +1,33 @@
 #![allow(clippy::arc_with_non_send_sync)]
 
-mod matrix;
-pub use matrix::*;
-mod scalar;
-pub use scalar::*;
-mod comp_fn;
-pub use comp_fn::*;
-mod exec;
-pub use exec::*;
-mod param;
-pub use param::*;
-mod comp;
-pub use comp::*;
 mod builder;
-pub use builder::*;
-mod transfer;
-pub use transfer::*;
 mod client;
-pub use client::*;
-mod vector;
-pub use vector::*;
-mod tensor;
-pub use tensor::*;
-mod quaternion;
-pub use quaternion::*;
+mod comp;
+mod comp_fn;
 mod error;
+mod exec;
+mod matrix;
+mod noxpr;
+mod param;
+mod quaternion;
+mod scalar;
+mod tensor;
+mod transfer;
+mod vector;
+
+pub use builder::*;
+pub use client::*;
+pub use comp::*;
+pub use comp_fn::*;
 pub use error::*;
+pub use exec::*;
+pub use matrix::*;
+pub use noxpr::*;
+pub use param::*;
+pub use quaternion::*;
+pub use scalar::*;
+pub use tensor::*;
+pub use transfer::*;
+pub use vector::*;
 
 pub use xla;

@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, ops::Deref};
 
-use crate::{Buffer, Client, Op, Tensor, TensorDim};
+use crate::{Buffer, Client, Noxpr, Op, Tensor, TensorDim};
 
 pub trait FromHost {
     type HostTy;
@@ -9,7 +9,7 @@ pub trait FromHost {
 }
 
 pub trait FromPjrtBuffer {
-    fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self;
+    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self;
 }
 
 pub trait AsBuffer {
@@ -23,12 +23,12 @@ impl<'a, A: AsBuffer> AsBuffer for &'a mut A {
 }
 
 pub trait IntoOp {
-    fn into_op(self, builder: &xla::XlaBuilder) -> xla::XlaOp;
+    fn into_op(self) -> Noxpr;
 }
 
 impl IntoOp for () {
-    fn into_op(self, builder: &xla::XlaBuilder) -> xla::XlaOp {
-        builder.tuple::<xla::XlaOp>(&[]).unwrap()
+    fn into_op(self) -> Noxpr {
+        Noxpr::tuple(vec![])
     }
 }
 
@@ -37,7 +37,7 @@ pub trait BufferForm {
 }
 
 pub trait BufferArg<BufferTy> {
-    fn is_mut_borrowed(&self) -> bool {
+    fn is_mut_borrowed() -> bool {
         false
     }
 
@@ -47,8 +47,8 @@ pub trait BufferArg<BufferTy> {
 }
 
 impl<T, R: TensorDim> FromPjrtBuffer for Tensor<T, R, Buffer> {
-    fn from_pjrt(pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {
-        let inner = pjrt.into_iter().next().unwrap().into_iter().next().unwrap();
+    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
+        let inner = pjrt.into_iter().next().unwrap();
         Tensor {
             inner,
             phantom: std::marker::PhantomData,
@@ -61,7 +61,7 @@ impl BufferForm for () {
 }
 
 impl FromPjrtBuffer for () {
-    fn from_pjrt(_pjrt: Vec<Vec<xla::PjRtBuffer>>) -> Self {}
+    fn from_pjrt(_pjrt: Vec<xla::PjRtBuffer>) -> Self {}
 }
 
 impl<T, R: TensorDim> BufferForm for Tensor<T, R, Op> {
@@ -73,7 +73,7 @@ impl<'a, T, R: TensorDim> BufferForm for &'a mut Tensor<T, R, Op> {
 }
 
 impl<'a, T, R: TensorDim> BufferArg<Self> for &'a mut Tensor<T, R, Buffer> {
-    fn is_mut_borrowed(&self) -> bool {
+    fn is_mut_borrowed() -> bool {
         true
     }
     fn as_buffer(&self, _client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {

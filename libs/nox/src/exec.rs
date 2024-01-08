@@ -17,32 +17,32 @@ pub trait ToHost {
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_exec {
       ($($ty:tt),+) => {
-        #[allow(non_snake_case, clippy::too_many_arguments)]
+        #[allow(non_snake_case, clippy::too_many_arguments, non_camel_case_types)]
         impl<$($ty,)* R> Exec<($($ty,)*), R>
         where
             R: BufferForm,
             R::BufferTy: FromPjrtBuffer,
             $($ty: AsBuffer, )*
         {
-            pub fn run(&self, client: &Client, $(mut $ty: impl BufferArg<$ty>,)*) -> Result<R::BufferTy, xla::Error> {
-                paste! {
-                $(
-                    let [<buf_$ty>] = $ty.as_buffer(client);
-                )*
-                let mut res = self.exec.execute_b(&[$([<buf_$ty>],)*])?;
-                let tuple = &mut res[0];
-                $(
-                    if $ty.is_mut_borrowed() {
-                        let buf = tuple.pop().unwrap();
-                        $ty.replace_buffer(buf);
-                    }
-                )*
-
-                Ok(R::BufferTy::from_pjrt(res))
+            paste! {
+                pub fn run<$([<arg_$ty>]: BufferArg<$ty>,)*>(&self, client: &Client, $(mut $ty: [<arg_$ty>],)*) -> Result<R::BufferTy, xla::Error> {
+                    let mut args = xla::BufferArgsRef::default();
+                    $(
+                        let [<buf_$ty>] = $ty.as_buffer(client);
+                        args.push(&[<buf_$ty>]);
+                    )*
+                    let mut res = self.exec.execute_buffers(args.untuple_result(true))?;
+                    $(
+                        if [<arg_$ty>]::is_mut_borrowed() {
+                            let buf = res.pop().unwrap();
+                            $ty.replace_buffer(buf);
+                        }
+                    )*
+                    Ok(R::BufferTy::from_pjrt(res))
                 }
             }
         }
-      }
+    }
 }
 
 impl_exec!(T1);

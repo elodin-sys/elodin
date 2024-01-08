@@ -1,29 +1,21 @@
-use std::marker::PhantomData;
-
+use crate::ArrayTy;
 use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
 use num_traits::Zero;
+use smallvec::smallvec;
+use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
-use crate::{Buffer, BufferArg, Client, FromHost, MaybeOwned, Op, Scalar, Tensor, ToHost};
+use crate::{Buffer, BufferArg, Client, FromHost, MaybeOwned, Noxpr, Op, Scalar, Tensor, ToHost};
 
 pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
 
-impl<T: NativeType> Vector<T, 3, Op> {
+impl<T: NativeType + ArrayElement> Vector<T, 3, Op> {
     pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
+        let elem = elem.literal();
+        let constant = Noxpr::constant(elem, ArrayTy::new(T::TY, smallvec![1]));
+        let inner = Noxpr::concat_in_dim(vec![self.inner.clone(), constant], 0);
         Vector {
-            inner: self
-                .inner
-                .concat_in_dim(
-                    &[self
-                        .inner
-                        .builder()
-                        .c0(elem)
-                        .unwrap()
-                        .reshape(&[1])
-                        .unwrap()],
-                    0,
-                )
-                .unwrap(),
+            inner,
             phantom: PhantomData,
         }
     }
@@ -38,7 +30,8 @@ where
     fn to_host(&self) -> Self::HostTy {
         let literal = self.inner.to_literal_sync().unwrap();
         let mut out = Self::HostTy::zeros();
-        literal.copy_raw_to(out.as_mut_slice()).unwrap();
+        out.as_mut_slice()
+            .copy_from_slice(literal.typed_buf::<T>().unwrap());
         out
     }
 }
@@ -59,10 +52,7 @@ where
     type HostTy = nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>;
 
     fn from_host(client: &Client, native: Self::HostTy) -> Self {
-        let inner = client
-            .0
-            .buffer_from_host_buffer(native.as_slice(), &[R], None)
-            .unwrap();
+        let inner = client.0.copy_host_buffer(native.as_slice(), &[R]).unwrap();
         Vector {
             inner,
             phantom: PhantomData,
@@ -76,27 +66,24 @@ where
     T: NativeType + NalgebraScalar + ArrayElement,
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
-        let inner = client
-            .0
-            .buffer_from_host_buffer(self.as_slice(), &[R], None)
-            .unwrap();
+        let inner = client.0.copy_host_buffer(self.as_slice(), &[R]).unwrap();
         MaybeOwned::Owned(inner)
     }
 }
 
 impl<T, const R: usize> Vector<T, R, Op> {
     pub fn from_arr(arr: [Vector<T, 1, Op>; R]) -> Self {
-        let arr = arr.map(|v| v.inner);
-        let op = arr[0].concat_in_dim(&arr[1..], 0).unwrap();
+        let nodes = arr.map(|v| v.inner).to_vec();
+        let inner = Noxpr::concat_in_dim(nodes, 0);
         Vector {
-            inner: op,
+            inner,
             phantom: PhantomData,
         }
     }
 
     pub fn dot(&self, other: &Self) -> Scalar<T> {
         Scalar {
-            inner: self.inner.dot(&other.inner).unwrap(),
+            inner: self.inner.clone().dot(&other.inner),
             phantom: PhantomData,
         }
     }
