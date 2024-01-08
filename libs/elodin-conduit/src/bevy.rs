@@ -11,7 +11,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use bevy::{
     app::AppExit,
@@ -40,7 +40,7 @@ impl<'a> ComponentData<'a> {
         commands: &mut Commands,
     ) {
         let Some(adapter) = component_map.0.get(&self.component_id) else {
-            warn!(?self.component_id, "unknown insert fn");
+            tracing::warn!(?self.component_id, "unknown insert fn");
             return;
         };
 
