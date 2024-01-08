@@ -76,7 +76,9 @@ impl From<u64> for EntityId {
 }
 
 #[repr(u8)]
-#[derive(Clone, Debug, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive, PartialEq, Eq,
+)]
 pub enum ComponentType {
     // Primatives
     U8 = 0,
