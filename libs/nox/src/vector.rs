@@ -36,15 +36,6 @@ where
     }
 }
 
-// impl<T, const N: usize, P: Param> Clone for Vector<T, N, P> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             inner: self.inner.clone(),
-//             phantom: PhantomData,
-//         }
-//     }
-// }
-
 impl<T, const R: usize> FromHost for Vector<T, R, Buffer>
 where
     T: NativeType + NalgebraScalar + ArrayElement,
@@ -96,14 +87,6 @@ impl<T, const R: usize> Vector<T, R, Op> {
         self.dot(self).sqrt()
     }
 }
-
-// impl<T, const R: usize, P: Param> ToHost for Vector<T, R, Buffer> {
-//     type HostTy = nalgebra::Matrix<T, Const<R>, Const<1>, ArrayStorage<T, R, 1>>;
-
-//     fn to_host(&self) -> HostTy {
-//         todo!()
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

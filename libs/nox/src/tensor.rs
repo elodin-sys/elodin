@@ -94,7 +94,7 @@ impl<T, D: TensorDim> Clone for Tensor<T, D, Op> {
 }
 
 impl<T, D: TensorDim> Tensor<T, D, Op> {
-    fn from_op(inner: Noxpr) -> Self {
+    pub(crate) fn from_op(inner: Noxpr) -> Self {
         Self {
             inner,
             phantom: PhantomData,
@@ -137,6 +137,9 @@ impl TensorDim for nalgebra::Dyn {}
 impl NonScalarDim for nalgebra::Dyn {}
 impl<const N: usize> TensorDim for nalgebra::Const<N> {}
 impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
+
+impl DimMul<ScalarDim, ScalarDim> for ShapeConstraint {}
+impl DimDiv<ScalarDim, ScalarDim> for ShapeConstraint {}
 
 pub trait ConstDim<const RANK: usize> {
     const RANK: usize = RANK;
