@@ -1,4 +1,6 @@
-use crate::{Buffer, BufferArg, Builder, Literal, MaybeOwned, Op, ScalarDim, Tensor, ToHost};
+use crate::{
+    Buffer, BufferArg, Literal, MaybeOwned, NoxprScalarExt, Op, ScalarDim, Tensor, ToHost,
+};
 use nalgebra::ClosedAdd;
 use nalgebra::Scalar as NalgebraScalar;
 
@@ -12,7 +14,7 @@ impl<T: NativeType + ArrayElement> ToHost for Scalar<T, Buffer> {
 
     fn to_host(&self) -> Self::HostTy {
         let literal = self.inner.to_literal_sync().unwrap();
-        literal.get_first_element().unwrap()
+        literal.typed_buf::<Self::HostTy>().unwrap()[0]
     }
 }
 
@@ -20,9 +22,9 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
     type Output = Scalar<T, Op>;
 
     fn add(self, rhs: T) -> Self::Output {
-        let rhs = self.inner.builder().c0(rhs).unwrap();
+        let rhs = NoxprScalarExt::constant(rhs);
         Scalar {
-            inner: (self.inner + rhs).unwrap(),
+            inner: (self.inner + rhs),
             phantom: PhantomData,
         }
     }
@@ -30,7 +32,7 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
 
 pub trait ScalarExt: Sized {
     fn literal(self) -> Scalar<Self, Literal>;
-    fn constant(self, builder: &Builder) -> Scalar<Self, Op>;
+    fn constant(self) -> Scalar<Self, Op>;
 }
 
 impl<T> ScalarExt for T
@@ -38,17 +40,16 @@ where
     T: ArrayElement + Sized + NativeType,
 {
     fn literal(self) -> Scalar<Self, Literal> {
+        let inner = self.literal();
         Scalar {
-            inner: xla::Literal::scalar(self),
+            inner,
             phantom: PhantomData,
         }
     }
 
-    fn constant(self, builder: &Builder) -> Scalar<Self, Op> {
-        let inner = builder
-            .inner
-            .constant_r0(self)
-            .expect("constant creation failed");
+    fn constant(self) -> Scalar<Self, Op> {
+        let inner = NoxprScalarExt::constant(self);
+        //let inner = T::constant_r0(&builder.inner, self);
 
         Scalar {
             inner,
@@ -64,7 +65,7 @@ where
     fn as_buffer(&self, client: &crate::Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client
             .0
-            .buffer_from_host_buffer(std::slice::from_ref(self), &[], None)
+            .copy_host_buffer(std::slice::from_ref(self), &[])
             .unwrap();
         MaybeOwned::Owned(inner)
     }

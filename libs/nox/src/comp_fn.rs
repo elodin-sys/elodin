@@ -1,26 +1,43 @@
-use crate::{Builder, Comp, IntoOp, Op, Tensor, TensorDim, XlaDim};
-use std::{any, marker::PhantomData, sync::atomic::Ordering};
+use crate::{
+    ArrayTy, Builder, Comp, IntoOp, Noxpr, NoxprFn, Op, Tensor, TensorDim, TensorItem, XlaDim,
+};
+use paste::paste;
+use smallvec::SmallVec;
+use std::{any, marker::PhantomData};
 
 pub trait CompFn<T, R>: Send + Sync {
-    fn compute(&self, builder: &Builder) -> R;
+    fn compute(&self, builder: &mut Builder) -> R;
 
-    fn build(&self) -> Result<Comp<T, R>, xla::Error>
+    fn build_expr(&self) -> Result<NoxprFn, crate::Error>
     where
         R: IntoOp,
     {
-        let builder = Builder::new(any::type_name::<Self>());
-        let res = self.compute(&builder);
-        let res = if !builder.mut_params.is_empty() {
+        let mut builder = Builder::new();
+        let res = self.compute(&mut builder);
+        let inner = if !builder.mut_params.is_empty() {
             let mut tuple = Vec::with_capacity(builder.mut_params.count() + 1);
-            tuple.push(res.into_op(&builder.inner));
+            let res_op = res.into_op();
+            tuple.push(res_op);
             for o in builder.mut_params.into_iter() {
-                tuple.insert(1, o.into_inner().into_op(&builder.inner));
+                tuple.insert(1, o.into_inner().into_op());
             }
-            builder.inner.tuple(&tuple)?
+            Noxpr::tuple(tuple)
         } else {
-            res.into_op(&builder.inner)
+            res.into_op()
         };
-        let comp = res.build()?;
+        Ok(NoxprFn {
+            inner,
+            args: builder.params.into_inner(),
+        })
+    }
+
+    fn build(&self) -> Result<Comp<T, R>, crate::Error>
+    where
+        R: IntoOp,
+    {
+        let expr = self.build_expr()?;
+        let op = expr.build(any::type_name::<Self>())?;
+        let comp = op.build()?;
         Ok(Comp {
             comp,
             phantom: PhantomData,
@@ -45,19 +62,30 @@ impl<'b> FromBuilder for &'b Builder {
     }
 }
 
-impl<T: xla::ArrayElement, D: XlaDim + TensorDim> FromBuilder for Tensor<T, D, Op>
+impl<T: TensorItem, D: XlaDim + TensorDim> FromBuilder for Tensor<T, D, Op>
 where
+    T::Dim: XlaDim,
+    <T::Dim as XlaDim>::Array: AsRef<[i64]>,
     D::Array: AsRef<[i64]>,
 {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        let i = builder.param_count.fetch_add(1, Ordering::SeqCst);
+        let mut params = builder.params.borrow_mut();
+        let i = params.len() as i64;
+        let mut shape = SmallVec::from_slice(D::dims().as_ref());
+        shape.extend_from_slice(<T::Dim as XlaDim>::dims().as_ref());
+        let inner = Noxpr::parameter(
+            i,
+            ArrayTy {
+                element_type: T::ELEM,
+                shape,
+            },
+            format!("param_{}", i),
+        );
+        params.push(inner.clone());
         Tensor {
-            inner: builder
-                .inner
-                .parameter(i, T::TY, D::dims().as_ref(), &format!("param_{}", i))
-                .expect("parameter create failed"),
+            inner,
             phantom: PhantomData,
         }
     }
@@ -71,13 +99,21 @@ where
     type Item<'a> = &'a mut Tensor<T, D, Op>;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        let i = builder.param_count.fetch_add(1, Ordering::SeqCst);
+        let mut params = builder.params.borrow_mut();
+        let i = params.len() as i64;
+        let inner = Noxpr::parameter(
+            i,
+            ArrayTy {
+                element_type: T::TY,
+                shape: SmallVec::from_slice(D::dims().as_ref()),
+            },
+            format!("param_{}", i),
+        );
+
+        params.push(inner.clone());
         let tensor_index = builder.mut_params.push(
             Tensor {
-                inner: builder
-                    .inner
-                    .parameter(i, T::TY, D::dims().as_ref(), &format!("param_{}", i))
-                    .expect("parameter create failed"),
+                inner,
                 phantom: PhantomData,
             }
             .into(),
@@ -99,29 +135,35 @@ where
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_comp_fn {
       ($($ty:tt),+) => {
-          #[allow(non_snake_case)]
-          impl<F, $($ty,)* R> CompFn<($($ty, )*), R> for F
-          where
-              F: Sync + Send,
-              F: Fn($($ty, )*) -> R,
-              F: for<'a> Fn($(<$ty as FromBuilder>::Item<'a>, )*) -> R ,
-              $($ty: FromBuilder, )*
-          {
+          paste! {
+            #[allow(non_snake_case)]
+            impl<F, $($ty,)* R> CompFn<($($ty, )*), R> for F
+            where
+                F: Sync + Send,
+                F: Fn($($ty, )*) -> R,
+                F: for<'a> Fn($(<$ty as FromBuilder>::Item<'a>, )*) -> R ,
+                $($ty: FromBuilder, )*
+            {
 
-              fn compute(&self, builder: &Builder) -> R {
-                  let mut alias_index = 0;
-                  $(
-                      let param_index = builder.param_count.load(Ordering::SeqCst);
-                      let $ty = $ty::from_builder(builder);
+                fn compute(&self, builder: &mut Builder) -> R {
+                    let mut alias_index = $({
+                      let $ty = 1;
+                      $ty
+                    } + )* 1;
+                    $(
+                      let param_index = builder.params.borrow().len();
                       if $ty::is_mut_borrowed() {
-                        alias_index += 1;
-                        builder.inner.setup_alias(param_index, alias_index).unwrap();
+                        alias_index -= 1;
+                        // TODO(sphw): add alias back
+                        builder.setup_alias(param_index as u64, alias_index);
                       }
-                  )*
-                  let res = (self)($($ty,)*);
-                  res
-              }
-          }
+                    )*
+                    $(let $ty = $ty::from_builder(builder);)*
+                    let res = (self)($($ty,)*);
+                    res
+                }
+            }
+        }
       };
   }
 
