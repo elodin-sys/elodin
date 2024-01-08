@@ -1,4 +1,4 @@
-use super::Claims;
+use super::{Claims, UserInfo};
 use crate::error::Error;
 use futures::Future;
 use jsonwebtoken::{
@@ -6,6 +6,7 @@ use jsonwebtoken::{
     jwk::{AlgorithmParameters, JwkSet},
     Algorithm, DecodingKey, Validation,
 };
+use reqwest::Client;
 use std::str::FromStr;
 use tonic::{Request, Response, Status};
 use tracing::warn;
@@ -30,11 +31,39 @@ impl super::Api {
             .ok_or(Error::Unauthorized)?;
         let claims = validate_auth_header(
             token,
-            &self.auth_context.auth_config.client_id,
+            &self.auth_context.auth_config.domain,
             &self.auth_context.auth0_keys,
         )?;
 
         handler(req.into_inner(), claims)
+            .await
+            .map_err(Error::status)
+            .map(Response::new)
+    }
+
+    pub async fn authed_route_userinfo<Req, Resp, RespFuture>(
+        &self,
+        req: Request<Req>,
+        handler: impl FnOnce(Req, UserInfo) -> RespFuture,
+    ) -> Result<tonic::Response<Resp>, Status>
+    where
+        RespFuture: Future<Output = Result<Resp, Error>>,
+    {
+        let auth_header = req
+            .metadata()
+            .get("Authorization")
+            .ok_or(Error::Unauthorized)?;
+        let auth_header = auth_header.to_str().map_err(|_| Error::Unauthorized)?;
+        let token = auth_header
+            .split("Bearer ")
+            .nth(1)
+            .ok_or(Error::Unauthorized)?;
+        let req_client = reqwest::Client::new();
+
+        let userinfo =
+            get_userinfo(&req_client, &self.auth_context.auth_config.domain, token).await?;
+
+        handler(req.into_inner(), userinfo)
             .await
             .map_err(Error::status)
             .map(Response::new)
@@ -94,6 +123,21 @@ where
         .map(Response::new)
 }
 
+pub async fn get_userinfo(
+    client: &Client,
+    domain: &str,
+    access_token: &str,
+) -> Result<UserInfo, Error> {
+    client
+        .get(&format!("https://{}/userinfo", domain))
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .json::<UserInfo>()
+        .await
+        .map_err(Error::from)
+}
+
 pub async fn get_keyset(domain: &str) -> Result<JwkSet, Error> {
     reqwest::get(&format!("https://{}/.well-known/jwks.json", domain))
         .await?
@@ -104,7 +148,7 @@ pub async fn get_keyset(domain: &str) -> Result<JwkSet, Error> {
 
 pub fn validate_auth_header(
     token: &str,
-    client_id: &str,
+    domain: &str,
     auth0_keys: &JwkSet,
 ) -> Result<Claims, Error> {
     let header = decode_header(token).map_err(|_| Error::Unauthorized)?;
@@ -136,7 +180,7 @@ pub fn validate_auth_header(
         })?,
     );
     validation.validate_exp = true;
-    validation.set_audience(&[&client_id]);
+    validation.set_audience(&[format!("https://{domain}/atc")]);
     let claims =
         decode::<Claims>(token, &decoding_key, &validation).map_err(|_| Error::Unauthorized)?;
     Ok(claims.claims)

@@ -47,7 +47,7 @@ defmodule ElodinDashboardWeb.UserAuth do
       |> Assent.Config.put(:session_params, %{state: state})
       |> Auth0.callback(params)
 
-    log_in_user(conn, token["id_token"])
+    log_in_user(conn, token["access_token"])
   end
 
   @doc """

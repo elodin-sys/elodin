@@ -1,11 +1,11 @@
-use super::{Api, Claims};
+use super::{Api, UserInfo};
 use crate::{error::Error, events::DbExt};
 use atc_entity::user::{self, Permissions};
 use elodin_types::api::{CreateUserReq, CreateUserResp, CurrentUserResp};
 use sea_orm::{prelude::Uuid, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 impl Api {
-    pub async fn current_user(&self, claims: Claims) -> Result<CurrentUserResp, Error> {
+    pub async fn current_user(&self, claims: UserInfo) -> Result<CurrentUserResp, Error> {
         let user = atc_entity::User::find()
             .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
             .one(&self.db)
@@ -23,17 +23,17 @@ impl Api {
     pub async fn create_user(
         &self,
         req: CreateUserReq,
-        claims: Claims,
+        userinfo: UserInfo,
     ) -> Result<CreateUserResp, Error> {
         let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
-        let name = req.name.unwrap_or(claims.name);
-        let email = req.email.unwrap_or(claims.email);
+        let name = req.name.unwrap_or(userinfo.name);
+        let email = req.email.unwrap_or(userinfo.email);
         user::ActiveModel {
             id: Set(id),
             email: Set(email),
             name: Set(name),
-            auth0_id: Set(claims.sub),
+            auth0_id: Set(userinfo.sub),
             permissions: Set(Permissions::default()),
         }
         .insert_with_event(&self.db, &mut redis)

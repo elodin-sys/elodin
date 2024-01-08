@@ -112,11 +112,16 @@ pub struct CurrentUser {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
+pub struct UserInfo {
     sub: String,
     name: String,
     email: String,
     picture: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    sub: String,
 }
 
 #[async_trait]
@@ -125,14 +130,15 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<CurrentUserReq>,
     ) -> Result<Response<CurrentUserResp>, Status> {
-        self.authed_route(req, |_, id| self.current_user(id)).await
+        self.authed_route_userinfo(req, |_, userinfo| self.current_user(userinfo))
+            .await
     }
 
     async fn create_user(
         &self,
         req: tonic::Request<CreateUserReq>,
     ) -> Result<Response<CreateUserResp>, Status> {
-        self.authed_route(req, |req, id| self.create_user(req, id))
+        self.authed_route_userinfo(req, |req, userinfo| self.create_user(req, userinfo))
             .await
     }
 

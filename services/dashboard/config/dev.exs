@@ -4,11 +4,14 @@ config :elodin_dashboard, ElodinDashboardWeb.UserAuth,
   client_id: "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR",
   client_secret: "Rx5d-nJWafMuEcmSRXiUtlCjArTBtPMsjU588CDjq3RjFe1fTSVng2dWmjnyWHBw",
   redirect_uri: "http://localhost:4000/oauth/callback",
-  site: "https://dev-i2ytsp68gngieek3.us.auth0.com",
+  site: "https://auth.elodin.dev",
   authorize_url: "/authorize",
   token_url: "/oauth/token",
   user_url: "/userinfo",
-  authorization_params: [scope: "openid profile email"],
+  authorization_params: [
+    scope: "openid profile email",
+    audience: "https://auth.elodin.dev/atc"
+  ],
   auth_method: :client_secret_post
 
 config :elodin_dashboard, ElodinDashboard.Atc,

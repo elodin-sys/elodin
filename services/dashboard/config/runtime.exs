@@ -56,7 +56,11 @@ if config_env() == :prod do
     client_id: auth_client_id,
     client_secret: auth_client_secret,
     redirect_uri: "https://#{host}/oauth/callback",
-    base_url: auth_base_url
+    base_url: auth_base_url,
+    authorization_params: [
+      scope: "openid profile email",
+      audience: "#{auth_base_url}/atc"
+    ]
 
   config :elodin_dashboard, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
