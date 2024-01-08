@@ -273,7 +273,7 @@ pub async fn sim_socket(
     trace!(?sandbox_id, "sandbox id");
     let claims = validate_auth_header(
         &auth.token,
-        &context.auth_context.auth_config.client_id,
+        &context.auth_context.auth_config.domain,
         &context.auth_context.auth0_keys,
     )?;
     let user = atc_entity::User::find()
