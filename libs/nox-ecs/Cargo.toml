@@ -1,0 +1,27 @@
+[package]
+name = "nox-ecs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nox.path = "../nox"
+elodin-conduit.path = "../elodin-conduit"
+elodin-conduit.features = ["nox"]
+
+# data structures
+heapless = "0.8"
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
+
+# errors
+thiserror = "1"
+
+# macros
+paste = "1.0.14"
+
+# derive macro
+nox-ecs-macros.path = "../nox-ecs-macros"
+
+[dev-dependencies]
