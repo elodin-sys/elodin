@@ -15,6 +15,7 @@ thiserror = "1.0"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
 itertools = "0.12.0"
+seq-macro = "0.3.5"
 
 # xla-rs - a wrapper around raw xla
 # we are using our own fork, which has diverged from upstream significantly
