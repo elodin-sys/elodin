@@ -22,6 +22,7 @@ use bevy_infinite_grid::{
 };
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_polyline::PolylinePlugin;
 use elodin::{
     plugin::sync_pos,
     runner::IntoSimRunner,
@@ -32,8 +33,9 @@ use elodin_conduit::{
     bevy::{Msg, SubscribeEvent},
     cid_mask,
 };
+use traces::TracesPlugin;
 
-//pub(crate) mod traces;
+pub(crate) mod traces;
 mod ui;
 
 pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
@@ -96,8 +98,8 @@ impl Plugin for EditorPlugin {
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
-        // .add_plugins(PolylinePlugin)
-        //.add_plugins(TracesPlugin)
+        .add_plugins(PolylinePlugin)
+        .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)

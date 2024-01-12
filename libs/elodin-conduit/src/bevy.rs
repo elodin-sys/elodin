@@ -241,7 +241,7 @@ impl AppExt for bevy::app::App {
         let mut map = self
             .world
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
-        map.0.insert(C::component_id(), adapter);
+        map.0.insert(dbg!(C::component_id()), adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
         self

@@ -30,6 +30,8 @@ bevy_atmosphere.git = "https://github.com/elodin-sys/bevy_atmosphere.git"
 bevy_infinite_grid.git = "https://github.com/elodin-sys/bevy_infinite_grid.git"
 bevy_mod_picking.version = "0.17"
 bevy_mod_picking.features = ["backend_egui"]
+bevy_polyline.git = "https://github.com/elodin-sys/bevy_polyline.git"
+bevy_polyline.branch = "feature/bevy-0.12"
 
 # channel
 flume = "0.11"
