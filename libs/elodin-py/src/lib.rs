@@ -1,6 +1,9 @@
 use std::sync::{Arc, OnceLock};
 
-use bevy::prelude::{shape, Color, Entity, World};
+use bevy::prelude::{
+    shape::{self, UVSphere},
+    Color, Entity, World,
+};
 use elodin::{
     builder::{EntityBuilder, FixedJoint, Free, Revolute},
     spatial::{SpatialMotion, SpatialPos},
@@ -39,7 +42,8 @@ impl RigidBody {
         joint = None,
         parent = None,
         body_pos = None,
-        effectors = None
+        effectors = None,
+        trace_anchor = None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -52,6 +56,7 @@ impl RigidBody {
         parent: Option<RigidBodyHandle>,
         body_pos: Option<PyArrayLike1<f64>>,
         effectors: Option<Vec<Effector>>,
+        trace_anchor: Option<PyArrayLike1<f64>>,
     ) -> PyResult<Self> {
         let mut inner = EntityBuilder::default();
         if let Some(mass) = mass {
@@ -106,6 +111,15 @@ impl RigidBody {
 
             inner = inner.body_pos(SpatialPos::linear(body_pos.into_owned()));
         }
+        if let Some(trace_anchor) = trace_anchor {
+            let Some(trace_anchor): Option<MatrixView3x1<f64>> = trace_anchor.try_as_matrix()
+            else {
+                return Err(PyErr::new::<PyTypeError, _>("pos must be a 1x3 matrix"));
+            };
+
+            inner = inner.trace(trace_anchor.into_owned());
+        }
+
         if let Some(effectors) = effectors {
             let effectors: PyResult<Vec<_>> = effectors
                 .into_iter()
@@ -131,7 +145,8 @@ impl RigidBody {
                                     }
                                 }
                                 let args = args.iter().collect::<BufferArgsRef>();
-                                let buf = &exec.execute_buffers(args).unwrap()[0];
+                                let buf =
+                                    &exec.execute_buffers(args.untuple_result(true)).unwrap()[0];
                                 let literal = buf.to_literal_sync().unwrap();
                                 let out = literal.typed_buf::<f64>().unwrap();
                                 Effect {
@@ -301,6 +316,10 @@ impl SimBuilder {
         self.0.g_accel(SpatialMotion::linear(accel.into_owned()));
         Ok(())
     }
+
+    fn gravity(&mut self, a: RigidBodyHandle, b: RigidBodyHandle) {
+        self.0.gravity(a.0, b.0);
+    }
 }
 
 #[derive(Clone)]
@@ -321,6 +340,16 @@ impl Mesh {
             mesh: bevy::prelude::Mesh::from(shape::Box::new(x_length, y_length, z_length)),
         }
     }
+
+    #[staticmethod]
+    pub fn sphere(radius: f32) -> Self {
+        Mesh {
+            mesh: bevy::prelude::Mesh::from(UVSphere {
+                radius,
+                ..Default::default()
+            }),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -338,6 +367,11 @@ impl Material {
                 .map_err(|e| PyErr::new::<PyTypeError, _>(e.to_string()))?
                 .into(),
         })
+    }
+
+    pub fn emissive(&mut self, r: f32, g: f32, b: f32) -> Self {
+        self.material.emissive = Color::rgb_linear(r, g, b);
+        self.clone()
     }
 }
 

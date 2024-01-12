@@ -13,6 +13,14 @@ pub struct SpatialInertia {
 }
 
 impl SpatialInertia {
+    pub fn from_mass(mass: f64) -> Self {
+        SpatialInertia {
+            inertia: Matrix3::identity(),
+            momentum: Vector3::zeros(),
+            mass,
+        }
+    }
+
     pub fn from_body_inertia(
         mass: f64,
         inertia: &Matrix3<f64>,

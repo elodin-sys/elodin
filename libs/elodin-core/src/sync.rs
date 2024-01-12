@@ -1,6 +1,6 @@
 use crate::{
     types::{SyncMaterial, SyncMeshData},
-    ReflectSerde, SimState,
+    ReflectSerde, SimState, TraceAnchor,
 };
 use bevy::prelude::*;
 use bevy_ecs::system::SystemId;
@@ -15,6 +15,7 @@ pub const DEFAULT_SUB_FILTERS: &[ComponentFilter] = &[
     ComponentFilter::from_str("world_pos"),
     ComponentFilter::from_str("sync_mesh_data"),
     ComponentFilter::from_str("sync_material"),
+    ComponentFilter::from_str("trace_anchor"),
 ];
 
 pub struct SyncPlugin {
@@ -39,6 +40,7 @@ impl Plugin for SyncPlugin {
             .insert_resource(EntityMap::default())
             .add_conduit_component::<SimState>()
             .add_conduit_component::<WorldPos>()
+            .add_conduit_component::<TraceAnchor>()
             .add_conduit_component_with_adapter::<SyncMaterial>(Box::new(SyncMaterialAdaptor {
                 sync_pbr,
             }))

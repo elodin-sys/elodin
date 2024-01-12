@@ -223,11 +223,15 @@ pub fn rne_system(
                 continue;
             };
 
-            // child.world_vel.0 = child.vel.0; // FIXME
+            child.world_vel.0 = child
+                .joint
+                .subspace(&(child.world_anchor_pos.0.linear - **child.subtree_com))
+                * child.vel.0;
             child.world_accel.0 = config.global_gravity;
             child.bias_force.0 = child
                 .effect
-                .to_spatial(child.world_pos.0.pos - **child.subtree_com);
+                .to_spatial(child.world_pos.0.pos - **child.subtree_com)
+                + &SpatialInertia::from_mass(child.mass.0) * config.global_gravity;
         }
     }
 
