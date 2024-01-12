@@ -1,5 +1,5 @@
-use crate::ArrayTy;
-use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
+use crate::{ArrayTy, FixedSliceExt};
+use nalgebra::{ArrayStorage, ClosedMul, ClosedSub, Const, RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
 use smallvec::smallvec;
 use std::marker::PhantomData;
@@ -85,6 +85,26 @@ impl<T, const R: usize> Vector<T, R, Op> {
 
     pub fn norm(&self) -> Scalar<T> {
         self.dot(self).sqrt()
+    }
+
+    pub fn parts(&self) -> [Vector<T, 1>; R] {
+        let mut i = 0;
+        [0; R].map(|_| {
+            let slice = self.fixed_slice([i]);
+            i += 1;
+            slice
+        })
+    }
+}
+
+impl<T: ClosedMul + RealField + nalgebra::Scalar + ClosedSub> Vector<T, 3, Op> {
+    pub fn cross(&self, other: &Self) -> Self {
+        let [ax, ay, az] = self.parts();
+        let [bx, by, bz] = other.parts();
+        let x = &ay * &bz - &az * &by;
+        let y = &az * &bx - &ax * &bz;
+        let z = &ax * &by - &ay * &bx;
+        Vector::from_arr([x, y, z])
     }
 }
 

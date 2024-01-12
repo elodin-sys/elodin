@@ -16,8 +16,8 @@ pub trait ToHost {
 // This macro allows us to implement the run function for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_exec {
-      ($($ty:tt),+) => {
-        #[allow(non_snake_case, clippy::too_many_arguments, non_camel_case_types)]
+      ($($ty:tt),*) => {
+        #[allow(non_snake_case, clippy::too_many_arguments, non_camel_case_types, unused_variables, unused_mut)]
         impl<$($ty,)* R> Exec<($($ty,)*), R>
         where
             R: BufferForm,
@@ -45,6 +45,7 @@ macro_rules! impl_exec {
     }
 }
 
+impl_exec!();
 impl_exec!(T1);
 impl_exec!(T1, T2);
 impl_exec!(T1, T2, T3);

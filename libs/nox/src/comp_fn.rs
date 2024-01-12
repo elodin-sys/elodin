@@ -134,9 +134,9 @@ where
 // This macro allows us to implement `CompFn` for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_comp_fn {
-      ($($ty:tt),+) => {
+      ($($ty:tt),*) => {
           paste! {
-            #[allow(non_snake_case)]
+            #[allow(non_snake_case, unused_variables, unused_mut)]
             impl<F, $($ty,)* R> CompFn<($($ty, )*), R> for F
             where
                 F: Sync + Send,
@@ -167,6 +167,7 @@ macro_rules! impl_comp_fn {
       };
   }
 
+impl_comp_fn!();
 impl_comp_fn!(T1);
 impl_comp_fn!(T1, T2);
 impl_comp_fn!(T1, T2, T3);

@@ -10,7 +10,13 @@ use crate::{
     FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
 };
 
-pub struct Quaternion<T, P: Param = Op>(Vector<T, 4, P>);
+pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
+
+impl<T> Clone for Quaternion<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 
 impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
     fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
@@ -18,15 +24,16 @@ impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
     }
 }
 
+impl<T: NativeType + ArrayElement + nalgebra::RealField> Quaternion<T> {
+    pub fn identity() -> Self {
+        nalgebra::Quaternion::identity().into()
+    }
+}
+
 impl<T: NalgebraScalar + ClosedNeg> Quaternion<T> {
     fn parts(&self) -> [Vector<T, 1>; 4] {
         let Quaternion(v) = self;
-        [
-            v.fixed_slice([0]),
-            v.fixed_slice([1]),
-            v.fixed_slice([2]),
-            v.fixed_slice([3]),
-        ]
+        v.parts()
     }
 
     pub fn conjugate(&self) -> Self {
