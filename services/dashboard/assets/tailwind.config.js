@@ -30,8 +30,10 @@ module.exports = {
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
         "surface-secondary": "#1F1F1F",
-        "surface-secondary-opacity-500": "rgba(31, 31, 31, 0.9)",
         "black-secondary": "rgba(13, 13, 13, 1)",
+        "black-opacity": {
+          "600": "rgba(0, 0, 0, 0.6)",
+        },
         "white-opacity": {
           "300": "rgba(255, 255, 255, 0.3)",
           "200": "rgba(255, 255, 255, 0.2)"
