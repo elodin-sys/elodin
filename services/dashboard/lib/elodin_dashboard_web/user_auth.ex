@@ -65,22 +65,24 @@ defmodule ElodinDashboardWeb.UserAuth do
   def log_in_user(conn, token, params \\ %{}) do
     user_return_to = get_session(conn, :user_return_to)
 
-    case get_user_by_token(token) do
-      {:error, %GRPC.RPCError{status: 5}} ->
-        ElodinDashboard.Atc.create_user(struct(Elodin.Types.Api.CreateUserReq), token)
+    query_params =
+      case get_user_by_token(token) do
+        {:error, %GRPC.RPCError{status: 5}} ->
+          ElodinDashboard.Atc.create_user(struct(Elodin.Types.Api.CreateUserReq), token)
+          "?onboarding=1"
 
-      {:error, _} ->
-        {}
+        {:error, _} ->
+          ""
 
-      {:ok, _} ->
-        {}
-    end
+        {:ok, _} ->
+          ""
+      end
 
     conn
     |> renew_session()
     |> put_token_in_session(token)
     |> maybe_write_remember_me_cookie(token, params)
-    |> redirect(to: user_return_to || signed_in_path(conn))
+    |> redirect(to: "#{user_return_to || signed_in_path(conn)}#{query_params}")
   end
 
   defp maybe_write_remember_me_cookie(conn, token, %{"remember_me" => "true"}) do

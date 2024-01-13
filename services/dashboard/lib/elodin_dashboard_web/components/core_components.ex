@@ -39,6 +39,9 @@ defmodule ElodinDashboardWeb.CoreComponents do
   """
   attr(:id, :string, required: true)
   attr(:show, :boolean, default: false)
+  attr(:wrapper_class, :string, default: "w-full max-w-[400px]")
+  attr(:bg_color, :string, default: "surface-secondary")
+  attr(:container_padding, :string, default: "elo-xl")
   attr(:on_cancel, JS, default: %JS{})
   slot(:inner_block, required: true)
 
@@ -53,7 +56,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
     >
       <div
         id={"#{@id}-bg"}
-        class="backdrop-blur-sm bg-surface-secondary-opacity-500 fixed inset-0 transition-opacity"
+        class="backdrop-blur-sm bg-black-opacity-600 fixed inset-0 transition-opacity"
         aria-hidden="true"
       />
       <div
@@ -65,13 +68,13 @@ defmodule ElodinDashboardWeb.CoreComponents do
         tabindex="0"
       >
         <div class="flex min-h-full items-center justify-center">
-          <div class="w-full max-w-[400px] p-4 sm:p-6 lg:py-8">
+          <div class={["p-4 sm:p-6 lg:py-8", @wrapper_class]}>
             <.focus_wrap
               id={"#{@id}-container"}
               phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
               phx-key="escape"
               phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
-              class="relative hidden rounded-elo-md bg-surface-secondary text-white p-elo-xl pt-[48px] shadow-lg transition"
+              class={"relative hidden overflow-hidden rounded-elo-md bg-#{@bg_color} text-white p-#{@container_padding} pt-[48px] shadow-lg transition"}
             >
               <div class="absolute top-elo-xl right-5">
                 <button
@@ -235,8 +238,24 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-sm border-solid border bg-transaprent border-white-opacity-300 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-sm border-solid border bg-transparent border-white-opacity-300 p-[12px] ",
         "text-[12px] leading-[8px] font-semibold text-white active:text-white/80",
+        @class
+      ]}
+      {@rest}
+    >
+      <%= render_slot(@inner_block) %>
+    </button>
+    """
+  end
+
+  def button(%{type: "invert"} = assigns) do
+    ~H"""
+    <button
+      type={@type}
+      class={[
+        "rounded-elo-sm bg-white hover:bg-white/80 p-[12px] ",
+        "text-[12px] leading-[8px] font-semibold text-hyper-blue active:text-hyper-blue-dim",
         @class
       ]}
       {@rest}
