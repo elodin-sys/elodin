@@ -130,7 +130,7 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<CurrentUserReq>,
     ) -> Result<Response<CurrentUserResp>, Status> {
-        self.authed_route_userinfo(req, |_, userinfo| self.current_user(userinfo))
+        self.authed_route(req, |_, claims| self.current_user(claims))
             .await
     }
 

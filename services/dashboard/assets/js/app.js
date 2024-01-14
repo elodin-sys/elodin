@@ -27,9 +27,31 @@ import editor_init from '../../priv/static/assets/wasm/editor-web.js'
 let Hooks = {}
 Hooks.CodeEditorHook = CodeEditorHook
 Hooks.EditorWasmHook = {
-    mounted() {
-        editor_init("/assets/wasm/editor-web_bg.wasm")
+    async mounted() {
+      await waitForElm("#editor");
+      await editor_init("/assets/wasm/editor-web_bg.wasm")
     }
+}
+
+// source: https://stackoverflow.com/a/61511955
+function waitForElm(selector) {
+    return new Promise(resolve => {
+        if (document.querySelector(selector)) {
+            return resolve(document.querySelector(selector));
+        }
+
+        const observer = new MutationObserver(mutations => {
+            if (document.querySelector(selector)) {
+                observer.disconnect();
+                resolve(document.querySelector(selector));
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    });
 }
 
 window.addEventListener("lme:editor_mounted", (ev) => {
