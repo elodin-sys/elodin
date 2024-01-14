@@ -11,6 +11,8 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
   def mount(params, _, socket) do
     token = socket.assigns[:current_user]["token"]
 
+    new_form = to_form(%{"name" => NameGen.generate()})
+
     case Atc.list_sandboxes(struct(Api.ListSandboxesReq), token) do
       {:ok, sandboxes} ->
         sandboxes =
@@ -21,7 +23,8 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
         {:ok,
          socket
          |> assign(:sandboxes, sandboxes)
-         |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))
+         |> assign(:new_form, new_form)
+         |> assign(:template, params["template"])
          |> assign(:is_onboarding, params["onboarding"] == "1")
          |> assign(:onboarding_step, 1)}
 
@@ -30,7 +33,8 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
          socket
          |> put_flash(:error, "Error creating sandbox: #{err}")
          |> assign(:sandboxes, [])
-         |> assign(:new_form, to_form(%{"name" => NameGen.generate()}))
+         |> assign(:new_form, new_form)
+         |> assign(:template, params["template"])
          |> assign(:is_onboarding, false)
          |> assign(:onboarding_step, 1)}
     end
@@ -42,8 +46,9 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
   def handle_event("save", %{"name" => name}, socket) do
     token = socket.assigns[:current_user]["token"]
+    template = socket.assigns[:template]
 
-    case Atc.create_sandbox(%Api.CreateSandboxReq{name: name}, token) do
+    case Atc.create_sandbox(%Api.CreateSandboxReq{name: name, template: template}, token) do
       {:ok, sandbox} ->
         id = UUID.binary_to_string!(sandbox.id)
 
@@ -59,6 +64,14 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
   def handle_event("change_page", %{"step" => step}, socket) do
     {:noreply, socket |> assign(:onboarding_step, step)}
+  end
+
+  def handle_event("select_template", %{"template" => template}, socket) do
+    {:noreply, socket |> assign(:template, template)}
+  end
+
+  def show_template_new(js \\ %JS{}, template) do
+    js |> JS.push("select_template", value: %{"template" => template}) |> show_modal("new")
   end
 
   def render(assigns) do
@@ -77,8 +90,18 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             Elodin sandboxes
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
-            <.sandbox_card name="Double Pendulum" img="/images/double-pend-bg.svg" />
-            <.sandbox_card name="3 Body Problem" img="/images/3-body-bg.svg" />
+            <.sandbox_card
+              name="Double Pendulum"
+              img="/images/double-pend-bg.svg"
+              patch={~p"/sandbox/new/double-pend"}
+              phx_click={show_template_new("double-pend")}
+            />
+            <.sandbox_card
+              name="3 Body Problem"
+              img="/images/3-body-bg.svg"
+              patch={~p"/sandbox/new/three-body"}
+              phx_click={show_template_new("three-body")}
+            />
           </div>
         </div>
         <div class="flex flex-wrap flex-col items-start self-stretch w-full flex-[0_0_auto] rounded-elo-xs ">
@@ -240,7 +263,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
         phx-submit="save"
         class="flex justify-center align-center flex-col gap-elo-xl mt-elo-xl"
       >
-        <.input name="name" label="Name" field={@new_form[:name]} />
+        <.input name="name" label="Name" field={@new_form[:name]} autocomplete="false" data-1p-ignore />
         <.button class="">New Sandbox</.button>
       </.form>
     </.modal>

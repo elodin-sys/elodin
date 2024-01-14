@@ -38,6 +38,7 @@ message CreateUserResp {
 message CreateSandboxReq {
     string name = 1;
     string code = 2;
+    optional string template = 3;
 }
 
 message CreateSandboxResp {

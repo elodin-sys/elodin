@@ -64,6 +64,7 @@ defmodule ElodinDashboardWeb.Router do
       on_mount: [{ElodinDashboardWeb.UserAuth, :ensure_authenticated}] do
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
+      live("/sandbox/new/:template", SandboxPickerLive, :new)
       live("/sandbox/:id/share", EditorLive, :share)
       live("/sandbox/:id", EditorLive, :edit)
     end

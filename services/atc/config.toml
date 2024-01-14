@@ -4,12 +4,13 @@ migrate = true
 
 [api]
 address = "[::]:50051"
-auth0.domain = "dev-i2ytsp68gngieek3.us.auth0.com"
+auth0.domain = "auth.elodin.dev"
 auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
+
 
 [orca]
 vm_namespace = "vms"
-image_name = "elo-sim-runner:ybpjb2wwjg1kmcl3m9mv5ayjjrn16j6x"
+image_name = "elo-sim-runner:yhri5xjhdd1xvmrg1ffl19p3b81yrqq4"
 
 [garbage_collect]
 enabled = true

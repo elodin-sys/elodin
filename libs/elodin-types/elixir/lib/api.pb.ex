@@ -50,6 +50,7 @@ defmodule Elodin.Types.Api.CreateSandboxReq do
 
   field :name, 1, type: :string
   field :code, 2, type: :string
+  field :template, 3, proto3_optional: true, type: :string
 end
 
 defmodule Elodin.Types.Api.CreateSandboxResp do
