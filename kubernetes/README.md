@@ -4,16 +4,43 @@
 ## Applying changes to the project
 
 ```sh
+# Login into the development cluster
+gcloud container clusters get-credentials "elodin-dev-gke" --region "us-central1" --project "elodin-dev" 
 
-kubectl kustomize overlays/dev > out.yaml
+# Run following commands from the root of the repo
 
-kubectl apply -f out.yaml
+just decrypt-secrets-force
+
+kubectl kustomize kubernetes/overlays/dev > out.yaml
+BUILDKITE_COMMIT=$(git rev-parse HEAD) envsubst < out.yaml > out-with-envs.yaml
+
+kubectl apply -f out-with-envs.yaml
 
 kubectl get all -n elodin-app-dev
 
-# NOTE: it's necessary for `terraform destroy`, since you're not managing `Network endpoint group` in there
-# NOTE: also disks created for PVC are not removed unless related k8s resource is deleted
-kubectl delete -f out.yaml
+# NOTE: Use following command before `terraform destroy` if you intend to fully remove all resources
+kubectl delete -f out-with-envs.yaml
+```
+
+## Production deployment
+
+```sh
+# Login into the production cluster
+gcloud container clusters get-credentials "elodin-prod-gke" --region "us-central1" --project "elodin-prod"
+
+# Run following commands from the root of the repo
+
+export RELEASE_IMAGE_TAG="0.2.0"
+
+just decrypt-secrets-force
+just re-tag-images-main $RELEASE_IMAGE_TAG
+
+kubectl kustomize kubernetes/overlays/prod > out.yaml
+envsubst < out.yaml > out-with-envs.yaml
+
+kubectl apply -f out-with-envs.yaml
+
+kubectl get all -n elodin-app-prod
 ```
 
 ## Project structure

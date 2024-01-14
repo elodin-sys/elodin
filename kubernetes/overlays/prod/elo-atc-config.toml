@@ -10,7 +10,7 @@ auth0.client_id = "Fduve612Omqy9gUXGxcZ5RoTP9IJ6gly"
 
 [orca]
 vm_namespace = "elodin-vms-prod"
-image_name = "us-central1-docker.pkg.dev/elodin-infra/elo-sim-runner/x86_64:0.1.2"
+image_name = "us-central1-docker.pkg.dev/elodin-infra/elo-sim-runner/x86_64:$RELEASE_IMAGE_TAG"
 
 [garbage_collect]
 enabled = true
