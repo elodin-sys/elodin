@@ -2,6 +2,7 @@ defmodule ElodinDashboardWeb.SandboxComponents do
   use Phoenix.Component
 
   attr(:path, :string, default: nil)
+  attr(:link, :string, default: nil)
   attr(:name, :string, default: nil)
   attr(:img, :string, default: nil)
   attr(:phx_click, :string, default: nil)
@@ -14,6 +15,7 @@ defmodule ElodinDashboardWeb.SandboxComponents do
     >
       <.link
         patch={@path}
+        href={@link}
         class="flex w-[198px] h-[41px] items-center justify-center pt-elo-lg pb-elo-lg relative top-[116px] left-px bg-tokens-surface-secondary rounded-elo-xs overflow-hidden"
         phx-click={@phx_click}
       >

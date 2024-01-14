@@ -329,7 +329,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
 
   attr(:rest, :global,
     include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
-                multiple pattern placeholder readonly required rows size step)
+                multiple pattern placeholder readonly required rows size step data-1p-ignore)
   )
 
   slot(:inner_block)

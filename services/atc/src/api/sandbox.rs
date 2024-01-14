@@ -116,13 +116,22 @@ impl Api {
         CurrentUser { mut user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<CreateSandboxResp, Error> {
+        let code = match req.template.as_deref() {
+            Some("double-pend") => {
+                include_str!("../../python-templates/double-pend.py").to_string()
+            }
+            Some("three-body") => {
+                include_str!("../../python-templates/three-body-broucke.py").to_string()
+            }
+            Some(_) | None => req.code,
+        };
         let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
         sandbox::ActiveModel {
             id: Set(id),
             user_id: Set(user.id),
             name: Set(req.name),
-            code: Set(req.code),
+            code: Set(code),
             status: Set(sandbox::Status::Off),
             vm_id: Set(None),
             last_used: ActiveValue::Set(Utc::now()),
