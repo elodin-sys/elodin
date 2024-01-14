@@ -113,7 +113,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
               :for={sandbox <- @sandboxes}
               name={sandbox.name}
               img="/images/blue-circle-8.svg"
-              path={~p"/sandbox/#{sandbox.id}"}
+              href={~p"/sandbox/#{sandbox.id}"}
             />
           </div>
         </div>
