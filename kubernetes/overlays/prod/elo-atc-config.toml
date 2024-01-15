@@ -14,4 +14,4 @@ image_name = "us-central1-docker.pkg.dev/elodin-infra/elo-sim-runner/x86_64:$REL
 
 [garbage_collect]
 enabled = true
-timeout = 60.0
+timeout = 600.0

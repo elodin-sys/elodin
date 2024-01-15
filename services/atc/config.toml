@@ -14,4 +14,4 @@ image_name = "elo-sim-runner:yhri5xjhdd1xvmrg1ffl19p3b81yrqq4"
 
 [garbage_collect]
 enabled = true
-timeout = 60.0
+timeout = 600.0
