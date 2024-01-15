@@ -50,6 +50,7 @@ message UpdateSandboxReq {
     string name = 2;
     optional string code = 3;
     optional string draft_code = 4;
+    bool public = 5;
 }
 
 message UpdateSandboxResp {}
@@ -72,6 +73,8 @@ message Sandbox {
         RUNNING = 3;
     }
     string draft_code = 5;
+    bool public = 6;
+    bytes user_id = 7;
 }
 
 message Page {

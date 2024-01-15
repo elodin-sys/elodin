@@ -23,7 +23,13 @@ defmodule ElodinDashboardWeb.UserAuth do
     case ElodinDashboard.Atc.current_user(struct(Elodin.Types.Api.CurrentUserReq), token) do
       {:ok, user} ->
         {:ok,
-         %{"token" => token, "name" => user.name, "email" => user.email, "avatar" => user.avatar}}
+         %{
+           "token" => token,
+           "name" => user.name,
+           "email" => user.email,
+           "avatar" => user.avatar,
+           "id" => user.id
+         }}
 
       {:error, err} ->
         {:error, err}

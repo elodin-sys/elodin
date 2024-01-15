@@ -38,7 +38,9 @@ defmodule ElodinDashboardWeb.EditorLive do
            name: sandbox.name,
            code: sandbox.code,
            draft_code: sandbox.draft_code,
-           status: sandbox.status
+           status: sandbox.status,
+           public: sandbox.public,
+           readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
          })
          |> assign(:share_link, "https://elodin.dev/sandbox/#{id_string}")}
       else
@@ -81,7 +83,9 @@ defmodule ElodinDashboardWeb.EditorLive do
        name: sandbox.name,
        code: sandbox.code,
        draft_code: sandbox.draft_code,
-       status: sandbox.status
+       status: sandbox.status,
+       public: sandbox.public,
+       readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
      })}
   end
 
@@ -110,6 +114,20 @@ defmodule ElodinDashboardWeb.EditorLive do
       )
 
     {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :code, value))}
+  end
+
+  def handle_event("set_public", %{"public" => public_str}, socket) do
+    token = socket.assigns[:current_user]["token"]
+    sandbox = socket.assigns[:sandbox]
+    public = public_str == "true"
+
+    {:ok, _} =
+      Atc.update_sandbox(
+        %Api.UpdateSandboxReq{id: sandbox[:id], public: public, name: sandbox[:name]},
+        token
+      )
+
+    {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :public, public))}
   end
 
   def render(assigns) do
@@ -145,7 +163,8 @@ defmodule ElodinDashboardWeb.EditorLive do
                     %{
                       "language" => "python",
                       "minimap" => %{"enabled" => false},
-                      "automaticLayout" => true
+                      "automaticLayout" => true,
+                      "readOnly" => @sandbox.readonly
                     }
                   )
                 }
@@ -170,6 +189,13 @@ defmodule ElodinDashboardWeb.EditorLive do
       on_cancel={JS.patch(~p"/sandbox/#{@sandbox.id_string}")}
     >
       <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">Share</h2>
+      <.form
+        class="flex justify-left items-center flex-row gap-elo-xl mt-elo-xl"
+        phx-change="set_public"
+      >
+        <.input name="public" type="checkbox" id="public" value={@sandbox.public} />
+        <.label for="public" class="mr-elo-m">Public Sandbox?</.label>
+      </.form>
       <div class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl">
         <.input name="share-link" id="share-link" value={@share_link} />
         <.button class="h-[36px] mt-2" phx-click={JS.dispatch("phx:copy", to: "\#share-link")}>

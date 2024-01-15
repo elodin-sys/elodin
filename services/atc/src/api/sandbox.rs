@@ -38,15 +38,16 @@ impl Api {
         txn: &DatabaseTransaction,
     ) -> Result<Sandbox, Error> {
         let id = req.id()?;
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
-        {
-            return Err(Error::NotFound);
-        }
         let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id).one(txn).await? else {
             return Err(Error::NotFound);
         };
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
+            && !sandbox.public
+        {
+            return Err(Error::NotFound);
+        }
         Ok(sandbox.into())
     }
 
@@ -135,6 +136,7 @@ impl Api {
             draft_code: Set(code),
             status: Set(sandbox::Status::Off),
             vm_id: Set(None),
+            public: Set(false),
             last_used: ActiveValue::Set(Utc::now()),
         }
         .insert_with_event(txn, &mut redis)
@@ -173,6 +175,7 @@ impl Api {
             code: req.code.clone().map(Set).unwrap_or(NotSet),
             draft_code: req.draft_code.map(Set).unwrap_or(NotSet),
             last_used: Set(Utc::now()),
+            public: Set(req.public),
             ..Default::default()
         }
         .update_with_event(txn, &mut redis)
@@ -201,15 +204,17 @@ impl Api {
     ) -> Result<BootSandboxResp, Error> {
         let mut redis = self.redis.clone();
         let id = req.id()?;
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
-        {
-            return Err(Error::Unauthorized);
-        }
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
         };
+
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
+            && !sandbox.public
+        {
+            return Err(Error::Unauthorized);
+        }
         if sandbox.vm_id.is_some() {
             sandbox::ActiveModel {
                 id: Unchanged(id),
@@ -248,18 +253,20 @@ impl Api {
         CurrentUser { user, .. }: CurrentUser,
     ) -> Result<<Api as api_server::Api>::SandboxEventsStream, Error> {
         let id = req.id()?;
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
-        {
-            return Err(Error::NotFound);
-        }
-        let Some(_sandbox) = atc_entity::sandbox::Entity::find_by_id(id)
+
+        let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id)
             .one(&self.db)
             .await?
         else {
             return Err(Error::NotFound);
         };
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
+            && !sandbox.public
+        {
+            return Err(Error::NotFound);
+        }
         let sandbox_events = self.sandbox_events.resubscribe();
         let stream = tokio_stream::wrappers::BroadcastStream::new(sandbox_events);
         let stream = stream.filter_map(move |res| async move {
@@ -297,18 +304,19 @@ pub async fn sim_socket(
         .one(&context.db)
         .await?
         .ok_or_else(|| Error::Unauthorized)?;
-    if !user
-        .permissions
-        .has_perm(&sandbox_id, EntityType::Sandbox, Verb::Read.into())
-    {
-        return Err(Error::NotFound);
-    }
     let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(sandbox_id)
         .one(&context.db)
         .await?
     else {
         return Err(Error::NotFound);
     };
+    if !user
+        .permissions
+        .has_perm(&sandbox_id, EntityType::Sandbox, Verb::Read.into())
+        && !sandbox.public
+    {
+        return Err(Error::NotFound);
+    }
     trace!(?sandbox, "found sandbox");
     let Some(vm_id) = sandbox.vm_id else {
         return Err(Error::SandboxNotBooted);
@@ -346,7 +354,7 @@ pub async fn sim_socket(
             .map_err(Error::from);
         let res = tokio::select! {
             res = ws_to_sim => { res }
-            res = sim_to_ws=> { res }
+            res = sim_to_ws=> { res}
         };
         if let Err(err) = res {
             trace!(?err, "error in sim proxy");
