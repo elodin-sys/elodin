@@ -68,7 +68,8 @@ defmodule Elodin.Types.Api.UpdateSandboxReq do
 
   field :id, 1, type: :bytes
   field :name, 2, type: :string
-  field :code, 3, type: :string
+  field :code, 3, proto3_optional: true, type: :string
+  field :draft_code, 4, proto3_optional: true, type: :string, json_name: "draftCode"
 end
 
 defmodule Elodin.Types.Api.UpdateSandboxResp do
@@ -100,6 +101,7 @@ defmodule Elodin.Types.Api.Sandbox do
   field :name, 2, type: :string
   field :code, 3, type: :string
   field :status, 4, type: Elodin.Types.Api.Sandbox.Status, enum: true
+  field :draft_code, 5, type: :string, json_name: "draftCode"
 end
 
 defmodule Elodin.Types.Api.Page do

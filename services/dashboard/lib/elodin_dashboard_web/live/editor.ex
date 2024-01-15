@@ -37,6 +37,7 @@ defmodule ElodinDashboardWeb.EditorLive do
            id: sandbox.id,
            name: sandbox.name,
            code: sandbox.code,
+           draft_code: sandbox.draft_code,
            status: sandbox.status
          })
          |> assign(:share_link, "https://elodin.dev/sandbox/#{id_string}")}
@@ -79,6 +80,7 @@ defmodule ElodinDashboardWeb.EditorLive do
        id: sandbox.id,
        name: sandbox.name,
        code: sandbox.code,
+       draft_code: sandbox.draft_code,
        status: sandbox.status
      })}
   end
@@ -89,11 +91,25 @@ defmodule ElodinDashboardWeb.EditorLive do
 
     {:ok, _} =
       Atc.update_sandbox(
+        %Api.UpdateSandboxReq{id: sandbox[:id], draft_code: value, name: sandbox[:name]},
+        token
+      )
+
+    {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :draft_code, value))}
+  end
+
+  def handle_event("update_code", _, socket) do
+    token = socket.assigns[:current_user]["token"]
+    sandbox = socket.assigns[:sandbox]
+    value = sandbox[:draft_code]
+
+    {:ok, _} =
+      Atc.update_sandbox(
         %Api.UpdateSandboxReq{id: sandbox[:id], code: value, name: sandbox[:name]},
         token
       )
 
-    {:noreply, socket}
+    {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :code, value))}
   end
 
   def render(assigns) do
@@ -121,7 +137,7 @@ defmodule ElodinDashboardWeb.EditorLive do
             <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
               <LiveMonacoEditor.code_editor
                 class="code-editor"
-                value={@sandbox.code}
+                value={@sandbox.draft_code}
                 change="set_editor_value"
                 opts={
                   Map.merge(
@@ -135,7 +151,7 @@ defmodule ElodinDashboardWeb.EditorLive do
                 }
               />
             </div>
-            <EditorComponents.console logs={@sandbox.status} />
+            <EditorComponents.console logs={@sandbox.status} update_click={JS.push("update_code")} />
           </div>
           <%= if @sandbox.status == :RUNNING do %>
             <EditorComponents.editor_wasm url={@url} />

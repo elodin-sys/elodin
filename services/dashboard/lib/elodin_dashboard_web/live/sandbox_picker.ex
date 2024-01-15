@@ -93,13 +93,13 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             <.sandbox_card
               name="Double Pendulum"
               img="/images/double-pend-bg.svg"
-              patch={~p"/sandbox/new/double-pend"}
+              path={~p"/sandbox/new/double-pend"}
               phx_click={show_template_new("double-pend")}
             />
             <.sandbox_card
               name="3 Body Problem"
               img="/images/3-body-bg.svg"
-              patch={~p"/sandbox/new/three-body"}
+              path={~p"/sandbox/new/three-body"}
               phx_click={show_template_new("three-body")}
             />
           </div>

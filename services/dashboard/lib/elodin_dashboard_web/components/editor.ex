@@ -8,7 +8,7 @@ defmodule ElodinDashboardWeb.EditorComponents do
     ~H"""
     <div class="w-full text-white overflow-auto h-[296px]">
       <div class="h-[64px] p-2 shadow-lg bg-secondary-surface flex items-center">
-        <.button class="px-elo-xl">Update Sim</.button>
+        <.button class="px-elo-xl" phx-click={@update_click}>Update Sim</.button>
       </div>
       <pre class="whitespace-pre-wrap overflow-auto h-64 bg-dark-matte p-2">
       <%= @logs %>

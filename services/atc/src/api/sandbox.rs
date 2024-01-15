@@ -18,8 +18,8 @@ use elodin_types::api::{
 use enumflags2::BitFlag;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use sea_orm::{
-    prelude::Uuid, ActiveValue, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set,
-    Unchanged,
+    prelude::Uuid, ActiveValue, ColumnTrait, DatabaseTransaction, EntityTrait, NotSet, QueryFilter,
+    Set, Unchanged,
 };
 use serde::Deserialize;
 use std::io;
@@ -131,7 +131,8 @@ impl Api {
             id: Set(id),
             user_id: Set(user.id),
             name: Set(req.name),
-            code: Set(code),
+            code: Set(code.clone()),
+            draft_code: Set(code),
             status: Set(sandbox::Status::Off),
             vm_id: Set(None),
             last_used: ActiveValue::Set(Utc::now()),
@@ -169,21 +170,27 @@ impl Api {
         let sandbox = sandbox::ActiveModel {
             id: Unchanged(id),
             name: Set(req.name),
-            code: Set(req.code),
-            last_used: ActiveValue::Set(Utc::now()),
+            code: req.code.clone().map(Set).unwrap_or(NotSet),
+            draft_code: req.draft_code.map(Set).unwrap_or(NotSet),
+            last_used: Set(Utc::now()),
             ..Default::default()
         }
         .update_with_event(txn, &mut redis)
         .await?;
-        if let Some(vm_id) = sandbox.vm_id {
-            if let Some(vm_ip) = vm::Entity::find_by_id(vm_id)
-                .one(txn)
-                .await?
-                .and_then(|vm| vm.pod_ip)
-            {
-                update_sandbox_code(&vm_ip, sandbox.code).await?;
-            }
-        }
+        let Some(code) = req.code else {
+            return Ok(UpdateSandboxResp {});
+        };
+        let Some(vm_id) = sandbox.vm_id else {
+            return Ok(UpdateSandboxResp {});
+        };
+        let Some(vm_ip) = vm::Entity::find_by_id(vm_id)
+            .one(txn)
+            .await?
+            .and_then(|vm| vm.pod_ip)
+        else {
+            return Ok(UpdateSandboxResp {});
+        };
+        update_sandbox_code(&vm_ip, code).await?;
         Ok(UpdateSandboxResp {})
     }
 

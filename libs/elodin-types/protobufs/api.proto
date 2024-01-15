@@ -48,7 +48,8 @@ message CreateSandboxResp {
 message UpdateSandboxReq {
     bytes id = 1;
     string name = 2;
-    string code = 3;
+    optional string code = 3;
+    optional string draft_code = 4;
 }
 
 message UpdateSandboxResp {}
@@ -70,6 +71,7 @@ message Sandbox {
         ERROR = 2;
         RUNNING = 3;
     }
+    string draft_code = 5;
 }
 
 message Page {
