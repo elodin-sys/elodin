@@ -45,8 +45,12 @@ fn update_lines(
     mut polylines: ResMut<Assets<Polyline>>,
 ) {
     for (entity, anchor, polyline) in &trace {
-        let pos = transform.get(entity.0).unwrap();
-        let polyline = polylines.get_mut(polyline).unwrap();
+        let Ok(pos) = transform.get(entity.0) else {
+            continue;
+        };
+        let Some(polyline) = polylines.get_mut(polyline) else {
+            continue;
+        };
         if polyline.vertices.len() == 1024 {
             polyline.vertices.pop_front();
         }
