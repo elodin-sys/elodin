@@ -42,7 +42,7 @@ defmodule ElodinDashboardWeb.EditorLive do
            public: sandbox.public,
            readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
          })
-         |> assign(:share_link, "https://elodin.dev/sandbox/#{id_string}")}
+         |> assign(:share_link, "#{ElodinDashboardWeb.Endpoint.url()}/sandbox/#{id_string}")}
       else
         err -> err
       end
