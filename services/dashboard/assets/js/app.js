@@ -56,16 +56,18 @@ function waitForElm(selector) {
 
 window.addEventListener("lme:editor_mounted", (ev) => {
   const hook = ev.detail.hook
-
-  // https://microsoft.github.io/monaco-editor/docs.html#interfaces/editor.IStandaloneCodeEditor.html
-  const editor = ev.detail.editor.standalone_code_editor
-
-  // push an event to the parent liveview containing the editor current value when the editor loses focus
-  editor.onDidBlurEditorWidget(() => {
-      document.querySelector("#editor-container").dispatchEvent(new CustomEvent("code-update", {
-          detail: editor.getValue()
-      }))
-  })
+  window.addEventListener('keydown', event => {
+    if (event.keyCode === 13 && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      if (event.stopImmediatePropagation) {
+          event.stopImmediatePropagation();
+      } else {
+          event.stopPropagation();
+      }
+      hook.pushEvent("update_code", {})
+      return;
+    }
+  }, true);
 })
 
 

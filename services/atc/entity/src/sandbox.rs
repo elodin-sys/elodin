@@ -11,6 +11,7 @@ pub struct Model {
 
     pub name: String,
     pub code: String,
+    pub draft_code: String,
 
     pub status: Status,
     pub vm_id: Option<Uuid>,
@@ -79,6 +80,7 @@ impl From<Model> for elodin_types::api::Sandbox {
             id: sandbox.id.as_bytes().to_vec(),
             name: sandbox.name,
             code: sandbox.code,
+            draft_code: sandbox.draft_code,
             status: elodin_types::api::sandbox::Status::from(sandbox.status).into(),
         }
     }
