@@ -92,14 +92,12 @@ test_steps = [
       flake = ".#elixir",
       emoji = ":elixir:",
       command = "cd services/dashboard && mix deps.get && mix deps.unlock --check-unused && mix compile --all-warnings --warning-as-errors && mix format --dry-run --check-formatted",
-      plugins = [elixir_cache_plugin()],
     ),
     nix_step(
       label = "dialyzer",
       flake = ".#elixir",
       emoji = ":elixir:",
       command = "cd services/dashboard && mix deps.get && mix dialyzer --plt && mix dialyzer",
-      plugins = [elixir_cache_plugin()],
     )
   ]),
 ]

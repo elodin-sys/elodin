@@ -16,6 +16,8 @@ pub struct Model {
     pub status: Status,
     pub vm_id: Option<Uuid>,
 
+    pub public: bool,
+
     pub last_used: ChronoDateTimeUtc,
 }
 
@@ -82,6 +84,8 @@ impl From<Model> for elodin_types::api::Sandbox {
             code: sandbox.code,
             draft_code: sandbox.draft_code,
             status: elodin_types::api::sandbox::Status::from(sandbox.status).into(),
+            public: sandbox.public,
+            user_id: sandbox.user_id.as_bytes().to_vec(),
         }
     }
 }
