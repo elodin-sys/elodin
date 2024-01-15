@@ -9,21 +9,19 @@ defmodule ElodinDashboardWeb.SandboxComponents do
 
   def sandbox_card(assigns) do
     ~H"""
-    <div
+    <.link
       style={"background: url(\"#{@img}\");"}
       class="w-[200px] h-[158px] bg-[url({@img})] bg-[100%_100%] h-[158px] rounded-elo-xs overflow-hidden"
+      patch={@path}
+      href={@href}
+      phx-click={@phx_click}
     >
-      <.link
-        patch={@path}
-        href={@href}
-        class="flex w-[198px] h-[41px] items-center justify-center pt-elo-lg pb-elo-lg relative top-[116px] left-px bg-tokens-surface-secondary rounded-elo-xs overflow-hidden"
-        phx-click={@phx_click}
-      >
+      <div class="flex w-[198px] h-[41px] items-center justify-center pt-elo-lg pb-elo-lg relative top-[116px] left-px bg-tokens-surface-secondary rounded-elo-xs overflow-hidden">
         <div class="w-fit font-bold text-primative-colors-white-opacity-900 text-sm text-center">
           <%= @name %>
         </div>
-      </.link>
-    </div>
+      </div>
+    </.link>
     """
   end
 end

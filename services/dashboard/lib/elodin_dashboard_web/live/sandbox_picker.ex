@@ -87,7 +87,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       <div class="flex flex-col min-h-full items-start p-elo-lg bg-surface-secondary">
         <div class="flex flex-col flex-wrap items-start w-full bg-primative-colors-white-opacity-50 rounded-elo-sm bg-primative-colors-white-opacity-50">
           <div class="p-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
-            Elodin sandboxes
+            Elodin templates
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
             <.sandbox_card

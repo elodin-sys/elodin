@@ -17,6 +17,11 @@ defmodule ElodinDashboardWeb.NavbarComponents do
       </li>
       <li class="text-[0.8125rem] ml-auto flex items-center">
         <%= render_slot(@navbar_right) %>
+        <.link href="https://docs.elodin.systems">
+          <.button type="outline" class="mr-1.5">
+            Docs
+          </.button>
+        </.link>
         <%= if @current_user do %>
           <img
             src={@current_user["avatar"]}
