@@ -52,10 +52,6 @@
               '';
               postBuild = ''
                 mix assets.deploy
-                # for external task you need a workaround for the no deps check flag
-                # https://github.com/phoenixframework/phoenix/issues/2690
-                mix do deps.loadpaths --no-deps-check, phx.digest
-                mix phx.digest --no-deps-check
               '';
             };
           build_docker = {
