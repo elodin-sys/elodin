@@ -183,14 +183,14 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             </div>
           </div>
 
-          <div class="flex h-[158px] w-[200px] flex-col rounded-md border border-black">
+          <%!-- <div class="flex h-[158px] w-[200px] flex-col rounded-md border border-black">
             <div class="basis-3/4 overflow-hidden">
               <img src="/images/onboarding/1-3-sim-timeline.svg" />
             </div>
             <div class="flex basis-1/4 items-center justify-center text-sm font-medium text-white">
               Sim Timeline
             </div>
-          </div>
+          </div> --%>
         </div>
       <% end %>
 
