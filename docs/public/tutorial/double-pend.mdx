@@ -1,0 +1,72 @@
+---
+title: Double Pendulum Tutorial
+icon: tornado
+---
+
+<Steps>
+  <Step title="Import Elodin and JAX">
+    Our first step is to import Elodin and Jax into our environment, and define our sim function.
+    The sandbox will call `sim` and run whatever we pass in.
+```python
+from elodin_py import SimBuilder, RigidBody, Mesh, Material, Joint, editor
+import jax.numpy as np
+def sim() -> SimBuilder:
+    builder = SimBuilder()
+    return builder
+```
+  </Step>
+  <Step title="Add root node">
+  Next we will add the root node, from which the pendulum will pivot. Put the following code below
+  `builder = SimBuilder()`
+```python
+root = builder.body(
+    RigidBody(
+        mass=10.0,
+        mesh=Mesh.box(0.05, 0.05, 0.5),
+        material=Material.hex_color("#FFF"),
+        joint=Joint.fixed(),
+        body_pos=np.array([0.0, 1.0, 0.0])
+    )
+)
+```
+At this point you can click the "Update Sim" button, or use `Cmd-Enter` to update the simulation.
+You should see a grey rectangle appear.
+  </Step>
+  <Step title="Add first arm">
+  Now we will add the first arm, and attach it to the root node:
+```python
+arm_a = builder.body(
+    RigidBody(
+        mass=1.0,
+        mesh=Mesh.box(0.2, length, 0.2),
+        material=Material.hex_color("#000"),
+        joint=Joint.revolute(np.array([0.0, 0.0, length / 2]), pos=np.deg2rad(-95)),
+        parent=root,
+        body_pos=np.array([0.0, -1 * length / 2.0, 0.0]),
+    )
+)
+```
+Notice how we add a revolute Joint to the Rigid Body.
+That joint adds a single rotational degree of freedom to the arm. It is constrained
+to only rotate about that axis.
+  </Step>
+  <Step title="Add final arm">
+  And last but not least we will add the final arm to pendulum.
+```python
+arm_b = builder.body(
+    RigidBody(
+        mass=1.0,
+        mesh=Mesh.box(0.2, length, 0.2),
+        material=Material.hex_color("#F00"),
+        joint=Joint.revolute(
+            np.array([0.0, 0.0, length / 2]),
+            anchor = np.array([0.0, -1 * length / 2.0, 0.0]),
+            pos=to_rad(-0)
+        ),
+        parent=arm_a,
+        body_pos=np.array([-0.0, -1 * length / 2.0, -0.0]),
+    )
+)
+```
+  </Step>
+</Steps>

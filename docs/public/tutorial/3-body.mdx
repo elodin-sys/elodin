@@ -1,0 +1,89 @@
+---
+title: Three-Body Orbit Tutorial
+icon: solar-system
+---
+
+The [three-body problem](https://en.wikipedia.org/wiki/Three-body_problem) is a classic orbital dynamics situation.
+You have three bodies, each with significant mass, all interacting gravitationally.
+This turns out to be a [chaotic system](https://en.wikipedia.org/wiki/Chaos_theory), with no general closed-form solution. There are however
+a few stable configurations of the three-body problem.
+
+In this tutorial, we will model one of the stable configurations from
+R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Problem with Earth Moon Masses"](https://ntrs.nasa.gov/api/citations/19680013800/downloads/19680013800.pdf).
+
+<Steps>
+  <Step title="Import Elodin and JAX">
+    Our first step is to import Elodin and Jax into our environment, and define our sim function.
+    The sandbox will call `sim` and run whatever we pass in.
+```python
+from elodin_py import SimBuilder, RigidBody, Mesh, Material, Joint, editor
+import jax.numpy as np
+def sim() -> SimBuilder:
+    builder = SimBuilder()
+    builder.zero_g()
+    return builder
+```
+You'll notice we call `builder.zero_g()` that tells the simulation to **NOT** apply a standard downward acceleation of 9.81 to all bodies.
+That is so we can add our own gravitational interaction between the bodies
+  </Step>
+  <Step title="Add the First Body">
+We will add our first body by adding the following code below `builder.zero_g()`
+```python
+a = builder.body(
+    RigidBody(
+        mass=1.0 / 6.649e-11,
+        mesh=Mesh.sphere(0.2),
+        material=Material.hex_color("#FFB800").emissive(20.0, 188.0 / 255.0 * 20.0, 0.0),
+        joint=Joint.free(
+            pos = np.array([0.8822391241, 0, 0]),
+            vel = np.array([0, 1.0042424155, 0])
+        ),
+        trace_anchor = np.array([0,0,0])
+    )
+)
+```
+You can now update the simulation by pressing `Update Sim` or hitting `Cmd-Enter`.
+You should see a yellow sphere start flying off in the wrong direction. To fix that
+let's add another body.
+    </Step>
+    <Step title="Add the Second Body">
+Next we will add the second body:
+```python
+b = builder.body(
+    RigidBody(
+        mass=1.0 / 6.649e-11,
+        mesh=Mesh.sphere(0.2),
+        material=Material.hex_color("#FFB800").emissive(65.0 / 255.0 * 20, 187 / 255.0 * 20, 20.0),
+        joint=Joint.free(
+            pos = np.array([-0.6432718586,0, 0]),
+            vel = np.array([0, -1.6491842814, 0])
+        ),
+        trace_anchor = np.array([0,0,0])
+    )
+)
+builder.gravity(a, b)
+```
+    `builder.gravity(a, b)` tells the simulation to calculate gravity between the two objects.
+
+    Once you update the code you should see a second body flying off into space.
+    </Step>
+    <Step title="Add the Third Body">
+    And last but not least, we will add the third body which will make this a stable orbit.
+```python
+c = builder.body(
+    RigidBody(
+        mass=1.0 / 6.649e-11,
+        mesh=Mesh.sphere(0.2),
+        material=Material.hex_color("#FFB800").emissive(20., 15.0 / 255.0 * 20., 0.0),
+        joint=Joint.free(
+            pos = np.array([-0.2389672654, 0, 0]),
+            vel = np.array([0,0.6449418659, 0.0])
+        ),
+        trace_anchor = np.array([0,0,0])
+    )
+)
+builder.gravity(a, c)
+builder.gravity(b, c)
+```
+    </Step>
+</Steps>
