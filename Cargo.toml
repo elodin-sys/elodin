@@ -11,6 +11,7 @@ members = [
     "libs/nox",
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
+    "libs/xla-rs",
     "services/atc",
     "services/atc/migration",
     "services/atc/entity",
