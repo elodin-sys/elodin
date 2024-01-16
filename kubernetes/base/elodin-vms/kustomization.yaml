@@ -4,5 +4,6 @@ kind: Kustomization
 resources:
 - namespace.yaml
 - cluster-roles.yaml
+- network-policy.yaml
 
 namespace: elodin-vms

@@ -113,6 +113,14 @@ impl Orca {
                 &Pod {
                     metadata: ObjectMeta {
                         name: Some(pod_name),
+                        labels: Some(
+                            [
+                                ("app.kubernetes.io/managed-by", "atc"),
+                                ("security.elodin.systems", "web-runner"),
+                            ]
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .into(),
+                        ),
                         ..Default::default()
                     },
                     spec: Some(PodSpec {
