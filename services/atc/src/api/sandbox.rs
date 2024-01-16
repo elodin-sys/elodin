@@ -181,20 +181,25 @@ impl Api {
         .update_with_event(txn, &mut redis)
         .await?;
         let Some(code) = req.code else {
-            return Ok(UpdateSandboxResp {});
+            return Ok(UpdateSandboxResp::default());
         };
         let Some(vm_id) = sandbox.vm_id else {
-            return Ok(UpdateSandboxResp {});
+            return Ok(UpdateSandboxResp::default());
         };
         let Some(vm_ip) = vm::Entity::find_by_id(vm_id)
             .one(txn)
             .await?
             .and_then(|vm| vm.pod_ip)
         else {
-            return Ok(UpdateSandboxResp {});
+            return Ok(UpdateSandboxResp::default());
         };
-        update_sandbox_code(&vm_ip, code).await?;
-        Ok(UpdateSandboxResp {})
+        let resp = update_sandbox_code(&vm_ip, code).await?;
+        if resp.status() == elodin_types::sandbox::Status::Error {
+            return Ok(UpdateSandboxResp {
+                errors: resp.errors,
+            });
+        }
+        Ok(UpdateSandboxResp::default())
     }
 
     pub async fn boot_sandbox(

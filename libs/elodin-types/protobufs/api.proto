@@ -53,7 +53,9 @@ message UpdateSandboxReq {
     bool public = 5;
 }
 
-message UpdateSandboxResp {}
+message UpdateSandboxResp {
+    repeated string errors = 1;
+}
 
 message BootSandboxReq {
     bytes id = 1;

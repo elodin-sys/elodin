@@ -3,12 +3,14 @@ use std::time::Duration;
 use crate::{error::Error, events::EntityExt};
 use atc_entity::{sandbox, vm};
 use chrono::Utc;
-use elodin_types::sandbox::{sandbox_control_client::SandboxControlClient, UpdateCodeReq};
+use elodin_types::sandbox::{
+    sandbox_control_client::SandboxControlClient, UpdateCodeReq, UpdateCodeResp,
+};
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tonic::transport::Channel;
 
-pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<(), Error> {
+pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<UpdateCodeResp, Error> {
     let Ok(ip) = format!("grpc://{}:50051", vm_ip).parse() else {
         return Err(Error::VMBootFailed("vm has invalid ip".to_string()));
     };
@@ -18,8 +20,7 @@ pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<(), Error>
         .update_code(UpdateCodeReq { code })
         .await
         .map_err(|err| Error::VMBootFailed(err.to_string()))?;
-    let _res = res.into_inner();
-    Ok(())
+    Ok(res.into_inner())
 }
 
 pub async fn garbage_collect(
