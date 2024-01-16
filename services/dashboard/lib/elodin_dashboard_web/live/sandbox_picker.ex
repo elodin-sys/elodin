@@ -249,7 +249,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             <.button type="outline" class="w-full py-4">Discord</.button>
           </.link>
 
-          <.link href="https://www.youtube.com">
+          <.link href="https://www.youtube.com/watch?v=UWPzF0JFgOA">
             <.button type="outline" class="w-full py-4">Video Demo</.button>
           </.link>
         </div>
