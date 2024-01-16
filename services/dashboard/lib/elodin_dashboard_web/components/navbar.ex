@@ -13,7 +13,9 @@ defmodule ElodinDashboardWeb.NavbarComponents do
         <%= render_slot(@navbar_left) %>
       </li>
       <li style="position: absolute; left: calc(50% - 25px/2);">
-        <img src="/images/o-logo.svg" class="w-5" />
+        <.link href="https://www.elodin.systems">
+          <img src="/images/o-logo.svg" class="w-5" />
+        </.link>
       </li>
       <li class="text-[0.8125rem] ml-auto flex items-center">
         <%= render_slot(@navbar_right) %>
