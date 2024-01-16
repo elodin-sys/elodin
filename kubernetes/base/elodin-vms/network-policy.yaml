@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-atc-ingress
+spec:
+  podSelector:
+    matchLabels:
+      security.elodin.systems: web-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          security.elodin.systems: app
+    - podSelector:
+        matchLabels:
+          security.elodin.systems: atc
+    ports:
+    - protocol: TCP
+      port: 50051
+    - protocol: TCP
+      port: 3563
