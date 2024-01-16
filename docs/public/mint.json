@@ -16,8 +16,8 @@
   },
   "topbarLinks": [
     {
-      "name": "Support",
-      "url": "mailto:hi@mintlify.com"
+      "name": "Contact Us",
+      "url": "mailto:founders@elodin.systems"
     }
   ],
   "topbarCtaButton": {
@@ -25,11 +25,6 @@
     "url": "https://app.elodin.systems"
   },
   "anchors": [
-    {
-      "name": "Documentation",
-      "icon": "book-open-cover",
-      "url": "https://docs.elodin.systems"
-    },
     {
       "name": "Discord",
       "icon": "discord",
@@ -39,15 +34,22 @@
   "navigation": [
     {
       "group": "Get Started",
-      "pages": ["introduction", "quickstart", "development"]
+      "pages": ["introduction", "tutorial/double-pend", "tutorial/3-body"]
     },
     {
-      "group": "Python SDK",
-      "pages": ["usage"]
+      "group": "The Tao of Elodin",
+      "pages": ["tao/what", "tao/ecs", "tao/monte-carlo", "tao/data-flow"]
+    },
+    {
+      "group": "Other",
+      "pages": ["roadmap"]
     }
   ],
   "footerSocials": {
     "github": "https://github.com/elodin-sys",
     "linkedin": "https://www.linkedin.com/company/elodin-systems-inc"
+  },
+  "integrations": {
+    "intercom": "fcvzwxgc"
   }
 }

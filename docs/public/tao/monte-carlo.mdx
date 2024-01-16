@@ -1,0 +1,29 @@
+---
+title: How do we run Monte Carlo Sims?
+icon: dice
+---
+
+<Note>This document discusses features not present in the alpha sandbox.</Note>
+
+With our physics toolkit, you can simulate a wide variety of physical situations. But what's the point of making these simulations?
+Our primary goal is to test control systems for aerospace vehicles.
+It's not sufficient to test the control systems in just one situation; you need to test them across the entire gamut of possible outcomes.
+To do that, you can use Monte Carlo testing. Monte Carlo is a tongue-in-cheek reference to the famous Monaco casino.
+The name originated in the depths of the Manhatten Project during WW2, where they needed a clandestine name to mask the details of the technique.
+
+As the name would suggest, Monte Carlo methods work by randomly sampling a system. In this case, the random sampling is of the control system and simulations. You randomize a set of input values to the simulation and then record outputs for each iteration.
+
+## Monte Carlo Challenges
+
+Monte Carlo systems are commonly used, but they can be particularly challenging for traditional simulation systems.
+Most systems allow you to randomize inputs into the system, but they make it far more challenging to run many simulations in parallel.
+MatLab's license model makes it prohibitively expensive to run parallel simulations.
+Other solutions simply require large amounts of engineering effort and/or massive amounts of computing power to run simulations in parallel.
+
+## Our Solution
+
+Elodin solves these problems by introducing a cloud-based simulation runner that can run 100,000 simulations simultaneously. Thankfully, there have been some innovations in the world of computing that make this problem tractable.
+
+Cloud service providers need to solve a very similar problem to support their serverless offerings. They give users the ability to spawn micro virtual machines (microVMs) every time a user requests their website. Amazon has open-sourced their Firecracker virtual machine manager, which powers their serverless service, AWS lambda. We utilize firecrackers to spawn iterations of a user's control system and simulation in a fast, isolated, and safe manner. This technology unlocks the ability to run many user simulations in parallel.
+
+There are still a few other problems to solve in the quest for a cloud-based simulation platform. Mainly, how will the simulation and control software communicate, and how will we record the results of the communication?
