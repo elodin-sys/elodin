@@ -3,10 +3,9 @@ use atc_entity::{
     vm::{self, Status},
 };
 use futures::{stream, StreamExt};
-use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec};
+use k8s_openapi::api::core::v1::Pod;
 use kube::{
     api::{DeleteParams, PostParams},
-    core::ObjectMeta,
     runtime::watcher,
     runtime::watcher::Event,
     Api,
@@ -107,53 +106,8 @@ impl Orca {
     async fn spawn_vm(&mut self, id: Uuid) -> Result<(), Error> {
         let api: Api<Pod> = kube::api::Api::namespaced(self.k8s.clone(), &self.vm_namespace);
         let pod_name = id.to_string();
-        if let Err(err) = api
-            .create(
-                &PostParams::default(),
-                &Pod {
-                    metadata: ObjectMeta {
-                        name: Some(pod_name),
-                        labels: Some(
-                            [
-                                ("app.kubernetes.io/managed-by", "atc"),
-                                ("security.elodin.systems", "web-runner"),
-                            ]
-                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                            .into(),
-                        ),
-                        ..Default::default()
-                    },
-                    spec: Some(PodSpec {
-                        runtime_class_name: self.runtime_class.clone(),
-                        containers: vec![Container {
-                            name: "payload".to_string(),
-                            image: Some(self.image_name.clone()),
-                            env: Some(vec![
-                                EnvVar {
-                                    name: "ELODIN_CONTROL_ADDR".to_string(),
-                                    value: Some("[::]:50051".to_string()),
-                                    ..Default::default()
-                                },
-                                EnvVar {
-                                    name: "ELODIN_SIM_ADDR".to_string(),
-                                    value: Some("[::]:3563".to_string()),
-                                    ..Default::default()
-                                },
-                                EnvVar {
-                                    name: "JAX_ENABLE_X64".to_string(),
-                                    value: Some("true".to_string()),
-                                    ..Default::default()
-                                },
-                            ]),
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
+        let pod = vm_pod(&pod_name, &self.image_name, self.runtime_class.as_deref());
+        if let Err(err) = api.create(&PostParams::default(), &pod).await {
             self.set_vm_status(id, Status::Error).await?;
             return Err(err.into());
         }
@@ -280,8 +234,54 @@ impl Orca {
     }
 }
 
+fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod {
+    serde_json::from_value(serde_json::json!({
+        "apiVersion": "v1",
+        "kind":  "Pod",
+        "metadata": {
+            "name": pod_name,
+            "labels": {
+                "app.kubernetes.io/managed-by": "atc",
+                "security.elodin.systems": "web-runner"
+            }
+        },
+        "spec": {
+            "runtimeClassName": runtime_class,
+            "containers": [{
+                "name": "payload",
+                "image": image_name,
+                "env": [
+                    { "name": "ELODIN_CONTROL_ADDR", "value": "[::]:50051" },
+                    { "name": "ELODIN_SIM_ADDR", "value": "[::]:3563" },
+                    { "name": "JAX_ENABLE_X64", "value": "true" }
+                ],
+                "resources": {
+                    "requests": {
+                        "cpu": "0.3",
+                        "memory": "500Mi"
+                    }
+                }
+            }]
+        }
+    }))
+    .unwrap()
+}
+
 #[derive(Debug)]
 pub enum OrcaMsg {
     DbEvent(DbEvent<vm::Model>),
     K8sEvent(Event<Pod>),
+}
+
+#[cfg(test)]
+mod tests {
+    use kube::ResourceExt;
+
+    use super::vm_pod;
+
+    #[test]
+    fn construct_pod_spec() {
+        let pod = vm_pod("test-pod", "test-image", Some("gvisor"));
+        assert_eq!(pod.name_any(), "test-pod");
+    }
 }
