@@ -2,7 +2,6 @@
   inputs = {
     elodin.url = "path:../../.";
     nixpkgs.follows = "elodin/nixpkgs";
-    cargo2nix.follows = "elodin/cargo2nix";
     rust-overlay.follows = "elodin/rust-overlay";
     flake-utils.follows = "elodin/flake-utils";
     nix2container.follows = "elodin/nix2container";
@@ -81,7 +80,7 @@
           };
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
+            overlays = [rust-overlay.overlays.default];
           };
           aarch64_pkgs =
             if system == "aarch64-linux"
@@ -90,7 +89,7 @@
               import nixpkgs {
                 localSystem = system;
                 crossSystem = "aarch64-linux";
-                overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
+                overlays = [rust-overlay.overlays.default];
               };
           x86_64_pkgs =
             if system == "x86_64-linux"
@@ -99,7 +98,7 @@
               import nixpkgs {
                 localSystem = system;
                 crossSystem = "x86_64-linux";
-                overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
+                overlays = [rust-overlay.overlays.default];
               };
         in rec {
           packages = {

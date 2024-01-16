@@ -38,11 +38,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1702749801,
-        "narHash": "sha256-frIhfv0h4RAobzQ/vp7C7a2bEbz2gcZc2qVSc2CElxw=",
+        "lastModified": 1704819371,
+        "narHash": "sha256-oFUfPWrWGQTZaCM3byxwYwrMLwshDxVGOrMH5cVP/X8=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "3330c0de31e8729bb5d01820e59ceb1640e128dc",
+        "rev": "5c234301a1277e4cc759c23a2a7a00a06ddd7111",
         "type": "github"
       },
       "original": {
@@ -62,7 +62,7 @@
       },
       "locked": {
         "lastModified": 0,
-        "narHash": "sha256-iX17+1Xg6R/eSjlqqbvUOuzKjSCF77CerSnT/cy1uY0=",
+        "narHash": "sha256-PzV2RWrKDyGQRhC5v3ryMgJ4fR+E8OaQta6kFvTjdqU=",
         "path": "../../.",
         "type": "path"
       },
@@ -163,10 +163,6 @@
     },
     "root": {
       "inputs": {
-        "cargo2nix": [
-          "elodin",
-          "cargo2nix"
-        ],
         "crane": "crane",
         "elodin": "elodin",
         "flake-utils": [
