@@ -18,12 +18,7 @@ itertools = "0.12.0"
 seq-macro = "0.3.5"
 
 # xla-rs - a wrapper around raw xla
-# we are using our own fork, which has diverged from upstream significantly
-# the `feature/new-ops` branch contains a few added operations + changes to support
-# metal and static linking
-xla.git = "https://github.com/elodin-sys/xla-rs.git"
-xla.branch = "main"
-#xla.path = "../../../xla-rs"
+xla.path = "../xla-rs"
 
 
 [dev-dependencies]
