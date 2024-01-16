@@ -42,6 +42,7 @@ defmodule ElodinDashboardWeb.EditorLive do
            public: sandbox.public,
            readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
          })
+         |> assign(:errors, [])
          |> assign(:share_link, "#{ElodinDashboardWeb.Endpoint.url()}/sandbox/#{id_string}")}
       else
         err -> err
@@ -102,18 +103,21 @@ defmodule ElodinDashboardWeb.EditorLive do
     {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :draft_code, value))}
   end
 
-  def handle_event("update_code", _, socket) do
+  def handle_event("update_code", resp, socket) do
     token = socket.assigns[:current_user]["token"]
     sandbox = socket.assigns[:sandbox]
     value = sandbox[:draft_code]
 
-    {:ok, _} =
+    {:ok, update_resp} =
       Atc.update_sandbox(
         %Api.UpdateSandboxReq{id: sandbox[:id], code: value, name: sandbox[:name]},
         token
       )
 
-    {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :code, value))}
+    {:noreply,
+     socket
+     |> assign(:sandbox, Map.put(sandbox, :code, value))
+     |> assign(:errors, update_resp.errors)}
   end
 
   def handle_event("set_public", %{"public" => public_str}, socket) do
@@ -170,7 +174,10 @@ defmodule ElodinDashboardWeb.EditorLive do
                 }
               />
             </div>
-            <EditorComponents.console logs={@sandbox.status} update_click={JS.push("update_code")} />
+            <EditorComponents.console
+              logs={([@sandbox.status] ++ @errors) |> Enum.join("\n")}
+              update_click={JS.push("update_code")}
+            />
           </div>
           <%= if @sandbox.status == :RUNNING do %>
             <EditorComponents.editor_wasm url={@url} />

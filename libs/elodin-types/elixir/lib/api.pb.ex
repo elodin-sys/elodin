@@ -77,6 +77,8 @@ defmodule Elodin.Types.Api.UpdateSandboxResp do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :errors, 1, repeated: true, type: :string
 end
 
 defmodule Elodin.Types.Api.BootSandboxReq do
