@@ -23,7 +23,8 @@ end
 if config_env() == :prod do
   config :elodin_dashboard, ElodinDashboard.Atc,
     internal_addr:
-      System.get_env("ATC_INTERNAL_ADDR") || raise("environment variable ATC_ADDR is missing."),
+      System.get_env("ATC_INTERNAL_ADDR") ||
+        raise("environment variable ATC_INTERNAL_ADDR is missing."),
     addr: System.get_env("ATC_ADDR") || raise("environment variable ATC_ADDR is missing."),
     tls: System.get_env("ATC_TLS") in ~w(true 1)
 
