@@ -1,4 +1,4 @@
-use crate::{AsBuffer, Buffer, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar};
+use crate::{AsBuffer, Buffer, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector};
 use nalgebra::{
     constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
     Scalar as NalgebraScalar,
@@ -657,3 +657,45 @@ pub trait NotConst1 {}
 seq_macro::seq!(N in 2..99 {
     impl NotConst1 for Const<N> {}
 });
+
+impl<T: TensorItem, D: TensorDim> Tensor<T, D> {
+    pub fn index<I: TensorIndex<T, D>>(&self, index: I) -> I::Output {
+        index.index(self.clone())
+    }
+}
+
+pub trait TensorIndex<T, D: TensorDim> {
+    type Output;
+
+    fn index(self, tensor: Tensor<T, D>) -> Self::Output;
+}
+
+impl<T: TensorItem, D: TensorDim + DefaultMap, IT: ArrayElement, const N: usize> TensorIndex<T, D>
+    for Vector<IT, N>
+where
+    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: XlaDim,
+    <ReplaceMappedDim<D::DefaultMapDim, D, Const<1>> as XlaDim>::Array: AsRef<[i64]>,
+{
+    type Output = Tensor<T, ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>>;
+
+    fn index(self, tensor: Tensor<T, D>) -> Self::Output {
+        let indices = self
+            .inner
+            .broadcast_in_dim(smallvec![N as i64, 1], smallvec![0]);
+        dbg!(indices.shape());
+        let inner = tensor.inner.gather(
+            indices,
+            smallvec![1],
+            smallvec![0],
+            smallvec![0],
+            SmallVec::from_slice(
+                ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::dims().as_ref(),
+            ),
+            1,
+        );
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+}
