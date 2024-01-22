@@ -149,4 +149,23 @@ impl XlaBuilder {
         };
         out_status.to_result()
     }
+    pub fn iota(&self, dims: &[i64], elem_type: ElementType, iota_dim: i64) -> XlaOp {
+        let dims_ptr = dims.as_ptr();
+        let dims_len = dims.len();
+        let prim_type = elem_type.primitive_type() as i32;
+        let raw = unsafe {
+            cpp!([self as "std::shared_ptr<XlaBuilder>*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t", iota_dim as "int64_t"] -> XlaOpRaw as "XlaOp" {
+                try {
+                    auto shape = ShapeUtil::MakeShape((PrimitiveType)prim_type, absl::Span(dims_ptr, dims_len));
+                    return XlaOp(Iota(self->get(), shape, iota_dim));
+                }catch(std::exception& e) {
+                    return XlaOp(self->get()->ReportError(tsl::errors::Internal(e.what())));
+                }
+            })
+        };
+        XlaOp {
+            raw,
+            builder: XlaBuilder::default(),
+        }
+    }
 }
