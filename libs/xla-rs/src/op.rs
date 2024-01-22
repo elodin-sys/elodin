@@ -19,6 +19,7 @@ cpp! {{
 
 cpp_class!(pub unsafe struct XlaOpRaw as "XlaOp");
 cpp_class!(pub unsafe struct DotDimensionNumbers as "DotDimensionNumbers");
+cpp_class!(pub unsafe struct ScatterDimensionNumbers as "ScatterDimensionNumbers");
 
 #[derive(Clone)]
 pub struct XlaOp {
@@ -945,23 +946,36 @@ impl XlaOp {
 
     pub fn gather(
         &self,
-        rhs: &Self,
-        offset_dims: &[isize],
-        slice_dims: &[isize],
-        start_index_map: &[isize],
-        slice_sizes: &[isize],
+        indicies: &Self,
+        offset_dims: &[i64],
+        collapsed_slice_dims: &[i64],
+        start_index_map: &[i64],
+        slice_sizes: &[i64],
+        index_vector_dim: i64,
     ) -> Self {
         let op = &self.raw;
         let offset_dims_ptr = offset_dims.as_ptr();
         let offset_dims_len = offset_dims.len();
-        let slice_dims_ptr = slice_dims.as_ptr();
-        let slice_dims_len = slice_dims.len();
+        let slice_dims_ptr = collapsed_slice_dims.as_ptr();
+        let slice_dims_len = collapsed_slice_dims.len();
         let start_index_map_ptr = start_index_map.as_ptr();
         let start_index_map_len = start_index_map.len();
         let slice_sizes_ptr = slice_sizes.as_ptr();
         let slice_sizes_len = slice_sizes.len();
         let raw = unsafe {
-            cpp!([op as "const XlaOp*", rhs as "const XlaOp*", offset_dims_ptr as "const int64_t*", offset_dims_len as "size_t", slice_dims_ptr as "const int64_t*", slice_dims_len as "size_t", start_index_map_ptr as "const int64_t*", start_index_map_len as "size_t", slice_sizes_ptr as "const int64_t*", slice_sizes_len as "size_t"] -> XlaOpRaw as "XlaOp" {
+            cpp!([
+                op as "const XlaOp*",
+                indicies as "const XlaOp*",
+                offset_dims_ptr as "const int64_t*",
+                offset_dims_len as "size_t",
+                slice_dims_ptr as "const int64_t*",
+                slice_dims_len as "size_t",
+                start_index_map_ptr as "const int64_t*",
+                start_index_map_len as "size_t",
+                slice_sizes_ptr as "const int64_t*",
+                slice_sizes_len as "size_t",
+                index_vector_dim as "int64_t"
+            ] -> XlaOpRaw as "XlaOp" {
                     GatherDimensionNumbers dn;
                     for (size_t i = 0; i < offset_dims_len; ++i) {
                         dn.add_offset_dims(offset_dims_ptr[i]);
@@ -972,8 +986,9 @@ impl XlaOp {
                     for (size_t i = 0; i < start_index_map_len; ++i) {
                         dn.add_start_index_map(start_index_map_ptr[i]);
                     }
+                    dn.set_index_vector_dim(index_vector_dim);
                     auto ss = absl::Span<const int64_t>(slice_sizes_ptr, slice_sizes_len);
-                    return XlaOp(Gather(*op, *rhs, dn, ss));
+                    return XlaOp(Gather(*op, *indicies, dn, ss));
             })
         };
         self.wrap(raw)
@@ -1044,6 +1059,51 @@ impl XlaOp {
         self.wrap(raw)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn scatter(
+        &self,
+        inputs: &[XlaOpRef<'_>],
+        scatter_indices: &XlaOp,
+        updates: &[XlaOpRef<'_>],
+        update_comp: &XlaComputation,
+        scatter_dimension_numbers: &ScatterDimensionNumbers,
+        indices_are_sorted: bool,
+        unique_indices: bool,
+    ) -> XlaOp {
+        let inputs_ptr = inputs.as_ptr();
+        let inputs_len = inputs.len();
+        let updates_ptr = updates.as_ptr();
+        let updates_len = updates.len();
+        let scatter_indices = &scatter_indices.raw;
+        let raw = unsafe {
+            cpp!([
+                inputs_ptr as "const XlaOp*", inputs_len as "size_t",
+                scatter_indices as "XlaOp*",
+                update_comp as "const XlaComputation*",
+                updates_ptr as "const XlaOp*", updates_len as "size_t",
+                scatter_dimension_numbers as "ScatterDimensionNumbers*",
+                indices_are_sorted as "bool",
+                unique_indices as "bool"
+            ] -> XlaOpRaw as "XlaOp" {
+                return XlaOp(
+                    Scatter(
+                        absl::Span(inputs_ptr, inputs_len),
+                        *scatter_indices,
+                        absl::Span(updates_ptr, updates_len),
+                        *update_comp,
+                        *scatter_dimension_numbers,
+                        indices_are_sorted,
+                        unique_indices
+                    )
+                );
+            })
+        };
+        XlaOp {
+            raw,
+            builder: self.builder.clone(),
+        }
+    }
+
     pub fn builder(&self) -> &XlaBuilder {
         &self.builder
     }
@@ -1109,6 +1169,48 @@ impl DotDimensionNumbers {
         unsafe {
             cpp!([self as "DotDimensionNumbers*", dim as "int64_t"] {
                 self->add_rhs_batch_dimensions(dim);
+            })
+        }
+    }
+}
+
+impl ScatterDimensionNumbers {
+    pub fn new() -> ScatterDimensionNumbers {
+        unsafe {
+            cpp!([] -> ScatterDimensionNumbers as "ScatterDimensionNumbers" {
+                return ScatterDimensionNumbers();
+            })
+        }
+    }
+
+    pub fn add_window_dim(&mut self, dim: i64) {
+        unsafe {
+            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
+                self->add_update_window_dims(dim);
+            })
+        }
+    }
+
+    pub fn add_inserted_window_dim(&mut self, dim: i64) {
+        unsafe {
+            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
+                self->add_inserted_window_dims(dim);
+            })
+        }
+    }
+
+    pub fn add_scatter_dims_to_operand_dims(&mut self, dim: i64) {
+        unsafe {
+            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
+                self->add_scatter_dims_to_operand_dims(dim);
+            })
+        }
+    }
+
+    pub fn set_index_vector_dim(&mut self, dim: i64) {
+        unsafe {
+            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
+                self->set_index_vector_dim(dim);
             })
         }
     }
