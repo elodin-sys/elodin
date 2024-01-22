@@ -16,9 +16,12 @@ use crate::{
 #[derive(Debug)]
 pub enum NoxprNode {
     // Params / Variables
-    Constant(Constant),
     Param(ParamExpr),
     Tuple(Vec<Noxpr>),
+
+    // Constants
+    Constant(Constant),
+    Iota(Iota),
 
     // Element Wise Binary Ops
     Add(BinaryOp),
@@ -47,6 +50,7 @@ pub enum NoxprNode {
     Broadcast(Broadcast),
     BroadcastInDim(BroadcastInDim),
     Transpose(Transpose),
+    Gather(Gather),
 }
 
 pub struct Constant {
@@ -66,7 +70,7 @@ pub enum NoxprTy {
     ArrayTy(ArrayTy),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayTy {
     pub element_type: ElementType,
     pub shape: SmallVec<[i64; 4]>,
@@ -79,6 +83,12 @@ impl ArrayTy {
             shape,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Iota {
+    shape: ArrayTy,
+    dim: usize,
 }
 
 #[derive(Debug)]
@@ -246,6 +256,17 @@ pub struct Transpose {
     permutation: SmallVec<[i64; 4]>,
 }
 
+#[derive(Debug)]
+pub struct Gather {
+    expr: Noxpr,
+    indices: Noxpr,
+    offset_dims: SmallVec<[i64; 4]>,
+    collapsed_slice_dims: SmallVec<[i64; 4]>,
+    start_index_map: SmallVec<[i64; 4]>,
+    slice_sizes: SmallVec<[i64; 4]>,
+    index_vector_dim: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Noxpr {
     pub node: Arc<NoxprNode>,
@@ -348,6 +369,30 @@ impl Noxpr {
         }))
     }
 
+    pub fn gather(
+        self,
+        indices: Noxpr,
+        offset_dims: SmallVec<[i64; 4]>,
+        collapsed_slice_dims: SmallVec<[i64; 4]>,
+        start_index_map: SmallVec<[i64; 4]>,
+        slice_sizes: SmallVec<[i64; 4]>,
+        index_vector_dim: i64,
+    ) -> Self {
+        Self::new(NoxprNode::Gather(Gather {
+            expr: self,
+            indices,
+            offset_dims,
+            collapsed_slice_dims,
+            start_index_map,
+            slice_sizes,
+            index_vector_dim,
+        }))
+    }
+
+    pub fn iota(shape: ArrayTy, dim: usize) -> Self {
+        Self::new(NoxprNode::Iota(Iota { shape, dim }))
+    }
+
     pub fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(c.ty.shape.clone()),
@@ -426,6 +471,44 @@ impl Noxpr {
                     .collect();
                 Some(new_shape)
             }
+            NoxprNode::Gather(gather) => {
+                let inner_shape = gather.expr.shape()?;
+                let indices_shape = gather.indices.shape()?;
+                let adjusted_slice_sizes: SmallVec<[i64; 4]> = gather
+                    .slice_sizes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !gather.collapsed_slice_dims.contains(&(*i as i64)))
+                    .map(|(_, x)| *x)
+                    .collect();
+                let batch_dims: SmallVec<[i64; 4]> = inner_shape
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !gather.offset_dims.contains(&(*i as i64)))
+                    .map(|(_, x)| *x)
+                    .collect();
+                let output_rank = batch_dims.len() + gather.offset_dims.len();
+                (0..output_rank)
+                    .map(|i| {
+                        if let Some((k, _)) =
+                            batch_dims.iter().enumerate().find(|(_, x)| **x == i as i64)
+                        {
+                            indices_shape.get(k)
+                        } else if let Some((k, _)) = gather
+                            .offset_dims
+                            .iter()
+                            .enumerate()
+                            .find(|(_, x)| **x == i as i64)
+                        {
+                            adjusted_slice_sizes.get(k)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(|r| r.copied())
+                    .collect::<Option<_>>()
+            }
+            NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
         }
     }
 
@@ -595,6 +678,22 @@ impl XlaTracer {
             NoxprNode::Transpose(t) => {
                 let op = self.visit(&t.expr)?;
                 op.transpose(&t.permutation)
+            }
+            NoxprNode::Gather(g) => {
+                let op = self.visit(&g.expr)?;
+                let indices = self.visit(&g.indices)?;
+                op.gather(
+                    &indices,
+                    &g.offset_dims,
+                    &g.collapsed_slice_dims,
+                    &g.start_index_map,
+                    &g.slice_sizes,
+                    g.index_vector_dim,
+                )
+            }
+            NoxprNode::Iota(i) => {
+                self.builder
+                    .iota(&i.shape.shape, i.shape.element_type, i.dim as i64)
             }
         };
         self.cache.insert(id, op.clone());
@@ -919,6 +1018,158 @@ impl BatchTracer {
                     }
                 }
             }
+            NoxprNode::Gather(g) => {
+                let expr = self.visit(&g.expr)?;
+                let indices = self.visit(&g.indices)?;
+                match (&expr.batch_axis, &indices.batch_axis) {
+                    (BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
+                        let expr = expr
+                            .move_batch_axis(BatchAxis::Mapped {
+                                index: 0,
+                                size: usize::MAX,
+                            })
+                            .ok_or(Error::UnbatchableArgument)?;
+                        let expr_shape = expr.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                        let slice_sizes: SmallVec<[i64; 4]> = expr_shape
+                            .first()
+                            .into_iter()
+                            .copied()
+                            .chain(g.slice_sizes.iter().cloned())
+                            .collect();
+                        let offset_dims: SmallVec<[i64; 4]> = std::iter::once(0)
+                            .chain(g.slice_sizes.iter().map(|x| x + 1))
+                            .collect();
+                        let collapsed_slice_dims: SmallVec<[i64; 4]> =
+                            g.collapsed_slice_dims.iter().map(|x| x + 1).collect();
+                        let start_index_map: SmallVec<[i64; 4]> = std::iter::once(0)
+                            .chain(g.start_index_map.iter().map(|x| x + 1))
+                            .collect();
+
+                        BatchedExpr {
+                            inner: expr.inner.gather(
+                                indices.inner,
+                                offset_dims,
+                                collapsed_slice_dims,
+                                start_index_map,
+                                slice_sizes,
+                                g.index_vector_dim,
+                            ),
+                            batch_axis: expr.batch_axis,
+                        }
+                    }
+                    (BatchAxis::NotMapped, BatchAxis::Mapped { .. }) => {
+                        let indices = indices
+                            .move_batch_axis(BatchAxis::Mapped {
+                                index: 0,
+                                size: usize::MAX,
+                            })
+                            .ok_or(Error::UnbatchableArgument)?;
+                        let offset_dims = g.offset_dims.iter().map(|x| x + 1).collect();
+                        BatchedExpr {
+                            inner: expr.inner.gather(
+                                indices.inner,
+                                offset_dims,
+                                g.collapsed_slice_dims.clone(),
+                                g.start_index_map.clone(),
+                                g.slice_sizes.clone(),
+                                g.index_vector_dim,
+                            ),
+                            batch_axis: indices.batch_axis,
+                        }
+                    }
+                    (
+                        BatchAxis::Mapped {
+                            size: expr_size, ..
+                        },
+                        BatchAxis::Mapped {
+                            size: indices_size, ..
+                        },
+                    ) => {
+                        let expr_size = *expr_size;
+                        let expr = expr
+                            .move_batch_axis(BatchAxis::Mapped {
+                                index: 0,
+                                size: expr_size,
+                            })
+                            .ok_or(Error::UnbatchableArgument)?;
+                        let indices_size = *indices_size;
+                        let indices = indices
+                            .move_batch_axis(BatchAxis::Mapped {
+                                index: 0,
+                                size: indices_size,
+                            })
+                            .ok_or(Error::UnbatchableArgument)?;
+
+                        // TODO: handle scalars
+
+                        let mut count_shape =
+                            indices.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                        if let Some(last) = count_shape.last_mut() {
+                            *last = -1;
+                        }
+                        let count_shape_len = count_shape.len();
+                        let counts = Noxpr::iota(
+                            ArrayTy {
+                                element_type: ElementType::S32, // TODO: calculate this type
+                                shape: count_shape,
+                            },
+                            0,
+                        );
+                        let indices =
+                            Noxpr::concat_in_dim(vec![counts, indices.inner], count_shape_len - 1);
+
+                        let slice_sizes: SmallVec<[i64; 4]> = std::iter::once(1)
+                            .chain(g.slice_sizes.iter().cloned())
+                            .collect();
+                        let collapsed_slice_dims: SmallVec<[i64; 4]> = std::iter::once(0)
+                            .chain(g.collapsed_slice_dims.iter().map(|x| x + 1))
+                            .collect();
+
+                        let offset_dims: SmallVec<[i64; 4]> =
+                            g.slice_sizes.iter().map(|x| x + 1).collect();
+                        let start_index_map: SmallVec<[i64; 4]> = std::iter::once(0)
+                            .chain(g.start_index_map.iter().map(|x| x + 1))
+                            .collect();
+
+                        let BatchAxis::Mapped { size, .. } = self.out_axis else {
+                            return Err(Error::UnbatchableArgument);
+                        };
+                        BatchedExpr {
+                            batch_axis: BatchAxis::Mapped { index: 0, size },
+                            inner: expr.inner.gather(
+                                indices,
+                                offset_dims,
+                                collapsed_slice_dims,
+                                start_index_map,
+                                slice_sizes,
+                                g.index_vector_dim,
+                            ),
+                        }
+                    }
+                    (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
+                        let inner = expr.inner.gather(
+                            indices.inner,
+                            g.offset_dims.clone(),
+                            g.collapsed_slice_dims.clone(),
+                            g.start_index_map.clone(),
+                            g.slice_sizes.clone(),
+                            g.index_vector_dim,
+                        );
+                        BatchedExpr {
+                            inner,
+                            batch_axis: BatchAxis::NotMapped,
+                        }
+                        .move_batch_axis(self.out_axis.clone())
+                        .ok_or(Error::UnbatchableArgument)?
+                    }
+                }
+            }
+            NoxprNode::Iota(iota) => BatchedExpr {
+                inner: Noxpr::new(NoxprNode::Iota(iota.clone())),
+                batch_axis: BatchAxis::NotMapped,
+            }
+            .move_batch_axis(self.out_axis.clone())
+            .ok_or(Error::UnbatchableArgument)?,
         };
         self.cache.insert(id, op.clone());
         Ok(op)

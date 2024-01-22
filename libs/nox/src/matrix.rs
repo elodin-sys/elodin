@@ -17,9 +17,10 @@ where
 
     fn to_host(&self) -> Self::HostTy {
         let literal = self.inner.to_literal_sync().unwrap();
-        let mut out = Self::HostTy::zeros();
-        out.copy_from_slice(literal.typed_buf().unwrap());
-        out
+        let buf = literal.typed_buf().unwrap();
+        // XLA uses row-major form while nalgebra uses column-major form,
+        // so we need to use from_row_iterator to copy the data out
+        Self::HostTy::from_row_iterator(buf.iter().copied())
     }
 }
 
@@ -70,7 +71,11 @@ where
     }
 
     fn buffer(&self, client: &Client) -> Matrix<T, R, C, Buffer> {
-        let inner = client.0.copy_host_buffer(self.as_slice(), &[R, C]).unwrap();
+        let mut buf: Vec<T> = Vec::with_capacity(C * R);
+        for row in self.row_iter() {
+            buf.extend(row.iter())
+        }
+        let inner = client.0.copy_host_buffer(&buf, &[R, C]).unwrap();
         Matrix {
             inner,
             phantom: PhantomData,
@@ -160,9 +165,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::matrix;
+    use nalgebra::{matrix, vector};
 
-    use crate::{CompFn, FixedSliceExt};
+    use crate::{CompFn, FixedSliceExt, Vector};
 
     use super::*;
 
@@ -234,5 +239,34 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, matrix![3.0])
+    }
+
+    #[test]
+    fn test_index() {
+        let client = Client::cpu().unwrap();
+        fn index(mat: Matrix<f32, 4, 3>, index: Vector<u32, 2>) -> Matrix<f32, 2, 3> {
+            mat.index(index)
+        }
+        let comp = index.build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let a = matrix![0., 1., 2.;
+                        2., 3., 4.;
+                        4., 5., 6.;
+                        7., 8., 9.];
+        let out: nalgebra::Matrix<f32, Const<2>, Const<3>, ArrayStorage<f32, 2, 3>> =
+            exec.run(&client, a, vector![1, 2]).unwrap().to_host();
+        assert_eq!(
+            out,
+            matrix![2., 3., 4.;
+                    4., 5., 6.]
+        );
+
+        let out: nalgebra::Matrix<f32, Const<2>, Const<3>, ArrayStorage<f32, 2, 3>> =
+            exec.run(&client, a, vector![0, 3]).unwrap().to_host();
+        assert_eq!(
+            out,
+            matrix![0., 1., 2.;
+                    7., 8., 9.]
+        );
     }
 }
