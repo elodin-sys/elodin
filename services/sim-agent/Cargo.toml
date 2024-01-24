@@ -1,5 +1,5 @@
 [package]
-name = "elodin-web-runner"
+name = "sim-agent"
 version = "0.1.0"
 edition = "2021"
 

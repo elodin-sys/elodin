@@ -118,8 +118,8 @@ cluster_app_deploy_steps = [
         image_tag = "\$BUILDKITE_COMMIT",
       ),
       build_image_step(
-        image_name = "elo-sim-runner",
-        service_path = "services/elodin-web-runner",
+        image_name = "elo-sim-agent",
+        service_path = "services/sim-agent",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
     ]

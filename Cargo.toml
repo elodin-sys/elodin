@@ -15,7 +15,7 @@ members = [
     "services/atc",
     "services/atc/migration",
     "services/atc/entity",
-    "services/elodin-web-runner",
+    "services/sim-agent",
     "tools/starlark-json",
 ]
 

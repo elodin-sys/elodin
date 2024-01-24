@@ -74,6 +74,6 @@ images:
 - name: elodin-infra/elo-dashboard
   newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
   newTag: $BUILDKITE_COMMIT
-- name: elodin-infra/elo-sim-runner
-  newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-runner/x86_64
+- name: elodin-infra/elo-sim-agent
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
   newTag: $BUILDKITE_COMMIT
