@@ -1,4 +1,4 @@
-use std::{borrow::Cow, hash::Hash};
+use std::{borrow::Cow, hash::Hash, mem::size_of};
 
 use bytemuck::bytes_of;
 use nalgebra::{Matrix3, Quaternion, Vector3};
@@ -52,6 +52,12 @@ impl<'a> ComponentData<'a> {
 )]
 #[repr(transparent)]
 pub struct EntityId(pub u64);
+
+impl EntityId {
+    pub fn rand() -> Self {
+        EntityId(fastrand::u64(..))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -111,6 +117,37 @@ pub enum ComponentType {
 
     // Msgs
     Filter,
+}
+
+impl ComponentType {
+    pub fn size(self) -> Option<usize> {
+        match self {
+            ComponentType::U8 => Some(size_of::<u8>()),
+            ComponentType::U16 => Some(size_of::<u16>()),
+            ComponentType::U32 => Some(size_of::<u32>()),
+            ComponentType::U64 => Some(size_of::<u64>()),
+            ComponentType::I8 => Some(size_of::<i8>()),
+            ComponentType::I16 => Some(size_of::<i16>()),
+            ComponentType::I32 => Some(size_of::<i32>()),
+            ComponentType::I64 => Some(size_of::<i64>()),
+            ComponentType::Bool => Some(size_of::<bool>()),
+            ComponentType::F32 => Some(size_of::<f32>()),
+            ComponentType::F64 => Some(size_of::<f64>()),
+            ComponentType::String => None,
+            ComponentType::Bytes => None,
+            ComponentType::Vector3F32 => Some(size_of::<f32>() * 3),
+            ComponentType::Vector3F64 => Some(size_of::<f64>() * 3),
+            ComponentType::Matrix3x3F32 => Some(size_of::<f32>() * 9),
+            ComponentType::Matrix3x3F64 => Some(size_of::<f64>() * 9),
+            ComponentType::QuaternionF32 => Some(size_of::<f32>() * 4),
+            ComponentType::QuaternionF64 => Some(size_of::<f64>() * 4),
+            ComponentType::SpatialPosF32 => Some(size_of::<f32>() * 7),
+            ComponentType::SpatialPosF64 => Some(size_of::<f64>() * 7),
+            ComponentType::SpatialMotionF32 => Some(size_of::<f32>() * 6),
+            ComponentType::SpatialMotionF64 => Some(size_of::<f64>() * 6),
+            ComponentType::Filter => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
