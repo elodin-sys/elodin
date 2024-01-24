@@ -142,8 +142,7 @@ mod tests {
         let client = nox::Client::cpu().unwrap();
         let mut exec = builder.build(&client).unwrap();
         exec.run().unwrap();
-        let x = exec.world.column::<X>().unwrap();
-        let lit = x.buffer.to_literal_sync().unwrap();
-        assert_eq!(lit.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
+        let col = exec.column(X::component_id()).unwrap();
+        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
     }
 }

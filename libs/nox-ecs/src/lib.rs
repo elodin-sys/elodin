@@ -1,9 +1,10 @@
-use elodin_conduit::{ComponentId, ComponentType, EntityId};
+use bytemuck::AnyBitPattern;
+use elodin_conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn, NoxprNode};
+use nox::{ArrayTy, Client, CompFn, ConstantExt, Noxpr, NoxprFn, NoxprNode};
 use std::any::TypeId;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
@@ -12,10 +13,12 @@ pub use elodin_conduit;
 pub use nox;
 
 mod component;
+mod conduit;
 mod integrator;
 mod query;
 
 pub use component::*;
+pub use conduit::*;
 pub use integrator::*;
 pub use query::*;
 
@@ -56,28 +59,32 @@ impl<S: WorldStore> World<S> {
         archetype.columns.get_mut(&C::component_id())
     }
 
-    pub fn column<C: Component + 'static>(&self) -> Option<&Column<S>> {
-        let Some(id) = self.component_map.get(&C::component_id()) else {
-            return None;
-        };
-        let archetype = self.archetypes.get(*id)?;
-        archetype.columns.get(&C::component_id())
+    pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, S>> {
+        self.column_by_id(C::component_id())
     }
 
-    pub fn column_by_id(&self, id: ComponentId) -> Option<&Column<S>> {
-        let Some(table_id) = self.component_map.get(&id) else {
-            return None;
-        };
+    pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, S>> {
+        let table_id = self.component_map.get(&id)?;
         let archetype = self.archetypes.get(*table_id)?;
-        archetype.columns.get(&id)
+        let column = archetype.columns.get(&id)?;
+        Some(ColumnRef {
+            column,
+            entities: &archetype.entity_buffer,
+            entity_map: &archetype.entity_map,
+        })
     }
 
-    pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<&mut Column<S>> {
+    pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<ColumnRefMut<'_, S>> {
         let Some(table_id) = self.component_map.get(&id) else {
             return None;
         };
         let archetype = self.archetypes.get_mut(*table_id)?;
-        archetype.columns.get_mut(&id)
+        let column = archetype.columns.get_mut(&id)?;
+        Some(ColumnRefMut {
+            column,
+            entities: &mut archetype.entity_buffer,
+            entity_map: &mut archetype.entity_map,
+        })
     }
 }
 
@@ -118,8 +125,18 @@ impl World<HostStore> {
         &mut self.archetypes[archetype_id]
     }
 
-    pub fn spawn<A: Archetype + 'static>(&mut self, archetype: A) {
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) {
+        self.spawn_with_id(archetype, EntityId::rand())
+    }
+
+    pub fn spawn_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
         let table = self.get_or_insert_archetype::<A>();
+        table
+            .entity_buffer
+            .push((table.entity_buffer.len() as u64).constant());
+        table
+            .entity_map
+            .insert(entity_id, table.entity_buffer.len());
         archetype.insert_into_table(table);
     }
 
@@ -153,6 +170,24 @@ impl World<HostStore> {
             archetype_id_map: self.archetype_id_map.clone(),
         })
     }
+
+    pub fn load_column_from_client(
+        &mut self,
+        id: ComponentId,
+        client_world: &World<ClientStore>,
+    ) -> Result<(), Error> {
+        let host_column = self.column_by_id_mut(id).ok_or(Error::ComponentNotFound)?;
+        let client_column = client_world
+            .column_by_id(id)
+            .ok_or(Error::ComponentNotFound)?;
+        let literal = client_column.column.buffer.to_literal_sync()?;
+        host_column
+            .column
+            .buffer
+            .buf
+            .copy_from_slice(literal.raw_buf());
+        Ok(())
+    }
 }
 
 pub trait WorldStore {
@@ -160,12 +195,20 @@ pub trait WorldStore {
     type EntityBuffer;
 }
 
+/// A dummy struct that implements WorldStore, for the client-side, i.e the gpu
+///
+/// Client is an overloaded term, but here it refers to a GPU, TPU, or CPU that will be running
+/// compiled XLA MLIR
 pub struct ClientStore;
 impl WorldStore for ClientStore {
     type Column = PjRtBuffer;
     type EntityBuffer = PjRtBuffer;
 }
 
+/// A dummy struct that implements WorldStore, for the host-side, i.e the cpu
+///
+/// Host here refers to the CPU that is calling the "client" (i.e a GPU / TPU). Not
+/// to be confused with a host over the network.
 pub struct HostStore;
 
 impl WorldStore for HostStore {
@@ -173,6 +216,7 @@ impl WorldStore for HostStore {
     type EntityBuffer = HostColumn;
 }
 
+/// A type erased columnar data store located on the host CPU
 pub struct HostColumn {
     buf: Vec<u8>,
     len: usize,
@@ -216,7 +260,74 @@ impl HostColumn {
             .copy_raw_host_buffer(self.component_type.element_type(), &self.buf, &dims[..])
             .map_err(Error::from)
     }
+
+    pub fn values_iter(&self) -> impl Iterator<Item = ComponentValue<'_>> + '_ {
+        let mut buf_offset = 0;
+        std::iter::from_fn(move || {
+            let buf = self.buf.get(buf_offset..)?;
+            let (offset, value) = self.component_type.parse(buf)?;
+            buf_offset += offset;
+            Some(value)
+        })
+    }
+
+    pub fn iter<T: elodin_conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
+        assert_eq!(self.component_type, T::component_type());
+        self.values_iter()
+            .filter_map(|v| T::from_component_value(v))
+    }
 }
+
+pub struct ColumnRef<'a, S: WorldStore = HostStore> {
+    pub column: &'a Column<S>,
+    pub entities: &'a S::EntityBuffer,
+    pub entity_map: &'a BTreeMap<EntityId, usize>,
+}
+
+impl ColumnRef<'_> {
+    pub fn iter(&self) -> impl Iterator<Item = (EntityId, ComponentValue<'_>)> {
+        self.entities
+            .iter::<u64>()
+            .map(EntityId)
+            .zip(self.column.buffer.values_iter())
+    }
+
+    pub fn typed_iter<T: elodin_conduit::Component>(
+        &self,
+    ) -> impl Iterator<Item = (EntityId, T)> + '_ {
+        self.entities
+            .iter::<u64>()
+            .map(EntityId)
+            .zip(self.column.buffer.iter())
+    }
+
+    pub fn typed_buf<T: AnyBitPattern>(&self) -> Option<&[T]> {
+        bytemuck::try_cast_slice(self.column.buffer.buf.as_slice()).ok()
+    }
+}
+
+pub struct ColumnRefMut<'a, S: WorldStore = HostStore> {
+    pub column: &'a mut Column<S>,
+    pub entities: &'a mut S::EntityBuffer,
+    pub entity_map: &'a mut BTreeMap<EntityId, usize>,
+}
+
+impl ColumnRefMut<'_, HostStore> {
+    pub fn entity_buf(&mut self, entity_id: EntityId) -> Option<&mut [u8]> {
+        let offset = self.entity_map.get(&entity_id)?;
+        let size = self.column.buffer.component_type.size()?;
+        let offset = *offset * size;
+        self.column.buffer.buf.get_mut(offset..offset + size)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (EntityId, ComponentValue<'_>)> {
+        self.entities
+            .iter::<u64>()
+            .map(EntityId)
+            .zip(self.column.buffer.values_iter())
+    }
+}
+
 pub trait Archetype {
     fn component_ids() -> Vec<ComponentId>;
     fn component_tys() -> Vec<ComponentType>;
@@ -235,6 +346,13 @@ impl<T: Component + 'static> Archetype for T {
 
     fn component_tys() -> Vec<ComponentType> {
         vec![T::component_type()]
+    }
+}
+
+impl Column<ClientStore> {
+    fn copy_from_host(&mut self, host: &Column<HostStore>, client: &Client) -> Result<(), Error> {
+        self.buffer = host.buffer.copy_to_client(client)?;
+        Ok(())
     }
 }
 
@@ -357,6 +475,13 @@ pub trait System<T, R> {
             b: other,
             phantom_data: PhantomData,
         }
+    }
+
+    fn world(self) -> WorldBuilder<T, R, Self>
+    where
+        Self: Sized,
+    {
+        WorldBuilder::from_pipeline(self)
     }
 }
 
@@ -481,6 +606,22 @@ where
         }
     }
 
+    pub fn from_pipeline(pipe: Sys) -> Self {
+        WorldBuilder {
+            world: World::default(),
+            pipe,
+            phantom_data: PhantomData,
+        }
+    }
+
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) {
+        self.world.spawn(archetype);
+    }
+
+    pub fn spawn_with_id(&mut self, archetype: impl Archetype + 'static, entity_id: EntityId) {
+        self.world.spawn_with_id(archetype, entity_id);
+    }
+
     pub fn build(self, client: &Client) -> Result<Exec, Error> {
         let mut builder = PipelineBuilder {
             vars: BTreeMap::default(),
@@ -513,10 +654,13 @@ where
         //     .filter_map(|id| world.column_by_id(*id).map(|c| c.buffer).clone())
         //     .collect::<Vec<_>>();
         Ok(Exec {
-            world,
+            client_world: world,
             arg_ids: builder.param_ids,
             ret_ids,
             exec,
+            host_world: builder.world,
+            loaded_components: HashSet::default(),
+            dirty_components: HashSet::default(),
         })
     }
 }
@@ -524,29 +668,76 @@ where
 pub struct Exec {
     arg_ids: Vec<ComponentId>,
     ret_ids: Vec<ComponentId>,
-    world: World<ClientStore>,
+    client_world: World<ClientStore>,
+    host_world: World,
+    loaded_components: HashSet<ComponentId>,
     exec: PjRtLoadedExecutable,
+    dirty_components: HashSet<ComponentId>,
 }
 
 impl Exec {
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self, client: &Client) -> Result<(), Error> {
+        self.clear_cache();
+        self.load_dirty_components(client)?;
         let mut buffers = BufferArgsRef::default().untuple_result(true);
         for id in &self.arg_ids {
             let col = self
-                .world
+                .client_world
                 .column_by_id(*id)
                 .ok_or(Error::ComponentNotFound)?;
-            buffers.push(&col.buffer);
+            buffers.push(&col.column.buffer);
         }
         let ret_bufs = self.exec.execute_buffers(buffers)?;
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.ret_ids.iter()) {
             let col = self
-                .world
+                .client_world
                 .column_by_id_mut(*comp_id)
                 .ok_or(Error::ComponentNotFound)?;
-            col.buffer = buf;
+            col.column.buffer = buf;
         }
         Ok(())
+    }
+
+    fn load_dirty_components(&mut self, client: &Client) -> Result<(), Error> {
+        for id in self.dirty_components.drain() {
+            let client_column = self
+                .client_world
+                .column_by_id_mut(id)
+                .ok_or(Error::ComponentNotFound)?;
+            let host_column = self
+                .host_world
+                .column_by_id_mut(id)
+                .ok_or(Error::ComponentNotFound)?;
+            client_column
+                .column
+                .copy_from_host(host_column.column, client)?;
+        }
+        Ok(())
+    }
+
+    pub fn column_mut(&mut self, component_id: ComponentId) -> Result<ColumnRefMut<'_>, Error> {
+        if !self.loaded_components.contains(&component_id) {
+            self.host_world
+                .load_column_from_client(component_id, &self.client_world)?;
+        }
+        self.dirty_components.insert(component_id);
+        self.host_world
+            .column_by_id_mut(component_id)
+            .ok_or(Error::ComponentNotFound)
+    }
+
+    pub fn column(&mut self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
+        if !self.loaded_components.contains(&component_id) {
+            self.host_world
+                .load_column_from_client(component_id, &self.client_world)?;
+        }
+        self.host_world
+            .column_by_id(component_id)
+            .ok_or(Error::ComponentNotFound)
+    }
+
+    fn clear_cache(&mut self) {
+        self.loaded_components.clear();
     }
 }
 
@@ -590,6 +781,10 @@ pub enum Error {
     Nox(#[from] nox::Error),
     #[error("component not found")]
     ComponentNotFound,
+    #[error("component value had wrong size")]
+    ValueSizeMismatch,
+    #[error("conduit error")]
+    Conduit(#[from] elodin_conduit::Error),
 }
 
 impl From<nox::xla::Error> for Error {
@@ -625,7 +820,7 @@ mod tests {
             a.map(|a: A, b: B| C(a.0 + b.0)).unwrap()
         }
 
-        let mut world = World::default();
+        let mut world = add_system.world();
         world.spawn(Body {
             a: A::host(1.0),
             b: B::host(2.0),
@@ -637,12 +832,11 @@ mod tests {
             b: B::host(2.0),
             c: C::host(-1.0),
         });
-        let builder = WorldBuilder::new(world, add_system);
         let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build(&client).unwrap();
+        let mut exec = world.build(&client).unwrap();
         exec.run().unwrap();
-        let c = exec.world.column::<C>().unwrap();
-        let lit = c.buffer.to_literal_sync().unwrap();
+        let c = exec.client_world.column::<C>().unwrap();
+        let lit = c.column.buffer.to_literal_sync().unwrap();
         assert_eq!(lit.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
     }
 }
