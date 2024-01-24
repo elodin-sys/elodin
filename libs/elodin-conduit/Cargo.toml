@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["bevy"]
+default = ["bevy", "rand"]
 tokio = ["dep:tokio", "tokio-util", "futures", "bytes"]
 bevy = ["dep:bevy", "flume", "ip_network_table-deps-treebitmap"]
 nox = ["dep:nox"]
+rand = ["fastrand"]
 
 [dependencies]
 nalgebra.version = "0.32"
@@ -45,7 +46,6 @@ ip_network_table-deps-treebitmap.optional = true
 # log
 tracing = "0.1"
 
-
 # hash
 ahash = "0.3.8"
 const-fnv1a-hash = "1.1.0"
@@ -56,3 +56,7 @@ thiserror = "1"
 # nox
 nox.path = "../nox"
 nox.optional = true
+
+# rand
+fastrand.version = "2"
+fastrand.optional = true

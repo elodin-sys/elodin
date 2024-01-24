@@ -11,7 +11,7 @@
       };
     };
     rust-overlay = {
-      url = "github:oxalica/rust-overlay/b7a041430733fccaa1ffc3724bb9454289d0f701";
+      url = "github:oxalica/rust-overlay/e36f66bb10b09f5189dc3b1706948eaeb9a1c555";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         flake-utils.follows = "flake-utils";
@@ -41,7 +41,7 @@
         config.allowUnfree = true;
       };
       rustPkgs = pkgs.rustBuilder.makePackageSet {
-        rustVersion = "1.73.0";
+        rustVersion = "1.75.0";
         packageFun = import ./Cargo.nix;
       };
     in rec {

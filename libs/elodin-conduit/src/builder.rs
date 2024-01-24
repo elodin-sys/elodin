@@ -1,6 +1,9 @@
-use std::{iter, marker::PhantomData};
+use std::{borrow::Borrow, iter, marker::PhantomData};
 
-use crate::{parser::varint_max, Component, ComponentData, ComponentValue, EntityId, Error};
+use crate::{
+    parser::varint_max, Component, ComponentData, ComponentId, ComponentType, ComponentValue,
+    EntityId, Error,
+};
 
 pub struct Builder<B> {
     buf: B,
@@ -26,36 +29,24 @@ impl<B: Extend> Builder<B> {
         let id = data.component_id;
         let entity_iter = data.storage.iter().map(|(id, _)| id);
         let value_iter = data.storage.iter().map(|(_, val)| val);
-
-        self.buf.extend_from_slice(&id.0.to_le_bytes())?;
-        self.buf.extend_from_slice(&[ty.into()])?;
         let entity_len = entity_iter.len();
         if entity_len != value_iter.len() {
             return Err(Error::EntityComponentLengthMismatch);
         }
-        let mut arr = [0; varint_max::<usize>()];
-        self.buf
-            .extend_from_slice(encode_varint_usize(entity_len, &mut arr))?;
-
-        for e in entity_iter {
-            self.buf.extend_from_slice(&e.0.to_le_bytes())?;
-        }
-
-        for value in value_iter {
-            value.encode(&mut self.buf)?;
-        }
+        ComponentBuilder::new(
+            (id, ty),
+            EntityIdEncoder(entity_iter),
+            ComponentValueEncoder(value_iter),
+        )
+        .encode(&mut self.buf)?;
         Ok(self)
     }
 
-    pub fn append_builder<
-        E: Iterator<Item = EntityId> + ExactSizeIterator,
-        V: Iterator<Item = C> + ExactSizeIterator,
-        C: Component,
-    >(
+    pub fn append_builder<C: Encodable, E: Encodable, V: Encodable>(
         &mut self,
-        builder: ComponentBuilder<E, V, C>,
+        builder: ComponentBuilder<C, E, V>,
     ) -> Result<&mut Self, Error> {
-        builder.write(&mut self.buf)?;
+        builder.encode(&mut self.buf)?;
         Ok(self)
     }
 
@@ -64,11 +55,11 @@ impl<B: Extend> Builder<B> {
         entity_iter: impl Iterator<Item = EntityId> + ExactSizeIterator,
         value_iter: impl Iterator<Item = C> + ExactSizeIterator,
     ) -> Result<&mut Self, Error> {
-        self.append_builder(ComponentBuilder {
-            _phantom_data: PhantomData,
-            entity_iter,
-            value_iter,
-        })
+        self.append_builder(ComponentBuilder::new(
+            ComponentIdEncoder::<C>::default(),
+            EntityIdEncoder(entity_iter),
+            ComponentEncoder::new(value_iter),
+        ))
     }
 
     pub fn append_component(
@@ -88,43 +79,6 @@ impl<B: Extend> Builder<B> {
     }
 }
 
-pub struct ComponentBuilder<E, V, C> {
-    _phantom_data: PhantomData<C>,
-    entity_iter: E,
-    value_iter: V,
-}
-
-impl<
-        E: Iterator<Item = EntityId> + ExactSizeIterator,
-        V: Iterator<Item = C> + ExactSizeIterator,
-        C: Component,
-    > ComponentBuilder<E, V, C>
-{
-    pub fn write(self, out: &mut impl Extend) -> Result<(), Error> {
-        let id = C::component_id();
-        let ty = C::component_type();
-        out.extend_from_slice(&id.0.to_le_bytes())?;
-        out.extend_from_slice(&[ty.into()])?;
-        let entity_len = self.entity_iter.len();
-        if entity_len != self.value_iter.len() {
-            return Err(Error::EntityComponentLengthMismatch);
-        }
-        let mut arr = [0; varint_max::<usize>()];
-        out.extend_from_slice(encode_varint_usize(entity_len, &mut arr))?;
-
-        for e in self.entity_iter {
-            out.extend_from_slice(&e.0.to_le_bytes())?;
-        }
-
-        for value in self.value_iter {
-            let value = value.component_value();
-            value.encode(out)?;
-        }
-
-        Ok(())
-    }
-}
-
 impl<'l> ComponentValue<'l> {
     pub fn encode(&self, out: &mut impl Extend) -> Result<(), Error> {
         match self {
@@ -139,6 +93,128 @@ impl<'l> ComponentValue<'l> {
             _ => {}
         };
         self.with_bytes(|bytes| out.extend_from_slice(bytes))
+    }
+}
+
+pub struct ComponentBuilder<C, E, V> {
+    component_encoder: C,
+    entity_id_encoder: E,
+    value_encoder: V,
+}
+
+impl<C: Encodable, E: Encodable, V: Encodable> ComponentBuilder<C, E, V> {
+    pub fn new(component_encoder: C, entity_id_encoder: E, value_encoder: V) -> Self {
+        Self {
+            component_encoder,
+            entity_id_encoder,
+            value_encoder,
+        }
+    }
+
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        self.component_encoder.encode(out)?;
+        self.entity_id_encoder.encode(out)?;
+        self.value_encoder.encode(out)?;
+        Ok(())
+    }
+}
+
+pub trait Encodable {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error>;
+}
+
+impl Encodable for (ComponentId, ComponentType) {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        let (id, ty) = self;
+        out.extend_from_slice(&id.0.to_le_bytes())?;
+        out.extend_from_slice(&[ty.into()])?;
+        Ok(())
+    }
+}
+
+pub struct ComponentIdEncoder<C>(PhantomData<C>);
+impl<C: Component> Default for ComponentIdEncoder<C> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<C: Component> Encodable for ComponentIdEncoder<C> {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        let id = C::component_id();
+        let ty = C::component_type();
+        (id, ty).encode(out)
+    }
+}
+
+pub struct ComponentValueEncoder<I>(I);
+
+impl<'a, V: Borrow<ComponentValue<'a>>, E: Iterator<Item = V>> Encodable
+    for ComponentValueEncoder<E>
+{
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        for value in self.0 {
+            value.borrow().encode(out)?;
+        }
+        Ok(())
+    }
+}
+
+pub struct EntityIdEncoder<I>(I);
+
+impl<I: Borrow<EntityId>, E: Iterator<Item = I> + ExactSizeIterator> Encodable
+    for EntityIdEncoder<E>
+{
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        let entity_len = self.0.len();
+        let mut arr = [0; varint_max::<usize>()];
+        out.extend_from_slice(encode_varint_usize(entity_len, &mut arr))?;
+
+        for e in self.0 {
+            let e = e.borrow();
+            out.extend_from_slice(&e.0.to_le_bytes())?;
+        }
+
+        Ok(())
+    }
+}
+
+pub struct ComponentEncoder<I, C> {
+    iter: I,
+    phantom_data: PhantomData<C>,
+}
+
+impl<I, C> ComponentEncoder<I, C> {
+    pub fn new(iter: I) -> Self {
+        Self {
+            iter,
+            phantom_data: PhantomData,
+        }
+    }
+}
+
+impl<C: Component, V: Iterator<Item = C> + ExactSizeIterator> Encodable for ComponentEncoder<V, C> {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        for value in self.iter {
+            let value = value.component_value();
+            value.encode(out)?;
+        }
+        Ok(())
+    }
+}
+
+impl Encodable for &'_ [u8] {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        out.extend_from_slice(self)
+    }
+}
+
+impl Encodable for (usize, &'_ [u8]) {
+    fn encode(self, out: &mut impl Extend) -> Result<(), Error> {
+        let (len, bytes) = self;
+        let mut arr = [0; varint_max::<usize>()];
+        out.extend_from_slice(encode_varint_usize(len, &mut arr))?;
+        out.extend_from_slice(bytes)
     }
 }
 

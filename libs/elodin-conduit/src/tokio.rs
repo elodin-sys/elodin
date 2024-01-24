@@ -47,13 +47,18 @@ where
     ) -> Result<(), Error> {
         let mut builder = Builder::new(BytesMut::with_capacity(26 + size_of::<C>()), time)?;
         builder.append_component(entity_id, component)?;
-        self.transport.send(builder.into_buf().freeze()).await?;
+        self.send_builder(builder).await?;
         Ok(())
     }
 
     pub async fn send_data(&mut self, time: u64, data: ComponentData<'_>) -> Result<(), Error> {
         let mut builder = Builder::new(BytesMut::default(), time)?;
         builder.append_data(data)?;
+        self.send_builder(builder).await?;
+        Ok(())
+    }
+
+    pub async fn send_builder(&mut self, builder: Builder<BytesMut>) -> Result<(), Error> {
         self.transport.send(builder.into_buf().freeze()).await?;
         Ok(())
     }
@@ -66,6 +71,15 @@ impl<T: Stream<Item = Result<BytesMut, std::io::Error>> + Unpin> Client<T> {
         };
         let mut parser = Parser::new(res?).ok_or(Error::ParsingError)?;
         parser.parse_data_msg().ok_or(Error::ParsingError).map(Some)
+    }
+
+    pub async fn recv_parser(&mut self) -> Result<Option<Parser<Bytes>>, Error> {
+        let Some(res) = self.transport.next().await else {
+            return Ok(None);
+        };
+        Parser::new(res?.freeze())
+            .ok_or(Error::ParsingError)
+            .map(Some)
     }
 
     pub fn pair_stream(self) -> impl Stream<Item = Result<ComponentPair<'static>, Error>> {
