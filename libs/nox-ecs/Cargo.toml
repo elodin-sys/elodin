@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+#
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio", "futures", "elodin-conduit/tokio"]
 
 [dependencies]
 nox.path = "../nox"
@@ -14,6 +18,8 @@ elodin-conduit.features = ["nox"]
 heapless = "0.8"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
+bytemuck.version = "1.14"
+bytemuck.features = ["derive"]
 
 # errors
 thiserror = "1"
@@ -23,5 +29,17 @@ paste = "1.0.14"
 
 # derive macro
 nox-ecs-macros.path = "../nox-ecs-macros"
+
+# conduit connections
+flume = "0.11"
+bytes.version = "1.5"
+
+# tokio conduit
+tokio.version = "1.34"
+tokio.features = ["full"]
+tokio.optional = true
+futures.version = "0.3.29"
+futures.optional = true
+
 
 [dev-dependencies]
