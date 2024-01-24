@@ -31,6 +31,7 @@
             doCheck = false;
             cargoExtraArgs = "--package=editor-web";
             CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+            CARGO_PROFILE = "wasm-release";
           };
           cargoArtifacts =
             craneLibWasm.buildDepsOnly args

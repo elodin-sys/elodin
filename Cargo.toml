@@ -24,3 +24,4 @@ inherits = "release"
 opt-level = "z"
 lto = "fat"
 codegen-units = 1
+strip = "debuginfo"
