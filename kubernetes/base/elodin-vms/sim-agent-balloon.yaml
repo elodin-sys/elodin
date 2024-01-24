@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sim-runner-balloon
+  name: sim-agent-balloon
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: sim-runner-balloon
+      app.kubernetes.io/name: sim-agent-balloon
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: sim-runner-balloon
+        app.kubernetes.io/name: sim-agent-balloon
     spec:
       runtimeClassName: gvisor
       priorityClassName: placeholder-priority
       terminationGracePeriodSeconds: 0
       containers:
-      - name: sim-runner-balloon
-        image: elodin-infra/elo-sim-runner:latest
+      - name: sim-agent-balloon
+        image: elodin-infra/elo-sim-agent:latest
         command: ["sleep"]
         args: ["infinity"]
         resources:

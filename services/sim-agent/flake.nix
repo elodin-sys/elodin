@@ -31,7 +31,7 @@
               version = "0.0.1";
               src = pkgs.nix-gitignore.gitignoreSource [] ../..;
               doCheck = false;
-              cargoExtraArgs = "--package=elodin-web-runner";
+              cargoExtraArgs = "--package=sim-agent";
               buildInputs = with pkgs;
                 [
                   systemdMinimal
@@ -62,7 +62,7 @@
             pkgs,
           }: let
             args = {
-              name = "elo-sim-runner";
+              name = "elo-sim-agent";
               contents = with pkgs; [
                 cacert
                 busybox
@@ -71,7 +71,7 @@
               tag = "latest";
               config = {
                 Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
-                Cmd = ["${bin}/bin/elodin-web-runner"];
+                Cmd = ["${bin}/bin/sim-agent"];
               };
             };
           in {
@@ -102,22 +102,22 @@
               };
         in rec {
           packages = {
-            elo-web-runner.default = build_rust pkgs;
-            elo-web-runner.aarch64 = build_rust aarch64_pkgs;
-            elo-web-runner.x86_64 = build_rust x86_64_pkgs;
+            elo-sim-agent.default = build_rust pkgs;
+            elo-sim-agent.aarch64 = build_rust aarch64_pkgs;
+            elo-sim-agent.x86_64 = build_rust x86_64_pkgs;
             docker =
               (build_docker {
                 inherit pkgs;
-                bin = packages.elo-web-runner.default;
+                bin = packages.elo-sim-agent.default;
               })
               // {
                 aarch64 = build_docker {
                   pkgs = aarch64_pkgs;
-                  bin = packages.elo-web-runner.aarch64;
+                  bin = packages.elo-sim-agent.aarch64;
                 };
                 x86_64 = build_docker {
                   pkgs = x86_64_pkgs;
-                  bin = packages.elo-web-runner.x86_64;
+                  bin = packages.elo-sim-agent.x86_64;
                 };
               };
           };

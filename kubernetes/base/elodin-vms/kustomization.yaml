@@ -6,6 +6,6 @@ resources:
 - cluster-roles.yaml
 - network-policy.yaml
 - placeholder-priority.yaml
-- sim-runner-balloon.yaml
+- sim-agent-balloon.yaml
 
 namespace: elodin-vms
