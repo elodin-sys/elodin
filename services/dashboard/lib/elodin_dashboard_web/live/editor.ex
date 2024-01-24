@@ -43,7 +43,8 @@ defmodule ElodinDashboardWeb.EditorLive do
            readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
          })
          |> assign(:errors, [])
-         |> assign(:share_link, "#{ElodinDashboardWeb.Endpoint.url()}/sandbox/#{id_string}")}
+         |> assign(:share_link, "#{ElodinDashboardWeb.Endpoint.url()}/sandbox/#{id_string}")
+         |> assign(:show_console, true)}
       else
         err -> err
       end
@@ -134,6 +135,10 @@ defmodule ElodinDashboardWeb.EditorLive do
     {:noreply, socket |> assign(:sandbox, Map.put(sandbox, :public, public))}
   end
 
+  def handle_event("toggle_console", %{"show_console" => show_console}, socket) do
+    {:noreply, socket |> assign(:show_console, show_console)}
+  end
+
   def render(assigns) do
     ~H"""
     <.navbar_layout current_user={@current_user}>
@@ -155,8 +160,13 @@ defmodule ElodinDashboardWeb.EditorLive do
 
       <div class="flex flex-col h-full">
         <div class="flex w-full h-full">
-          <div class="w-1/2 h-full">
-            <div style="height: calc(100% - 256px - 40px);" class="pt-3 bg-code">
+          <div class="flex flex-col w-1/2 h-full">
+            <div
+              class="pt-3 bg-code transition-all"
+              style={
+                if @show_console, do: "height: calc(100% - 20rem)", else: "height: calc(100% - 4rem)"
+              }
+            >
               <LiveMonacoEditor.code_editor
                 class="code-editor"
                 value={@sandbox.draft_code}
@@ -174,9 +184,28 @@ defmodule ElodinDashboardWeb.EditorLive do
                 }
               />
             </div>
+
+            <div class="flex flex-row justify-between h-16 p-4 shadow-lg bg-secondary-surface flex items-center">
+              <.button
+                type="outline"
+                class="flex gap-2 py-2"
+                phx-click={JS.push("toggle_console", value: %{show_console: !@show_console})}
+              >
+                <img
+                  src="/images/arrow-chevron-up.svg"
+                  class={if @show_console, do: "rotate-180", else: "rotate-0"}
+                />
+                <span class="leading-4">Console</span>
+              </.button>
+              <.button class="flex gap-2 py-2.5" phx-click={JS.push("update_code")}>
+                <img src="/images/lightning.svg" />
+                <span class="leading-3">Update Sim</span>
+              </.button>
+            </div>
+
             <EditorComponents.console
+              hide={!@show_console}
               logs={([@sandbox.status] ++ @errors) |> Enum.join("\n")}
-              update_click={JS.push("update_code")}
             />
           </div>
           <%= if @sandbox.status == :RUNNING do %>

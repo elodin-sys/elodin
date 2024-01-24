@@ -1,19 +1,13 @@
 defmodule ElodinDashboardWeb.EditorComponents do
   use Phoenix.Component
 
-  import ElodinDashboardWeb.CoreComponents
   import ElodinDashboardWeb.IconComponents
 
   def console(assigns) do
     ~H"""
-    <div class="w-full text-white overflow-auto h-[296px]">
-      <div class="h-[64px] p-2 shadow-lg bg-secondary-surface flex items-center">
-        <.button class="px-elo-xl" phx-click={@update_click}>Update Sim</.button>
-      </div>
-      <pre class="whitespace-pre-wrap overflow-auto h-64 bg-dark-matte p-2">
-      <%= @logs %>
-      </pre>
-    </div>
+    <pre class={"#{if @hide, do: "h-0 hidden", else: "h-64"} whitespace-pre-wrap overflow-auto text-white bg-dark-matte p-2"}>
+    <%= @logs %>
+    </pre>
     """
   end
 
