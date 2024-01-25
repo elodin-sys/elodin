@@ -23,7 +23,7 @@ def sim() -> SimBuilder:
             mass=1.0,
             mesh=Mesh.box(0.2, length, 0.2),
             material=Material.hex_color("#000"),
-            joint=Joint.revolute(np.array([0.0, 0.0, length / 2]), pos=to_rad(-95)),
+            joint=Joint.revolute(np.array([0.0, 0.0, length / 2]), pos=to_rad(-165)),
             parent=root,
             body_pos=np.array([0.0, -1 * length / 2.0, 0.0]),
         )
@@ -32,7 +32,7 @@ def sim() -> SimBuilder:
     builder.body(
         RigidBody(
             mass=1.0,
-            mesh=Mesh.box(0.2, length, 0.2),
+            mesh=Mesh.box(0.2, length, 0.18),
             material=Material.hex_color("#F00"),
             joint=Joint.revolute(
                 np.array([0.0, 0.0, length / 2]),
