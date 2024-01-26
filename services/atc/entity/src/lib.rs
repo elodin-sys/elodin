@@ -4,3 +4,5 @@ pub mod user;
 pub use user::Entity as User;
 pub mod vm;
 pub use vm::Entity as Vm;
+pub mod mc;
+pub use mc::Entity as MonteCarloRun;
