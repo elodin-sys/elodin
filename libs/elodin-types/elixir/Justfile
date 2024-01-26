@@ -1,2 +1,2 @@
 gen:
-    cd ../protobufs && protoc --elixir_out=plugins=grpc:../elixir/lib ./*.proto
+    cd ../protobufs && protoc --elixir_out=plugins=grpc:../elixir/lib ./*.proto --experimental_allow_proto3_optional
