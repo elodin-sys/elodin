@@ -16,6 +16,9 @@ service Api {
     rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
 
     rpc SandboxEvents(GetSandboxReq) returns (stream Sandbox);
+
+    // Monte Carlo
+    rpc CreateMonteCarloRun(CreateMonteCarloRunReq) returns (CreateMonteCarloRunResp);
 }
 
 message CurrentUserReq {}
@@ -94,5 +97,15 @@ message ListSandboxesResp {
 }
 
 message GetSandboxReq {
+    bytes id = 1;
+}
+
+message CreateMonteCarloRunReq {
+    string name = 1;
+    string artifact_dir_uri = 2;
+    uint32 samples = 3;
+}
+
+message CreateMonteCarloRunResp {
     bytes id = 1;
 }

@@ -6,12 +6,7 @@ use crate::{
     events::DbEvent,
 };
 use axum::routing::get;
-use elodin_types::api::{
-    api_server::{self, ApiServer},
-    BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp, CreateUserReq,
-    CreateUserResp, CurrentUserReq, CurrentUserResp, GetSandboxReq, ListSandboxesReq,
-    ListSandboxesResp, Sandbox, UpdateSandboxReq, UpdateSandboxResp,
-};
+use elodin_types::api::*;
 use futures::Stream;
 use jsonwebtoken::jwk::JwkSet;
 use redis::aio::MultiplexedConnection;
@@ -25,6 +20,7 @@ use tracing::info;
 
 use crate::config::ApiConfig;
 
+mod montecarlo;
 mod multiplex;
 mod sandbox;
 mod user;
@@ -84,8 +80,10 @@ impl Api {
                 db: self.db.clone(),
             });
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-        health_reporter.set_serving::<ApiServer<Api>>().await;
-        let svc = ApiServer::new(self);
+        health_reporter
+            .set_serving::<api_server::ApiServer<Api>>()
+            .await;
+        let svc = api_server::ApiServer::new(self);
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
             .build()?;
@@ -183,6 +181,13 @@ impl api_server::Api for Api {
         req: tonic::Request<GetSandboxReq>,
     ) -> Result<Response<Self::SandboxEventsStream>, Status> {
         current_user_route!(self, req, Self::sandbox_events)
+    }
+
+    async fn create_monte_carlo_run(
+        &self,
+        req: tonic::Request<CreateMonteCarloRunReq>,
+    ) -> Result<Response<CreateMonteCarloRunResp>, Status> {
+        current_user_route_txn!(self, req, Self::create_monte_carlo_run)
     }
 }
 

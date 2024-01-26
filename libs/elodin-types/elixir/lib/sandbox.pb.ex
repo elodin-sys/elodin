@@ -1,7 +1,7 @@
 defmodule Elodin.Types.Sandbox.Status do
   @moduledoc false
 
-  use Protobuf, enum: true, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+  use Protobuf, enum: true, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 
   field :Success, 0
   field :Error, 1
@@ -10,7 +10,7 @@ end
 defmodule Elodin.Types.Sandbox.UpdateCodeReq do
   @moduledoc false
 
-  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 
   field :code, 1, type: :string
 end
@@ -18,7 +18,7 @@ end
 defmodule Elodin.Types.Sandbox.UpdateCodeResp do
   @moduledoc false
 
-  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 
   field :status, 1, type: Elodin.Types.Sandbox.Status, enum: true
   field :errors, 2, repeated: true, type: :string
