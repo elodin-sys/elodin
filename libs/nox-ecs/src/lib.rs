@@ -1,7 +1,8 @@
 use bytemuck::AnyBitPattern;
 use elodin_conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, ConstantExt, Noxpr, NoxprFn, NoxprNode};
+use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn, NoxprNode};
+use smallvec::smallvec;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -51,12 +52,17 @@ impl<S: WorldStore> Default for World<S> {
 }
 
 impl<S: WorldStore> World<S> {
-    pub fn column_mut<C: Component + 'static>(&mut self) -> Option<&mut Column<S>> {
+    pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRefMut<'_, S>> {
         let Some(id) = self.component_map.get(&C::component_id()) else {
             return None;
         };
         let archetype = self.archetypes.get_mut(*id)?;
-        archetype.columns.get_mut(&C::component_id())
+        let column = archetype.columns.get_mut(&C::component_id())?;
+        Some(ColumnRefMut {
+            column,
+            entities: &mut archetype.entity_buffer,
+            entity_map: &mut archetype.entity_map,
+        })
     }
 
     pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, S>> {
@@ -125,18 +131,21 @@ impl World<HostStore> {
         &mut self.archetypes[archetype_id]
     }
 
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) {
-        self.spawn_with_id(archetype, EntityId::rand())
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
+        let entity_id = EntityId::rand();
+        self.spawn_with_id(archetype, entity_id);
+        entity_id
     }
 
     pub fn spawn_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
+        use nox::ScalarExt;
         let table = self.get_or_insert_archetype::<A>();
-        table
-            .entity_buffer
-            .push((table.entity_buffer.len() as u64).constant());
         table
             .entity_map
             .insert(entity_id, table.entity_buffer.len());
+        table
+            .entity_buffer
+            .push((table.entity_buffer.len() as u64).constant());
         archetype.insert_into_table(table);
     }
 
@@ -356,12 +365,22 @@ impl Column<ClientStore> {
     }
 }
 
-#[derive(Clone)]
 pub struct ComponentArray<T> {
     buffer: Noxpr,
-    view_ty: ViewTy,
     len: usize,
+    entity_map: BTreeMap<EntityId, usize>,
     phantom_data: PhantomData<T>,
+}
+
+impl<T> Clone for ComponentArray<T> {
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+            len: self.len,
+            entity_map: self.entity_map.clone(),
+            phantom_data: PhantomData,
+        }
+    }
 }
 
 impl ComponentArray<()> {
@@ -370,8 +389,8 @@ impl ComponentArray<()> {
     fn cast<D: Component>(self) -> ComponentArray<D> {
         ComponentArray {
             buffer: self.buffer,
-            view_ty: self.view_ty,
             phantom_data: PhantomData,
+            entity_map: self.entity_map,
             len: self.len,
         }
     }
@@ -381,17 +400,11 @@ impl<T: Component> ComponentArray<T> {
     fn erase_ty(self) -> ComponentArray<()> {
         ComponentArray {
             buffer: self.buffer,
-            view_ty: self.view_ty,
             phantom_data: PhantomData,
             len: self.len,
+            entity_map: self.entity_map,
         }
     }
-}
-
-#[derive(Clone)]
-pub enum ViewTy {
-    Slice { entities: Noxpr },
-    Full,
 }
 
 impl<T: Component + 'static> SystemParam for ComponentArray<T> {
@@ -406,7 +419,7 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
             .world
             .column_mut::<T>()
             .ok_or(Error::ComponentNotFound)?;
-        let len = column.buffer.len();
+        let len = column.column.buffer.len();
         let shape = std::iter::once(len as i64)
             .chain(T::component_type().dims().iter().copied())
             .collect();
@@ -426,9 +439,9 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
         builder.param_ids.push(id);
         let array = ComponentArray {
             buffer: op,
-            view_ty: ViewTy::Full,
             phantom_data: PhantomData,
             len,
+            entity_map: column.entity_map.clone(),
         };
         builder.vars.insert(id, array.into());
         Ok(())
@@ -439,6 +452,36 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
     }
 
     fn insert_into_builder(self, builder: &mut PipelineBuilder) {
+        use nox::NoxprScalarExt;
+        if let Some(var) = builder.vars.get_mut(&T::component_id()) {
+            let mut var = var.borrow_mut();
+            if var.entity_map != self.entity_map {
+                let (old, new, _) = intersect_ids(&var.entity_map, &self.entity_map);
+                let shape = self.buffer.shape().unwrap();
+                let updated_buffer = old.iter().zip(new.iter()).fold(
+                    var.buffer.clone(),
+                    |buffer, (existing_index, update_index)| {
+                        let mut start = shape.clone();
+                        start[0] = *update_index as i64;
+                        for x in start.iter_mut().skip(1) {
+                            *x = 0;
+                        }
+                        let mut stop = shape.clone();
+                        stop[0] = *update_index as i64 + 1;
+                        buffer.dynamic_update_slice(
+                            vec![(*existing_index).constant()],
+                            self.buffer.clone().slice(
+                                smallvec![*update_index as i64],
+                                stop,
+                                shape.iter().map(|_| 1).collect(),
+                            ),
+                        )
+                    },
+                );
+                var.buffer = updated_buffer;
+                return;
+            }
+        }
         builder
             .vars
             .insert(T::component_id(), self.erase_ty().into());
@@ -614,8 +657,8 @@ where
         }
     }
 
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) {
-        self.world.spawn(archetype);
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
+        self.world.spawn(archetype)
     }
 
     pub fn spawn_with_id(&mut self, archetype: impl Archetype + 'static, entity_id: EntityId) {
@@ -750,9 +793,9 @@ impl<C: Component> ComponentArray<C> {
         let buffer = Noxpr::vmap_with_axis(func, &[0], std::slice::from_ref(&self.buffer))?;
         Ok(ComponentArray {
             buffer,
-            view_ty: self.view_ty.clone(),
             len: self.len,
             phantom_data: PhantomData,
+            entity_map: self.entity_map.clone(),
         })
     }
 }
@@ -834,7 +877,7 @@ mod tests {
         });
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build(&client).unwrap();
-        exec.run().unwrap();
+        exec.run(&client).unwrap();
         let c = exec.client_world.column::<C>().unwrap();
         let lit = c.column.buffer.to_literal_sync().unwrap();
         assert_eq!(lit.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
