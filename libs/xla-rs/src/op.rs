@@ -930,6 +930,22 @@ impl XlaOp {
         self.wrap(raw)
     }
 
+    pub fn dynamic_update_slice(&self, update: &XlaOp, start_indicies: &[XlaOpRef<'_>]) -> Self {
+        let op = &self.raw;
+        let start_indices_ptr = start_indicies.as_ptr();
+        let start_indices_len = start_indicies.len();
+        let raw = unsafe {
+            cpp!([op as "const XlaOp*", update as "const XlaOp*", start_indices_ptr as "const XlaOp*", start_indices_len as "size_t"] -> XlaOpRaw as "XlaOp" {
+                try {
+                    return XlaOp(DynamicUpdateSlice(*op, *update, absl::Span(start_indices_ptr, start_indices_len)));
+                }catch(std::exception& e) {
+                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                }
+            })
+        };
+        self.wrap(raw)
+    }
+
     pub fn get_tuple_element(&self, index: i64) -> Self {
         let op = &self.raw;
         let raw = unsafe {
