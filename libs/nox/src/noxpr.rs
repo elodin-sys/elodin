@@ -7,7 +7,7 @@ use std::{
 
 use itertools::Itertools;
 use smallvec::{smallvec, SmallVec};
-use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaOp};
+use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaOp, XlaOpRef};
 
 use crate::{
     CompFn, DefaultMap, DefaultMappedDim, Error, IntoOp, MapDim, Tensor, TensorDim, TensorItem,
@@ -44,13 +44,16 @@ pub enum NoxprNode {
     Concat(Concat),
 
     // Reshape
-    Slice(Slice),
-    DynamicSlice(DynamicSlice),
     Reshape(Reshape),
     Broadcast(Broadcast),
     BroadcastInDim(BroadcastInDim),
     Transpose(Transpose),
+
+    // Slice
     Gather(Gather),
+    Slice(Slice),
+    DynamicSlice(DynamicSlice),
+    DynamicUpdateSlice(DynamicUpdateSlice),
 }
 
 pub struct Constant {
@@ -267,6 +270,13 @@ pub struct Gather {
     index_vector_dim: i64,
 }
 
+#[derive(Debug)]
+pub struct DynamicUpdateSlice {
+    expr: Noxpr,
+    start_indicies: Vec<Noxpr>,
+    update: Noxpr,
+}
+
 #[derive(Debug, Clone)]
 pub struct Noxpr {
     pub node: Arc<NoxprNode>,
@@ -472,44 +482,41 @@ impl Noxpr {
                 Some(new_shape)
             }
             NoxprNode::Gather(gather) => {
-                let inner_shape = gather.expr.shape()?;
                 let indices_shape = gather.indices.shape()?;
-                let adjusted_slice_sizes: SmallVec<[i64; 4]> = gather
+                let output_rank = gather.offset_dims.len() + indices_shape.len() - 1;
+                let index_vector_dim = indices_shape.len() - 1;
+                let mut expanded_indices_shape = indices_shape.clone();
+                expanded_indices_shape.remove(index_vector_dim);
+                let mut expanded_indices_shape_iter = expanded_indices_shape.iter().copied();
+                let mut adjusted_slice_sizes = gather
                     .slice_sizes
                     .iter()
                     .enumerate()
                     .filter(|(i, _)| !gather.collapsed_slice_dims.contains(&(*i as i64)))
-                    .map(|(_, x)| *x)
-                    .collect();
-                let batch_dims: SmallVec<[i64; 4]> = inner_shape
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| !gather.offset_dims.contains(&(*i as i64)))
-                    .map(|(_, x)| *x)
-                    .collect();
-                let output_rank = batch_dims.len() + gather.offset_dims.len();
-                (0..output_rank)
-                    .map(|i| {
-                        if let Some((k, _)) =
-                            batch_dims.iter().enumerate().find(|(_, x)| **x == i as i64)
-                        {
-                            indices_shape.get(k)
-                        } else if let Some((k, _)) = gather
-                            .offset_dims
-                            .iter()
-                            .enumerate()
-                            .find(|(_, x)| **x == i as i64)
-                        {
-                            adjusted_slice_sizes.get(k)
-                        } else {
-                            None
-                        }
-                    })
-                    .map(|r| r.copied())
-                    .collect::<Option<_>>()
+                    .map(|(_, x)| *x);
+                Some(
+                    (0..output_rank)
+                        .filter_map(|i| {
+                            if gather.offset_dims.contains(&(i as i64)) {
+                                adjusted_slice_sizes.next()
+                            } else {
+                                expanded_indices_shape_iter.next()
+                            }
+                        })
+                        .collect(),
+                )
             }
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
+            NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
         }
+    }
+
+    pub fn dynamic_update_slice(&self, start_indicies: Vec<Noxpr>, update: Noxpr) -> Noxpr {
+        Noxpr::new(NoxprNode::DynamicUpdateSlice(DynamicUpdateSlice {
+            expr: self.clone(),
+            start_indicies,
+            update,
+        }))
     }
 
     pub fn id(&self) -> NoxprId {
@@ -694,6 +701,20 @@ impl XlaTracer {
             NoxprNode::Iota(i) => {
                 self.builder
                     .iota(&i.shape.shape, i.shape.element_type, i.dim as i64)
+            }
+            NoxprNode::DynamicUpdateSlice(d) => {
+                let inner = self.visit(&d.expr)?;
+                let update = self.visit(&d.update)?;
+                let start = d
+                    .start_indicies
+                    .iter()
+                    .map(|expr| self.visit(expr))
+                    .collect::<Result<Vec<_>, Error>>()?;
+                let start = start
+                    .iter()
+                    .map(|op| op.as_ref())
+                    .collect::<SmallVec<[XlaOpRef<'_>; 4]>>();
+                inner.dynamic_update_slice(&update, &start)
             }
         };
         self.cache.insert(id, op.clone());
@@ -1170,6 +1191,10 @@ impl BatchTracer {
             }
             .move_batch_axis(self.out_axis.clone())
             .ok_or(Error::UnbatchableArgument)?,
+            NoxprNode::DynamicUpdateSlice(_) => {
+                // TODO: dynamic update slice is a special case of scatter, add this when we add scatter
+                todo!()
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)

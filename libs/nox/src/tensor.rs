@@ -682,15 +682,17 @@ where
         let indices = self
             .inner
             .broadcast_in_dim(smallvec![N as i64, 1], smallvec![0]);
-        dbg!(indices.shape());
+        let slice_shape = SmallVec::from_slice(
+            ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::dims().as_ref(),
+        );
+
+        let offset_dims = (1..slice_shape.len() as i64).collect();
         let inner = tensor.inner.gather(
             indices,
-            smallvec![1],
+            offset_dims,
             smallvec![0],
             smallvec![0],
-            SmallVec::from_slice(
-                ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::dims().as_ref(),
-            ),
+            slice_shape,
             1,
         );
         Tensor {
