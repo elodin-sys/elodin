@@ -1,0 +1,13 @@
+[package]
+name = "redmq"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+redis = { version = "0.23", features = ["streams", "aio", "tokio-comp"] }
+redis-derive = "0.1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.34", features = ["rt", "net", "macros"] }
+tracing-subscriber = "0.3"
