@@ -17,6 +17,7 @@ members = [
     "services/atc/entity",
     "services/sim-agent",
     "tools/starlark-json",
+    "libs/redmq",
 ]
 
 [profile.wasm-release]
