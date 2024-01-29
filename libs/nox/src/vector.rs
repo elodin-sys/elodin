@@ -1,5 +1,5 @@
-use crate::{ArrayTy, FixedSliceExt};
-use nalgebra::{ArrayStorage, ClosedMul, ClosedSub, Const, RealField, Scalar as NalgebraScalar};
+use crate::{ArrayTy, Field, FixedSliceExt};
+use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
 use num_traits::Zero;
 use smallvec::smallvec;
 use std::marker::PhantomData;
@@ -38,7 +38,7 @@ where
 
 impl<T, const R: usize> FromHost for Vector<T, R, Buffer>
 where
-    T: NativeType + NalgebraScalar + ArrayElement,
+    T: NativeType + Field + ArrayElement,
 {
     type HostTy = nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>;
 
@@ -54,7 +54,7 @@ where
 impl<T, const R: usize> BufferArg<Vector<T, R, Buffer>>
     for nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>
 where
-    T: NativeType + NalgebraScalar + ArrayElement,
+    T: NativeType + Field + ArrayElement,
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client.0.copy_host_buffer(self.as_slice(), &[R]).unwrap();
@@ -97,7 +97,7 @@ impl<T, const R: usize> Vector<T, R, Op> {
     }
 }
 
-impl<T: ClosedMul + RealField + nalgebra::Scalar + ClosedSub> Vector<T, 3, Op> {
+impl<T: Field> Vector<T, 3, Op> {
     pub fn cross(&self, other: &Self) -> Self {
         let [ax, ay, az] = self.parts();
         let [bx, by, bz] = other.parts();

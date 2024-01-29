@@ -1,8 +1,5 @@
-use crate::{AsBuffer, Buffer, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector};
-use nalgebra::{
-    constraint::ShapeConstraint, ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, Const,
-    Scalar as NalgebraScalar,
-};
+use crate::{AsBuffer, Buffer, Field, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector};
+use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Scalar as NalgebraScalar};
 use simba::scalar::ClosedNeg;
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -323,12 +320,12 @@ macro_rules! impl_op {
     };
 }
 
-impl_op! {Add, add, DimAdd, +, ClosedAdd, NalgebraScalar}
-impl_op! {Mul, mul, DimMul, *, ClosedMul, NalgebraScalar}
-impl_op! {Div, div, DimDiv, /, ClosedDiv, NalgebraScalar}
-impl_op! {Sub, sub, DimSub, -, ClosedSub, NalgebraScalar}
+impl_op! {Add, add, DimAdd, +, Field}
+impl_op! {Mul, mul, DimMul, *, Field}
+impl_op! {Div, div, DimDiv, /, Field}
+impl_op! {Sub, sub, DimSub, -, Field}
 
-impl<T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for Tensor<T, D> {
+impl<T: Field, D: TensorDim> Neg for Tensor<T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {

@@ -12,4 +12,8 @@ pub enum Error {
     VmapArgsEmpty,
     #[error("vmap requires in axis length to equal arguments length")]
     VmapInAxisMismatch,
+    #[error("this jaxpr has an incompatible dtype")]
+    IncompatibleDType,
+    #[error("pyo3 error {0}")]
+    PyO3(#[from] pyo3::PyErr),
 }

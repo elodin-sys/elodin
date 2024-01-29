@@ -5,6 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["jax"]
+jax = ["pyo3", "numpy", "bytemuck"]
+
 [dependencies]
 nalgebra = "0.32"
 num-traits = "0.2.15"
@@ -19,6 +23,14 @@ seq-macro = "0.3.5"
 
 # xla-rs - a wrapper around raw xla
 xla.path = "../xla-rs"
+
+# jax
+pyo3.version = "0.20.0"
+pyo3.optional = true
+numpy.version = "0.20.0"
+numpy.optional = true
+bytemuck.version = "1.14"
+bytemuck.optional = true
 
 
 [dev-dependencies]
