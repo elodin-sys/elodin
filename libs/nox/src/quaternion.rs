@@ -1,13 +1,12 @@
 use std::ops::Mul;
 
-use nalgebra::{ClosedDiv, RealField, Scalar as NalgebraScalar};
+use nalgebra::{RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
-use simba::scalar::ClosedNeg;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, FixedSliceExt, FromBuilder, FromHost,
-    FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
+    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FixedSliceExt, FromBuilder,
+    FromHost, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
@@ -30,7 +29,7 @@ impl<T: NativeType + ArrayElement + nalgebra::RealField> Quaternion<T> {
     }
 }
 
-impl<T: NalgebraScalar + ClosedNeg> Quaternion<T> {
+impl<T: Field> Quaternion<T> {
     fn parts(&self) -> [Vector<T, 1>; 4] {
         let Quaternion(v) = self;
         v.parts()
@@ -42,14 +41,14 @@ impl<T: NalgebraScalar + ClosedNeg> Quaternion<T> {
     }
 }
 
-impl<T: NalgebraScalar + ClosedDiv + ClosedNeg> Quaternion<T> {
+impl<T: Field> Quaternion<T> {
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
 }
 
-impl<T: RealField> Mul for Quaternion<T> {
+impl<T: Field> Mul for Quaternion<T> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -64,11 +63,12 @@ impl<T: RealField> Mul for Quaternion<T> {
     }
 }
 
-impl<T: NativeType + ArrayElement + RealField> Mul<Vector<T, 3>> for Quaternion<T> {
+impl<T: Field> Mul<Vector<T, 3>> for Quaternion<T> {
     type Output = Vector<T, 3>;
 
     fn mul(self, rhs: Vector<T, 3>) -> Self::Output {
-        let v = Quaternion(rhs.extend(T::zero()));
+        let zero: Vector<T, 1> = T::zero().reshape();
+        let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
         (self * v * inv).0.fixed_slice([0])
     }
@@ -96,7 +96,7 @@ impl<T: xla::ArrayElement + NativeType> FromBuilder for Quaternion<T, Op> {
 
 impl<T> FromHost for Quaternion<T, Buffer>
 where
-    T: NativeType + NalgebraScalar + ArrayElement,
+    T: NativeType + Field + NalgebraScalar + ArrayElement,
 {
     type HostTy = nalgebra::Quaternion<T>;
 
