@@ -11,6 +11,7 @@ pub struct Config {
     pub redis_url: String,
     pub migrate: bool,
     pub garbage_collect: Option<GarbageCollect>,
+    pub pod_name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

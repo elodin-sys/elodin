@@ -1,4 +1,4 @@
-use crate::{api, error};
+use crate::{api, error, montecarlo};
 
 use elodin_types::api::*;
 use sea_orm::prelude::*;
@@ -10,8 +10,7 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<CreateMonteCarloRunResp, error::Error> {
-        // # of samples must be a multiple of 100 for easy math
-        if (req.samples % 100 != 0) || (req.samples > 100_000) {
+        if req.samples > montecarlo::MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
         }
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
@@ -28,6 +27,20 @@ impl api::Api {
         }
         .insert(txn)
         .await?;
+
+        let run = montecarlo::Run {
+            id: redmq::StringAdapter(mc_run.id),
+            name: mc_run.manifest.name,
+            samples: mc_run.samples as usize,
+            batch_size: montecarlo::BATCH_SIZE,
+            artifact_dir_uri: mc_run.manifest.artifact_dir_uri,
+            start_time: redmq::StringAdapter(chrono::Utc::now()),
+        };
+
+        self.msg_queue
+            .send(montecarlo::RUN_TOPIC, vec![run])
+            .await?;
+
         Ok(CreateMonteCarloRunResp {
             id: mc_run.id.as_bytes().to_vec(),
         })

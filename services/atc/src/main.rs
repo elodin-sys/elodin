@@ -11,6 +11,7 @@ mod api;
 mod config;
 mod error;
 mod events;
+mod montecarlo;
 mod orca;
 mod sandbox;
 
@@ -42,8 +43,9 @@ async fn main() -> anyhow::Result<()> {
             let redis = redis.into_pubsub();
             services.push(sandbox_monitor.run(redis))
         };
+        let msg_queue = redmq::MsgQueue::new(&redis, "atc", config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
-        let api = Api::new(api_config, db.clone(), redis, sandbox_events).await?;
+        let api = Api::new(api_config, db.clone(), redis, msg_queue, sandbox_events).await?;
         services.push(tokio::spawn(api.run()));
     }
 
