@@ -15,6 +15,10 @@ spec:
         imagePullPolicy: Always
         image: elodin-infra/elo-atc:latest
         env:
+        - name: ELODIN_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         - name: ELODIN_ORCA.RUNTIME_CLASS
           value: gvisor
         - name: RUST_LOG

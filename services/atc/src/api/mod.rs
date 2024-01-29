@@ -32,6 +32,7 @@ pub struct Api {
     db: DatabaseConnection,
     auth_context: AuthContext,
     redis: MultiplexedConnection,
+    msg_queue: redmq::MsgQueue,
     sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
 }
 
@@ -52,6 +53,7 @@ impl Api {
         config: ApiConfig,
         db: DatabaseConnection,
         redis: MultiplexedConnection,
+        msg_queue: redmq::MsgQueue,
         sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
@@ -63,6 +65,7 @@ impl Api {
             address: config.address,
             db,
             redis,
+            msg_queue,
             auth_context,
             sandbox_events,
         })
