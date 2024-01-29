@@ -54,6 +54,9 @@ pub enum NoxprNode {
     Slice(Slice),
     DynamicSlice(DynamicSlice),
     DynamicUpdateSlice(DynamicUpdateSlice),
+
+    #[cfg(feature = "jax")]
+    Jax(pyo3::PyObject),
 }
 
 pub struct Constant {
@@ -90,8 +93,8 @@ impl ArrayTy {
 
 #[derive(Debug, Clone)]
 pub struct Iota {
-    shape: ArrayTy,
-    dim: usize,
+    pub shape: ArrayTy,
+    pub dim: usize,
 }
 
 #[derive(Debug)]
@@ -221,60 +224,60 @@ pub struct Concat {
 
 #[derive(Debug)]
 pub struct Slice {
-    expr: Noxpr,
-    start_indices: SmallVec<[i64; 4]>,
-    stop_indices: SmallVec<[i64; 4]>,
-    strides: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub start_indices: SmallVec<[i64; 4]>,
+    pub stop_indices: SmallVec<[i64; 4]>,
+    pub strides: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct DynamicSlice {
-    expr: Noxpr,
-    start_indices: Vec<Noxpr>,
-    size_indices: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub start_indices: Vec<Noxpr>,
+    pub size_indices: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct Reshape {
-    expr: Noxpr,
-    new_sizes: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub new_sizes: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct Broadcast {
-    expr: Noxpr,
-    sizes: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub sizes: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct BroadcastInDim {
-    expr: Noxpr,
-    sizes: SmallVec<[i64; 4]>,
-    broadcast_dims: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub sizes: SmallVec<[i64; 4]>,
+    pub broadcast_dims: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct Transpose {
-    expr: Noxpr,
-    permutation: SmallVec<[i64; 4]>,
+    pub expr: Noxpr,
+    pub permutation: SmallVec<[i64; 4]>,
 }
 
 #[derive(Debug)]
 pub struct Gather {
-    expr: Noxpr,
-    indices: Noxpr,
-    offset_dims: SmallVec<[i64; 4]>,
-    collapsed_slice_dims: SmallVec<[i64; 4]>,
-    start_index_map: SmallVec<[i64; 4]>,
-    slice_sizes: SmallVec<[i64; 4]>,
-    index_vector_dim: i64,
+    pub expr: Noxpr,
+    pub indices: Noxpr,
+    pub offset_dims: SmallVec<[i64; 4]>,
+    pub collapsed_slice_dims: SmallVec<[i64; 4]>,
+    pub start_index_map: SmallVec<[i64; 4]>,
+    pub slice_sizes: SmallVec<[i64; 4]>,
+    pub index_vector_dim: i64,
 }
 
 #[derive(Debug)]
 pub struct DynamicUpdateSlice {
-    expr: Noxpr,
-    start_indicies: Vec<Noxpr>,
-    update: Noxpr,
+    pub expr: Noxpr,
+    pub start_indicies: Vec<Noxpr>,
+    pub update: Noxpr,
 }
 
 #[derive(Debug, Clone)]
@@ -508,6 +511,14 @@ impl Noxpr {
             }
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
             NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
+            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+                let shape = o
+                    .call_method0(py, "shape")
+                    .ok()?
+                    .extract::<Vec<i64>>(py)
+                    .ok()?;
+                Some(SmallVec::from_vec(shape))
+            }),
         }
     }
 
@@ -517,6 +528,11 @@ impl Noxpr {
             start_indicies,
             update,
         }))
+    }
+
+    #[cfg(feature = "jax")]
+    pub fn jax(py: pyo3::PyObject) -> Noxpr {
+        Noxpr::new(NoxprNode::Jax(py))
     }
 
     pub fn id(&self) -> NoxprId {
@@ -715,6 +731,9 @@ impl XlaTracer {
                     .map(|op| op.as_ref())
                     .collect::<SmallVec<[XlaOpRef<'_>; 4]>>();
                 inner.dynamic_update_slice(&update, &start)
+            }
+            NoxprNode::Jax(_) => {
+                unimplemented!()
             }
         };
         self.cache.insert(id, op.clone());
@@ -1194,6 +1213,9 @@ impl BatchTracer {
             NoxprNode::DynamicUpdateSlice(_) => {
                 // TODO: dynamic update slice is a special case of scatter, add this when we add scatter
                 todo!()
+            }
+            NoxprNode::Jax(_) => {
+                unimplemented!()
             }
         };
         self.cache.insert(id, op.clone());

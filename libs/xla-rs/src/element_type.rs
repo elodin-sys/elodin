@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::error::{Error, Result};
 use num_derive::FromPrimitive;
 
@@ -75,6 +77,31 @@ pub enum ElementType {
     F64,
     C64,
     C128,
+}
+
+impl FromStr for ElementType {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "bool" => Ok(Self::Pred),
+            "int8" => Ok(Self::S8),
+            "int16" => Ok(Self::S16),
+            "int32" => Ok(Self::S32),
+            "int64" => Ok(Self::S64),
+            "uint8" => Ok(Self::U8),
+            "uint16" => Ok(Self::U16),
+            "uint32" => Ok(Self::U32),
+            "uint64" => Ok(Self::U64),
+            "float16" => Ok(Self::F16),
+            "float32" => Ok(Self::F32),
+            "bf16" => Ok(Self::Bf16),
+            "float64" => Ok(Self::F64),
+            "complex64" => Ok(Self::C64),
+            "complex128" => Ok(Self::C128),
+            _ => Err(()),
+        }
+    }
 }
 
 impl ElementType {
