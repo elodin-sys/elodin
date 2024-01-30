@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - ../../base/
+- ../../modules/elo-docs/
 
 patches:
 - target:
@@ -12,6 +13,19 @@ patches:
     - op: replace
       path: /spec/rules/0/host
       value: $CLUSTER_NAME.elodin.dev
+    - op: add
+      path: /spec/rules/1
+      value:
+        host: $CLUSTER_NAME-docs.elodin.dev
+        http:
+          paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: elo-docs
+                port: 
+                  number: 80
 - target:
     namespace: elodin-app
   patch: |-
@@ -76,4 +90,7 @@ images:
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-sim-agent
   newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
+  newTag: $BUILDKITE_COMMIT
+- name: elodin-infra/elo-docs
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-docs/x86_64
   newTag: $BUILDKITE_COMMIT

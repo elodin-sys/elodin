@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - ../../base/
+- ../../modules/elo-docs/
 
 patches:
 - target:
@@ -12,6 +13,19 @@ patches:
     - op: replace
       path: /spec/rules/0/host
       value: app.elodin.dev
+    - op: add
+      path: /spec/rules/1
+      value:
+        host: docs.elodin.dev
+        http:
+          paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: elo-docs
+                port: 
+                  number: 80
 - target:
     namespace: elodin-app
   patch: |-

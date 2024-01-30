@@ -4,7 +4,6 @@ metadata:
   annotations:
   name: elo-atc
 spec:
-  type: NodePort
   ports:
   - name: grpc
     port: 50051
