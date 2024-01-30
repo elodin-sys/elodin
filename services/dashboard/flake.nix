@@ -3,7 +3,6 @@
     elodin.url = "path:../../.";
     nixpkgs.follows = "elodin/nixpkgs";
     flake-utils.follows = "elodin/flake-utils";
-    nix2container.follows = "elodin/nix2container";
     get-flake.follows = "elodin/get-flake";
   };
 

@@ -5,7 +5,6 @@
     cargo2nix.follows = "elodin/cargo2nix";
     rust-overlay.follows = "elodin/rust-overlay";
     flake-utils.follows = "elodin/flake-utils";
-    nix2container.follows = "elodin/nix2container";
   };
 
   outputs = inputs:

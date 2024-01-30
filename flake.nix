@@ -3,13 +3,6 @@
     nixpkgs.url = "github:NixOS/nixpkgs/aba830385baac22d06a22085f5b5baeb88c88b46";
     flake-utils.url = "github:numtide/flake-utils";
     get-flake.url = "github:ursi/get-flake";
-    nix2container = {
-      url = "github:nlewo/nix2container";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
-    };
     rust-overlay = {
       url = "github:oxalica/rust-overlay/e36f66bb10b09f5189dc3b1706948eaeb9a1c555";
       inputs = {
