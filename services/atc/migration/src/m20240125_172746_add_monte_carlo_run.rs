@@ -19,12 +19,9 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(MonteCarloRuns::UserId).uuid().not_null())
                     .col(ColumnDef::new(MonteCarloRuns::Samples).integer().not_null())
-                    .col(
-                        ColumnDef::new(MonteCarloRuns::Manifest)
-                            .json_binary()
-                            .not_null(),
-                    )
-                    .col(ColumnDef::new(MonteCarloRuns::Results).json_binary())
+                    .col(ColumnDef::new(MonteCarloRuns::Name).string().not_null())
+                    .col(ColumnDef::new(MonteCarloRuns::Metadata).json_binary())
+                    .col(ColumnDef::new(MonteCarloRuns::Status).integer().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .from(MonteCarloRuns::Table, MonteCarloRuns::UserId)
@@ -54,6 +51,7 @@ enum MonteCarloRuns {
     Id,
     UserId,
     Samples,
-    Manifest,
-    Results,
+    Name,
+    Metadata,
+    Status,
 }

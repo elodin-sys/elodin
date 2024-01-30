@@ -19,6 +19,7 @@ service Api {
 
     // Monte Carlo
     rpc CreateMonteCarloRun(CreateMonteCarloRunReq) returns (CreateMonteCarloRunResp);
+    rpc StartMonteCarloRun(StartMonteCarloRunReq) returns (StartMonteCarloRunResp);
 }
 
 message CurrentUserReq {}
@@ -102,10 +103,15 @@ message GetSandboxReq {
 
 message CreateMonteCarloRunReq {
     string name = 1;
-    string artifact_dir_uri = 2;
-    uint32 samples = 3;
+    uint32 samples = 2;
 }
 
 message CreateMonteCarloRunResp {
     bytes id = 1;
 }
+
+message StartMonteCarloRunReq {
+    bytes id = 1;
+}
+
+message StartMonteCarloRunResp {}

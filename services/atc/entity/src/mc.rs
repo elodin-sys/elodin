@@ -1,17 +1,16 @@
-use sea_orm::{entity::prelude::*, FromJsonQueryResult};
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "monte_carlo_run")]
+#[sea_orm(table_name = "monte_carlo_runs")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
     pub samples: i32,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub manifest: Manifest,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub results: Option<Results>,
+    pub name: String,
+    pub metadata: Json,
+    pub status: Status,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -32,15 +31,13 @@ impl Related<super::user::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, FromJsonQueryResult, Default)]
-pub struct Manifest {
-    pub name: String,
-    pub artifact_dir_uri: String,
-    pub metadata: Json,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, FromJsonQueryResult, Default)]
-pub struct Results {
-    pub summary_uri: String,
-    pub replay_dir_uri: String,
+#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Copy)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum Status {
+    #[sea_orm(num_value = 0)]
+    Pending,
+    #[sea_orm(num_value = 1)]
+    Running,
+    #[sea_orm(num_value = 2)]
+    Done,
 }

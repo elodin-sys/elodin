@@ -192,6 +192,13 @@ impl api_server::Api for Api {
     ) -> Result<Response<CreateMonteCarloRunResp>, Status> {
         current_user_route_txn!(self, req, Self::create_monte_carlo_run)
     }
+
+    async fn start_monte_carlo_run(
+        &self,
+        req: tonic::Request<StartMonteCarloRunReq>,
+    ) -> Result<Response<StartMonteCarloRunResp>, Status> {
+        current_user_route_txn!(self, req, Self::start_monte_carlo_run)
+    }
 }
 
 async fn healthz() -> impl axum::response::IntoResponse {
