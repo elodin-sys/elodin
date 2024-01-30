@@ -16,7 +16,6 @@ members = [
     "services/atc/migration",
     "services/atc/entity",
     "services/sim-agent",
-    "tools/starlark-json",
     "libs/redmq",
 ]
 
