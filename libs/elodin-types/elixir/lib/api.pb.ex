@@ -149,8 +149,7 @@ defmodule Elodin.Types.Api.CreateMonteCarloRunReq do
   use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 
   field :name, 1, type: :string
-  field :artifact_dir_uri, 2, type: :string, json_name: "artifactDirUri"
-  field :samples, 3, type: :uint32
+  field :samples, 2, type: :uint32
 end
 
 defmodule Elodin.Types.Api.CreateMonteCarloRunResp do
@@ -159,6 +158,20 @@ defmodule Elodin.Types.Api.CreateMonteCarloRunResp do
   use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 
   field :id, 1, type: :bytes
+end
+
+defmodule Elodin.Types.Api.StartMonteCarloRunReq do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+
+  field :id, 1, type: :bytes
+end
+
+defmodule Elodin.Types.Api.StartMonteCarloRunResp do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
 end
 
 defmodule Elodin.Types.Api.Api.Service do
@@ -185,6 +198,10 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :CreateMonteCarloRun,
       Elodin.Types.Api.CreateMonteCarloRunReq,
       Elodin.Types.Api.CreateMonteCarloRunResp
+
+  rpc :StartMonteCarloRun,
+      Elodin.Types.Api.StartMonteCarloRunReq,
+      Elodin.Types.Api.StartMonteCarloRunResp
 end
 
 defmodule Elodin.Types.Api.Api.Stub do

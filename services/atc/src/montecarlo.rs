@@ -16,7 +16,6 @@ pub struct Run {
     pub name: String,
     pub samples: usize,
     pub batch_size: usize,
-    pub artifact_dir_uri: String,
     pub start_time: redmq::StringAdapter<chrono::DateTime<chrono::Utc>>,
 }
 
