@@ -18,11 +18,26 @@ struct StringSerializer {
     data: String,
 }
 
-impl StringSerializer {
-    fn serialize_string(&mut self, v: impl ToString) -> Result<(), Error> {
-        self.data = v.to_string();
-        Ok(())
-    }
+macro_rules! unsupported_ser {
+    ($ser_func:ident) => {
+        fn $ser_func(self) -> Result<Self::Ok, Self::Error> {
+            Err(Error::UnsupportedType)
+        }
+    };
+    ($ser_func:ident, $ser_type:ty) => {
+        fn $ser_func(self, _v: $ser_type) -> Result<Self::Ok, Self::Error> {
+            Err(Error::UnsupportedType)
+        }
+    };
+}
+
+macro_rules! ser_to_string {
+    ($ser_func:ident, $ser_type:ty) => {
+        fn $ser_func(self, v: $ser_type) -> Result<(), Error> {
+            self.data = v.to_string();
+            Ok(())
+        }
+    };
 }
 
 impl<'a> ser::Serializer for &'a mut Serializer {
@@ -37,78 +52,33 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     type SerializeStruct = Self;
     type SerializeStructVariant = ser::Impossible<(), Error>;
 
-    fn serialize_bool(self, _v: bool) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
+    fn serialize_struct(
+        self,
+        _name: &'static str,
+        _len: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Ok(self)
     }
 
-    fn serialize_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
+    unsupported_ser!(serialize_bool, bool);
+    unsupported_ser!(serialize_i8, i8);
+    unsupported_ser!(serialize_i16, i16);
+    unsupported_ser!(serialize_i32, i32);
+    unsupported_ser!(serialize_i64, i64);
+    unsupported_ser!(serialize_u8, u8);
+    unsupported_ser!(serialize_u16, u16);
+    unsupported_ser!(serialize_u32, u32);
+    unsupported_ser!(serialize_u64, u64);
+    unsupported_ser!(serialize_f32, f32);
+    unsupported_ser!(serialize_f64, f64);
+    unsupported_ser!(serialize_char, char);
+    unsupported_ser!(serialize_str, &str);
+    unsupported_ser!(serialize_bytes, &[u8]);
+    unsupported_ser!(serialize_unit_struct, &'static str);
+    unsupported_ser!(serialize_none);
+    unsupported_ser!(serialize_unit);
 
-    fn serialize_i16(self, _v: i16) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_i32(self, _v: i32) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_i64(self, _v: i64) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_u8(self, _v: u8) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_u16(self, _v: u16) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_u32(self, _v: u32) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_u64(self, _v: u64) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_char(self, _v: char) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_str(self, _v: &str) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_some<T: ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_some<T: ?Sized + Serialize>(self, _value: &T) -> Result<Self::Ok, Self::Error> {
         Err(Error::UnsupportedType)
     }
 
@@ -121,27 +91,21 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         Err(Error::UnsupportedType)
     }
 
-    fn serialize_newtype_struct<T: ?Sized>(
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
         _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
+    ) -> Result<Self::Ok, Self::Error> {
         Err(Error::UnsupportedType)
     }
 
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
         _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
+    ) -> Result<Self::Ok, Self::Error> {
         Err(Error::UnsupportedType)
     }
 
@@ -175,14 +139,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         Err(Error::UnsupportedType)
     }
 
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(self)
-    }
-
     fn serialize_struct_variant(
         self,
         _name: &'static str,
@@ -198,10 +154,11 @@ impl<'a> ser::SerializeStruct for &'a mut Serializer {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
-    where
-        T: ?Sized + Serialize,
-    {
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Error> {
         let mut string_serializer = StringSerializer {
             data: Default::default(),
         };
@@ -227,78 +184,26 @@ impl<'a> ser::Serializer for &'a mut StringSerializer {
     type SerializeStruct = ser::Impossible<(), Error>;
     type SerializeStructVariant = ser::Impossible<(), Error>;
 
-    fn serialize_bool(self, v: bool) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
+    ser_to_string!(serialize_bool, bool);
+    ser_to_string!(serialize_i8, i8);
+    ser_to_string!(serialize_i16, i16);
+    ser_to_string!(serialize_i32, i32);
+    ser_to_string!(serialize_i64, i64);
+    ser_to_string!(serialize_u8, u8);
+    ser_to_string!(serialize_u16, u16);
+    ser_to_string!(serialize_u32, u32);
+    ser_to_string!(serialize_u64, u64);
+    ser_to_string!(serialize_f32, f32);
+    ser_to_string!(serialize_f64, f64);
+    ser_to_string!(serialize_char, char);
+    ser_to_string!(serialize_str, &str);
 
-    fn serialize_i8(self, v: i8) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
+    unsupported_ser!(serialize_bytes, &[u8]);
+    unsupported_ser!(serialize_unit_struct, &'static str);
+    unsupported_ser!(serialize_none);
+    unsupported_ser!(serialize_unit);
 
-    fn serialize_i16(self, v: i16) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_i32(self, v: i32) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_i64(self, v: i64) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_u8(self, v: u8) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_u16(self, v: u16) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_u32(self, v: u32) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_u64(self, v: u64) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_f32(self, v: f32) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_f64(self, v: f64) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_char(self, v: char) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_str(self, v: &str) -> Result<(), Error> {
-        self.serialize_string(v)
-    }
-
-    fn serialize_bytes(self, _v: &[u8]) -> Result<(), Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_none(self) -> Result<(), Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_some<T>(self, _value: &T) -> Result<(), Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_unit(self) -> Result<(), Error> {
-        Err(Error::UnsupportedType)
-    }
-
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<(), Error> {
+    fn serialize_some<T: ?Sized + Serialize>(self, _value: &T) -> Result<(), Error> {
         Err(Error::UnsupportedType)
     }
 
@@ -311,23 +216,21 @@ impl<'a> ser::Serializer for &'a mut StringSerializer {
         Err(Error::UnsupportedType)
     }
 
-    fn serialize_newtype_struct<T>(self, _name: &'static str, _value: &T) -> Result<(), Error>
-    where
-        T: ?Sized + Serialize,
-    {
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _name: &'static str,
+        _value: &T,
+    ) -> Result<(), Error> {
         Err(Error::UnsupportedType)
     }
 
-    fn serialize_newtype_variant<T>(
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
         _value: &T,
-    ) -> Result<(), Error>
-    where
-        T: ?Sized + Serialize,
-    {
+    ) -> Result<(), Error> {
         Err(Error::UnsupportedType)
     }
 
