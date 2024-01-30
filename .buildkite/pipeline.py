@@ -25,6 +25,9 @@ def deploy_k8s_step(branch_name):
 
   cluster_name = "app" if is_main else codename(branch_name)
   overlay_name = "dev" if is_main else "dev-branch"
+  docs_subdomain = "docs" if is_main else f"{cluster_name}-docs"
+
+  annotation_message = f"Deployed at https://{cluster_name}.elodin.dev | https://{docs_subdomain}.elodin.dev"
 
   command = " && ".join([
     f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
@@ -33,7 +36,7 @@ def deploy_k8s_step(branch_name):
     f"export CLUSTER_NAME={cluster_name}",
     "envsubst < out.yaml > out-with-envs.yaml",
     "kubectl apply -f out-with-envs.yaml",
-    f"buildkite-agent annotate \"Deployed at https://{cluster_name}.elodin.dev\" --style \"success\"",
+    f"buildkite-agent annotate \"{annotation_message}\" --style \"success\"",
   ])
   
   return nix_step(
@@ -120,6 +123,11 @@ cluster_app_deploy_steps = [
       build_image_step(
         image_name = "elo-sim-agent",
         service_path = "services/sim-agent",
+        image_tag = "\$BUILDKITE_COMMIT",
+      ),
+      build_image_step(
+        image_name = "elo-docs",
+        service_path = "docs/public",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
     ]

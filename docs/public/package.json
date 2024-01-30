@@ -1,0 +1,9 @@
+{
+  "name": "docs-public",
+  "engines": {
+    "node": "^20.3.0"
+  },
+  "dependencies": {
+    "mintlify": "^4.0.114"
+  }
+}

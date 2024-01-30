@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elo-docs
+spec:
+  selector:
+    matchLabels:
+      app: elo-docs
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: elo-docs
+        imagePullPolicy: Always
+        image: elodin-infra/elo-docs:latest
+        ports:
+        - containerPort: 3000
+          name: http
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /introduction
+            port: 3000
+        livenessProbe:
+          httpGet:
+            path: /introduction
+            port: 3000
