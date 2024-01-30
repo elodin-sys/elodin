@@ -52,11 +52,11 @@ impl api::Api {
         let mc_run = mc_run.update(txn).await?;
 
         let mc_run_msg = montecarlo::Run {
-            id: redmq::StringAdapter(mc_run.id),
+            id: mc_run.id,
             name: mc_run.name,
             samples: mc_run.samples as usize,
             batch_size: montecarlo::BATCH_SIZE,
-            start_time: redmq::StringAdapter(chrono::Utc::now()),
+            start_time: chrono::Utc::now(),
         };
         self.msg_queue
             .send(montecarlo::RUN_TOPIC, vec![mc_run_msg])

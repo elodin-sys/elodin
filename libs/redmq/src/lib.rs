@@ -1,16 +1,16 @@
 // Redis-based message queue library
 
 use std::collections::HashMap;
+use std::fmt;
 
 use redis::streams;
 use redis::AsyncCommands;
 
-pub use redis::RedisError;
-pub use redis_derive::{FromRedisValue, ToRedisArgs};
+mod de;
+mod ser;
 
-mod adapter;
-
-pub use adapter::StringAdapter;
+pub use de::from_redis;
+pub use ser::to_redis;
 
 pub struct MsgQueue {
     conn: redis::aio::MultiplexedConnection,
@@ -25,8 +25,39 @@ pub struct Received<M: Message> {
     entry: M,
 }
 
-type StreamRangeReply = Vec<HashMap<String, redis::Value>>;
-type StreamReadReply = Vec<HashMap<String, Vec<HashMap<String, redis::Value>>>>;
+#[derive(Debug)]
+enum Error {
+    Message(String),
+    UnsupportedType,
+    FailedToParse,
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Message(msg) => formatter.write_str(msg),
+            Error::UnsupportedType => formatter.write_str("unsupported type"),
+            Error::FailedToParse => formatter.write_str("failed to parse"),
+        }
+    }
+}
+
+impl serde::ser::Error for Error {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        Error::Message(msg.to_string())
+    }
+}
+
+impl serde::de::Error for Error {
+    fn custom<T: fmt::Display>(msg: T) -> Self {
+        Error::Message(msg.to_string())
+    }
+}
+
+type StreamRangeReply = Vec<HashMap<String, Vec<(String, String)>>>;
+type StreamReadReply = Vec<HashMap<String, Vec<HashMap<String, Vec<(String, String)>>>>>;
 
 impl MsgQueue {
     pub async fn new(
@@ -48,8 +79,9 @@ impl MsgQueue {
         entries: Vec<M>,
     ) -> redis::RedisResult<Vec<String>> {
         entries
-            .into_iter()
-            .fold(&mut redis::pipe(), |p, e| p.xadd_map(topic, "*", e))
+            .iter()
+            .map(to_redis)
+            .fold(&mut redis::pipe(), |p, fields| p.xadd(topic, "*", &fields))
             .atomic()
             .query_async::<_, Vec<String>>(&mut self.conn.clone())
             .await
@@ -63,7 +95,7 @@ impl MsgQueue {
             .into_iter()
             .flat_map(|row| row.into_iter())
             .next()
-            .map(|(_, v)| redis::from_redis_value(&v))
+            .map(|(_, v)| from_redis::<M>(v))
             .transpose()
     }
 
@@ -141,7 +173,7 @@ impl MsgQueue {
             let mut bad_ids = Vec::default();
             let entries: Vec<Received<M>> = stream
                 .into_iter()
-                .filter_map(|(id, v)| match redis::from_redis_value(&v) {
+                .filter_map(|(id, v)| match from_redis(v) {
                     Ok(entry) => Some(Received { id, entry }),
                     Err(err) => {
                         tracing::error!(consumer = &self.consumer, id, %err, "failed to parse message");
@@ -204,6 +236,30 @@ impl<M: Message> std::ops::Deref for Received<M> {
     }
 }
 
-pub trait Message: redis::FromRedisValue + redis::ToRedisArgs {}
+pub trait Message: serde::Serialize + serde::de::DeserializeOwned {}
 
-impl<M: redis::FromRedisValue + redis::ToRedisArgs> Message for M {}
+impl<M: serde::Serialize + serde::de::DeserializeOwned> Message for M {}
+
+#[cfg(test)]
+mod tests {
+    use crate::{from_redis, to_redis};
+
+    #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+    struct Data {
+        name: String,
+        samples: usize,
+    }
+
+    #[test]
+    fn simple_data() {
+        let data = Data {
+            name: "test".to_string(),
+            samples: 774,
+        };
+        let redis_data = to_redis(&data);
+        assert_eq!(redis_data.len(), 2);
+
+        let deserialized_data: Data = from_redis(redis_data).unwrap();
+        assert_eq!(data, deserialized_data);
+    }
+}
