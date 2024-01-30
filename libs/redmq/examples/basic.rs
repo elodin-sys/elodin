@@ -1,6 +1,6 @@
 const TOPIC_PING: &str = "ping";
 
-#[derive(redmq::FromRedisValue, redmq::ToRedisArgs)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Ping {
     id: u32,
 }

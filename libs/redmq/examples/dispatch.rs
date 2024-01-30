@@ -4,13 +4,13 @@ const WORKERS: usize = 10;
 const TOPIC_JOB: &str = "job";
 const TOPIC_RESULTS: &str = "results";
 
-#[derive(redmq::FromRedisValue, redmq::ToRedisArgs)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Job {
     name: String,
     size: u32,
 }
 
-#[derive(redmq::FromRedisValue, redmq::ToRedisArgs, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Results {
     name: String,
 }
