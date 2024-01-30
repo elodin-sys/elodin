@@ -10,32 +10,19 @@
         flake-utils.follows = "flake-utils";
       };
     };
-    cargo2nix = {
-      url = "github:cargo2nix/cargo2nix/release-0.11.0";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-        rust-overlay.follows = "rust-overlay";
-      };
-    };
   };
 
   outputs = {
     nixpkgs,
     flake-utils,
-    cargo2nix,
     rust-overlay,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = import nixpkgs {
         inherit system;
-        overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
+        overlays = [rust-overlay.overlays.default];
         config.allowUnfree = true;
-      };
-      rustPkgs = pkgs.rustBuilder.makePackageSet {
-        rustVersion = "1.75.0";
-        packageFun = import ./Cargo.nix;
       };
     in rec {
       packages.buildkite-test-collector = pkgs.rustPlatform.buildRustPackage rec {

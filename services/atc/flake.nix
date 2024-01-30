@@ -2,83 +2,49 @@
   inputs = {
     elodin.url = "path:../../.";
     nixpkgs.follows = "elodin/nixpkgs";
-    cargo2nix.follows = "elodin/cargo2nix";
     rust-overlay.follows = "elodin/rust-overlay";
     flake-utils.follows = "elodin/flake-utils";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = inputs:
-    with inputs;
-      flake-utils.lib.eachDefaultSystem (
-        system: let
-          build_rust = pkgs: let
-            rustPkgs = pkgs.rustBuilder.makePackageSet {
-              rustVersion = "1.73.0";
-              packageFun = import ../../Cargo.nix;
-              packageOverrides = elodin.packages.${system}.rust-overrides;
-            };
-          in
-            (rustPkgs.workspace.atc {}).bin;
-          build_docker = {
-            bin,
-            pkgs,
-          }: let
-            attrs = {
-              name = "elo-atc";
-              tag = "latest";
-              contents = with pkgs; [cacert busybox];
-              config = {
-                Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
-                Cmd = ["${bin.bin}/bin/atc"];
-              };
-            };
-          in {
-            image = pkgs.dockerTools.buildLayeredImage attrs;
-            stream = pkgs.dockerTools.buildLayeredImage attrs;
+  outputs = { self, nixpkgs, crane, rust-overlay, flake-utils, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [rust-overlay.overlays.default];
+        };
+        craneLib = (crane.mkLib pkgs).overrideToolchain pkgs.rust-bin.stable."1.73.0".default;
+        crateName = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
+        src = pkgs.nix-gitignore.gitignoreSource [] ../..;
+        commonArgs = {
+          inherit (crateName) pname version;
+          inherit src;
+          doCheck = false;
+          cargoExtraArgs = "--package=${crateName.pname}";
+          buildInputs = with pkgs; [ protobuf ];
+        };
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        bin = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+        });
+
+        dockerImage = pkgs.dockerTools.buildLayeredImage {
+          name = "elo-atc";
+          tag = "latest";
+          contents = with pkgs; [cacert busybox];
+          config = {
+            Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
+            Cmd = ["${bin}/bin/atc"];
           };
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
-          };
-          aarch64_pkgs =
-            if system == "aarch64-linux"
-            then pkgs
-            else
-              import nixpkgs {
-                localSystem = system;
-                crossSystem = "aarch64-linux";
-                overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
-              };
-          x86_64_pkgs =
-            if system == "x86_64-linux"
-            then pkgs
-            else
-              import nixpkgs {
-                localSystem = system;
-                crossSystem = "x86_64-linux";
-                overlays = [cargo2nix.overlays.default rust-overlay.overlays.default];
-              };
-        in rec {
-          packages = {
-            atc.default = build_rust pkgs;
-            atc.aarch64 = build_rust aarch64_pkgs;
-            atc.x86_64 = build_rust x86_64_pkgs;
-            docker =
-              build_docker {
-                inherit pkgs;
-                bin = packages.atc.default;
-              }
-              // {
-                aarch64 = build_docker {
-                  pkgs = aarch64_pkgs;
-                  bin = packages.atc.aarch64;
-                };
-                x86_64 = build_docker {
-                  pkgs = x86_64_pkgs;
-                  bin = packages.atc.x86_64;
-                };
-              };
-          };
-        }
-      );
+        };
+      in
+      {
+        packages = {
+          docker.image = dockerImage;
+        };
+      });
 }
