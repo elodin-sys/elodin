@@ -1,36 +1,5 @@
 {
   "nodes": {
-    "cargo2nix": {
-      "inputs": {
-        "flake-compat": "flake-compat",
-        "flake-utils": [
-          "elodin",
-          "flake-utils"
-        ],
-        "nixpkgs": [
-          "elodin",
-          "nixpkgs"
-        ],
-        "rust-overlay": [
-          "elodin",
-          "rust-overlay"
-        ]
-      },
-      "locked": {
-        "lastModified": 1705129117,
-        "narHash": "sha256-LgdDHibvimzYhxBK3kxCk2gAL7k4Hyigl5KI0X9cijA=",
-        "owner": "cargo2nix",
-        "repo": "cargo2nix",
-        "rev": "ae19a9e1f8f0880c088ea155ab66cee1fa001f59",
-        "type": "github"
-      },
-      "original": {
-        "owner": "cargo2nix",
-        "ref": "release-0.11.0",
-        "repo": "cargo2nix",
-        "type": "github"
-      }
-    },
     "crane": {
       "inputs": {
         "nixpkgs": [
@@ -53,7 +22,6 @@
     },
     "elodin": {
       "inputs": {
-        "cargo2nix": "cargo2nix",
         "flake-utils": "flake-utils",
         "get-flake": "get-flake",
         "nixpkgs": "nixpkgs",
@@ -61,29 +29,13 @@
       },
       "locked": {
         "lastModified": 0,
-        "narHash": "sha256-aOvkGZ21Z3sNd8QYxnRCY6OviB3iYq6kUkvtkk9ZP+c=",
+        "narHash": "sha256-7q07LENdINeFlvVAyJZB4Nub7INH3ugEmJLekutPytY=",
         "path": "../../.",
         "type": "path"
       },
       "original": {
         "path": "../../.",
         "type": "path"
-      }
-    },
-    "flake-compat": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1696426674,
-        "narHash": "sha256-kvjfFW7WAETZlt09AgDn1MrtKzP7t90Vf7vypd3OL1U=",
-        "owner": "edolstra",
-        "repo": "flake-compat",
-        "rev": "0f9255e01c2351cc7d116c072cb317785dd33b33",
-        "type": "github"
-      },
-      "original": {
-        "owner": "edolstra",
-        "repo": "flake-compat",
-        "type": "github"
       }
     },
     "flake-utils": {
