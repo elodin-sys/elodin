@@ -45,8 +45,6 @@
         packageFun = import ./Cargo.nix;
       };
     in rec {
-      packages.starlark-json =
-        (rustPkgs.workspace.starlark-json {}).bin;
       packages.buildkite-test-collector = pkgs.rustPlatform.buildRustPackage rec {
         pname = "buildkite-test-collector";
         version = "0.1.2";
