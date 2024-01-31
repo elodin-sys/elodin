@@ -1,10 +1,6 @@
 { config, self', pkgs, lib, flakeInputs, rustToolchain, ... }:
 let
-  wasmTarget = "wasm32-unknown-unknown";
-  rustWithWasmTarget = rustToolchain.override {
-    targets = [wasmTarget];
-  };
-  craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustWithWasmTarget;
+  craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml { cargoToml = ../apps/editor-web/Cargo.toml; };
   src = pkgs.nix-gitignore.gitignoreSource [] ../.;
   commonArgs = {
@@ -15,7 +11,7 @@ let
     buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
       pkgs.libiconv
     ];
-    CARGO_BUILD_TARGET = wasmTarget;
+    CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
     CARGO_PROFILE = "wasm-release";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
