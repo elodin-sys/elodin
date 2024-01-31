@@ -6010,6 +6010,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nox-py"
+version = "0.1.0"
+dependencies = [
+ "nox-ecs",
+ "nox-ecs-macros",
+ "numpy",
+ "parking_lot",
+ "pyo3",
+ "thiserror",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
