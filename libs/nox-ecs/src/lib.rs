@@ -1,5 +1,5 @@
 use bytemuck::AnyBitPattern;
-use elodin_conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
+use elodin_conduit::{ComponentType, ComponentValue, EntityId};
 use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn, NoxprNode};
 use smallvec::smallvec;
@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub use elodin_conduit;
+pub use elodin_conduit::ComponentId;
 pub use nox;
 
 mod component;
@@ -26,19 +27,19 @@ pub use query::*;
 pub use nox_ecs_macros::{Archetype, Component};
 
 pub struct Table<S: WorldStore> {
-    columns: BTreeMap<ComponentId, Column<S>>,
-    entity_buffer: S::EntityBuffer,
-    entity_map: BTreeMap<EntityId, usize>,
+    pub columns: BTreeMap<ComponentId, Column<S>>,
+    pub entity_buffer: S::EntityBuffer,
+    pub entity_map: BTreeMap<EntityId, usize>,
 }
 
 pub struct Column<S: WorldStore> {
-    buffer: S::Column,
+    pub buffer: S::Column,
 }
 
 pub struct World<S: WorldStore = HostStore> {
-    archetypes: Vec<Table<S>>,
-    component_map: HashMap<ComponentId, usize>,
-    archetype_id_map: HashMap<TypeId, usize>,
+    pub archetypes: Vec<Table<S>>,
+    pub component_map: HashMap<ComponentId, usize>,
+    pub archetype_id_map: HashMap<ArchetypeId, usize>,
 }
 
 impl<S: WorldStore> Default for World<S> {
@@ -96,7 +97,10 @@ impl<S: WorldStore> World<S> {
 
 impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
-        if let Some(id) = self.archetype_id_map.get(&TypeId::of::<A>()) {
+        if let Some(id) = self
+            .archetype_id_map
+            .get(&ArchetypeId::TypeId(TypeId::of::<A>()))
+        {
             &mut self.archetypes[*id]
         } else {
             self.insert_archetype::<A>()
@@ -127,7 +131,7 @@ impl World<HostStore> {
             self.component_map.insert(id, archetype_id);
         }
         self.archetype_id_map
-            .insert(TypeId::of::<A>(), archetype_id);
+            .insert(ArchetypeId::TypeId(TypeId::of::<A>()), archetype_id);
         &mut self.archetypes[archetype_id]
     }
 
@@ -149,7 +153,7 @@ impl World<HostStore> {
         archetype.insert_into_table(table);
     }
 
-    fn copy_to_client(&self, client: &Client) -> Result<World<ClientStore>, Error> {
+    pub fn copy_to_client(&self, client: &Client) -> Result<World<ClientStore>, Error> {
         let archetypes = self
             .archetypes
             .iter()
@@ -199,6 +203,12 @@ impl World<HostStore> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ArchetypeId {
+    Raw(u64),
+    TypeId(TypeId),
+}
+
 pub trait WorldStore {
     type Column;
     type EntityBuffer;
@@ -233,7 +243,7 @@ pub struct HostColumn {
 }
 
 impl HostColumn {
-    fn from_ty(ty: ComponentType) -> Self {
+    pub fn from_ty(ty: ComponentType) -> Self {
         HostColumn {
             buf: vec![],
             component_type: ty,
@@ -247,7 +257,11 @@ impl HostColumn {
         let NoxprNode::Constant(c) = op.deref() else {
             panic!("push into host column must be constant expr");
         };
-        self.buf.extend_from_slice(c.data.raw_buf());
+        self.push_raw(c.data.raw_buf());
+    }
+
+    pub fn push_raw(&mut self, raw: &[u8]) {
+        self.buf.extend_from_slice(raw);
         self.len += 1;
     }
 
@@ -284,6 +298,14 @@ impl HostColumn {
         assert_eq!(self.component_type, T::component_type());
         self.values_iter()
             .filter_map(|v| T::from_component_value(v))
+    }
+
+    pub fn component_type(&self) -> ComponentType {
+        self.component_type
+    }
+
+    pub fn raw_buf(&self) -> &[u8] {
+        &self.buf
     }
 }
 
@@ -358,6 +380,12 @@ impl<T: Component + 'static> Archetype for T {
     }
 }
 
+impl<S: WorldStore> Column<S> {
+    pub fn new(buffer: S::Column) -> Self {
+        Self { buffer }
+    }
+}
+
 impl Column<ClientStore> {
     fn copy_from_host(&mut self, host: &Column<HostStore>, client: &Client) -> Result<(), Error> {
         self.buffer = host.buffer.copy_to_client(client)?;
@@ -366,10 +394,10 @@ impl Column<ClientStore> {
 }
 
 pub struct ComponentArray<T> {
-    buffer: Noxpr,
-    len: usize,
-    entity_map: BTreeMap<EntityId, usize>,
-    phantom_data: PhantomData<T>,
+    pub buffer: Noxpr,
+    pub len: usize,
+    pub entity_map: BTreeMap<EntityId, usize>,
+    pub phantom_data: PhantomData<T>,
 }
 
 impl<T> Clone for ComponentArray<T> {
@@ -393,6 +421,10 @@ impl ComponentArray<()> {
             entity_map: self.entity_map,
             len: self.len,
         }
+    }
+
+    pub fn buffer(&self) -> &Noxpr {
+        &self.buffer
     }
 }
 
@@ -488,11 +520,23 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
     }
 }
 
+#[derive(Default)]
 pub struct PipelineBuilder {
-    vars: BTreeMap<ComponentId, RefCell<ComponentArray<()>>>,
-    param_ids: Vec<ComponentId>,
-    param_ops: Vec<Noxpr>,
-    world: World<HostStore>,
+    pub vars: BTreeMap<ComponentId, RefCell<ComponentArray<()>>>,
+    pub param_ids: Vec<ComponentId>,
+    pub param_ops: Vec<Noxpr>,
+    pub world: World<HostStore>,
+}
+
+impl PipelineBuilder {
+    pub fn from_world(world: World<HostStore>) -> Self {
+        PipelineBuilder {
+            vars: BTreeMap::default(),
+            param_ids: vec![],
+            param_ops: vec![],
+            world,
+        }
+    }
 }
 
 pub trait SystemParam {
@@ -709,13 +753,13 @@ where
 }
 
 pub struct Exec {
-    arg_ids: Vec<ComponentId>,
-    ret_ids: Vec<ComponentId>,
-    client_world: World<ClientStore>,
-    host_world: World,
-    loaded_components: HashSet<ComponentId>,
-    exec: PjRtLoadedExecutable,
-    dirty_components: HashSet<ComponentId>,
+    pub arg_ids: Vec<ComponentId>,
+    pub ret_ids: Vec<ComponentId>,
+    pub client_world: World<ClientStore>,
+    pub host_world: World,
+    pub loaded_components: HashSet<ComponentId>,
+    pub exec: PjRtLoadedExecutable,
+    pub dirty_components: HashSet<ComponentId>,
 }
 
 impl Exec {

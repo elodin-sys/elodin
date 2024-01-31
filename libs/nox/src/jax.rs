@@ -242,7 +242,7 @@ fn literal_to_arr<T: ArrayElement + numpy::Element + bytemuck::Pod>(
     })
 }
 
-fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
+pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
     match elem {
         ElementType::S8 => Ok("int8"),
         ElementType::S16 => Ok("int16"),

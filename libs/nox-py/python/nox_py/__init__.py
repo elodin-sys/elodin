@@ -1,0 +1,144 @@
+from .nox_py import *
+from typing import Protocol, Self, Generic, TypeVar, Any, Callable, Annotated, Type, Union
+from dataclasses import dataclass
+import inspect
+import jax
+import typing
+import numpy
+
+__doc__ = nox_py.__doc__
+if hasattr(nox_py, "__all__"):
+    __all__ = nox_py.__all__
+
+class System(Protocol):
+    @staticmethod
+    def call(builder: PipelineBuilder): ...
+    def init(builder: PipelineBuilder) -> PipelineBuilder: ...
+    def pipe(self, other: Self) -> Self:
+        return Pipe(self, other)
+
+@dataclass
+class Pipe(System):
+    a: System
+    b: System
+    def init(self, builder):
+        self.a.init(builder)
+        self.b.init(builder)
+    def call(self, builder):
+        self.a.call(builder)
+        self.b.call(builder)
+
+
+def system(func) -> Callable[[Any], None]:
+    class Inner(System):
+        func
+        def init(self, builder):
+            sig = inspect.signature(func)
+            params = sig.parameters
+            for (_, p) in params.items():
+                p.annotation.init_builder(p.annotation, builder)
+            if sig.return_annotation is not inspect._empty:
+                sig.return_annotation.init_builder(sig.return_annotation, builder)
+
+        def call(self, builder):
+            sig = inspect.signature(func)
+            params = sig.parameters
+            args = [p.annotation.from_builder(p.annotation, builder) for (_, p) in params.items()]
+            ret = func(*args)
+            if ret is not None:
+                ret.insert_into_builder(builder)
+    inner = Inner()
+    inner.func = func
+    return inner
+
+
+@dataclass
+class ComponentData:
+    id: ComponentId
+    type: ComponentType
+    from_expr: Callable[[Any], Any]
+
+type ComponentProto = jax.Array | FromArray
+
+T = TypeVar('T', bound='ComponentProto')
+Q = TypeVar('Q', bound='ComponentArray[Any]')
+class ComponentArray(Generic[T]):
+    buf: jax.Array
+    data: ComponentData
+
+
+    @staticmethod
+    def from_builder(new_tp: type[Q], builder: PipelineBuilder) -> Q:
+        t_arg = typing.get_args(new_tp)[0]
+        arr = new_tp()
+        arr.component_data = t_arg.__metadata__[0]
+        arr.buf = builder.get_var(arr.component_data.id)
+        return arr
+
+    @staticmethod
+    def init_builder(new_tp: Type[Q], builder: PipelineBuilder):
+        t_arg = typing.get_args(new_tp)[0]
+        component_data: ComponentData = t_arg.__metadata__[0]
+        buf = builder.init_var(component_data.id, component_data.type )
+
+    def insert_into_builder(self, builder: PipelineBuilder):
+        builder.set_var(self.component_data.id, self.buf)
+
+    def map[O](self, f: Callable[[T], O]) -> Q:
+        buf = jax.vmap(lambda b: self.data.from_expr(b))(self.buf)
+        arr = ComponentArray[O]()
+        arr.buf = buf
+        arr.data = self.data
+        return arr
+
+
+class SystemParam(Protocol):
+    @staticmethod
+    def from_builder(builder: PipelineBuilder) -> Any: ...
+
+class FromArray(Protocol):
+    @staticmethod
+    def from_array(arr: jax.Array) -> Any: ...
+
+
+class Component:
+    def __class_getitem__(cls, params):
+        def parse_id(id):
+            if isinstance(id, str):
+                return ComponentId(id)
+            else:
+                return id
+        def from_expr(ty):
+            if ty is jax.Array:
+                return lambda x: x
+            else:
+                return ty.from_array
+        if len(params) == 3:
+            (t, id, type) = params
+            id = parse_id(id)
+            return Annotated.__class_getitem__((t, ComponentData(id, type, from_expr(t)))) # type: ignore
+        elif len(params) == 2:
+            (t, id) = params
+            id = parse_id(id)
+            type = t.__metadata__[0].type
+            return Annotated.__class_getitem__((t, ComponentData(id, type, from_expr(t)))) # type: ignore
+        else:
+            raise Exception("Component must be called an ID and type")
+
+
+class Archetype(Protocol):
+    def archetype_id(self) -> int:
+        return abs(hash(type(self).__name__))
+    def component_data(self) -> list[ComponentData]:
+        return [v.__metadata__[0] for v in typing.get_type_hints(self, include_extras=True).values()]
+    def arrays(self) -> list[jax.Array]:
+        return [numpy.asarray(v) for (a, v) in self.__dict__.items() if not a.startswith('__') and not callable(getattr(self, a))]
+
+
+def build_expr(builder: PipelineBuilder, sys: System) -> Any:
+    sys.init(builder)
+    def call(args, builder):
+        builder.inject_args(args)
+        sys.call(builder)
+    xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
+    return xla
