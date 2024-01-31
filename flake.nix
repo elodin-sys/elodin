@@ -32,7 +32,9 @@
       systems = import systems;
       perSystem = { config, self', inputs', pkgs, system, ... }:
         let
-          overlays = [ (import rust-overlay) ];
+          overlays = [
+            rust-overlay.overlays.default
+          ];
         in
         {
           _module.args = {
@@ -41,7 +43,7 @@
               config.allowUnfree = true;
             };
             flakeInputs = inputs;
-            rustToolchain = pkgs.rust-bin.stable.latest.default;
+            rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           };
           buildkite-test-collector = {
             version = "0.1.2";
