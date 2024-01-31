@@ -1,14 +1,11 @@
 from buildkite import step, group
 from plugins import *
 
-def build_image_step(image_name, service_path, image_tag = "latest", repository = "us-central1-docker.pkg.dev"):
+def build_image_step(image_name, target, image_tag = "latest", repository = "us-central1-docker.pkg.dev"):
   remote_image_path = f"{repository}/elodin-infra/{image_name}/x86_64:{image_tag}"
 
   pre_command = " && ".join([
-    f"pushd {service_path}",
-    "nix flake update",
-    "export IMAGE_PATH=\$(nix build .#packages.x86_64-linux.docker.image --print-out-paths)",
-    "popd",
+    f"export IMAGE_PATH=\$(nix build .#packages.x86_64-linux.{target} --print-out-paths)",
   ])
 
   command = " && ".join([

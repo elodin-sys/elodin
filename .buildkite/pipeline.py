@@ -112,22 +112,22 @@ cluster_app_deploy_steps = [
     steps = [
       build_image_step(
         image_name = "elo-dashboard",
-        service_path = "services/dashboard",
+        target = "dashboard-image",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
       build_image_step(
         image_name = "elo-atc",
-        service_path = "services/atc",
+        target = "atc-image",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
       build_image_step(
         image_name = "elo-sim-agent",
-        service_path = "services/sim-agent",
+        target = "sim-agent-image",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
       build_image_step(
         image_name = "elo-docs",
-        service_path = "docs/public",
+        target = "docs-image",
         image_tag = "\$BUILDKITE_COMMIT",
       ),
     ]

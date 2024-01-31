@@ -1,8 +1,11 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/aba830385baac22d06a22085f5b5baeb88c88b46";
-    flake-utils.url = "github:numtide/flake-utils";
-    get-flake.url = "github:ursi/get-flake";
+    systems.url = "github:nix-systems/default";
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+      inputs.systems.follows = "systems";
+    };
     rust-overlay = {
       url = "github:oxalica/rust-overlay/e36f66bb10b09f5189dc3b1706948eaeb9a1c555";
       inputs = {
@@ -10,83 +13,50 @@
         flake-utils.follows = "flake-utils";
       };
     };
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+    npmlock2nix = {
+      url = "github:nix-community/npmlock2nix/9197bbf397d76059a76310523d45df10d2e4ca81";
+      flake = false;
+    };
   };
 
-  outputs = {
-    nixpkgs,
-    flake-utils,
-    rust-overlay,
-    ...
-  }:
-    flake-utils.lib.eachDefaultSystem (system: let
-      pkgs = import nixpkgs {
-        inherit system;
-        overlays = [rust-overlay.overlays.default];
-        config.allowUnfree = true;
-      };
-    in rec {
-      packages.buildkite-test-collector = pkgs.rustPlatform.buildRustPackage rec {
-        pname = "buildkite-test-collector";
-        version = "0.1.2";
-
-        src = pkgs.fetchFromGitHub {
-          owner = "buildkite";
-          repo = "test-collector-rust";
-          rev = version;
-          hash = "sha256-ukBXUuy2rbyDWZD14Uf1AQQ7XiBB0jFHhcFmMOxV0V4";
+  outputs = inputs@{ self, nixpkgs, flake-parts, rust-overlay, systems, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = import systems;
+      perSystem = { config, self', inputs', pkgs, system, ... }:
+        let
+          overlays = [ (import rust-overlay) ];
+        in
+        {
+          _module.args = {
+            pkgs = import nixpkgs {
+              inherit system overlays;
+              config.allowUnfree = true;
+            };
+            flakeInputs = inputs;
+            rustToolchain = pkgs.rust-bin.stable.latest.default;
+          };
+          buildkite-test-collector = {
+            version = "0.1.2";
+            hash = "sha256-ukBXUuy2rbyDWZD14Uf1AQQ7XiBB0jFHhcFmMOxV0V4";
+            cargoHash = "sha256-6uMd+E95qlk/cVOzJwE5ZUaUsWkCmKLd3TbDSqIihic";
+          };
+          imports = [
+            ./nix/buildkite.nix
+            ./nix/shell.nix
+            ./nix/atc.nix
+            ./nix/sim-agent.nix
+            ./nix/editor-web.nix
+            ./nix/dashboard.nix
+            ./nix/docs.nix
+          ];
         };
-        postConfigure = ''
-          cargo metadata --offline
-        '';
-        cargoHash = "sha256-6uMd+E95qlk/cVOzJwE5ZUaUsWkCmKLd3TbDSqIihic";
-      };
-      devShells.rust = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
-        name = "elo-rust-shell";
-        buildInputs = with pkgs;
-          [
-            rust-bin.stable.latest.default
-            pkg-config
-            python3
-            openssl
-            clang
-            protobuf
-            sccache
-            packages.buildkite-test-collector
-            alsa-lib
-            alsa-oss
-            alsa-utils
-            vulkan-loader
-            wayland
-            gtk3
-            udev
-            libxkbcommon
-            fontconfig
-          ];
-        LIBCLANG_PATH = "${pkgs.llvmPackages_14.libclang.lib}/lib";
-        BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
-        doCheck = false;
-      };
-      devShells.elixir = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
-        name = "elo-elixir-shell";
-        buildInputs = with pkgs;
-          [
-            elixir
-          ];
-        doCheck = false;
-      };
-      devShells.ops = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
-        name = "elo-ops-shell";
-        buildInputs = with pkgs;
-          [
-            skopeo
-            gettext
-            just
-            _1password
-            docker
-            kubectl
-            (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
-          ];
-        doCheck = false;
-      };
-    });
+    };
 }
