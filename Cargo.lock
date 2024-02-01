@@ -6025,6 +6025,7 @@ dependencies = [
  "flume",
  "futures",
  "heapless 0.8.0",
+ "ndarray",
  "nox",
  "nox-ecs-macros",
  "paste",

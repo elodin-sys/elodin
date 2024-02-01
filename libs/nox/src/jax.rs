@@ -109,7 +109,10 @@ impl JaxTracer {
                 let expr = self.visit(&b.expr)?;
                 let sizes = b.sizes.to_vec();
                 let dims = b.broadcast_dims.to_vec();
-                Python::with_gil(|py| self.lax.call_method1(py, "broadcast", (expr, sizes, dims)))?
+                Python::with_gil(|py| {
+                    self.lax
+                        .call_method1(py, "broadcast_in_dim", (expr, sizes, dims))
+                })?
             }
             NoxprNode::Transpose(t) => {
                 let expr = self.visit(&t.expr)?;
@@ -134,15 +137,7 @@ impl JaxTracer {
                     self.lax.call_method1(
                         py,
                         "gather",
-                        (
-                            expr,
-                            start_indices,
-                            gather_dims,
-                            g.slice_sizes.to_vec(),
-                            true,
-                            true,
-                            "clip",
-                        ),
+                        (expr, start_indices, gather_dims, g.slice_sizes.to_vec()),
                     )
                 })?
             }
