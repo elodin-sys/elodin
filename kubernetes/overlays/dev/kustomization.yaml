@@ -91,3 +91,6 @@ images:
 - name: elodin-infra/elo-sim-agent
   newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
   newTag: $BUILDKITE_COMMIT
+- name: elodin-infra/elo-docs
+  newName: us-central1-docker.pkg.dev/elodin-infra/elo-docs/x86_64
+  newTag: $BUILDKITE_COMMIT
