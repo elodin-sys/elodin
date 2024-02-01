@@ -9,8 +9,8 @@ name = "elodin_py"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-elodin.path = "../elodin-core/"
-elodin.features = ["nox"]
+elodin-core.path = "../elodin-core/"
+elodin-core.features = ["nox"]
 elodin-editor.path = "../elodin-editor/"
 
 pyo3 = "0.20.0"

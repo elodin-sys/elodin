@@ -14,7 +14,7 @@ osx_minimum_system_version = "10.11"
 
 [dependencies]
 # core
-elodin.path = "../elodin-core"
+elodin-core.path = "../elodin-core"
 elodin-macros.path = "../elodin-macros"
 
 # math

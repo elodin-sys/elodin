@@ -1,8 +1,8 @@
-use elodin::{
+use elodin_conduit::bevy::{ConduitSubscribePlugin, Msg, Subscriptions};
+use elodin_core::{
     runner::IntoSimRunner,
     sync::{SendPlbPlugin, SyncPlugin},
 };
-use elodin_conduit::bevy::{ConduitSubscribePlugin, Msg, Subscriptions};
 use elodin_py::SimBuilder;
 use elodin_types::sandbox::{
     self,
@@ -71,7 +71,7 @@ impl SimServer {
                 self.bevy_tx.clone(),
                 tx_socket,
                 rx_socket,
-                elodin::sync::DEFAULT_SUB_FILTERS,
+                elodin_core::sync::DEFAULT_SUB_FILTERS,
             ));
         }
     }
@@ -160,7 +160,7 @@ impl SandboxControl for ControlService {
             }
             let runner = builder.into_runner();
             let mut app = runner
-                .run_mode(elodin::runner::RunMode::RealTime)
+                .run_mode(elodin_core::runner::RunMode::RealTime)
                 .build_with_plugins((
                     SyncPlugin {
                         plugin: ConduitSubscribePlugin::new(rx),

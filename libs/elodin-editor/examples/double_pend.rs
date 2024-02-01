@@ -1,5 +1,5 @@
 use bevy::prelude::{shape, Color, Mesh};
-use elodin::{
+use elodin_core::{
     builder::{EntityBuilder, FixedJoint, Revolute, SimBuilder},
     runner::IntoSimRunner,
     spatial::SpatialPos,
@@ -29,7 +29,7 @@ fn sim() -> SimBuilder {
         EntityBuilder::default()
             .mass(1.0)
             .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
-            //.inertia(elodin::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            //.inertia(elodin_core::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2)))
             .material(bevy::prelude::StandardMaterial {
                 base_color: Color::hex("38ACFF").unwrap(),
@@ -45,7 +45,7 @@ fn sim() -> SimBuilder {
         EntityBuilder::default()
             .mass(1.0)
             .body_pos(SpatialPos::linear(vector![0., -0.5, 0.0]))
-            //.inertia(elodin::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
+            //.inertia(elodin_core::Inertia::solid_box(0.2, 1.0, 0.2, 1.0))
             .mesh(Mesh::from(shape::Box::new(0.2, 1.0, 0.2)))
             .material(bevy::prelude::StandardMaterial {
                 base_color: Color::hex("38ACFF").unwrap(),

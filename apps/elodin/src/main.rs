@@ -20,9 +20,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authorize elodin-cli to access the Elodin platform.
+    /// Obtain access credentials for your user account
     Login,
-    /// No-op command (just for testing purposes).
+    /// No-op command (just for testing purposes)
     Noop,
 }
 
@@ -108,7 +108,7 @@ impl Cli {
             }
             Ok(access_token)
         })()
-        .context("Please run `elodin-cli login`")
+        .context("Please run `elodin login`")
     }
 
     async fn login(&self) -> anyhow::Result<()> {
@@ -147,9 +147,8 @@ impl Cli {
         } = res;
 
         let expires_in_mins = expires_in / 60;
-        println!("Finish logging in in the browser: {verification_uri_complete}.");
-        println!("You should see the following code: {user_code}.");
-        println!("It expires in {expires_in_mins} minutes.");
+        println!("Login via the browser: {verification_uri_complete}.");
+        println!("You should see the following code: {user_code}, which expires in {expires_in_mins} minutes.");
         opener::open_browser(verification_uri_complete)?;
 
         // request access token

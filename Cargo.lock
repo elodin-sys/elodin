@@ -3205,8 +3205,8 @@ dependencies = [
  "anyhow",
  "bevy",
  "console_error_panic_hook",
- "elodin",
  "elodin-conduit",
+ "elodin-core",
  "elodin-editor",
  "flume",
  "js-sys",
@@ -3382,32 +3382,6 @@ name = "elodin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "approx",
- "bevy",
- "bevy_ecs",
- "bevy_utils",
- "clap",
- "elodin-conduit",
- "elodin-macros",
- "flume",
- "ip_network_table-deps-treebitmap",
- "nalgebra",
- "nox",
- "plotters",
- "postcard",
- "rand",
- "rand_distr",
- "rerun",
- "serde",
- "serde_json",
- "stable-vec",
-]
-
-[[package]]
-name = "elodin-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
  "base64 0.21.7",
  "chrono",
  "clap",
@@ -3444,6 +3418,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "elodin-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "bevy",
+ "bevy_ecs",
+ "bevy_utils",
+ "clap",
+ "elodin-conduit",
+ "elodin-macros",
+ "flume",
+ "ip_network_table-deps-treebitmap",
+ "nalgebra",
+ "nox",
+ "plotters",
+ "postcard",
+ "rand",
+ "rand_distr",
+ "rerun",
+ "serde",
+ "serde_json",
+ "stable-vec",
+]
+
+[[package]]
 name = "elodin-editor"
 version = "0.1.0"
 dependencies = [
@@ -3456,8 +3456,8 @@ dependencies = [
  "bevy_panorbit_camera",
  "bevy_polyline",
  "clap",
- "elodin",
  "elodin-conduit",
+ "elodin-core",
  "elodin-macros",
  "flume",
  "futures-lite 2.2.0",
@@ -3482,8 +3482,8 @@ name = "elodin-py"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "elodin",
  "elodin-conduit",
+ "elodin-core",
  "elodin-editor",
  "nalgebra",
  "notify",
@@ -9180,8 +9180,8 @@ dependencies = [
  "bevy",
  "bytes",
  "config",
- "elodin",
  "elodin-conduit",
+ "elodin-core",
  "elodin-py",
  "elodin-types",
  "flume",

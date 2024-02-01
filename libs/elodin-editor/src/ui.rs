@@ -3,7 +3,7 @@ use bevy_egui::{
     egui::{self, epaint::Shadow, style::WidgetVisuals, Color32, Margin, Rounding, Stroke, Ui},
     EguiContexts,
 };
-use elodin::{EntityQuery, Picked, SimState};
+use elodin_core::{EntityQuery, Picked, SimState};
 use nalgebra::Vector3;
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);

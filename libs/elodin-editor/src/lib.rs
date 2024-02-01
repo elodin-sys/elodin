@@ -23,15 +23,15 @@ use bevy_infinite_grid::{
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use elodin::{
+use elodin_conduit::{
+    bevy::{Msg, SubscribeEvent},
+    cid_mask,
+};
+use elodin_core::{
     plugin::sync_pos,
     runner::IntoSimRunner,
     sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS},
     SimState,
-};
-use elodin_conduit::{
-    bevy::{Msg, SubscribeEvent},
-    cid_mask,
 };
 use traces::TracesPlugin;
 
@@ -44,7 +44,7 @@ pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
     let _ = std::thread::spawn(move || {
         let runner = func.into_runner();
         let mut app = runner
-            .run_mode(elodin::runner::RunMode::RealTime)
+            .run_mode(elodin_core::runner::RunMode::RealTime)
             .build_with_plugins((SyncPlugin::new(server_rx), SendPlbPlugin));
 
         app.run()

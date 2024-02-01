@@ -1,7 +1,7 @@
 { config, self', pkgs, lib, flakeInputs, rustToolchain, ... }:
 let
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml { cargoToml = ../apps/elodin-cli/Cargo.toml; };
+  crateName = craneLib.crateNameFromCargoToml { cargoToml = ../apps/elodin/Cargo.toml; };
   src = pkgs.nix-gitignore.gitignoreSource [] ../.;
   commonArgs = {
     inherit (crateName) pname version;
