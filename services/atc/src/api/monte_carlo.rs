@@ -1,4 +1,4 @@
-use crate::{api, error, montecarlo};
+use crate::{api, error, monte_carlo};
 
 use atc_entity::mc;
 use elodin_types::api::*;
@@ -11,7 +11,7 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<CreateMonteCarloRunResp, error::Error> {
-        if req.samples > montecarlo::MAX_SAMPLE_COUNT as u32 {
+        if req.samples > monte_carlo::MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
         }
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
@@ -51,15 +51,15 @@ impl api::Api {
         mc_run.status = sea_orm::Set(mc::Status::Running);
         let mc_run = mc_run.update(txn).await?;
 
-        let mc_run_msg = montecarlo::Run {
+        let mc_run_msg = monte_carlo::Run {
             id: mc_run.id,
             name: mc_run.name,
             samples: mc_run.samples as usize,
-            batch_size: montecarlo::BATCH_SIZE,
+            batch_size: monte_carlo::BATCH_SIZE,
             start_time: chrono::Utc::now(),
         };
         self.msg_queue
-            .send(montecarlo::RUN_TOPIC, vec![mc_run_msg])
+            .send(monte_carlo::RUN_TOPIC, vec![mc_run_msg])
             .await?;
 
         Ok(StartMonteCarloRunResp {})

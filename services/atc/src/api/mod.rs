@@ -20,7 +20,7 @@ use tracing::info;
 
 use crate::config::ApiConfig;
 
-mod montecarlo;
+mod monte_carlo;
 mod multiplex;
 mod sandbox;
 mod user;
