@@ -1,12 +1,11 @@
 use bytemuck::AnyBitPattern;
 use elodin_conduit::{ComponentType, ComponentValue, EntityId};
 use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn, NoxprNode};
+use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
 use smallvec::smallvec;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -16,11 +15,15 @@ pub use nox;
 
 mod component;
 mod conduit;
+mod dyn_array;
+mod host_column;
 mod integrator;
 mod query;
 
 pub use component::*;
 pub use conduit::*;
+pub use dyn_array::*;
+pub use host_column::*;
 pub use integrator::*;
 pub use query::*;
 
@@ -235,80 +238,6 @@ impl WorldStore for HostStore {
     type EntityBuffer = HostColumn;
 }
 
-/// A type erased columnar data store located on the host CPU
-pub struct HostColumn {
-    buf: Vec<u8>,
-    len: usize,
-    component_type: ComponentType,
-}
-
-impl HostColumn {
-    pub fn from_ty(ty: ComponentType) -> Self {
-        HostColumn {
-            buf: vec![],
-            component_type: ty,
-            len: 0,
-        }
-    }
-
-    pub fn push<T: Component + 'static>(&mut self, val: T) {
-        assert_eq!(self.component_type, T::component_type());
-        let op = val.into_op();
-        let NoxprNode::Constant(c) = op.deref() else {
-            panic!("push into host column must be constant expr");
-        };
-        self.push_raw(c.data.raw_buf());
-    }
-
-    pub fn push_raw(&mut self, raw: &[u8]) {
-        self.buf.extend_from_slice(raw);
-        self.len += 1;
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
-        let mut dims: heapless::Vec<usize, 3> = heapless::Vec::default();
-        dims.extend(self.component_type.dims().iter().map(|d| *d as usize));
-        dims.push(self.len).unwrap();
-        client
-            .0
-            .copy_raw_host_buffer(self.component_type.element_type(), &self.buf, &dims[..])
-            .map_err(Error::from)
-    }
-
-    pub fn values_iter(&self) -> impl Iterator<Item = ComponentValue<'_>> + '_ {
-        let mut buf_offset = 0;
-        std::iter::from_fn(move || {
-            let buf = self.buf.get(buf_offset..)?;
-            let (offset, value) = self.component_type.parse(buf)?;
-            buf_offset += offset;
-            Some(value)
-        })
-    }
-
-    pub fn iter<T: elodin_conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
-        assert_eq!(self.component_type, T::component_type());
-        self.values_iter()
-            .filter_map(|v| T::from_component_value(v))
-    }
-
-    pub fn component_type(&self) -> ComponentType {
-        self.component_type
-    }
-
-    pub fn raw_buf(&self) -> &[u8] {
-        &self.buf
-    }
-}
-
 pub struct ColumnRef<'a, S: WorldStore = HostStore> {
     pub column: &'a Column<S>,
     pub entities: &'a S::EntityBuffer,
@@ -484,33 +413,11 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
     }
 
     fn insert_into_builder(self, builder: &mut PipelineBuilder) {
-        use nox::NoxprScalarExt;
         if let Some(var) = builder.vars.get_mut(&T::component_id()) {
             let mut var = var.borrow_mut();
             if var.entity_map != self.entity_map {
-                let (old, new, _) = intersect_ids(&var.entity_map, &self.entity_map);
-                let shape = self.buffer.shape().unwrap();
-                let updated_buffer = old.iter().zip(new.iter()).fold(
-                    var.buffer.clone(),
-                    |buffer, (existing_index, update_index)| {
-                        let mut start = shape.clone();
-                        start[0] = *update_index as i64;
-                        for x in start.iter_mut().skip(1) {
-                            *x = 0;
-                        }
-                        let mut stop = shape.clone();
-                        stop[0] = *update_index as i64 + 1;
-                        buffer.dynamic_update_slice(
-                            vec![(*existing_index).constant()],
-                            self.buffer.clone().slice(
-                                smallvec![*update_index as i64],
-                                stop,
-                                shape.iter().map(|_| 1).collect(),
-                            ),
-                        )
-                    },
-                );
-                var.buffer = updated_buffer;
+                var.buffer =
+                    update_var(&var.entity_map, &self.entity_map, &var.buffer, &self.buffer);
                 return;
             }
         }
@@ -518,6 +425,37 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
             .vars
             .insert(T::component_id(), self.erase_ty().into());
     }
+}
+
+pub fn update_var(
+    old_entity_map: &BTreeMap<EntityId, usize>,
+    update_entity_map: &BTreeMap<EntityId, usize>,
+    old_buffer: &Noxpr,
+    update_buffer: &Noxpr,
+) -> Noxpr {
+    use nox::NoxprScalarExt;
+    let (old, new, _) = intersect_ids(old_entity_map, update_entity_map);
+    let shape = update_buffer.shape().unwrap();
+    old.iter().zip(new.iter()).fold(
+        old_buffer.clone(),
+        |buffer, (existing_index, update_index)| {
+            let mut start = shape.clone();
+            start[0] = *update_index as i64;
+            for x in start.iter_mut().skip(1) {
+                *x = 0;
+            }
+            let mut stop = shape.clone();
+            stop[0] = *update_index as i64 + 1;
+            buffer.dynamic_update_slice(
+                vec![(*existing_index).constant()],
+                update_buffer.clone().slice(
+                    smallvec![*update_index as i64],
+                    stop,
+                    shape.iter().map(|_| 1).collect(),
+                ),
+            )
+        },
+    )
 }
 
 #[derive(Default)]
