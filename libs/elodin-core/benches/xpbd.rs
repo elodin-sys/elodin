@@ -3,7 +3,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use nalgebra::{vector, Vector3};
 
-use elodin::{
+use elodin_core::{
     forces::gravity,
     runtime::JobSpec,
     xpbd::{

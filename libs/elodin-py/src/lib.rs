@@ -4,12 +4,12 @@ use bevy::prelude::{
     shape::{self, UVSphere},
     Color, Entity, World,
 };
-use elodin::{
+use elodin_conduit::{bevy::ComponentMap, ComponentId};
+use elodin_core::{
     builder::{EntityBuilder, FixedJoint, Free, Revolute},
     spatial::{SpatialMotion, SpatialPos},
     Effect, Force, Inertia, Torque, XlaEffectors,
 };
-use elodin_conduit::{bevy::ComponentMap, ComponentId};
 use nalgebra::{
     MatrixView3, MatrixView3x1, MatrixView4x1, Quaternion, UnitQuaternion, UnitVector3, Vector3,
 };
@@ -291,13 +291,13 @@ impl Effector {
 
 #[pyclass]
 #[derive(Clone)]
-pub struct SimBuilder(pub elodin::builder::SimBuilder);
+pub struct SimBuilder(pub elodin_core::builder::SimBuilder);
 
 #[pymethods]
 impl SimBuilder {
     #[new]
     fn new() -> Self {
-        SimBuilder(elodin::builder::SimBuilder::default())
+        SimBuilder(elodin_core::builder::SimBuilder::default())
     }
 
     fn body(&mut self, entity: RigidBody) -> RigidBodyHandle {
@@ -324,7 +324,7 @@ impl SimBuilder {
 
 #[derive(Clone)]
 #[pyclass]
-pub struct RigidBodyHandle(elodin::builder::RigidBodyHandle);
+pub struct RigidBodyHandle(elodin_core::builder::RigidBodyHandle);
 
 #[derive(Clone)]
 #[pyclass]
