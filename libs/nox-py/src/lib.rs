@@ -7,10 +7,11 @@ use std::{
 
 use nox_ecs::{
     elodin_conduit::{self},
-    nox::{self, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    ArchetypeId, Column, ComponentArray, HostColumn, HostStore, Table, World,
+    join_many,
+    nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
+    ArchetypeId, ComponentArray, HostColumn, HostStore, Query, Table, World,
 };
-use numpy::ToPyArray;
+use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
 use parking_lot::Mutex;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
@@ -26,7 +27,7 @@ struct PipelineBuilder {
 
 #[pymethods]
 impl PipelineBuilder {
-    fn get_var(&self, id: ComponentId) -> Result<PyObject, Error> {
+    fn get_var(&self, id: ComponentId) -> Result<(ComponentArrayMetadata, PyObject), Error> {
         let builder = self.builder.lock();
         let var = builder
             .vars
@@ -36,17 +37,39 @@ impl PipelineBuilder {
         let NoxprNode::Jax(buf) = var.buffer().deref() else {
             todo!()
         };
-        Python::with_gil(|py| Ok(buf.to_object(py)))
+        let obj = Python::with_gil(|py| buf.to_object(py));
+        let metadata = ComponentArrayMetadata {
+            len: var.len,
+            entity_map: var.entity_map.clone(),
+        };
+        Ok((metadata, obj))
     }
 
-    fn set_var(&self, id: ComponentId, value: PyObject) -> Result<(), Error> {
+    fn set_var(
+        &self,
+        id: ComponentId,
+        metadata: &ComponentArrayMetadata,
+        value: PyObject,
+    ) -> Result<(), Error> {
         let builder = self.builder.lock();
         let var = builder
             .vars
             .get(&id.inner)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
         let mut var = var.borrow_mut();
-        var.buffer = Noxpr::jax(value);
+        let update_buffer = Noxpr::jax(value);
+        if var.entity_map == metadata.entity_map {
+            var.buffer = update_buffer;
+        } else {
+            let mut tracer = JaxTracer::new();
+            let new_buf = nox_ecs::update_var(
+                &var.entity_map,
+                &metadata.entity_map,
+                &var.buffer,
+                &update_buffer,
+            );
+            var.buffer = Noxpr::jax(tracer.visit(&new_buf)?);
+        }
         Ok(())
     }
 
@@ -272,7 +295,7 @@ impl WorldBuilder {
                 let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
                 Ok((
                     id.inner,
-                    Column::<HostStore>::new(HostColumn::from_ty(ty.into())),
+                    nox_ecs::Column::<HostStore>::new(HostColumn::from_ty(ty.into())),
                 ))
             })
             .collect::<Result<_, Error>>()?;
@@ -413,12 +436,56 @@ pub struct Exec {
 #[pymethods]
 impl Exec {
     pub fn run(&mut self, client: &Client) -> Result<(), Error> {
-        self.exec.run(&client.client).map_err(Error::from)
+        Python::with_gil(|_| self.exec.run(&client.client).map_err(Error::from))
     }
 
-    pub fn column(&mut self, py: Python<'_>, id: ComponentId) -> Result<PyObject, Error> {
-        let col = self.exec.column(id.inner)?;
-        Ok(col.column.buffer.raw_buf().to_pyarray(py).into())
+    fn column_array(
+        this_cell: &PyCell<Self>,
+        id: ComponentId,
+    ) -> Result<&'_ numpy::PyUntypedArray, Error> {
+        let mut this = this_cell.borrow_mut();
+        let column = this.exec.column(id.inner)?;
+        let dyn_array = column
+            .column
+            .buffer
+            .dyn_ndarray()
+            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+        fn untyped_pyarray<'py, T: numpy::Element + 'static>(
+            view: &ArrayViewD<'_, T>,
+            container: &'py PyAny,
+        ) -> &'py PyUntypedArray {
+            // # Safety
+            // This is one of those things that I'm like 75% sure is safe enough,
+            // but also close to 100% sure it breaks Rust's rules.
+            // There are essentially two safety guarantees that we want to keep
+            // when doing weird borrow stuff, ensure you aren't creating a reference
+            // to free-ed / uninitialized/unaligned memory and to ensure that you are not
+            // accidentally creating aliasing. We know we aren't doing the first one here,
+            // because `Exec` is guaranteed to stay around as long as the `PyCell` is around.
+            // We are technically breaking the 2nd rule, BUT, I think the way we are doing it is also ok.
+            // What can happen is that we call `column_array`, then we call `run`, then we call `column_array` again.
+            // We still have an outstanding reference to the array, and calling `column_array` again will cause the contents to be overwritten.
+            // In most languages, this would cause all sorts of problems, but thankfully, in Python, we have the GIL to save the day.
+            // While `exec` is run, the GIL is taken, so no one can access the old array result.
+            // We never re-alloc the underlying buffer because lengths are immutable during execution.
+            unsafe {
+                let arr = PyArray::borrow_from_array(view, container);
+                arr.as_untyped()
+            }
+        }
+        match dyn_array {
+            nox_ecs::DynArrayView::F64(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::F32(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::U64(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::U32(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::U16(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::U8(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::I64(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::I32(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::I16(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::I8(f) => Ok(untyped_pyarray(&f, this_cell)),
+            nox_ecs::DynArrayView::Bool(f) => Ok(untyped_pyarray(&f, this_cell)),
+        }
     }
 }
 
@@ -480,6 +547,49 @@ impl From<Error> for PyErr {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct ComponentArrayMetadata {
+    len: usize,
+    entity_map: BTreeMap<elodin_conduit::EntityId, usize>,
+}
+
+#[pymethods]
+impl ComponentArrayMetadata {
+    fn join(
+        &self,
+        expr: PyObject,
+        other_metadata: ComponentArrayMetadata,
+        other_exprs: Vec<PyObject>,
+    ) -> Result<(ComponentArrayMetadata, Vec<PyObject>), Error> {
+        let arr = ComponentArray {
+            buffer: Noxpr::jax(expr),
+            len: self.len,
+            entity_map: self.entity_map.clone(),
+            phantom_data: PhantomData::<()>,
+        };
+        let other_exprs = other_exprs.into_iter().map(Noxpr::jax).collect();
+        let query = Query {
+            exprs: other_exprs,
+            entity_map: other_metadata.entity_map,
+            len: other_metadata.len,
+            phantom_data: PhantomData::<()>,
+        };
+        let out = join_many(query, &arr);
+        let mut tracer = JaxTracer::new();
+        let exprs = out
+            .exprs
+            .into_iter()
+            .map(|expr| tracer.visit(&expr))
+            .collect::<Result<Vec<_>, _>>()?;
+        let metadata = ComponentArrayMetadata {
+            len: out.len,
+            entity_map: out.entity_map,
+        };
+        Ok((metadata, exprs))
+    }
+}
+
 #[pymodule]
 pub fn nox_py(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
@@ -488,5 +598,6 @@ pub fn nox_py(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<WorldBuilder>()?;
     m.add_class::<EntityId>()?;
     m.add_class::<Client>()?;
+    m.add_class::<ComponentArrayMetadata>()?;
     Ok(())
 }
