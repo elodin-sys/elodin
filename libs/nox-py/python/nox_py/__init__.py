@@ -1,5 +1,5 @@
 from .nox_py import *
-from typing import Protocol, Self, Generic, TypeVar, Any, Callable, Annotated, Type, Union
+from typing import Protocol, Self, Generic, TypeVar, Any, Callable, Annotated, Type, Union, TypeVarTuple
 from dataclasses import dataclass
 import inspect
 import jax
@@ -64,7 +64,8 @@ T = TypeVar('T', bound='ComponentProto')
 Q = TypeVar('Q', bound='ComponentArray[Any]')
 class ComponentArray(Generic[T]):
     buf: jax.Array
-    data: ComponentData
+    component_data: ComponentData
+    metadata: ComponentArrayMetadata
 
 
     @staticmethod
@@ -72,7 +73,9 @@ class ComponentArray(Generic[T]):
         t_arg = typing.get_args(new_tp)[0]
         arr = new_tp()
         arr.component_data = t_arg.__metadata__[0]
-        arr.buf = builder.get_var(arr.component_data.id)
+        (metadata, buf) = builder.get_var(arr.component_data.id)
+        arr.metadata = metadata
+        arr.buf = buf
         return arr
 
     @staticmethod
@@ -82,14 +85,69 @@ class ComponentArray(Generic[T]):
         buf = builder.init_var(component_data.id, component_data.type )
 
     def insert_into_builder(self, builder: PipelineBuilder):
-        builder.set_var(self.component_data.id, self.buf)
+        builder.set_var(self.component_data.id, self.metadata, self.buf)
 
     def map[O](self, f: Callable[[T], O]) -> Q:
-        buf = jax.vmap(lambda b: self.data.from_expr(b))(self.buf)
+        buf = jax.vmap(lambda b: f(self.component_data.from_expr(b)))(self.buf)
+        arr = ComponentArray[O]()
+        arr.metadata = self.metadata
+        arr.buf = buf
+        arr.component_data = self.component_data
+        return arr
+    def join(self, other: Q) -> Any:
+        (metadata, bufs) = self.metadata.join(self.buf, other.metadata, [other.buf])
+        q = Query()
+        q.bufs = bufs
+        q.component_data = [self.component_data, other.component_data]
+        q.metadata = metadata
+        return q
+
+A = TypeVarTuple('A')
+B = TypeVar('B', bound='Query[Any]')
+class Query(Generic[*A]):
+    bufs: list[jax.Array]
+    component_data: list[ComponentData]
+    metadata: ComponentArrayMetadata
+    def map[O](self, out_tp: type[O], f: Callable[[*A], O]) -> Q:
+        buf = jax.vmap(lambda b: f(*[data.from_expr(x) for (x, data) in zip(b, self.component_data)]) )(self.bufs)
         arr = ComponentArray[O]()
         arr.buf = buf
-        arr.data = self.data
+        arr.component_data = out_tp.__metadata__[0]
+        arr.metadata = self.metadata
         return arr
+
+    def join[O](self, other: ComponentArray[O]) -> B:
+        (metadata, bufs) = other.metadata.join(other.buf, self.metadata, self.bufs)
+        q = Query()
+        q.bufs = bufs
+        q.component_data = self.component_data
+        q.component_data.append(other.component_data)
+        q.metadata = metadata
+        return q
+
+    @staticmethod
+    def from_builder(new_tp: type[B], builder: PipelineBuilder) -> Q:
+        t_args = typing.get_args(new_tp)
+        query = None
+        for t_arg in t_args:
+            arr = ComponentArray.from_builder(ComponentArray[t_arg], builder)
+            if query is None:
+                query = Query()
+                query.component_data = [arr.component_data]
+                query.bufs = [arr.buf]
+                query.metadata = arr.metadata
+            else:
+                query = query.join(arr)
+        return query
+
+    @staticmethod
+    def init_builder(new_tp: Type[B], builder: PipelineBuilder):
+        t_args = typing.get_args(new_tp)
+        for t_arg in t_args:
+            component_data: ComponentData = t_arg.__metadata__[0]
+            buf = builder.init_var(component_data.id, component_data.type )
+
+
 
 
 class SystemParam(Protocol):

@@ -20,6 +20,7 @@ smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
 bytemuck.version = "1.14"
 bytemuck.features = ["derive"]
+ndarray = "0.15.6"
 
 # errors
 thiserror = "1"

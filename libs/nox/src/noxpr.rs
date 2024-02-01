@@ -512,11 +512,7 @@ impl Noxpr {
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
             NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
-                let shape = o
-                    .call_method0(py, "shape")
-                    .ok()?
-                    .extract::<Vec<i64>>(py)
-                    .ok()?;
+                let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
                 Some(SmallVec::from_vec(shape))
             }),
         }
