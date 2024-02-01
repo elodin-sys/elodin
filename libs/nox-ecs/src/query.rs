@@ -5,10 +5,10 @@ use smallvec::smallvec;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub struct Query<Param> {
-    exprs: Vec<Noxpr>,
-    entity_map: BTreeMap<EntityId, usize>,
-    len: usize,
-    phantom_data: PhantomData<Param>,
+    pub exprs: Vec<Noxpr>,
+    pub entity_map: BTreeMap<EntityId, usize>,
+    pub len: usize,
+    pub phantom_data: PhantomData<Param>,
 }
 
 impl<Param> Query<Param> {
@@ -130,7 +130,7 @@ fn filter_index(indexes: &[u32], buffer: &Noxpr) -> Noxpr {
     )
 }
 
-fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
+pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
     if a.entity_map == b.entity_map {
         a.exprs.push(b.buffer.clone());
         Query {
