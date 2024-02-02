@@ -7,10 +7,12 @@ use std::{net::SocketAddr, time::Duration};
 pub struct Config {
     pub api: Option<ApiConfig>,
     pub orca: Option<OrcaConfig>,
+    pub garbage_collect: Option<GarbageCollect>,
+    #[serde(default)]
+    pub monte_carlo: MonteCarloConfig,
     pub database_url: String,
     pub redis_url: String,
     pub migrate: bool,
-    pub garbage_collect: Option<GarbageCollect>,
     pub pod_name: String,
 }
 
@@ -31,6 +33,11 @@ pub struct OrcaConfig {
     pub vm_namespace: String,
     pub image_name: String,
     pub runtime_class: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct MonteCarloConfig {
+    pub spawn_batches: bool,
 }
 
 #[serde_as]
