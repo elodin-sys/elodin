@@ -1,8 +1,9 @@
 use api::Api;
 use config::Config;
-use futures::future;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
+use tokio::signal::unix::{signal, SignalKind};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{events::EventMonitor, orca::Orca, sandbox::garbage_collect};
@@ -20,7 +21,19 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let config = Config::new()?;
     info!(?config, "config");
-    let mut services = vec![];
+
+    // this cancellation token is hooked into all of the spawned tasks
+    // any of them can trigger a full shutdown via a dead-man's switch
+    let cancel_token = CancellationToken::new();
+    let signal_cancel_token = cancel_token.clone();
+    tokio::spawn(async move {
+        // initiate graceful shutdown on sigterm (but not sigint or ctrl+c)
+        let sigterm = SignalKind::terminate();
+        signal(sigterm).unwrap().recv().await;
+        signal_cancel_token.cancel();
+    });
+
+    let mut services = tokio::task::JoinSet::new();
     let mut opt = sea_orm::ConnectOptions::new(config.database_url);
     opt.sqlx_logging(false);
     let db = Database::connect(opt).await?;
@@ -35,29 +48,41 @@ async fn main() -> anyhow::Result<()> {
         let pubsub = pubsub.into_pubsub();
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let orca = Orca::new(orca_config, db.clone(), redis).await?;
-        let handle = orca.run(pubsub);
-        services.push(handle);
+        services.spawn(orca.run(pubsub, cancel_token.clone()));
     }
     if let Some(api_config) = config.api {
         let (sandbox_monitor, sandbox_events) = EventMonitor::<atc_entity::sandbox::Model>::pair();
         {
             let redis = redis.get_tokio_connection().await?;
             let redis = redis.into_pubsub();
-            services.push(sandbox_monitor.run(redis))
+            services.spawn(sandbox_monitor.run(redis, cancel_token.clone()))
         };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let api = Api::new(api_config, db.clone(), redis, msg_queue, sandbox_events).await?;
-        services.push(tokio::spawn(api.run()));
+        let cancel_on_drop = cancel_token.clone().drop_guard();
+        services.spawn(async move {
+            // don't add graceful shutdown for API server because "always be serving" is the best strategy for no downtime
+            // load balancers and ingress should be responsible for draining connections instead of the application
+            api.run().await?;
+            // if api server returns an error, other tasks should still gracefully shutdown
+            drop(cancel_on_drop);
+            Ok(())
+        });
     }
 
     if let Some(gc) = config.garbage_collect {
         if gc.enabled {
             let redis = redis.get_multiplexed_tokio_connection().await?;
-            services.push(tokio::spawn(garbage_collect(db, redis, gc.timeout)));
+            services.spawn(garbage_collect(db, redis, gc.timeout, cancel_token.clone()));
         }
     }
 
-    let (res, _, _) = future::select_all(services.into_iter()).await;
-    res?
+    // wait for cancellation
+    cancel_token.cancelled().await;
+    // wait for services to terminate gracefully
+    while let Some(res) = services.join_next().await {
+        res.unwrap()?
+    }
+    Ok(())
 }
