@@ -1,6 +1,7 @@
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{prelude::*, Duration};
+use tonic::{metadata, service};
 
 use super::Cli;
 
@@ -47,8 +48,30 @@ struct AcessTokenPayload {
     scope: String,
 }
 
+pub struct AuthInterceptor {
+    access_token: metadata::MetadataValue<metadata::Ascii>,
+}
+
+impl service::Interceptor for AuthInterceptor {
+    fn call(
+        &mut self,
+        mut request: tonic::Request<()>,
+    ) -> Result<tonic::Request<()>, tonic::Status> {
+        request
+            .metadata_mut()
+            .insert("authorization", self.access_token.clone());
+        Ok(request)
+    }
+}
+
 impl Cli {
-    pub fn access_token(&self) -> anyhow::Result<String> {
+    pub fn auth_interceptor(&self) -> anyhow::Result<AuthInterceptor> {
+        let access_token = self.access_token()?;
+        let access_token = format!("Bearer {access_token}").parse()?;
+        Ok(AuthInterceptor { access_token })
+    }
+
+    fn access_token(&self) -> anyhow::Result<String> {
         (|| {
             let access_token_path = self
                 .xdg_dirs()

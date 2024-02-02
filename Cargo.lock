@@ -3385,11 +3385,14 @@ dependencies = [
  "base64 0.21.7",
  "chrono",
  "clap",
+ "elodin-types",
  "opener",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "tonic",
+ "uuid",
  "xdg",
 ]
 
@@ -10203,12 +10206,16 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost",
+ "rustls",
+ "rustls-pemfile",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots",
 ]
 
 [[package]]
