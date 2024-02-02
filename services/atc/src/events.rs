@@ -7,7 +7,8 @@ use sea_orm::{
     PrimaryKeyTrait,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tonic::async_trait;
 
 use crate::error::Error;
@@ -148,15 +149,24 @@ impl<M: EventModel + DeserializeOwned + Send + 'static + Clone> EventMonitor<M> 
         let (tx, rx) = broadcast::channel(128);
         (EventMonitor { tx }, rx)
     }
-    pub fn run(self, mut redis: PubSub) -> JoinHandle<anyhow::Result<()>> {
-        tokio::spawn(async move {
-            redis.subscribe(M::topic_name().as_str()).await?;
-            let mut stream = redis.on_message();
-            while let Some(msg) = stream.next().await {
-                let msg = postcard::from_bytes(msg.get_payload_bytes())?;
-                let _ = self.tx.send(msg);
-            }
-            Ok(())
-        })
+    pub async fn run(
+        self,
+        mut redis: PubSub,
+        cancel_token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let cancel_on_drop = cancel_token.clone().drop_guard();
+        redis.subscribe(M::topic_name().as_str()).await?;
+        let mut stream = redis.on_message();
+        loop {
+            let msg = tokio::select! {
+                _ = cancel_token.cancelled() => break,
+                Some(msg) = stream.next() => msg,
+                else => break,
+            };
+            let msg = postcard::from_bytes(msg.get_payload_bytes())?;
+            let _ = self.tx.send(msg);
+        }
+        drop(cancel_on_drop);
+        Ok(())
     }
 }

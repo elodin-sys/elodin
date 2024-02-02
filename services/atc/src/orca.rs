@@ -2,7 +2,7 @@ use atc_entity::{
     sandbox,
     vm::{self, Status},
 };
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     api::{DeleteParams, PostParams},
@@ -12,7 +12,7 @@ use kube::{
 };
 use redis::aio::{MultiplexedConnection, PubSub};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
-use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, trace, warn};
 use uuid::Uuid;
 
@@ -49,58 +49,62 @@ impl Orca {
         })
     }
 
-    pub fn run(mut self, mut redis: PubSub) -> JoinHandle<Result<(), anyhow::Error>> {
+    pub async fn run(
+        mut self,
+        mut redis: PubSub,
+        cancel_token: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let cancel_on_drop = cancel_token.clone().drop_guard();
         let pods: Api<Pod> = kube::api::Api::namespaced(self.k8s.clone(), &self.vm_namespace);
-        let events = watcher(pods, watcher::Config::default());
-        let handle = tokio::spawn(async move {
-            redis.subscribe("vm_events").await?;
-            let rx = redis.on_message().map(|msg| {
-                postcard::from_bytes(msg.get_payload_bytes())
-                    .map(OrcaMsg::DbEvent)
-                    .map_err(Error::from)
-            });
-            let mut stream = stream::select(
-                Box::pin(events.map(|e| e.map(OrcaMsg::K8sEvent).map_err(Error::from))),
-                Box::pin(rx),
-            );
-
-            loop {
-                let Some(msg) = stream.next().await else {
-                    return Ok(());
-                };
-                match msg {
-                    Err(err) => {
-                        error!(?err, "error event");
-                    }
-                    Ok(OrcaMsg::K8sEvent(Event::Applied(pod))) => {
-                        if let Err(err) = self.handle_pod_change(&pod).await {
-                            warn!(?err, "error handling pod update");
-                        }
-                    }
-                    Ok(OrcaMsg::K8sEvent(Event::Deleted(pod))) => {
-                        if let Err(err) = self.handle_pod_deleted(&pod).await {
-                            warn!(?err, "error handling pod deleted");
-                        }
-                    }
-                    Ok(OrcaMsg::K8sEvent(Event::Restarted(_pods))) => {
-                        // NOTE(sphw): choosing not to handle stream restarts right now
-                    }
-                    Ok(OrcaMsg::DbEvent(DbEvent::Insert(vm))) => {
-                        trace!(?vm, "vm insert event");
-                        if let Err(err) = self.spawn_vm(vm.id).await {
-                            error!(?err, "error spawning vm");
-                        }
-                    }
-                    Ok(OrcaMsg::DbEvent(DbEvent::Delete(vm))) => {
-                        if let Err(err) = self.handle_vm_deleted(&vm).await {
-                            warn!(?err, "error handling vm deleted");
-                        }
-                    }
-                    Ok(OrcaMsg::DbEvent(DbEvent::Update(_vm))) => {}
-                }
-            }
+        let events = watcher(pods, watcher::Config::default())
+            .map(|e| e.map(OrcaMsg::K8sEvent).map_err(Error::from));
+        tokio::pin!(events);
+        redis.subscribe("vm_events").await?;
+        let mut rx = redis.on_message().map(|msg| {
+            postcard::from_bytes(msg.get_payload_bytes())
+                .map(OrcaMsg::DbEvent)
+                .map_err(Error::from)
         });
-        handle
+        loop {
+            let msg = tokio::select! {
+                _ = cancel_token.cancelled() => break,
+                Some(msg) = events.next() => msg,
+                Some(msg) = rx.next() => msg,
+                else => break,
+            };
+            match msg {
+                Err(err) => {
+                    error!(?err, "error event");
+                }
+                Ok(OrcaMsg::K8sEvent(Event::Applied(pod))) => {
+                    if let Err(err) = self.handle_pod_change(&pod).await {
+                        warn!(?err, "error handling pod update");
+                    }
+                }
+                Ok(OrcaMsg::K8sEvent(Event::Deleted(pod))) => {
+                    if let Err(err) = self.handle_pod_deleted(&pod).await {
+                        warn!(?err, "error handling pod deleted");
+                    }
+                }
+                Ok(OrcaMsg::K8sEvent(Event::Restarted(_pods))) => {
+                    // NOTE(sphw): choosing not to handle stream restarts right now
+                }
+                Ok(OrcaMsg::DbEvent(DbEvent::Insert(vm))) => {
+                    trace!(?vm, "vm insert event");
+                    if let Err(err) = self.spawn_vm(vm.id).await {
+                        error!(?err, "error spawning vm");
+                    }
+                }
+                Ok(OrcaMsg::DbEvent(DbEvent::Delete(vm))) => {
+                    if let Err(err) = self.handle_vm_deleted(&vm).await {
+                        warn!(?err, "error handling vm deleted");
+                    }
+                }
+                Ok(OrcaMsg::DbEvent(DbEvent::Update(_vm))) => {}
+            }
+        }
+        drop(cancel_on_drop);
+        Ok(())
     }
 
     async fn spawn_vm(&mut self, id: Uuid) -> Result<(), Error> {

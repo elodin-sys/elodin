@@ -8,6 +8,7 @@ use elodin_types::sandbox::{
 };
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 
 pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<UpdateCodeResp, Error> {
@@ -27,9 +28,14 @@ pub async fn garbage_collect(
     db: DatabaseConnection,
     mut redis: MultiplexedConnection,
     timeout: Duration,
+    cancel_token: CancellationToken,
 ) -> anyhow::Result<()> {
+    let cancel_on_drop = cancel_token.clone().drop_guard();
     loop {
-        tokio::time::sleep(timeout / 10).await;
+        tokio::select! {
+            _ = cancel_token.cancelled() => break,
+            _ = tokio::time::sleep(timeout / 10) => {},
+        };
         let stale_cutoff = Utc::now() - timeout;
         let stale_sandboxes = sandbox::Entity::find()
             .filter(sandbox::Column::LastUsed.lte(stale_cutoff))
@@ -42,4 +48,6 @@ pub async fn garbage_collect(
             }
         }
     }
+    drop(cancel_on_drop);
+    Ok(())
 }
