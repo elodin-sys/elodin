@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
             let redis = redis.into_pubsub();
             services.spawn(sandbox_monitor.run(redis, cancel_token.clone()))
         };
-        let msg_queue = redmq::MsgQueue::new(&redis, "atc", config.pod_name).await?;
+        let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let api = Api::new(api_config, db.clone(), redis, msg_queue, sandbox_events).await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();
@@ -76,6 +76,11 @@ async fn main() -> anyhow::Result<()> {
             let redis = redis.get_multiplexed_tokio_connection().await?;
             services.spawn(garbage_collect(db, redis, gc.timeout, cancel_token.clone()));
         }
+    }
+
+    if config.monte_carlo.spawn_batches {
+        let batch_spawner = monte_carlo::BatchSpawner::new(&redis, &config.pod_name).await?;
+        services.spawn(batch_spawner.run(cancel_token.clone()));
     }
 
     // wait for cancellation

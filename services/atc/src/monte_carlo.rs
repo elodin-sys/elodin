@@ -1,7 +1,11 @@
+use tokio_util::sync::CancellationToken;
+
 pub const BATCH_SIZE: usize = 100;
 pub const MAX_SAMPLE_COUNT: usize = 100_000;
 
 pub const RUN_TOPIC: &str = "mc:run";
+pub const BATCH_TOPIC: &str = "mc:batch";
+pub const SPAWN_GROUP: &str = "atc:spawn";
 
 // Buffer batches help with work alignment
 // E.g. if an agent can do 10 batches at once, adding some buffer between runs allows for the agent
@@ -23,6 +27,49 @@ pub struct Batch {
     pub id: String,
     pub batch_no: usize,
     pub buffer: bool,
+}
+
+pub struct BatchSpawner {
+    msg_queue: redmq::MsgQueue,
+}
+
+impl BatchSpawner {
+    pub async fn new(client: &redis::Client, pod_name: &str) -> anyhow::Result<Self> {
+        let msg_queue = redmq::MsgQueue::new(client, SPAWN_GROUP, pod_name).await?;
+        let batch_spawner = BatchSpawner { msg_queue };
+        Ok(batch_spawner)
+    }
+
+    pub async fn run(mut self, cancel_token: CancellationToken) -> anyhow::Result<()> {
+        let cancel_on_drop = cancel_token.clone().drop_guard();
+        loop {
+            let work = tokio::select! {
+               r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1) => r?,
+               _ = cancel_token.cancelled() => break,
+            };
+            let mut batches = Vec::default();
+            for run in &work {
+                let since_start = chrono::Utc::now().signed_duration_since(run.start_time);
+                if since_start.num_minutes() > 30 {
+                    tracing::warn!(%run.id, %run.name, %since_start, "stale run, skipping batch creation");
+                    continue;
+                }
+                tracing::debug!(%run.id, %run.name, %since_start, "creating batches");
+                let batch_count = run.samples.div_ceil(run.batch_size);
+                let new_batches = (0..batch_count).map(|batch_no| Batch {
+                    id: run.id().to_string(),
+                    batch_no,
+                    buffer: false,
+                });
+                batches.extend(new_batches);
+            }
+            // TODO(Akhil): make the send + ack operations atomic
+            self.msg_queue.send(BATCH_TOPIC, batches).await?;
+            self.msg_queue.ack(RUN_TOPIC, &work).await?;
+        }
+        drop(cancel_on_drop);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -78,13 +78,21 @@ impl MsgQueue {
         topic: &str,
         entries: Vec<M>,
     ) -> redis::RedisResult<Vec<String>> {
-        entries
+        let ids = entries
             .iter()
             .map(to_redis)
             .fold(&mut redis::pipe(), |p, fields| p.xadd(topic, "*", &fields))
             .atomic()
             .query_async::<_, Vec<String>>(&mut self.conn.clone())
-            .await
+            .await?;
+        tracing::trace!(
+            topic,
+            group = &self.group,
+            consumer = &self.consumer,
+            count = ids.len(),
+            "sent"
+        );
+        Ok(ids)
     }
 
     pub async fn get<M: Message>(&self, topic: &str, id: &str) -> redis::RedisResult<Option<M>> {
@@ -158,6 +166,7 @@ impl MsgQueue {
                 .collect();
 
             tracing::trace!(
+                topic,
                 group = &self.group,
                 consumer = &self.consumer,
                 start_id = id,
@@ -204,6 +213,7 @@ impl MsgQueue {
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
         let acks = self.conn.clone().xack(topic, &self.group, &ids).await?;
         tracing::trace!(
+            topic,
             group = &self.group,
             consumer = &self.consumer,
             count = acks,
@@ -220,6 +230,7 @@ impl MsgQueue {
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
         let deleted = self.conn.clone().xdel(topic, &ids).await?;
         tracing::trace!(
+            topic,
             group = &self.group,
             consumer = &self.consumer,
             count = deleted,
@@ -233,6 +244,12 @@ impl<M: Message> std::ops::Deref for Received<M> {
     type Target = M;
     fn deref(&self) -> &Self::Target {
         &self.entry
+    }
+}
+
+impl<M: Message> Received<M> {
+    pub fn id(&self) -> &str {
+        &self.id
     }
 }
 

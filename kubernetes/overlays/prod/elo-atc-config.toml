@@ -15,3 +15,6 @@ image_name = "us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64:$RELE
 [garbage_collect]
 enabled = true
 timeout = 600.0
+
+[monte_carlo]
+spawn_batches = true
