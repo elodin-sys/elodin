@@ -11,6 +11,8 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<CreateMonteCarloRunResp, error::Error> {
+        tracing::debug!(%user.id, "create monte carlo run");
+
         if req.samples > monte_carlo::MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
         }
@@ -25,6 +27,7 @@ impl api::Api {
         }
         .insert(txn)
         .await?;
+        tracing::debug!(%user.id, id = %mc_run.id, "created monte carlo run");
 
         Ok(CreateMonteCarloRunResp {
             id: mc_run.id.as_bytes().to_vec(),
@@ -38,6 +41,8 @@ impl api::Api {
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<StartMonteCarloRunResp, error::Error> {
         let id = req.id()?;
+        tracing::debug!(%user.id, %id, "start monte carlo run");
+
         let mc_run = atc_entity::MonteCarloRun::find_by_id(id)
             .filter(mc::Column::UserId.eq(user.id))
             .one(txn)
@@ -62,6 +67,7 @@ impl api::Api {
         self.msg_queue
             .send(monte_carlo::RUN_TOPIC, vec![mc_run_msg])
             .await?;
+        tracing::debug!(%user.id, %id, "started monte carlo run");
 
         Ok(StartMonteCarloRunResp {})
     }
