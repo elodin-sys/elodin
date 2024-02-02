@@ -20,7 +20,8 @@ impl api::Api {
             user_id: sea_orm::Set(user.id),
             samples: sea_orm::Set(samples),
             name: sea_orm::Set(req.name),
-            ..Default::default()
+            status: sea_orm::Set(mc::Status::Pending),
+            metadata: sea_orm::Set(Json::Null),
         }
         .insert(txn)
         .await?;
