@@ -21,7 +21,9 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::new()?;
     info!(?config, "config");
     let mut services = vec![];
-    let db = Database::connect(config.database_url).await?;
+    let mut opt = sea_orm::ConnectOptions::new(config.database_url);
+    opt.sqlx_logging(false);
+    let db = Database::connect(opt).await?;
     if config.migrate {
         Migrator::up(&db, None).await?;
     }
