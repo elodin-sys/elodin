@@ -62,7 +62,7 @@ hyper.features = ["stream"]
 
 # sql
 sea-orm.version = "0.12"
-sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid" ]
+sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]
 atc-entity.path = "./entity"
 atc-migration.path = "./migration"
 
