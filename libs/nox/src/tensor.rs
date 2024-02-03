@@ -143,7 +143,7 @@ pub trait ConstDim<const RANK: usize> {
 }
 
 pub trait XlaDim {
-    type Array;
+    type Array: AsRef<[i64]>;
     fn dims() -> Self::Array;
 }
 
