@@ -128,6 +128,13 @@ impl<'de> de::Deserializer<'de> for &mut StringDeserializer {
         visitor.visit_string(self.input.clone())
     }
 
+    fn deserialize_identifier<V: de::Visitor<'de>>(
+        self,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        self.deserialize_str(visitor)
+    }
+
     parse_de!(deserialize_bool, visit_bool);
     parse_de!(deserialize_i8, visit_i8);
     parse_de!(deserialize_i16, visit_i16);
@@ -147,7 +154,6 @@ impl<'de> de::Deserializer<'de> for &mut StringDeserializer {
     unsupported_de!(deserialize_option);
     unsupported_de!(deserialize_unit);
     unsupported_de!(deserialize_seq);
-    unsupported_de!(deserialize_identifier);
     unsupported_de!(deserialize_ignored_any);
     unsupported_de!(deserialize_map);
 
