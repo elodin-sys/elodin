@@ -26,10 +26,7 @@ def nix_step(label, flake, command, emoji = ":nix:", pre_command = None, key = N
     label = f"{emoji} {label}",
     command = [
       pre_command,
-      f"echo '{command}' > script.sh",
-      "chmod a+x script.sh",
-      f"nix develop {flake} --command bash -euo pipefail -c ./script.sh",
-      "rm ./script.sh",
+      f"nix develop {flake} --command bash -euo pipefail -c '{command}'",
     ],
     key = key,
     depends_on = depends_on,
