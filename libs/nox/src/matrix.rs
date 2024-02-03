@@ -37,7 +37,7 @@ where
 }
 
 impl<T: ArrayElement, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
-    fn constant(self) -> Matrix<T, R, C, Op> {
+    pub fn constant(self) -> Matrix<T, R, C, Op> {
         let inner = Noxpr::constant(
             self.inner,
             ArrayTy {

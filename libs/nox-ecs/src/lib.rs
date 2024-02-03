@@ -1,3 +1,4 @@
+use assets::{AssetStore, Handle};
 use bytemuck::AnyBitPattern;
 use elodin_conduit::{ComponentType, ComponentValue, EntityId};
 use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
@@ -13,6 +14,7 @@ pub use elodin_conduit;
 pub use elodin_conduit::ComponentId;
 pub use nox;
 
+mod assets;
 mod component;
 mod conduit;
 mod dyn_array;
@@ -43,6 +45,7 @@ pub struct World<S: WorldStore = HostStore> {
     pub archetypes: Vec<Table<S>>,
     pub component_map: HashMap<ComponentId, usize>,
     pub archetype_id_map: HashMap<ArchetypeId, usize>,
+    pub assets: AssetStore,
 }
 
 impl<S: WorldStore> Default for World<S> {
@@ -51,6 +54,7 @@ impl<S: WorldStore> Default for World<S> {
             archetypes: Default::default(),
             component_map: Default::default(),
             archetype_id_map: Default::default(),
+            assets: AssetStore::default(),
         }
     }
 }
@@ -95,6 +99,13 @@ impl<S: WorldStore> World<S> {
             entities: &mut archetype.entity_buffer,
             entity_map: &mut archetype.entity_map,
         })
+    }
+
+    pub fn insert_asset<C: elodin_conduit::Component + Send + Sync + 'static>(
+        &mut self,
+        asset: C,
+    ) -> Handle<C> {
+        self.assets.insert(asset)
     }
 }
 
@@ -184,6 +195,7 @@ impl World<HostStore> {
             archetypes,
             component_map: self.component_map.clone(),
             archetype_id_map: self.archetype_id_map.clone(),
+            assets: AssetStore::default(),
         })
     }
 
@@ -761,6 +773,15 @@ impl Exec {
             .ok_or(Error::ComponentNotFound)
     }
 
+    pub fn cached_column(&self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
+        if !self.loaded_components.contains(&component_id) {
+            return Err(Error::ComponentNotFound);
+        }
+        self.host_world
+            .column_by_id(component_id)
+            .ok_or(Error::ComponentNotFound)
+    }
+
     fn clear_cache(&mut self) {
         self.loaded_components.clear();
     }
@@ -810,6 +831,8 @@ pub enum Error {
     ValueSizeMismatch,
     #[error("conduit error")]
     Conduit(#[from] elodin_conduit::Error),
+    #[error("asset not found")]
+    AssetNotFound,
 }
 
 impl From<nox::xla::Error> for Error {
@@ -821,6 +844,7 @@ impl From<nox::xla::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use elodin_conduit::well_known::Mesh;
     use nox::Scalar;
 
     #[test]
@@ -863,5 +887,23 @@ mod tests {
         let c = exec.client_world.column::<C>().unwrap();
         let lit = c.column.buffer.to_literal_sync().unwrap();
         assert_eq!(lit.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
+    }
+
+    #[test]
+    fn test_assets() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
+
+        #[derive(Archetype)]
+        struct Body {
+            mesh: Handle<Mesh>,
+            a: A,
+        }
+        let mut world = World::default();
+        let body = Body {
+            mesh: world.insert_asset(Mesh::bachs(1., 1., 1.)),
+            a: A(Scalar::host(1.0)),
+        };
+        world.spawn(body);
     }
 }
