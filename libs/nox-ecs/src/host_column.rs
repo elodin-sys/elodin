@@ -15,6 +15,7 @@ pub struct HostColumn {
     pub(crate) buf: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) component_type: ComponentType,
+    pub(crate) asset: bool,
 }
 
 impl HostColumn {
@@ -23,6 +24,7 @@ impl HostColumn {
             buf: vec![],
             component_type: ty,
             len: 0,
+            asset: false,
         }
     }
 
