@@ -1,6 +1,6 @@
 { config, self', pkgs, lib, rustToolchain, ... }: {
   devShells = {
-    rust = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
+    rust = pkgs.mkShell {
       name = "elo-rust-shell";
       buildInputs = with pkgs;
         [
@@ -28,7 +28,7 @@
       BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
       doCheck = false;
     };
-    elixir = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
+    elixir = pkgs.mkShell {
       name = "elo-elixir-shell";
       buildInputs = with pkgs;
         [
@@ -36,7 +36,7 @@
         ];
       doCheck = false;
     };
-    ops = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
+    ops = pkgs.mkShell {
       name = "elo-ops-shell";
       buildInputs = with pkgs;
         [
