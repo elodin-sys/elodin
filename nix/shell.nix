@@ -8,6 +8,8 @@
           rustToolchain
           pkg-config
           python3
+          python3Packages.jax
+          python3Packages.jaxlib
           openssl
           clang
           protobuf
