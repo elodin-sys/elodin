@@ -4,7 +4,7 @@ use crate::{
         GeneralizedMotion, GeneralizedPos, SpatialForce, SpatialInertia, SpatialMotion, SpatialPos,
         SpatialSubspace, SpatialTransform,
     },
-    types::{BiasForce, Effect, JointForce, WorldAccel},
+    types::{BiasForce, Effect, JointForce, WorldAccel, WorldPosExt},
     BodyPos, Config, Inertia, JointAccel, JointPos, JointVel, Mass, SubtreeCoM, SubtreeCoMSum,
     SubtreeInertia, SubtreeMass, TreeIndex, TreeMassMatrix, WorldAnchorPos, WorldPos, WorldVel,
 };
@@ -24,19 +24,23 @@ pub fn pos_tree_step(
     joint: &Joint,
 ) -> (WorldPos, WorldAnchorPos) {
     match joint.joint_type {
-        JointType::Free => (
-            WorldPos(child.to_spatial(joint)),
-            WorldAnchorPos(SpatialTransform::identity()),
-        ),
+        JointType::Free => {
+            let spatial_pos = child.to_spatial(joint);
+            let world_pos = WorldPos {
+                pos: spatial_pos.pos,
+                att: *spatial_pos.att,
+            };
+            (world_pos, WorldAnchorPos(SpatialTransform::identity()))
+        }
         JointType::Revolute { .. } | JointType::Sphere | JointType::Fixed => {
             let anchor_pos = child.to_spatial(joint);
             let world_anchor_pos = parent.transform() * anchor_pos.transform();
             let pos = world_anchor_pos * body_pos.transform();
             (
-                WorldPos(SpatialPos {
+                WorldPos {
                     pos: pos.linear,
-                    att: pos.angular,
-                }),
+                    att: pos.angular.into_inner(),
+                },
                 WorldAnchorPos(world_anchor_pos),
             )
         }
@@ -87,7 +91,7 @@ pub fn kinematic_system(
             let Ok(Some(children)) = children else {
                 continue;
             };
-            recurisve_step(&world_pos.0, children, query, children_query);
+            recurisve_step(&world_pos.to_spatial(), children, query, children_query);
         }
     }
 
@@ -103,7 +107,7 @@ pub fn kinematic_system(
         let Some(children) = children else { continue };
 
         recurisve_step(
-            &parent_kinematics.world_pos.0,
+            &parent_kinematics.world_pos.to_spatial(),
             children,
             &mut query,
             &children_query,
@@ -135,7 +139,7 @@ pub fn com_system(
             **mass_sum = 0.0;
         }
 
-        **com_sum += mass.0 * pos.0.pos;
+        **com_sum += mass.0 * pos.to_spatial().pos;
         **mass_sum += mass.0;
     }
 
@@ -197,7 +201,7 @@ pub fn rne_system(
             let Ok([parent, mut child]) = child_query.get_many_mut([*parent, *child]) else {
                 continue;
             };
-
+            let child_world_pos = child.world_pos.to_spatial();
             let (vel, accel, force) = forward_rne_step(
                 child.joint,
                 &parent.world_vel.0,
@@ -207,12 +211,12 @@ pub fn rne_system(
                 &SpatialInertia::from_body_inertia(
                     child.mass.0,
                     &child.inertia.0,
-                    &(child.world_pos.0.pos - **child.subtree_com),
-                    &child.world_pos.0.att,
+                    &(child_world_pos.pos - **child.subtree_com),
+                    &child_world_pos.att,
                 ),
                 child
                     .effect
-                    .to_spatial(child.world_pos.0.pos - **child.subtree_com),
+                    .to_spatial(child.world_pos.to_spatial().pos - **child.subtree_com),
             );
 
             child.world_vel.0 = vel;
@@ -230,7 +234,7 @@ pub fn rne_system(
             child.world_accel.0 = config.global_gravity;
             child.bias_force.0 = child
                 .effect
-                .to_spatial(child.world_pos.0.pos - **child.subtree_com)
+                .to_spatial(child.world_pos.to_spatial().pos - **child.subtree_com)
                 + &SpatialInertia::from_mass(child.mass.0) * config.global_gravity;
         }
     }
@@ -354,11 +358,12 @@ pub fn cri_system(
     let mass_matrix = &mut mass_matrix.0;
 
     for mut x in &mut query {
+        let world_pos = x.world_pos.to_spatial();
         x.subtree_inertia.0 = SpatialInertia::from_body_inertia(
             x.mass.0,
             &x.inertia.0,
-            &(x.world_pos.0.pos - **x.subtree_com),
-            &x.world_pos.0.att,
+            &(world_pos.pos - **x.subtree_com),
+            &world_pos.att,
         );
     }
     for Link { parent, child, .. } in sort.0.iter().rev() {

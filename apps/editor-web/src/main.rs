@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use elodin_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-use elodin_core::sync::SyncPlugin;
+use elodin_conduit::bevy_sync::SyncPlugin;
 use elodin_editor::EditorPlugin;
 use tracing::error;
 

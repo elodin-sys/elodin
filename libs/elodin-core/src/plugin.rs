@@ -6,13 +6,15 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
+use elodin_conduit::well_known::SimState;
 use nalgebra::DMatrix;
 
 use crate::{
     hierarchy::TopologicalSortPlugin,
     history::HistoryPlugin,
     tree::{com_system, cri_system, forward_dynamics, rne_system},
-    SimState, SyncModels, TreeMassMatrix, WorldPos,
+    types::WorldPosExt,
+    SyncModels, TreeMassMatrix, WorldPos,
 };
 
 use super::{
@@ -111,7 +113,8 @@ pub fn tick(world: &mut World) {
 }
 
 pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
-    query.iter_mut().for_each(|(mut transform, WorldPos(pos))| {
+    query.iter_mut().for_each(|(mut transform, pos)| {
+        let pos = pos.to_spatial();
         *transform = pos.bevy(1.0);
     });
 }
