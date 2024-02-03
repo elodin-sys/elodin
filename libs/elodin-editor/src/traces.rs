@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
-use elodin_core::TraceAnchor;
+use elodin_conduit::well_known::TraceAnchor;
 use std::collections::VecDeque;
 
 pub struct TracesPlugin;

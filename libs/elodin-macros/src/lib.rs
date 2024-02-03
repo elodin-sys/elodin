@@ -14,3 +14,20 @@ pub fn derive_macro_editable(input: TokenStream) -> TokenStream {
 pub fn component(input: TokenStream) -> TokenStream {
     component::component(input)
 }
+
+pub(crate) fn conduit_crate_name() -> proc_macro2::TokenStream {
+    use proc_macro2::Span;
+    use proc_macro_crate::{crate_name, FoundCrate};
+    use quote::quote;
+    use syn::Ident;
+
+    let name = crate_name("elodin-conduit").expect("my-crate is present in `Cargo.toml`");
+
+    match name {
+        FoundCrate::Itself => quote!(crate),
+        FoundCrate::Name(name) => {
+            let ident = Ident::new(&name, Span::call_site());
+            quote!( #ident )
+        }
+    }
+}

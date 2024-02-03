@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::{
     plugin::{PhysicsSchedule, TickSet},
     spatial::{GeneralizedMotion, GeneralizedPos, SpatialMotion, SpatialPos},
-    types::{Config, Effect, EntityQuery},
+    types::{Config, Effect, EntityQuery, WorldPosExt},
 };
 
 #[derive(Default, Resource)]
@@ -78,7 +78,7 @@ impl EntityHistory {
         self.vel.push(data.vel.0);
         self.mass.push(data.mass.0);
         self.effects.push(*query.effect);
-        self.world_pos.push(data.world_pos.0);
+        self.world_pos.push(data.world_pos.to_spatial());
         self.world_vel.push(data.world_vel.0);
     }
 

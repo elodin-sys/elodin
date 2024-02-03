@@ -6,6 +6,8 @@ use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 use syn::{Generics, Ident};
 
+use crate::conduit_crate_name;
+
 pub enum IdAttr {
     Id(String),
     Prefix(String),
@@ -55,37 +57,38 @@ pub fn component(input: TokenStream) -> TokenStream {
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0].ty;
     let where_clause = &generics.where_clause;
+    let crate_name = conduit_crate_name();
     let id_string = match id {
         IdAttr::Id(id) => {
-            format!("elodin_conduit::cid!({})", id)
+            format!("{crate_name}::cid!({id})",)
         }
         IdAttr::Prefix(prefix) => {
             let ident = ident.to_string().to_case(Case::Snake);
-            format!("elodin_conduit::cid!({};{})", prefix, ident)
+            format!("{crate_name}::cid!({prefix};{ident})")
         }
         IdAttr::Ident => {
             let ident = ident.to_string().to_case(Case::Snake);
-            format!("elodin_conduit::ComponentId::new(\"{}\")", ident)
+            format!("{crate_name}::ComponentId::new(\"{ident}\")")
         }
     };
     let id: proc_macro2::TokenStream = id_string.parse().unwrap();
     if postcard {
         quote! {
-            impl elodin_conduit::Component for #ident #generics #where_clause {
-                fn component_id() -> elodin_conduit::ComponentId {
+            impl #crate_name::Component for #ident #generics #where_clause {
+                fn component_id() -> #crate_name::ComponentId {
                     #id
                 }
 
-                fn component_type() -> elodin_conduit::ComponentType {
-                    elodin_conduit::ComponentType::Bytes
+                fn component_type() -> #crate_name::ComponentType {
+                    #crate_name::ComponentType::Bytes
                 }
 
-                fn component_value<'a>(&self) -> elodin_conduit::ComponentValue<'a> {
-                    elodin_conduit::ComponentValue::Bytes(postcard::to_allocvec(self).unwrap_or_default().into())
+                fn component_value<'a>(&self) -> #crate_name::ComponentValue<'a> {
+                    #crate_name::ComponentValue::Bytes(postcard::to_allocvec(self).unwrap_or_default().into())
                 }
 
-                fn from_component_value(value: elodin_conduit::ComponentValue<'_>) -> Option<Self> {
-                    let elodin_conduit::ComponentValue::Bytes(buf) = value else {
+                fn from_component_value(value: #crate_name::ComponentValue<'_>) -> Option<Self> {
+                    let #crate_name::ComponentValue::Bytes(buf) = value else {
                         return None;
                     };
                     postcard::from_bytes(buf.as_ref()).ok()
@@ -96,23 +99,23 @@ pub fn component(input: TokenStream) -> TokenStream {
         .into()
     } else {
         quote! {
-            impl elodin_conduit::Component for #ident #generics #where_clause {
-                fn component_id() -> elodin_conduit::ComponentId {
+            impl #crate_name::Component for #ident #generics #where_clause {
+                fn component_id() -> #crate_name::ComponentId {
                     #id
                 }
 
-                fn component_type() -> elodin_conduit::ComponentType {
-                    use elodin_conduit::Component;
+                fn component_type() -> #crate_name::ComponentType {
+                    use #crate_name::Component;
                     <#ty>::component_type()
                 }
 
-                fn component_value<'a>(&self) -> elodin_conduit::ComponentValue<'a> {
-                    use elodin_conduit::Component;
+                fn component_value<'a>(&self) -> #crate_name::ComponentValue<'a> {
+                    use #crate_name::Component;
                     self.0.component_value()
                 }
 
-                fn from_component_value(value: elodin_conduit::ComponentValue<'_>) -> Option<Self> {
-                    use elodin_conduit::Component;
+                fn from_component_value(value: #crate_name::ComponentValue<'_>) -> Option<Self> {
+                    use #crate_name::Component;
                     <#ty>::from_component_value(value).map(Self)
                 }
 

@@ -3405,6 +3405,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "const-fnv1a-hash",
+ "elodin-macros",
  "fastrand 2.0.1",
  "flume",
  "futures",
@@ -3413,6 +3414,7 @@ dependencies = [
  "nalgebra",
  "nox",
  "num_enum 0.7.2",
+ "postcard",
  "serde",
  "thiserror",
  "tokio",
@@ -3475,6 +3477,7 @@ version = "0.1.0"
 dependencies = [
  "convert_case",
  "darling",
+ "proc-macro-crate 3.1.0",
  "proc-macro2",
  "quote",
  "syn 2.0.48",

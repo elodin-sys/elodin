@@ -37,12 +37,12 @@ pub fn archetype(input: TokenStream) -> TokenStream {
         impl #crate_name::Archetype for #ident #generics #where_clause {
             fn component_ids() -> Vec<#crate_name::elodin_conduit::ComponentId> {
                 use #crate_name::Component;
-                vec![#( #tys::component_id(), )*]
+                vec![#( <#tys>::component_id(), )*]
             }
 
             fn component_tys() -> Vec<#crate_name::elodin_conduit::ComponentType> {
                 use #crate_name::Component;
-                vec![#( #tys::component_type(), )*]
+                vec![#( <#tys>::component_type(), )*]
             }
 
             fn insert_into_table(self, table: &mut #crate_name::Table<#crate_name::HostStore>) {

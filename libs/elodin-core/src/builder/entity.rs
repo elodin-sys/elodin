@@ -161,7 +161,7 @@ impl EntityBuilder {
             fixed: FixedBody(self.fixed),
             picked: Picked(false),
 
-            world_pos: WorldPos(Default::default()),
+            world_pos: WorldPos::default(),
             world_anchor_pos: WorldAnchorPos(SpatialTransform::identity()),
             world_vel: WorldVel(Default::default()),
             world_accel: WorldAccel(Default::default()),

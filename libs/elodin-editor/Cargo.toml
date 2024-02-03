@@ -12,9 +12,14 @@ osx_minimum_system_version = "10.11"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["core"]
+core = ["elodin-core"]
+
 [dependencies]
 # core
 elodin-core.path = "../elodin-core"
+elodin-core.optional = true
 elodin-macros.path = "../elodin-macros"
 
 # math

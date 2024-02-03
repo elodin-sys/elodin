@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{self, epaint::Shadow, style::WidgetVisuals, Color32, Margin, Rounding, Stroke, Ui},
+    egui::{self, epaint::Shadow, style::WidgetVisuals, Color32, Margin, Rounding, Stroke},
     EguiContexts,
 };
-use elodin_core::{EntityQuery, Picked, SimState};
-use nalgebra::Vector3;
+use elodin_conduit::well_known::SimState;
 
 const LIGHT_BLUE: Color32 = Color32::from_rgb(184, 204, 255);
 const DARK_BLUE: Color32 = Color32::from_rgb(0x1F, 0x2C, 0x4C);
@@ -84,29 +83,30 @@ fn set_widget_visuals(visuals: &mut WidgetVisuals) {
 //         });
 // }
 
-pub(crate) fn picked_system(
-    mut contexts: EguiContexts,
-    picked: Query<(EntityQuery, &Picked, Entity)>,
-) {
-    set_theme(contexts.ctx_mut());
-    egui::Window::new("picked components")
-        .title_bar(false)
-        .resizable(false)
-        .show(contexts.ctx_mut(), |ui| {
-            picked
-                .iter()
-                .filter(|(_, picked, _)| picked.0)
-                .for_each(|(entity, _, e)| {
-                    ui.collapsing(format!("entity {:?}", e), |ui| {
-                        vec3_component(ui, "pos (m/s)", &entity.world_pos.0.pos);
-                        vec3_component(ui, "vel (m/s)", &entity.world_vel.0.vel);
-                        let euler_angles = vec_from_tuple(entity.world_pos.0.att.euler_angles());
-                        vec3_component(ui, "euler angle (rad)", &euler_angles);
-                        vec3_component(ui, "ang vel (m/s)", &entity.world_vel.0.vel);
-                    });
-                })
-        });
-}
+// pub(crate) fn picked_system(
+//     mut contexts: EguiContexts,
+//     picked: Query<(EntityQuery, &Picked, Entity)>,
+// ) {
+//     set_theme(contexts.ctx_mut());
+//     egui::Window::new("picked components")
+//         .title_bar(false)
+//         .resizable(false)
+//         .show(contexts.ctx_mut(), |ui| {
+//             picked
+//                 .iter()
+//                 .filter(|(_, picked, _)| picked.0)
+//                 .for_each(|(entity, _, e)| {
+//                     ui.collapsing(format!("entity {:?}", e), |ui| {
+//                         vec3_component(ui, "pos (m/s)", &entity.world_pos.pos);
+//                         vec3_component(ui, "vel (m/s)", &entity.world_vel.0.vel);
+//                         let att = UnitQuaternion::new_normalize(entity.world_pos.att);
+//                         let euler_angles = vec_from_tuple(att.euler_angles());
+//                         vec3_component(ui, "euler angle (rad)", &euler_angles);
+//                         vec3_component(ui, "ang vel (m/s)", &entity.world_vel.0.vel);
+//                     });
+//                 })
+//         });
+// }
 
 pub(crate) fn timeline_system(
     mut contexts: EguiContexts,
@@ -116,6 +116,7 @@ pub(crate) fn timeline_system(
     let window = window.single();
     let width = window.resolution.width();
     let height = window.resolution.height();
+    set_theme(contexts.ctx_mut());
     egui::Window::new("timeline")
         .title_bar(false)
         .resizable(false)
@@ -135,27 +136,27 @@ pub(crate) fn timeline_system(
         });
 }
 
-fn vec_from_tuple(tuple: (f64, f64, f64)) -> Vector3<f64> {
-    Vector3::new(tuple.0, tuple.1, tuple.2)
-}
+// fn vec_from_tuple(tuple: (f64, f64, f64)) -> Vector3<f64> {
+//     Vector3::new(tuple.0, tuple.1, tuple.2)
+// }
 
-fn vec3_component(ui: &mut Ui, label: &str, vec3: &Vector3<f64>) {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        let x = format!("{:+.5}", vec3.x);
-        let y = format!("{:+.5}", vec3.y);
-        let z = format!("{:+.5}", vec3.z);
-        ui.add_sized(
-            egui::vec2(70., 16.),
-            egui::TextEdit::singleline(&mut x.as_str()),
-        );
-        ui.add_sized(
-            egui::vec2(70., 16.),
-            egui::TextEdit::singleline(&mut y.as_str()),
-        );
-        ui.add_sized(
-            egui::vec2(70., 16.),
-            egui::TextEdit::singleline(&mut z.as_str()),
-        );
-    });
-}
+// fn vec3_component(ui: &mut Ui, label: &str, vec3: &Vector3<f64>) {
+//     ui.horizontal(|ui| {
+//         ui.label(label);
+//         let x = format!("{:+.5}", vec3.x);
+//         let y = format!("{:+.5}", vec3.y);
+//         let z = format!("{:+.5}", vec3.z);
+//         ui.add_sized(
+//             egui::vec2(70., 16.),
+//             egui::TextEdit::singleline(&mut x.as_str()),
+//         );
+//         ui.add_sized(
+//             egui::vec2(70., 16.),
+//             egui::TextEdit::singleline(&mut y.as_str()),
+//         );
+//         ui.add_sized(
+//             egui::vec2(70., 16.),
+//             egui::TextEdit::singleline(&mut z.as_str()),
+//         );
+//     });
+// }

@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[cfg(feature = "bevy")]
 pub mod bevy;
+#[cfg(feature = "bevy")]
+pub mod bevy_sync;
 #[cfg(feature = "nox")]
 pub mod nox;
 #[cfg(feature = "tokio")]
@@ -11,6 +13,7 @@ pub mod builder;
 pub mod error;
 pub mod parser;
 pub mod types;
+pub mod well_known;
 
 pub use error::*;
 pub use types::*;

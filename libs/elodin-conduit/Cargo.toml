@@ -37,6 +37,7 @@ bytes.optional = true
 # bevy
 bevy.version = "0.12"
 bevy.default_features = false
+bevy.features = ["bevy_pbr"]
 bevy.optional = true
 flume.version = "0.11"
 flume.optional = true
@@ -60,3 +61,8 @@ nox.optional = true
 # rand
 fastrand.version = "2"
 fastrand.optional = true
+
+# well-known
+elodin-macros.path = "../elodin-macros"
+postcard.version = "1.0"
+postcard.features = ["alloc"]

@@ -1,8 +1,6 @@
 use elodin_conduit::bevy::{ConduitSubscribePlugin, Msg, Subscriptions};
-use elodin_core::{
-    runner::IntoSimRunner,
-    sync::{SendPlbPlugin, SyncPlugin},
-};
+use elodin_conduit::bevy_sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS};
+use elodin_core::runner::IntoSimRunner;
 use elodin_py::SimBuilder;
 use elodin_types::sandbox::{
     self,
@@ -71,7 +69,7 @@ impl SimServer {
                 self.bevy_tx.clone(),
                 tx_socket,
                 rx_socket,
-                elodin_core::sync::DEFAULT_SUB_FILTERS,
+                DEFAULT_SUB_FILTERS,
             ));
         }
     }

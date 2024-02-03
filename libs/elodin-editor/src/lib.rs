@@ -23,22 +23,20 @@ use bevy_infinite_grid::{
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use elodin_conduit::{
-    bevy::{Msg, SubscribeEvent},
-    cid_mask,
-};
-use elodin_core::{
-    plugin::sync_pos,
-    runner::IntoSimRunner,
-    sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS},
-    SimState,
-};
+use elodin_conduit::well_known::{SimState, WorldPos};
 use traces::TracesPlugin;
 
 pub(crate) mod traces;
 mod ui;
 
-pub fn editor<'a, T>(func: impl IntoSimRunner<'a, T> + Send + Sync + 'static) {
+#[cfg(feature = "core")]
+pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send + Sync + 'static) {
+    use elodin_conduit::{
+        bevy::{Msg, SubscribeEvent},
+        bevy_sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS},
+        cid_mask,
+    };
+
     let (server_tx, server_rx) = flume::unbounded();
     let (client_tx, client_rx) = flume::unbounded();
     let _ = std::thread::spawn(move || {
@@ -101,7 +99,6 @@ impl Plugin for EditorPlugin {
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, (picked_system,))
         .add_systems(Update, make_pickable)
         .add_systems(Update, timeline_system)
         .add_systems(Update, sync_pos)
@@ -185,4 +182,15 @@ fn make_pickable(
     for entity in meshes.iter() {
         commands.entity(entity).insert((PickableBundle::default(),));
     }
+}
+
+pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
+    query.iter_mut().for_each(|(mut transform, pos)| {
+        let WorldPos { pos, att } = pos;
+        *transform = bevy::prelude::Transform {
+            translation: Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
+            rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
+            ..Default::default()
+        }
+    });
 }
