@@ -49,5 +49,6 @@ pub async fn garbage_collect(
         }
     }
     drop(cancel_on_drop);
+    tracing::debug!("done");
     Ok(())
 }

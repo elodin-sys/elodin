@@ -167,6 +167,7 @@ impl<M: EventModel + DeserializeOwned + Send + 'static + Clone> EventMonitor<M> 
             let _ = self.tx.send(msg);
         }
         drop(cancel_on_drop);
+        tracing::debug!("done");
         Ok(())
     }
 }

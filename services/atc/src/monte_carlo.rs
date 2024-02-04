@@ -44,17 +44,19 @@ impl BatchSpawner {
         let cancel_on_drop = cancel_token.clone().drop_guard();
         loop {
             let work = tokio::select! {
-               r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1) => r?,
-               _ = cancel_token.cancelled() => break,
+                r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1) => r?,
+                _ = cancel_token.cancelled() => break,
             };
             let mut batches = Vec::default();
             for run in &work {
                 let since_start = chrono::Utc::now().signed_duration_since(run.start_time);
+                let span = tracing::debug_span!("create_batches", %run.id, %run.name, %since_start);
+                let _enter = span.enter();
                 if since_start.num_minutes() > 30 {
-                    tracing::warn!(%run.id, %run.name, %since_start, "stale run, skipping batch creation");
+                    tracing::warn!("stale run, skipping batch creation");
                     continue;
                 }
-                tracing::debug!(%run.id, %run.name, %since_start, "creating batches");
+                tracing::debug!("creating batches");
                 let batch_count = run.samples.div_ceil(run.batch_size);
                 let new_batches = (0..batch_count).map(|batch_no| Batch {
                     id: run.id().to_string(),
@@ -68,6 +70,7 @@ impl BatchSpawner {
             self.msg_queue.ack(RUN_TOPIC, &work).await?;
         }
         drop(cancel_on_drop);
+        tracing::debug!("done");
         Ok(())
     }
 }
