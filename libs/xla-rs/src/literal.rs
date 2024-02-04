@@ -102,7 +102,7 @@ impl Literal {
             Shape::Array(_) => Ok(vec![]),
             Shape::Tuple(shapes) => {
                 let tuple_len = shapes.len();
-                let mut out = Vec::with_capacity(tuple_len);
+                let mut out = vec![Literal::default(); tuple_len];
                 let out_ptr = out.as_mut_ptr();
                 unsafe {
                     cpp!([self as "std::shared_ptr<Literal>*", out_ptr as "std::shared_ptr<Literal>*"] {
@@ -113,7 +113,6 @@ impl Literal {
                             i++;
                         }
                     });
-                    out.set_len(tuple_len);
                 }
                 Ok(out)
             }
