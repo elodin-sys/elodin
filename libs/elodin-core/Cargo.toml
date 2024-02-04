@@ -12,7 +12,6 @@ rerun = ["dep:rerun"]
 [dependencies]
 nalgebra.version = "0.32"
 nalgebra.features = ["serde-serialize"]
-stable-vec = "0.4"
 
 # core bevy
 bevy_ecs = "0.12"
@@ -50,12 +49,6 @@ nox.optional = true
 
 
 [dev-dependencies]
-plotters = "0.3.5"
 approx = "0.5"
 bevy = "0.12"
-anyhow = "1"
 flume = "0.11"
-
-[[bench]]
-name = "xpbd"
-harness = false

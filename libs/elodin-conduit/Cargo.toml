@@ -48,7 +48,6 @@ ip_network_table-deps-treebitmap.optional = true
 tracing = "0.1"
 
 # hash
-ahash = "0.3.8"
 const-fnv1a-hash = "1.1.0"
 
 # error

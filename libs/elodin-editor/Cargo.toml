@@ -51,17 +51,8 @@ elodin-conduit.path = "../../libs/elodin-conduit"
 # pyo3.version = "0.20.0"
 # elodin-py.path = "../elodin-py"
 
-# errors
-anyhow = "1"
-
-# file notifications
-notify = "6.1"
-
 # thread priority
 # thread-priority = "0.13.1"
-
-# ui
-rfd = "0.12.1"
 
 # futures
 futures-lite = "2.0"

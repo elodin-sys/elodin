@@ -20,8 +20,6 @@ nalgebra = "0.32"
 
 bevy = "0.12"
 
-notify = "6.1.1"
-
 elodin-conduit.path = "../elodin-conduit"
 elodin-conduit.features = ["nox"]
 
