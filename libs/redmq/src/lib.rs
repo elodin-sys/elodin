@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 
 use redis::streams;
 use redis::AsyncCommands;
@@ -132,12 +133,15 @@ impl MsgQueue {
     ) -> redis::RedisResult<Vec<Received<M>>> {
         // TODO(Akhil): add autoclaim (https://redis.io/docs/data-types/streams/#automatic-claiming)
         let mut check_pending = true;
+        let mut delay = Duration::from_secs(1);
         loop {
             let id = if check_pending { "0-0" } else { ">" };
+            // exponential backoff with a max of 2 minutes
+            delay = Duration::from_secs(2 * 60).min(delay * 2);
 
             // TODO(Akhil): add jitter to block time to prevent thundering herd
             let opts = streams::StreamReadOptions::default()
-                .block(1000)
+                .block(delay.as_millis() as usize)
                 .count(limit)
                 .group(&self.group, &self.consumer);
             let result = self
@@ -171,6 +175,7 @@ impl MsgQueue {
                 consumer = &self.consumer,
                 start_id = id,
                 count = stream.len(),
+                ?delay,
                 "received"
             );
 
