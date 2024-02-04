@@ -31,9 +31,7 @@ web-sys.features = [
 ]
 wasm-bindgen = "0.2.88"
 tracing = "0.1"
-thingbuf = "0.1.4"
 flume = "0.11"
 elodin-conduit.path = "../../libs/elodin-conduit"
 wasm-bindgen-futures = "0.4.39"
-tracing-wasm = "0.2.1"
 console_error_panic_hook = "0.1.7"
