@@ -101,6 +101,7 @@ impl Api {
             .serve(tower::make::Shared::new(service))
             .await?;
 
+        tracing::debug!("done");
         Ok(())
     }
 }

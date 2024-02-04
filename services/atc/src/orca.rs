@@ -104,6 +104,7 @@ impl Orca {
             }
         }
         drop(cancel_on_drop);
+        tracing::debug!("done");
         Ok(())
     }
 
