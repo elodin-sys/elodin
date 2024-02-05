@@ -1,8 +1,18 @@
+#!/usr/bin/env -S nix develop .#ops --command just --justfile
+
 k8s_overlays := "kubernetes/overlays"
 artifact_registry := "us-central1-docker.pkg.dev/elodin-infra"
 repo_sim_agent := "elo-sim-agent/x86_64"
 repo_atc := "elo-atc/x86_64"
 repo_dashboard := "elo-dashboard/x86_64"
+
+project := "elodin-dev"
+region := "us-central1"
+cluster := "elodin-dev-gke"
+
+[private]
+default:
+  @just --list
 
 decrypt-secrets *FLAGS:
   @ echo "   🔑 Decrypting secrets for kubernetes..."
@@ -24,3 +34,8 @@ re-tag-images-main new_tag:
 
 re-tag-images-current new_tag:
   just re-tag-images $(git rev-parse HEAD) {{new_tag}}
+
+clean-dev-branch branch_codename:
+  gcloud container clusters get-credentials {{cluster}} --region {{region}} --project {{project}}
+  kubectl get namespace elodin-app-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-app-{{branch_codename}} || echo "elodin-app-{{branch_codename}} already deleted"
+  kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"

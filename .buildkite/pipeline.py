@@ -48,22 +48,11 @@ def deploy_k8s_step(branch_name):
   )
 
 def cleanup_k8s_step(branch_name):
-  gke_cluster_name = GKE_CONFIG["cluster_name"]
-  gke_project_id = GKE_CONFIG["project_id"]
-  gke_region = GKE_CONFIG["region"]
-
-  cluster_name = codename(branch_name)
-
-  command = " && ".join([
-    f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
-    f"kubectl delete ns elodin-app-{cluster_name}",
-    f"kubectl delete ns elodin-vms-{cluster_name}",
-  ])
-  
-  return nix_step(
+  return step(
     label = f":kubernetes: delete dev-branch cluster",
-    flake = ".#ops",
-    command = command,
+    command = [
+      f"./justfile clean-dev-branch {codename(branch_name)}"
+    ],
     plugins = [ gcp_identity_plugin() ]
   )
 
