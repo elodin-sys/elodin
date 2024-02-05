@@ -65,6 +65,10 @@ configMapGenerator:
   namespace: elodin-app
   files:
   - atc.toml=elo-atc-config.toml
+- name: elo-sim-config
+  namespace: elodin-vms
+  files:
+  - sim.toml=elo-sim-config.toml
 - name: elo-dashboard
   namespace: elodin-app
   literals:

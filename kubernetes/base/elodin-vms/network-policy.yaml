@@ -5,7 +5,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      security.elodin.systems: sim-agent
+      security.elodin.systems: sim-agent-web-runner
   policyTypes:
   - Ingress
   - Egress

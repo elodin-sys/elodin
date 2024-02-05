@@ -1,0 +1,2 @@
+mode = "monte-carlo"
+redis_url = "redis://redis.elodin-app-dev.svc.cluster.local:6379"
