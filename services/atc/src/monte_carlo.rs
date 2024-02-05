@@ -1,3 +1,4 @@
+use elodin_types::{Batch, Run};
 use tokio_util::sync::CancellationToken;
 
 pub const BATCH_SIZE: usize = 100;
@@ -12,22 +13,6 @@ pub const SPAWN_GROUP: &str = "atc:spawn";
 // to only work on 1 run at a time. These batches are effectively a no-op, and are ignored during
 // results aggregation.
 // pub const BUFFER_BATCH_COUNT: usize = 10;
-
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
-pub struct Run {
-    pub id: uuid::Uuid,
-    pub name: String,
-    pub samples: usize,
-    pub batch_size: usize,
-    pub start_time: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
-pub struct Batch {
-    pub id: String,
-    pub batch_no: usize,
-    pub buffer: bool,
-}
 
 pub struct BatchSpawner {
     msg_queue: redmq::MsgQueue,
