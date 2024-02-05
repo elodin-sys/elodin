@@ -4,9 +4,10 @@ use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "mode")]
+#[serde(rename_all = "kebab-case")]
 pub enum Config {
     WebRunner(WebRunnerConfig),
-    MonteCarloAgent(AgentConfig),
+    MonteCarlo(MonteCarloConfig),
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,7 +17,7 @@ pub struct WebRunnerConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AgentConfig {
+pub struct MonteCarloConfig {
     pub redis_url: String,
     pub pod_name: String,
 }

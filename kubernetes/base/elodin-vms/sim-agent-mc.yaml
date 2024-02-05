@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sim-agent-mc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sim-agent-mc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sim-agent-mc
+    spec:
+      containers:
+      - name: sim-agent-mc
+        image: elodin-infra/elo-sim-agent:latest
+        env:
+        - name: ELODIN_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: config
+          mountPath: /etc/elodin
+        resources:
+          requests:
+            cpu: 300m
+            memory: 500Mi
+      volumes:
+      - name: config
+        configMap:
+          name: elo-sim-config

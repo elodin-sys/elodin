@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
                 .instrument(info_span!("web_runner"))
                 .await?
         }
-        config::Config::MonteCarloAgent(config) => {
+        config::Config::MonteCarlo(config) => {
             run_mc_agent(config)
                 .instrument(info_span!("mc_agent"))
                 .await?
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_mc_agent(config: config::AgentConfig) -> anyhow::Result<()> {
+async fn run_mc_agent(config: config::MonteCarloConfig) -> anyhow::Result<()> {
     info!("running monte carlo agent");
     let redis = redis::Client::open(config.redis_url)?;
     let mut msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
