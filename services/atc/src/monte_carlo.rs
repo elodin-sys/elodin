@@ -1,11 +1,9 @@
-use elodin_types::{Batch, Run};
+use elodin_types::{Batch, Run, BATCH_TOPIC, RUN_TOPIC};
 use tokio_util::sync::CancellationToken;
 
 pub const BATCH_SIZE: usize = 100;
 pub const MAX_SAMPLE_COUNT: usize = 100_000;
 
-pub const RUN_TOPIC: &str = "mc:run";
-pub const BATCH_TOPIC: &str = "mc:batch";
 pub const SPAWN_GROUP: &str = "atc:spawn";
 
 // Buffer batches help with work alignment

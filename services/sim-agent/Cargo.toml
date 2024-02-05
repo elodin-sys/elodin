@@ -18,7 +18,6 @@ tokio-util.features = ["codec"]
 tokio.version = "1.34"
 tokio.features = ["full"]
 flume = "0.11"
-futures = "0.3.29"
 
 # logs
 tracing = "0.1"
@@ -51,3 +50,12 @@ bytes = "1.5"
 # config
 config.version = "0.13.1"
 config.features = ["toml"]
+
+# message queue
+redis.version = "0.23"
+redis.features = ["tokio-comp", "streams"]
+redmq.version = "0.1.0"
+redmq.path = "../../libs/redmq"
+
+#time
+chrono = "0.4.33"

@@ -42,6 +42,9 @@ pub struct ValidationError;
 
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("elodin_types");
 
+pub const RUN_TOPIC: &str = "mc:run";
+pub const BATCH_TOPIC: &str = "mc:batch";
+
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 pub struct Run {
     pub id: uuid::Uuid,
@@ -56,4 +59,12 @@ pub struct Batch {
     pub id: String,
     pub batch_no: usize,
     pub buffer: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+pub struct BatchResults {
+    pub batch_no: usize,
+    pub failed: usize,
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    pub run_time_seconds: u64,
 }
