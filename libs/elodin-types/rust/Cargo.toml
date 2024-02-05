@@ -8,10 +8,9 @@ edition = "2021"
 [dependencies]
 tonic = "0.10"
 prost = "0.12"
-uuid.version = "1.6.1"
-
+uuid = { version = "1.6.1", features = ["serde"] }
+serde = { version = "1.0.196", features = ["derive"] }
+chrono = { version = "0.4.33", default-features = false, features = ["serde"] }
 
 [build-dependencies]
 tonic-build = "0.10"
-
-

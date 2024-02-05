@@ -1,7 +1,7 @@
 use crate::{api, error, monte_carlo};
 
 use atc_entity::mc;
-use elodin_types::api::*;
+use elodin_types::{api::*, Run};
 use sea_orm::prelude::*;
 
 impl api::Api {
@@ -57,7 +57,7 @@ impl api::Api {
         mc_run.status = sea_orm::Set(mc::Status::Running);
         let mc_run = mc_run.update(txn).await?;
 
-        let mc_run_msg = monte_carlo::Run {
+        let mc_run_msg = Run {
             id: mc_run.id,
             name: mc_run.name,
             samples: mc_run.samples as usize,

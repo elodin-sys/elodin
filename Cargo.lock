@@ -3391,7 +3391,9 @@ dependencies = [
 name = "elodin-types"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "prost",
+ "serde",
  "tonic",
  "tonic-build",
  "uuid",
