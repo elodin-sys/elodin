@@ -3,9 +3,22 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
-pub struct Config {
+#[serde(tag = "mode")]
+pub enum Config {
+    WebRunner(WebRunnerConfig),
+    MonteCarloAgent(AgentConfig),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebRunnerConfig {
     pub control_addr: SocketAddr,
     pub sim_addr: SocketAddr,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentConfig {
+    pub redis_url: String,
+    pub pod_name: String,
 }
 
 impl Config {

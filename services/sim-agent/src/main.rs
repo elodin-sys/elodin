@@ -7,7 +7,7 @@ use elodin_types::sandbox::{
     sandbox_control_server::{SandboxControl, SandboxControlServer},
     UpdateCodeReq, UpdateCodeResp,
 };
-use futures::future::select_all;
+use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
 use pyo3::{types::PyModule, Python};
 use std::{
     net::SocketAddr,
@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tonic::{async_trait, transport::Server, Response, Status};
-use tracing::info;
+use tracing::{error, info, info_span, Instrument};
 
 mod config;
 
@@ -32,19 +32,87 @@ async fn main() -> anyhow::Result<()> {
         pyo3::append_to_inittab!(elodin_py);
     }
 
+    // TODO(Akhil): Handle graceful shutdown
+    match config::Config::new()? {
+        config::Config::WebRunner(config) => {
+            run_web_runner(config)
+                .instrument(info_span!("web_runner"))
+                .await?
+        }
+        config::Config::MonteCarloAgent(config) => {
+            run_mc_agent(config)
+                .instrument(info_span!("mc_agent"))
+                .await?
+        }
+    }
+    Ok(())
+}
+
+async fn run_mc_agent(config: config::AgentConfig) -> anyhow::Result<()> {
+    info!("running monte carlo agent");
+    let redis = redis::Client::open(config.redis_url)?;
+    let mut msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
+    loop {
+        let batches = msg_queue.recv::<Batch>(BATCH_TOPIC, 1).await?;
+
+        match process_batches(&mut msg_queue, &batches).await {
+            Ok(_) => {}
+            Err(err) => error!(?err, "error processing batches"),
+        }
+
+        msg_queue.ack(BATCH_TOPIC, &batches).await?;
+        msg_queue.del(BATCH_TOPIC, &batches).await?;
+    }
+}
+
+async fn process_batches(
+    msg_queue: &mut redmq::MsgQueue,
+    batches: &[redmq::Received<Batch>],
+) -> anyhow::Result<()> {
+    let Some(run_id) = batches.iter().find(|b| !b.buffer).map(|b| b.id.clone()) else {
+        return Ok(());
+    };
+    let Some(run) = msg_queue.get::<Run>(RUN_TOPIC, &run_id).await? else {
+        anyhow::bail!("monte carlo run {} not found", run_id);
+    };
+
+    // TODO: run the batch simulations, collect and upload the results
+    let start_time = chrono::Utc::now();
+    let failed = 0;
+    let elapsed = chrono::Utc::now().signed_duration_since(start_time);
+    let results_topic = format!("mc:results:{}", run.id);
+
+    let mut results = Vec::default();
+    for b in batches {
+        info!(%run.name, %run.id, batch_no = %b.batch_no, "simulating batch");
+        results.push(BatchResults {
+            batch_no: b.batch_no,
+            failed,
+            start_time,
+            run_time_seconds: elapsed.num_seconds() as u64,
+        });
+    }
+
+    msg_queue.send(&results_topic, results).await?;
+    Ok(())
+}
+
+async fn run_web_runner(config: config::WebRunnerConfig) -> anyhow::Result<()> {
     let (server_tx, server_rx) = flume::unbounded();
-    let config = crate::config::Config::new()?;
     let control = ControlService::new(
         server_tx.clone(),
         server_rx,
         config.control_addr,
         Subscriptions::default(),
     );
-    let control = tokio::spawn(control.run());
+    let mut tasks = tokio::task::JoinSet::new();
+    tasks.spawn(control.run().instrument(info_span!("control").or_current()));
     let sim = SimServer::new(server_tx, config.sim_addr);
-    let sim = tokio::spawn(sim.run());
-    let (res, _, _) = select_all([control, sim]).await;
-    res?
+    tasks.spawn(sim.run().instrument(info_span!("sim").or_current()));
+    while let Some(res) = tasks.join_next().await {
+        res.unwrap()?;
+    }
+    Ok(())
 }
 
 struct SimServer {

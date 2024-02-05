@@ -1,7 +1,7 @@
 use crate::{api, error, monte_carlo};
 
 use atc_entity::mc;
-use elodin_types::{api::*, Run};
+use elodin_types::{api::*, Run, RUN_TOPIC};
 use sea_orm::prelude::*;
 
 impl api::Api {
@@ -64,9 +64,7 @@ impl api::Api {
             batch_size: monte_carlo::BATCH_SIZE,
             start_time: chrono::Utc::now(),
         };
-        self.msg_queue
-            .send(monte_carlo::RUN_TOPIC, vec![mc_run_msg])
-            .await?;
+        self.msg_queue.send(RUN_TOPIC, vec![mc_run_msg]).await?;
         tracing::debug!(%user.id, %id, "started monte carlo run");
 
         Ok(StartMonteCarloRunResp {})
