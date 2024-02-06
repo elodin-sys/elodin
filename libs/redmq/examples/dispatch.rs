@@ -36,7 +36,7 @@ async fn main() -> redis::RedisResult<()> {
         let _: tokio::task::JoinHandle<redis::RedisResult<()>> = tokio::spawn(async move {
             tracing::info!(worker = i, "spawning");
             loop {
-                let work = mq.recv::<Job>(TOPIC_JOB, 10).await?;
+                let work = mq.recv::<Job>(TOPIC_JOB, 10, None).await?;
                 let results = work
                     .iter()
                     .map(|w| w.name.clone())
@@ -56,7 +56,7 @@ async fn main() -> redis::RedisResult<()> {
 
     let mut num_results = 0;
     while num_results < ENTRIES {
-        let results = mq.recv::<Results>(TOPIC_RESULTS, 100).await?;
+        let results = mq.recv::<Results>(TOPIC_RESULTS, 100, None).await?;
         num_results += results.len();
         mq.ack(TOPIC_RESULTS, &results).await?;
         mq.del(TOPIC_RESULTS, &results).await?;

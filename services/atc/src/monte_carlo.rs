@@ -1,10 +1,15 @@
-use elodin_types::{Batch, Run, BATCH_TOPIC, RUN_TOPIC};
+use atc_entity::mc;
+use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
+use sea_orm::prelude::*;
+use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 pub const BATCH_SIZE: usize = 100;
 pub const MAX_SAMPLE_COUNT: usize = 100_000;
 
 pub const SPAWN_GROUP: &str = "atc:spawn";
+pub const RESULTS_GROUP: &str = "atc:results";
 
 // Buffer batches help with work alignment
 // E.g. if an agent can do 10 batches at once, adding some buffer between runs allows for the agent
@@ -27,7 +32,7 @@ impl BatchSpawner {
         let cancel_on_drop = cancel_token.clone().drop_guard();
         loop {
             let work = tokio::select! {
-                r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1) => r?,
+                r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1, None) => r?,
                 _ = cancel_token.cancelled() => break,
             };
             let mut batches = Vec::default();
@@ -54,6 +59,99 @@ impl BatchSpawner {
         }
         drop(cancel_on_drop);
         tracing::debug!("done");
+        Ok(())
+    }
+}
+
+pub struct Aggregator {
+    msg_queue: redmq::MsgQueue,
+    db: DatabaseConnection,
+}
+
+impl Aggregator {
+    pub async fn new(
+        client: &redis::Client,
+        db: DatabaseConnection,
+        pod_name: &str,
+    ) -> anyhow::Result<Self> {
+        let msg_queue = redmq::MsgQueue::new(client, RESULTS_GROUP, pod_name).await?;
+        let results_collector = Aggregator { msg_queue, db };
+        Ok(results_collector)
+    }
+
+    pub async fn run(mut self, cancel_token: CancellationToken) -> anyhow::Result<()> {
+        let cancel_on_drop = cancel_token.clone().drop_guard();
+        loop {
+            let mut work = tokio::select! {
+                r = self.msg_queue.recv::<Run>(RUN_TOPIC, 1, None) => r?,
+                _ = cancel_token.cancelled() => break,
+            };
+            let Some(run) = work.pop() else { continue };
+
+            let span = tracing::debug_span!("collect_results", %run.id, %run.name);
+            self.collect_results(run, &cancel_token)
+                .instrument(span)
+                .await?;
+        }
+        drop(cancel_on_drop);
+        tracing::debug!("done");
+        Ok(())
+    }
+
+    async fn collect_results(
+        &mut self,
+        run: redmq::Received<Run>,
+        cancel_token: &CancellationToken,
+    ) -> anyhow::Result<()> {
+        let results_topic = format!("mc:results:{}", run.id);
+        let batch_count = run.samples.div_ceil(run.batch_size);
+        let mut last_id: Option<String> = None;
+        let mut all_results = Vec::default();
+        loop {
+            let expires_at = run.start_time + chrono::Duration::hours(2);
+            let remaining = expires_at.signed_duration_since(chrono::Utc::now());
+            let results = tokio::select! {
+                r = self.msg_queue.recv::<BatchResults>(results_topic.as_str(), 100, last_id.as_deref()) => r?,
+                _ = cancel_token.cancelled() => return Ok(()),
+                _ = tokio::time::sleep(remaining.to_std().unwrap_or_default()) => {
+                    tracing::warn!("stale run, abandon results collection");
+                    break;
+                }
+            };
+            for r in results {
+                last_id = Some(r.id().to_string());
+                if r.batch_no >= batch_count {
+                    tracing::debug!(%r.batch_no, "ignoring buffer batch results");
+                    continue;
+                }
+                all_results.push(r.clone());
+            }
+
+            tracing::debug!(total = %all_results.len(), %remaining, "collected results");
+            if all_results.len() >= batch_count {
+                break;
+            }
+            // avoid hot loop, encourage batching
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        let failures = all_results.iter().fold(0, |f, r| f + r.failed);
+        let total_runtime = all_results.iter().fold(0, |rt, r| rt + r.run_time_seconds);
+        let total_runtime = std::time::Duration::from_secs(total_runtime);
+        let average_runtime = total_runtime / batch_count as u32;
+        tracing::info!(failures, ?average_runtime, "collected results");
+
+        let mc_run = atc_entity::mc::ActiveModel {
+            id: sea_orm::Set(run.id),
+            status: sea_orm::Set(mc::Status::Done),
+            ..Default::default()
+        };
+        mc_run.update(&self.db).await?;
+
+        let work = &[run];
+        self.msg_queue.del_topic(results_topic.as_str()).await?;
+        self.msg_queue.ack(RUN_TOPIC, work).await?;
+        self.msg_queue.del(RUN_TOPIC, work).await?;
         Ok(())
     }
 }

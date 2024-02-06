@@ -63,7 +63,7 @@ async fn run_mc_agent(config: config::MonteCarloConfig) -> anyhow::Result<()> {
     let redis = redis::Client::open(config.redis_url)?;
     let mut msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
     loop {
-        let batches = msg_queue.recv::<Batch>(BATCH_TOPIC, 1).await?;
+        let batches = msg_queue.recv::<Batch>(BATCH_TOPIC, 1, None).await?;
 
         match process_batches(&mut msg_queue, &batches).await {
             Ok(_) => {}

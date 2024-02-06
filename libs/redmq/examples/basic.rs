@@ -17,7 +17,7 @@ async fn main() -> redis::RedisResult<()> {
     mq.send(TOPIC_PING, vec![Ping { id: 74 }]).await?;
 
     // receive ping
-    let msgs = mq.recv::<Ping>(TOPIC_PING, 1).await?;
+    let msgs = mq.recv::<Ping>(TOPIC_PING, 1, None).await?;
     assert_eq!(msgs[0].id, 74);
     mq.ack(TOPIC_PING, &msgs).await?;
     mq.del(TOPIC_PING, &msgs).await?;
