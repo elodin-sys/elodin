@@ -19,8 +19,9 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: ELODIN_ORCA.RUNTIME_CLASS
-          value: gvisor
+        # Disable gvisor because it's broken:
+        # - name: ELODIN_ORCA.RUNTIME_CLASS
+        #   value: gvisor
         - name: RUST_LOG
           value: info,atc=trace,sea_orm=debug,redmq=trace
         volumeMounts:
