@@ -3,15 +3,13 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "mode")]
-#[serde(rename_all = "kebab-case")]
-pub enum Config {
-    WebRunner(WebRunnerConfig),
-    MonteCarlo(MonteCarloConfig),
+pub struct Config {
+    pub sandbox: Option<SandboxConfig>,
+    pub monte_carlo: Option<MonteCarloConfig>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WebRunnerConfig {
+pub struct SandboxConfig {
     pub control_addr: SocketAddr,
     pub sim_addr: SocketAddr,
 }

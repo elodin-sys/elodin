@@ -256,9 +256,8 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                 "name": "payload",
                 "image": image_name,
                 "env": [
-                    { "name": "ELODIN_MODE", "value": "web-runner" },
-                    { "name": "ELODIN_CONTROL_ADDR", "value": "[::]:50051" },
-                    { "name": "ELODIN_SIM_ADDR", "value": "[::]:3563" },
+                    { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
+                    { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
                     { "name": "JAX_ENABLE_X64", "value": "true" }
                 ],
                 "resources": {

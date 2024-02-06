@@ -15,7 +15,7 @@ spec:
       - name: sim-agent-mc
         image: elodin-infra/elo-sim-agent:latest
         env:
-        - name: ELODIN_POD_NAME
+        - name: ELODIN_MONTE_CARLO.POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
