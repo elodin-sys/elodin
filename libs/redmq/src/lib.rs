@@ -130,12 +130,17 @@ impl MsgQueue {
         &mut self,
         topic: &str,
         limit: usize,
+        last_id: Option<&str>,
     ) -> redis::RedisResult<Vec<Received<M>>> {
         // TODO(Akhil): add autoclaim (https://redis.io/docs/data-types/streams/#automatic-claiming)
         let mut check_pending = true;
         let mut delay = Duration::from_secs(1);
         loop {
-            let id = if check_pending { "0-0" } else { ">" };
+            let id = if check_pending {
+                last_id.unwrap_or("0-0")
+            } else {
+                ">"
+            };
             // exponential backoff with a max of 2 minutes
             delay = Duration::from_secs(2 * 60).min(delay * 2);
 
@@ -241,6 +246,12 @@ impl MsgQueue {
             count = deleted,
             "deleted"
         );
+        Ok(deleted)
+    }
+
+    pub async fn del_topic(&self, topic: &str) -> redis::RedisResult<usize> {
+        let deleted = self.conn.clone().del(topic).await?;
+        tracing::debug!(topic, "deleted");
         Ok(deleted)
     }
 }

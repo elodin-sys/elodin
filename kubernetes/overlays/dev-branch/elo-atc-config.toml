@@ -18,3 +18,4 @@ timeout = 600.0
 
 [monte_carlo]
 spawn_batches = true
+collect_results = true

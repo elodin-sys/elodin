@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
         if gc.enabled {
             let redis = redis.get_multiplexed_tokio_connection().await?;
             services.spawn(
-                garbage_collect(db, redis, gc.timeout, cancel_token.clone())
+                garbage_collect(db.clone(), redis, gc.timeout, cancel_token.clone())
                     .instrument(tracing::info_span!("gc")),
             );
         }
@@ -95,6 +95,15 @@ async fn main() -> anyhow::Result<()> {
             batch_spawner
                 .run(cancel_token.clone())
                 .instrument(tracing::info_span!("batch_spawner")),
+        );
+    }
+
+    if config.monte_carlo.collect_results {
+        let aggregator = monte_carlo::Aggregator::new(&redis, db, &config.pod_name).await?;
+        services.spawn(
+            aggregator
+                .run(cancel_token.clone())
+                .instrument(tracing::info_span!("aggregator")),
         );
     }
 

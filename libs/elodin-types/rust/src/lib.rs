@@ -45,7 +45,7 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("elod
 pub const RUN_TOPIC: &str = "mc:run";
 pub const BATCH_TOPIC: &str = "mc:batch";
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Run {
     pub id: uuid::Uuid,
     pub name: String,
@@ -54,14 +54,14 @@ pub struct Run {
     pub start_time: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Batch {
     pub id: String,
     pub batch_no: usize,
     pub buffer: bool,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct BatchResults {
     pub batch_no: usize,
     pub failed: usize,

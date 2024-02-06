@@ -38,6 +38,7 @@ pub struct OrcaConfig {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct MonteCarloConfig {
     pub spawn_batches: bool,
+    pub collect_results: bool,
 }
 
 #[serde_as]
