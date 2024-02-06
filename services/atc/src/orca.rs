@@ -258,7 +258,8 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                 "env": [
                     { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
                     { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
-                    { "name": "JAX_ENABLE_X64", "value": "true" }
+                    { "name": "JAX_ENABLE_X64", "value": "true" },
+                    { "name": "RUST_LOG", "value": "debug" }
                 ],
                 "resources": {
                     "requests": {

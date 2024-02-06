@@ -19,6 +19,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: RUST_LOG
+          value: debug,redmq=trace
         volumeMounts:
         - name: config
           mountPath: /etc/elodin
