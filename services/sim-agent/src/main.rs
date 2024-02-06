@@ -32,18 +32,28 @@ async fn main() -> anyhow::Result<()> {
         pyo3::append_to_inittab!(elodin_py);
     }
 
-    // TODO(Akhil): Handle graceful shutdown
-    match config::Config::new()? {
-        config::Config::WebRunner(config) => {
-            run_web_runner(config)
-                .instrument(info_span!("web_runner"))
-                .await?
-        }
-        config::Config::MonteCarlo(config) => {
-            run_mc_agent(config)
-                .instrument(info_span!("mc_agent"))
-                .await?
-        }
+    let config = config::Config::new()?;
+    let mut tasks = tokio::task::JoinSet::new();
+
+    if let Some(sandbox_config) = config.sandbox {
+        let (server_tx, server_rx) = flume::unbounded();
+        let control = ControlService::new(
+            server_tx.clone(),
+            server_rx,
+            sandbox_config.control_addr,
+            Subscriptions::default(),
+        );
+        tasks.spawn(control.run().instrument(info_span!("control").or_current()));
+        let sim = SimServer::new(server_tx, sandbox_config.sim_addr);
+        tasks.spawn(sim.run().instrument(info_span!("sim").or_current()));
+    }
+
+    if let Some(mc_agent_config) = config.monte_carlo {
+        tasks.spawn(run_mc_agent(mc_agent_config).instrument(info_span!("mc_agent").or_current()));
+    }
+
+    while let Some(res) = tasks.join_next().await {
+        res.unwrap()?;
     }
     Ok(())
 }
@@ -94,24 +104,6 @@ async fn process_batches(
     }
 
     msg_queue.send(&results_topic, results).await?;
-    Ok(())
-}
-
-async fn run_web_runner(config: config::WebRunnerConfig) -> anyhow::Result<()> {
-    let (server_tx, server_rx) = flume::unbounded();
-    let control = ControlService::new(
-        server_tx.clone(),
-        server_rx,
-        config.control_addr,
-        Subscriptions::default(),
-    );
-    let mut tasks = tokio::task::JoinSet::new();
-    tasks.spawn(control.run().instrument(info_span!("control").or_current()));
-    let sim = SimServer::new(server_tx, config.sim_addr);
-    tasks.spawn(sim.run().instrument(info_span!("sim").or_current()));
-    while let Some(res) = tasks.join_next().await {
-        res.unwrap()?;
-    }
     Ok(())
 }
 
