@@ -59,6 +59,14 @@ patches:
     - op: replace
       path: /subjects/0/namespace
       value: elodin-app-$CLUSTER_NAME
+- target:
+    kind: Deployment
+    name: elo-atc
+  path: atc-gcs-key-patch.yaml
+- target:
+    kind: DaemonSet
+    name: sim-agent-mc
+  path: sim-agent-gcs-key-patch.yaml
 
 configMapGenerator:
 - name: elo-atc-config
@@ -84,6 +92,14 @@ secretGenerator:
   namespace: elodin-app
   envs:
   - elo-dashboard-secret.env
+- name: sim-gcs-key
+  namespace: elodin-app
+  files:
+  - sim-gcs-key.json
+- name: sim-gcs-key
+  namespace: elodin-vms
+  files:
+  - sim-gcs-key.json
 
 images:
 - name: elodin-infra/elo-atc

@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sim-agent-mc
+spec:
+  template:
+    spec:
+      containers:
+      - name: sim-agent-mc
+        volumeMounts:
+        - name: secret-volume
+          mountPath: /etc/secrets
+          readOnly: true
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/secrets/sim-gcs-key.json
+      volumes:
+      - name: secret-volume
+        secret:
+          secretName: sim-gcs-key
