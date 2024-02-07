@@ -19,6 +19,7 @@ decrypt-secrets *FLAGS:
   op inject {{FLAGS}} -i {{k8s_overlays}}/dev/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev/elo-dashboard-secret.env
   op inject {{FLAGS}} -i {{k8s_overlays}}/dev-branch/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev-branch/elo-dashboard-secret.env
   op inject {{FLAGS}} -i {{k8s_overlays}}/prod/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/prod/elo-dashboard-secret.env
+  op read op://Infrastructure/GCS/dev/sim-gcs-key.json | jq > {{k8s_overlays}}/dev-branch/sim-gcs-key.json
 
 decrypt-secrets-force:
   just decrypt-secrets --force
