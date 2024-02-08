@@ -1,3 +1,6 @@
+use std::io::Seek;
+use std::path::PathBuf;
+
 use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
 use tonic::{service::interceptor::InterceptedService, transport};
@@ -17,12 +20,13 @@ enum Commands {
     Run(RunArgs),
 }
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Clone)]
 struct RunArgs {
     #[arg(short, long)]
     name: String,
     #[arg(short, long)]
     samples: u32,
+    file: PathBuf,
 }
 
 type Client = ApiClient<InterceptedService<transport::Channel, AuthInterceptor>>;
@@ -58,12 +62,47 @@ impl Cli {
         let id = uuid::Uuid::from_slice(&create_res.id)?;
         let upload_url = create_res.upload_url;
 
+        let args = args.clone();
+        let artifacts_file = tokio::task::spawn_blocking(|| prepare_artifacts(args))
+            .await
+            .unwrap()?;
+        let artifacts_file = tokio::fs::File::from_std(artifacts_file);
+        reqwest::Client::new()
+            .put(&upload_url)
+            .body(artifacts_file)
+            .send()
+            .await?;
+        println!("Uploaded simulation artifacts");
+
         let start_req = StartMonteCarloRunReq {
             id: id.as_bytes().to_vec(),
         };
         client.start_monte_carlo_run(start_req).await?.into_inner();
-        println!("Created Monte Carlo run with id: {id}, upload url: {upload_url}");
+        println!("Created Monte Carlo run with id: {id}");
 
         Ok(())
     }
+}
+
+fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
+    let tmp_dir = tempfile::tempdir()?;
+    if !args.file.is_file() {
+        anyhow::bail!("Not a file: {}", args.file.display());
+    }
+    let file_name = args.file.file_name().unwrap();
+    let tmp_path = tmp_dir.path().join(file_name);
+
+    std::fs::copy(&args.file, tmp_path)?;
+
+    let archive_file = tempfile::tempfile()?;
+    let buf = std::io::BufWriter::new(archive_file);
+    let zstd = zstd::Encoder::new(buf, 0)?;
+    let mut ar = tar::Builder::new(zstd);
+    ar.append_dir_all("artifacts", tmp_dir.path())?;
+    let mut archive_file = ar.into_inner()?.finish()?.into_inner()?;
+    archive_file.rewind()?;
+    let len = archive_file.metadata()?.len();
+    println!("Bundled simulation artifacts (size: {} bytes)", len);
+
+    Ok(archive_file)
 }
