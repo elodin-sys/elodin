@@ -67,3 +67,36 @@ macro_rules! impl_ty {
 
 impl_ty!(nalgebra::Vector3<f64>, nox::Vector<f64, 3>, ComponentType::Vector3F64);
 impl_ty!(nalgebra::Vector3<f32>, nox::Vector<f32, 3>, ComponentType::Vector3F32);
+
+macro_rules! impl_spatial_ty {
+    ($nox_ty:ty, $comp_ty:expr, $name: tt) => {
+        impl Component for $nox_ty {
+            type Inner = Self;
+            type HostTy = Self;
+
+            fn host(val: Self::HostTy) -> Self {
+                val
+            }
+
+            fn component_id() -> ComponentId {
+                elodin_conduit::ComponentId::new($name)
+            }
+
+            fn component_type() -> ComponentType {
+                $comp_ty
+            }
+        }
+    };
+}
+
+impl_spatial_ty!(
+    nox::SpatialTransform::<f64>,
+    ComponentType::SpatialPosF64,
+    "spatial_transform_f64"
+);
+
+impl_spatial_ty!(
+    nox::SpatialMotion::<f64>,
+    ComponentType::SpatialMotionF64,
+    "spatial_transform_f64"
+);
