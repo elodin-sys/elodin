@@ -14,6 +14,17 @@ pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
+impl<T, D: TensorDim, P: Param> std::fmt::Debug for Tensor<T, D, P>
+where
+    P::Inner: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tensor")
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+
 pub trait TensorItem {
     type Item;
     type Tensor<D>
@@ -104,18 +115,6 @@ impl<T, D: TensorDim> Tensor<T, D, Op> {
 
     pub fn log(&self) -> Self {
         Self::from_op(self.inner.clone().log())
-    }
-
-    /// *Safety*: This function is memory safe, it is marked unsafe because you could introduce crashes and/or
-    /// other weirdness in XLA using it. Its only intended use case is as a bogan form of type-erasure for Tensors.
-    /// Essentially you must guarentee that the Op you are casting from is of the correct dimension and type
-    pub(crate) unsafe fn unsafe_mut_cast<NT, ND: TensorDim>(
-        &mut self,
-    ) -> &'_ mut Tensor<NT, ND, Op> {
-        // Safety: this is safe because we are casting between two `Tensor<Op>` types,
-        // which are marked `repr(transparent)`, since the only two types are the inner `Op` and a
-        // ZST PhantomData
-        std::mem::transmute(self)
     }
 }
 

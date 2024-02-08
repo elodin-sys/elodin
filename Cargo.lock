@@ -3802,6 +3802,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fn-traits"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd0eff6318cf8d98871f51ab547fd925058556c6518b076ea5a8b3e97dc8220c"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5739,8 +5745,10 @@ dependencies = [
  "approx",
  "boxcar",
  "bytemuck",
+ "fn-traits",
  "itertools 0.12.1",
  "nalgebra",
+ "nox-ecs-macros",
  "num-traits",
  "numpy",
  "paste",
