@@ -1,39 +1,17 @@
-use crate::ConstantExt;
 use crate::Field;
 use crate::FixedSliceExt;
-use crate::FromBuilder;
-use crate::IntoOp;
 use crate::TensorItem;
-use crate::XlaDim;
 use crate::{Quaternion, Scalar, Vector};
 use nalgebra::Const;
-use simba::scalar::SubsetOf;
+use nox_ecs_macros::{FromBuilder, IntoOp};
 use std::ops::Div;
 use std::ops::{Add, Mul};
 use xla::ArrayElement;
 use xla::NativeType;
 
+#[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialTransform<T> {
-    inner: Vector<T, 7>,
-}
-
-impl<T> IntoOp for SpatialTransform<T> {
-    fn into_op(self) -> crate::Noxpr {
-        self.inner.inner
-    }
-}
-
-impl<T> FromBuilder for SpatialTransform<T>
-where
-    T: TensorItem + ArrayElement + Field,
-    T::Dim: XlaDim,
-{
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &crate::Builder) -> Self::Item<'_> {
-        let inner = Vector::<T, 7>::from_builder(builder);
-        Self { inner }
-    }
+    pub inner: Vector<T, 7>,
 }
 
 impl<T: TensorItem + Field> SpatialTransform<T> {
@@ -63,6 +41,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform
     }
 }
 
+#[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialForce<T> {
     inner: Vector<T, 6>,
 }
@@ -84,6 +63,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
     }
 }
 
+#[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialInertia<T> {
     inner: Vector<T, 7>,
 }
@@ -135,8 +115,9 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul<SpatialMotion<T>>
     }
 }
 
+#[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialMotion<T> {
-    inner: Vector<T, 6>,
+    pub inner: Vector<T, 6>,
 }
 
 impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
@@ -197,19 +178,37 @@ where
     T: ArrayElement + NativeType + Field,
     Quaternion<T>: Add<Quaternion<T>, Output = Quaternion<T>>,
     Vector<T, 3>: Add<Vector<T, 3>, Output = Vector<T, 3>>,
-    f64: SubsetOf<T>,
 {
     type Output = SpatialTransform<T>;
 
     fn add(self, rhs: SpatialMotion<T>) -> Self::Output {
-        let half: Scalar<T> = nalgebra::convert::<f64, T>(0.5).constant();
-        let omega: Vector<T, 3> = rhs.angular() * half;
+        let omega: Vector<T, 3> = rhs.angular() / T::two();
         let zero = T::zero().reshape::<Const<1>>();
         let omega = Quaternion(zero.concat(omega));
         let q = self.angular();
         let angular = q.clone() + omega * q;
         let linear = self.linear() + rhs.linear();
         SpatialTransform::new(angular, linear)
+    }
+}
+
+impl<T: Field> Add<SpatialMotion<T>> for SpatialMotion<T> {
+    type Output = SpatialMotion<T>;
+
+    fn add(self, rhs: SpatialMotion<T>) -> Self::Output {
+        SpatialMotion {
+            inner: self.inner + rhs.inner,
+        }
+    }
+}
+
+impl<T: Field> Add<SpatialTransform<T>> for SpatialTransform<T> {
+    type Output = SpatialTransform<T>;
+
+    fn add(self, rhs: SpatialTransform<T>) -> Self::Output {
+        SpatialTransform {
+            inner: self.inner + rhs.inner,
+        }
     }
 }
 
