@@ -17,7 +17,10 @@ use crate::{
 pub enum NoxprNode {
     // Params / Variables
     Param(ParamExpr),
+
+    // Tuples
     Tuple(Vec<Noxpr>),
+    GetTupleElement(GetTupleElement),
 
     // Constants
     Constant(Constant),
@@ -111,7 +114,7 @@ impl BinaryOp {
     }
 }
 
-fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 4]>> {
+pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 4]>> {
     // logic from https://numpy.org/doc/stable/user/basics.broadcasting.html extended with extra rule for dynamic arrays
     let lhs = lhs.iter().rev().copied();
     let rhs = rhs.iter().rev().copied();
@@ -124,6 +127,7 @@ fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 4]>> {
             itertools::EitherOrBoth::Left(lhs) => Some(lhs),
             itertools::EitherOrBoth::Right(rhs) => Some(rhs),
         })
+        .rev()
         .collect()
 }
 
@@ -280,9 +284,16 @@ pub struct DynamicUpdateSlice {
     pub update: Noxpr,
 }
 
+#[derive(Debug)]
+pub struct GetTupleElement {
+    pub expr: Noxpr,
+    pub index: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Noxpr {
     pub node: Arc<NoxprNode>,
+    pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
@@ -291,6 +302,7 @@ pub struct NoxprId(usize);
 impl Noxpr {
     pub fn new(node: NoxprNode) -> Self {
         Self {
+            backtrace: Arc::new(std::backtrace::Backtrace::capture()),
             node: Arc::new(node),
         }
     }
@@ -406,6 +418,13 @@ impl Noxpr {
         Self::new(NoxprNode::Iota(Iota { shape, dim }))
     }
 
+    pub fn get_tuple_element(&self, index: usize) -> Self {
+        Self::new(NoxprNode::GetTupleElement(GetTupleElement {
+            expr: self.clone(),
+            index,
+        }))
+    }
+
     pub fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(c.ty.shape.clone()),
@@ -437,7 +456,7 @@ impl Noxpr {
                     .map(Noxpr::shape)
                     .collect::<Option<Vec<_>>>()?;
                 let mut shape = shapes.first()?.clone();
-                let dim = shape.len();
+                let dim = concat.dimension;
                 // TODO(sphw): ensure that all shapes are the same, except for a particular dim
                 if shapes.iter().any(|s| s.len() != dim) {
                     return None;
@@ -511,6 +530,13 @@ impl Noxpr {
             }
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
             NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
+            NoxprNode::GetTupleElement(g) => {
+                let NoxprNode::Tuple(elems) = g.expr.deref() else {
+                    return None;
+                };
+                elems.get(g.index)?.shape()
+            }
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
                 let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
                 Some(SmallVec::from_vec(shape))
@@ -533,6 +559,37 @@ impl Noxpr {
 
     pub fn id(&self) -> NoxprId {
         NoxprId(Arc::as_ptr(&self.node) as usize)
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self.deref() {
+            NoxprNode::Param(_) => "Param",
+            NoxprNode::Tuple(_) => "Tuple",
+            NoxprNode::GetTupleElement(_) => "GetTupleElement",
+            NoxprNode::Constant(_) => "Constant",
+            NoxprNode::Iota(_) => todo!(),
+            NoxprNode::Add(_) => "Add",
+            NoxprNode::Sub(_) => "Sub",
+            NoxprNode::Mul(_) => "Mul",
+            NoxprNode::Div(_) => "Div",
+            NoxprNode::And(_) => "And",
+            NoxprNode::Or(_) => "Or",
+            NoxprNode::Dot(_) => "Dot",
+            NoxprNode::DotGeneral(_) => "DotGeneral",
+            NoxprNode::Sqrt(_) => "Sqrt",
+            NoxprNode::Neg(_) => "Neg",
+            NoxprNode::Log(_) => "Log",
+            NoxprNode::Concat(_) => "Concat",
+            NoxprNode::Reshape(_) => "Reshape",
+            NoxprNode::Broadcast(_) => "Broadcast",
+            NoxprNode::BroadcastInDim(_) => "BroadcastInDim",
+            NoxprNode::Transpose(_) => "Transpose",
+            NoxprNode::Gather(_) => "Gather",
+            NoxprNode::Slice(_) => "Slice",
+            NoxprNode::DynamicSlice(_) => "DynamicSlice",
+            NoxprNode::DynamicUpdateSlice(_) => "DynamicUpdateSlice",
+            NoxprNode::Jax(_) => "Jax",
+        }
     }
 }
 
@@ -686,6 +743,10 @@ impl XlaTracer {
                 let ops = ops.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
                 self.builder.tuple(&ops)
             }
+            NoxprNode::GetTupleElement(g) => {
+                let op = self.visit(&g.expr)?;
+                op.get_tuple_element(g.index as i64)
+            }
             NoxprNode::Broadcast(b) => {
                 let op = self.visit(&b.expr)?;
                 op.broadcast(&b.sizes)
@@ -768,6 +829,8 @@ impl Noxpr {
         args: &[Noxpr],
     ) -> Result<Noxpr, Error> {
         if in_axis.len() != args.len() {
+            dbg!(in_axis);
+            dbg!(args);
             return Err(Error::VmapInAxisMismatch);
         }
         let shape = args
@@ -884,7 +947,7 @@ impl BatchedExpr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BatchAxis {
     NotMapped,
     Mapped { index: usize, size: usize },
@@ -904,10 +967,21 @@ impl BatchTracer {
             return Ok(op.clone());
         }
         let op = match expr.deref() {
-            NoxprNode::Constant(_) | NoxprNode::Param(_) | NoxprNode::Tuple(_) => BatchedExpr {
+            NoxprNode::Constant(_) | NoxprNode::Param(_) => BatchedExpr {
                 inner: expr.clone(),
                 batch_axis: BatchAxis::NotMapped,
             },
+            NoxprNode::Tuple(inner) => {
+                let mut exprs = Vec::with_capacity(inner.len());
+                let mut batch_axis = BatchAxis::NotMapped;
+                for e in inner {
+                    let mapped = self.visit(e)?;
+                    exprs.push(mapped.inner);
+                    batch_axis = mapped.batch_axis;
+                }
+                let inner = Noxpr::tuple(exprs);
+                BatchedExpr { inner, batch_axis }
+            }
             NoxprNode::Add(b) => self.visit_binary_op(b, Noxpr::add)?,
             NoxprNode::Sub(b) => self.visit_binary_op(b, Noxpr::sub)?,
             NoxprNode::Mul(b) => self.visit_binary_op(b, Noxpr::mul)?,
@@ -918,31 +992,30 @@ impl BatchTracer {
             NoxprNode::Neg(e) => self.visit_unary_op(e, Noxpr::neg)?,
             NoxprNode::Log(e) => self.visit_unary_op(e, Noxpr::log)?,
             NoxprNode::Concat(c) => {
-                let shape = c
-                    .nodes
-                    .iter()
-                    .find_map(|n| n.shape())
-                    .ok_or(Error::UnbatchableArgument)?; // TODO: add specific error here
                 let nodes = c
                     .nodes
                     .iter()
-                    .map(|n| {
-                        let e = self.visit(n)?;
-                        let e = e
-                            .move_batch_axis(BatchAxis::Mapped {
-                                index: 0,
-                                size: shape.len(),
-                            })
-                            .ok_or(Error::UnbatchableArgument)?;
-                        Ok(e.inner)
-                    })
+                    .map(|n| self.visit(n))
                     .collect::<Result<Vec<_>, Error>>()?;
+                let size = nodes
+                    .iter()
+                    .find_map(|n| match n.batch_axis {
+                        BatchAxis::NotMapped => None,
+                        BatchAxis::Mapped { size, .. } => Some(size),
+                    })
+                    .ok_or(Error::UnbatchableArgument)?;
+                let nodes = nodes
+                    .into_iter()
+                    .map(|n| {
+                        Ok(n.move_batch_axis(BatchAxis::Mapped { index: 0, size })
+                            .ok_or(Error::UnbatchableArgument)?
+                            .inner)
+                    })
+                    .collect::<Result<_, Error>>()?;
+
                 BatchedExpr {
                     inner: Noxpr::concat_in_dim(nodes, c.dimension + 1),
-                    batch_axis: BatchAxis::Mapped {
-                        index: 0,
-                        size: shape.len(),
-                    },
+                    batch_axis: BatchAxis::Mapped { index: 0, size },
                 }
             }
             NoxprNode::DotGeneral(d) => {
@@ -1213,6 +1286,13 @@ impl BatchTracer {
             NoxprNode::Jax(_) => {
                 unimplemented!()
             }
+            NoxprNode::GetTupleElement(g) => {
+                let NoxprNode::Tuple(elems) = g.expr.deref() else {
+                    return Err(Error::UnbatchableArgument);
+                };
+                let expr = elems.get(g.index).ok_or(Error::UnbatchableArgument)?;
+                self.visit(expr)?
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -1452,6 +1532,7 @@ impl<T: NativeType + ArrayElement> NoxprScalarExt for T {
 mod tests {
     use crate::{Client, Collapse, CompFn, Dot, Matrix, Scalar, Tensor, ToHost, Vector};
     use nalgebra::{matrix, vector, Const};
+    use smallvec::smallvec;
 
     #[test]
     fn test_scalar_add_vmap() {
@@ -1583,5 +1664,13 @@ mod tests {
         let lit = out.inner.to_literal_sync().unwrap();
         let buf = lit.typed_buf::<f32>().unwrap();
         assert_eq!(buf, &[7.0, 15.0, 10.0, 22.0, 97.0, 135.0, 120.0, 172.0]);
+    }
+
+    #[test]
+    fn test_broadcast_dims() {
+        let a = &[1, 6];
+        let b = &[];
+        let out = crate::broadcast_dims(a, b);
+        assert_eq!(out, Some(smallvec![1, 6]))
     }
 }

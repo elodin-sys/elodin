@@ -1,7 +1,7 @@
 use assets::{AssetStore, Handle};
-use bytemuck::AnyBitPattern;
+use bytemuck::{AnyBitPattern, Pod};
 use elodin_conduit::{ComponentType, ComponentValue, EntityId};
-use nox::xla::{BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
+use nox::xla::{ArrayElement, BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
 use smallvec::smallvec;
 use std::any::TypeId;
@@ -276,6 +276,10 @@ impl ColumnRef<'_> {
     pub fn typed_buf<T: AnyBitPattern>(&self) -> Option<&[T]> {
         bytemuck::try_cast_slice(self.column.buffer.buf.as_slice()).ok()
     }
+
+    pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
+        self.column.buffer.ndarray()
+    }
 }
 
 pub struct ColumnRefMut<'a, S: WorldStore = HostStore> {
@@ -352,10 +356,10 @@ impl<T> Clone for ComponentArray<T> {
     }
 }
 
-impl ComponentArray<()> {
+impl<T> ComponentArray<T> {
     // NOTE: this is not generlaly safe to run, you should only cast `ComponentArray`,
     // when you are sure the destination type is the actual type of the inner `Op`
-    fn cast<D: Component>(self) -> ComponentArray<D> {
+    pub(crate) fn cast<D>(self) -> ComponentArray<D> {
         ComponentArray {
             buffer: self.buffer,
             phantom_data: PhantomData,
@@ -367,9 +371,7 @@ impl ComponentArray<()> {
     pub fn buffer(&self) -> &Noxpr {
         &self.buffer
     }
-}
 
-impl<T: Component> ComponentArray<T> {
     fn erase_ty(self) -> ComponentArray<()> {
         ComponentArray {
             buffer: self.buffer,
@@ -865,7 +867,7 @@ mod tests {
             c: C,
         }
 
-        fn add_system(a: Query<(A, B)>) -> ComponentArray<C> {
+        fn add_system(a: Query<(A, B)>) -> Query<C> {
             a.map(|a: A, b: B| C(a.0 + b.0)).unwrap()
         }
 
