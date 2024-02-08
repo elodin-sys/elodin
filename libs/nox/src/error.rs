@@ -14,6 +14,10 @@ pub enum Error {
     VmapInAxisMismatch,
     #[error("this jaxpr has an incompatible dtype")]
     IncompatibleDType,
+    #[error("get tuple element can only be called on a tuple")]
+    GetTupleElemWrongType,
+    #[error("out of bounds access")]
+    OutOfBoundsAccess,
     #[error("pyo3 error {0}")]
     PyO3(#[from] pyo3::PyErr),
 }
