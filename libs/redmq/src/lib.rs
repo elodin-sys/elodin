@@ -116,7 +116,9 @@ impl MsgQueue {
             .await;
         if let Err(err) = result {
             // ignore BUSYGROUP error, which indicates the group already exists
-            if err.code().unwrap_or_default() != "BUSYGROUP" {
+            let code = err.code().unwrap_or_default();
+            tracing::warn!(consumer = &self.consumer, code, ?err);
+            if code != "BUSYGROUP" {
                 return Err(err);
             }
         } else {
@@ -157,7 +159,9 @@ impl MsgQueue {
                 Ok(srr) => srr,
                 Err(err) => {
                     // create group if it doesn't exist, and retry the xread
-                    if err.code().unwrap_or_default() == "NOGROUP" {
+                    let code = err.code().unwrap_or_default();
+                    tracing::warn!(consumer = &self.consumer, code, ?err);
+                    if code == "NOGROUP" {
                         self.register(topic).await?;
                         continue;
                     }
