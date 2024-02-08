@@ -1,5 +1,6 @@
-use crate::{Component, Error};
-use crate::{ComponentArray, System, SystemParam};
+use crate::{ComponentGroup, Error, Query};
+use crate::{System, SystemParam};
+use nox::IntoOp;
 use std::ops::Add;
 use std::sync::Arc;
 use std::{marker::PhantomData, ops::Mul};
@@ -50,39 +51,43 @@ where
 
 impl<Pipe, Arg, Ret, U, DU> System<Arg, Ret> for Rk4<U, DU, Pipe>
 where
-    ComponentArray<U>: SystemParam<Item = ComponentArray<U>> + Clone,
-    ComponentArray<DU>: SystemParam<Item = ComponentArray<DU>> + Clone,
-    U: Add<DU, Output = U> + Component,
-    DU: Add<DU, Output = DU> + Component,
+    Query<U>: SystemParam<Item = Query<U>> + Clone,
+    Query<DU>: SystemParam<Item = Query<DU>> + Clone,
+    U: Add<DU, Output = U> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = U>,
+    DU: Add<DU, Output = DU> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = DU>,
     f64: Mul<DU, Output = DU>,
 
     Pipe: System<Arg, Ret> + Clone,
 {
     fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
-        ComponentArray::<U>::init(builder)?;
-        ComponentArray::<DU>::init(builder)?;
+        Query::<U>::init(builder)?;
+        Query::<DU>::init(builder)?;
         let dt = self.dt;
-        let init_u = ComponentArray::<U>::from_builder(builder);
+        let init_u = Query::<U>::from_builder(builder);
         let f = |dt: f64| {
             let init_u = init_u.clone();
-            move |du: ComponentArray<DU>| -> ComponentArray<U> {
-                init_u.join(&du).map(|u, du| u + dt * du).unwrap()
+            move |du: Query<DU>| -> Query<U> {
+                init_u
+                    .clone()
+                    .join_query(du.clone())
+                    .map(|u, du| u + dt * du)
+                    .unwrap()
             }
         };
-        let mut step = |dt: f64| -> Result<ComponentArray<DU>, Error> {
+        let mut step = |dt: f64| -> Result<Query<DU>, Error> {
             f(dt).pipe(self.pipe.clone()).add_to_builder(builder)?;
-            Ok(ComponentArray::<DU>::from_builder(builder))
+            Ok(Query::<DU>::from_builder(builder))
         };
         let k1 = step(0.0)?;
         let k2 = step(dt / 2.0)?;
         let k3 = step(dt / 2.0)?;
         let k4 = step(dt)?;
         let u = init_u
-            .join(&k1)
-            .join(&k2)
-            .join(&k3)
-            .join(&k4)
-            .map(|du, k1, k2, k3, k4| du + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4))?;
+            .join_query(k1)
+            .join_query(k2)
+            .join_query(k3)
+            .join_query(k4)
+            .map(|(((du, k1), k2), k3), k4| du + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4))?;
         u.insert_into_builder(builder);
         Ok(())
     }
@@ -93,7 +98,9 @@ mod tests {
     use super::*;
     use crate::Component;
     use crate::{Archetype, World, WorldBuilder};
-    use nox::Scalar;
+    use nox::nalgebra::vector;
+    use nox::{nalgebra, Scalar, SpatialMotion, SpatialTransform};
+    use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 
     #[test]
     fn test_simple_rk4() {
@@ -144,5 +151,89 @@ mod tests {
         exec.run(&client).unwrap();
         let col = exec.column(X::component_id()).unwrap();
         assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
+    }
+
+    #[test]
+    fn test_six_dof() {
+        #[derive(Clone, Component)]
+        struct X(SpatialTransform<f64>);
+        #[derive(Clone, Component)]
+        struct V(SpatialMotion<f64>);
+        #[derive(Clone, Component)]
+        struct A(SpatialMotion<f64>);
+
+        #[derive(FromBuilder, ComponentGroup, IntoOp)]
+        struct U {
+            x: X,
+            v: V,
+        }
+
+        #[derive(FromBuilder, ComponentGroup, IntoOp)]
+        struct DU {
+            v: V,
+            a: A,
+        }
+
+        impl Add<DU> for U {
+            type Output = U;
+
+            fn add(self, v: DU) -> Self::Output {
+                U {
+                    x: X(self.x.0 + v.v.0),
+                    v: V(self.v.0 + v.a.0),
+                }
+            }
+        }
+
+        impl Add for DU {
+            type Output = DU;
+
+            fn add(self, v: DU) -> Self::Output {
+                DU {
+                    v: V(self.v.0 + v.v.0),
+                    a: A(self.a.0 + v.a.0),
+                }
+            }
+        }
+
+        impl Mul<DU> for f64 {
+            type Output = DU;
+
+            fn mul(self, rhs: DU) -> Self::Output {
+                DU {
+                    v: V(self * rhs.v.0),
+                    a: A(self * rhs.a.0),
+                }
+            }
+        }
+
+        #[derive(Archetype)]
+        struct Body {
+            x: X,
+            v: V,
+            a: A,
+        }
+
+        let mut world = World::default();
+        world.spawn(Body {
+            x: X(SpatialTransform {
+                inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            v: V(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            a: A(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+        });
+        let builder = WorldBuilder::new(world, ().rk4::<U, DU>());
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = builder.build(&client).unwrap();
+        exec.run(&client).unwrap();
+        let col = exec.column(X::component_id()).unwrap();
+        assert_eq!(
+            col.typed_buf::<f64>().unwrap(),
+            &[1.0f64, 0.0, 0.0, 0.0, 0.016666666666666666, 0.0, 0.0]
+        )
     }
 }

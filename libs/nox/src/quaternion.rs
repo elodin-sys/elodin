@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::ops::{Add, Mul};
 
 use nalgebra::{RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
@@ -71,6 +71,14 @@ impl<T: Field> Mul<Vector<T, 3>> for Quaternion<T> {
         let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
         (self * v * inv).0.fixed_slice([0])
+    }
+}
+
+impl<T: Field> Add for Quaternion<T> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Quaternion(self.0 + rhs.0)
     }
 }
 
