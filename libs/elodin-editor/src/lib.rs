@@ -1,5 +1,5 @@
-use self::ui::*;
 use bevy::{
+    asset::embedded_asset,
     core_pipeline::{
         bloom::BloomSettings,
         experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
@@ -65,6 +65,18 @@ pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send
     app.run()
 }
 
+struct EmbeddedAssetPlugin;
+
+impl Plugin for EmbeddedAssetPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "assets/icons/icon_play.png");
+        embedded_asset!(app, "assets/icons/icon_pause.png");
+        embedded_asset!(app, "assets/icons/icon_scrub.png");
+        embedded_asset!(app, "assets/icons/icon_skip_next.png");
+        embedded_asset!(app, "assets/icons/icon_skip_prev.png");
+    }
+}
+
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
@@ -87,20 +99,22 @@ impl Plugin for EditorPlugin {
                 .build(),
         )
         .insert_resource(SimState::default())
+        .init_resource::<ui::UiState>()
         .add_plugins(
             DefaultPickingPlugins
                 .build()
                 .disable::<DebugPickingPlugin>()
                 .disable::<DefaultHighlightingPlugin>(),
         )
+        .add_plugins(EmbeddedAssetPlugin)
         .add_plugins(EguiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_systems(Startup, setup)
+        .add_systems(Update, ui::render)
         .add_systems(Update, make_pickable)
-        .add_systems(Update, timeline_system)
         .add_systems(Update, sync_pos)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
