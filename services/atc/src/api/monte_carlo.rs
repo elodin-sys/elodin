@@ -13,12 +13,15 @@ impl api::Api {
     ) -> Result<CreateMonteCarloRunResp, error::Error> {
         tracing::debug!(%user.id, "create monte carlo run");
 
+        let id = Uuid::now_v7();
+        let upload_url = self.sim_storage_client.signed_upload_url(id).await?;
+
         if req.samples > monte_carlo::MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
         }
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
         let mc_run = atc_entity::mc::ActiveModel {
-            id: sea_orm::Set(Uuid::now_v7()),
+            id: sea_orm::Set(id),
             user_id: sea_orm::Set(user.id),
             samples: sea_orm::Set(samples),
             name: sea_orm::Set(req.name),
@@ -31,6 +34,7 @@ impl api::Api {
 
         Ok(CreateMonteCarloRunResp {
             id: mc_run.id.as_bytes().to_vec(),
+            upload_url,
         })
     }
 

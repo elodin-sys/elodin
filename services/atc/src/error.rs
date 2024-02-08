@@ -3,6 +3,7 @@ use sea_orm::TransactionError;
 use std::io;
 use thiserror::Error;
 use tonic::{Code, Status};
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("db error: {0}")]
@@ -37,6 +38,8 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("tonic transport error: {0}")]
     TonicTransport(#[from] tonic::transport::Error),
+    #[error("signed url error: {0}")]
+    SignedURL(#[from] google_cloud_storage::sign::SignedURLError),
 }
 
 impl From<TransactionError<Error>> for Error {

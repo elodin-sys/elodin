@@ -1,2 +1,4 @@
 [monte_carlo]
 redis_url = "redis://redis.elodin-app-dev.svc.cluster.local:6379"
+sim_artifacts_bucket_name = "sim-artifacts-dev"
+sim_results_bucket_name = "sim-results-dev"
