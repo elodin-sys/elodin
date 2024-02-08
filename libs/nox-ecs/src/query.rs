@@ -1,7 +1,7 @@
 use crate::{Component, ComponentArray, Error, SystemParam};
-use elodin_conduit::EntityId;
-use nox::{xla, ArrayTy, CompFn, Noxpr};
-use smallvec::smallvec;
+use elodin_conduit::{ComponentId, ComponentType, EntityId};
+use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
+use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub struct Query<Param> {
@@ -9,6 +9,17 @@ pub struct Query<Param> {
     pub entity_map: BTreeMap<EntityId, usize>,
     pub len: usize,
     pub phantom_data: PhantomData<Param>,
+}
+
+impl<Param> Clone for Query<Param> {
+    fn clone(&self) -> Self {
+        Self {
+            exprs: self.exprs.clone(),
+            entity_map: self.entity_map.clone(),
+            len: self.len,
+            phantom_data: PhantomData,
+        }
+    }
 }
 
 impl<Param> Query<Param> {
@@ -22,83 +33,213 @@ impl<Param> Query<Param> {
     }
 }
 
-macro_rules! impl_query {
-    ($num:tt; $($param:tt),*) => {
-        impl<$($param),*> SystemParam for Query<($($param,)*)>
-            where $(ComponentArray<$param>: SystemParam<Item = ComponentArray<$param>>),*
-        {
-            type Item = Self;
+pub trait ComponentGroup {
+    type Params;
+    type Append<O>;
 
-            fn init(builder: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+    fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), Error>;
+    fn component_arrays(
+        builder: &'_ crate::PipelineBuilder,
+    ) -> impl Iterator<Item = ComponentArray<()>> + '_;
+    fn component_types() -> impl Iterator<Item = ComponentType>;
+    fn component_ids() -> impl Iterator<Item = ComponentId>;
+    fn component_count() -> usize;
+
+    fn map_axes() -> &'static [usize];
+}
+
+macro_rules! impl_group {
+    ($num:tt; $($param:tt),*) => {
+      impl<$($param),*> ComponentGroup for ($($param,)*)
+            where $($param: ComponentGroup),*
+        {
+            type Params = Self;
+            type Append<O> = ($($param,)* O);
+
+            fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
                 $(
-                    ComponentArray::<$param>::init(builder)?;
+                    <$param>::init_params(builder)?;
                 )*
                 Ok(())
             }
 
-            fn from_builder(builder: &crate::PipelineBuilder) -> Self {
-                let mut query = None;
+
+            fn component_arrays<'a>(
+                builder: &'a crate::PipelineBuilder,
+            ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
+                let iter = std::iter::empty();
                 $(
-                    let a = ComponentArray::<$param>::from_builder(builder);
-                    if query.is_some() {
-                        query = Some(join_many(query.take().unwrap(), &a));
-                    } else {
-                        let q: Query<_> = a.into();
-                        query = Some(q.transmute());
-                    }
+                    let iter = iter.chain($param::component_arrays(builder));
                 )*
-                let query = query.unwrap();
-                Self {
-                    exprs: query.exprs,
-                    len: query.len,
-                    entity_map: query.entity_map,
-                    phantom_data: PhantomData,
-                }
+                iter
             }
 
-            fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {
-            }
-        }
-
-        impl<$($param),*> Query<($($param,)*)>
-            where $(ComponentArray<$param>: SystemParam<Item = ComponentArray<$param>>),*
-        {
-            pub fn map<O: Component>(&self, func: impl CompFn<($($param,)*), O>) -> Result<ComponentArray<O>, Error> {
-                let func = func.build_expr()?;
-                let buffer = Noxpr::vmap_with_axis(func, &[0; $num], &self.exprs)?;
-                Ok(ComponentArray {
-                    buffer,
-                    len: self.len,
-                    phantom_data: PhantomData,
-                    entity_map: self.entity_map.clone(),
-                })
+            fn component_types() -> impl Iterator<Item = ComponentType> {
+                let iter = std::iter::empty();
+                $(
+                    let iter = iter.chain($param::component_types());
+                )*
+                iter
             }
 
-            pub fn join<B: Component>(self, other: &ComponentArray<B>) -> Query<($($param,)* B)> {
-                let q = join_many(self, other);
-                Query {
-                    exprs: q.exprs,
-                    len: q.len,
-                    entity_map: q.entity_map,
-                    phantom_data: PhantomData,
-                }
-            }
+
+            fn component_count() -> usize {
+                0 $(
+                    + <$param>::component_count()
+                )*
+           }
+
+          fn component_ids() -> impl Iterator<Item = ComponentId> {
+                let iter = std::iter::empty();
+                $(
+                    let iter = iter.chain($param::component_ids());
+                )*
+                iter
+          }
+
+          fn map_axes() -> &'static [usize] {
+              &[0; $num]
+          }
         }
     }
 }
 
-impl_query!(1; T1);
-impl_query!(2; T1, T2);
-impl_query!(3; T1, T2, T3);
-impl_query!(4; T1, T2, T3, T4);
-impl_query!(5; T1, T2, T3, T4, T5);
-impl_query!(6; T1, T2, T3, T4, T5, T6);
-impl_query!(7; T1, T2, T3, T4, T5, T6, T7);
-impl_query!(8; T1, T2, T3, T4, T5, T6, T7, T8);
-impl_query!(9; T1, T2, T3, T4, T5, T6, T7, T9, T10);
-impl_query!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
-impl_query!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
-impl_query!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+impl<T> ComponentGroup for T
+where
+    T: Component,
+    ComponentArray<T>: SystemParam<Item = ComponentArray<T>>,
+{
+    type Params = T;
+
+    type Append<O> = (T, O);
+
+    fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
+        ComponentArray::<T>::init(builder)
+    }
+
+    fn component_arrays(
+        builder: &'_ crate::PipelineBuilder,
+    ) -> impl Iterator<Item = ComponentArray<()>> + '_ {
+        std::iter::once(ComponentArray::<T>::from_builder(builder).cast())
+    }
+
+    fn map_axes() -> &'static [usize] {
+        &[0]
+    }
+
+    fn component_count() -> usize {
+        1
+    }
+
+    fn component_types() -> impl Iterator<Item = ComponentType> {
+        std::iter::once(T::component_type())
+    }
+
+    fn component_ids() -> impl Iterator<Item = ComponentId> {
+        std::iter::once(T::component_id())
+    }
+}
+
+impl_group!(1; T1);
+impl_group!(2; T1, T2);
+impl_group!(3; T1, T2, T3);
+impl_group!(4; T1, T2, T3, T4);
+impl_group!(5; T1, T2, T3, T4, T5);
+impl_group!(6; T1, T2, T3, T4, T5, T6);
+impl_group!(7; T1, T2, T3, T4, T5, T6, T7);
+impl_group!(8; T1, T2, T3, T4, T5, T6, T7, T8);
+impl_group!(9; T1, T2, T3, T4, T5, T6, T7, T9, T10);
+impl_group!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
+impl_group!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
+impl_group!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
+
+impl<G: ComponentGroup> SystemParam for Query<G> {
+    type Item = Self;
+
+    fn init(builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
+        G::init_params(builder)
+    }
+
+    fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
+        G::component_arrays(builder)
+            .fold(None, |mut query, a| {
+                if query.is_some() {
+                    query = Some(join_many(query.take().unwrap(), &a));
+                } else {
+                    let q: Query<_> = a.into();
+                    query = Some(q.transmute());
+                }
+                query
+            })
+            .expect("query must be non empty")
+            .transmute()
+    }
+
+    fn insert_into_builder(self, builder: &mut crate::PipelineBuilder) {
+        for (expr, id) in self.exprs.iter().zip(G::component_ids()) {
+            let array: ComponentArray<()> = ComponentArray {
+                buffer: expr.clone(),
+                len: self.len,
+                entity_map: self.entity_map.clone(),
+                phantom_data: PhantomData,
+            };
+
+            if let Some(var) = builder.vars.get_mut(&id) {
+                let mut var = var.borrow_mut();
+                if var.entity_map != self.entity_map {
+                    var.buffer =
+                        crate::update_var(&var.entity_map, &self.entity_map, &var.buffer, expr);
+                    return;
+                }
+            }
+            builder.vars.insert(id, array.into());
+        }
+    }
+}
+
+impl<G: ComponentGroup> Query<G> {
+    pub fn map<O: ComponentGroup + IntoOp>(
+        &self,
+        func: impl CompFn<G::Params, O>,
+    ) -> Result<Query<O>, Error> {
+        let func = func.build_expr()?;
+        let map_axes: SmallVec<[usize; 4]> = smallvec![0; G::component_count()];
+        let buffer = Noxpr::vmap_with_axis(func, &map_axes, &self.exprs)?;
+        let exprs = if O::component_count() == 1 {
+            vec![buffer]
+        } else {
+            (0..O::component_count())
+                .map(|i| buffer.get_tuple_element(i))
+                .collect()
+        };
+        Ok(Query {
+            exprs,
+            len: self.len,
+            phantom_data: PhantomData,
+            entity_map: self.entity_map.clone(),
+        })
+    }
+
+    pub fn join<B: Component>(self, other: &ComponentArray<B>) -> Query<G::Append<B>> {
+        let q = join_many(self, other);
+        Query {
+            exprs: q.exprs,
+            len: q.len,
+            entity_map: q.entity_map,
+            phantom_data: PhantomData,
+        }
+    }
+
+    pub fn join_query<B: ComponentGroup>(self, other: Query<B>) -> Query<(G, B)> {
+        let q = join_query(self, other);
+        Query {
+            exprs: q.exprs,
+            len: q.len,
+            entity_map: q.entity_map,
+            phantom_data: PhantomData,
+        }
+    }
+}
 
 impl<A: Component> ComponentArray<A> {
     pub fn join<B: Component>(&self, other: &ComponentArray<B>) -> Query<(A, B)> {
@@ -155,6 +296,34 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
     }
 }
 
+pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
+    if a.entity_map == b.entity_map {
+        a.exprs.append(&mut b.exprs);
+        Query {
+            exprs: a.exprs,
+            entity_map: a.entity_map,
+            len: a.len,
+            phantom_data: PhantomData,
+        }
+    } else {
+        let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
+        for expr in &mut a.exprs {
+            *expr = filter_index(&a_indexes, expr);
+        }
+        for expr in &mut b.exprs {
+            *expr = filter_index(&b_indexes, expr);
+        }
+        let mut exprs = a.exprs;
+        exprs.append(&mut b.exprs);
+        Query {
+            exprs,
+            len: ids.len(),
+            entity_map: ids,
+            phantom_data: PhantomData,
+        }
+    }
+}
+
 pub fn intersect_ids(
     a: &BTreeMap<EntityId, usize>,
     b: &BTreeMap<EntityId, usize>,
@@ -202,6 +371,7 @@ mod tests {
     use super::*;
     use crate::{Archetype, System};
     use nox::Scalar;
+    use nox_ecs_macros::{ComponentGroup, FromBuilder};
 
     #[test]
     fn test_cross_archetype_join() {
@@ -216,7 +386,7 @@ mod tests {
             x: X,
         }
 
-        fn add_e(a: Query<(E, X)>) -> ComponentArray<X> {
+        fn add_e(a: Query<(E, X)>) -> Query<X> {
             a.map(|e: E, x: X| X(x.0 + e.0)).unwrap()
         }
         let mut world = add_e.world();
@@ -241,5 +411,53 @@ mod tests {
             lit.typed_buf::<f64>().unwrap(),
             &[-91.0, 945.0, 5.0, 200.0, -49900.0, 400.0]
         );
+    }
+
+    #[test]
+    fn component_group() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
+
+        #[derive(Component)]
+        struct B(Scalar<f64>);
+
+        #[derive(Component)]
+        struct C(Scalar<f64>);
+
+        #[derive(Archetype)]
+        struct Body {
+            a: A,
+            b: B,
+            c: C,
+        }
+
+        #[derive(FromBuilder, ComponentGroup)]
+        struct AB {
+            a: A,
+            b: B,
+        }
+
+        fn add_system(q: Query<AB>) -> Query<C> {
+            q.map(|ab: AB| C(ab.a.0 + ab.b.0)).unwrap()
+        }
+
+        let mut world = add_system.world();
+        world.spawn(Body {
+            a: A::host(1.0),
+            b: B::host(2.0),
+            c: C::host(-1.0),
+        });
+
+        world.spawn(Body {
+            a: A::host(2.0),
+            b: B::host(2.0),
+            c: C::host(-1.0),
+        });
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world.build(&client).unwrap();
+        exec.run(&client).unwrap();
+        let c = exec.client_world.column::<C>().unwrap();
+        let lit = c.column.buffer.to_literal_sync().unwrap();
+        assert_eq!(lit.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
     }
 }

@@ -189,6 +189,13 @@ impl JaxTracer {
                         .map_err(Error::PyO3)
                 })?
             }
+            NoxprNode::GetTupleElement(g) => match g.expr.deref() {
+                NoxprNode::Tuple(elems) => {
+                    let elem = elems.get(g.index).ok_or(Error::OutOfBoundsAccess)?;
+                    self.visit(elem)?
+                }
+                _ => return Err(Error::GetTupleElemWrongType),
+            },
             NoxprNode::Jax(o) => o.clone(),
         };
         self.cache.insert(id, op.clone());
