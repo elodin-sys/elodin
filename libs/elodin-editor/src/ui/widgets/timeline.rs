@@ -4,9 +4,10 @@ use bevy_egui::egui::{
     self,
     emath::{self, Numeric},
     epaint::PathShape,
-    load::SizedTexture,
-    Image, Label, Pos2, Rangef, Rect, Response, RichText, Sense, TextureId, Vec2, Widget,
+    Color32, Label, Pos2, Rangef, Rect, Response, RichText, Sense, TextureId, Vec2, Widget,
 };
+
+use crate::ui::colors;
 
 // ----------------------------------------------------------------------------
 
@@ -32,6 +33,7 @@ pub struct Timeline<'a> {
     step: Option<f64>,
 
     handle_image_id: Option<TextureId>,
+    handle_image_tint: Color32,
     handle_aspect_ratio: f32,
     segments: u8,
     label_font_size: f32,
@@ -82,6 +84,7 @@ impl<'a> Timeline<'a> {
             clamp_to_range: true,
             step: Some(1.0),
             handle_image_id: None,
+            handle_image_tint: colors::HYPER_RED,
             handle_aspect_ratio: 0.5,
             segments: 8,
             label_font_size: 10.0,
@@ -220,9 +223,11 @@ impl<'a> Timeline<'a> {
             let handle_rect = Rect::from_center_size(center, handle_size);
 
             if let Some(image_id) = self.handle_image_id {
-                ui.put(
+                ui.painter().image(
+                    image_id,
                     handle_rect,
-                    Image::new(SizedTexture::new(image_id, handle_size)),
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    self.handle_image_tint,
                 );
             } else {
                 ui.painter().rect(
