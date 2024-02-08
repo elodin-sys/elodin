@@ -108,6 +108,7 @@ message CreateMonteCarloRunReq {
 
 message CreateMonteCarloRunResp {
     bytes id = 1;
+    string upload_url = 2;
 }
 
 message StartMonteCarloRunReq {

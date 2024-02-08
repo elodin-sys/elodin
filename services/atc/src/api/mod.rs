@@ -4,6 +4,7 @@ use crate::{
     current_user_route, current_user_route_txn,
     error::Error,
     events::DbEvent,
+    monte_carlo::SimStorageClient,
 };
 use axum::routing::get;
 use elodin_types::api::*;
@@ -30,6 +31,7 @@ use utils::*;
 pub struct Api {
     address: SocketAddr,
     db: DatabaseConnection,
+    sim_storage_client: SimStorageClient,
     auth_context: AuthContext,
     redis: MultiplexedConnection,
     msg_queue: redmq::MsgQueue,
@@ -54,6 +56,7 @@ impl Api {
         db: DatabaseConnection,
         redis: MultiplexedConnection,
         msg_queue: redmq::MsgQueue,
+        sim_storage_client: SimStorageClient,
         sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
@@ -68,6 +71,7 @@ impl Api {
             msg_queue,
             auth_context,
             sandbox_events,
+            sim_storage_client,
         })
     }
 

@@ -18,6 +18,8 @@ pub struct SandboxConfig {
 pub struct MonteCarloConfig {
     pub redis_url: String,
     pub pod_name: String,
+    pub sim_artifacts_bucket_name: String,
+    pub sim_results_bucket_name: String,
 }
 
 impl Config {

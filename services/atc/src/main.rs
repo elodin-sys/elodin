@@ -43,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let redis = redis::Client::open(config.redis_url)?;
+    let sim_storage_client = monte_carlo::SimStorageClient::new(&config.monte_carlo).await?;
 
     if let Some(orca_config) = config.orca {
         let pubsub = redis.get_tokio_connection().await?;
@@ -67,7 +68,15 @@ async fn main() -> anyhow::Result<()> {
         };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
-        let api = Api::new(api_config, db.clone(), redis, msg_queue, sandbox_events).await?;
+        let api = Api::new(
+            api_config,
+            db.clone(),
+            redis,
+            msg_queue,
+            sim_storage_client,
+            sandbox_events,
+        )
+        .await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();
         services.spawn(async move {
             // don't add graceful shutdown for API server because "always be serving" is the best strategy for no downtime

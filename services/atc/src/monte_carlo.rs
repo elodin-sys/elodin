@@ -1,9 +1,14 @@
 use atc_entity::mc;
 use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
+use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
+use google_cloud_storage::sign::{SignedURLMethod, SignedURLOptions};
 use sea_orm::prelude::*;
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
+
+use crate::config::MonteCarloConfig;
+use crate::error::Error;
 
 pub const BATCH_SIZE: usize = 100;
 pub const MAX_SAMPLE_COUNT: usize = 100_000;
@@ -17,8 +22,45 @@ pub const RESULTS_GROUP: &str = "atc:results";
 // results aggregation.
 // pub const BUFFER_BATCH_COUNT: usize = 10;
 
+pub struct SimStorageClient {
+    gcs_client: GcsClient,
+    sim_artifacts_bucket_name: String,
+    _sim_results_bucket_name: String,
+}
+
 pub struct BatchSpawner {
     msg_queue: redmq::MsgQueue,
+}
+
+impl SimStorageClient {
+    pub async fn new(config: &MonteCarloConfig) -> anyhow::Result<Self> {
+        let gcp_config = ClientConfig::default().with_auth().await?;
+        let gcs_client = GcsClient::new(gcp_config);
+        Ok(SimStorageClient {
+            gcs_client,
+            sim_artifacts_bucket_name: config.sim_artifacts_bucket_name.clone(),
+            _sim_results_bucket_name: config.sim_results_bucket_name.clone(),
+        })
+    }
+
+    pub async fn signed_upload_url(&self, id: uuid::Uuid) -> Result<String, Error> {
+        let object_name = format!("runs/{}.tar.zst", id);
+        let options = SignedURLOptions {
+            method: SignedURLMethod::PUT,
+            ..Default::default()
+        };
+        let url = self
+            .gcs_client
+            .signed_url(
+                &self.sim_artifacts_bucket_name,
+                &object_name,
+                None,
+                None,
+                options,
+            )
+            .await?;
+        Ok(url)
+    }
 }
 
 impl BatchSpawner {

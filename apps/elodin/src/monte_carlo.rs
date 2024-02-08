@@ -56,12 +56,13 @@ impl Cli {
             .await?
             .into_inner();
         let id = uuid::Uuid::from_slice(&create_res.id)?;
+        let upload_url = create_res.upload_url;
 
         let start_req = StartMonteCarloRunReq {
             id: id.as_bytes().to_vec(),
         };
         client.start_monte_carlo_run(start_req).await?.into_inner();
-        println!("Created Monte Carlo run with id: {id}");
+        println!("Created Monte Carlo run with id: {id}, upload url: {upload_url}");
 
         Ok(())
     }
