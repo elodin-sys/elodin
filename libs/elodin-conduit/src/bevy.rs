@@ -241,7 +241,7 @@ impl AppExt for bevy::app::App {
         let mut map = self
             .world
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
-        map.0.insert(dbg!(C::component_id()), adapter);
+        map.0.insert(C::component_id(), adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
         self
@@ -353,7 +353,7 @@ pub async fn handle_socket(
     rx_socket: impl tokio::io::AsyncRead + Unpin,
     default_filters: &[ComponentFilter],
 ) {
-    use crate::{cid_mask, Error};
+    use crate::Error;
     use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
     use tracing::error;
     let mut tx_socket =
@@ -373,7 +373,9 @@ pub async fn handle_socket(
     }
 
     if let Err(err) = out_tx
-        .send_async(Msg::Data(ComponentData::subscribe(cid_mask!(32;sim_state))))
+        .send_async(Msg::Data(ComponentData::subscribe(
+            ComponentFilter::from_str("sim_state"),
+        )))
         .await
     {
         error!(?err, "initial subscribe error");

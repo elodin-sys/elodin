@@ -1,8 +1,8 @@
 use std::{borrow::Borrow, iter, marker::PhantomData};
 
 use crate::{
-    parser::varint_max, Component, ComponentData, ComponentId, ComponentType, ComponentValue,
-    EntityId, Error,
+    parser::varint_max, Component, ComponentData, ComponentFilter, ComponentId, ComponentType,
+    ComponentValue, EntityId, Error, SUB_COMPONENT_ID,
 };
 
 pub struct Builder<B> {
@@ -76,6 +76,23 @@ impl<B: Extend> Builder<B> {
 
     pub fn into_buf(self) -> B {
         self.buf
+    }
+}
+
+#[cfg(feature = "bytes")]
+impl Builder<bytes::BytesMut> {
+    pub fn filters(filters: &[ComponentFilter]) -> Self {
+        let mut builder = Builder::new(bytes::BytesMut::default(), 0).unwrap();
+        let data = ComponentData {
+            component_id: SUB_COMPONENT_ID,
+            storage: filters
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (EntityId(i as u64), ComponentValue::Filter(*f)))
+                .collect(),
+        };
+        builder.append_data(data).unwrap();
+        builder
     }
 }
 
@@ -260,6 +277,14 @@ impl<'a> Extend for &'a mut [u8] {
             .copy_from_slice(slice);
         let (_, b) = std::mem::take(self).split_at_mut(slice.len());
         *self = b;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "bytes")]
+impl crate::builder::Extend for bytes::BytesMut {
+    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
+        self.extend_from_slice(slice);
         Ok(())
     }
 }

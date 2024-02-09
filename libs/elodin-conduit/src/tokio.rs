@@ -1,9 +1,12 @@
 use futures::{stream, Sink, SinkExt, Stream, StreamExt, TryStreamExt};
 use std::{io, mem::size_of, net::SocketAddr};
-use tokio::net::TcpStream;
+use tokio::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream,
+};
 use tokio_util::{
     bytes::{Bytes, BytesMut},
-    codec::{Framed, LengthDelimitedCodec},
+    codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
 use crate::{
@@ -106,9 +109,21 @@ impl TcpClient {
     }
 }
 
-impl crate::builder::Extend for BytesMut {
-    fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), Error> {
-        self.extend_from_slice(slice);
-        Ok(())
+pub type TcpReader = Client<FramedRead<OwnedReadHalf, LengthDelimitedCodec>>;
+impl TcpReader {
+    pub fn from_read_half(read_half: OwnedReadHalf, current_time: u64) -> Self {
+        Client::new(
+            current_time,
+            FramedRead::new(read_half, LengthDelimitedCodec::default()),
+        )
+    }
+}
+pub type TcpWriter = Client<FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>>;
+impl TcpWriter {
+    pub fn from_write_half(write_half: OwnedWriteHalf, current_time: u64) -> Self {
+        Client::new(
+            current_time,
+            FramedWrite::new(write_half, LengthDelimitedCodec::default()),
+        )
     }
 }

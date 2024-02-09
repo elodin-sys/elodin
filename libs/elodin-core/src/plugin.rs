@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use bevy::{
     prelude::*,
     render::{settings::WgpuSettings, RenderPlugin},
@@ -99,9 +97,9 @@ impl Plugin for XpbdPlugin {
             );
         app.add_schedule(substep_schedule());
         #[cfg(feature = "nox")]
-        app.insert_resource(crate::XlaClient(Arc::new(Mutex::new(
-            nox::Client::cpu().unwrap(),
-        ))));
+        app.insert_resource(crate::XlaClient(std::sync::Arc::new(
+            std::sync::Mutex::new(nox::Client::cpu().unwrap()),
+        )));
     }
 }
 

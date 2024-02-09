@@ -94,6 +94,52 @@ pub struct Material {
     pub deferred_lighting_pass_id: u8,
 }
 
+impl Material {
+    pub fn color(r: f32, g: f32, b: f32) -> Self {
+        Material {
+            base_color: Color { r, g, b },
+
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            base_color: Color::WHITE,
+            base_color_texture: None,
+            emissive: Color::BLACK,
+            emissive_texture: None,
+            perceptual_roughness: 0.5,
+            metallic: 0.0,
+            metallic_roughness_texture: None,
+            reflectance: 0.5,
+            diffuse_transmission: 0.0,
+            specular_transmission: 0.0,
+            thickness: 0.0,
+            ior: 1.5,
+            attenuation_color: Color::WHITE,
+            attenuation_distance: f32::INFINITY,
+            occlusion_texture: None,
+            normal_map_texture: None,
+            flip_normal_map_y: false,
+            double_sided: false,
+            cull_mode: Some(Face::Back),
+            unlit: false,
+            fog_enabled: true,
+            alpha_mode: AlphaMode::Opaque,
+            depth_bias: 0.0,
+            depth_map: None,
+            parallax_depth_scale: 0.1,
+            max_parallax_layer_count: 16.0,
+            parallax_mapping_method: ParallaxMappingMethod::Occlusion,
+            opaque_render_method: OpaqueRendererMethod::Auto,
+            deferred_lighting_pass_id: 1,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Image {
     data: Vec<u8>,
@@ -201,9 +247,25 @@ pub enum TextureDimension {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Color {
-    r: f32,
-    g: f32,
-    b: f32,
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+}
+
+impl Color {
+    pub const BLACK: Self = Self {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+    };
+    pub const WHITE: Self = Self {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
+    pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
+        Self { r, g, b }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
