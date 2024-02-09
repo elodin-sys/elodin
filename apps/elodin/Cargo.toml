@@ -20,3 +20,9 @@ tonic = { version = "0.10.2", features = ["tls", "tls-webpki-roots"] }
 uuid = "1.7.0"
 xdg = "2.5.2"
 zstd = "0.13.0"
+
+elodin-editor.path = "../../libs/elodin-editor"
+elodin-editor.default-features = false
+elodin-conduit.path = "../../libs/elodin-conduit"
+elodin-conduit.features = ["tokio"]
+bevy.version = "0.12"

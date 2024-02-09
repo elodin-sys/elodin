@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["bevy", "rand"]
+default = ["bevy", "rand", "bytes"]
 tokio = ["dep:tokio", "tokio-util", "futures", "bytes"]
+bytes = ["dep:bytes"]
 bevy = ["dep:bevy", "flume", "ip_network_table-deps-treebitmap"]
 nox = ["dep:nox"]
 rand = ["fastrand"]

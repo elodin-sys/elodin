@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod auth;
+mod editor;
 mod monte_carlo;
 
 #[derive(Parser)]
@@ -18,6 +19,7 @@ enum Commands {
     Login,
     /// Manage your Monte Carlo runs
     MonteCarlo(monte_carlo::Args),
+    Editor(editor::Args),
 }
 
 #[tokio::main]
@@ -35,6 +37,7 @@ impl Cli {
         match &self.command {
             Commands::Login => self.login().await,
             Commands::MonteCarlo(args) => self.monte_carlo(args).await,
+            Commands::Editor(args) => self.editor(args.clone()).await,
         }
     }
 

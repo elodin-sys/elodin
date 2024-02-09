@@ -474,7 +474,7 @@ impl<'a> SliceExt for &'a [u8] {
 
 // source: https://github.com/jamesmunns/postcard/blob/a095b49935f7bd1bab04e6c5914ab11c3bbd5fee/src/varint.rs#L1C1-L24C1
 /// Returns the maximum number of bytes required to encode T.
-pub(crate) const fn varint_max<T: Sized>() -> usize {
+pub const fn varint_max<T: Sized>() -> usize {
     const BITS_PER_BYTE: usize = 8;
     const BITS_PER_VARINT_BYTE: usize = 7;
 

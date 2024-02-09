@@ -116,6 +116,7 @@ impl Plugin for EditorPlugin {
         .add_systems(Update, ui::render)
         .add_systems(Update, make_pickable)
         .add_systems(Update, sync_pos)
+        .add_systems(Startup, setup_window_icon)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
@@ -185,6 +186,41 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
         });
+    }
+}
+
+fn setup_window_icon() {
+    #[cfg(target_os = "macos")]
+    set_icon_mac()
+}
+
+/// source: https://github.com/emilk/egui/blob/15370bbea0b468cf719a75cc6d1e39eb00c420d8/crates/eframe/src/native/app_icon.rs#L199C1-L268C2
+#[cfg(target_os = "macos")]
+fn set_icon_mac() {
+    use cocoa::{
+        appkit::{NSApp, NSApplication, NSImage},
+        base::nil,
+        foundation::NSData,
+    };
+
+    let png_bytes = include_bytes!("../assets/512x512@2x.png");
+
+    // SAFETY: Accessing raw data from icon in a read-only manner. Icon data is static!
+    unsafe {
+        let app = NSApp();
+        if app.is_null() {
+            panic!("NSApp was null when setting app icon")
+        }
+
+        let data = NSData::dataWithBytes_length_(
+            nil,
+            png_bytes.as_ptr().cast::<std::ffi::c_void>(),
+            png_bytes.len() as u64,
+        );
+
+        let app_icon = NSImage::initWithData_(NSImage::alloc(nil), data);
+
+        app.setApplicationIconImage_(app_icon);
     }
 }
 

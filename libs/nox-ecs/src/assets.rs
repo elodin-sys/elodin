@@ -2,10 +2,19 @@ use elodin_conduit::{Component, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
 use std::marker::PhantomData;
 
+#[derive(Debug)]
 pub struct Handle<T> {
     id: u64,
     _phantom: PhantomData<T>,
 }
+
+impl<T> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Handle<T> {}
 
 impl<T> Handle<T> {
     pub fn new(id: u64) -> Self {
@@ -46,6 +55,10 @@ impl<T: elodin_conduit::Component> crate::Component for Handle<T> {
 
     fn component_type() -> elodin_conduit::ComponentType {
         elodin_conduit::ComponentType::U64
+    }
+
+    fn is_asset() -> bool {
+        true
     }
 }
 

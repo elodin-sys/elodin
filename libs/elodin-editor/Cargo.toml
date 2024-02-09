@@ -56,3 +56,8 @@ elodin-conduit.path = "../../libs/elodin-conduit"
 
 # futures
 futures-lite = "2.0"
+
+
+# macos
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.25.0"
