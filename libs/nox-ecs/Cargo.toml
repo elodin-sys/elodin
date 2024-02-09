@@ -42,5 +42,9 @@ tokio.optional = true
 futures.version = "0.3.29"
 futures.optional = true
 
+# logs
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
 
 [dev-dependencies]

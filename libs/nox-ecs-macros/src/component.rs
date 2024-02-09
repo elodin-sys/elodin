@@ -30,7 +30,7 @@ pub fn component(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     quote! {
         impl #crate_name::nox::IntoOp for #ident #generics #where_clause {
-            fn into_op(self) -> #crate_name::Noxpr {
+            fn into_op(self) -> #crate_name::nox::Noxpr {
                 use #crate_name::nox::IntoOp;
                 self.0.into_op()
             }
