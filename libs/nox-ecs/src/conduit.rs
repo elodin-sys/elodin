@@ -1,96 +1,129 @@
 use crate::{assets::Handle, Error, Exec};
 use bytes::{Bytes, BytesMut};
 use elodin_conduit::{
-    parser::{ComponentPair, Parser},
-    ComponentId, ComponentType,
+    bevy_sync::DEFAULT_SUB_FILTERS,
+    builder::{encode_varint_usize, Builder},
+    parser::{varint_max, ComponentPair, Parser},
+    ComponentId, ComponentType, ComponentValue,
 };
-use nox::{Client, FromBuilder, IntoOp};
-use std::{collections::BTreeMap, future::Future};
+use nox::{FromBuilder, IntoOp};
+use std::collections::BTreeMap;
 
-pub struct ConduitExec<Tx, Rx> {
-    subscriptions: BTreeMap<ComponentId, Subscription<Tx>>,
-    rx: Rx,
-    exec: Exec,
-}
+struct ConnectionId(usize);
 
-struct Subscription<Tx> {
-    tx: Tx,
+struct Subscription {
+    connection_id: ConnectionId,
     sent_generation: usize,
 }
 
-impl<Tx: ClientTx, Rx> ConduitExec<Tx, Rx> {
-    pub async fn send(&mut self) -> Result<(), Error> {
-        for (comp_id, sub) in &mut self.subscriptions {
-            let _ = self.exec.column(*comp_id)?;
-            let col = self.exec.cached_column(*comp_id)?;
-            if col.column.buffer.asset {
-                let Some(buf) = col.column.buffer.typed_buf::<u64>() else {
-                    // TODO: warn
-                    continue;
-                };
-                let mut out = vec![];
-                let mut changed = false;
-                for id in buf.iter() {
-                    let gen = self
-                        .exec
-                        .host_world
-                        .assets
-                        .gen(Handle::<()>::new(*id))
-                        .ok_or(Error::AssetNotFound)?;
-                    if gen > sub.sent_generation {
-                        changed = true;
-                        sub.sent_generation = gen;
-                    }
+pub struct ConduitExec {
+    subscriptions: BTreeMap<ComponentId, Vec<Subscription>>,
+    connections: Vec<Sender>,
+    rx: flume::Receiver<RecvMsg>,
+    exec: Exec,
+}
+
+struct Sender(flume::Sender<Builder<BytesMut>>);
+
+impl Sender {
+    fn send(
+        &mut self,
+        component_id: ComponentId,
+        component_ty: ComponentType,
+        len: usize,
+        entities: &[u8],
+        values: &[u8],
+    ) -> Result<(), Error> {
+        use elodin_conduit::builder::ComponentBuilder;
+        let capacity = 26 + entities.len() + values.len();
+        let mut builder = Builder::new(bytes::BytesMut::with_capacity(capacity), 0).unwrap();
+        builder.append_builder(ComponentBuilder::new(
+            (component_id, component_ty),
+            (len, entities),
+            values,
+        ))?;
+        self.0.send(builder).map_err(|_| Error::ChannelClosed)
+    }
+}
+
+pub struct RecvMsg {
+    parser: Parser<Bytes>,
+    tx: flume::WeakSender<Builder<BytesMut>>,
+}
+
+impl ConduitExec {
+    pub fn new(exec: Exec) -> (Self, flume::Sender<RecvMsg>) {
+        let (tx, rx) = flume::unbounded();
+        (
+            Self {
+                subscriptions: BTreeMap::new(),
+                connections: Vec::new(),
+                rx,
+                exec,
+            },
+            tx,
+        )
+    }
+
+    pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
+        self.exec.run(client)?;
+        self.send()?;
+        self.recv()?;
+        Ok(())
+    }
+
+    pub fn send(&mut self) -> Result<(), Error> {
+        for (comp_id, subs) in &mut self.subscriptions {
+            for sub in subs.iter_mut() {
+                if let Err(err) = send_sub(&mut self.connections, &mut self.exec, comp_id, sub) {
+                    tracing::debug!(?err, ?comp_id, "send sub error")
                 }
-                if !changed {
-                    continue;
-                }
-                for id in buf.iter() {
-                    let Some(value) = self.exec.host_world.assets.value(Handle::<()>::new(*id))
-                    else {
-                        todo!("gracefully handle")
-                    };
-                    value.with_bytes(|bytes| out.extend_from_slice(bytes));
-                }
-                sub.tx
-                    .send(
-                        *comp_id,
-                        col.column.buffer.component_type,
-                        col.column.buffer.len,
-                        &col.entities.buf,
-                        &out,
-                    )
-                    .await?;
-            } else {
-                sub.tx
-                    .send(
-                        *comp_id,
-                        col.column.buffer.component_type,
-                        col.column.buffer.len,
-                        &col.entities.buf,
-                        &col.column.buffer.buf,
-                    )
-                    .await?;
             }
         }
         Ok(())
     }
-}
 
-impl<Tx, Rx: ClientRx> ConduitExec<Tx, Rx> {
-    pub async fn recv(&mut self) -> Result<(), Error> {
-        let Some(parser) = self.rx.recv().await? else {
+    pub fn recv(&mut self) -> Result<(), Error> {
+        let Ok(RecvMsg { parser, tx }) = self.rx.try_recv() else {
             return Ok(());
         };
-        for ComponentPair {
+        for pair in parser {
+            if let Err(err) = self.process_component_pair(&tx, pair) {
+                tracing::warn!(?err, "error processing component pair");
+            }
+        }
+
+        Ok(())
+    }
+
+    fn process_component_pair(
+        &mut self,
+        tx: &flume::WeakSender<Builder<BytesMut>>,
+        ComponentPair {
             component_id,
             entity_id,
             value,
-        } in parser
-        {
+        }: ComponentPair,
+    ) -> Result<(), Error> {
+        if component_id == elodin_conduit::SUB_COMPONENT_ID {
+            let ComponentValue::Filter(filter) = value else {
+                return Err(Error::InvalidFilter);
+            };
+            let connection_id = ConnectionId(self.connections.len());
+            self.connections
+                .push(Sender(tx.upgrade().ok_or(Error::ChannelClosed)?));
+            let subs = self
+                .subscriptions
+                .entry(ComponentId(filter.id))
+                .or_default();
+            subs.push(Subscription {
+                connection_id,
+                sent_generation: 0,
+            });
+        } else {
             let mut col = self.exec.column_mut(component_id)?;
             let Some(out) = col.entity_buf(entity_id) else {
-                continue;
+                return Err(Error::EntityNotFound);
             };
             value.with_bytes(|bytes| {
                 if bytes.len() != out.len() {
@@ -102,72 +135,157 @@ impl<Tx, Rx: ClientRx> ConduitExec<Tx, Rx> {
         }
         Ok(())
     }
+}
 
-    pub fn clear_cache(&mut self) {
-        self.exec.clear_cache();
+fn send_sub(
+    connections: &mut [Sender],
+    exec: &mut Exec,
+    comp_id: &ComponentId,
+    sub: &mut Subscription,
+) -> Result<(), Error> {
+    let tx = connections
+        .get_mut(sub.connection_id.0)
+        .ok_or(Error::AssetNotFound)?;
+    let _ = exec.column(*comp_id)?;
+    let col = exec.cached_column(*comp_id)?;
+    if col.column.buffer.asset {
+        let Some(buf) = col.column.buffer.typed_buf::<u64>() else {
+            // TODO: warn
+            todo!()
+        };
+        let mut out = vec![];
+        let mut changed = false;
+        for id in buf.iter() {
+            let gen = exec
+                .host_world
+                .assets
+                .gen(Handle::<()>::new(*id))
+                .ok_or(Error::AssetNotFound)?;
+            if gen > sub.sent_generation {
+                changed = true;
+                sub.sent_generation = gen;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+        for id in buf.iter() {
+            let Some(value) = exec.host_world.assets.value(Handle::<()>::new(*id)) else {
+                todo!("gracefully handle")
+            };
+            value.with_bytes(|bytes| {
+                let mut arr = [0; varint_max::<usize>()];
+                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr));
+                out.extend_from_slice(bytes)
+            });
+        }
+
+        tx.send(
+            *comp_id,
+            ComponentType::Bytes,
+            col.column.buffer.len,
+            &col.entities.buf,
+            &out,
+        )?;
+    } else {
+        tx.send(
+            *comp_id,
+            col.column.buffer.component_type,
+            col.column.buffer.len,
+            &col.entities.buf,
+            &col.column.buffer.buf,
+        )?;
     }
-}
-
-impl<Tx: ClientTx, Rx: ClientRx> ConduitExec<Tx, Rx> {
-    pub async fn run(&mut self, client: &Client) -> Result<(), Error> {
-        self.exec.run(client)?;
-        self.send().await?;
-        self.recv().await?;
-        Ok(())
-    }
-}
-
-pub trait ClientTx {
-    fn send(
-        &mut self,
-        component_id: ComponentId,
-        component_ty: ComponentType,
-        len: usize,
-        entities: &[u8],
-        values: &[u8],
-    ) -> impl Future<Output = Result<(), Error>>;
-}
-
-pub trait ClientRx {
-    fn recv(&mut self) -> impl Future<Output = Result<Option<Parser<Bytes>>, Error>>;
+    Ok(())
 }
 
 #[cfg(feature = "tokio")]
-impl<T> ClientTx for elodin_conduit::tokio::Client<T>
-where
-    T: futures::Sink<Bytes, Error = std::io::Error> + Unpin,
-{
-    async fn send(
-        &mut self,
-        component_id: ComponentId,
-        component_ty: ComponentType,
-        len: usize,
-        entities: &[u8],
-        values: &[u8],
-    ) -> Result<(), Error> {
-        use elodin_conduit::builder::{Builder, ComponentBuilder};
-        let capacity = 26 + entities.len() + values.len();
-        let mut builder = Builder::new(bytes::BytesMut::with_capacity(capacity), 0).unwrap();
-        builder.append_builder(ComponentBuilder::new(
-            (component_id, component_ty),
-            (len, entities),
-            values,
-        ))?;
-        self.send_builder(builder).await.map_err(Error::from)
+pub struct TokioServer {
+    tx: flume::Sender<RecvMsg>,
+    listener: tokio::net::TcpListener,
+}
+
+#[cfg(feature = "tokio")]
+impl TokioServer {
+    pub async fn bind(
+        tx: flume::Sender<RecvMsg>,
+        addr: std::net::SocketAddr,
+    ) -> Result<Self, Error> {
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        Ok(Self { tx, listener })
+    }
+
+    pub async fn run(self) -> Result<(), Error> {
+        loop {
+            let (socket, _) = self.listener.accept().await?;
+            let (rx_socket, tx_socket) = socket.into_split();
+            let (tx, rx) = flume::unbounded();
+            let tx_recv_msg = self.tx.clone();
+            tokio::spawn(async move {
+                for filter in DEFAULT_SUB_FILTERS {
+                    let default_subs = Builder::filters(&[*filter]);
+                    let default_subs = default_subs.into_buf();
+                    let default_subs = Parser::new(default_subs.freeze()).unwrap();
+                    tx_recv_msg
+                        .send_async(RecvMsg {
+                            parser: default_subs,
+                            tx: tx.downgrade(),
+                        })
+                        .await
+                        .map_err(|_| Error::ChannelClosed)?;
+                }
+                let mut rx_client = elodin_conduit::tokio::TcpReader::from_read_half(rx_socket, 0);
+                while let Some(parser) = rx_client.recv_parser().await? {
+                    tx_recv_msg
+                        .send_async(RecvMsg {
+                            parser,
+                            tx: tx.downgrade(),
+                        })
+                        .await
+                        .map_err(|_| Error::ChannelClosed)?;
+                }
+                Ok::<(), Error>(())
+            });
+            tokio::spawn(async move {
+                let mut tx_client = elodin_conduit::tokio::TcpWriter::from_write_half(tx_socket, 0);
+                while let Ok(builder) = rx.recv_async().await {
+                    tx_client.send_builder(builder).await?;
+                }
+                Ok::<(), Error>(())
+            });
+        }
     }
 }
 
 #[cfg(feature = "tokio")]
-impl<T> ClientRx for elodin_conduit::tokio::Client<T>
-where
-    T: futures::Stream<Item = Result<BytesMut, std::io::Error>> + Unpin,
-{
-    async fn recv(&mut self) -> Result<Option<Parser<Bytes>>, Error> {
-        self.recv_parser().await.map_err(Error::from)
+pub fn spawn_tcp_server(
+    socket_addr: std::net::SocketAddr,
+    exec: Exec,
+    client: &nox::Client,
+    tick_period: std::time::Duration,
+) -> Result<(), Error> {
+    use std::time::Instant;
+
+    let (mut conduit_exec, rx) = ConduitExec::new(exec);
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let server = TokioServer::bind(rx, socket_addr).await.unwrap();
+            server.run().await
+        })
+        .unwrap();
+    });
+    loop {
+        let start = Instant::now();
+        conduit_exec.run(client)?;
+        let sleep_time = tick_period.saturating_sub(start.elapsed());
+        if !sleep_time.is_zero() {
+            std::thread::sleep(sleep_time)
+        }
     }
 }
 
-pub struct WorldPos(nox::SpatialTransform<f64>);
+pub struct WorldPos(pub nox::SpatialTransform<f64>);
 impl FromBuilder for WorldPos {
     type Item<'a> = Self;
 

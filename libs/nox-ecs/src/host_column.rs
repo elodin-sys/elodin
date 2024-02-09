@@ -34,6 +34,7 @@ impl HostColumn {
         let NoxprNode::Constant(c) = op.deref() else {
             panic!("push into host column must be constant expr");
         };
+        self.asset = T::is_asset();
         self.push_raw(c.data.raw_buf());
     }
 

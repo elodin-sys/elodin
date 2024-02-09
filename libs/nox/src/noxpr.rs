@@ -456,12 +456,13 @@ impl Noxpr {
                     .map(Noxpr::shape)
                     .collect::<Option<Vec<_>>>()?;
                 let mut shape = shapes.first()?.clone();
+                let rank = shape.len();
                 let dim = concat.dimension;
                 // TODO(sphw): ensure that all shapes are the same, except for a particular dim
-                if shapes.iter().any(|s| s.len() != dim) {
+                if shapes.iter().any(|s| s.len() != rank) {
                     return None;
                 }
-                if concat.dimension >= dim {
+                if concat.dimension >= rank {
                     return None;
                 }
                 let new_len = shapes.iter().map(|s| s[concat.dimension]).fold(0, |xs, x| {
@@ -590,6 +591,17 @@ impl Noxpr {
             NoxprNode::DynamicUpdateSlice(_) => "DynamicUpdateSlice",
             NoxprNode::Jax(_) => "Jax",
         }
+    }
+
+    fn expand_rank(self, rank: usize) -> Option<Noxpr> {
+        let in_shape = self.shape()?;
+        let in_rank = in_shape.len();
+        let broadcast_dims = (0..in_rank).map(|x| x as i64).collect();
+        let mut out_shape = in_shape;
+        for _ in in_rank..rank {
+            out_shape.push(1);
+        }
+        Some(self.broadcast_in_dim(out_shape, broadcast_dims))
     }
 }
 
@@ -1021,15 +1033,19 @@ impl BatchTracer {
             NoxprNode::DotGeneral(d) => {
                 self.visit_dot_general(&d.lhs, &d.rhs, d.dimensions.clone())?
             }
-            NoxprNode::Dot(d) => self.visit_dot_general(
-                &d.lhs,
-                &d.rhs,
-                DotDimensionNums {
-                    lhs_contracting_dimensions: smallvec![1],
-                    rhs_contracting_dimensions: smallvec![0],
-                    ..Default::default()
-                },
-            )?,
+            NoxprNode::Dot(d) => {
+                let lhs_rank = d.lhs.shape().ok_or(Error::UnbatchableArgument)?.len();
+                let rhs_rank = d.rhs.shape().ok_or(Error::UnbatchableArgument)?.len();
+                self.visit_dot_general(
+                    &d.lhs,
+                    &d.rhs,
+                    DotDimensionNums {
+                        lhs_contracting_dimensions: smallvec![lhs_rank.saturating_sub(1) as i64],
+                        rhs_contracting_dimensions: smallvec![rhs_rank.saturating_sub(2) as i64],
+                        ..Default::default()
+                    },
+                )?
+            }
             NoxprNode::Slice(s) => {
                 let expr = self.visit(&s.expr)?;
                 match expr.batch_axis {
@@ -1465,18 +1481,45 @@ impl BatchTracer {
     ) -> Result<BatchedExpr, Error> {
         let lhs = self.visit(&op.lhs)?;
         let rhs = self.visit(&op.rhs)?;
-        match (lhs.batch_axis, rhs.batch_axis.clone()) {
+        fn scalar_broadcast(
+            rank: usize,
+            expr: BatchedExpr,
+            shape: SmallVec<[i64; 4]>,
+        ) -> Option<Noxpr> {
+            if expr.batch_axis == BatchAxis::NotMapped || shape.len() == rank {
+                Some(expr.inner)
+            } else {
+                expr.inner.expand_rank(rank)
+            }
+        }
+        let scalar_broadcast_func =
+            move |lhs: BatchedExpr, rhs: BatchedExpr| -> Result<Noxpr, Error> {
+                let rhs_shape = rhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                let lhs_shape = lhs.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                if rhs_shape.len() == lhs_shape.len() {
+                    Ok(func(lhs.inner, rhs.inner))
+                } else {
+                    let rank = rhs_shape.len().max(lhs_shape.len());
+                    let lhs =
+                        scalar_broadcast(rank, lhs, lhs_shape).ok_or(Error::UnbatchableArgument)?;
+                    let rhs =
+                        scalar_broadcast(rank, rhs, rhs_shape).ok_or(Error::UnbatchableArgument)?;
+                    Ok(func(lhs, rhs))
+                }
+            };
+        match (lhs.batch_axis.clone(), rhs.batch_axis.clone()) {
             (BatchAxis::NotMapped, BatchAxis::NotMapped) => {
                 let expr = BatchedExpr {
-                    inner: func(lhs.inner, rhs.inner),
+                    inner: scalar_broadcast_func(lhs, rhs)?,
                     batch_axis: BatchAxis::NotMapped,
                 };
-                expr.move_batch_axis(self.out_axis.clone())
-                    .ok_or(Error::UnbatchableArgument)
+                Ok(expr
+                    .move_batch_axis(self.out_axis.clone())
+                    .ok_or(Error::UnbatchableArgument)?)
             }
             (BatchAxis::NotMapped, mapped @ BatchAxis::Mapped { .. })
             | (mapped @ BatchAxis::Mapped { .. }, BatchAxis::NotMapped) => {
-                let inner = func(lhs.inner, rhs.inner);
+                let inner = scalar_broadcast_func(lhs, rhs)?;
                 Ok(BatchedExpr {
                     inner,
                     batch_axis: mapped,
@@ -1486,7 +1529,7 @@ impl BatchTracer {
                 let rhs = rhs
                     .move_batch_axis(lhs_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
-                let inner = func(lhs.inner, rhs.inner);
+                let inner = scalar_broadcast_func(lhs, rhs)?;
                 Ok(BatchedExpr {
                     inner,
                     batch_axis: lhs_axis.clone(),
@@ -1672,5 +1715,33 @@ mod tests {
         let b = &[];
         let out = crate::broadcast_dims(a, b);
         assert_eq!(out, Some(smallvec![1, 6]))
+    }
+
+    #[test]
+    fn test_normalize_vmap() {
+        let client = Client::cpu().unwrap();
+        fn norm(q: Matrix<f32, 2, 3>) -> Matrix<f32, 2, 3> {
+            q.vmap(|x: Vector<f32, 3>| x.clone() / x.norm())
+                .unwrap()
+                .collapse()
+        }
+
+        let comp = norm.build().unwrap();
+        println!("{}", comp.to_hlo_text().unwrap());
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec
+            .run(&client, matrix![1.0, 0.0, 0.0; 0.0, 4.0, 0.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, matrix![1.0, 0.0, 0.0; 0.0, 1.0, 0.0])
     }
 }

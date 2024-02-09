@@ -46,6 +46,10 @@ impl<T: Field> Quaternion<T> {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
+
+    pub fn normalize(&self) -> Self {
+        Quaternion(self.0.clone() / self.0.norm())
+    }
 }
 
 impl<T: Field> Mul for Quaternion<T> {

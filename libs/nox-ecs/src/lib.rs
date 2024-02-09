@@ -1,6 +1,7 @@
-use assets::{AssetStore, Handle};
+extern crate self as nox_ecs;
+
 use bytemuck::{AnyBitPattern, Pod};
-use elodin_conduit::{ComponentType, ComponentValue, EntityId};
+use elodin_conduit::{ComponentValue, EntityId};
 use nox::xla::{ArrayElement, BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
 use smallvec::smallvec;
@@ -9,6 +10,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
+
+pub use elodin_conduit::ComponentType;
 
 pub use elodin_conduit;
 pub use elodin_conduit::ComponentId;
@@ -22,6 +25,7 @@ mod host_column;
 mod integrator;
 mod query;
 
+pub use assets::*;
 pub use component::*;
 pub use conduit::*;
 pub use dyn_array::*;
@@ -769,6 +773,7 @@ impl Exec {
         if !self.loaded_components.contains(&component_id) {
             self.host_world
                 .load_column_from_client(component_id, &self.client_world)?;
+            self.loaded_components.insert(component_id);
         }
         self.host_world
             .column_by_id(component_id)
@@ -835,6 +840,14 @@ pub enum Error {
     Conduit(#[from] elodin_conduit::Error),
     #[error("asset not found")]
     AssetNotFound,
+    #[error("channel closed")]
+    ChannelClosed,
+    #[error("invalid filter")]
+    InvalidFilter,
+    #[error("entity not found")]
+    EntityNotFound,
+    #[error("io {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl From<nox::xla::Error> for Error {

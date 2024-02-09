@@ -187,6 +187,7 @@ where
         let omega = Quaternion(zero.concat(omega));
         let q = self.angular();
         let angular = q.clone() + omega * q;
+        let angular = angular.normalize();
         let linear = self.linear() + rhs.linear();
         SpatialTransform::new(angular, linear)
     }

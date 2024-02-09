@@ -31,12 +31,12 @@ pub fn component_group(input: TokenStream) -> TokenStream {
         impl #generics #crate_name::ComponentGroup for #ident #generics #where_clause {
             type Params = (Self,);
             type Append<B> = (Self, B);
-            fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), #crate_name::Error> {
+            fn init_params(builder: &mut #crate_name::PipelineBuilder) -> Result<(), #crate_name::Error> {
                 <(#(#params,)*)>::init_params(builder)
             }
 
             fn component_arrays<'a>(
-                builder: &'a crate::PipelineBuilder,
+                builder: &'a #crate_name::PipelineBuilder,
             ) -> impl Iterator<Item = #crate_name::ComponentArray<()>> + 'a {
                 <(#(#params,)*)>::component_arrays(builder)
             }
