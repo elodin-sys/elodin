@@ -38,14 +38,14 @@ pub fn component_group(input: TokenStream) -> TokenStream {
 }
 
 pub(crate) fn nox_ecs_crate_name() -> proc_macro2::TokenStream {
-    let name = crate_name("nox-ecs").expect("nox-ecs is present in `Cargo.toml`");
+    let name = crate_name("nox-ecs");
 
     match name {
-        FoundCrate::Itself => quote!(crate),
-        FoundCrate::Name(name) => {
+        Ok(FoundCrate::Name(name)) => {
             let ident = Ident::new(&name, Span::call_site());
             quote!( #ident )
         }
+        _ => quote!(::nox_ecs),
     }
 }
 
