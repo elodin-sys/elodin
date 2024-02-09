@@ -8,6 +8,9 @@ pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
     fn host(val: Self::HostTy) -> Self;
     fn component_id() -> ComponentId;
     fn component_type() -> ComponentType;
+    fn is_asset() -> bool {
+        false
+    }
 }
 
 macro_rules! impl_scalar_primitive {
