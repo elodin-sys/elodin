@@ -90,9 +90,21 @@ fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
         anyhow::bail!("Not a file: {}", args.file.display());
     }
     let file_name = args.file.file_name().unwrap();
-    let tmp_path = tmp_dir.path().join(file_name);
 
-    std::fs::copy(&args.file, tmp_path)?;
+    let status = std::process::Command::new(&args.file)
+        .arg("monte-carlo")
+        .arg("--build-dir")
+        .arg(tmp_dir.path())
+        .spawn()?
+        .wait()?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to prepare simulation artifacts: {}", status);
+    }
+
+    // Copy the original file into the temporary directory for debugging purposes
+    // TODO(Akhil): Remove this once this actually works e2e
+    std::fs::copy(&args.file, tmp_dir.path().join(file_name))?;
 
     let archive_file = tempfile::tempfile()?;
     let buf = std::io::BufWriter::new(archive_file);
