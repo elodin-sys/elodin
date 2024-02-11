@@ -79,10 +79,10 @@ impl Runner {
             let hlo = std::fs::read(hlo)?;
             tracing::debug!("downloaded XLA hlo: {} bytes", hlo.len());
 
-            let comp_bufs = temp_dir.path().join("artifacts").join("comp_bufs.bin");
-            let comp_bufs = std::fs::read(comp_bufs)?;
-            let comp_bufs: Vec<Vec<u8>> = postcard::from_bytes(&comp_bufs)?;
-            tracing::debug!("downloaded {} component buffers", comp_bufs.len());
+            let world = temp_dir.path().join("artifacts").join("world.bin");
+            let world = std::fs::read(world)?;
+            let world: Vec<Vec<u8>> = postcard::from_bytes(&world)?;
+            tracing::debug!("downloaded {} component buffers", world.len());
 
             let comp = nox::xla::HloModuleProto::parse_binary(&hlo)?.computation();
             let _exec = self.nox_client.0.compile(&comp)?;
