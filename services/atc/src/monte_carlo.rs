@@ -4,6 +4,7 @@ use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::sign::{SignedURLMethod, SignedURLOptions};
 use sea_orm::prelude::*;
 use sea_orm::DatabaseConnection;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
@@ -130,7 +131,7 @@ impl Aggregator {
             };
             let Some(run) = work.pop() else { continue };
 
-            let span = tracing::debug_span!("collect_results", %run.id, %run.name);
+            let span = tracing::debug_span!("collect_results", %run.name);
             self.collect_results(run, &cancel_token)
                 .instrument(span)
                 .await?;
@@ -147,10 +148,11 @@ impl Aggregator {
     ) -> anyhow::Result<()> {
         let results_topic = format!("mc:results:{}", run.id);
         let batch_count = run.samples.div_ceil(run.batch_size);
+        let expires_at = run.start_time + chrono::Duration::hours(2);
+        tracing::info!(results_topic, batch_count, %expires_at, "collecting results");
         let mut last_id: Option<String> = None;
         let mut all_results = Vec::default();
         loop {
-            let expires_at = run.start_time + chrono::Duration::hours(2);
             let remaining = expires_at.signed_duration_since(chrono::Utc::now());
             let results = tokio::select! {
                 r = self.msg_queue.recv::<BatchResults>(results_topic.as_str(), 100, last_id.as_deref()) => r?,
@@ -166,10 +168,11 @@ impl Aggregator {
                     tracing::debug!(%r.batch_no, "ignoring buffer batch results");
                     continue;
                 }
+                let runtime = Duration::from_secs(r.run_time_seconds);
+                tracing::debug!(batch_no = %r.batch_no, ?runtime, failed = ?r.failed, "received results");
                 all_results.push(r.clone());
             }
 
-            tracing::debug!(total = %all_results.len(), %remaining, "collected results");
             if all_results.len() >= batch_count {
                 break;
             }
@@ -179,7 +182,7 @@ impl Aggregator {
 
         let failures = all_results.iter().fold(0, |f, r| f + r.failed);
         let total_runtime = all_results.iter().fold(0, |rt, r| rt + r.run_time_seconds);
-        let total_runtime = std::time::Duration::from_secs(total_runtime);
+        let total_runtime = Duration::from_secs(total_runtime);
         let average_runtime = total_runtime / batch_count as u32;
         tracing::info!(failures, ?average_runtime, "collected results");
 
