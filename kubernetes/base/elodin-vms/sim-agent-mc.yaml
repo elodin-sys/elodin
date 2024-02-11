@@ -33,6 +33,8 @@ spec:
         - name: RUST_LOG
           value: info,sim_agent=debug,redmq=trace
         volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         - name: config
           mountPath: /etc/elodin
         resources:
@@ -40,6 +42,10 @@ spec:
             cpu: 300m
             memory: 500Mi
       volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 500Mi
       - name: config
         configMap:
           name: elo-sim-config
