@@ -441,7 +441,7 @@ def build_expr(builder, sys):
             .write(true)
             .create(true)
             .truncate(true)
-            .open(build_dir.join("comp_bufs.bin"))?
+            .open(build_dir.join("world.bin"))?
             .write_all(&buffers)?;
 
         Ok(())
