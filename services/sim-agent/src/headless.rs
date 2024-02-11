@@ -70,6 +70,9 @@ impl Runner {
             .await?;
 
         let results = tokio::task::block_in_place(|| {
+            let span = tracing::info_span!("run", %run.name, %run.id);
+            let _guard = span.enter();
+
             let zstd = zstd::Decoder::new(data.as_slice())?;
             let mut tar = tar::Archive::new(zstd);
             let temp_dir = tempfile::tempdir()?;
@@ -89,14 +92,19 @@ impl Runner {
 
             let mut results = Vec::default();
             for b in batches {
-                tracing::info!(%run.name, %run.id, batch_no = %b.batch_no, "simulating batch");
-                let elapsed = chrono::Utc::now().signed_duration_since(start_time);
-                results.push(BatchResults {
+                let span = tracing::info_span!("batch", %b.batch_no);
+                let _guard = span.enter();
+
+                tracing::info!("simulating batch");
+                let runtime = (chrono::Utc::now() - start_time).to_std()?;
+                let batch_results = BatchResults {
                     batch_no: b.batch_no,
                     failed: 0,
                     start_time,
-                    run_time_seconds: elapsed.num_seconds() as u64,
-                });
+                    run_time_seconds: runtime.as_secs(),
+                };
+                tracing::info!(failed = %batch_results.failed, ?runtime, "simulated batch");
+                results.push(batch_results);
             }
             Ok::<_, anyhow::Error>(results)
         })?;

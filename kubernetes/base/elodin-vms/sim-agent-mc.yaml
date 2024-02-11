@@ -31,7 +31,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: RUST_LOG
-          value: debug,redmq=trace
+          value: info,sim_agent=debug,redmq=trace
         volumeMounts:
         - name: config
           mountPath: /etc/elodin
