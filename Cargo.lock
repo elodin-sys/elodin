@@ -9000,17 +9000,22 @@ dependencies = [
  "elodin-py",
  "elodin-types",
  "flume",
+ "google-cloud-storage",
+ "nox",
  "postcard",
  "pyo3",
  "redis",
  "redmq",
  "serde",
+ "tar",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tonic",
  "tonic-reflection",
  "tracing",
  "tracing-subscriber",
+ "zstd 0.13.0",
 ]
 
 [[package]]

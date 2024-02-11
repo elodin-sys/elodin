@@ -59,3 +59,9 @@ redmq.path = "../../libs/redmq"
 
 #time
 chrono = "0.4.33"
+
+google-cloud-storage = { version = "0.15.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
+tar = "0.4.40"
+zstd = "0.13.0"
+tempfile = "3.10.0"
+nox = { path = "../../libs/nox" }

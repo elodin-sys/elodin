@@ -7,7 +7,6 @@ use elodin_types::sandbox::{
     sandbox_control_server::{SandboxControl, SandboxControlServer},
     UpdateCodeReq, UpdateCodeResp,
 };
-use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
 use pyo3::{types::PyModule, Python};
 use std::{
     net::SocketAddr,
@@ -20,9 +19,10 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tonic::{async_trait, transport::Server, Response, Status};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{info, info_span, Instrument};
 
 mod config;
+mod headless;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,61 +49,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if let Some(mc_agent_config) = config.monte_carlo {
-        tasks.spawn(run_mc_agent(mc_agent_config).instrument(info_span!("mc_agent").or_current()));
+        let runner = headless::Runner::new(mc_agent_config).await?;
+        tasks.spawn(runner.run().instrument(info_span!("mc_agent").or_current()));
     }
 
     while let Some(res) = tasks.join_next().await {
         res.unwrap()?;
     }
-    Ok(())
-}
-
-async fn run_mc_agent(config: config::MonteCarloConfig) -> anyhow::Result<()> {
-    info!("running monte carlo agent");
-    let redis = redis::Client::open(config.redis_url)?;
-    let mut msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
-    loop {
-        let batches = msg_queue.recv::<Batch>(BATCH_TOPIC, 1, None).await?;
-
-        match process_batches(&mut msg_queue, &batches).await {
-            Ok(_) => {}
-            Err(err) => error!(?err, "error processing batches"),
-        }
-
-        msg_queue.ack(BATCH_TOPIC, &batches).await?;
-        msg_queue.del(BATCH_TOPIC, &batches).await?;
-    }
-}
-
-async fn process_batches(
-    msg_queue: &mut redmq::MsgQueue,
-    batches: &[redmq::Received<Batch>],
-) -> anyhow::Result<()> {
-    let Some(run_id) = batches.iter().find(|b| !b.buffer).map(|b| b.id.clone()) else {
-        return Ok(());
-    };
-    let Some(run) = msg_queue.get::<Run>(RUN_TOPIC, &run_id).await? else {
-        anyhow::bail!("monte carlo run {} not found", run_id);
-    };
-
-    // TODO: run the batch simulations, collect and upload the results
-    let start_time = chrono::Utc::now();
-    let failed = 0;
-    let elapsed = chrono::Utc::now().signed_duration_since(start_time);
-    let results_topic = format!("mc:results:{}", run.id);
-
-    let mut results = Vec::default();
-    for b in batches {
-        info!(%run.name, %run.id, batch_no = %b.batch_no, "simulating batch");
-        results.push(BatchResults {
-            batch_no: b.batch_no,
-            failed,
-            start_time,
-            run_time_seconds: elapsed.num_seconds() as u64,
-        });
-    }
-
-    msg_queue.send(&results_topic, results).await?;
     Ok(())
 }
 
