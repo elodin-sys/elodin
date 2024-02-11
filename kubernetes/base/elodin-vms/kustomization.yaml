@@ -8,5 +8,6 @@ resources:
 - placeholder-priority.yaml
 - sim-agent-balloon.yaml
 - sim-agent-mc.yaml
+- service-account.yaml
 
 namespace: elodin-vms

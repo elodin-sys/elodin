@@ -66,6 +66,13 @@ patches:
       name: elo-atc
       annotations:
         iam.gke.io/gcp-service-account: sim-gcs@elodin-dev.iam.gserviceaccount.com
+- patch: |-
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: elo-sim-agent
+      annotations:
+        iam.gke.io/gcp-service-account: sim-gcs@elodin-dev.iam.gserviceaccount.com
 
 configMapGenerator:
 - name: elo-atc-config
