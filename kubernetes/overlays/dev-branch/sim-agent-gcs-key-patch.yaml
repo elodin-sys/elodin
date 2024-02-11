@@ -9,7 +9,7 @@ spec:
       - name: sim-agent-mc
         volumeMounts:
         - name: secret-volume
-          mountPath: /etc/secrets
+          mountPath: /var/secrets
           readOnly: true
         env:
         - name: GOOGLE_APPLICATION_CREDENTIALS
