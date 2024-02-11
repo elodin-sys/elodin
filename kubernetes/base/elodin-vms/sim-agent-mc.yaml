@@ -1,8 +1,9 @@
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: sim-agent-mc
 spec:
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: sim-agent-mc
@@ -11,6 +12,15 @@ spec:
       labels:
         app.kubernetes.io/name: sim-agent-mc
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: sim-agent-mc
       containers:
       - name: sim-agent-mc
         image: elodin-infra/elo-sim-agent:latest

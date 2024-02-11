@@ -64,7 +64,7 @@ patches:
     name: elo-atc
   path: atc-gcs-key-patch.yaml
 - target:
-    kind: DaemonSet
+    kind: Deployment
     name: sim-agent-mc
   path: sim-agent-gcs-key-patch.yaml
 
