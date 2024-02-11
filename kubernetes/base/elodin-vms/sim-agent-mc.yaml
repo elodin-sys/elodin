@@ -12,6 +12,7 @@ spec:
       labels:
         app.kubernetes.io/name: sim-agent-mc
     spec:
+      serviceAccountName: elo-sim-agent
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
