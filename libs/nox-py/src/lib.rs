@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
+    io::Write,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -372,6 +373,81 @@ impl WorldBuilder {
         Ok(EntityId { inner: entity_id })
     }
 
+    pub fn run(&mut self, py: Python<'_>, sys: PyObject) -> Result<(), Error> {
+        // skip `python3 <name of script>`
+        let args: Vec<_> = std::env::args_os().skip(2).collect();
+        let mut pargs = pico_args::Arguments::from_vec(args);
+        let cmd = pargs.subcommand().map_err(|_| Error::UnexpectedInput)?;
+
+        let Some(cmd) = cmd else {
+            todo!("spawn TCP server, and run simulation locally");
+        };
+
+        match cmd.as_str() {
+            "monte-carlo" => {}
+            _ => return Err(Error::UnknownCommand(cmd.to_string())),
+        }
+
+        let build_dir: String = pargs
+            .value_from_str("--build-dir")
+            .map_err(|err| Error::MissingArg(err.to_string()))?;
+        let build_dir = std::path::PathBuf::from(build_dir);
+
+        let world = std::mem::take(&mut self.world);
+        let builder = nox_ecs::PipelineBuilder::from_world(world);
+        let builder = PipelineBuilder {
+            builder: Arc::new(Mutex::new(builder)),
+        };
+        let py_code = "import jax
+def build_expr(builder, sys):
+    sys.init(builder)
+    def call(args, builder):
+        builder.inject_args(args)
+        sys.call(builder)
+        return builder.ret_vars()
+    xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
+    return (builder, xla)";
+
+        let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
+            .getattr("build_expr")?
+            .into();
+        let (builder, comp) = fun
+            .call1(py, (builder, sys))?
+            .extract::<(PyObject, PyObject)>(py)?;
+        let builder = builder.extract::<PipelineBuilder>(py)?;
+        let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
+        let comp = comp
+            .downcast::<PyBytes>(py)
+            .map_err(|_| Error::HloModuleNotBytes)?;
+        let hlo_bytes = comp.as_bytes();
+
+        let builder = std::mem::take(&mut *builder.builder.lock());
+        let mut buffers = Vec::default();
+        for id in builder.param_ids.iter() {
+            let col = builder.world.column_by_id(*id).unwrap();
+            buffers.push(col.column.buffer.raw_buf().to_vec());
+        }
+        let buffers = postcard::to_allocvec(&buffers).unwrap();
+
+        std::fs::File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(build_dir.join("xlacomp.hlo"))?
+            .write_all(hlo_bytes)?;
+
+        // TODO: this is a very hacky way to serialize world, we need a better way to do this
+        std::fs::File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(build_dir.join("comp_bufs.bin"))?
+            .write_all(&buffers)?;
+
+        Ok(())
+    }
+
+    // TODO: reuse run() in build() after proper world serialization
     pub fn build(&mut self, py: Python<'_>, sys: PyObject, client: &Client) -> Result<Exec, Error> {
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
@@ -530,6 +606,14 @@ pub enum Error {
     PyErr(#[from] PyErr),
     #[error("hlo module was not PyBytes")]
     HloModuleNotBytes,
+    #[error("unexpected input")]
+    UnexpectedInput,
+    #[error("unknown command: {0}")]
+    UnknownCommand(String),
+    #[error("{0}")]
+    MissingArg(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl From<Error> for PyErr {
