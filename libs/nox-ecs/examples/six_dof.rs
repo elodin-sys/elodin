@@ -1,104 +1,51 @@
 use elodin_conduit::well_known::{Material, Mesh};
-use nox::{nalgebra, SpatialTransform};
+use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
-use nox_ecs::{spawn_tcp_server, Handle, Rk4Ext, WorldPos};
-use nox_ecs::{Archetype, Component, World, WorldBuilder};
-use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
-use std::ops::{Add, Mul};
+use nox_ecs::{six_dof::*, spawn_tcp_server, Query, WorldPos};
+use nox_ecs::{World, WorldBuilder};
 
-#[derive(Clone, Component)]
-struct V(SpatialMotion<f64>);
-#[derive(Clone, Component)]
-struct A(SpatialMotion<f64>);
-
-#[derive(FromBuilder, ComponentGroup, IntoOp)]
-struct U {
-    x: WorldPos,
-    v: V,
-}
-
-#[derive(FromBuilder, ComponentGroup, IntoOp)]
-struct DU {
-    v: V,
-    a: A,
-}
-
-impl Add<DU> for U {
-    type Output = U;
-
-    fn add(self, v: DU) -> Self::Output {
-        U {
-            x: WorldPos(self.x.0 + v.v.0),
-            v: V(self.v.0 + v.a.0),
-        }
-    }
-}
-
-impl Add for DU {
-    type Output = DU;
-
-    fn add(self, v: DU) -> Self::Output {
-        DU {
-            v: V(self.v.0 + v.v.0),
-            a: A(self.a.0 + v.a.0),
-        }
-    }
-}
-
-impl Mul<DU> for f64 {
-    type Output = DU;
-
-    fn mul(self, rhs: DU) -> Self::Output {
-        DU {
-            v: V(self * rhs.v.0),
-            a: A(self * rhs.a.0),
-        }
-    }
-}
-
-#[derive(Archetype)]
-struct Body {
-    x: WorldPos,
-    v: V,
-    a: A,
-    model: Handle<Mesh>,
-    material: Handle<Material>,
+fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
+    const G: f64 = 6.649e-11;
+    let big_m: f64 = 1.0 / G;
+    pos.map(|world_pos: WorldPos, inertia: Inertia, force: Force| {
+        let mass = inertia.0.mass();
+        let r = world_pos.0.linear();
+        let norm = r.clone().norm();
+        let force = force.0
+            + SpatialForce::from_linear(
+                -r / (norm.clone() * norm.clone() * norm) * G * big_m * mass,
+            );
+        Force(force)
+    })
+    .unwrap()
 }
 
 fn main() {
     tracing_subscriber::fmt::init();
     let mut world = World::default();
-    let model = world.insert_asset(Mesh::bachs(1.0, 1.0, 1.0));
+    let model = world.insert_asset(Mesh::sphere(0.1, 36, 18));
     let material = world.insert_asset(Material::color(1.0, 1.0, 1.0));
 
     world.spawn(Body {
-        x: WorldPos(SpatialTransform {
-            inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+        pos: WorldPos(SpatialTransform {
+            inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
         }),
-        v: V(SpatialMotion {
-            inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+        vel: WorldVel(SpatialMotion {
+            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
         }),
-        a: A(SpatialMotion {
+        accel: WorldAccel(SpatialMotion {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),
         model,
         material,
-    });
-
-    world.spawn(Body {
-        x: WorldPos(SpatialTransform {
-            inner: vector![1.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0].into(),
-        }),
-        v: V(SpatialMotion {
-            inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-        }),
-        a: A(SpatialMotion {
+        force: Force(SpatialForce {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),
-        model,
-        material,
+        mass: Inertia(SpatialInertia {
+            inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+        }),
     });
-    let builder = WorldBuilder::new(world, ().rk4::<U, DU>());
+    let builder = WorldBuilder::new(world, six_dof(|| gravity, 1.0 / 60.0));
     let client = nox::Client::cpu().unwrap();
     let exec = builder.build(&client).unwrap();
     spawn_tcp_server(

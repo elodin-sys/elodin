@@ -235,7 +235,17 @@ impl TokioServer {
                         .map_err(|_| Error::ChannelClosed)?;
                 }
                 let mut rx_client = elodin_conduit::tokio::TcpReader::from_read_half(rx_socket, 0);
-                while let Some(parser) = rx_client.recv_parser().await? {
+                loop {
+                    let parser = match rx_client.recv_parser().await {
+                        Ok(Some(parser)) => parser,
+                        Ok(None) => {
+                            continue;
+                        }
+                        Err(elodin_conduit::Error::ParsingError) => {
+                            continue;
+                        }
+                        Err(err) => return Err::<(), Error>(Error::from(err)),
+                    };
                     tx_recv_msg
                         .send_async(RecvMsg {
                             parser,
@@ -244,7 +254,6 @@ impl TokioServer {
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
                 }
-                Ok::<(), Error>(())
             });
             tokio::spawn(async move {
                 let mut tx_client = elodin_conduit::tokio::TcpWriter::from_write_half(tx_socket, 0);
