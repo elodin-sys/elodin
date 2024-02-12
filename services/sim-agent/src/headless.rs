@@ -71,7 +71,7 @@ impl Runner {
             .await?;
 
         let results = tokio::task::block_in_place(|| {
-            let span = tracing::info_span!("run", %run.name, %run.id);
+            let span = tracing::info_span!("run", %run.name);
             let _guard = span.enter();
 
             let zstd = zstd::Decoder::new(data.as_slice())?;
@@ -93,7 +93,8 @@ impl Runner {
                     let span = tracing::info_span!("sample", %sample_no);
                     let _guard = span.enter();
 
-                    if self.run_sim(&run, &mut exec).is_err() {
+                    if let Err(err) = self.run_sim(&run, &mut exec) {
+                        tracing::error!(?err, "simulation failed");
                         failed += 1;
                     } else {
                         tracing::info!("simulation completed");
