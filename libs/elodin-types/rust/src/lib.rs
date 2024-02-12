@@ -52,6 +52,8 @@ pub struct Run {
     pub samples: usize,
     pub batch_size: usize,
     pub start_time: chrono::DateTime<chrono::Utc>,
+    #[serde(default = "default_max_duration")]
+    pub max_duration: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -67,4 +69,8 @@ pub struct BatchResults {
     pub failed: usize,
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub run_time_seconds: u64,
+}
+
+fn default_max_duration() -> u64 {
+    30
 }
