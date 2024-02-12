@@ -372,6 +372,10 @@ impl Noxpr {
         }))
     }
 
+    pub fn broadcast(self, sizes: SmallVec<[i64; 4]>) -> Self {
+        Self::new(NoxprNode::Broadcast(Broadcast { expr: self, sizes }))
+    }
+
     pub fn transpose(self, permuation: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Transpose(Transpose {
             expr: self,

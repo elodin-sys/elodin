@@ -338,7 +338,9 @@ impl Plugin for ConduitTcpSubscriber {
                     .await
                     .expect("tcp client failed")
                     .into_split();
-                handle_socket(bevy_tx, tx_socket, rx_socket, &[]).await;
+                handle_socket(bevy_tx, tx_socket, rx_socket, &[])
+                    .await
+                    .unwrap();
             });
         });
         app.add_plugins(sub_plugin)
@@ -352,7 +354,7 @@ pub async fn handle_socket(
     tx_socket: impl tokio::io::AsyncWrite + Unpin,
     rx_socket: impl tokio::io::AsyncRead + Unpin,
     default_filters: &[ComponentFilter],
-) {
+) -> Result<(), crate::Error> {
     use crate::Error;
     use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
     use tracing::error;
@@ -387,7 +389,7 @@ pub async fn handle_socket(
         Ok::<(), Error>(())
     };
     let rx = async move {
-        while let Some(batch) = rx_socket.recv().await.expect("recv failed") {
+        while let Some(batch) = rx_socket.recv().await? {
             let filters: Vec<_> = batch
                 .components
                 .iter()
@@ -419,8 +421,8 @@ pub async fn handle_socket(
         Ok::<(), Error>(())
     };
     tokio::select! {
-        res = tx => res.unwrap(),
-        res = rx => res.unwrap()
+        res = tx => res,
+        res = rx => res,
     }
 }
 
