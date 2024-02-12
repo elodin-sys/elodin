@@ -8,7 +8,12 @@ let
     inherit src;
     doCheck = false;
     cargoExtraArgs = "--package=${crateName.pname}";
-    buildInputs = with pkgs; [ protobuf ];
+    buildInputs = with pkgs; [
+      protobuf
+      pkg-config
+      alsa-lib
+      udev
+    ];
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs // {
