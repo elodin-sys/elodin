@@ -104,6 +104,7 @@ message GetSandboxReq {
 message CreateMonteCarloRunReq {
     string name = 1;
     uint32 samples = 2;
+    uint64 max_duration = 3;
 }
 
 message CreateMonteCarloRunResp {

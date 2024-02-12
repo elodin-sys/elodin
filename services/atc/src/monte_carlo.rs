@@ -213,6 +213,7 @@ mod tests {
             samples: 774,
             batch_size: 100,
             start_time: chrono::Utc::now(),
+            max_duration: 30,
         };
 
         let run_de = redmq::from_redis::<Run>(redmq::to_redis(&run)).unwrap();

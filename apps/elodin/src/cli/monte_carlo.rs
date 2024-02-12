@@ -22,10 +22,16 @@ enum Commands {
 
 #[derive(clap::Args, Clone)]
 struct RunArgs {
+    /// Name of the Monte Carlo run
     #[arg(short, long)]
     name: String,
+    /// Number of samples to run
     #[arg(short, long)]
     samples: u32,
+    /// Max simulation duration in seconds
+    #[arg(short, long, default_value_t = 30)]
+    max_duration: u64,
+    /// Path to the simulation configuration
     file: PathBuf,
 }
 
@@ -54,6 +60,7 @@ impl Cli {
         let create_req = CreateMonteCarloRunReq {
             name: args.name.clone(),
             samples: args.samples,
+            max_duration: args.max_duration,
         };
         let create_res = client
             .create_monte_carlo_run(create_req)

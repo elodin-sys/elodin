@@ -20,6 +20,8 @@ impl api::Api {
             return Err(error::Error::InvalidRequest);
         }
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
+        let max_duration =
+            i64::try_from(req.max_duration).map_err(|_| error::Error::InvalidRequest)?;
         let mc_run = atc_entity::mc::ActiveModel {
             id: sea_orm::Set(id),
             user_id: sea_orm::Set(user.id),
@@ -27,6 +29,7 @@ impl api::Api {
             name: sea_orm::Set(req.name),
             status: sea_orm::Set(mc::Status::Pending),
             metadata: sea_orm::Set(Json::Null),
+            max_duration: sea_orm::Set(max_duration),
         }
         .insert(txn)
         .await?;
@@ -67,6 +70,7 @@ impl api::Api {
             samples: mc_run.samples as usize,
             batch_size: monte_carlo::BATCH_SIZE,
             start_time: chrono::Utc::now(),
+            max_duration: mc_run.max_duration as u64,
         };
         self.msg_queue.send(RUN_TOPIC, vec![mc_run_msg]).await?;
         tracing::debug!(%user.id, %id, "started monte carlo run");

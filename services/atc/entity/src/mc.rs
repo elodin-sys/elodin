@@ -11,6 +11,7 @@ pub struct Model {
     pub name: String,
     pub metadata: Json,
     pub status: Status,
+    pub max_duration: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

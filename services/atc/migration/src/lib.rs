@@ -5,6 +5,7 @@ mod m20240114_071737_add_profile_pic;
 mod m20240115_003703_add_draft_code;
 mod m20240115_010451_add_public_sandbox;
 mod m20240125_172746_add_monte_carlo_run;
+mod m20240212_165856_add_max_duration;
 
 pub struct Migrator;
 
@@ -17,6 +18,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240115_003703_add_draft_code::Migration),
             Box::new(m20240115_010451_add_public_sandbox::Migration),
             Box::new(m20240125_172746_add_monte_carlo_run::Migration),
+            Box::new(m20240212_165856_add_max_duration::Migration),
         ]
     }
 }
