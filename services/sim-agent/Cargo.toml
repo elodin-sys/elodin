@@ -65,3 +65,4 @@ tar = "0.4.40"
 zstd = "0.13.0"
 tempfile = "3.10.0"
 nox = { path = "../../libs/nox" }
+nox-ecs = { path = "../../libs/nox-ecs" }

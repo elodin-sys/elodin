@@ -3,6 +3,7 @@ use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use nox::Client as NoxClient;
+use nox_ecs::WorldExec;
 
 use crate::config::MonteCarloConfig;
 
@@ -77,29 +78,32 @@ impl Runner {
             let mut tar = tar::Archive::new(zstd);
             let temp_dir = tempfile::tempdir()?;
             tar.unpack(temp_dir.path())?;
-
-            let hlo = temp_dir.path().join("artifacts").join("xlacomp.hlo");
-            let hlo = std::fs::read(hlo)?;
-            tracing::debug!("downloaded XLA hlo: {} bytes", hlo.len());
-
-            let world = temp_dir.path().join("artifacts").join("world.bin");
-            let world = std::fs::read(world)?;
-            let world: Vec<Vec<u8>> = postcard::from_bytes(&world)?;
-            tracing::debug!("downloaded {} component buffers", world.len());
-
-            let comp = nox::xla::HloModuleProto::parse_binary(&hlo)?.computation();
-            let _exec = self.nox_client.0.compile(&comp)?;
+            let artifacts = temp_dir.path().join("artifacts");
 
             let mut results = Vec::default();
             for b in batches {
                 let span = tracing::info_span!("batch", %b.batch_no);
                 let _guard = span.enter();
 
-                tracing::info!("simulating batch");
+                let mut failed = 0;
+                // TODO: parallelize batch sim execution
+                for i in 0..run.batch_size {
+                    let mut exec = WorldExec::read_from_dir(&artifacts)?;
+                    let sample_no = b.batch_no * run.batch_size + i;
+                    let span = tracing::info_span!("sample", %sample_no);
+                    let _guard = span.enter();
+
+                    if self.run_sim(&run, &mut exec).is_err() {
+                        failed += 1;
+                    } else {
+                        tracing::info!("simulation completed");
+                    }
+                }
+
                 let runtime = (chrono::Utc::now() - start_time).to_std()?;
                 let batch_results = BatchResults {
                     batch_no: b.batch_no,
-                    failed: 0,
+                    failed,
                     start_time,
                     run_time_seconds: runtime.as_secs(),
                 };
@@ -111,6 +115,14 @@ impl Runner {
 
         let results_topic = format!("mc:results:{}", run.id);
         self.msg_queue.send(&results_topic, results).await?;
+        Ok(())
+    }
+
+    fn run_sim(&self, run: &Run, exec: &mut WorldExec) -> Result<(), nox_ecs::Error> {
+        let ticks = run.max_duration * 60;
+        for _ in 0..ticks {
+            exec.run(&self.nox_client)?;
+        }
         Ok(())
     }
 }
