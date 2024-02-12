@@ -10001,6 +10001,7 @@ dependencies = [
  "flume",
  "google-cloud-storage",
  "nox",
+ "nox-ecs",
  "postcard",
  "pyo3",
  "redis",
