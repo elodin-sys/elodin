@@ -94,8 +94,8 @@ impl Plugin for EditorPlugin {
                     }),
                     ..default()
                 })
-                .disable::<LogPlugin>()
                 .disable::<DiagnosticsPlugin>()
+                .disable::<LogPlugin>()
                 .build(),
         )
         .insert_resource(SimState::default())
@@ -177,14 +177,14 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
             // })
             .insert(ScreenSpaceAmbientOcclusionBundle {
                 settings: ScreenSpaceAmbientOcclusionSettings {
-                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
                 },
                 ..Default::default()
             })
             .insert(TemporalAntiAliasBundle::default());
 
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
         });
     }
 }

@@ -23,6 +23,16 @@ impl Mesh {
             inner: MeshInner::Box { x, y, z },
         }
     }
+
+    pub fn sphere(radius: f32, sectors: usize, stacks: usize) -> Self {
+        Self {
+            inner: MeshInner::Sphere {
+                radius,
+                sectors,
+                stacks,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

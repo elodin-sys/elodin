@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 
 use crate::Cli;
-use bevy::prelude::App;
+use bevy::{prelude::App, utils::tracing};
 use elodin_conduit::bevy_sync::DEFAULT_SUB_FILTERS;
 
 #[derive(clap::Args, Clone)]
@@ -19,18 +19,24 @@ impl Cli {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let stream = TcpStream::connect(args.addr).await?;
-                let (rx_socket, tx_socket) = stream.into_split();
-                elodin_conduit::bevy::handle_socket(
-                    bevy_tx.clone(),
-                    tx_socket,
-                    rx_socket,
-                    DEFAULT_SUB_FILTERS,
-                )
-                .await;
-                anyhow::Ok(())
-            })
-            .unwrap();
+                loop {
+                    let Ok(socket) = TcpStream::connect(args.addr).await else {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        continue;
+                    };
+                    let (rx_socket, tx_socket) = socket.into_split();
+                    if let Err(err) = elodin_conduit::bevy::handle_socket(
+                        bevy_tx.clone(),
+                        tx_socket,
+                        rx_socket,
+                        DEFAULT_SUB_FILTERS,
+                    )
+                    .await
+                    {
+                        tracing::warn!(?err, "socket error");
+                    }
+                }
+            });
         });
         let mut app = App::new();
         app.add_plugins(EditorPlugin)
