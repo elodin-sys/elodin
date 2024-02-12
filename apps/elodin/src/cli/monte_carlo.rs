@@ -26,7 +26,7 @@ struct RunArgs {
     #[arg(short, long)]
     name: String,
     /// Number of samples to run
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 100)]
     samples: u32,
     /// Max simulation duration in seconds
     #[arg(short, long, default_value_t = 30)]
