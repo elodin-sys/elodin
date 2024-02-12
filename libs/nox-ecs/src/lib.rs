@@ -25,6 +25,8 @@ mod host_column;
 mod integrator;
 mod query;
 
+pub mod six_dof;
+
 pub use assets::*;
 pub use component::*;
 pub use conduit::*;
@@ -826,6 +828,42 @@ impl SystemParam for () {
     fn from_builder(_builder: &PipelineBuilder) -> Self::Item {}
 
     fn insert_into_builder(self, _builder: &mut PipelineBuilder) {}
+}
+
+pub struct ErasedSystem<Sys, Arg, Ret> {
+    system: Sys,
+    phantom: PhantomData<(Arg, Ret)>,
+}
+
+impl<Sys, Arg, Ret> ErasedSystem<Sys, Arg, Ret> {
+    pub fn new(system: Sys) -> Self {
+        Self {
+            system,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<Sys, Arg, Ret> System<(), ()> for ErasedSystem<Sys, Arg, Ret>
+where
+    Sys: System<Arg, Ret>,
+{
+    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.system.add_to_builder(builder)
+    }
+}
+
+pub struct JoinSystem {
+    systems: Vec<Box<dyn System<(), ()>>>,
+}
+
+impl System<(), ()> for JoinSystem {
+    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        for system in &self.systems {
+            system.add_to_builder(builder)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

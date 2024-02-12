@@ -56,8 +56,7 @@ where
     U: Add<DU, Output = U> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = U>,
     DU: Add<DU, Output = DU> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = DU>,
     f64: Mul<DU, Output = DU>,
-
-    Pipe: System<Arg, Ret> + Clone,
+    Pipe: System<Arg, Ret>,
 {
     fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
         Query::<U>::init(builder)?;

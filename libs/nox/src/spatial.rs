@@ -1,5 +1,6 @@
 use crate::Field;
 use crate::FixedSliceExt;
+use crate::Tensor;
 use crate::TensorItem;
 use crate::{Quaternion, Scalar, Vector};
 use nalgebra::Const;
@@ -43,7 +44,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform
 
 #[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialForce<T> {
-    inner: Vector<T, 6>,
+    pub inner: Vector<T, 6>,
 }
 
 impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
@@ -54,6 +55,13 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
         SpatialForce { inner }
     }
 
+    pub fn from_linear(force: impl Into<Vector<T, 3>>) -> Self {
+        let force = force.into();
+        let zero = T::zero().broadcast::<Const<3>>();
+        let inner = zero.concat(force);
+        SpatialForce { inner }
+    }
+
     pub fn torque(&self) -> Vector<T, 3> {
         self.inner.fixed_slice([0])
     }
@@ -61,11 +69,27 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
     pub fn force(&self) -> Vector<T, 3> {
         self.inner.fixed_slice([3])
     }
+
+    pub fn zero() -> Self {
+        SpatialForce {
+            inner: Tensor::zeros(),
+        }
+    }
+}
+
+impl<T: Field> Add for SpatialForce<T> {
+    type Output = SpatialForce<T>;
+
+    fn add(self, rhs: SpatialForce<T>) -> Self::Output {
+        SpatialForce {
+            inner: self.inner + rhs.inner,
+        }
+    }
 }
 
 #[derive(FromBuilder, IntoOp, Clone, Debug)]
 pub struct SpatialInertia<T> {
-    inner: Vector<T, 7>,
+    pub inner: Vector<T, 7>,
 }
 
 impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
@@ -125,6 +149,13 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         let angular = angular.into();
         let linear = linear.into();
         let inner = angular.concat(linear);
+        SpatialMotion { inner }
+    }
+
+    pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
+        let linear = linear.into();
+        let zero = T::zero().broadcast::<Const<3>>();
+        let inner = zero.concat(linear);
         SpatialMotion { inner }
     }
 

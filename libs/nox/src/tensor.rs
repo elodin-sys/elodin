@@ -118,6 +118,12 @@ impl<T, D: TensorDim> Tensor<T, D, Op> {
     }
 }
 
+impl<T: Field, D: TensorDim + XlaDim> Tensor<T, D, Op> {
+    pub fn zeros() -> Self {
+        T::zero().broadcast()
+    }
+}
+
 impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
     fn into_op(self) -> Noxpr {
         self.inner
@@ -560,6 +566,20 @@ impl<T, D: TensorDim> Tensor<T, D> {
             inner: self
                 .inner
                 .reshape(SmallVec::from_slice(ND::dims().as_ref())),
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn broadcast<ND: TensorDim>(self) -> Tensor<T, ND>
+    where
+        ND: TensorDim + XlaDim,
+        ND::Array: AsRef<[i64]>,
+    {
+        let inner = self
+            .inner
+            .broadcast(SmallVec::from_slice(ND::dims().as_ref()));
+        Tensor {
+            inner,
             phantom: PhantomData,
         }
     }

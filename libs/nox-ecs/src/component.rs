@@ -103,3 +103,15 @@ impl_spatial_ty!(
     ComponentType::SpatialMotionF64,
     "spatial_transform_f64"
 );
+
+impl_spatial_ty!(
+    nox::SpatialInertia::<f64>,
+    ComponentType::SpatialPosF64, //NOTE This is a lie, and needs to be fixed
+    "spatial_inertia_f64"
+);
+
+impl_spatial_ty!(
+    nox::SpatialForce::<f64>,
+    ComponentType::SpatialMotionF64, //NOTE This is a lie, and needs to be fixed
+    "spatial_inertia_f64"
+);
