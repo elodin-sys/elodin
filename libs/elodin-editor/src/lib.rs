@@ -12,6 +12,7 @@ use bevy::{
         ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
+    render::view::RenderLayers,
     window::{PresentMode, WindowTheme},
     DefaultPlugins,
 };
@@ -24,8 +25,10 @@ use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
 use elodin_conduit::well_known::{SimState, WorldPos};
+use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
 
+mod plugins;
 pub(crate) mod traces;
 mod ui;
 
@@ -74,8 +77,18 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/icon_scrub.png");
         embedded_asset!(app, "assets/icons/icon_skip_next.png");
         embedded_asset!(app, "assets/icons/icon_skip_prev.png");
+        embedded_asset!(app, "assets/textures/cube_side_top.png");
+        embedded_asset!(app, "assets/textures/cube_side_bottom.png");
+        embedded_asset!(app, "assets/textures/cube_side_front.png");
+        embedded_asset!(app, "assets/textures/cube_side_back.png");
+        embedded_asset!(app, "assets/textures/cube_side_right.png");
+        embedded_asset!(app, "assets/textures/cube_side_left.png");
+        embedded_asset!(app, "assets/textures/cube_side_corner.png");
+        embedded_asset!(app, "assets/textures/cube_side_edge.png");
     }
 }
+
+const NAVIGATION_GIZMO_LAYER: RenderLayers = RenderLayers::layer(1);
 
 pub struct EditorPlugin;
 
@@ -112,6 +125,7 @@ impl Plugin for EditorPlugin {
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
+        .add_plugins(NavigationGizmoPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, ui::render)
         .add_systems(Update, make_pickable)
@@ -144,7 +158,8 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
         settings: InfiniteGridSettings {
             minor_line_color: Color::hex("#00081E").unwrap(),
             major_line_color: Color::hex("#00081E").unwrap(),
-            x_axis_color: Color::hex("F46E22").unwrap(),
+            x_axis_color: Color::RED,
+            z_axis_color: Color::BLUE,
             shadow_color: None,
             ..Default::default()
         },
@@ -152,15 +167,19 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
     });
 
     // return the id so it can be fetched below
-    let mut camera = commands.spawn(Camera3dBundle {
-        transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
-        camera: Camera {
-            hdr: true,
-            ..Default::default()
+    let mut camera = commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+            camera: Camera {
+                hdr: true,
+                ..Default::default()
+            },
+            tonemapping: Tonemapping::TonyMcMapface,
+            ..default()
         },
-        tonemapping: Tonemapping::TonyMcMapface,
-        ..default()
-    });
+        // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
+        RenderLayers::default(),
+    ));
 
     camera
         .insert(BloomSettings { ..default() })
