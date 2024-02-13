@@ -36,6 +36,14 @@
         ];
       doCheck = false;
     };
+    node = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
+      name = "elo-node-shell";
+      buildInputs = with pkgs;
+        [
+          nodejs_21
+        ];
+      doCheck = false;
+    };
     ops = pkgs.mkShell {
       name = "elo-ops-shell";
       buildInputs = with pkgs;

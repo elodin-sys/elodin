@@ -92,6 +92,14 @@ test_steps = [
       command = "cd services/dashboard && mix deps.get && mix dialyzer --plt && mix dialyzer",
     )
   ]),
+  group(name = ":node: node", steps = [
+    nix_step(
+      label = "mintlify broken-links",
+      flake = ".#node",
+      emoji = ":node:",
+      command = "cd docs/public && npx mintlify broken-links",
+    ),
+  ]),
 ]
 
 cluster_app_deploy_steps = [

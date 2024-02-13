@@ -1,8 +1,8 @@
 {
   "name": "Elodin Docs",
   "logo": {
-    "dark": "/logo/logo.svg",
-    "light": "/logo/logo.svg"
+    "dark": "/assets/logo.svg",
+    "light": "/assets/logo.svg"
   },
   "favicon": "/favicon.svg",
   "colors": {
@@ -41,10 +41,13 @@
       "pages": ["tao/what", "tao/ecs", "tao/monte-carlo", "tao/data-flow"]
     },
     {
-      "group": "Other",
-      "pages": ["roadmap"]
+      "group": "Updates",
+      "pages": ["updates/roadmap", "updates/2023-01-25-v010", "updates/archive"]
     }
   ],
+  "feedback": {
+    "thumbsRating": true
+  },
   "footerSocials": {
     "github": "https://github.com/elodin-sys",
     "linkedin": "https://www.linkedin.com/company/elodin-systems-inc"
