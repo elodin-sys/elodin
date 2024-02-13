@@ -20,8 +20,8 @@ pub struct UiState {
 
 // NOTE: Temporary local state to test the UI
 impl Default for UiState {
-    fn default() -> UiState {
-        UiState {
+    fn default() -> Self {
+        Self {
             history_index: 1025,
             history_count: 140 * 30, // 2min20sec at 30fps
         }
