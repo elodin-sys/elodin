@@ -3,7 +3,7 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "nox-py"
+name = "elodin"
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
