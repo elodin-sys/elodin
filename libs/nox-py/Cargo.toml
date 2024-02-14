@@ -3,13 +3,15 @@ name = "nox-py"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.maturin]
+name = "elodin"
+
 [lib]
-name = "nox_py"
+name = "elodin"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.20.0"
+pyo3 = { version = "0.20.0", features = ["abi3-py38"] }
 numpy.version = "0.20"
 
 nox-ecs.path = "../nox-ecs"
