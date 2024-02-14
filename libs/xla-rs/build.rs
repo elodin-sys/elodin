@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     cpp_build::Config::new()
-        .flag("-std=c++20")
+        .flag("-std=c++17")
         .flag("-DLLVM_ON_UNIX=1")
         .flag("-DLLVM_VERSION_STRING=")
         .flag(&format!("-isystem{}", xla_dir.join("include").display()))
