@@ -369,7 +369,7 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, System};
+    use crate::{Archetype, IntoSystem};
     use nox::Scalar;
     use nox_ecs_macros::{ComponentGroup, FromBuilder};
 
