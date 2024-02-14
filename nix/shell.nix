@@ -10,6 +10,7 @@
           python3
           python3Packages.jax
           python3Packages.jaxlib
+          python3Packages.typing-extensions
           openssl
           clang
           protobuf
