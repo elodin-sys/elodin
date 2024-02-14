@@ -678,7 +678,7 @@ impl ComponentArrayMetadata {
 }
 
 #[pymodule]
-pub fn nox_py(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
     m.add_class::<ComponentId>()?;
     m.add_class::<PipelineBuilder>()?;

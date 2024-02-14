@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-import nox_py
+import elodin
 import jax
 import jax.numpy as np
-from nox_py import Component, ComponentType, system, ComponentArray, Archetype, WorldBuilder, Client, ComponentId, Query
+from elodin import Component, ComponentType, system, ComponentArray, Archetype, WorldBuilder, Client, ComponentId, Query
 from dataclasses import dataclass
 
 X = Component[jax.Array, "x", ComponentType.F32]

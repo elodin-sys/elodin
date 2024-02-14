@@ -1,6 +1,6 @@
 import pytest
-import nox_py
+import elodin
 
 
 def test_sum_as_string():
-    assert nox_py.sum_as_string(1, 1) == "2"
+    assert elodin.sum_as_string(1, 1) == "2"

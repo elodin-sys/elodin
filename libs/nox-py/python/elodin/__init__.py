@@ -1,4 +1,4 @@
-from .nox_py import *
+from .elodin import *
 from typing import Protocol, Self, Generic, TypeVar, Any, Callable, Annotated, Type, Union, TypeVarTuple
 from dataclasses import dataclass
 import inspect
@@ -6,9 +6,9 @@ import jax
 import typing
 import numpy
 
-__doc__ = nox_py.__doc__
-if hasattr(nox_py, "__all__"):
-    __all__ = nox_py.__all__
+__doc__ = elodin.__doc__
+if hasattr(elodin, "__all__"):
+    __all__ = elodin.__all__
 
 class System(Protocol):
     @staticmethod
