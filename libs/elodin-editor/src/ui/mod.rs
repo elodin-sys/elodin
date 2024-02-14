@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
+    prelude::*,
+};
 use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText, Rounding, Separator},
     EguiContexts,
@@ -16,6 +19,7 @@ mod widgets;
 pub struct UiState {
     history_index: usize,
     history_count: usize,
+    show_stats: bool,
 }
 
 // NOTE: Temporary local state to test the UI
@@ -24,7 +28,14 @@ impl Default for UiState {
         Self {
             history_index: 1025,
             history_count: 140 * 30, // 2min20sec at 30fps
+            show_stats: false,
         }
+    }
+}
+
+pub fn shortcuts(mut ui_state: ResMut<UiState>, kbd: Res<Input<KeyCode>>) {
+    if kbd.just_pressed(KeyCode::F12) {
+        ui_state.show_stats = !ui_state.show_stats;
     }
 }
 
@@ -33,6 +44,7 @@ pub fn render(
     mut sim_state: ResMut<SimState>,
     mut ui_state: ResMut<UiState>,
     // picked: Query<(EntityQuery, &Picked, Entity)>,
+    diagnostics: Res<DiagnosticsStore>,
     window: Query<&Window>,
     images: Local<images::Images>,
 ) {
@@ -66,6 +78,24 @@ pub fn render(
     //                 });
     //             })
     //     });
+
+    if ui_state.show_stats {
+        egui::Window::new("stats")
+            .title_bar(false)
+            .resizable(false)
+            .frame(egui::Frame::default())
+            .fixed_pos(egui::pos2(32.0, 32.0))
+            .show(contexts.ctx_mut(), |ui| {
+                let fps_str = diagnostics
+                    .get(FrameTimeDiagnosticsPlugin::FPS)
+                    .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
+                    .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
+
+                ui.add(Label::new(
+                    RichText::new(format!("FPS: {fps_str}")).color(Color32::WHITE),
+                ));
+            });
+    }
 
     egui::Window::new("timeline")
         .title_bar(false)
