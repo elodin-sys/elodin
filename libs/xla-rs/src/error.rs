@@ -137,7 +137,7 @@ impl Status {
         } else {
             let msg = unsafe {
                 cpp!([self as "Status*"] -> UniquePtr<CxxString> as "std::unique_ptr<std::string>" {
-                    return make_unique<std::string>(std::string(self->message()));
+                    return std::make_unique<std::string>(std::string(self->message()));
                 })
             };
             let msg = msg
