@@ -551,35 +551,47 @@ pub trait SystemParam {
     fn insert_into_builder(self, builder: &mut PipelineBuilder);
 }
 
-pub trait System<T, R> {
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
-
-    fn pipe<ArgB, RetB, SystemB: System<ArgB, RetB>>(
-        self,
-        other: SystemB,
-    ) -> Pipe<T, R, ArgB, RetB, Self, SystemB>
+pub trait IntoSystem<Marker, Arg, Ret> {
+    type System: System<Arg = Arg, Ret = Ret>;
+    fn into_system(self) -> Self::System;
+    fn pipe<M2, A2, R2, B: IntoSystem<M2, A2, R2>>(self, other: B) -> Pipe<Self::System, B::System>
     where
         Self: Sized,
     {
         Pipe {
-            a: self,
-            b: other,
-            phantom_data: PhantomData,
+            a: self.into_system(),
+            b: other.into_system(),
         }
     }
 
-    fn world(self) -> WorldBuilder<T, R, Self>
+    fn world(self) -> WorldBuilder<Self::System>
     where
         Self: Sized,
+        Self::System: Sized,
     {
-        WorldBuilder::from_pipeline(self)
+        WorldBuilder::from_pipeline(self.into_system())
     }
 }
 
-impl<Arg, Ret, Sys: System<Arg, Ret>> System<Arg, Ret> for Arc<Sys> {
+pub trait System {
+    type Arg;
+    type Ret;
+
+    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
+}
+
+impl<Sys: System> System for Arc<Sys> {
+    type Arg = Sys::Arg;
+    type Ret = Sys::Arg;
+
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.as_ref().add_to_builder(builder)
     }
+}
+
+pub struct SystemFn<M, F> {
+    func: F,
+    phantom_data: PhantomData<M>,
 }
 
 macro_rules! impl_system_param {
@@ -610,18 +622,37 @@ macro_rules! impl_system_param {
           }
 
 
-            impl<$($ty,)* Ret, F> System<($($ty,)*), Ret> for F
+            impl<$($ty,)* Ret, F> IntoSystem<F, ($($ty,)*), Ret> for F
             where
                 F: Fn($($ty,)*) -> Ret,
                 F: for<'a> Fn($($ty::Item, )*) -> Ret,
                 $($ty: SystemParam,)*
                 Ret: SystemParam,
             {
+                type System = SystemFn<($($ty,)* Ret,), F>;
+                fn into_system(self) -> Self::System {
+                    SystemFn {
+                        func: self,
+                        phantom_data: PhantomData,
+                    }
+                }
+            }
+
+
+            impl<$($ty,)* Ret, F> System for SystemFn<($($ty,)* Ret,), F>
+            where
+                F: Fn($($ty,)*) -> Ret,
+                F: for<'a> Fn($($ty::Item, )*) -> Ret,
+                $($ty: SystemParam,)*
+                Ret: SystemParam,
+            {
+                type Arg = ($($ty,)*);
+                type Ret = Ret;
                 fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
                     $(
                         $ty::init(builder)?;
                     )*
-                    let ret = self(
+                    let ret = (self.func)(
                         $(
                             $ty::from_builder(builder),
                         )*
@@ -652,56 +683,83 @@ impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15,
 impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17);
 impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18);
 
-impl<Ret, F> System<(), Ret> for F
+impl<Ret, F> System for SystemFn<(Ret,), F>
 where
     F: Fn() -> Ret,
     Ret: SystemParam,
 {
+    type Arg = ();
+    type Ret = Ret;
+
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        let ret = self();
+        let ret = (self.func)();
         ret.insert_into_builder(builder);
         Ok(())
     }
 }
 
-pub struct Pipe<TA, RA, TB, RB, A: System<TA, RA>, B: System<TB, RB>> {
-    a: A,
-    b: B,
-    phantom_data: PhantomData<(TA, RA, TB, RB)>,
+struct FnMarker;
+
+impl<Ret, F> IntoSystem<FnMarker, (), Ret> for F
+where
+    F: Fn() -> Ret,
+    Ret: SystemParam,
+{
+    type System = SystemFn<(Ret,), F>;
+
+    fn into_system(self) -> Self::System {
+        SystemFn {
+            func: self,
+            phantom_data: PhantomData,
+        }
+    }
 }
 
-impl<TA, RA, TB, RB, A: System<TA, RA>, B: System<TB, RB>> System<(TA, TB), (RA, RB)>
-    for Pipe<TA, RA, TB, RB, A, B>
+struct SysMarker<S>(S);
+
+impl<Arg, Ret, Sys> IntoSystem<SysMarker<Sys>, Arg, Ret> for Sys
+where
+    Sys: System<Arg = Arg, Ret = Ret>,
 {
+    type System = Sys;
+
+    fn into_system(self) -> Self::System {
+        self
+    }
+}
+
+pub struct Pipe<A: System, B: System> {
+    a: A,
+    b: B,
+}
+
+impl<A: System, B: System> System for Pipe<A, B> {
+    type Arg = (A::Arg, B::Arg);
+    type Ret = (A::Ret, B::Ret);
+
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.a.add_to_builder(builder)?;
         self.b.add_to_builder(builder)
     }
 }
 
-pub struct WorldBuilder<Arg, Ret, Sys> {
+pub struct WorldBuilder<Sys> {
     world: World<HostStore>,
     pipe: Sys,
-    phantom_data: PhantomData<(Arg, Ret, Sys)>,
 }
 
-impl<Arg, Ret, Sys> WorldBuilder<Arg, Ret, Sys>
+impl<Sys> WorldBuilder<Sys>
 where
-    Sys: System<Arg, Ret>,
+    Sys: System,
 {
     pub fn new(world: World<HostStore>, pipe: Sys) -> Self {
-        WorldBuilder {
-            world,
-            pipe,
-            phantom_data: PhantomData,
-        }
+        WorldBuilder { world, pipe }
     }
 
     pub fn from_pipeline(pipe: Sys) -> Self {
         WorldBuilder {
             world: World::default(),
             pipe,
-            phantom_data: PhantomData,
         }
     }
 
@@ -858,7 +916,9 @@ impl<C: Component> ComponentArray<C> {
     }
 }
 
-impl System<(), ()> for () {
+impl System for () {
+    type Arg = ();
+    type Ret = ();
     fn add_to_builder(&self, _builder: &mut PipelineBuilder) -> Result<(), Error> {
         Ok(())
     }
@@ -890,20 +950,25 @@ impl<Sys, Arg, Ret> ErasedSystem<Sys, Arg, Ret> {
     }
 }
 
-impl<Sys, Arg, Ret> System<(), ()> for ErasedSystem<Sys, Arg, Ret>
+impl<Sys, Arg, Ret> System for ErasedSystem<Sys, Arg, Ret>
 where
-    Sys: System<Arg, Ret>,
+    Sys: System<Arg = Arg, Ret = Ret>,
 {
+    type Arg = ();
+    type Ret = ();
+
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.system.add_to_builder(builder)
     }
 }
 
 pub struct JoinSystem {
-    systems: Vec<Box<dyn System<(), ()>>>,
+    systems: Vec<Box<dyn System<Arg = (), Ret = ()>>>,
 }
 
-impl System<(), ()> for JoinSystem {
+impl System for JoinSystem {
+    type Arg = ();
+    type Ret = ();
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         for system in &self.systems {
             system.add_to_builder(builder)?;
