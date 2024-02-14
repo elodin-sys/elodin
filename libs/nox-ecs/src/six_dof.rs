@@ -1,11 +1,11 @@
 use elodin_conduit::well_known::{Material, Mesh};
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{Archetype, Component};
-use nox_ecs::{Handle, Query, Rk4Ext, System, WorldPos};
+use nox_ecs::{Handle, IntoSystem, Query, Rk4Ext, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 
-use crate::{ComponentArray, ErasedSystem};
+use crate::ComponentArray;
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -82,13 +82,13 @@ pub struct Body {
     pub material: Handle<Material>,
 }
 
-pub fn six_dof<Arg, Ret, Sys>(
-    effectors: impl FnOnce() -> Sys,
-    time_step: f64,
-) -> impl System<(), ()>
+pub fn six_dof<Sys, M, A, R>(effectors: impl FnOnce() -> Sys, time_step: f64) -> impl System
 where
-    Sys: System<Arg, Ret>,
+    Sys: IntoSystem<M, A, R>,
 {
     let effectors = effectors();
-    ErasedSystem::new(clear_forces.pipe(effectors).pipe(calc_accel)).rk4_with_dt::<U, DU>(time_step)
+    clear_forces
+        .pipe(effectors)
+        .pipe(calc_accel)
+        .rk4_with_dt::<U, DU>(time_step)
 }

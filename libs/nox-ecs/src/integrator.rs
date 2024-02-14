@@ -1,5 +1,5 @@
 use crate::{ComponentGroup, Error, Query};
-use crate::{System, SystemParam};
+use crate::{IntoSystem, System, SystemParam};
 use nox::IntoOp;
 use std::ops::Add;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ impl<Pipe, U, DU> Rk4<U, DU, Pipe> {
     }
 }
 
-pub trait Rk4Ext<P> {
+pub trait Rk4Ext {
     fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
     where
         Self: Sized;
@@ -30,9 +30,9 @@ pub trait Rk4Ext<P> {
         Self: Sized;
 }
 
-impl<A, R, Sys> Rk4Ext<(A, R)> for Sys
+impl<Sys> Rk4Ext for Sys
 where
-    Sys: System<A, R>,
+    Sys: System,
 {
     fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
     where
@@ -49,15 +49,17 @@ where
     }
 }
 
-impl<Pipe, Arg, Ret, U, DU> System<Arg, Ret> for Rk4<U, DU, Pipe>
+impl<Pipe, U, DU> System for Rk4<U, DU, Pipe>
 where
     Query<U>: SystemParam<Item = Query<U>> + Clone,
     Query<DU>: SystemParam<Item = Query<DU>> + Clone,
     U: Add<DU, Output = U> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = U>,
     DU: Add<DU, Output = DU> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = DU>,
     f64: Mul<DU, Output = DU>,
-    Pipe: System<Arg, Ret>,
+    Pipe: System,
 {
+    type Arg = Pipe::Arg;
+    type Ret = Pipe::Ret;
     fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
         Query::<U>::init(builder)?;
         Query::<DU>::init(builder)?;
