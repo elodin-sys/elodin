@@ -10,6 +10,12 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+dependencies = [
+  "jax",
+  "jaxlib",
+  "numpy",
+  "typing-extensions",
+]
 [project.optional-dependencies]
 tests = [
     "pytest",
