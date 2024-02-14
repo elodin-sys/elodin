@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, Generic, Any, Self, Callable, Annotated
+from typing import Protocol, TypeVar, Generic, Any, Callable, Annotated
 import typing
 from enum import Enum
 import jax

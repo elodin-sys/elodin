@@ -1,5 +1,6 @@
 from .elodin import *
-from typing import Protocol, Self, Generic, TypeVar, Any, Callable, Annotated, Type, Union, TypeVarTuple
+from typing import Protocol, Generic, TypeVar, Any, Callable, Annotated, Type, Union
+from typing_extensions import TypeVarTuple, Unpack
 from dataclasses import dataclass
 import inspect
 import jax
@@ -10,6 +11,7 @@ __doc__ = elodin.__doc__
 if hasattr(elodin, "__all__"):
     __all__ = elodin.__all__
 
+Self = TypeVar("Self")
 class System(Protocol):
     @staticmethod
     def call(builder: PipelineBuilder): ...
@@ -58,9 +60,8 @@ class ComponentData:
     type: ComponentType
     from_expr: Callable[[Any], Any]
 
-type ComponentProto = jax.Array | FromArray
-
-T = TypeVar('T', bound='ComponentProto')
+O = TypeVar('O')
+T = TypeVar('T', bound='Union[jax.Array, FromArray]')
 Q = TypeVar('Q', bound='ComponentArray[Any]')
 class ComponentArray(Generic[T]):
     buf: jax.Array
@@ -87,7 +88,7 @@ class ComponentArray(Generic[T]):
     def insert_into_builder(self, builder: PipelineBuilder):
         builder.set_var(self.component_data.id, self.metadata, self.buf)
 
-    def map[O](self, f: Callable[[T], O]) -> Q:
+    def map(self, f: Callable[[T], O]) -> Q:
         buf = jax.vmap(lambda b: f(self.component_data.from_expr(b)))(self.buf)
         arr = ComponentArray[O]()
         arr.metadata = self.metadata
@@ -104,11 +105,11 @@ class ComponentArray(Generic[T]):
 
 A = TypeVarTuple('A')
 B = TypeVar('B', bound='Query[Any]')
-class Query(Generic[*A]):
+class Query(Generic[Unpack[A]]):
     bufs: list[jax.Array]
     component_data: list[ComponentData]
     metadata: ComponentArrayMetadata
-    def map[O](self, out_tp: type[O], f: Callable[[*A], O]) -> Q:
+    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> Q:
         buf = jax.vmap(lambda b: f(*[data.from_expr(x) for (x, data) in zip(b, self.component_data)]) )(self.bufs)
         arr = ComponentArray[O]()
         arr.buf = buf
@@ -116,7 +117,7 @@ class Query(Generic[*A]):
         arr.metadata = self.metadata
         return arr
 
-    def join[O](self, other: ComponentArray[O]) -> B:
+    def join(self, other: ComponentArray[O]) -> B:
         (metadata, bufs) = other.metadata.join(other.buf, self.metadata, self.bufs)
         q = Query()
         q.bufs = bufs
