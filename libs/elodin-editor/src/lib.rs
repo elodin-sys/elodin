@@ -5,7 +5,7 @@ use bevy::{
         experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
         tonemapping::Tonemapping,
     },
-    diagnostic::DiagnosticsPlugin,
+    diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
@@ -126,8 +126,9 @@ impl Plugin for EditorPlugin {
         .add_plugins(PolylinePlugin)
         .add_plugins(TracesPlugin)
         .add_plugins(NavigationGizmoPlugin)
+        .add_plugins(FrameTimeDiagnosticsPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, ui::render)
+        .add_systems(Update, (ui::shortcuts, ui::render))
         .add_systems(Update, make_pickable)
         .add_systems(Update, sync_pos)
         .add_systems(Startup, setup_window_icon)
