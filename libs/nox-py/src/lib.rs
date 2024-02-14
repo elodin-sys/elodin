@@ -262,7 +262,7 @@ impl WorldBuilder {
         if let Some(id) = self
             .world
             .archetype_id_map
-            .get(&ArchetypeId::Raw(archetype_id))
+            .get(&ArchetypeId::new(archetype_id.into()))
         {
             Ok(&mut self.world.archetypes[*id])
         } else {
@@ -277,7 +277,7 @@ impl WorldBuilder {
         let archetype_id = archetype
             .call_method0(py, "archetype_id")?
             .extract::<u64>(py)?;
-        let archetype_id = ArchetypeId::Raw(archetype_id);
+        let archetype_id = ArchetypeId::new(archetype_id.into());
         let datas = archetype
             .call_method0(py, "component_data")?
             .extract::<Vec<PyObject>>(py)?;
@@ -296,14 +296,17 @@ impl WorldBuilder {
                 let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
                 Ok((
                     id.inner,
-                    nox_ecs::Column::<HostStore>::new(HostColumn::from_ty(ty.into())),
+                    nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner)),
                 ))
             })
             .collect::<Result<_, Error>>()?;
         let archetype_index = self.world.archetypes.len();
         self.world.archetypes.push(Table {
             columns,
-            entity_buffer: HostColumn::from_ty(elodin_conduit::ComponentType::U64),
+            entity_buffer: HostColumn::new(
+                elodin_conduit::ComponentType::U64,
+                nox_ecs::ComponentId::new("entity_id"),
+            ),
             entity_map: BTreeMap::default(),
         });
         for id in component_ids {

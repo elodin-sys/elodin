@@ -46,5 +46,16 @@ futures.optional = true
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
+# serialize
+polars.version = "0.37"
+polars.features = ["parquet", "dtype-array", "lazy"]
+polars-arrow.version = "0.37"
+arrow.version = "50.0"
+arrow.features = ["ffi"]
+parquet = "50.0.0"
+serde.version = "1.0"
+serde_json = "1.0"
+
 
 [dev-dependencies]
+tempfile = "3.10.0"

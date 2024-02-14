@@ -4,6 +4,7 @@ use bytemuck::{AnyBitPattern, Pod};
 use elodin_conduit::{ComponentValue, EntityId};
 use nox::xla::{ArrayElement, BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
+use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use std::any::TypeId;
 use std::cell::RefCell;
@@ -23,6 +24,7 @@ mod conduit;
 mod dyn_array;
 mod host_column;
 mod integrator;
+mod polars;
 mod query;
 
 pub mod six_dof;
@@ -43,8 +45,33 @@ pub struct Table<S: WorldStore> {
     pub entity_map: BTreeMap<EntityId, usize>,
 }
 
+impl<S: WorldStore> std::fmt::Debug for Table<S>
+where
+    S::EntityBuffer: std::fmt::Debug,
+    S::Column: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Table")
+            .field("columns", &self.columns)
+            .field("entity_buffer", &self.entity_buffer)
+            .field("entity_map", &self.entity_map)
+            .finish()
+    }
+}
+
 pub struct Column<S: WorldStore> {
     pub buffer: S::Column,
+}
+
+impl<S: WorldStore> std::fmt::Debug for Column<S>
+where
+    S::Column: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Column")
+            .field("buffer", &self.buffer)
+            .finish()
+    }
 }
 
 pub struct World<S: WorldStore = HostStore> {
@@ -119,7 +146,7 @@ impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
         if let Some(id) = self
             .archetype_id_map
-            .get(&ArchetypeId::TypeId(TypeId::of::<A>()))
+            .get(&ArchetypeId::type_id(TypeId::of::<A>()))
         {
             &mut self.archetypes[*id]
         } else {
@@ -137,21 +164,21 @@ impl World<HostStore> {
                 (
                     *id,
                     Column {
-                        buffer: HostColumn::from_ty(*ty),
+                        buffer: HostColumn::new(*ty, *id),
                     },
                 )
             })
             .collect();
         self.archetypes.push(Table {
             columns,
-            entity_buffer: HostColumn::from_ty(ComponentType::U64),
+            entity_buffer: HostColumn::new(ComponentType::U64, ComponentId::new("entity_id")),
             entity_map: BTreeMap::default(),
         });
         for id in component_ids {
             self.component_map.insert(id, archetype_id);
         }
         self.archetype_id_map
-            .insert(ArchetypeId::TypeId(TypeId::of::<A>()), archetype_id);
+            .insert(ArchetypeId::type_id(TypeId::of::<A>()), archetype_id);
         &mut self.archetypes[archetype_id]
     }
 
@@ -224,10 +251,28 @@ impl World<HostStore> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ArchetypeId {
-    Raw(u64),
-    TypeId(TypeId),
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ArchetypeId(u128);
+
+impl ArchetypeId {
+    pub fn new(id: u128) -> Self {
+        Self(id)
+    }
+
+    pub fn type_id(id: TypeId) -> Self {
+        // safety: TypeId is a single field struct with
+        // a u128 in it, so this is safe for now
+        let id = unsafe { std::mem::transmute(id) };
+        Self(id)
+    }
+
+    pub fn of<T: std::any::Any>() -> ArchetypeId {
+        Self::type_id(TypeId::of::<T>())
+    }
+
+    pub fn to_raw(self) -> u128 {
+        self.0
+    }
 }
 
 pub trait WorldStore {
@@ -249,6 +294,7 @@ impl WorldStore for ClientStore {
 ///
 /// Host here refers to the CPU that is calling the "client" (i.e a GPU / TPU). Not
 /// to be confused with a host over the network.
+#[derive(Debug)]
 pub struct HostStore;
 
 impl WorldStore for HostStore {
@@ -886,6 +932,14 @@ pub enum Error {
     EntityNotFound,
     #[error("io {0}")]
     Io(#[from] std::io::Error),
+    #[error("polars {0}")]
+    Polars(#[from] ::polars::error::PolarsError),
+    #[error("arrow {0}")]
+    Arrow(#[from] arrow::error::ArrowError),
+    #[error("invalid component id")]
+    InvalidComponentId,
+    #[error("serde_json {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl From<nox::xla::Error> for Error {

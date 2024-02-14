@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use bytemuck::Pod;
-use elodin_conduit::{ComponentType, ComponentValue};
+use elodin_conduit::{ComponentId, ComponentType, ComponentValue};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
@@ -11,20 +11,23 @@ use smallvec::SmallVec;
 use crate::{Component, DynArrayView, Error};
 
 /// A type erased columnar data store located on the host CPU
+#[derive(PartialEq, Eq, Debug)]
 pub struct HostColumn {
     pub(crate) buf: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) component_type: ComponentType,
+    pub(crate) component_id: ComponentId,
     pub(crate) asset: bool,
 }
 
 impl HostColumn {
-    pub fn from_ty(ty: ComponentType) -> Self {
+    pub fn new(component_type: ComponentType, component_id: ComponentId) -> Self {
         HostColumn {
             buf: vec![],
-            component_type: ty,
+            component_type,
             len: 0,
             asset: false,
+            component_id,
         }
     }
 
