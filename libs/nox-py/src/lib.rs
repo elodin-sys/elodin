@@ -509,6 +509,7 @@ def build_expr(builder, sys):
                 hlo_module_data: comp_bytes.to_vec(),
             },
             startup_exec: None,
+            history: nox_ecs::history::History::default(),
         };
 
         Ok(Exec { exec })
