@@ -1,6 +1,5 @@
-use cpp::{cpp, cpp_class};
-
 use crate::{Result, Status, XlaComputation};
+use cpp::{cpp, cpp_class};
 
 cpp! {{
     #include "xla/service/hlo_parser.h"
@@ -58,5 +57,16 @@ impl HloModuleProto {
                 return XlaComputation(*self);
             })
         }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let string = unsafe {
+            cpp!([self as "HloModuleProto*"] -> cxx::UniquePtr<cxx::CxxString> as "std::unique_ptr<std::string>" {
+                std::string out;
+                self->SerializeToString(&out);
+                return std::make_unique<std::string>(std::move(out));
+            })
+        };
+        string.as_bytes().to_vec()
     }
 }
