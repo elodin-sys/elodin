@@ -98,7 +98,7 @@ where
 mod tests {
     use super::*;
     use crate::Component;
-    use crate::{Archetype, World, WorldBuilder};
+    use crate::{Archetype, World};
     use nox::nalgebra::vector;
     use nox::{nalgebra, Scalar, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
@@ -146,7 +146,7 @@ mod tests {
             x: X::host(0.0),
             v: V::host(10.0),
         });
-        let builder = WorldBuilder::new(world, ().rk4::<X, V>());
+        let builder = world.builder().tick_pipeline(().rk4::<X, V>());
         let client = nox::Client::cpu().unwrap();
         let mut exec = builder.build(&client).unwrap();
         exec.run(&client).unwrap();
@@ -227,7 +227,7 @@ mod tests {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
         });
-        let builder = WorldBuilder::new(world, ().rk4::<U, DU>());
+        let builder = world.builder().tick_pipeline(().rk4::<U, DU>());
         let client = nox::Client::cpu().unwrap();
         let mut exec = builder.build(&client).unwrap();
         exec.run(&client).unwrap();

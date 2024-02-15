@@ -1,8 +1,8 @@
 use elodin_conduit::well_known::{Material, Mesh};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
+use nox_ecs::World;
 use nox_ecs::{six_dof::*, spawn_tcp_server, Query, WorldPos};
-use nox_ecs::{World, WorldBuilder};
 
 fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     const G: f64 = 6.649e-11;
@@ -45,7 +45,9 @@ fn main() {
             inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
         }),
     });
-    let builder = WorldBuilder::new(world, six_dof(|| gravity, 1.0 / 60.0));
+    let builder = world
+        .builder()
+        .tick_pipeline(six_dof(|| gravity, 1.0 / 60.0));
     let client = nox::Client::cpu().unwrap();
     let exec = builder.build(&client).unwrap();
     spawn_tcp_server(
