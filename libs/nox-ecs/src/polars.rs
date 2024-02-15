@@ -23,7 +23,7 @@ use crate::{
 
 const ENTITY_ID_COMPONENT: ComponentId = ComponentId::new("entity_id");
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PolarsWorld {
     pub archetypes: BTreeMap<ArchetypeId, DataFrame>,
     pub metadata: Metadata,
@@ -50,7 +50,8 @@ pub struct ColumnMetadata {
 }
 
 impl PolarsWorld {
-    pub fn write_to_dir(&mut self, path: &Path) -> Result<(), Error> {
+    pub fn write_to_dir(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref();
         std::fs::create_dir_all(path)?;
         let mut metadata = File::create(path.join("metadata.json"))?;
         serde_json::to_writer(&mut metadata, &self.metadata)?;
@@ -68,7 +69,8 @@ impl PolarsWorld {
         Ok(())
     }
 
-    pub fn read_from_dir(path: &Path) -> Result<Self, Error> {
+    pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = path.as_ref();
         let mut archetypes = BTreeMap::new();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: Metadata = serde_json::from_reader(&mut metadata)?;
