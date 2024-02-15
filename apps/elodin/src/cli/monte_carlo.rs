@@ -5,8 +5,8 @@ use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
 use tonic::{service::interceptor::InterceptedService, transport};
 
-use crate::auth::AuthInterceptor;
-use crate::Cli;
+use super::auth::AuthInterceptor;
+use super::Cli;
 
 #[derive(clap::Args)]
 pub struct Args {
