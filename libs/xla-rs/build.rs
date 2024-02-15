@@ -58,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/client.rs");
     println!("cargo:rerun-if-changed=src/buffer.rs");
     println!("cargo:rerun-if-changed=src/computation.rs");
+    println!("cargo:rerun-if-changed=src/hlo_module.rs");
 
     let jax_metal_dir =
         env_var_rerun("JAX_METAL_DIR").map_or_else(|| out_dir.join("jax_metal"), PathBuf::from);

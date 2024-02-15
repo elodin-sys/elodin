@@ -7,10 +7,9 @@ use std::{
 };
 
 use nox_ecs::{
-    elodin_conduit::{self},
-    join_many,
+    elodin_conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    ArchetypeId, ComponentArray, HostColumn, HostStore, Query, Table, World,
+    ArchetypeId, ComponentArray, HostColumn, HostStore, Query, SharedWorld, Table, World,
 };
 use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
 use parking_lot::Mutex;
@@ -478,7 +477,8 @@ def build_expr(builder, sys):
         let comp = comp
             .downcast::<PyBytes>(py)
             .map_err(|_| Error::HloModuleNotBytes)?;
-        let hlo_module = nox::xla::HloModuleProto::parse_binary(comp.as_bytes())
+        let comp_bytes = comp.as_bytes();
+        let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         let comp = hlo_module.computation();
         let exec = client.client.0.compile(&comp).map_err(|err| {
@@ -493,14 +493,22 @@ def build_expr(builder, sys):
             .map_err(|err| {
                 PyValueError::new_err(format!("failed to copy world to client {:?}", err))
             })?;
-        let exec = nox_ecs::Exec {
-            client_world: world,
-            arg_ids: builder.param_ids,
-            ret_ids,
-            exec,
-            host_world: builder.world,
-            loaded_components: HashSet::default(),
-            dirty_components: HashSet::default(),
+        let exec = nox_ecs::WorldExec {
+            world: SharedWorld {
+                client: world,
+                host: builder.world,
+                loaded_components: HashSet::default(),
+                dirty_components: HashSet::default(),
+            },
+            tick_exec: nox_ecs::Exec {
+                exec,
+                metadata: nox_ecs::ExecMetadata {
+                    arg_ids: builder.param_ids,
+                    ret_ids,
+                },
+                hlo_module_data: comp_bytes.to_vec(),
+            },
+            startup_exec: None,
         };
 
         Ok(Exec { exec })
@@ -509,7 +517,7 @@ def build_expr(builder, sys):
 
 #[pyclass]
 pub struct Exec {
-    exec: nox_ecs::Exec,
+    exec: nox_ecs::WorldExec,
 }
 
 #[pymethods]

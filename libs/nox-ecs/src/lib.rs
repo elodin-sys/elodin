@@ -2,13 +2,16 @@ extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
 use elodin_conduit::{ComponentValue, EntityId};
-use nox::xla::{ArrayElement, BufferArgsRef, PjRtBuffer, PjRtLoadedExecutable};
+use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
+use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -248,6 +251,14 @@ impl World<HostStore> {
             .buf
             .copy_from_slice(literal.raw_buf());
         Ok(())
+    }
+
+    pub fn builder(self) -> WorldBuilder {
+        WorldBuilder {
+            world: self,
+            pipe: (),
+            startup_sys: (),
+        }
     }
 }
 
@@ -715,7 +726,7 @@ where
     }
 }
 
-struct SysMarker<S>(S);
+pub struct SysMarker<S>(S);
 
 impl<Arg, Ret, Sys> IntoSystem<SysMarker<Sys>, Arg, Ret> for Sys
 where
@@ -743,23 +754,44 @@ impl<A: System, B: System> System for Pipe<A, B> {
     }
 }
 
-pub struct WorldBuilder<Sys> {
+pub struct WorldBuilder<Sys = (), StartupSys = ()> {
     world: World<HostStore>,
     pipe: Sys,
+    startup_sys: StartupSys,
 }
 
-impl<Sys> WorldBuilder<Sys>
+impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
 where
     Sys: System,
+    StartupSys: System,
 {
-    pub fn new(world: World<HostStore>, pipe: Sys) -> Self {
-        WorldBuilder { world, pipe }
+    pub fn new(world: World<HostStore>, pipe: Sys, startup_sys: StartupSys) -> Self {
+        WorldBuilder {
+            world,
+            pipe,
+            startup_sys,
+        }
     }
 
-    pub fn from_pipeline(pipe: Sys) -> Self {
+    pub fn tick_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+        self,
+        pipe: N,
+    ) -> WorldBuilder<N::System, StartupSys> {
         WorldBuilder {
-            world: World::default(),
-            pipe,
+            world: self.world,
+            pipe: pipe.into_system(),
+            startup_sys: self.startup_sys,
+        }
+    }
+
+    pub fn startup_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+        self,
+        startup: N,
+    ) -> WorldBuilder<Sys, N::System> {
+        WorldBuilder {
+            world: self.world,
+            pipe: self.pipe,
+            startup_sys: startup.into_system(),
         }
     }
 
@@ -771,14 +803,41 @@ where
         self.world.spawn_with_id(archetype, entity_id);
     }
 
-    pub fn build(self, client: &Client) -> Result<Exec, Error> {
+    pub fn build(mut self, client: &Client) -> Result<WorldExec, Error> {
+        let tick_exec = self.pipe.build(client, &mut self.world)?;
+        let startup_exec = self.startup_sys.build(client, &mut self.world)?;
+        Ok(WorldExec {
+            world: SharedWorld::from_host(self.world, client)?,
+            tick_exec,
+            startup_exec: Some(startup_exec),
+        })
+    }
+}
+
+impl<Sys: System> WorldBuilder<Sys> {
+    pub fn from_pipeline(pipe: Sys) -> Self {
+        WorldBuilder {
+            world: World::default(),
+            pipe,
+            startup_sys: (),
+        }
+    }
+}
+
+pub trait SystemExt {
+    fn build(self, client: &Client, world: &mut World) -> Result<Exec, Error>;
+}
+
+impl<S: System> SystemExt for S {
+    fn build(self, client: &Client, world: &mut World) -> Result<Exec, Error> {
+        let owned_world = std::mem::take(world);
         let mut builder = PipelineBuilder {
             vars: BTreeMap::default(),
             param_ids: vec![],
             param_ops: vec![],
-            world: self.world,
+            world: owned_world,
         };
-        self.pipe.add_to_builder(&mut builder)?;
+        self.add_to_builder(&mut builder)?;
         let ret = builder
             .vars
             .into_iter()
@@ -797,49 +856,46 @@ where
         let op = func.build("pipeline")?;
         let comp = op.build()?;
         let exec = client.0.compile(&comp)?;
-        let world = builder.world.copy_to_client(client)?;
-        // ret_ids
-        //     .iter()
-        //     .filter_map(|id| world.column_by_id(*id).map(|c| c.buffer).clone())
-        //     .collect::<Vec<_>>();
+        *world = builder.world;
         Ok(Exec {
-            client_world: world,
-            arg_ids: builder.param_ids,
-            ret_ids,
+            metadata: ExecMetadata {
+                arg_ids: builder.param_ids,
+                ret_ids,
+            },
             exec,
-            host_world: builder.world,
-            loaded_components: HashSet::default(),
-            dirty_components: HashSet::default(),
+            hlo_module_data: comp.to_hlo_module().to_bytes(),
         })
     }
 }
 
-pub struct Exec {
+#[derive(Serialize, Deserialize)]
+pub struct ExecMetadata {
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
-    pub client_world: World<ClientStore>,
-    pub host_world: World,
-    pub loaded_components: HashSet<ComponentId>,
+}
+
+pub struct Exec {
+    pub metadata: ExecMetadata,
+    pub hlo_module_data: Vec<u8>,
     pub exec: PjRtLoadedExecutable,
-    pub dirty_components: HashSet<ComponentId>,
 }
 
 impl Exec {
-    pub fn run(&mut self, client: &Client) -> Result<(), Error> {
-        self.clear_cache();
-        self.load_dirty_components(client)?;
+    fn run(&self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
+        world.clear_cache();
+        world.load_dirty_components(client)?;
         let mut buffers = BufferArgsRef::default().untuple_result(true);
-        for id in &self.arg_ids {
-            let col = self
-                .client_world
+        for id in &self.metadata.arg_ids {
+            let col = world
+                .client
                 .column_by_id(*id)
                 .ok_or(Error::ComponentNotFound)?;
             buffers.push(&col.column.buffer);
         }
         let ret_bufs = self.exec.execute_buffers(buffers)?;
-        for (buf, comp_id) in ret_bufs.into_iter().zip(self.ret_ids.iter()) {
-            let col = self
-                .client_world
+        for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
+            let col = world
+                .client
                 .column_by_id_mut(*comp_id)
                 .ok_or(Error::ComponentNotFound)?;
             col.column.buffer = buf;
@@ -847,14 +903,59 @@ impl Exec {
         Ok(())
     }
 
+    pub fn write_to_dir(&self, path: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(path)?;
+        let mut metadata = File::create(path.join("metadata.json"))?;
+        serde_json::to_writer(&mut metadata, &self.metadata)?;
+        std::fs::write(path.join("hlo.binpb"), &self.hlo_module_data)?;
+        Ok(())
+    }
+
+    pub fn read_from_dir(path: &Path, client: &Client) -> Result<Self, Error> {
+        let mut metadata = File::open(path.join("metadata.json"))?;
+        let metadata: ExecMetadata = serde_json::from_reader(&mut metadata)?;
+        let hlo_module_data = std::fs::read(path.join("hlo.binpb"))?;
+        let hlo_module = HloModuleProto::parse_binary(&hlo_module_data)?;
+        let comp = hlo_module.computation();
+        let exec = client.0.compile(&comp)?;
+        Ok(Self {
+            metadata,
+            hlo_module_data,
+            exec,
+        })
+    }
+}
+
+pub struct SharedWorld {
+    pub client: World<ClientStore>,
+    pub host: World,
+    pub loaded_components: HashSet<ComponentId>,
+    pub dirty_components: HashSet<ComponentId>,
+}
+
+impl SharedWorld {
+    pub fn from_host(host: World, client: &Client) -> Result<Self, Error> {
+        let client = host.copy_to_client(client)?;
+        Ok(SharedWorld {
+            client,
+            host,
+            loaded_components: HashSet::default(),
+            dirty_components: HashSet::default(),
+        })
+    }
+
+    fn clear_cache(&mut self) {
+        self.loaded_components.clear();
+    }
+
     fn load_dirty_components(&mut self, client: &Client) -> Result<(), Error> {
         for id in self.dirty_components.drain() {
             let client_column = self
-                .client_world
+                .client
                 .column_by_id_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
             let host_column = self
-                .host_world
+                .host
                 .column_by_id_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
             client_column
@@ -863,40 +964,88 @@ impl Exec {
         }
         Ok(())
     }
+}
+
+pub struct WorldExec {
+    pub world: SharedWorld,
+    pub tick_exec: Exec,
+    pub startup_exec: Option<Exec>,
+}
+
+impl WorldExec {
+    pub fn run(&mut self, client: &Client) -> Result<(), Error> {
+        if let Some(startup_exec) = self.startup_exec.take() {
+            startup_exec.run(&mut self.world, client)?;
+        }
+        self.tick_exec.run(&mut self.world, client)?;
+        Ok(())
+    }
 
     pub fn column_mut(&mut self, component_id: ComponentId) -> Result<ColumnRefMut<'_>, Error> {
-        if !self.loaded_components.contains(&component_id) {
-            self.host_world
-                .load_column_from_client(component_id, &self.client_world)?;
+        if !self.world.loaded_components.contains(&component_id) {
+            self.world
+                .host
+                .load_column_from_client(component_id, &self.world.client)?;
         }
-        self.dirty_components.insert(component_id);
-        self.host_world
+        self.world.dirty_components.insert(component_id);
+        self.world
+            .host
             .column_by_id_mut(component_id)
             .ok_or(Error::ComponentNotFound)
     }
 
     pub fn column(&mut self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
-        if !self.loaded_components.contains(&component_id) {
-            self.host_world
-                .load_column_from_client(component_id, &self.client_world)?;
-            self.loaded_components.insert(component_id);
+        if !self.world.loaded_components.contains(&component_id) {
+            self.world
+                .host
+                .load_column_from_client(component_id, &self.world.client)?;
+            self.world.loaded_components.insert(component_id);
         }
-        self.host_world
+        self.world
+            .host
             .column_by_id(component_id)
             .ok_or(Error::ComponentNotFound)
     }
 
     pub fn cached_column(&self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
-        if !self.loaded_components.contains(&component_id) {
+        if !self.world.loaded_components.contains(&component_id) {
             return Err(Error::ComponentNotFound);
         }
-        self.host_world
+        self.world
+            .host
             .column_by_id(component_id)
             .ok_or(Error::ComponentNotFound)
     }
 
-    fn clear_cache(&mut self) {
-        self.loaded_components.clear();
+    pub fn write_to_dir(&self, dir: &Path) -> Result<(), Error> {
+        let tick_exec_path = dir.join("tick_exec");
+        self.tick_exec.write_to_dir(&tick_exec_path)?;
+        if let Some(startup_exec) = &self.startup_exec {
+            let startup_exec_path = dir.join("startup_exec");
+            startup_exec.write_to_dir(&startup_exec_path)?;
+        }
+        let mut polars_world = self.world.host.to_polars()?;
+        let world_dir = dir.join("world");
+        polars_world.write_to_dir(&world_dir)?;
+        Ok(())
+    }
+
+    pub fn read_from_dir(dir: &Path, client: &Client) -> Result<Self, Error> {
+        let tick_exec = Exec::read_from_dir(&dir.join("tick_exec"), client)?;
+        let startup_exec_path = dir.join("startup_exec");
+        let startup_exec = if startup_exec_path.exists() {
+            Some(Exec::read_from_dir(&startup_exec_path, client)?)
+        } else {
+            None
+        };
+        let polars_world = PolarsWorld::read_from_dir(&dir.join("world"))?;
+        let world = World::try_from(polars_world)?;
+        let world = SharedWorld::from_host(world, client)?;
+        Ok(Self {
+            world,
+            tick_exec,
+            startup_exec,
+        })
     }
 }
 
@@ -1056,9 +1205,8 @@ mod tests {
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build(&client).unwrap();
         exec.run(&client).unwrap();
-        let c = exec.client_world.column::<C>().unwrap();
-        let lit = c.column.buffer.to_literal_sync().unwrap();
-        assert_eq!(lit.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
+        let c = exec.column(C::component_id()).unwrap();
+        assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
     }
 
     #[test]
@@ -1077,5 +1225,63 @@ mod tests {
             a: A(Scalar::host(1.0)),
         };
         world.spawn(body);
+    }
+
+    #[test]
+    fn test_startup() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
+
+        fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
+            a.map(|a: A| A(a.0 * 3.0)).unwrap()
+        }
+
+        fn tick(a: ComponentArray<A>) -> ComponentArray<A> {
+            a.map(|a: A| A(a.0 + 1.0)).unwrap()
+        }
+
+        let mut world = World::default();
+        world.spawn(A(Scalar::host(1.0)));
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world
+            .builder()
+            .tick_pipeline(tick)
+            .startup_pipeline(startup)
+            .build(&client)
+            .unwrap();
+        exec.run(&client).unwrap();
+        let c = exec.column(A::component_id()).unwrap();
+        assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
+    }
+
+    #[test]
+    fn test_write_read() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
+
+        fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
+            a.map(|a: A| A(a.0 * 3.0)).unwrap()
+        }
+
+        fn tick(a: ComponentArray<A>) -> ComponentArray<A> {
+            a.map(|a: A| A(a.0 + 1.0)).unwrap()
+        }
+
+        let mut world = World::default();
+        world.spawn(A(Scalar::host(1.0)));
+        let client = nox::Client::cpu().unwrap();
+        let exec = world
+            .builder()
+            .tick_pipeline(tick)
+            .startup_pipeline(startup)
+            .build(&client)
+            .unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let tempdir = tempdir.path();
+        exec.write_to_dir(&tempdir).unwrap();
+        let mut exec = WorldExec::read_from_dir(&tempdir, &client).unwrap();
+        exec.run(&client).unwrap();
+        let c = exec.column(A::component_id()).unwrap();
+        assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
     }
 }

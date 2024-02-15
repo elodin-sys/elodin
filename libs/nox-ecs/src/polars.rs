@@ -51,6 +51,7 @@ pub struct ColumnMetadata {
 
 impl PolarsWorld {
     pub fn write_to_dir(&mut self, path: &Path) -> Result<(), Error> {
+        std::fs::create_dir_all(path)?;
         let mut metadata = File::create(path.join("metadata.json"))?;
         serde_json::to_writer(&mut metadata, &self.metadata)?;
         for (archetype_id, df) in &mut self.archetypes {
