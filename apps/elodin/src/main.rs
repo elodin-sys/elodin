@@ -1,3 +1,3 @@
 fn main() {
-    elodin::Cli::run();
+    elodin::Cli::from_os_args().run();
 }
