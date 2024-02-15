@@ -2,6 +2,7 @@ extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
 use elodin_conduit::{ComponentValue, EntityId};
+use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
 use polars::PolarsWorld;
@@ -30,6 +31,7 @@ mod integrator;
 mod polars;
 mod query;
 
+pub mod history;
 pub mod six_dof;
 
 pub use assets::*;
@@ -810,6 +812,7 @@ where
             world: SharedWorld::from_host(self.world, client)?,
             tick_exec,
             startup_exec: Some(startup_exec),
+            history: History::default(),
         })
     }
 }
@@ -903,7 +906,8 @@ impl Exec {
         Ok(())
     }
 
-    pub fn write_to_dir(&self, path: &Path) -> Result<(), Error> {
+    pub fn write_to_dir(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let path = path.as_ref();
         std::fs::create_dir_all(path)?;
         let mut metadata = File::create(path.join("metadata.json"))?;
         serde_json::to_writer(&mut metadata, &self.metadata)?;
@@ -911,7 +915,8 @@ impl Exec {
         Ok(())
     }
 
-    pub fn read_from_dir(path: &Path, client: &Client) -> Result<Self, Error> {
+    pub fn read_from_dir(path: impl AsRef<Path>, client: &Client) -> Result<Self, Error> {
+        let path = path.as_ref();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: ExecMetadata = serde_json::from_reader(&mut metadata)?;
         let hlo_module_data = std::fs::read(path.join("hlo.binpb"))?;
@@ -964,12 +969,29 @@ impl SharedWorld {
         }
         Ok(())
     }
+
+    fn copy_all_columns(&mut self) -> Result<(), Error> {
+        for (host, client) in self
+            .host
+            .archetypes
+            .iter_mut()
+            .zip(self.client.archetypes.iter_mut())
+        {
+            for (host, client) in host.columns.values_mut().zip(client.columns.values_mut()) {
+                let literal = client.buffer.to_literal_sync()?;
+                host.buffer.buf.copy_from_slice(literal.raw_buf());
+                self.loaded_components.insert(host.buffer.component_id);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct WorldExec {
     pub world: SharedWorld,
     pub tick_exec: Exec,
     pub startup_exec: Option<Exec>,
+    pub history: History,
 }
 
 impl WorldExec {
@@ -978,6 +1000,8 @@ impl WorldExec {
             startup_exec.run(&mut self.world, client)?;
         }
         self.tick_exec.run(&mut self.world, client)?;
+        self.world.copy_all_columns()?;
+        self.history.push_world(&self.world.host)?;
         Ok(())
     }
 
@@ -1017,34 +1041,35 @@ impl WorldExec {
             .ok_or(Error::ComponentNotFound)
     }
 
-    pub fn write_to_dir(&self, dir: &Path) -> Result<(), Error> {
-        let tick_exec_path = dir.join("tick_exec");
-        self.tick_exec.write_to_dir(&tick_exec_path)?;
+    pub fn write_to_dir(&self, dir: impl AsRef<Path>) -> Result<(), Error> {
+        let dir = dir.as_ref();
+        self.tick_exec.write_to_dir(dir.join("tick_exec"))?;
         if let Some(startup_exec) = &self.startup_exec {
-            let startup_exec_path = dir.join("startup_exec");
-            startup_exec.write_to_dir(&startup_exec_path)?;
+            startup_exec.write_to_dir(dir.join("startup_exec"))?;
         }
         let mut polars_world = self.world.host.to_polars()?;
-        let world_dir = dir.join("world");
-        polars_world.write_to_dir(&world_dir)?;
+        polars_world.write_to_dir(dir.join("world"))?;
+        self.history.write_to_dir(dir.join("history"))?;
         Ok(())
     }
 
-    pub fn read_from_dir(dir: &Path, client: &Client) -> Result<Self, Error> {
-        let tick_exec = Exec::read_from_dir(&dir.join("tick_exec"), client)?;
+    pub fn read_from_dir(dir: impl AsRef<Path>, client: &Client) -> Result<Self, Error> {
+        let dir = dir.as_ref();
+        let tick_exec = Exec::read_from_dir(dir.join("tick_exec"), client)?;
         let startup_exec_path = dir.join("startup_exec");
         let startup_exec = if startup_exec_path.exists() {
             Some(Exec::read_from_dir(&startup_exec_path, client)?)
         } else {
             None
         };
-        let polars_world = PolarsWorld::read_from_dir(&dir.join("world"))?;
+        let polars_world = PolarsWorld::read_from_dir(dir.join("world"))?;
         let world = World::try_from(polars_world)?;
         let world = SharedWorld::from_host(world, client)?;
         Ok(Self {
             world,
             tick_exec,
             startup_exec,
+            history: History::default(),
         })
     }
 }
@@ -1154,6 +1179,8 @@ pub enum Error {
     InvalidComponentId,
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
+    #[error("world not found")]
+    WorldNotFound,
 }
 
 impl From<nox::xla::Error> for Error {
