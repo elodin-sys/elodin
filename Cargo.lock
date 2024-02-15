@@ -6473,6 +6473,7 @@ dependencies = [
 name = "nox-py"
 version = "0.1.0"
 dependencies = [
+ "elodin",
  "nox-ecs",
  "nox-ecs-macros",
  "numpy",
