@@ -8,3 +8,9 @@
 - `docs/internal` & `rfcs` - rfcs, private docs that determine the future of the project
 - `libs` - public and private libraries
 - `services` - hosted services, anything that runs in the cloud
+
+### Supported Operating Systems
+- Debian 12+
+- Ubuntu 22.04+
+- NixOS unstable
+- macOS 14 (Sonoma)
