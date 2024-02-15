@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-use crate::{Error, Status, XlaOp, XlaOpRaw};
+use crate::{Error, HloModuleProto, Status, XlaOp, XlaOpRaw};
 use cpp::{cpp, cpp_class};
 use cxx::{CxxString, UniquePtr};
 cpp! {{
@@ -71,5 +71,13 @@ impl XlaComputation {
         };
         out_status.to_result()?;
         Ok(cxx_string.to_string_lossy().into_owned())
+    }
+
+    pub fn to_hlo_module(&self) -> HloModuleProto {
+        unsafe {
+            cpp!([self as "const XlaComputation*"] -> HloModuleProto as "HloModuleProto" {
+                return self->proto();
+            })
+        }
     }
 }

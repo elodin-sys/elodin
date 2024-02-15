@@ -1,4 +1,4 @@
-use crate::{assets::Handle, Error, Exec};
+use crate::{assets::Handle, Error, WorldExec};
 use bytes::{Bytes, BytesMut};
 use elodin_conduit::{
     bevy_sync::DEFAULT_SUB_FILTERS,
@@ -20,7 +20,7 @@ pub struct ConduitExec {
     subscriptions: BTreeMap<ComponentId, Vec<Subscription>>,
     connections: Vec<Sender>,
     rx: flume::Receiver<RecvMsg>,
-    exec: Exec,
+    exec: WorldExec,
 }
 
 struct Sender(flume::Sender<Builder<BytesMut>>);
@@ -52,7 +52,7 @@ pub struct RecvMsg {
 }
 
 impl ConduitExec {
-    pub fn new(exec: Exec) -> (Self, flume::Sender<RecvMsg>) {
+    pub fn new(exec: WorldExec) -> (Self, flume::Sender<RecvMsg>) {
         let (tx, rx) = flume::unbounded();
         (
             Self {
@@ -139,7 +139,7 @@ impl ConduitExec {
 
 fn send_sub(
     connections: &mut [Sender],
-    exec: &mut Exec,
+    exec: &mut WorldExec,
     comp_id: &ComponentId,
     sub: &mut Subscription,
 ) -> Result<(), Error> {
@@ -157,7 +157,8 @@ fn send_sub(
         let mut changed = false;
         for id in buf.iter() {
             let gen = exec
-                .host_world
+                .world
+                .host
                 .assets
                 .gen(Handle::<()>::new(*id))
                 .ok_or(Error::AssetNotFound)?;
@@ -170,7 +171,7 @@ fn send_sub(
             return Ok(());
         }
         for id in buf.iter() {
-            let Some(value) = exec.host_world.assets.value(Handle::<()>::new(*id)) else {
+            let Some(value) = exec.world.host.assets.value(Handle::<()>::new(*id)) else {
                 todo!("gracefully handle")
             };
             value.with_bytes(|bytes| {
@@ -269,7 +270,7 @@ impl TokioServer {
 #[cfg(feature = "tokio")]
 pub fn spawn_tcp_server(
     socket_addr: std::net::SocketAddr,
-    exec: Exec,
+    exec: WorldExec,
     client: &nox::Client,
     tick_period: std::time::Duration,
 ) -> Result<(), Error> {
