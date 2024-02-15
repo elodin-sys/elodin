@@ -1,0 +1,50 @@
+use clap::{Parser, Subcommand};
+
+mod auth;
+mod editor;
+mod monte_carlo;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    #[arg(short, long, default_value = "https://app.elodin.systems")]
+    url: String,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Obtain access credentials for your user account
+    Login,
+    /// Manage your Monte Carlo runs
+    MonteCarlo(monte_carlo::Args),
+    Editor(editor::Args),
+}
+
+impl Cli {
+    pub fn run() {
+        let cli = Cli::parse();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let res = rt.block_on(async {
+            match &cli.command {
+                Commands::Login => cli.login().await,
+                Commands::MonteCarlo(args) => cli.monte_carlo(args).await,
+                Commands::Editor(args) => cli.editor(args.clone()).await,
+            }
+        });
+        if let Err(err) = res {
+            eprintln!("Error: {:#}", err);
+            std::process::exit(1);
+        }
+    }
+
+    fn is_dev(&self) -> bool {
+        self.url.ends_with("elodin.dev")
+    }
+
+    fn xdg_dirs(&self) -> xdg::BaseDirectories {
+        let profile = if self.is_dev() { "dev" } else { "" };
+        xdg::BaseDirectories::with_profile("elodin", profile).unwrap()
+    }
+}
