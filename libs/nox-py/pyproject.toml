@@ -22,6 +22,9 @@ tests = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+elodin = "elodin:run_cli"
+
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]

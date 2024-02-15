@@ -685,6 +685,14 @@ impl ComponentArrayMetadata {
     }
 }
 
+#[pyfunction]
+// TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
+fn run_cli(_py: Python) -> PyResult<()> {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    ::elodin::Cli::from_args(&args).run();
+    Ok(())
+}
+
 #[pymodule]
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
@@ -694,5 +702,6 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<EntityId>()?;
     m.add_class::<Client>()?;
     m.add_class::<ComponentArrayMetadata>()?;
+    m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     Ok(())
 }
