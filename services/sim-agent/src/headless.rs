@@ -1,9 +1,14 @@
+use std::io::Seek;
+
+use anyhow::Context;
 use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
+use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::WorldExec;
+use tracing::Instrument;
 
 use crate::config::MonteCarloConfig;
 
@@ -12,7 +17,7 @@ pub struct Runner {
     nox_client: NoxClient,
     gcs_client: GcsClient,
     sim_artifacts_bucket_name: String,
-    _sim_results_bucket_name: String,
+    sim_results_bucket_name: String,
 }
 
 impl Runner {
@@ -25,7 +30,7 @@ impl Runner {
             nox_client: NoxClient::cpu()?,
             gcs_client: GcsClient::new(gcs_config),
             sim_artifacts_bucket_name: config.sim_artifacts_bucket_name,
-            _sim_results_bucket_name: config.sim_results_bucket_name,
+            sim_results_bucket_name: config.sim_results_bucket_name,
         })
     }
 
@@ -70,6 +75,7 @@ impl Runner {
             )
             .await?;
 
+        let mut uploads = tokio::task::JoinSet::new();
         let results = tokio::task::block_in_place(|| {
             let span = tracing::info_span!("run", %run.name);
             let _guard = span.enter();
@@ -101,6 +107,48 @@ impl Runner {
                     } else {
                         tracing::info!("simulation completed");
                     }
+
+                    let gcs_client = self.gcs_client.clone();
+                    let bucket = self.sim_results_bucket_name.clone();
+                    let file_name = format!("runs/{}/samples/{}.tar.zst", run.id, sample_no);
+                    uploads.spawn(
+                        async move {
+                            // TODO: if/when polars supports streaming from compressed parquet files,
+                            // upload files directly instead of archiving them into a tarball
+                            tracing::debug!("generating replay archive");
+                            let results_dir = tempfile::tempdir()?;
+                            let results_archive = tempfile::tempfile()?;
+                            sample_exec.history.write_to_dir(&results_dir)?;
+                            let buf = std::io::BufWriter::new(results_archive);
+                            let zstd = zstd::Encoder::new(buf, 0)?;
+                            let mut ar = tar::Builder::new(zstd);
+                            ar.append_dir_all("results", &results_dir)?;
+                            // TODO: write directly to compressed archive instead of through through tmp fs
+                            let mut results_archive = ar.into_inner()?.finish()?.into_inner()?;
+                            results_archive.rewind()?;
+                            let len = results_archive.metadata()?.len();
+
+                            tracing::debug!(file_name, len, "uploading replay archive");
+                            let object = gcs_client
+                                .upload_object(
+                                    &UploadObjectRequest {
+                                        bucket,
+                                        ..Default::default()
+                                    },
+                                    tokio::fs::File::from_std(results_archive),
+                                    &UploadType::Simple(Media::new(file_name.clone())),
+                                )
+                                .await
+                                .with_context(|| format!("gcs upload failed: {}", file_name))?;
+                            tracing::debug!(
+                                file_name,
+                                link = object.self_link,
+                                "uploaded replay archive"
+                            );
+                            Ok::<_, anyhow::Error>(())
+                        }
+                        .in_current_span(),
+                    );
                 }
 
                 let runtime = (chrono::Utc::now() - start_time).to_std()?;
@@ -115,6 +163,12 @@ impl Runner {
             }
             Ok::<_, anyhow::Error>(results)
         })?;
+
+        while let Some(result) = uploads.join_next().await {
+            if let Err(err) = result.unwrap() {
+                tracing::error!(?err, "upload failed");
+            }
+        }
 
         let results_topic = format!("mc:results:{}", run.id);
         self.msg_queue.send(&results_topic, results).await?;
