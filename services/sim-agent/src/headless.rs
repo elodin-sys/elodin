@@ -79,21 +79,23 @@ impl Runner {
             let temp_dir = tempfile::tempdir()?;
             tar.unpack(temp_dir.path())?;
             let artifacts = temp_dir.path().join("artifacts");
+            let run_exec = WorldExec::read_from_dir(artifacts)?;
 
             let mut results = Vec::default();
             for b in batches {
                 let span = tracing::info_span!("batch", %b.batch_no);
                 let _guard = span.enter();
 
+                let batch_exec = run_exec.fork();
                 let mut failed = 0;
                 // TODO: parallelize batch sim execution
                 for i in 0..run.batch_size {
-                    let mut exec = WorldExec::read_from_dir(&artifacts)?;
+                    let mut sample_exec = batch_exec.fork();
                     let sample_no = b.batch_no * run.batch_size + i;
                     let span = tracing::info_span!("sample", %sample_no);
                     let _guard = span.enter();
 
-                    if let Err(err) = self.run_sim(&run, &mut exec) {
+                    if let Err(err) = self.run_sim(&run, &mut sample_exec) {
                         tracing::error!(?err, "simulation failed");
                         failed += 1;
                     } else {
