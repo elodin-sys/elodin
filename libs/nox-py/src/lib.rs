@@ -1,6 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
-    io::Write,
+    collections::BTreeMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -381,13 +380,10 @@ impl WorldBuilder {
         let mut pargs = pico_args::Arguments::from_vec(args);
         let cmd = pargs.subcommand().map_err(|_| Error::UnexpectedInput)?;
 
-        let Some(cmd) = cmd else {
-            todo!("spawn TCP server, and run simulation locally");
-        };
-
-        match cmd.as_str() {
-            "monte-carlo" => {}
-            _ => return Err(Error::UnknownCommand(cmd.to_string())),
+        match cmd.as_deref() {
+            Some("monte-carlo") => {}
+            Some(cmd) => return Err(Error::UnknownCommand(cmd.to_string())),
+            None => todo!("spawn TCP server, and run simulation locally"),
         }
 
         let build_dir: String = pargs
@@ -395,62 +391,13 @@ impl WorldBuilder {
             .map_err(|err| Error::MissingArg(err.to_string()))?;
         let build_dir = std::path::PathBuf::from(build_dir);
 
-        let world = std::mem::take(&mut self.world);
-        let builder = nox_ecs::PipelineBuilder::from_world(world);
-        let builder = PipelineBuilder {
-            builder: Arc::new(Mutex::new(builder)),
-        };
-        let py_code = "import jax
-def build_expr(builder, sys):
-    sys.init(builder)
-    def call(args, builder):
-        builder.inject_args(args)
-        sys.call(builder)
-        return builder.ret_vars()
-    xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
-    return (builder, xla)";
-
-        let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
-            .getattr("build_expr")?
-            .into();
-        let (builder, comp) = fun
-            .call1(py, (builder, sys))?
-            .extract::<(PyObject, PyObject)>(py)?;
-        let builder = builder.extract::<PipelineBuilder>(py)?;
-        let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
-        let comp = comp
-            .downcast::<PyBytes>(py)
-            .map_err(|_| Error::HloModuleNotBytes)?;
-        let hlo_bytes = comp.as_bytes();
-
-        let builder = std::mem::take(&mut *builder.builder.lock());
-        let mut buffers = Vec::default();
-        for id in builder.param_ids.iter() {
-            let col = builder.world.column_by_id(*id).unwrap();
-            buffers.push(col.column.buffer.raw_buf().to_vec());
-        }
-        let buffers = postcard::to_allocvec(&buffers).unwrap();
-
-        std::fs::File::options()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(build_dir.join("xlacomp.hlo"))?
-            .write_all(hlo_bytes)?;
-
-        // TODO: this is a very hacky way to serialize world, we need a better way to do this
-        std::fs::File::options()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(build_dir.join("world.bin"))?
-            .write_all(&buffers)?;
-
+        let exec = self.build(py, sys)?.exec;
+        exec.write_to_dir(build_dir)?;
         Ok(())
     }
 
     // TODO: reuse run() in build() after proper world serialization
-    pub fn build(&mut self, py: Python<'_>, sys: PyObject, client: &Client) -> Result<Exec, Error> {
+    pub fn build(&mut self, py: Python<'_>, sys: PyObject) -> Result<Exec, Error> {
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
         let builder = PipelineBuilder {
@@ -480,33 +427,21 @@ def build_expr(builder, sys):
         let comp_bytes = comp.as_bytes();
         let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let comp = hlo_module.computation();
-        let exec = client.client.0.compile(&comp).map_err(|err| {
-            PyValueError::new_err(format!("failed to compile computation {:?}", err))
-        })?;
         let builder = std::mem::take(&mut *builder.builder.lock());
 
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
-        let world = builder
-            .world
-            .copy_to_client(&client.client)
-            .map_err(|err| {
-                PyValueError::new_err(format!("failed to copy world to client {:?}", err))
-            })?;
         let exec = nox_ecs::WorldExec {
             world: SharedWorld {
-                client: world,
                 host: builder.world,
-                loaded_components: HashSet::default(),
-                dirty_components: HashSet::default(),
+                ..Default::default()
             },
             tick_exec: nox_ecs::Exec {
-                exec,
+                exec: Default::default(),
                 metadata: nox_ecs::ExecMetadata {
                     arg_ids: builder.param_ids,
                     ret_ids,
                 },
-                hlo_module_data: comp_bytes.to_vec(),
+                hlo_module,
             },
             startup_exec: None,
             history: nox_ecs::history::History::default(),

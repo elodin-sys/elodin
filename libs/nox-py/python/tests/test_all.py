@@ -35,7 +35,7 @@ def test_basic_system():
     w.spawn(Test(np.array([1.0], dtype='float32'), np.array([500.0], dtype='float32')))
     id = w.spawn(Test(np.array([15.0], dtype='float32'), np.array([500.0], dtype='float32')))
     w.spawn_with_entity_id(Effect(np.array([15.0], dtype='float32')), id)
-    exec = w.build(sys, client)
+    exec = w.build(sys)
     exec.run(client)
     x1 = exec.column_array(ComponentId("x"))
     y1 = exec.column_array(ComponentId("y"))
