@@ -148,7 +148,7 @@ mod tests {
         });
         let builder = world.builder().tick_pipeline(().rk4::<X, V>());
         let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build(&client).unwrap();
+        let mut exec = builder.build().unwrap();
         exec.run(&client).unwrap();
         let col = exec.column(X::component_id()).unwrap();
         assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
@@ -229,7 +229,7 @@ mod tests {
         });
         let builder = world.builder().tick_pipeline(().rk4::<U, DU>());
         let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build(&client).unwrap();
+        let mut exec = builder.build().unwrap();
         exec.run(&client).unwrap();
         let col = exec.column(X::component_id()).unwrap();
         assert_eq!(
