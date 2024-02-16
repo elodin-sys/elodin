@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 use crate::{Component, DynArrayView, Error};
 
 /// A type erased columnar data store located on the host CPU
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct HostColumn {
     pub(crate) buf: Vec<u8>,
     pub(crate) len: usize,

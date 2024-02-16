@@ -51,6 +51,16 @@ pub struct Table<S: WorldStore> {
     pub entity_map: BTreeMap<EntityId, usize>,
 }
 
+impl Clone for Table<HostStore> {
+    fn clone(&self) -> Self {
+        Self {
+            columns: self.columns.clone(),
+            entity_buffer: self.entity_buffer.clone(),
+            entity_map: self.entity_map.clone(),
+        }
+    }
+}
+
 impl<S: WorldStore> std::fmt::Debug for Table<S>
 where
     S::EntityBuffer: std::fmt::Debug,
@@ -69,6 +79,14 @@ pub struct Column<S: WorldStore> {
     pub buffer: S::Column,
 }
 
+impl Clone for Column<HostStore> {
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+        }
+    }
+}
+
 impl<S: WorldStore> std::fmt::Debug for Column<S>
 where
     S::Column: std::fmt::Debug,
@@ -84,6 +102,16 @@ pub struct World<S: WorldStore = HostStore> {
     pub archetypes: HashMap<ArchetypeId, Table<S>>,
     pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub assets: AssetStore,
+}
+
+impl Clone for World {
+    fn clone(&self) -> Self {
+        Self {
+            archetypes: self.archetypes.clone(),
+            component_map: self.component_map.clone(),
+            assets: self.assets.clone(),
+        }
+    }
 }
 
 impl<S: WorldStore> Default for World<S> {
@@ -877,12 +905,13 @@ impl<S: System> SystemExt for S {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
 }
 
+#[derive(Clone)]
 pub struct Exec {
     pub metadata: ExecMetadata,
     pub hlo_module: HloModuleProto,
@@ -957,6 +986,13 @@ impl SharedWorld {
         }
     }
 
+    fn fork(&self) -> Self {
+        Self {
+            host: self.host.clone(),
+            ..Default::default()
+        }
+    }
+
     fn copy_to_client(&self, client: &Client) -> Result<&World<ClientStore>, Error> {
         self.client
             .get_or_try_init(|| self.host.copy_to_client(client))
@@ -1024,6 +1060,15 @@ impl WorldExec {
         self.world.copy_all_columns()?;
         self.history.push_world(&self.world.host)?;
         Ok(())
+    }
+
+    pub fn fork(&self) -> Self {
+        Self {
+            world: self.world.fork(),
+            tick_exec: self.tick_exec.clone(),
+            startup_exec: self.startup_exec.clone(),
+            history: self.history.clone(),
+        }
     }
 
     pub fn column_mut(&mut self, component_id: ComponentId) -> Result<ColumnRefMut<'_>, Error> {
