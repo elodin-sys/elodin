@@ -273,6 +273,7 @@ pub fn spawn_tcp_server(
     exec: WorldExec,
     client: &nox::Client,
     tick_period: std::time::Duration,
+    check_canceled: impl Fn() -> bool,
 ) -> Result<(), Error> {
     use std::time::Instant;
 
@@ -288,6 +289,9 @@ pub fn spawn_tcp_server(
     loop {
         let start = Instant::now();
         conduit_exec.run(client)?;
+        if check_canceled() {
+            break Ok(());
+        }
         let sleep_time = tick_period.saturating_sub(start.elapsed());
         if !sleep_time.is_zero() {
             std::thread::sleep(sleep_time)
