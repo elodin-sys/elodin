@@ -32,8 +32,7 @@ pub struct PolarsWorld {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Metadata {
     pub archetypes: BTreeMap<ArchetypeId, ArchetypeMetadata>,
-    pub component_map: HashMap<ComponentId, usize>,
-    pub archetype_id_map: HashMap<ArchetypeId, usize>,
+    pub component_map: HashMap<ComponentId, ArchetypeId>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -91,20 +90,15 @@ impl World<HostStore> {
     pub fn to_polars(&self) -> Result<PolarsWorld, Error> {
         let mut archetypes = BTreeMap::new();
         let mut archetype_metadata = BTreeMap::new();
-        for (id, table) in self
-            .archetype_id_map
-            .iter()
-            .filter_map(|(id, index)| self.archetypes.get(*index).map(|a| (*id, a)))
-        {
+        for (id, table) in &self.archetypes {
             let (metadata, df) = table.to_polars()?;
-            archetypes.insert(id, df);
-            archetype_metadata.insert(id, metadata);
+            archetypes.insert(*id, df);
+            archetype_metadata.insert(*id, metadata);
         }
 
         let metadata = Metadata {
             archetypes: archetype_metadata,
             component_map: self.component_map.clone(),
-            archetype_id_map: self.archetype_id_map.clone(),
         };
 
         Ok(PolarsWorld {
@@ -121,18 +115,19 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
         let Metadata {
             archetypes,
             component_map,
-            archetype_id_map,
         } = polars.metadata;
         let archetypes = polars
             .archetypes
-            .into_values()
+            .into_iter()
             .zip(archetypes.into_values())
-            .map(|(df, metadata)| Table::from_dataframe(df, metadata))
+            .map(|((id, df), metadata)| {
+                let table = Table::from_dataframe(df, metadata)?;
+                Ok((id, table))
+            })
             .collect::<Result<_, Error>>()?;
         Ok(World {
             archetypes,
             component_map,
-            archetype_id_map,
             assets: AssetStore::default(),
         })
     }
