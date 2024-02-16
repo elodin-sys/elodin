@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Handle<T> {
-    id: u64,
+    pub id: u64,
     _phantom: PhantomData<T>,
 }
 
@@ -76,6 +76,14 @@ struct Asset {
 
 impl AssetStore {
     pub fn insert<C: Component + Send + Sync + 'static>(&mut self, val: C) -> Handle<C> {
+        let Handle { id, .. } = self.insert_erased(val);
+        Handle {
+            id,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn insert_erased(&mut self, val: impl ErasedComponent + 'static) -> Handle<()> {
         let id = self.data.len() as u64;
         let inner = Arc::new(val);
         self.data.push(Asset {

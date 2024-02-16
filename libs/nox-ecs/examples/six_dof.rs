@@ -51,10 +51,11 @@ fn main() {
     let client = nox::Client::cpu().unwrap();
     let exec = builder.build().unwrap();
     spawn_tcp_server(
-        "0.0.0.0:3104".parse().unwrap(),
+        "0.0.0.0:2240".parse().unwrap(),
         exec,
         &client,
         std::time::Duration::from_secs_f64(1.0 / 60.0),
+        || false,
     )
     .unwrap();
 }

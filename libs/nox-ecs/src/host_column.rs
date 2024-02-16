@@ -17,7 +17,7 @@ pub struct HostColumn {
     pub(crate) len: usize,
     pub(crate) component_type: ComponentType,
     pub(crate) component_id: ComponentId,
-    pub(crate) asset: bool,
+    pub asset: bool,
 }
 
 impl HostColumn {
