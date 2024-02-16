@@ -1,4 +1,5 @@
-#!/usr/bin/env -S nix develop .#ops --command just --justfile
+#! /usr/bin/env nix
+#! nix develop .#ops --command just --justfile
 
 k8s_overlays := "kubernetes/overlays"
 artifact_registry := "us-central1-docker.pkg.dev/elodin-infra"
