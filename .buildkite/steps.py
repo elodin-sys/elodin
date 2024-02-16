@@ -34,11 +34,11 @@ def nix_step(label, flake, command, emoji = ":nix:", pre_command = None, key = N
     plugins = plugins,
   )
 
-def rust_step(label, command, env = {}):
+def rust_step(label, command, env = {}, emoji = ":crab:"):
   return nix_step(
     label = label,
     flake = ".#rust",
-    emoji = ":crab:",
+    emoji = emoji,
     command = command,
     env = env,
   )
