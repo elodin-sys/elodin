@@ -59,6 +59,7 @@ def system(func) -> Callable[[Any], None]:
 class ComponentData:
     id: ComponentId
     type: ComponentType
+    asset: bool
     from_expr: Callable[[Any], Any]
 
 O = TypeVar('O')
@@ -173,10 +174,14 @@ class Component:
                 return lambda x: x
             else:
                 return ty.from_array
+        if len(params) == 4:
+            (t, id, type, asset) = params
+            id = parse_id(id)
+            return Annotated.__class_getitem__((t, ComponentData(id, type, asset, from_expr(t)))) # type: ignore
         if len(params) == 3:
             (t, id, type) = params
             id = parse_id(id)
-            return Annotated.__class_getitem__((t, ComponentData(id, type, from_expr(t)))) # type: ignore
+            return Annotated.__class_getitem__((t, ComponentData(id, type, False, from_expr(t)))) # type: ignore
         elif len(params) == 2:
             (t, id) = params
             id = parse_id(id)
@@ -198,12 +203,15 @@ jax.tree_util.register_pytree_node(elodin.SpatialMotion,elodin.SpatialMotion.fla
 jax.tree_util.register_pytree_node(elodin.SpatialForce,elodin.SpatialForce.flatten,elodin.SpatialForce.unflatten)
 jax.tree_util.register_pytree_node(elodin.SpatialInertia,elodin.SpatialInertia.flatten,elodin.SpatialInertia.unflatten)
 jax.tree_util.register_pytree_node(elodin.Quaternion,elodin.Quaternion.flatten,elodin.Quaternion.unflatten)
+jax.tree_util.register_pytree_node(elodin.Handle,elodin.Handle.flatten,elodin.Handle.unflatten)
 
 WorldPos = Component[SpatialTransform, "world_pos", ComponentType.SpatialPosF64]
 WorldVel = Component[SpatialMotion, "world_vel", ComponentType.SpatialMotionF64]
 WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotionF64]
 Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
 Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
+MeshAsset = Component[Handle, "mesh", ComponentType.U64, True]
+MaterialAsset = Component[Handle, "material", ComponentType.U64, True]
 
 @dataclass
 class Body(Archetype):
@@ -212,6 +220,8 @@ class Body(Archetype):
     world_accel: WorldAccel
     force: Force
     inertia: Inertia
+    mesh: MeshAsset
+    material: MaterialAsset
 
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
