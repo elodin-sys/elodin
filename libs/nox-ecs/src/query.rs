@@ -403,7 +403,7 @@ mod tests {
         world.spawn(Body { x: X::host(400.0) });
 
         let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build(&client).unwrap();
+        let mut exec = world.build().unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(X::component_id()).unwrap();
         assert_eq!(
@@ -453,7 +453,7 @@ mod tests {
             c: C::host(-1.0),
         });
         let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build(&client).unwrap();
+        let mut exec = world.build().unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(C::component_id()).unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])

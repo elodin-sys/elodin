@@ -49,7 +49,7 @@ fn main() {
         .builder()
         .tick_pipeline(six_dof(|| gravity, 1.0 / 60.0));
     let client = nox::Client::cpu().unwrap();
-    let exec = builder.build(&client).unwrap();
+    let exec = builder.build().unwrap();
     spawn_tcp_server(
         "0.0.0.0:3104".parse().unwrap(),
         exec,
