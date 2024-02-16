@@ -9,10 +9,10 @@ use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 
 pub const DEFAULT_SUB_FILTERS: &[ComponentFilter] = &[
-    ComponentFilter::from_str("world_pos"),
-    ComponentFilter::from_str("mesh"),
-    ComponentFilter::from_str("material"),
-    ComponentFilter::from_str("trace_anchor"),
+    ComponentFilter::from_str("world_pos"), // 6709265627763630702
+    ComponentFilter::from_str("mesh"),      // 4838001395392124604
+    ComponentFilter::from_str("material"),  // 175488002581160416
+    ComponentFilter::from_str("trace_anchor"), //5639674603227263162
 ];
 
 pub struct SyncPlugin {

@@ -1,14 +1,18 @@
 use std::{
     collections::{hash_map::Entry, BTreeMap},
     marker::PhantomData,
+    net::SocketAddr,
     ops::Deref,
+    path::PathBuf,
+    time::Duration,
 };
 
+use clap::Parser;
 use nox_ecs::{
     elodin_conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore, Query, SharedWorld, System,
-    Table, World,
+    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedComponent, ErasedSystem, HostColumn,
+    HostStore, Query, SharedWorld, System, Table, World,
 };
 use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
 use pyo3::{
@@ -279,10 +283,11 @@ impl WorldBuilder {
                     .map(|data| {
                         let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
                         let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
-                        Ok((
-                            id.inner,
-                            nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner)),
-                        ))
+                        let asset = data.getattr(py, "asset")?.extract::<bool>(py)?;
+                        let mut col =
+                            nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner));
+                        col.buffer.asset = asset;
+                        Ok((id.inner, col))
                     })
                     .collect::<Result<_, Error>>()?;
                 for id in component_ids {
@@ -300,6 +305,56 @@ impl WorldBuilder {
             }
         }
     }
+}
+
+pub struct PyAsset {
+    object: PyObject,
+}
+
+impl PyAsset {
+    pub fn try_new(py: Python<'_>, object: PyObject) -> Result<Self, Error> {
+        let _ = object.getattr(py, "component_id")?;
+        let _ = object.getattr(py, "component_value")?;
+        Ok(Self { object })
+    }
+}
+
+impl ErasedComponent for PyAsset {
+    fn component_id(&self) -> nox_ecs::ComponentId {
+        Python::with_gil(|py| {
+            let id: ComponentId = self
+                .object
+                .call_method0(py, "component_id")
+                .unwrap()
+                .extract(py)
+                .unwrap();
+            id.inner
+        })
+    }
+
+    fn component_value(&self) -> elodin_conduit::ComponentValue<'_> {
+        let val: ComponentValue = Python::with_gil(|py| {
+            self.object
+                .call_method0(py, "component_value")
+                .unwrap()
+                .extract(py)
+                .unwrap()
+        });
+        val.inner
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+enum Args {
+    MonteCarlo {
+        #[arg(long)]
+        build_dir: PathBuf,
+    },
+    Run {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+    },
 }
 
 #[pymethods]
@@ -359,26 +414,35 @@ impl WorldBuilder {
         Ok(EntityId { inner: entity_id })
     }
 
-    pub fn run(&mut self, py: Python<'_>, sys: PyObject) -> Result<(), Error> {
+    fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Handle {
+        let asset = PyAsset::try_new(py, asset).unwrap();
+        let inner = self.world.assets.insert_erased(asset);
+        Handle { inner }
+    }
+
+    pub fn run(&mut self, py: Python<'_>, client: &Client, sys: PyObject) -> Result<(), Error> {
+        tracing_subscriber::fmt::init();
         // skip `python3 <name of script>`
-        let args: Vec<_> = std::env::args_os().skip(2).collect();
-        let mut pargs = pico_args::Arguments::from_vec(args);
-        let cmd = pargs.subcommand().map_err(|_| Error::UnexpectedInput)?;
-
-        match cmd.as_deref() {
-            Some("monte-carlo") => {}
-            Some(cmd) => return Err(Error::UnknownCommand(cmd.to_string())),
-            None => todo!("spawn TCP server, and run simulation locally"),
+        let args = std::env::args_os().skip(2);
+        let args = Args::parse_from(args);
+        match args {
+            Args::MonteCarlo { build_dir } => {
+                let exec = self.build(py, sys)?.exec;
+                exec.write_to_dir(build_dir)?;
+                Ok(())
+            }
+            Args::Run { addr } => {
+                let exec = self.build(py, sys)?.exec;
+                spawn_tcp_server(
+                    addr,
+                    exec,
+                    &client.client,
+                    Duration::from_secs_f64(1.0 / 60.0),
+                    || py.check_signals().is_err(),
+                )?;
+                Ok(())
+            }
         }
-
-        let build_dir: String = pargs
-            .value_from_str("--build-dir")
-            .map_err(|err| Error::MissingArg(err.to_string()))?;
-        let build_dir = std::path::PathBuf::from(build_dir);
-
-        let exec = self.build(py, sys)?.exec;
-        exec.write_to_dir(build_dir)?;
-        Ok(())
     }
 
     // TODO: reuse run() in build() after proper world serialization
@@ -393,7 +457,8 @@ def build_expr(builder, sys):
         builder.inject_args(args)
         sys.call(builder)
         return builder.ret_vars()
-    xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
+    var_array = builder.var_arrays()
+    xla = jax.xla_computation(lambda a: call(a, builder))(var_array)
     return xla";
 
         let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
@@ -675,6 +740,94 @@ pub fn six_dof(time_step: f64, sys: Option<PyObject>) -> RustSystem {
     RustSystem { inner: sys }
 }
 
+#[derive(Clone)]
+#[pyclass]
+pub struct Handle {
+    inner: nox_ecs::Handle<()>,
+}
+
+#[pymethods]
+impl Handle {
+    fn asarray(&self) -> Result<PyObject, Error> {
+        Ok(nox::NoxprScalarExt::constant(self.inner.id).to_jax()?)
+    }
+
+    fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
+        let jax = nox::NoxprScalarExt::constant(self.inner.id).to_jax()?;
+        Ok(((jax,), None))
+    }
+
+    #[staticmethod]
+    fn unflatten(_aux: PyObject, _jax: PyObject) -> Self {
+        todo!()
+    }
+
+    #[staticmethod]
+    fn from_array(_arr: PyObject) -> Self {
+        todo!()
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct ComponentValue {
+    inner: elodin_conduit::ComponentValue<'static>,
+}
+
+#[pyclass]
+pub struct Mesh {
+    inner: elodin_conduit::well_known::Mesh,
+}
+
+#[pymethods]
+impl Mesh {
+    fn component_id(&self) -> ComponentId {
+        ComponentId {
+            inner: self.inner.component_id(),
+        }
+    }
+
+    fn component_value(&self) -> ComponentValue {
+        ComponentValue {
+            inner: self.inner.component_value().into_owned(),
+        }
+    }
+
+    #[staticmethod]
+    pub fn cuboid(x: f32, y: f32, z: f32) -> Self {
+        Self {
+            inner: elodin_conduit::well_known::Mesh::cuboid(x, y, z),
+        }
+    }
+}
+
+#[pyclass]
+pub struct Material {
+    inner: elodin_conduit::well_known::Material,
+}
+
+#[pymethods]
+impl Material {
+    fn component_id(&self) -> ComponentId {
+        ComponentId {
+            inner: self.inner.component_id(),
+        }
+    }
+
+    fn component_value(&self) -> ComponentValue {
+        ComponentValue {
+            inner: self.inner.component_value().into_owned(),
+        }
+    }
+
+    #[staticmethod]
+    fn color(r: f32, g: f32, b: f32) -> Self {
+        Material {
+            inner: elodin_conduit::well_known::Material::color(r, g, b),
+        }
+    }
+}
+
 #[pyfunction]
 // TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
 fn run_cli(_py: Python) -> PyResult<()> {
@@ -687,6 +840,7 @@ fn run_cli(_py: Python) -> PyResult<()> {
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
     m.add_class::<ComponentId>()?;
+    m.add_class::<ComponentValue>()?;
     m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;
     m.add_class::<EntityId>()?;
@@ -698,6 +852,9 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SpatialInertia>()?;
     m.add_class::<Quaternion>()?;
     m.add_class::<RustSystem>()?;
+    m.add_class::<Mesh>()?;
+    m.add_class::<Material>()?;
+    m.add_class::<Handle>()?;
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
