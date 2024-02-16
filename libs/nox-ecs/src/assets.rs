@@ -1,6 +1,7 @@
 use elodin_conduit::{Component, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Handle<T> {
@@ -62,20 +63,21 @@ impl<T: elodin_conduit::Component> crate::Component for Handle<T> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AssetStore {
     data: Vec<Asset>,
 }
 
+#[derive(Clone)]
 struct Asset {
     generation: usize,
-    inner: Box<dyn ErasedComponent>,
+    inner: Arc<dyn ErasedComponent>,
 }
 
 impl AssetStore {
     pub fn insert<C: Component + Send + Sync + 'static>(&mut self, val: C) -> Handle<C> {
         let id = self.data.len() as u64;
-        let inner = Box::new(val);
+        let inner = Arc::new(val);
         self.data.push(Asset {
             generation: 1,
             inner,
