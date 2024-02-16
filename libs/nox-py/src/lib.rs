@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, marker::PhantomData, ops::Deref};
+use std::{
+    collections::{hash_map::Entry, BTreeMap},
+    marker::PhantomData,
+    ops::Deref,
+};
 
 use nox_ecs::{
     elodin_conduit, join_many,
@@ -251,63 +255,50 @@ impl WorldBuilder {
         let archetype_id = archetype
             .call_method0(py, "archetype_id")?
             .extract::<u64>(py)?;
-        if let Some(id) = self
-            .world
-            .archetype_id_map
-            .get(&ArchetypeId::new(archetype_id.into()))
-        {
-            Ok(&mut self.world.archetypes[*id])
-        } else {
-            self.insert_archetype(py, archetype)
-        }
-    }
-    fn insert_archetype(
-        &mut self,
-        py: Python<'_>,
-        archetype: &PyObject,
-    ) -> Result<&mut Table<HostStore>, Error> {
-        let archetype_id = archetype
-            .call_method0(py, "archetype_id")?
-            .extract::<u64>(py)?;
         let archetype_id = ArchetypeId::new(archetype_id.into());
-        let datas = archetype
-            .call_method0(py, "component_data")?
-            .extract::<Vec<PyObject>>(py)?;
-        let component_ids = datas
-            .iter()
-            .map(|data| {
-                let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-                Ok(id.inner)
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
 
-        let columns = datas
-            .iter()
-            .map(|data| {
-                let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-                let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
-                Ok((
-                    id.inner,
-                    nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner)),
-                ))
-            })
-            .collect::<Result<_, Error>>()?;
-        let archetype_index = self.world.archetypes.len();
-        self.world.archetypes.push(Table {
-            columns,
-            entity_buffer: HostColumn::new(
-                elodin_conduit::ComponentType::U64,
-                nox_ecs::ComponentId::new("entity_id"),
-            ),
-            entity_map: BTreeMap::default(),
-        });
-        for id in component_ids {
-            self.world.component_map.insert(id, archetype_index);
+        match self.world.archetypes.entry(archetype_id) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                let archetype_id = archetype
+                    .call_method0(py, "archetype_id")?
+                    .extract::<u64>(py)?;
+                let archetype_id = ArchetypeId::new(archetype_id.into());
+                let datas = archetype
+                    .call_method0(py, "component_data")?
+                    .extract::<Vec<PyObject>>(py)?;
+                let component_ids = datas
+                    .iter()
+                    .map(|data| {
+                        let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
+                        Ok(id.inner)
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
+                let columns = datas
+                    .iter()
+                    .map(|data| {
+                        let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
+                        let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
+                        Ok((
+                            id.inner,
+                            nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner)),
+                        ))
+                    })
+                    .collect::<Result<_, Error>>()?;
+                for id in component_ids {
+                    self.world.component_map.insert(id, archetype_id);
+                }
+                let table = Table {
+                    columns,
+                    entity_buffer: HostColumn::new(
+                        elodin_conduit::ComponentType::U64,
+                        nox_ecs::ComponentId::new("entity_id"),
+                    ),
+                    entity_map: BTreeMap::default(),
+                };
+                Ok(entry.insert(table))
+            }
         }
-        self.world
-            .archetype_id_map
-            .insert(archetype_id, archetype_index);
-        Ok(&mut self.world.archetypes[archetype_index])
     }
 }
 

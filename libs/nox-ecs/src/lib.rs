@@ -81,9 +81,8 @@ where
 }
 
 pub struct World<S: WorldStore = HostStore> {
-    pub archetypes: Vec<Table<S>>,
-    pub component_map: HashMap<ComponentId, usize>,
-    pub archetype_id_map: HashMap<ArchetypeId, usize>,
+    pub archetypes: HashMap<ArchetypeId, Table<S>>,
+    pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub assets: AssetStore,
 }
 
@@ -92,8 +91,7 @@ impl<S: WorldStore> Default for World<S> {
         Self {
             archetypes: Default::default(),
             component_map: Default::default(),
-            archetype_id_map: Default::default(),
-            assets: AssetStore::default(),
+            assets: Default::default(),
         }
     }
 }
@@ -103,7 +101,7 @@ impl<S: WorldStore> World<S> {
         let Some(id) = self.component_map.get(&C::component_id()) else {
             return None;
         };
-        let archetype = self.archetypes.get_mut(*id)?;
+        let archetype = self.archetypes.get_mut(id)?;
         let column = archetype.columns.get_mut(&C::component_id())?;
         Some(ColumnRefMut {
             column,
@@ -118,7 +116,7 @@ impl<S: WorldStore> World<S> {
 
     pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, S>> {
         let table_id = self.component_map.get(&id)?;
-        let archetype = self.archetypes.get(*table_id)?;
+        let archetype = self.archetypes.get(table_id)?;
         let column = archetype.columns.get(&id)?;
         Some(ColumnRef {
             column,
@@ -131,7 +129,7 @@ impl<S: WorldStore> World<S> {
         let Some(table_id) = self.component_map.get(&id) else {
             return None;
         };
-        let archetype = self.archetypes.get_mut(*table_id)?;
+        let archetype = self.archetypes.get_mut(table_id)?;
         let column = archetype.columns.get_mut(&id)?;
         Some(ColumnRefMut {
             column,
@@ -150,42 +148,30 @@ impl<S: WorldStore> World<S> {
 
 impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
-        if let Some(id) = self
-            .archetype_id_map
-            .get(&ArchetypeId::type_id(TypeId::of::<A>()))
-        {
-            &mut self.archetypes[*id]
-        } else {
-            self.insert_archetype::<A>()
-        }
-    }
-
-    pub fn insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
-        let component_ids = A::component_ids();
-        let archetype_id = self.archetypes.len();
-        let columns = component_ids
-            .iter()
-            .zip(A::component_tys().iter())
-            .map(|(id, ty)| {
-                (
-                    *id,
-                    Column {
-                        buffer: HostColumn::new(*ty, *id),
-                    },
-                )
-            })
-            .collect();
-        self.archetypes.push(Table {
-            columns,
-            entity_buffer: HostColumn::new(ComponentType::U64, ComponentId::new("entity_id")),
-            entity_map: BTreeMap::default(),
-        });
-        for id in component_ids {
-            self.component_map.insert(id, archetype_id);
-        }
-        self.archetype_id_map
-            .insert(ArchetypeId::type_id(TypeId::of::<A>()), archetype_id);
-        &mut self.archetypes[archetype_id]
+        let archetype_id = ArchetypeId::type_id(TypeId::of::<A>());
+        self.archetypes.entry(archetype_id).or_insert_with(|| {
+            let component_ids = A::component_ids();
+            let columns = component_ids
+                .iter()
+                .zip(A::component_tys().iter())
+                .map(|(id, ty)| {
+                    (
+                        *id,
+                        Column {
+                            buffer: HostColumn::new(*ty, *id),
+                        },
+                    )
+                })
+                .collect();
+            for id in component_ids {
+                self.component_map.insert(id, archetype_id);
+            }
+            Table {
+                columns,
+                entity_buffer: HostColumn::new(ComponentType::U64, ComponentId::new("entity_id")),
+                entity_map: BTreeMap::default(),
+            }
+        })
     }
 
     pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
@@ -210,7 +196,7 @@ impl World<HostStore> {
         let archetypes = self
             .archetypes
             .iter()
-            .map(|table| {
+            .map(|(id, table)| {
                 let columns = table
                     .columns
                     .iter()
@@ -223,17 +209,17 @@ impl World<HostStore> {
                         ))
                     })
                     .collect::<Result<BTreeMap<_, _>, Error>>()?;
-                Ok(Table {
+                let table = Table {
                     columns,
                     entity_buffer: table.entity_buffer.copy_to_client(client)?,
                     entity_map: table.entity_map.clone(),
-                })
+                };
+                Ok((*id, table))
             })
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<_, Error>>()?;
         Ok(World {
             archetypes,
             component_map: self.component_map.clone(),
-            archetype_id_map: self.archetype_id_map.clone(),
             assets: AssetStore::default(),
         })
     }
@@ -1003,13 +989,16 @@ impl SharedWorld {
         let Some(client_world) = self.client.get_mut() else {
             return Ok(());
         };
-        for (host, client) in self
-            .host
-            .archetypes
-            .iter_mut()
-            .zip(client_world.archetypes.iter_mut())
-        {
-            for (host, client) in host.columns.values_mut().zip(client.columns.values_mut()) {
+        for (id, host_table) in &mut self.host.archetypes {
+            let client_table = client_world
+                .archetypes
+                .get_mut(id)
+                .ok_or(Error::ComponentNotFound)?;
+            for (host, client) in host_table
+                .columns
+                .values_mut()
+                .zip(client_table.columns.values_mut())
+            {
                 let literal = client.buffer.to_literal_sync()?;
                 host.buffer.buf.copy_from_slice(literal.raw_buf());
                 self.loaded_components.insert(host.buffer.component_id);
