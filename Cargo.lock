@@ -6443,6 +6443,7 @@ dependencies = [
  "ndarray",
  "nox",
  "nox-ecs-macros",
+ "once_cell",
  "parquet",
  "paste",
  "polars",

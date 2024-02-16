@@ -5,6 +5,7 @@ use elodin_conduit::{ComponentValue, EntityId};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
+use once_cell::sync::OnceCell;
 use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
@@ -805,11 +806,11 @@ where
         self.world.spawn_with_id(archetype, entity_id);
     }
 
-    pub fn build(mut self, client: &Client) -> Result<WorldExec, Error> {
-        let tick_exec = self.pipe.build(client, &mut self.world)?;
-        let startup_exec = self.startup_sys.build(client, &mut self.world)?;
+    pub fn build(mut self) -> Result<WorldExec, Error> {
+        let tick_exec = self.pipe.build(&mut self.world)?;
+        let startup_exec = self.startup_sys.build(&mut self.world)?;
         Ok(WorldExec {
-            world: SharedWorld::from_host(self.world, client)?,
+            world: SharedWorld::from_host(self.world),
             tick_exec,
             startup_exec: Some(startup_exec),
             history: History::default(),
@@ -828,11 +829,11 @@ impl<Sys: System> WorldBuilder<Sys> {
 }
 
 pub trait SystemExt {
-    fn build(self, client: &Client, world: &mut World) -> Result<Exec, Error>;
+    fn build(self, world: &mut World) -> Result<Exec, Error>;
 }
 
 impl<S: System> SystemExt for S {
-    fn build(self, client: &Client, world: &mut World) -> Result<Exec, Error> {
+    fn build(self, world: &mut World) -> Result<Exec, Error> {
         let owned_world = std::mem::take(world);
         let mut builder = PipelineBuilder {
             vars: BTreeMap::default(),
@@ -858,15 +859,14 @@ impl<S: System> SystemExt for S {
         };
         let op = func.build("pipeline")?;
         let comp = op.build()?;
-        let exec = client.0.compile(&comp)?;
         *world = builder.world;
         Ok(Exec {
             metadata: ExecMetadata {
                 arg_ids: builder.param_ids,
                 ret_ids,
             },
-            exec,
-            hlo_module_data: comp.to_hlo_module().to_bytes(),
+            exec: OnceCell::new(),
+            hlo_module: comp.to_hlo_module(),
         })
     }
 }
@@ -879,27 +879,33 @@ pub struct ExecMetadata {
 
 pub struct Exec {
     pub metadata: ExecMetadata,
-    pub hlo_module_data: Vec<u8>,
-    pub exec: PjRtLoadedExecutable,
+    pub hlo_module: HloModuleProto,
+    pub exec: OnceCell<PjRtLoadedExecutable>,
 }
 
 impl Exec {
     fn run(&self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
         world.clear_cache();
         world.load_dirty_components(client)?;
+        let client_world = world.copy_to_client(client)?;
         let mut buffers = BufferArgsRef::default().untuple_result(true);
         for id in &self.metadata.arg_ids {
-            let col = world
-                .client
+            let col = client_world
                 .column_by_id(*id)
                 .ok_or(Error::ComponentNotFound)?;
             buffers.push(&col.column.buffer);
         }
-        let ret_bufs = self.exec.execute_buffers(buffers)?;
+        let exec = self.exec.get_or_try_init(|| {
+            let comp = self.hlo_module.computation();
+            let exec = client.0.compile(&comp)?;
+            Ok::<_, Error>(exec)
+        })?;
+        let ret_bufs = exec.execute_buffers(buffers)?;
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
             let col = world
                 .client
-                .column_by_id_mut(*comp_id)
+                .get_mut()
+                .and_then(|c| c.column_by_id_mut(*comp_id))
                 .ok_or(Error::ComponentNotFound)?;
             col.column.buffer = buf;
         }
@@ -911,42 +917,43 @@ impl Exec {
         std::fs::create_dir_all(path)?;
         let mut metadata = File::create(path.join("metadata.json"))?;
         serde_json::to_writer(&mut metadata, &self.metadata)?;
-        std::fs::write(path.join("hlo.binpb"), &self.hlo_module_data)?;
+        std::fs::write(path.join("hlo.binpb"), self.hlo_module.to_bytes())?;
         Ok(())
     }
 
-    pub fn read_from_dir(path: impl AsRef<Path>, client: &Client) -> Result<Self, Error> {
+    pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: ExecMetadata = serde_json::from_reader(&mut metadata)?;
         let hlo_module_data = std::fs::read(path.join("hlo.binpb"))?;
         let hlo_module = HloModuleProto::parse_binary(&hlo_module_data)?;
-        let comp = hlo_module.computation();
-        let exec = client.0.compile(&comp)?;
         Ok(Self {
             metadata,
-            hlo_module_data,
-            exec,
+            hlo_module,
+            exec: OnceCell::default(),
         })
     }
 }
 
+#[derive(Default)]
 pub struct SharedWorld {
-    pub client: World<ClientStore>,
     pub host: World,
+    pub client: OnceCell<World<ClientStore>>,
     pub loaded_components: HashSet<ComponentId>,
     pub dirty_components: HashSet<ComponentId>,
 }
 
 impl SharedWorld {
-    pub fn from_host(host: World, client: &Client) -> Result<Self, Error> {
-        let client = host.copy_to_client(client)?;
-        Ok(SharedWorld {
-            client,
+    pub fn from_host(host: World) -> Self {
+        SharedWorld {
             host,
-            loaded_components: HashSet::default(),
-            dirty_components: HashSet::default(),
-        })
+            ..Default::default()
+        }
+    }
+
+    fn copy_to_client(&self, client: &Client) -> Result<&World<ClientStore>, Error> {
+        self.client
+            .get_or_try_init(|| self.host.copy_to_client(client))
     }
 
     fn clear_cache(&mut self) {
@@ -954,9 +961,11 @@ impl SharedWorld {
     }
 
     fn load_dirty_components(&mut self, client: &Client) -> Result<(), Error> {
+        let Some(client_world) = self.client.get_mut() else {
+            return Ok(());
+        };
         for id in self.dirty_components.drain() {
-            let client_column = self
-                .client
+            let client_column = client_world
                 .column_by_id_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
             let host_column = self
@@ -971,11 +980,14 @@ impl SharedWorld {
     }
 
     fn copy_all_columns(&mut self) -> Result<(), Error> {
+        let Some(client_world) = self.client.get_mut() else {
+            return Ok(());
+        };
         for (host, client) in self
             .host
             .archetypes
             .iter_mut()
-            .zip(self.client.archetypes.iter_mut())
+            .zip(client_world.archetypes.iter_mut())
         {
             for (host, client) in host.columns.values_mut().zip(client.columns.values_mut()) {
                 let literal = client.buffer.to_literal_sync()?;
@@ -1007,9 +1019,11 @@ impl WorldExec {
 
     pub fn column_mut(&mut self, component_id: ComponentId) -> Result<ColumnRefMut<'_>, Error> {
         if !self.world.loaded_components.contains(&component_id) {
-            self.world
-                .host
-                .load_column_from_client(component_id, &self.world.client)?;
+            if let Some(client_world) = self.world.client.get() {
+                self.world
+                    .host
+                    .load_column_from_client(component_id, client_world)?;
+            }
         }
         self.world.dirty_components.insert(component_id);
         self.world
@@ -1020,9 +1034,11 @@ impl WorldExec {
 
     pub fn column(&mut self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
         if !self.world.loaded_components.contains(&component_id) {
-            self.world
-                .host
-                .load_column_from_client(component_id, &self.world.client)?;
+            if let Some(client_world) = self.world.client.get() {
+                self.world
+                    .host
+                    .load_column_from_client(component_id, client_world)?;
+            }
             self.world.loaded_components.insert(component_id);
         }
         self.world
@@ -1053,18 +1069,18 @@ impl WorldExec {
         Ok(())
     }
 
-    pub fn read_from_dir(dir: impl AsRef<Path>, client: &Client) -> Result<Self, Error> {
+    pub fn read_from_dir(dir: impl AsRef<Path>) -> Result<Self, Error> {
         let dir = dir.as_ref();
-        let tick_exec = Exec::read_from_dir(dir.join("tick_exec"), client)?;
+        let tick_exec = Exec::read_from_dir(dir.join("tick_exec"))?;
         let startup_exec_path = dir.join("startup_exec");
         let startup_exec = if startup_exec_path.exists() {
-            Some(Exec::read_from_dir(&startup_exec_path, client)?)
+            Some(Exec::read_from_dir(&startup_exec_path)?)
         } else {
             None
         };
         let polars_world = PolarsWorld::read_from_dir(dir.join("world"))?;
         let world = World::try_from(polars_world)?;
-        let world = SharedWorld::from_host(world, client)?;
+        let world = SharedWorld::from_host(world);
         Ok(Self {
             world,
             tick_exec,
@@ -1230,7 +1246,7 @@ mod tests {
             c: C::host(-1.0),
         });
         let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build(&client).unwrap();
+        let mut exec = world.build().unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(C::component_id()).unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
@@ -1274,7 +1290,7 @@ mod tests {
             .builder()
             .tick_pipeline(tick)
             .startup_pipeline(startup)
-            .build(&client)
+            .build()
             .unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(A::component_id()).unwrap();
@@ -1301,12 +1317,12 @@ mod tests {
             .builder()
             .tick_pipeline(tick)
             .startup_pipeline(startup)
-            .build(&client)
+            .build()
             .unwrap();
         let tempdir = tempfile::tempdir().unwrap();
         let tempdir = tempdir.path();
         exec.write_to_dir(&tempdir).unwrap();
-        let mut exec = WorldExec::read_from_dir(&tempdir, &client).unwrap();
+        let mut exec = WorldExec::read_from_dir(&tempdir).unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(A::component_id()).unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
