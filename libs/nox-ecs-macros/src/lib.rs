@@ -10,6 +10,7 @@ mod archetype;
 mod component;
 mod component_group;
 mod from_builder;
+mod from_op;
 mod into_op;
 
 #[proc_macro_derive(Component, attributes(nox))]
@@ -30,6 +31,11 @@ pub fn from_builder(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(IntoOp, attributes(nox))]
 pub fn into_op(input: TokenStream) -> TokenStream {
     into_op::into_op(input)
+}
+
+#[proc_macro_derive(FromOp, attributes(nox))]
+pub fn from_op(input: TokenStream) -> TokenStream {
+    from_op::from_op(input)
 }
 
 #[proc_macro_derive(ComponentGroup, attributes(nox))]

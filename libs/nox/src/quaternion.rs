@@ -1,12 +1,12 @@
 use std::ops::{Add, Mul};
 
-use nalgebra::{RealField, Scalar as NalgebraScalar};
+use nalgebra::{Const, RealField, Scalar as NalgebraScalar};
 use num_traits::Zero;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
     AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FixedSliceExt, FromBuilder,
-    FromHost, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
+    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
@@ -23,9 +23,18 @@ impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
     }
 }
 
-impl<T: NativeType + ArrayElement + nalgebra::RealField> Quaternion<T> {
+impl<T> FromOp for Quaternion<T, Op> {
+    fn from_op(op: Noxpr) -> Self {
+        Self(Vector::from_op(op))
+    }
+}
+
+impl<T: Field> Quaternion<T> {
     pub fn identity() -> Self {
-        nalgebra::Quaternion::identity().into()
+        let inner = T::zero()
+            .broadcast::<Const<3>>()
+            .concat(T::one().reshape::<Const<1>>());
+        Quaternion(inner)
     }
 }
 

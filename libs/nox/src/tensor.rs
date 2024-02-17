@@ -1,4 +1,6 @@
-use crate::{AsBuffer, Buffer, Field, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector};
+use crate::{
+    AsBuffer, Buffer, Field, FromOp, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector,
+};
 use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Scalar as NalgebraScalar};
 use simba::scalar::ClosedNeg;
 use smallvec::{smallvec, SmallVec};
@@ -58,6 +60,15 @@ impl<T: TensorItem, D: TensorDim> TensorItem for Tensor<T, D, Op> {
 
     fn from_op(op: Noxpr) -> Self::Item {
         T::from_op(op)
+    }
+}
+
+impl<T, D: TensorDim> FromOp for Tensor<T, D> {
+    fn from_op(inner: Noxpr) -> Self {
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
     }
 }
 
