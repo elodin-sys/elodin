@@ -1,34 +1,32 @@
-use std::{
-    collections::BTreeMap,
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, marker::PhantomData, ops::Deref};
 
 use nox_ecs::{
     elodin_conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    ArchetypeId, ComponentArray, HostColumn, HostStore, Query, SharedWorld, Table, World,
+    ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore, Query, SharedWorld, System,
+    Table, World,
 };
 use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
-use parking_lot::Mutex;
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyTuple},
 };
 
+mod spatial;
+pub use spatial::*;
+
 #[pyclass]
-#[derive(Clone)]
+#[derive(Default)]
 struct PipelineBuilder {
-    builder: Arc<Mutex<nox_ecs::PipelineBuilder>>,
+    builder: nox_ecs::PipelineBuilder,
 }
 
 #[pymethods]
 impl PipelineBuilder {
-    fn get_var(&self, id: ComponentId) -> Result<(ComponentArrayMetadata, PyObject), Error> {
-        let builder = self.builder.lock();
-        let var = builder
+    fn get_var(&mut self, id: ComponentId) -> Result<(ComponentArrayMetadata, PyObject), Error> {
+        let var = self
+            .builder
             .vars
             .get(&id.inner)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
@@ -45,13 +43,13 @@ impl PipelineBuilder {
     }
 
     fn set_var(
-        &self,
+        &mut self,
         id: ComponentId,
         metadata: &ComponentArrayMetadata,
         value: PyObject,
     ) -> Result<(), Error> {
-        let builder = self.builder.lock();
-        let var = builder
+        let var = self
+            .builder
             .vars
             .get(&id.inner)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
@@ -73,12 +71,12 @@ impl PipelineBuilder {
     }
 
     fn init_var(&mut self, id: ComponentId, ty: ComponentType) -> Result<(), Error> {
-        let mut builder = self.builder.lock();
         let id = id.inner;
-        if builder.param_ids.contains(&id) {
+        if self.builder.param_ids.contains(&id) {
             return Ok(());
         }
-        let column = builder
+        let column = self
+            .builder
             .world
             .column_by_id(id)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
@@ -88,23 +86,22 @@ impl PipelineBuilder {
             .chain(ty.dims().iter().copied())
             .collect();
         let op = Noxpr::parameter(
-            builder.param_ops.len() as i64,
+            self.builder.param_ops.len() as i64,
             ArrayTy {
                 element_type: ty.element_type(),
                 shape, // FIXME
             },
-            format!("{:?}::{}", id, builder.param_ops.len()),
+            format!("{:?}::{}", id, self.builder.param_ops.len()),
         );
-        builder.param_ops.push(op.clone());
-        builder.param_ids.push(id);
+        self.builder.param_ops.push(op.clone());
+        self.builder.param_ids.push(id);
 
         Ok(())
     }
 
-    fn var_arrays(&self, py: Python<'_>) -> Result<Vec<PyObject>, Error> {
-        let builder = self.builder.lock();
+    fn var_arrays(&mut self, py: Python<'_>) -> Result<Vec<PyObject>, Error> {
         let mut res = vec![];
-        for p in &builder.param_ops {
+        for p in &self.builder.param_ops {
             let NoxprNode::Param(p) = p.deref() else {
                 continue;
             };
@@ -118,14 +115,14 @@ impl PipelineBuilder {
     }
 
     fn inject_args(&mut self, args: Vec<PyObject>) -> Result<(), Error> {
-        let mut builder = self.builder.lock();
+        let builder = &mut self.builder;
         assert_eq!(args.len(), builder.param_ids.len());
         let nox_ecs::PipelineBuilder {
             vars,
             world,
             param_ids,
             ..
-        } = builder.deref_mut();
+        } = builder;
         for (arg, id) in args.into_iter().zip(param_ids.iter()) {
             let column = world
                 .column_by_id(*id)
@@ -143,18 +140,15 @@ impl PipelineBuilder {
     }
 
     fn ret_vars(&self, py: Python<'_>) -> Result<PyObject, Error> {
-        let builder = self.builder.lock();
-        let vars = builder
+        let vars = self
+            .builder
             .vars
             .values()
             .map(|var| {
                 let var = var.borrow();
-                let NoxprNode::Jax(buf) = var.buffer().deref() else {
-                    todo!()
-                };
-                buf.clone()
+                var.buffer().to_jax()
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, nox_ecs::nox::Error>>()?;
         Ok(PyTuple::new(py, vars).into())
     }
 }
@@ -400,9 +394,7 @@ impl WorldBuilder {
     pub fn build(&mut self, py: Python<'_>, sys: PyObject) -> Result<Exec, Error> {
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
-        let builder = PipelineBuilder {
-            builder: Arc::new(Mutex::new(builder)),
-        };
+        let builder = PipelineBuilder { builder };
         let py_code = "import jax
 def build_expr(builder, sys):
     sys.init(builder)
@@ -411,15 +403,15 @@ def build_expr(builder, sys):
         sys.call(builder)
         return builder.ret_vars()
     xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
-    return (builder, xla)";
+    return xla";
 
         let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
             .getattr("build_expr")?
             .into();
-        let (builder, comp) = fun
-            .call1(py, (builder, sys))?
-            .extract::<(PyObject, PyObject)>(py)?;
-        let builder = builder.extract::<PipelineBuilder>(py)?;
+        let builder = PyCell::new(py, builder)?;
+        let comp = fun
+            .call1(py, (builder.borrow_mut(), sys))?
+            .extract::<PyObject>(py)?;
         let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
         let comp = comp
             .downcast::<PyBytes>(py)
@@ -427,8 +419,8 @@ def build_expr(builder, sys):
         let comp_bytes = comp.as_bytes();
         let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let builder = std::mem::take(&mut *builder.builder.lock());
-
+        let builder = builder.replace(PipelineBuilder::default());
+        let builder = builder.builder;
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
         let exec = nox_ecs::WorldExec {
             world: SharedWorld {
@@ -448,6 +440,48 @@ def build_expr(builder, sys):
         };
 
         Ok(Exec { exec })
+    }
+}
+
+struct PySystem {
+    sys: PyObject,
+}
+
+impl System for PySystem {
+    type Arg = ();
+
+    type Ret = ();
+
+    fn init_builder(
+        &self,
+        in_builder: &mut nox_ecs::PipelineBuilder,
+    ) -> Result<(), nox_ecs::Error> {
+        let builder = std::mem::take(in_builder);
+        let builder = PipelineBuilder { builder };
+        let builder = Python::with_gil(move |py| {
+            let builder = PyCell::new(py, builder)?;
+            self.sys.call_method1(py, "init", (builder.borrow_mut(),))?;
+            Ok::<_, Error>(builder.replace(PipelineBuilder::default()))
+        })
+        .unwrap();
+        *in_builder = builder.builder;
+        Ok(())
+    }
+
+    fn add_to_builder(
+        &self,
+        in_builder: &mut nox_ecs::PipelineBuilder,
+    ) -> Result<(), nox_ecs::Error> {
+        let builder = std::mem::take(in_builder);
+        let builder = PipelineBuilder { builder };
+        let builder = Python::with_gil(move |py| {
+            let builder = PyCell::new(py, builder)?;
+            self.sys.call_method1(py, "call", (builder.borrow_mut(),))?;
+            Ok::<_, Error>(builder.replace(PipelineBuilder::default()))
+        })
+        .unwrap();
+        *in_builder = builder.builder;
+        Ok(())
     }
 }
 
@@ -621,6 +655,35 @@ impl ComponentArrayMetadata {
     }
 }
 
+#[pyclass]
+pub struct RustSystem {
+    inner: Box<dyn System<Arg = (), Ret = ()> + Send + Sync>,
+}
+
+#[pymethods]
+impl RustSystem {
+    fn init(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.inner.init_builder(&mut builder.builder)?;
+        Ok(())
+    }
+    fn call(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.inner.add_to_builder(&mut builder.builder)?;
+        Ok(())
+    }
+}
+
+#[pyfunction]
+pub fn six_dof(time_step: f64, sys: Option<PyObject>) -> RustSystem {
+    let sys: Box<dyn System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
+        let sys = nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step);
+        Box::new(ErasedSystem::new(sys))
+    } else {
+        let sys = nox_ecs::six_dof::six_dof(|| (), time_step);
+        Box::new(ErasedSystem::new(sys))
+    };
+    RustSystem { inner: sys }
+}
+
 #[pyfunction]
 // TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
 fn run_cli(_py: Python) -> PyResult<()> {
@@ -638,6 +701,13 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<EntityId>()?;
     m.add_class::<Client>()?;
     m.add_class::<ComponentArrayMetadata>()?;
+    m.add_class::<SpatialTransform>()?;
+    m.add_class::<SpatialForce>()?;
+    m.add_class::<SpatialMotion>()?;
+    m.add_class::<SpatialInertia>()?;
+    m.add_class::<Quaternion>()?;
+    m.add_class::<RustSystem>()?;
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
+    m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
 }

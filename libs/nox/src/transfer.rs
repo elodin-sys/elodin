@@ -22,6 +22,10 @@ impl<'a, A: AsBuffer> AsBuffer for &'a mut A {
     }
 }
 
+pub trait FromOp {
+    fn from_op(noxpr: Noxpr) -> Self;
+}
+
 pub trait IntoOp {
     fn into_op(self) -> Noxpr;
 }
