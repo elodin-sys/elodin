@@ -5,6 +5,7 @@ out.rrd
 .idea
 result
 result-bin
+.venv
 
 # kubernetes
 

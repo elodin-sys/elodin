@@ -591,6 +591,7 @@ pub trait System {
     type Arg;
     type Ret;
 
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
 }
 
@@ -600,6 +601,10 @@ impl<Sys: System> System for Arc<Sys> {
 
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.as_ref().add_to_builder(builder)
+    }
+
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.as_ref().init_builder(builder)
     }
 }
 
@@ -622,11 +627,13 @@ macro_rules! impl_system_param {
                 )*
                 Ok(())
             }
+
             fn from_builder(builder: &PipelineBuilder) -> Self::Item {
                 ($(
                     $ty::from_builder(builder),
                 )*)
             }
+
             fn insert_into_builder(self, builder: &mut PipelineBuilder) {
                 let ($($ty,)*) = self;
                 $(
@@ -662,10 +669,13 @@ macro_rules! impl_system_param {
             {
                 type Arg = ($($ty,)*);
                 type Ret = Ret;
-                fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+                fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
                     $(
                         $ty::init(builder)?;
                     )*
+                    Ok(())
+                }
+                fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
                     let ret = (self.func)(
                         $(
                             $ty::from_builder(builder),
@@ -704,6 +714,10 @@ where
 {
     type Arg = ();
     type Ret = Ret;
+
+    fn init_builder(&self, _: &mut PipelineBuilder) -> Result<(), Error> {
+        Ok(())
+    }
 
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         let ret = (self.func)();
@@ -754,6 +768,11 @@ impl<A: System, B: System> System for Pipe<A, B> {
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.a.add_to_builder(builder)?;
         self.b.add_to_builder(builder)
+    }
+
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.a.init_builder(builder)?;
+        self.b.init_builder(builder)
     }
 }
 
@@ -841,6 +860,7 @@ impl<S: System> SystemExt for S {
             param_ops: vec![],
             world: owned_world,
         };
+        self.init_builder(&mut builder)?;
         self.add_to_builder(&mut builder)?;
         let ret = builder
             .vars
@@ -1112,6 +1132,10 @@ impl System for () {
     fn add_to_builder(&self, _builder: &mut PipelineBuilder) -> Result<(), Error> {
         Ok(())
     }
+
+    fn init_builder(&self, _builder: &mut PipelineBuilder) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 impl SystemParam for () {
@@ -1128,7 +1152,7 @@ impl SystemParam for () {
 
 pub struct ErasedSystem<Sys, Arg, Ret> {
     system: Sys,
-    phantom: PhantomData<(Arg, Ret)>,
+    phantom: PhantomData<fn(Arg, Ret) -> ()>,
 }
 
 impl<Sys, Arg, Ret> ErasedSystem<Sys, Arg, Ret> {
@@ -1150,6 +1174,10 @@ where
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.system.add_to_builder(builder)
     }
+
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.system.init_builder(builder)
+    }
 }
 
 pub struct JoinSystem {
@@ -1162,6 +1190,13 @@ impl System for JoinSystem {
     fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         for system in &self.systems {
             system.add_to_builder(builder)?;
+        }
+        Ok(())
+    }
+
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        for system in &self.systems {
+            system.init_builder(builder)?;
         }
         Ok(())
     }
