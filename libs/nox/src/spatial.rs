@@ -4,13 +4,13 @@ use crate::Tensor;
 use crate::TensorItem;
 use crate::{Quaternion, Scalar, Vector};
 use nalgebra::Const;
-use nox_ecs_macros::{FromBuilder, IntoOp};
+use nox_ecs_macros::{FromBuilder, FromOp, IntoOp};
 use std::ops::Div;
 use std::ops::{Add, Mul};
 use xla::ArrayElement;
 use xla::NativeType;
 
-#[derive(FromBuilder, IntoOp, Clone, Debug)]
+#[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialTransform<T> {
     pub inner: Vector<T, 7>,
 }
@@ -21,6 +21,15 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
         let linear = linear.into();
         let inner = angular.0.concat(linear);
         SpatialTransform { inner }
+    }
+
+    pub fn from_angular(angular: impl Into<Quaternion<T>>) -> Self {
+        let zero = T::zero().broadcast::<Const<3>>();
+        SpatialTransform::new(angular, zero)
+    }
+
+    pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
+        SpatialTransform::new(Quaternion::identity(), linear)
     }
 
     pub fn angular(&self) -> Quaternion<T> {
@@ -42,7 +51,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform
     }
 }
 
-#[derive(FromBuilder, IntoOp, Clone, Debug)]
+#[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialForce<T> {
     pub inner: Vector<T, 6>,
 }
@@ -87,7 +96,7 @@ impl<T: Field> Add for SpatialForce<T> {
     }
 }
 
-#[derive(FromBuilder, IntoOp, Clone, Debug)]
+#[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialInertia<T> {
     pub inner: Vector<T, 7>,
 }
@@ -103,6 +112,14 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         let mass = mass.into().reshape::<Const<1>>();
         let inner = inertia.concat(momentum).concat(mass);
         SpatialInertia { inner }
+    }
+
+    pub fn from_mass(mass: impl Into<Scalar<T>>) -> Self {
+        SpatialInertia::new(
+            T::one().broadcast::<Const<3>>(),
+            Vector::zeros(),
+            mass.into(),
+        )
     }
 
     pub fn inertia_diag(&self) -> Vector<T, 3> {
@@ -139,7 +156,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul<SpatialMotion<T>>
     }
 }
 
-#[derive(FromBuilder, IntoOp, Clone, Debug)]
+#[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialMotion<T> {
     pub inner: Vector<T, 6>,
 }

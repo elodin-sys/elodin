@@ -2,7 +2,7 @@ import pytest
 import elodin
 import jax
 import jax.numpy as np
-from elodin import Component, ComponentType, system, ComponentArray, Archetype, WorldBuilder, Client, ComponentId, Query
+from elodin import Component, ComponentType, system, ComponentArray, Archetype, WorldBuilder, Client, ComponentId, Query, WorldPos, WorldAccel, WorldVel, Inertia, Force, Body, six_dof
 from dataclasses import dataclass
 
 def test_basic_system():
@@ -46,3 +46,18 @@ def test_basic_system():
     y1 = exec.column_array(ComponentId("y"))
     assert (x1 == [1000000., 15015015.]).all()
     assert (y1 == [500.0, 500.0]).all()
+
+def test_six_dof() :
+    w = WorldBuilder()
+    w.spawn(Body(
+        world_pos = WorldPos.from_linear(np.array([0.,0.,0.])),
+        world_vel = WorldVel.from_linear(np.array([1.,0.,0.])),
+        world_accel = WorldVel.from_linear(np.array([0.,0.,0.])),
+        force = Force.zero(),
+        inertia = Inertia.from_mass(1.0)
+    ))
+    client = Client.cpu()
+    exec = w.build(six_dof(1.0 / 60.0))
+    exec.run(client)
+    x = exec.column_array(ComponentId("world_pos"))
+    assert (x == [0,0,0, 1, 1.0 / 60.0, 0., 0.]).all()

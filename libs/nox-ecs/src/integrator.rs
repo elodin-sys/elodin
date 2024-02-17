@@ -60,9 +60,14 @@ where
 {
     type Arg = Pipe::Arg;
     type Ret = Pipe::Ret;
-    fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
+
+    fn init_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
+        self.pipe.init_builder(builder)?;
         Query::<U>::init(builder)?;
-        Query::<DU>::init(builder)?;
+        Query::<DU>::init(builder)
+    }
+
+    fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
         let dt = self.dt;
         let init_u = Query::<U>::from_builder(builder);
         let f = |dt: f64| {

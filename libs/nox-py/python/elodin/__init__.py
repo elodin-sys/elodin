@@ -2,6 +2,7 @@ from .elodin import *
 from typing import Protocol, Generic, TypeVar, Any, Callable, Annotated, Type, Union
 from typing_extensions import TypeVarTuple, Unpack
 from dataclasses import dataclass
+from jax.tree_util import tree_flatten, tree_unflatten
 import inspect
 import jax
 import typing
@@ -184,14 +185,33 @@ class Component:
         else:
             raise Exception("Component must be called an ID and type")
 
-
 class Archetype(Protocol):
     def archetype_id(self) -> int:
         return abs(hash(type(self).__name__))
     def component_data(self) -> list[ComponentData]:
         return [v.__metadata__[0] for v in typing.get_type_hints(self, include_extras=True).values()]
     def arrays(self) -> list[jax.Array]:
-        return [numpy.asarray(v) for (a, v) in self.__dict__.items() if not a.startswith('__') and not callable(getattr(self, a))]
+        return [numpy.asarray(tree_flatten(v)[0][0]) for (a, v) in self.__dict__.items() if not a.startswith('__') and not callable(getattr(self, a))]
+
+jax.tree_util.register_pytree_node(elodin.SpatialTransform,elodin.SpatialTransform.flatten,elodin.SpatialTransform.unflatten)
+jax.tree_util.register_pytree_node(elodin.SpatialMotion,elodin.SpatialMotion.flatten,elodin.SpatialMotion.unflatten)
+jax.tree_util.register_pytree_node(elodin.SpatialForce,elodin.SpatialForce.flatten,elodin.SpatialForce.unflatten)
+jax.tree_util.register_pytree_node(elodin.SpatialInertia,elodin.SpatialInertia.flatten,elodin.SpatialInertia.unflatten)
+jax.tree_util.register_pytree_node(elodin.Quaternion,elodin.Quaternion.flatten,elodin.Quaternion.unflatten)
+
+WorldPos = Component[SpatialTransform, "world_pos", ComponentType.SpatialPosF64]
+WorldVel = Component[SpatialMotion, "world_vel", ComponentType.SpatialMotionF64]
+WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotionF64]
+Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
+Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
+
+@dataclass
+class Body(Archetype):
+    world_pos: WorldPos
+    world_vel: WorldVel
+    world_accel: WorldAccel
+    force: Force
+    inertia: Inertia
 
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
@@ -201,3 +221,7 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
         sys.call(builder)
     xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
     return xla
+
+def dbg(x):
+    print(x)
+    return x
