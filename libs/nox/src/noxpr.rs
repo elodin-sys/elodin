@@ -497,7 +497,12 @@ impl Noxpr {
             NoxprNode::Reshape(reshape) => Some(reshape.new_sizes.clone()),
             NoxprNode::Tuple(_) => None,
             NoxprNode::Log(l) => l.shape(),
-            NoxprNode::Broadcast(b) => Some(b.sizes.clone()),
+            NoxprNode::Broadcast(b) => {
+                let in_shape = b.expr.shape()?;
+                let mut out_shape = b.sizes.clone();
+                out_shape.extend_from_slice(&in_shape);
+                Some(out_shape)
+            }
             NoxprNode::BroadcastInDim(b) => Some(b.sizes.clone()),
             NoxprNode::Transpose(t) => {
                 let shape = self.shape()?;
@@ -932,14 +937,8 @@ impl BatchedExpr {
         };
         match self.batch_axis {
             BatchAxis::NotMapped => {
-                let mut shape = self.inner.shape()?;
-                let broadcast_dims = if shape.is_empty() {
-                    smallvec![]
-                } else {
-                    smallvec![dest_axis as i64]
-                };
-                shape.insert(dest_axis, dest_size as i64);
-                let inner = self.inner.broadcast_in_dim(shape, broadcast_dims);
+                let inner = self.inner.broadcast(smallvec![dest_size as i64]);
+                // TODO: handle non zero broadcast dim
                 Some(Self {
                     inner,
                     batch_axis: dest,

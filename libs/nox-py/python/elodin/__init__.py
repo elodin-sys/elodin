@@ -92,9 +92,10 @@ class ComponentArray(Generic[T]):
 
     def map(self, f: Callable[[T], O]) -> Q:
         buf = jax.vmap(lambda b: f(self.component_data.from_expr(b)))(self.buf)
+        (bufs, _) = tree_flatten(buf)
         arr = ComponentArray[O]()
         arr.metadata = self.metadata
-        arr.buf = buf
+        arr.buf = bufs[0]
         arr.component_data = self.component_data
         return arr
     def join(self, other: Q) -> Any:
@@ -112,9 +113,10 @@ class Query(Generic[Unpack[A]]):
     component_data: list[ComponentData]
     metadata: ComponentArrayMetadata
     def map(self, out_tp: type[O], f: Callable[[*A], O]) -> Q:
-        buf = jax.vmap(lambda b: f(*[data.from_expr(x) for (x, data) in zip(b, self.component_data)]) )(self.bufs)
+        buf = jax.vmap(lambda b: f(*[data.from_expr(x) for (x, data) in zip(b, self.component_data)]), in_axes=0, out_axes=0)(self.bufs)
+        (bufs, _) = tree_flatten(buf)
         arr = ComponentArray[O]()
-        arr.buf = buf
+        arr.buf = bufs[0]
         arr.component_data = out_tp.__metadata__[0]
         arr.metadata = self.metadata
         return arr
@@ -231,7 +233,3 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
         sys.call(builder)
     xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
     return xla
-
-def dbg(x):
-    print(x)
-    return x

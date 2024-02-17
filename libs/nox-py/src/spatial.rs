@@ -1,5 +1,5 @@
 use nox_ecs::nox::{self, FromOp, IntoOp, Noxpr, Scalar, Vector};
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyTuple};
 
 use crate::Error;
 
@@ -54,6 +54,11 @@ impl SpatialTransform {
     fn asarray(&self) -> Result<PyObject, Error> {
         Ok(self.inner.clone().into_op().to_jax()?)
     }
+
+    #[getter]
+    fn shape(&self) -> PyObject {
+        Python::with_gil(|py| PyTuple::new(py, [7]).into())
+    }
 }
 
 #[pyclass]
@@ -100,6 +105,11 @@ impl SpatialMotion {
 
     fn angular(&self) -> Result<PyObject, Error> {
         Ok(self.inner.angular().into_op().to_jax()?)
+    }
+
+    #[getter]
+    fn shape(&self) -> PyObject {
+        Python::with_gil(|py| PyTuple::new(py, [6]).into())
     }
 }
 
@@ -153,6 +163,11 @@ impl SpatialForce {
     fn torque(&self) -> Result<PyObject, Error> {
         Ok(self.inner.torque().into_op().to_jax()?)
     }
+
+    #[getter]
+    fn shape(&self) -> PyObject {
+        Python::with_gil(|py| PyTuple::new(py, [6]).into())
+    }
 }
 
 #[pyclass]
@@ -188,6 +203,11 @@ impl Quaternion {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::Quaternion::from_op(Noxpr::jax(jax)).into()
+    }
+
+    #[getter]
+    fn shape(&self) -> PyObject {
+        Python::with_gil(|py| PyTuple::new(py, [4]).into())
     }
 }
 
@@ -227,5 +247,10 @@ impl SpatialInertia {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::SpatialInertia::from_op(Noxpr::jax(jax)).into()
+    }
+
+    #[getter]
+    fn shape(&self) -> PyObject {
+        Python::with_gil(|py| PyTuple::new(py, [7]).into())
     }
 }

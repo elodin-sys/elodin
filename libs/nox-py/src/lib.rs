@@ -39,9 +39,10 @@ impl PipelineBuilder {
             .get(&id.inner)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
         let var = var.borrow();
-        let NoxprNode::Jax(buf) = var.buffer().deref() else {
-            todo!()
-        };
+        // let NoxprNode::Jax(buf) = var.buffer().deref() else {
+        //     todo!()
+        // };
+        let buf = var.buffer().to_jax()?;
         let obj = Python::with_gil(|py| buf.to_object(py));
         let metadata = ComponentArrayMetadata {
             len: var.len,
