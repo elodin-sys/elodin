@@ -83,6 +83,9 @@ test_steps = [
       label = "maturin build",
       emoji = ":python:",
       command = "cd libs/nox-py && python3 -m venv .venv && maturin develop && .venv/bin/python -m pytest",
+      env = {
+        "JAX_ENABLE_X64": "true",
+      }
     )
   ]),
   group(name = ":elixir: elixir", steps = [

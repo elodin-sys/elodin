@@ -8,6 +8,13 @@ use crate::{
     BinaryOp, CompFn, Error, Field, IntoOp, Noxpr, NoxprId, NoxprNode, Scalar, Tensor, TensorItem,
 };
 
+impl Noxpr {
+    pub fn to_jax(&self) -> Result<PyObject, Error> {
+        let mut tracer = JaxTracer::new();
+        tracer.visit(self)
+    }
+}
+
 pub struct JaxTracer {
     lax: PyObject,
     jnp: PyObject,
@@ -93,7 +100,10 @@ impl JaxTracer {
                     .iter()
                     .map(|x| self.visit(x))
                     .collect::<Result<Vec<_>, _>>()?;
-                Python::with_gil(|py| self.lax.call_method1(py, "concat", (nodes, c.dimension)))?
+                Python::with_gil(|py| {
+                    self.lax
+                        .call_method1(py, "concatenate", (nodes, c.dimension))
+                })?
             }
             NoxprNode::Reshape(r) => {
                 let expr = self.visit(&r.expr)?;
