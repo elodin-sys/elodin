@@ -3,6 +3,10 @@ import jax
 import jax.numpy as np
 from elodin import Component, ComponentType, system, ComponentArray, Archetype, WorldBuilder, Client, ComponentId, Query, WorldPos, WorldAccel, WorldVel, Inertia, Force, Body, six_dof, Material, Mesh
 
+@system
+def gravity(q: Query[WorldPos, Force]) -> ComponentArray[Force]:
+  return q.map(Force, lambda p, f: Force.from_linear(np.array([0.,0.,1.])))
+
 w = WorldBuilder()
 b = Body(
     world_pos = WorldPos.from_linear(np.array([0.,0.,0.])),
@@ -15,4 +19,4 @@ b = Body(
 )
 w.spawn(b)
 client = Client.cpu()
-exec = w.run(client, six_dof(1.0 / 60.0))
+exec = w.run(client, six_dof(1.0 / 60.0, gravity))
