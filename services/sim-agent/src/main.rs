@@ -26,7 +26,11 @@ mod headless;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_target(false)
+        .init();
+
     {
         use elodin_py::elodin_py;
         pyo3::append_to_inittab!(elodin_py);
@@ -50,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(mc_agent_config) = config.monte_carlo {
         let runner = headless::Runner::new(mc_agent_config).await?;
-        tasks.spawn(runner.run().instrument(info_span!("mc_agent").or_current()));
+        tasks.spawn(runner.run().instrument(info_span!("mc").or_current()));
     }
 
     while let Some(res) = tasks.join_next().await {

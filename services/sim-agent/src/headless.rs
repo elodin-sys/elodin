@@ -77,7 +77,7 @@ impl Runner {
 
         let mut uploads = tokio::task::JoinSet::new();
         let results = tokio::task::block_in_place(|| {
-            let span = tracing::info_span!("run", %run.name);
+            let span = tracing::info_span!("run", name = %run.name);
             let _guard = span.enter();
 
             let zstd = zstd::Decoder::new(data.as_slice())?;
@@ -89,7 +89,7 @@ impl Runner {
 
             let mut results = Vec::default();
             for b in batches {
-                let span = tracing::info_span!("batch", %b.batch_no);
+                let span = tracing::info_span!("batch", no = %b.batch_no);
                 let _guard = span.enter();
 
                 let batch_exec = run_exec.fork();
@@ -98,14 +98,14 @@ impl Runner {
                 for i in 0..run.batch_size {
                     let mut sample_exec = batch_exec.fork();
                     let sample_no = b.batch_no * run.batch_size + i;
-                    let span = tracing::info_span!("sample", %sample_no);
+                    let span = tracing::info_span!("sample", no = %sample_no);
                     let _guard = span.enter();
 
                     if let Err(err) = self.run_sim(&run, &mut sample_exec) {
                         tracing::error!(?err, "simulation failed");
                         failed += 1;
                     } else {
-                        tracing::info!("simulation completed");
+                        tracing::debug!("simulation completed");
                     }
 
                     let gcs_client = self.gcs_client.clone();
@@ -115,7 +115,7 @@ impl Runner {
                         async move {
                             // TODO: if/when polars supports streaming from compressed parquet files,
                             // upload files directly instead of archiving them into a tarball
-                            tracing::debug!("generating replay archive");
+                            tracing::trace!("generating replay archive");
                             let results_dir = tempfile::tempdir()?;
                             let results_archive = tempfile::tempfile()?;
                             sample_exec.history.write_to_dir(&results_dir)?;
@@ -128,8 +128,8 @@ impl Runner {
                             results_archive.rewind()?;
                             let len = results_archive.metadata()?.len();
 
-                            tracing::debug!(file_name, len, "uploading replay archive");
-                            let object = gcs_client
+                            tracing::trace!(file_name, len, "uploading replay archive");
+                            gcs_client
                                 .upload_object(
                                     &UploadObjectRequest {
                                         bucket,
@@ -140,11 +140,7 @@ impl Runner {
                                 )
                                 .await
                                 .with_context(|| format!("gcs upload failed: {}", file_name))?;
-                            tracing::debug!(
-                                file_name,
-                                link = object.self_link,
-                                "uploaded replay archive"
-                            );
+                            tracing::trace!(file_name, "uploaded replay archive");
                             Ok::<_, anyhow::Error>(())
                         }
                         .in_current_span(),
