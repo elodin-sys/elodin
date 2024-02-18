@@ -809,6 +809,13 @@ impl Mesh {
             inner: elodin_conduit::well_known::Mesh::cuboid(x, y, z),
         }
     }
+
+    #[staticmethod]
+    pub fn sphere(radius: f32) -> Self {
+        Self {
+            inner: elodin_conduit::well_known::Mesh::sphere(radius, 36, 18),
+        }
+    }
 }
 
 #[pyclass]
