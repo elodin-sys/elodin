@@ -497,12 +497,18 @@ impl WorldBuilder {
                     Some(c) => c.client.clone(),
                     None => nox::Client::cpu()?,
                 };
+                let ppid = std::os::unix::process::parent_id();
                 spawn_tcp_server(
                     addr,
                     exec,
                     &client,
                     Duration::from_secs_f64(1.0 / 60.0),
-                    || py.check_signals().is_err(),
+                    || {
+                        let sig_err = py.check_signals().is_err();
+                        let current_ppid = std::os::unix::process::parent_id();
+                        let ppid_changed = ppid != current_ppid;
+                        sig_err || ppid_changed
+                    },
                 )?;
                 Ok(())
             }
