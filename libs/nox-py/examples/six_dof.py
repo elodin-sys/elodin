@@ -18,5 +18,4 @@ b = Body(
     material = w.insert_asset(Material.color(1.0, 1.0, 1.0))
 )
 w.spawn(b)
-client = Client.cpu()
-exec = w.run(client, six_dof(1.0 / 60.0, gravity))
+exec = w.run(six_dof(1.0 / 60.0, gravity))
