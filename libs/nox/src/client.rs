@@ -1,4 +1,5 @@
 use crate::Error;
+#[derive(Clone)]
 pub struct Client(pub xla::PjRtClient);
 
 impl Client {
