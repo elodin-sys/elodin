@@ -421,7 +421,12 @@ impl WorldBuilder {
         Handle { inner }
     }
 
-    pub fn run(&mut self, py: Python<'_>, client: &Client, sys: PyObject) -> Result<(), Error> {
+    pub fn run(
+        &mut self,
+        py: Python<'_>,
+        sys: PyObject,
+        client: Option<&Client>,
+    ) -> Result<(), Error> {
         tracing_subscriber::fmt::init();
         // skip `python3 <name of script>`
         let args = std::env::args_os().skip(2);
@@ -434,10 +439,14 @@ impl WorldBuilder {
             }
             Args::Run { addr } => {
                 let exec = self.build(py, sys)?.exec;
+                let client = match client {
+                    Some(c) => c.client.clone(),
+                    None => nox::Client::cpu()?,
+                };
                 spawn_tcp_server(
                     addr,
                     exec,
-                    &client.client,
+                    &client,
                     Duration::from_secs_f64(1.0 / 60.0),
                     || py.check_signals().is_err(),
                 )?;
