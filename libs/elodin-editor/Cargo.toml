@@ -28,8 +28,8 @@ nalgebra = "0.32"
 # bevy
 bevy.version = "0.12"
 bevy.features = ["wayland", ]
-bevy_egui = "0.23"
-bevy_panorbit_camera.version = "0.9.0"
+bevy_egui = "0.24"
+bevy_panorbit_camera.version = "0.12.1"
 bevy_panorbit_camera.features = ["bevy_egui"]
 bevy_atmosphere = "0.8.1"
 bevy_infinite_grid = "0.10.0"

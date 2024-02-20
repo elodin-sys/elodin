@@ -21,7 +21,7 @@ bevy.features = []
 
 elodin-macros.path = "../elodin-macros"
 
-rerun.version = "0.8.0"
+rerun.version = "0.13.0"
 rerun.optional = true
 
 # monte carlo
