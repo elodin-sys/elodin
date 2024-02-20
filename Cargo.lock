@@ -3834,6 +3834,7 @@ dependencies = [
  "elodin-conduit",
  "elodin-editor",
  "elodin-types",
+ "flume",
  "opener",
  "reqwest",
  "serde",

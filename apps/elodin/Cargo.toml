@@ -26,3 +26,4 @@ elodin-editor.default-features = false
 elodin-conduit.path = "../../libs/elodin-conduit"
 elodin-conduit.features = ["tokio"]
 bevy.version = "0.12"
+flume = "0.11.0"
