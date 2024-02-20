@@ -14,16 +14,15 @@ readme = "README.md"
 thiserror = "1"
 libc = "0.2"
 num-traits = "0.2"
-num-derive = "0.3"
+num-derive = "0.4"
 zip = "0.6.4"
 cpp = "0.5"
 cxx = "1.0"
 bytemuck.version = "1.14"
 bytemuck.features = ["derive"]
 
-
 [build-dependencies]
-bindgen ="0.64"
+bindgen ="0.69"
 cc = "1.0"
 reqwest.version = "0.11"
 reqwest.default-features = false
