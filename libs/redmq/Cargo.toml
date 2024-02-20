@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-redis = { version = "0.23", features = ["streams", "aio", "tokio-comp"] }
+redis = { version = "0.24", features = ["streams", "aio", "tokio-comp"] }
 tracing = "0.1"
 
 [dev-dependencies]

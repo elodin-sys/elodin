@@ -30,7 +30,7 @@ tracing-subscriber.version = "0.3"
 tracing-subscriber.features = ["env-filter"]
 
 # config
-config.version = "0.13.1"
+config.version = "0.14"
 config.features = ["toml"]
 
 # serialize
@@ -46,16 +46,16 @@ anyhow = "1"
 thiserror = "1.0"
 
 # grpc
-tonic = "0.10"
-tonic-reflection = "0.10.2"
-tonic-health = "0.10"
+tonic = "0.11"
+tonic-reflection = "0.11"
+tonic-health = "0.11"
 
 
 # http
 axum.version = "0.6.20"
 axum.features = ["ws", "headers"]
 tower.version = "0.4"
-tower-http.version = "0.4.4"
+tower-http.version = "0.5"
 tower-http.features = ["cors"]
 hyper.version = "0.14.24"
 hyper.features = ["stream"]
@@ -73,11 +73,11 @@ jsonwebtoken = "9"
 reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 
 # k8s
-kube = { version = "0.87.1", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.20.0", features = ["latest"] }
+kube = { version = "0.88", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.21", features = ["latest"] }
 
 # queue
-redis.version = "0.23"
+redis.version = "0.24"
 redis.features = ["tokio-comp", "streams", "r2d2"]
 redmq.path = "../../libs/redmq"
 

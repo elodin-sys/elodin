@@ -3,7 +3,6 @@ use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::sign::{SignedURLMethod, SignedURLOptions};
 use sea_orm::prelude::*;
-use sea_orm::DatabaseConnection;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
