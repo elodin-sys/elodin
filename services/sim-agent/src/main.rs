@@ -144,14 +144,15 @@ impl SandboxControl for ControlService {
         pyo3::prepare_freethreaded_python();
         let loaded = self.loaded.clone();
         let server_tx = self.server_tx.clone();
-        let builder = match Python::with_gil(|py| {
+        let builder_res = Python::with_gil(|py| {
             let sim = PyModule::from_code(py, &req.code, "./test.py", "./")?;
             let callable = sim.getattr("sim")?;
             let builder = callable.call0()?;
             let builder: SimBuilder = builder.extract().unwrap();
 
             pyo3::PyResult::Ok(builder.0)
-        }) {
+        });
+        let builder = match builder_res {
             Ok(builder) => builder,
             Err(e) => {
                 let err = Python::with_gil(|py| {
