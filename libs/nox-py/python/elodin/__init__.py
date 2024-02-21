@@ -167,7 +167,7 @@ class FromArray(Protocol):
 class Component:
     def __class_getitem__(cls, params):
         def parse_id(id):
-            if isinstance(id, str):
+            if isinstance(id, str) or isinstance(id, int):
                 return ComponentId(id)
             else:
                 return id
@@ -212,8 +212,8 @@ WorldVel = Component[SpatialMotion, "world_vel", ComponentType.SpatialMotionF64]
 WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotionF64]
 Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
 Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
-MeshAsset = Component[Handle, "mesh", ComponentType.U64, True]
-MaterialAsset = Component[Handle, "material", ComponentType.U64, True]
+MeshAsset = Component[Handle, 2241, ComponentType.U64, True]
+MaterialAsset = Component[Handle, 2242, ComponentType.U64, True]
 
 @dataclass
 class Body(Archetype):
