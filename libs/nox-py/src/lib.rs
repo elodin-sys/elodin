@@ -9,12 +9,13 @@ use std::{
 
 use clap::Parser;
 use nox_ecs::{
-    elodin_conduit, join_many,
+    elodin_conduit::{self},
+    join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedComponent, ErasedSystem, HostColumn,
-    HostStore, Query, SharedWorld, System, Table, World,
+    spawn_tcp_server, ArchetypeId, Asset, ComponentArray, ErasedSystem, HostColumn, HostStore,
+    Query, SharedWorld, System, Table, World,
 };
-use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
+use numpy::{ndarray::ArrayViewD, PyArray, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -92,12 +93,12 @@ impl PipelineBuilder {
         let ty: elodin_conduit::ComponentType = ty.into();
         let len = column.column.buffer.len();
         let shape = std::iter::once(len as i64)
-            .chain(ty.dims().iter().copied())
+            .chain(ty.shape.iter().map(|x| *x as i64))
             .collect();
         let op = Noxpr::parameter(
             self.builder.param_ops.len() as i64,
             ArrayTy {
-                element_type: ty.element_type(),
+                element_type: ty.primitive_ty.element_type(),
                 shape, // FIXME
             },
             format!("{:?}::{}", id, self.builder.param_ops.len()),
@@ -171,76 +172,124 @@ pub struct ComponentId {
 #[pymethods]
 impl ComponentId {
     #[new]
-    fn new(string: String) -> Self {
-        Self {
-            inner: nox_ecs::ComponentId::new(&string),
+    fn new(py: Python<'_>, inner: PyObject) -> Result<Self, Error> {
+        if let Ok(s) = inner.extract::<String>(py) {
+            Ok(Self {
+                inner: nox_ecs::ComponentId::new(&s),
+            })
+        } else if let Ok(s) = inner.extract::<u64>(py) {
+            Ok(Self {
+                inner: nox_ecs::ComponentId(s),
+            })
+        } else {
+            Err(Error::UnexpectedInput)
         }
     }
 }
 
 #[pyclass]
-#[derive(Clone, Copy)]
-pub enum ComponentType {
-    // Primatives
-    U8 = 0,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
-    Bool,
-    F32,
-    F64,
+#[derive(Clone, Debug)]
+pub struct ComponentType {
+    #[pyo3(get, set)]
+    pub ty: PrimitiveType,
+    #[pyo3(get, set)]
+    pub shape: Py<PyArray1<usize>>,
+}
 
-    // Variable Size
-    String,
-    Bytes,
+#[pymethods]
+impl ComponentType {
+    #[new]
+    fn new(ty: PrimitiveType, shape: numpy::PyArrayLike1<usize>) -> Self {
+        let py_readonly: &PyReadonlyArray1<usize> = shape.deref();
+        let py_array: &PyArray1<usize> = py_readonly.deref();
+        let shape = py_array.to_owned();
+        Self { ty, shape }
+    }
 
-    // Tensors
-    Vector3F32,
-    Vector3F64,
-    Matrix3x3F32,
-    Matrix3x3F64,
-    QuaternionF32,
-    QuaternionF64,
-    SpatialPosF32,
-    SpatialPosF64,
-    SpatialMotionF32,
-    SpatialMotionF64,
+    #[classattr]
+    #[pyo3(name = "SpatialPosF64")]
+    fn spatial_pos_f64(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![7]).to_owned();
+        Self {
+            ty: PrimitiveType::F64,
+            shape,
+        }
+    }
 
-    // Msgs
-    Filter,
+    #[classattr]
+    #[pyo3(name = "SpatialMotionF64")]
+    fn spatial_motion_f64(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![6]).to_owned();
+        Self {
+            ty: PrimitiveType::F64,
+            shape,
+        }
+    }
+
+    #[classattr]
+    #[pyo3(name = "U64")]
+    fn u64(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+        Self {
+            ty: PrimitiveType::U64,
+            shape,
+        }
+    }
+
+    #[classattr]
+    #[pyo3(name = "F32")]
+    fn f32(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+        Self {
+            ty: PrimitiveType::F32,
+            shape,
+        }
+    }
 }
 
 impl From<ComponentType> for elodin_conduit::ComponentType {
     fn from(val: ComponentType) -> Self {
+        Python::with_gil(|py| {
+            let shape = val.shape.as_ref(py);
+            let shape = shape.to_vec().unwrap().into();
+            elodin_conduit::ComponentType {
+                primitive_ty: val.ty.into(),
+                shape,
+            }
+        })
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimitiveType {
+    F64,
+    F32,
+    U64,
+    U32,
+    U16,
+    U8,
+    I64,
+    I32,
+    I16,
+    I8,
+    Bool,
+}
+
+impl From<PrimitiveType> for elodin_conduit::PrimitiveTy {
+    fn from(val: PrimitiveType) -> Self {
         match val {
-            ComponentType::U8 => elodin_conduit::ComponentType::U8,
-            ComponentType::U16 => elodin_conduit::ComponentType::U16,
-            ComponentType::U32 => elodin_conduit::ComponentType::U32,
-            ComponentType::U64 => elodin_conduit::ComponentType::U64,
-            ComponentType::I8 => elodin_conduit::ComponentType::I8,
-            ComponentType::I16 => elodin_conduit::ComponentType::I16,
-            ComponentType::I32 => elodin_conduit::ComponentType::I32,
-            ComponentType::I64 => elodin_conduit::ComponentType::I64,
-            ComponentType::Bool => elodin_conduit::ComponentType::Bool,
-            ComponentType::F32 => elodin_conduit::ComponentType::F32,
-            ComponentType::F64 => elodin_conduit::ComponentType::F64,
-            ComponentType::String => elodin_conduit::ComponentType::String,
-            ComponentType::Bytes => elodin_conduit::ComponentType::Bytes,
-            ComponentType::Vector3F32 => elodin_conduit::ComponentType::Vector3F32,
-            ComponentType::Vector3F64 => elodin_conduit::ComponentType::Vector3F64,
-            ComponentType::Matrix3x3F32 => elodin_conduit::ComponentType::Matrix3x3F32,
-            ComponentType::Matrix3x3F64 => elodin_conduit::ComponentType::Matrix3x3F64,
-            ComponentType::QuaternionF32 => elodin_conduit::ComponentType::QuaternionF32,
-            ComponentType::QuaternionF64 => elodin_conduit::ComponentType::QuaternionF64,
-            ComponentType::SpatialPosF32 => elodin_conduit::ComponentType::SpatialPosF32,
-            ComponentType::SpatialPosF64 => elodin_conduit::ComponentType::SpatialPosF64,
-            ComponentType::SpatialMotionF32 => elodin_conduit::ComponentType::SpatialMotionF32,
-            ComponentType::SpatialMotionF64 => elodin_conduit::ComponentType::SpatialMotionF64,
-            ComponentType::Filter => elodin_conduit::ComponentType::Filter,
+            PrimitiveType::F64 => elodin_conduit::PrimitiveTy::F64,
+            PrimitiveType::F32 => elodin_conduit::PrimitiveTy::F32,
+            PrimitiveType::U64 => elodin_conduit::PrimitiveTy::U64,
+            PrimitiveType::U32 => elodin_conduit::PrimitiveTy::U32,
+            PrimitiveType::U16 => elodin_conduit::PrimitiveTy::U16,
+            PrimitiveType::U8 => elodin_conduit::PrimitiveTy::U8,
+            PrimitiveType::I64 => elodin_conduit::PrimitiveTy::I64,
+            PrimitiveType::I32 => elodin_conduit::PrimitiveTy::I32,
+            PrimitiveType::I16 => elodin_conduit::PrimitiveTy::I16,
+            PrimitiveType::I8 => elodin_conduit::PrimitiveTy::I8,
+            PrimitiveType::Bool => elodin_conduit::PrimitiveTy::Bool,
         }
     }
 }
@@ -297,7 +346,7 @@ impl WorldBuilder {
                 let table = Table {
                     columns,
                     entity_buffer: HostColumn::new(
-                        elodin_conduit::ComponentType::U64,
+                        elodin_conduit::ComponentType::u64(),
                         nox_ecs::ComponentId::new("entity_id"),
                     ),
                     entity_map: BTreeMap::default(),
@@ -308,40 +357,42 @@ impl WorldBuilder {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct PyBufBytes {
+    bytes: bytes::Bytes,
+}
+
 pub struct PyAsset {
     object: PyObject,
 }
 
 impl PyAsset {
     pub fn try_new(py: Python<'_>, object: PyObject) -> Result<Self, Error> {
-        let _ = object.getattr(py, "component_id")?;
-        let _ = object.getattr(py, "component_value")?;
+        let _ = object.getattr(py, "asset_id")?;
+        let _ = object.getattr(py, "bytes")?;
         Ok(Self { object })
     }
 }
 
-impl ErasedComponent for PyAsset {
-    fn component_id(&self) -> nox_ecs::ComponentId {
+impl PyAsset {
+    fn asset_id(&self) -> elodin_conduit::AssetId {
         Python::with_gil(|py| {
-            let id: ComponentId = self
+            let id: u64 = self
                 .object
-                .call_method0(py, "component_id")
+                .call_method0(py, "asset_id")
                 .unwrap()
                 .extract(py)
                 .unwrap();
-            id.inner
+            elodin_conduit::AssetId(id)
         })
     }
 
-    fn component_value(&self) -> elodin_conduit::ComponentValue<'_> {
-        let val: ComponentValue = Python::with_gil(|py| {
-            self.object
-                .call_method0(py, "component_value")
-                .unwrap()
-                .extract(py)
-                .unwrap()
-        });
-        val.inner
+    fn bytes(&self) -> Result<bytes::Bytes, Error> {
+        Python::with_gil(|py| {
+            let bytes: PyBufBytes = self.object.call_method0(py, "bytes")?.extract(py)?;
+            Ok(bytes.bytes)
+        })
     }
 }
 
@@ -401,7 +452,7 @@ impl WorldBuilder {
                 .get_mut(&id)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
             let ty = col.buffer.component_type();
-            let size = ty.element_type().element_size_in_bytes();
+            let size = ty.primitive_ty.element_type().element_size_in_bytes();
             let buf = unsafe {
                 if !arr.is_c_contiguous() {
                     panic!("array must be c-style contiguous")
@@ -415,10 +466,13 @@ impl WorldBuilder {
         Ok(EntityId { inner: entity_id })
     }
 
-    fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Handle {
+    fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
         let asset = PyAsset::try_new(py, asset).unwrap();
-        let inner = self.world.assets.insert_erased(asset);
-        Handle { inner }
+        let inner = self
+            .world
+            .assets
+            .insert_bytes(asset.asset_id(), asset.bytes()?);
+        Ok(Handle { inner })
     }
 
     pub fn run(
@@ -759,11 +813,11 @@ pub struct Handle {
 #[pymethods]
 impl Handle {
     fn asarray(&self) -> Result<PyObject, Error> {
-        Ok(nox::NoxprScalarExt::constant(self.inner.id).to_jax()?)
+        Ok(nox::NoxprScalarExt::constant(self.inner.id.0).to_jax()?)
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
-        let jax = nox::NoxprScalarExt::constant(self.inner.id).to_jax()?;
+        let jax = nox::NoxprScalarExt::constant(self.inner.id.0).to_jax()?;
         Ok(((jax,), None))
     }
 
@@ -780,27 +834,19 @@ impl Handle {
 
 #[pyclass]
 #[derive(Clone)]
-pub struct ComponentValue {
-    inner: elodin_conduit::ComponentValue<'static>,
-}
-
-#[pyclass]
 pub struct Mesh {
     inner: elodin_conduit::well_known::Mesh,
 }
 
 #[pymethods]
 impl Mesh {
-    fn component_id(&self) -> ComponentId {
-        ComponentId {
-            inner: self.inner.component_id(),
-        }
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
     }
 
-    fn component_value(&self) -> ComponentValue {
-        ComponentValue {
-            inner: self.inner.component_value().into_owned(),
-        }
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
     }
 
     #[staticmethod]
@@ -825,16 +871,13 @@ pub struct Material {
 
 #[pymethods]
 impl Material {
-    fn component_id(&self) -> ComponentId {
-        ComponentId {
-            inner: self.inner.component_id(),
-        }
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
     }
 
-    fn component_value(&self) -> ComponentValue {
-        ComponentValue {
-            inner: self.inner.component_value().into_owned(),
-        }
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
     }
 
     #[staticmethod]
@@ -857,7 +900,6 @@ fn run_cli(_py: Python) -> PyResult<()> {
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
     m.add_class::<ComponentId>()?;
-    m.add_class::<ComponentValue>()?;
     m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;
     m.add_class::<EntityId>()?;
