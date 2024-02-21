@@ -2,7 +2,7 @@ use arrow::array::{ArrayData, LargeListArray, ListArray, MapArray, StructArray, 
 use arrow::datatypes::{Field, Schema};
 use arrow::ffi::FFI_ArrowArray;
 use arrow::record_batch::RecordBatch;
-use elodin_conduit::{ComponentId, ComponentType, EntityId};
+use elodin_conduit::{ComponentId, ComponentType, EntityId, PrimitiveTy};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use polars::prelude::SerReader;
@@ -159,7 +159,7 @@ impl Table<HostStore> {
             .zip(df.iter().filter(|s| s.name() != entity_id_string))
             .map(|(metadata, series)| {
                 let component_id = metadata.component_id;
-                let component_type = metadata.component_type;
+                let component_type = metadata.component_type.clone();
                 let asset = metadata.asset;
                 let buffer = HostColumn::from_series(series, component_type, asset)?;
                 let column = Column { buffer };
@@ -169,7 +169,7 @@ impl Table<HostStore> {
         let column = df
             .column(&entity_id_string)
             .map_err(|_| Error::ComponentNotFound)?;
-        let entity_buffer = HostColumn::from_series(column, ComponentType::U64, false)?;
+        let entity_buffer = HostColumn::from_series(column, ComponentType::u64(), false)?;
 
         Ok(Self {
             columns,
@@ -184,7 +184,7 @@ impl Table<HostStore> {
             .values()
             .map(|c| ColumnMetadata {
                 component_id: c.buffer.component_id,
-                component_type: c.buffer.component_type,
+                component_type: c.buffer.component_type.clone(),
                 asset: c.buffer.asset,
             })
             .collect();
@@ -228,71 +228,18 @@ impl HostColumn {
     }
 
     pub fn to_series(&self) -> Result<Series, Error> {
-        let array: Box<dyn Array> = match self.component_type {
-            elodin_conduit::ComponentType::U8 => self.prim_array::<u8>(),
-            elodin_conduit::ComponentType::U16 => self.prim_array::<u16>(),
-            elodin_conduit::ComponentType::U32 => self.prim_array::<u32>(),
-            elodin_conduit::ComponentType::U64 => self.prim_array::<u64>(),
-            elodin_conduit::ComponentType::I8 => self.prim_array::<i8>(),
-            elodin_conduit::ComponentType::I16 => self.prim_array::<i16>(),
-            elodin_conduit::ComponentType::I32 => self.prim_array::<i32>(),
-            elodin_conduit::ComponentType::I64 => self.prim_array::<i64>(),
-            elodin_conduit::ComponentType::F32 => self.prim_array::<f32>(),
-            elodin_conduit::ComponentType::F64 => self.prim_array::<f64>(),
-            elodin_conduit::ComponentType::Vector3F32 => Box::new(tensor_array(
-                ArrowDataType::Float32,
-                self.prim_array::<f32>(),
-                &[3],
-            )),
-            elodin_conduit::ComponentType::Vector3F64 => Box::new(tensor_array(
-                ArrowDataType::Float64,
-                self.prim_array::<f64>(),
-                &[3],
-            )),
-            elodin_conduit::ComponentType::Matrix3x3F32 => Box::new(tensor_array(
-                ArrowDataType::Float32,
-                self.prim_array::<f32>(),
-                &[3, 3],
-            )),
-            elodin_conduit::ComponentType::Matrix3x3F64 => Box::new(tensor_array(
-                ArrowDataType::Float64,
-                self.prim_array::<f64>(),
-                &[3, 3],
-            )),
-            elodin_conduit::ComponentType::QuaternionF32 => Box::new(tensor_array(
-                ArrowDataType::Float32,
-                self.prim_array::<f32>(),
-                &[4],
-            )),
-            elodin_conduit::ComponentType::QuaternionF64 => Box::new(tensor_array(
-                ArrowDataType::Float64,
-                self.prim_array::<f64>(),
-                &[4],
-            )),
-            elodin_conduit::ComponentType::SpatialPosF32 => Box::new(tensor_array(
-                ArrowDataType::Float32,
-                self.prim_array::<f32>(),
-                &[7],
-            )),
-            elodin_conduit::ComponentType::SpatialPosF64 => Box::new(tensor_array(
-                ArrowDataType::Float64,
-                self.prim_array::<f64>(),
-                &[7],
-            )),
-            elodin_conduit::ComponentType::SpatialMotionF32 => Box::new(tensor_array(
-                ArrowDataType::Float32,
-                self.prim_array::<f32>(),
-                &[6],
-            )),
-            elodin_conduit::ComponentType::SpatialMotionF64 => Box::new(tensor_array(
-                ArrowDataType::Float64,
-                self.prim_array::<f64>(),
-                &[6],
-            )),
-            elodin_conduit::ComponentType::Filter => todo!(),
-            elodin_conduit::ComponentType::Bool => todo!(),
-            elodin_conduit::ComponentType::String => todo!(),
-            elodin_conduit::ComponentType::Bytes => todo!(),
+        let array = match self.component_type.primitive_ty {
+            PrimitiveTy::F64 => tensor_array(&self.component_type, self.prim_array::<f64>()),
+            PrimitiveTy::F32 => tensor_array(&self.component_type, self.prim_array::<f32>()),
+            PrimitiveTy::U64 => tensor_array(&self.component_type, self.prim_array::<u64>()),
+            PrimitiveTy::U32 => tensor_array(&self.component_type, self.prim_array::<u32>()),
+            PrimitiveTy::U16 => tensor_array(&self.component_type, self.prim_array::<u16>()),
+            PrimitiveTy::U8 => tensor_array(&self.component_type, self.prim_array::<u8>()),
+            PrimitiveTy::I64 => tensor_array(&self.component_type, self.prim_array::<i64>()),
+            PrimitiveTy::I32 => tensor_array(&self.component_type, self.prim_array::<i32>()),
+            PrimitiveTy::I16 => tensor_array(&self.component_type, self.prim_array::<i16>()),
+            PrimitiveTy::I8 => tensor_array(&self.component_type, self.prim_array::<i8>()),
+            PrimitiveTy::Bool => todo!(),
         };
         Series::from_arrow(&self.component_id.0.to_string(), array).map_err(Error::from)
     }
@@ -304,18 +251,36 @@ impl HostColumn {
     }
 }
 
-fn tensor_array(
-    data_type: ArrowDataType,
-    inner: Box<dyn Array>,
-    shape: &[usize],
-) -> polars_arrow::array::FixedSizeListArray {
+fn arrow_data_type(ty: PrimitiveTy) -> ArrowDataType {
+    match ty {
+        PrimitiveTy::U8 => ArrowDataType::UInt8,
+        PrimitiveTy::U16 => ArrowDataType::UInt16,
+        PrimitiveTy::U32 => ArrowDataType::UInt32,
+        PrimitiveTy::U64 => ArrowDataType::UInt64,
+        PrimitiveTy::I8 => ArrowDataType::Int8,
+        PrimitiveTy::I16 => ArrowDataType::Int16,
+        PrimitiveTy::I32 => ArrowDataType::Int32,
+        PrimitiveTy::I64 => ArrowDataType::Int64,
+        PrimitiveTy::F32 => ArrowDataType::Float32,
+        PrimitiveTy::F64 => ArrowDataType::Float64,
+        PrimitiveTy::Bool => ArrowDataType::Boolean,
+    }
+}
+
+fn tensor_array(ty: &ComponentType, inner: Box<dyn Array>) -> Box<dyn Array> {
+    let data_type = arrow_data_type(ty.primitive_ty);
+    if ty.shape.is_empty() {
+        return inner;
+    }
     let data_type = ArrowDataType::FixedSizeList(
         Box::new(polars_arrow::datatypes::Field::new(
             "inner", data_type, false,
         )),
-        shape.iter().product::<usize>(),
+        ty.shape.iter().product::<usize>(),
     );
-    polars_arrow::array::FixedSizeListArray::new(data_type, inner, None)
+    Box::new(polars_arrow::array::FixedSizeListArray::new(
+        data_type, inner, None,
+    ))
     // let metadata = HashMap::from_iter([(
     //     "ARROW:extension:metadata".to_string(),
     //     format!("{{ \"shape\": {:?} }}", shape),

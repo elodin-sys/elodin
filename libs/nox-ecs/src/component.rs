@@ -1,5 +1,8 @@
-use elodin_conduit::{ComponentId, ComponentType};
-use nox::{nalgebra, IntoOp, Scalar, ScalarExt};
+use elodin_conduit::{ComponentId, ComponentType, PrimitiveTy};
+use nox::{IntoOp, Scalar, ScalarExt};
+
+use nox_ecs_macros::Component;
+use smallvec::smallvec;
 
 pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
     type Inner;
@@ -46,33 +49,8 @@ impl_scalar_primitive!(i64);
 impl_scalar_primitive!(i32);
 impl_scalar_primitive!(i16);
 
-macro_rules! impl_ty {
-    ($host_ty:ty, $nox_ty:ty, $comp_ty:expr) => {
-        impl Component for $nox_ty {
-            type Inner = Self;
-            type HostTy = $host_ty;
-
-            fn host(val: Self::HostTy) -> Self {
-                use nox::ConstantExt;
-                val.constant()
-            }
-
-            fn component_id() -> ComponentId {
-                elodin_conduit::ComponentId::new(stringify!($nox_ty))
-            }
-
-            fn component_type() -> ComponentType {
-                $comp_ty
-            }
-        }
-    };
-}
-
-impl_ty!(nalgebra::Vector3<f64>, nox::Vector<f64, 3>, ComponentType::Vector3F64);
-impl_ty!(nalgebra::Vector3<f32>, nox::Vector<f32, 3>, ComponentType::Vector3F32);
-
 macro_rules! impl_spatial_ty {
-    ($nox_ty:ty, $comp_ty:expr, $name: tt) => {
+    ($nox_ty:ty, $prim_ty:expr, $shape:expr, $name: tt) => {
         impl Component for $nox_ty {
             type Inner = Self;
             type HostTy = Self;
@@ -86,7 +64,10 @@ macro_rules! impl_spatial_ty {
             }
 
             fn component_type() -> ComponentType {
-                $comp_ty
+                ComponentType {
+                    primitive_ty: $prim_ty,
+                    shape: $shape,
+                }
             }
         }
     };
@@ -94,24 +75,31 @@ macro_rules! impl_spatial_ty {
 
 impl_spatial_ty!(
     nox::SpatialTransform::<f64>,
-    ComponentType::SpatialPosF64,
+    PrimitiveTy::F64,
+    smallvec![7],
     "spatial_transform_f64"
 );
 
 impl_spatial_ty!(
     nox::SpatialMotion::<f64>,
-    ComponentType::SpatialMotionF64,
-    "spatial_transform_f64"
+    PrimitiveTy::F64,
+    smallvec![6],
+    "spatial_motion_f64"
 );
 
 impl_spatial_ty!(
     nox::SpatialInertia::<f64>,
-    ComponentType::SpatialPosF64, //NOTE This is a lie, and needs to be fixed
+    PrimitiveTy::F64,
+    smallvec![7],
     "spatial_inertia_f64"
 );
 
 impl_spatial_ty!(
     nox::SpatialForce::<f64>,
-    ComponentType::SpatialMotionF64, //NOTE This is a lie, and needs to be fixed
-    "spatial_inertia_f64"
+    PrimitiveTy::F64,
+    smallvec![6],
+    "spatial_force_f64"
 );
+
+#[derive(Component)]
+pub struct WorldPos(pub nox::SpatialTransform<f64>);

@@ -17,10 +17,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-pub use elodin_conduit::ComponentType;
-
 pub use elodin_conduit;
-pub use elodin_conduit::ComponentId;
+pub use elodin_conduit::{Asset, ComponentId, ComponentType};
 pub use nox;
 
 mod assets;
@@ -166,7 +164,8 @@ impl<S: WorldStore> World<S> {
         })
     }
 
-    pub fn insert_asset<C: elodin_conduit::Component + Send + Sync + 'static>(
+    pub fn insert_asset<C: Asset + Send + Sync + 'static>(
+        //
         &mut self,
         asset: C,
     ) -> Handle<C> {
@@ -186,7 +185,7 @@ impl World<HostStore> {
                     (
                         *id,
                         Column {
-                            buffer: HostColumn::new(*ty, *id),
+                            buffer: HostColumn::new(ty.clone(), *id),
                         },
                     )
                 })
@@ -196,7 +195,7 @@ impl World<HostStore> {
             }
             Table {
                 columns,
-                entity_buffer: HostColumn::new(ComponentType::U64, ComponentId::new("entity_id")),
+                entity_buffer: HostColumn::new(ComponentType::u64(), ComponentId::new("entity_id")),
                 entity_map: BTreeMap::default(),
             }
         })
@@ -371,7 +370,7 @@ pub struct ColumnRefMut<'a, S: WorldStore = HostStore> {
 impl ColumnRefMut<'_, HostStore> {
     pub fn entity_buf(&mut self, entity_id: EntityId) -> Option<&mut [u8]> {
         let offset = self.entity_map.get(&entity_id)?;
-        let size = self.column.buffer.component_type.size()?;
+        let size = self.column.buffer.component_type.size();
         let offset = *offset * size;
         self.column.buffer.buf.get_mut(offset..offset + size)
     }
@@ -475,15 +474,11 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
             .column_mut::<T>()
             .ok_or(Error::ComponentNotFound)?;
         let len = column.column.buffer.len();
-        let shape = std::iter::once(len as i64)
-            .chain(T::component_type().dims().iter().copied())
-            .collect();
+        let mut ty: ArrayTy = T::component_type().into();
+        ty.shape.insert(0, len as i64);
         let op = Noxpr::parameter(
             builder.param_ops.len() as i64,
-            ArrayTy {
-                element_type: T::component_type().element_type(),
-                shape, // FIXME
-            },
+            ty,
             format!(
                 "{}::{}",
                 std::any::type_name::<T>(),
@@ -1250,8 +1245,8 @@ pub enum Error {
     AssetNotFound,
     #[error("channel closed")]
     ChannelClosed,
-    #[error("invalid filter")]
-    InvalidFilter,
+    #[error("invalid query")]
+    InvalidQuery,
     #[error("entity not found")]
     EntityNotFound,
     #[error("io {0}")]

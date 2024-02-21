@@ -57,11 +57,15 @@ impl HostColumn {
 
     pub fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
         let mut dims: heapless::Vec<usize, 3> = heapless::Vec::default();
-        dims.extend(self.component_type.dims().iter().map(|d| *d as usize));
+        dims.extend(self.component_type.shape.iter().copied());
         dims.push(self.len).unwrap();
         client
             .0
-            .copy_raw_host_buffer(self.component_type.element_type(), &self.buf, &dims[..])
+            .copy_raw_host_buffer(
+                self.component_type.primitive_ty.element_type(),
+                &self.buf,
+                &dims[..],
+            )
             .map_err(Error::from)
     }
 
@@ -69,7 +73,7 @@ impl HostColumn {
         let mut buf_offset = 0;
         std::iter::from_fn(move || {
             let buf = self.buf.get(buf_offset..)?;
-            let (offset, value) = self.component_type.parse(buf)?;
+            let (offset, value) = self.component_type.parse_value(buf).ok()?;
             buf_offset += offset;
             Some(value)
         })
@@ -82,7 +86,7 @@ impl HostColumn {
     }
 
     pub fn component_type(&self) -> ComponentType {
-        self.component_type
+        self.component_type.clone()
     }
 
     pub fn raw_buf(&self) -> &[u8] {
@@ -90,7 +94,7 @@ impl HostColumn {
     }
 
     pub fn typed_buf<T: ArrayElement + Pod>(&self) -> Option<&[T]> {
-        if self.component_type.element_type() != T::TY {
+        if self.component_type.primitive_ty.element_type() != T::TY {
             return None;
         }
         bytemuck::try_cast_slice(self.buf.as_slice()).ok()
@@ -98,14 +102,14 @@ impl HostColumn {
 
     pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
         let shape: SmallVec<[usize; 4]> = std::iter::once(self.len)
-            .chain(self.component_type.dims().iter().map(|x| *x as usize))
+            .chain(self.component_type.shape.iter().copied())
             .collect();
         let buf = self.typed_buf::<T>()?;
         ndarray::ArrayViewD::from_shape(&shape[..], buf).ok()
     }
 
     pub fn dyn_ndarray(&self) -> Option<DynArrayView<'_>> {
-        let elem_type = self.component_type.element_type();
+        let elem_type = self.component_type.primitive_ty.element_type();
         match elem_type {
             nox::xla::ElementType::Pred => {
                 todo!()
