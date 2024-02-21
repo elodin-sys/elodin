@@ -5,6 +5,7 @@ use tokio::net::TcpStream;
 use crate::Cli;
 use bevy::{prelude::*, utils::tracing};
 use elodin_conduit::{client::MsgPair, server::handle_socket};
+use notify::Watcher;
 
 #[derive(clap::Args, Clone)]
 pub struct Args {
@@ -92,12 +93,41 @@ impl Plugin for SimClient {
 
 impl Plugin for SimSupervisor {
     fn build(&self, _: &mut App) {
-        let Some(path) = &self.path else { return };
-        std::process::Command::new("python3")
-            .arg(path)
-            .arg("--")
-            .arg("run")
-            .spawn()
-            .unwrap();
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        std::thread::spawn(move || {
+            if let Err(err) = Self::run(path) {
+                tracing::error!(?err);
+            }
+        });
+    }
+}
+
+impl SimSupervisor {
+    fn run(path: PathBuf) -> anyhow::Result<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    tracing::debug!(?event, "received notify");
+                    let _ = tx.send(());
+                }
+            })?;
+        watcher.watch(&path, notify::RecursiveMode::NonRecursive)?;
+        loop {
+            let mut sim = std::process::Command::new("python3")
+                .arg(&path)
+                .arg("--")
+                .arg("run")
+                .spawn()?;
+            while rx.try_recv().is_ok() {}
+            if rx.recv().is_err() {
+                break;
+            }
+            println!("{} was updated, restarting sim ...", path.display());
+            sim.kill()?;
+        }
+        Ok(())
     }
 }
