@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use tokio::net::TcpStream;
 
 use crate::Cli;
@@ -7,7 +8,25 @@ use elodin_conduit::{client::MsgPair, server::handle_socket};
 
 #[derive(clap::Args, Clone)]
 pub struct Args {
-    addr: SocketAddr,
+    #[clap(name = "addr/path")]
+    sim: Simulator,
+}
+
+#[derive(Clone)]
+enum Simulator {
+    Addr(SocketAddr),
+    File(PathBuf),
+}
+
+impl std::str::FromStr for Simulator {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        if let Ok(addr) = s.parse() {
+            Ok(Self::Addr(addr))
+        } else {
+            Ok(Self::File(s.into()))
+        }
+    }
 }
 
 impl Cli {
@@ -17,12 +36,15 @@ impl Cli {
         use elodin_editor::EditorPlugin;
         let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
 
+        let (addr, path) = match args.sim {
+            Simulator::Addr(addr) => (addr, None),
+            Simulator::File(path) => ("127.0.0.1:2240".parse()?, Some(path)),
+        };
+
         App::new()
-            .add_plugins(SimClient {
-                addr: args.addr,
-                bevy_tx,
-            })
             .add_plugins(EditorPlugin)
+            .add_plugins(SimClient { addr, bevy_tx })
+            .add_plugins(SimSupervisor { path })
             .add_plugins(SyncPlugin {
                 plugin: sub,
                 subscriptions: Subscriptions::default(),
@@ -37,6 +59,11 @@ impl Cli {
 struct SimClient {
     addr: SocketAddr,
     bevy_tx: flume::Sender<MsgPair>,
+}
+
+#[derive(Clone)]
+struct SimSupervisor {
+    path: Option<PathBuf>,
 }
 
 impl Plugin for SimClient {
@@ -60,5 +87,17 @@ impl Plugin for SimClient {
                 }
             });
         });
+    }
+}
+
+impl Plugin for SimSupervisor {
+    fn build(&self, _: &mut App) {
+        let Some(path) = &self.path else { return };
+        std::process::Command::new("python3")
+            .arg(path)
+            .arg("--")
+            .arg("run")
+            .spawn()
+            .unwrap();
     }
 }
