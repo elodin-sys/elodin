@@ -1,58 +1,44 @@
 use crate::{assets::Handle, Error, WorldExec};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use elodin_conduit::{
-    bevy_sync::DEFAULT_SUB_FILTERS,
-    builder::{encode_varint_usize, Builder},
-    parser::{varint_max, ComponentPair, Parser},
-    ComponentId, ComponentType, ComponentValue,
+    client::{Msg, MsgPair},
+    query::{MetadataStore, QueryId},
+    ser_de::ColumnValue,
+    AssetId, ColumnPayload, ComponentId, ControlMsg, EntityId, Metadata, Packet, Payload, StreamId,
 };
-use nox::{FromBuilder, IntoOp};
-use std::collections::BTreeMap;
+use tracing::warn;
+
+use std::collections::{BTreeMap, HashMap};
 
 struct ConnectionId(usize);
 
 struct Subscription {
+    stream_id: StreamId,
     connection_id: ConnectionId,
     sent_generation: usize,
 }
 
 pub struct ConduitExec {
     subscriptions: BTreeMap<ComponentId, Vec<Subscription>>,
-    connections: Vec<Sender>,
-    rx: flume::Receiver<RecvMsg>,
+    connections: Vec<flume::Sender<Packet<Payload<Bytes>>>>,
+    metadata_store: MetadataStore,
+    rx: flume::Receiver<MsgPair>,
     exec: WorldExec,
 }
 
-struct Sender(flume::Sender<Builder<BytesMut>>);
-
-impl Sender {
-    fn send(
-        &mut self,
-        component_id: ComponentId,
-        component_ty: ComponentType,
-        len: usize,
-        entities: &[u8],
-        values: &[u8],
-    ) -> Result<(), Error> {
-        use elodin_conduit::builder::ComponentBuilder;
-        let capacity = 26 + entities.len() + values.len();
-        let mut builder = Builder::new(bytes::BytesMut::with_capacity(capacity), 0).unwrap();
-        builder.append_builder(ComponentBuilder::new(
-            (component_id, component_ty),
-            (len, entities),
-            values,
-        ))?;
-        self.0.send(builder).map_err(|_| Error::ChannelClosed)
-    }
-}
-
-pub struct RecvMsg {
-    parser: Parser<Bytes>,
-    tx: flume::WeakSender<Builder<BytesMut>>,
-}
-
 impl ConduitExec {
-    pub fn new(exec: WorldExec) -> (Self, flume::Sender<RecvMsg>) {
+    pub fn new(exec: WorldExec) -> (Self, flume::Sender<MsgPair>) {
+        let mut metadata_store = MetadataStore::default();
+        for arch in exec.world.host.archetypes.values() {
+            for (id, col) in &arch.columns {
+                let metadata = Metadata {
+                    component_id: *id,
+                    component_type: col.buffer.component_type.clone(),
+                    tags: HashMap::new(),
+                };
+                metadata_store.push(metadata);
+            }
+        }
         let (tx, rx) = flume::unbounded();
         (
             Self {
@@ -60,6 +46,7 @@ impl ConduitExec {
                 connections: Vec::new(),
                 rx,
                 exec,
+                metadata_store,
             },
             tx,
         )
@@ -84,61 +71,86 @@ impl ConduitExec {
     }
 
     pub fn recv(&mut self) -> Result<(), Error> {
-        let Ok(RecvMsg { parser, tx }) = self.rx.try_recv() else {
+        let Ok(pair) = self.rx.try_recv() else {
             return Ok(());
         };
-        for pair in parser {
-            if let Err(err) = self.process_component_pair(&tx, pair) {
-                tracing::warn!(?err, "error processing component pair");
-            }
+        if let Err(err) = self.process_msg_pair(pair) {
+            tracing::warn!(?err, "error processing msg pair");
         }
 
         Ok(())
     }
 
-    fn process_component_pair(
-        &mut self,
-        tx: &flume::WeakSender<Builder<BytesMut>>,
-        ComponentPair {
-            component_id,
-            entity_id,
-            value,
-        }: ComponentPair,
-    ) -> Result<(), Error> {
-        if component_id == elodin_conduit::SUB_COMPONENT_ID {
-            let ComponentValue::Filter(filter) = value else {
-                return Err(Error::InvalidFilter);
-            };
-            let connection_id = ConnectionId(self.connections.len());
-            self.connections
-                .push(Sender(tx.upgrade().ok_or(Error::ChannelClosed)?));
-            let subs = self
-                .subscriptions
-                .entry(ComponentId(filter.id))
-                .or_default();
-            subs.push(Subscription {
-                connection_id,
-                sent_generation: 0,
-            });
-        } else {
-            let mut col = self.exec.column_mut(component_id)?;
-            let Some(out) = col.entity_buf(entity_id) else {
-                return Err(Error::EntityNotFound);
-            };
-            value.with_bytes(|bytes| {
-                if bytes.len() != out.len() {
-                    return Err(Error::ValueSizeMismatch);
+    fn process_msg_pair(&mut self, MsgPair { msg, tx }: MsgPair) -> Result<(), Error> {
+        match msg {
+            Msg::Control(ControlMsg::Subscribe { query }) => {
+                let ids = query.execute(&self.metadata_store);
+                if ids.len() != 1 {
+                    return Err(Error::InvalidQuery); // For now we only support ids with len 1
                 }
-                out.copy_from_slice(bytes);
-                Ok(())
-            })?;
+                let QueryId::Component(id) = ids[0] else {
+                    return Err(Error::InvalidQuery); // For now we only support ids with len 1
+                };
+                let connection_id = ConnectionId(self.connections.len());
+                let tx = tx.upgrade().ok_or(Error::ChannelClosed)?;
+                self.connections.push(tx.clone());
+                let subs = self.subscriptions.entry(id).or_default();
+                let stream_id = StreamId::rand();
+                let Some(metadata) = self.metadata_store.get_metadata(&id) else {
+                    warn!(?id, "component not found");
+                    return Err(Error::ComponentNotFound);
+                };
+                tx.send(Packet {
+                    stream_id: StreamId::CONTROL,
+                    payload: Payload::ControlMsg(ControlMsg::Metadata {
+                        stream_id,
+                        metadata: metadata.clone(),
+                    }),
+                })
+                .map_err(|_| Error::ChannelClosed)?;
+                subs.push(Subscription {
+                    connection_id,
+                    sent_generation: 0,
+                    stream_id,
+                });
+            }
+            Msg::Control(_) => {}
+            Msg::Column(col) => {
+                for res in col.iter() {
+                    let Ok(value) = res else {
+                        tracing::warn!("error processing column value");
+                        continue;
+                    };
+                    if let Err(err) = self.process_column_value(&col.metadata, value) {
+                        tracing::warn!(?err, "error processing column value");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn process_column_value(
+        &mut self,
+        metadata: &Metadata,
+        column_value: ColumnValue<'_>,
+    ) -> Result<(), Error> {
+        let mut col = self.exec.column_mut(metadata.component_id)?;
+        let Some(out) = col.entity_buf(column_value.entity_id) else {
+            return Err(Error::EntityNotFound);
+        };
+        if let Some(bytes) = column_value.value.bytes() {
+            if bytes.len() != out.len() {
+                return Err(Error::ValueSizeMismatch);
+            }
+            out.copy_from_slice(bytes);
         }
         Ok(())
     }
 }
 
 fn send_sub(
-    connections: &mut [Sender],
+    connections: &mut [flume::Sender<Packet<Payload<Bytes>>>],
     exec: &mut WorldExec,
     comp_id: &ComponentId,
     sub: &mut Subscription,
@@ -153,14 +165,13 @@ fn send_sub(
             // TODO: warn
             todo!()
         };
-        let mut out = vec![];
         let mut changed = false;
         for id in buf.iter() {
             let gen = exec
                 .world
                 .host
                 .assets
-                .gen(Handle::<()>::new(*id))
+                .gen(Handle::<()>::new(AssetId(*id)))
                 .ok_or(Error::AssetNotFound)?;
             if gen > sub.sent_generation {
                 changed = true;
@@ -170,101 +181,39 @@ fn send_sub(
         if !changed {
             return Ok(());
         }
-        for id in buf.iter() {
-            let Some(value) = exec.world.host.assets.value(Handle::<()>::new(*id)) else {
+        let entities_buf = col.entities.typed_buf::<u64>().unwrap();
+        for (id, entity_id) in buf.iter().zip(entities_buf.iter().copied()) {
+            let Some(value) = exec
+                .world
+                .host
+                .assets
+                .value(Handle::<()>::new(AssetId(*id)))
+            else {
                 todo!("gracefully handle")
             };
-            value.with_bytes(|bytes| {
-                let mut arr = [0; varint_max::<usize>()];
-                out.extend_from_slice(encode_varint_usize(bytes.len(), &mut arr));
-                out.extend_from_slice(bytes)
-            });
+            let packet = Packet {
+                stream_id: StreamId::CONTROL,
+                payload: Payload::ControlMsg(ControlMsg::Asset {
+                    entity_id: EntityId(entity_id),
+                    bytes: value.inner.clone(),
+                    id: value.asset_id,
+                }),
+            };
+            tx.send(packet).map_err(|_| Error::ChannelClosed)?;
         }
-
-        tx.send(
-            *comp_id,
-            ComponentType::Bytes,
-            col.column.buffer.len,
-            &col.entities.buf,
-            &out,
-        )?;
     } else {
-        tx.send(
-            *comp_id,
-            col.column.buffer.component_type,
-            col.column.buffer.len,
-            &col.entities.buf,
-            &col.column.buffer.buf,
-        )?;
+        let packet = Packet {
+            stream_id: sub.stream_id,
+            payload: Payload::Column(ColumnPayload {
+                time: 0,
+                len: col.column.buffer.len as u32,
+                entity_buf: Bytes::copy_from_slice(&col.entities.buf),
+                value_buf: Bytes::copy_from_slice(&col.column.buffer.buf), // TODO: make the Vec<u8> here bytes so this is a ref-count
+            }),
+        };
+        tx.send(packet).map_err(|_| Error::ChannelClosed)?;
     }
     Ok(())
-}
-
-#[cfg(feature = "tokio")]
-pub struct TokioServer {
-    tx: flume::Sender<RecvMsg>,
-    listener: tokio::net::TcpListener,
-}
-
-#[cfg(feature = "tokio")]
-impl TokioServer {
-    pub async fn bind(
-        tx: flume::Sender<RecvMsg>,
-        addr: std::net::SocketAddr,
-    ) -> Result<Self, Error> {
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        Ok(Self { tx, listener })
-    }
-
-    pub async fn run(self) -> Result<(), Error> {
-        loop {
-            let (socket, _) = self.listener.accept().await?;
-            let (rx_socket, tx_socket) = socket.into_split();
-            let (tx, rx) = flume::unbounded();
-            let tx_recv_msg = self.tx.clone();
-            tokio::spawn(async move {
-                for filter in DEFAULT_SUB_FILTERS {
-                    let default_subs = Builder::filters(&[*filter]);
-                    let default_subs = default_subs.into_buf();
-                    let default_subs = Parser::new(default_subs.freeze()).unwrap();
-                    tx_recv_msg
-                        .send_async(RecvMsg {
-                            parser: default_subs,
-                            tx: tx.downgrade(),
-                        })
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-                }
-                let mut rx_client = elodin_conduit::tokio::TcpReader::from_read_half(rx_socket, 0);
-                loop {
-                    let parser = match rx_client.recv_parser().await {
-                        Ok(Some(parser)) => parser,
-                        Ok(None) => {
-                            continue;
-                        }
-                        Err(elodin_conduit::Error::ParsingError) => {
-                            continue;
-                        }
-                        Err(err) => return Err::<(), Error>(Error::from(err)),
-                    };
-                    tx_recv_msg
-                        .send_async(RecvMsg {
-                            parser,
-                            tx: tx.downgrade(),
-                        })
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-                }
-            });
-            tokio::spawn(async move {
-                let mut tx_client = elodin_conduit::tokio::TcpWriter::from_write_half(tx_socket, 0);
-                while let Ok(builder) = rx.recv_async().await {
-                    tx_client.send_builder(builder).await?;
-                }
-                Ok::<(), Error>(())
-            });
-        }
-    }
 }
 
 #[cfg(feature = "tokio")]
@@ -277,11 +226,13 @@ pub fn spawn_tcp_server(
 ) -> Result<(), Error> {
     use std::time::Instant;
 
+    use elodin_conduit::server::TcpServer;
+
     let (mut conduit_exec, rx) = ConduitExec::new(exec);
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let server = TokioServer::bind(rx, socket_addr).await.unwrap();
+            let server = TcpServer::bind(rx, socket_addr).await.unwrap();
             server.run().await
         })
         .unwrap();
@@ -296,38 +247,5 @@ pub fn spawn_tcp_server(
         if !sleep_time.is_zero() {
             std::thread::sleep(sleep_time)
         }
-    }
-}
-
-pub struct WorldPos(pub nox::SpatialTransform<f64>);
-impl FromBuilder for WorldPos {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &nox::Builder) -> Self::Item<'_> {
-        WorldPos(nox::SpatialTransform::from_builder(builder))
-    }
-}
-
-impl IntoOp for WorldPos {
-    fn into_op(self) -> nox::Noxpr {
-        self.0.into_op()
-    }
-}
-
-impl crate::Component for WorldPos {
-    type Inner = nox::SpatialTransform<f64>;
-
-    type HostTy = Self;
-
-    fn host(val: Self::HostTy) -> Self {
-        val
-    }
-
-    fn component_id() -> ComponentId {
-        ComponentId::new("world_pos")
-    }
-
-    fn component_type() -> ComponentType {
-        ComponentType::SpatialPosF64
     }
 }

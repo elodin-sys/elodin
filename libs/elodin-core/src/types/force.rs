@@ -2,15 +2,12 @@ use std::ops::AddAssign;
 
 use crate::spatial::SpatialForce;
 use bevy::prelude::*;
-use elodin_conduit::{cid, ComponentValue};
-use elodin_macros::Component as Comp;
+
 use nalgebra::{UnitQuaternion, Vector3};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default, Comp)]
-#[conduit(prefix = "31")]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
 pub struct Force(pub Vector3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default, Comp)]
-#[conduit(prefix = "31")]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Default)]
 pub struct Torque(pub Vector3<f64>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
@@ -19,32 +16,32 @@ pub struct Effect {
     pub torque: Torque,
 }
 
-impl elodin_conduit::Component for Effect {
-    fn component_id() -> elodin_conduit::ComponentId {
-        cid!(31;effect)
-    }
+// impl elodin_conduit::Component for Effect {
+//     fn component_id() -> elodin_conduit::ComponentId {
+//         cid!(31;effect)
+//     }
 
-    fn component_type() -> elodin_conduit::ComponentType {
-        elodin_conduit::ComponentType::SpatialMotionF64
-    }
+//     fn component_type() -> elodin_conduit::ComponentType {
+//         elodin_conduit::ComponentType::SpatialMotionF64
+//     }
 
-    fn component_value<'a>(&self) -> elodin_conduit::ComponentValue<'a> {
-        elodin_conduit::ComponentValue::SpatialMotionF64((self.force.0, self.torque.0))
-    }
+//     fn component_value<'a>(&self) -> elodin_conduit::ComponentValue<'a> {
+//         elodin_conduit::ComponentValue::SpatialMotionF64((self.force.0, self.torque.0))
+//     }
 
-    fn from_component_value(value: elodin_conduit::ComponentValue<'_>) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        let ComponentValue::SpatialMotionF64((force, torque)) = value else {
-            return None;
-        };
-        Some(Self {
-            force: Force(force),
-            torque: Torque(torque),
-        })
-    }
-}
+//     fn from_component_value(value: elodin_conduit::ComponentValue<'_>) -> Option<Self>
+//     where
+//         Self: Sized,
+//     {
+//         let ComponentValue::SpatialMotionF64((force, torque)) = value else {
+//             return None;
+//         };
+//         Some(Self {
+//             force: Force(force),
+//             torque: Torque(torque),
+//         })
+//     }
+// }
 
 impl Effect {
     pub fn force_at_point(

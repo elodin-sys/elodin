@@ -1,6 +1,7 @@
 database_url = "postgres://sphw@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
 migrate = true
+pod_name = "foo"
 
 [api]
 address = "[::]:50051"
@@ -10,8 +11,16 @@ auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
 
 [orca]
 vm_namespace = "vms"
-image_name = "elo-sim-agent:yhri5xjhdd1xvmrg1ffl19p3b81yrqq4"
+image_name = "elo-sim-agent:23jmxri34x9wjsq2xibc1wqzd1c8dfxi"
 
 [garbage_collect]
 enabled = true
 timeout = 600.0
+
+[monte_carlo]
+sim_artifacts_bucket_name = ""
+sim_results_bucket_name = ""
+spawn_batches = false
+collect_results = false
+
+

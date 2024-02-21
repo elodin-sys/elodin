@@ -35,9 +35,10 @@ mod ui;
 #[cfg(feature = "core")]
 pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send + Sync + 'static) {
     use elodin_conduit::{
-        bevy::{Msg, SubscribeEvent},
-        bevy_sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS},
-        cid_mask,
+        bevy_sync::{SendPlbPlugin, SyncPlugin},
+        client::{Demux, Msg, MsgPair},
+        well_known::DEFAULT_SUB_FILTERS,
+        ControlMsg,
     };
 
     let (server_tx, server_rx) = flume::unbounded();
@@ -50,21 +51,37 @@ pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send
 
         app.run()
     });
-    server_tx
-        .send(Msg::Subscribe(SubscribeEvent {
-            tx: client_tx.clone(),
-            filters: DEFAULT_SUB_FILTERS.to_vec(),
-        }))
-        .unwrap();
-
-    client_tx
-        .send(Msg::Subscribe(SubscribeEvent {
-            tx: server_tx.clone(),
-            filters: vec![cid_mask!(32;sim_state)],
-        }))
-        .unwrap();
+    for id in DEFAULT_SUB_FILTERS {
+        server_tx
+            .send(MsgPair {
+                msg: Msg::Control(ControlMsg::Subscribe {
+                    query: elodin_conduit::Query::ComponentId(*id),
+                }),
+                tx: client_tx.downgrade(),
+            })
+            .unwrap();
+    }
+    let (parsed_client_tx, parsed_client_rx) = flume::unbounded();
+    std::thread::spawn(move || {
+        let mut demux = Demux::default();
+        while let Ok(msg) = client_rx.recv() {
+            let msg = match demux.handle(msg) {
+                Ok(m) => m,
+                Err(err) => {
+                    warn!(?err, "failed to parse message");
+                    continue;
+                }
+            };
+            if let Err(err) = parsed_client_tx.send(MsgPair {
+                msg,
+                tx: client_tx.downgrade(),
+            }) {
+                warn!(?err, "failed to send parsed message");
+            }
+        }
+    });
     let mut app = App::new();
-    app.add_plugins((EditorPlugin, SyncPlugin::new(client_rx)));
+    app.add_plugins((EditorPlugin, SyncPlugin::new(parsed_client_rx)));
     app.run()
 }
 
