@@ -6,12 +6,13 @@ pub mod bevy;
 pub mod bevy_sync;
 #[cfg(feature = "nox")]
 pub mod nox;
-#[cfg(feature = "tokio")]
-pub mod tokio;
 
-pub mod builder;
+pub mod client;
 pub mod error;
-pub mod parser;
+pub mod query;
+pub mod ser_de;
+#[cfg(feature = "tokio")]
+pub mod server;
 pub mod types;
 pub mod well_known;
 

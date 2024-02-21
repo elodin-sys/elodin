@@ -1,19 +1,14 @@
 use std::ops::DerefMut;
 
 use crate::{
-    bevy::{AppExt, ComponentAdapter, ConduitSubscribePlugin, EntityMap, Msg, Subscriptions},
-    well_known::{Material as SyncMaterial, Mesh as SyncMesh, SimState, TraceAnchor, WorldPos},
-    Component, ComponentFilter, EntityId,
+    bevy::{AppExt, AssetAdapter, ConduitSubscribePlugin, EntityMap, Subscriptions},
+    client::MsgPair,
+    well_known::{Material as SyncMaterial, Mesh as SyncMesh, TraceAnchor, WorldPos},
+    EntityId,
 };
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
-
-pub const DEFAULT_SUB_FILTERS: &[ComponentFilter] = &[
-    ComponentFilter::from_str("world_pos"), // 6709265627763630702
-    ComponentFilter::from_str("mesh"),      // 4838001395392124604
-    ComponentFilter::from_str("material"),  // 175488002581160416
-    ComponentFilter::from_str("trace_anchor"), //5639674603227263162
-];
+use bytes::Bytes;
 
 pub struct SyncPlugin {
     pub plugin: ConduitSubscribePlugin,
@@ -21,7 +16,7 @@ pub struct SyncPlugin {
 }
 
 impl SyncPlugin {
-    pub fn new(rx: flume::Receiver<Msg<'static>>) -> Self {
+    pub fn new(rx: flume::Receiver<MsgPair>) -> Self {
         Self {
             plugin: ConduitSubscribePlugin::new(rx),
             subscriptions: Subscriptions::default(),
@@ -35,14 +30,16 @@ impl Plugin for SyncPlugin {
         app.add_plugins(self.plugin.clone())
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
-            .add_conduit_component::<SimState>()
             .add_conduit_component::<WorldPos>()
             .add_conduit_component::<TraceAnchor>()
-            .add_conduit_component_with_adapter::<SyncMaterial>(Box::new(SyncMaterialAdaptor {
-                sync_pbr,
-            }))
-            .add_conduit_component_with_adapter::<SyncMesh>(Box::new(SyncMeshAdapter { sync_pbr }))
-            .add_conduit_resource::<SimState>();
+            .add_conduit_asset::<SyncMaterial>(
+                SyncMaterial::ASSET_ID,
+                Box::new(SyncMaterialAdaptor { sync_pbr }),
+            )
+            .add_conduit_asset::<SyncMesh>(
+                SyncMesh::ASSET_ID,
+                Box::new(SyncMeshAdapter { sync_pbr }),
+            );
     }
 }
 
@@ -50,18 +47,18 @@ struct SyncMaterialAdaptor {
     sync_pbr: SystemId,
 }
 
-impl ComponentAdapter for SyncMaterialAdaptor {
-    fn get(&self, _world: &World, _entity: Entity) -> Option<crate::ComponentValue> {
-        None
-    }
-
+impl AssetAdapter for SyncMaterialAdaptor {
     fn insert(
         &self,
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
-        value: crate::ComponentValue,
+        value: Bytes,
     ) {
+        let Ok(mat) = postcard::from_bytes::<SyncMaterial>(&value) else {
+            warn!("failed to deserialize material");
+            return;
+        };
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
             let Some(e) = commands.get_entity(*entity) else {
                 return;
@@ -72,10 +69,7 @@ impl ComponentAdapter for SyncMaterialAdaptor {
             entity_map.0.insert(entity_id, e.id());
             e
         };
-
-        if let Some(c) = SyncMaterial::from_component_value(value) {
-            e.insert(c);
-        }
+        e.insert(mat);
         commands.run_system(self.sync_pbr);
     }
 }
@@ -84,18 +78,18 @@ struct SyncMeshAdapter {
     sync_pbr: SystemId,
 }
 
-impl ComponentAdapter for SyncMeshAdapter {
-    fn get(&self, _world: &World, _entity: Entity) -> Option<crate::ComponentValue> {
-        None
-    }
-
+impl AssetAdapter for SyncMeshAdapter {
     fn insert(
         &self,
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
-        value: crate::ComponentValue,
+        value: Bytes,
     ) {
+        let Ok(mat) = postcard::from_bytes::<SyncMesh>(&value) else {
+            warn!("failed to deserialize mesh");
+            return;
+        };
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
             let Some(e) = commands.get_entity(*entity) else {
                 return;
@@ -106,10 +100,7 @@ impl ComponentAdapter for SyncMeshAdapter {
             entity_map.0.insert(entity_id, e.id());
             e
         };
-
-        if let Some(c) = SyncMesh::from_component_value(value) {
-            e.insert(c);
-        }
+        e.insert(mat);
         commands.run_system(self.sync_pbr);
     }
 }

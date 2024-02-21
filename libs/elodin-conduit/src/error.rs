@@ -1,4 +1,6 @@
 use thiserror::Error;
+
+use crate::StreamId;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("io {0}")]
@@ -11,4 +13,32 @@ pub enum Error {
     ParsingError,
     #[error("send error")]
     SendError,
+    #[error("component values need contigous memory to be encoded")]
+    NonContigousMemory,
+    #[error("shape must have less than 255 dims")]
+    TooManyDims,
+    #[error("eof")]
+    EOF,
+    #[error("checked cast error")]
+    CheckedCast,
+    #[error("shape error {0}")]
+    ShapeError(#[from] ndarray::ShapeError),
+    #[error("unknown primitive type")]
+    UnknownPrimitiveTy,
+    #[error("postcard {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error("stream not found {0:?}")]
+    StreamNotFound(StreamId),
+    #[error("invalid alignment")]
+    InvalidAlignment,
+    #[error("connection closed")]
+    ConnectionClosed,
+}
+
+impl From<try_buf::ErrorKind> for Error {
+    fn from(value: try_buf::ErrorKind) -> Self {
+        match value {
+            try_buf::ErrorKind::EOF => Error::EOF,
+        }
+    }
 }

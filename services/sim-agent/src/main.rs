@@ -1,5 +1,7 @@
-use elodin_conduit::bevy::{ConduitSubscribePlugin, Msg, Subscriptions};
-use elodin_conduit::bevy_sync::{SendPlbPlugin, SyncPlugin, DEFAULT_SUB_FILTERS};
+use elodin_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
+use elodin_conduit::bevy_sync::{SendPlbPlugin, SyncPlugin};
+use elodin_conduit::client::MsgPair;
+use elodin_conduit::server::TcpServer;
 use elodin_core::runner::IntoSimRunner;
 use elodin_py::SimBuilder;
 use elodin_types::sandbox::{
@@ -17,7 +19,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::net::TcpListener;
+
 use tonic::{async_trait, transport::Server, Response, Status};
 use tracing::{info, info_span, Instrument};
 
@@ -48,8 +50,12 @@ async fn main() -> anyhow::Result<()> {
             Subscriptions::default(),
         );
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
-        let sim = SimServer::new(server_tx, sandbox_config.sim_addr);
-        tasks.spawn(sim.run().instrument(info_span!("sim").or_current()));
+        let sim = async move {
+            let sim = TcpServer::bind(server_tx, sandbox_config.sim_addr).await?;
+            sim.run().instrument(info_span!("sim").or_current()).await?;
+            Ok(())
+        };
+        tasks.spawn(sim);
     }
 
     if let Some(mc_agent_config) = config.monte_carlo {
@@ -63,38 +69,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-struct SimServer {
-    address: SocketAddr,
-    bevy_tx: flume::Sender<Msg<'static>>,
-}
-
-impl SimServer {
-    fn new(
-        bevy_tx: flume::Sender<elodin_conduit::bevy::Msg<'static>>,
-        address: SocketAddr,
-    ) -> Self {
-        Self { address, bevy_tx }
-    }
-
-    async fn run(self) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(self.address).await?;
-        loop {
-            let (socket, _addr) = listener.accept().await?;
-            let (rx_socket, tx_socket) = socket.into_split();
-            tokio::spawn(elodin_conduit::bevy::handle_socket(
-                self.bevy_tx.clone(),
-                tx_socket,
-                rx_socket,
-                DEFAULT_SUB_FILTERS,
-            ));
-        }
-    }
-}
-
 #[derive(Clone)]
 struct ControlService {
-    server_tx: flume::Sender<Msg<'static>>,
-    server_rx: flume::Receiver<Msg<'static>>,
+    server_tx: flume::Sender<MsgPair>,
+    server_rx: flume::Receiver<MsgPair>,
     subscriptions: Subscriptions,
     loaded: Arc<AtomicBool>,
     address: SocketAddr,
@@ -102,8 +80,8 @@ struct ControlService {
 
 impl ControlService {
     fn new(
-        server_tx: flume::Sender<Msg<'static>>,
-        server_rx: flume::Receiver<Msg<'static>>,
+        server_tx: flume::Sender<MsgPair>,
+        server_rx: flume::Receiver<MsgPair>,
         address: SocketAddr,
         subscriptions: Subscriptions,
     ) -> Self {
@@ -144,7 +122,7 @@ impl SandboxControl for ControlService {
         pyo3::prepare_freethreaded_python();
         let loaded = self.loaded.clone();
         let server_tx = self.server_tx.clone();
-        let builder_res = Python::with_gil(|py| {
+        let res = Python::with_gil(|py| {
             let sim = PyModule::from_code(py, &req.code, "./test.py", "./")?;
             let callable = sim.getattr("sim")?;
             let builder = callable.call0()?;
@@ -152,7 +130,7 @@ impl SandboxControl for ControlService {
 
             pyo3::PyResult::Ok(builder.0)
         });
-        let builder = match builder_res {
+        let builder = match res {
             Ok(builder) => builder,
             Err(e) => {
                 let err = Python::with_gil(|py| {
@@ -170,7 +148,12 @@ impl SandboxControl for ControlService {
         let subscriptions = self.subscriptions.clone();
         thread::spawn(move || -> anyhow::Result<()> {
             if loaded.swap(true, Ordering::SeqCst) {
-                server_tx.send(Msg::Exit)?;
+                let (tx, _) = flume::unbounded();
+                server_tx.send(MsgPair {
+                    msg: elodin_conduit::client::Msg::Control(elodin_conduit::ControlMsg::Exit),
+                    tx: tx.downgrade(),
+                })?;
+
                 thread::sleep(Duration::from_millis(100));
             }
             let runner = builder.into_runner();

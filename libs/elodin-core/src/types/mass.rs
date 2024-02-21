@@ -1,16 +1,13 @@
 use bevy::prelude::*;
-use elodin_macros::Component as Comp;
+
 use nalgebra::{matrix, Matrix3};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component, Comp)]
-#[conduit(id = "31;mass")]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Component)]
 pub struct Mass(pub f64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Component, Comp)]
-#[conduit(id = "31;intertia")]
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Inertia(pub Matrix3<f64>);
-#[derive(Debug, Clone, Copy, PartialEq, Component, Comp)]
-#[conduit(id = "31;inverse_inertia")]
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct InverseInertia(pub Matrix3<f64>);
 
 impl Inertia {

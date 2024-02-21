@@ -1,17 +1,23 @@
+use crate::client::ColumnMsg;
+use crate::client::Msg;
+use crate::client::MsgPair;
+use crate::query::{MetadataStore, QueryId};
+use crate::ser_de::ColumnValue;
+use crate::Asset;
+use crate::AssetId;
+use crate::Error;
+use crate::Metadata;
 use crate::{
-    eid, Component, ComponentData, ComponentFilter, ComponentId, ComponentValue, EntityId,
+    Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
 use bevy::ecs::system::EntityCommand;
 use bevy::prelude::{DetectChanges, Event, EventReader, Without, World};
 use bevy::ptr::OwningPtr;
-use ip_network_table_deps_treebitmap::address::Address;
+use bytes::Bytes;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use tracing::info;
+use tracing::warn;
 
 use bevy::{
     app::AppExit,
@@ -25,35 +31,27 @@ use bevy::{
 #[derive(bevy::prelude::Component)]
 pub struct Received;
 
-#[derive(Debug)]
-pub enum Msg<'a> {
-    Data(ComponentData<'a>),
-    Subscribe(SubscribeEvent<'a>),
-    Exit,
-}
-
-impl<'a> ComponentData<'a> {
+impl ColumnMsg<Bytes> {
     pub fn load_into_bevy(
         self,
         entity_map: &mut EntityMap,
         component_map: &ComponentMap,
         commands: &mut Commands,
     ) {
-        let Some(adapter) = component_map.0.get(&self.component_id) else {
-            tracing::warn!(?self.component_id, "unknown insert fn");
+        let component_id = self.metadata.component_id;
+        let Some(adapter) = component_map.0.get(&component_id) else {
+            warn!(?component_id, "unknown insert fn");
             return;
         };
 
-        for (entity_id, value) in self.storage.into_iter() {
+        for res in self.iter() {
+            let Ok(ColumnValue { entity_id, value }) = res else {
+                warn!("error parsing column value");
+                continue;
+            };
             adapter.insert(commands, entity_map, entity_id, value);
         }
     }
-}
-
-#[derive(Event, Debug, Clone)]
-pub struct SubscribeEvent<'a> {
-    pub filters: Vec<ComponentFilter>,
-    pub tx: flume::Sender<Msg<'a>>,
 }
 
 #[derive(Resource, Default, Deref)]
@@ -110,7 +108,6 @@ where
             entity_map.0.insert(entity_id, e.id());
             e
         };
-
         if let Some(c) = C::from_component_value(value) {
             e.insert((c, Received));
         }
@@ -206,6 +203,19 @@ impl EntityCommand for InsertValueById {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct AssetMap(pub HashMap<AssetId, Box<dyn AssetAdapter + Send + Sync>>);
+
+pub trait AssetAdapter {
+    fn insert(
+        &self,
+        commands: &mut Commands,
+        entity_map: &mut EntityMap,
+        entity_id: EntityId,
+        value: Bytes,
+    );
+}
+
 pub trait AppExt {
     fn add_conduit_component<C>(&mut self) -> &mut Self
     where
@@ -221,6 +231,12 @@ pub trait AppExt {
     fn add_conduit_resource<C>(&mut self) -> &mut Self
     where
         C: Component + bevy::prelude::Resource + std::fmt::Debug;
+
+    fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
+        &mut self,
+        asset_id: AssetId,
+        adapter: Box<dyn AssetAdapter + Send + Sync>,
+    ) -> &mut Self;
 }
 
 impl AppExt for bevy::app::App {
@@ -238,9 +254,19 @@ impl AppExt for bevy::app::App {
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug,
     {
+        let mut metadata = self
+            .world
+            .get_resource_or_insert_with(MetadataStore::default);
+        metadata.push(Metadata {
+            component_id: C::component_id(),
+            component_type: C::component_type(),
+            tags: HashMap::default(),
+        });
+
         let mut map = self
             .world
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
+
         map.0.insert(C::component_id(), adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
@@ -262,33 +288,77 @@ impl AppExt for bevy::app::App {
         self.add_systems(Update, sync_resource::<R>);
         self
     }
+
+    fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
+        &mut self,
+        asset_id: AssetId,
+        adapter: Box<dyn AssetAdapter + Send + Sync>,
+    ) -> &mut Self {
+        let mut map = self.world.get_resource_or_insert_with(AssetMap::default);
+        map.0.insert(asset_id, adapter);
+        self.add_systems(Update, sync_asset::<R>);
+        self.add_systems(Update, query_asset::<R>);
+        self
+    }
 }
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub struct ConduitRx(pub flume::Receiver<Msg<'static>>);
+pub struct ConduitRx(pub flume::Receiver<MsgPair>);
 
+#[allow(clippy::too_many_arguments)]
 fn recv_system(
     rx: Res<ConduitRx>,
     mut entity_map: ResMut<EntityMap>,
     component_map: Res<ComponentMap>,
+    asset_map: Res<AssetMap>,
     mut commands: Commands,
     mut subscriptions: ResMut<Subscriptions>,
     mut exit: EventWriter<AppExit>,
-    mut subscribe_event: EventWriter<SubscribeEvent<'static>>,
+    mut subscribe_event: EventWriter<SubscribeEvent>,
+    metadata: Res<MetadataStore>,
 ) {
     while let Ok(msg) = rx.try_recv() {
-        match msg {
-            Msg::Data(data) => {
-                data.load_into_bevy(entity_map.as_mut(), component_map.as_ref(), &mut commands);
-            }
-            Msg::Subscribe(event) => {
-                subscribe_event.send(event.clone());
-                for filter in event.filters.into_iter() {
-                    subscriptions.subscribe(filter, event.tx.clone());
+        match msg.msg {
+            Msg::Control(ControlMsg::Subscribe { query }) => {
+                let Some(tx) = msg.tx.upgrade() else {
+                    continue;
+                };
+                let subscription = Subscription {
+                    stream_id: StreamId::rand(),
+                    tx,
+                };
+                let ids = query.execute(&metadata);
+                if ids.len() != 1 {
+                    warn!("only single id queries are supported for now");
+                    continue;
                 }
+                let QueryId::Component(id) = ids[0] else {
+                    warn!("only single id queries are supported for now");
+                    continue;
+                };
+                subscriptions.subscribe(id, subscription.clone());
+                subscribe_event.send(SubscribeEvent {
+                    query: query.clone(),
+                    subscription,
+                });
             }
-            Msg::Exit => {
+            Msg::Control(ControlMsg::Asset {
+                id,
+                bytes,
+                entity_id,
+            }) => {
+                let Some(adapter) = asset_map.0.get(&id) else {
+                    warn!(?id, "unknown asset type");
+                    continue;
+                };
+                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes);
+            }
+            Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
+            }
+            Msg::Control(_) => {}
+            Msg::Column(col) => {
+                col.load_into_bevy(entity_map.as_mut(), component_map.as_ref(), &mut commands);
             }
         }
     }
@@ -296,15 +366,15 @@ fn recv_system(
 
 #[derive(Clone)]
 pub struct ConduitSubscribePlugin {
-    rx: flume::Receiver<Msg<'static>>,
+    rx: flume::Receiver<MsgPair>,
 }
 
 impl ConduitSubscribePlugin {
-    pub fn new(rx: flume::Receiver<Msg<'static>>) -> Self {
+    pub fn new(rx: flume::Receiver<MsgPair>) -> Self {
         Self { rx }
     }
 
-    pub fn pair() -> (ConduitSubscribePlugin, flume::Sender<Msg<'static>>) {
+    pub fn pair() -> (ConduitSubscribePlugin, flume::Sender<MsgPair>) {
         let (tx, rx) = flume::unbounded();
         (ConduitSubscribePlugin { rx }, tx)
     }
@@ -323,8 +393,10 @@ pub struct ConduitTcpSubscriber {
 #[cfg(feature = "tokio")]
 impl Plugin for ConduitTcpSubscriber {
     fn build(&self, app: &mut bevy::prelude::App) {
+        use crate::server::handle_socket;
         use std::thread;
         use tokio::net::TcpStream;
+
         #[derive(Resource)]
         struct ConduitTokioHandle(thread::JoinHandle<()>);
         let (sub_plugin, bevy_tx) = ConduitSubscribePlugin::pair();
@@ -338,9 +410,7 @@ impl Plugin for ConduitTcpSubscriber {
                     .await
                     .expect("tcp client failed")
                     .into_split();
-                handle_socket(bevy_tx, tx_socket, rx_socket, &[])
-                    .await
-                    .unwrap();
+                handle_socket(bevy_tx, tx_socket, rx_socket).await.unwrap()
             });
         });
         app.add_plugins(sub_plugin)
@@ -348,114 +418,50 @@ impl Plugin for ConduitTcpSubscriber {
     }
 }
 
-#[cfg(feature = "tokio")]
-pub async fn handle_socket(
-    server_tx: flume::Sender<Msg<'static>>,
-    tx_socket: impl tokio::io::AsyncWrite + Unpin,
-    rx_socket: impl tokio::io::AsyncRead + Unpin,
-    default_filters: &[ComponentFilter],
-) -> Result<(), crate::Error> {
-    use crate::Error;
-    use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-    use tracing::error;
-    let mut tx_socket =
-        crate::tokio::Client::new(0, FramedWrite::new(tx_socket, LengthDelimitedCodec::new()));
-    let mut rx_socket =
-        crate::tokio::Client::new(0, FramedRead::new(rx_socket, LengthDelimitedCodec::new()));
-
-    let (out_tx, out_rx) = flume::unbounded();
-    if let Err(err) = server_tx
-        .send_async(Msg::Subscribe(SubscribeEvent {
-            tx: out_tx.clone(),
-            filters: default_filters.to_vec(),
-        }))
-        .await
-    {
-        error!(?err, "initial subscribe error");
-    }
-
-    if let Err(err) = out_tx
-        .send_async(Msg::Data(ComponentData::subscribe(
-            ComponentFilter::from_str("sim_state"),
-        )))
-        .await
-    {
-        error!(?err, "initial subscribe error");
-    }
-    let tx = async move {
-        while let Ok(Msg::Data(msg)) = out_rx.recv_async().await {
-            tx_socket.send_data(0, msg).await?;
-        }
-        Ok::<(), Error>(())
-    };
-    let rx = async move {
-        while let Some(batch) = rx_socket.recv().await? {
-            let filters: Vec<_> = batch
-                .components
-                .iter()
-                .filter(|c| c.component_id == crate::SUB_COMPONENT_ID)
-                .flat_map(|c| c.storage.iter())
-                .filter_map(|(_, c)| match c {
-                    ComponentValue::Filter(filter) => Some(filter),
-                    _ => None,
-                })
-                .cloned()
-                .collect();
-            if filters.is_empty() {
-                for data in batch.components.into_iter() {
-                    server_tx
-                        .send_async(Msg::Data(data))
-                        .await
-                        .map_err(|_| Error::SendError)?;
-                }
-            } else {
-                server_tx
-                    .send_async(Msg::Subscribe(SubscribeEvent {
-                        tx: out_tx.clone(),
-                        filters,
-                    }))
-                    .await
-                    .map_err(|_| Error::SendError)?;
-            }
-        }
-        Ok::<(), Error>(())
-    };
-    tokio::select! {
-        res = tx => res,
-        res = rx => res,
-    }
-}
-
 impl Plugin for ConduitSubscribePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_event::<SubscribeEvent>();
         app.insert_resource(EntityMap::default());
         app.insert_resource(ComponentMap::default());
+        app.insert_resource(AssetMap::default());
         app.insert_resource(ConduitRx(self.rx.clone()));
+        app.add_event::<SubscribeEvent>();
         app.add_systems(Update, recv_system);
     }
 }
 
 pub fn sync_resource<T: bevy::prelude::Resource + Component + Debug>(
     res: Res<T>,
-    mut subs: ResMut<Subscriptions>,
+    subs: ResMut<Subscriptions>,
 ) {
     if !res.is_changed() {
         return;
     }
     let component_id = T::component_id();
-    let storage = vec![(eid!(31;resource), res.component_value())];
-    let data = ComponentData {
-        component_id,
-        storage,
+    let Some(subs) = subs.get(&component_id) else {
+        return;
     };
-    let _ = subs.send(data);
+    let Ok(col) = crate::ColumnPayload::try_from_value_iter(
+        0,
+        std::iter::once(ColumnValue {
+            entity_id: EntityId::RESOURCE,
+            value: res.component_value(),
+        }),
+    ) else {
+        warn!("error creating column payload packet");
+        return;
+    };
+    for sub in subs.iter() {
+        let _ = sub.tx.send(Packet {
+            stream_id: sub.stream_id,
+            payload: Payload::Column(col.clone()),
+        });
+    }
 }
 
 #[allow(clippy::type_complexity)]
 pub fn sync_component<T>(
     query: Query<(&EntityId, &T), (Changed<T>, Without<Received>)>,
-    mut subs: ResMut<Subscriptions>,
+    subs: ResMut<Subscriptions>,
 ) where
     T: bevy::prelude::Component + Component + Debug,
 {
@@ -463,133 +469,172 @@ pub fn sync_component<T>(
     if query.is_empty() {
         return;
     }
-    let storage = query
-        .iter()
-        .map(|(entity_id, val)| (*entity_id, val.component_value()))
-        .collect();
-    let data = ComponentData {
-        component_id,
-        storage,
+    let Some(subs) = subs.get(&component_id) else {
+        return;
     };
-    let _ = subs.send(data);
+    let iter = query.iter().map(|(entity_id, val)| ColumnValue {
+        entity_id: *entity_id,
+        value: val.component_value(),
+    });
+    let Ok(col) = crate::ColumnPayload::try_from_value_iter(0, iter) else {
+        warn!("error creating column payload packet");
+        return;
+    };
+    for sub in subs.iter() {
+        let _ = sub.tx.send(Packet {
+            stream_id: sub.stream_id,
+            payload: Payload::Column(col.clone()),
+        });
+    }
 }
 
 pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
-    mut events: EventReader<SubscribeEvent<'static>>,
+    mut events: EventReader<SubscribeEvent>,
+    store: Res<MetadataStore>,
     query: Query<(&EntityId, &T)>,
 ) {
     let component_id = T::component_id();
     for event in events.read() {
-        if !event
-            .filters
-            .iter()
-            .any(|filter| filter.apply(component_id))
-        {
+        let ids = event.query.execute(&store);
+        if ids.len() != 1 {
+            warn!("only single id queries are supported right now");
             continue;
         }
-        let storage = query
-            .iter()
-            .map(|(entity_id, val)| (*entity_id, val.component_value()))
-            .collect();
-        let data = ComponentData {
-            component_id,
-            storage,
+        if ids[0] != QueryId::Component(component_id) {
+            continue;
+        }
+        let Some(metadata) = store.get_metadata(&component_id) else {
+            warn!(?component_id, "component lacks metadata");
+            continue;
         };
-        let _ = event.tx.send(Msg::Data(data));
+
+        let _ = event.subscription.tx.send(Packet {
+            stream_id: StreamId::CONTROL,
+            payload: Payload::ControlMsg(ControlMsg::Metadata {
+                stream_id: event.subscription.stream_id,
+                metadata: metadata.clone(),
+            }),
+        });
+
+        let iter = query.iter().map(|(entity_id, val)| ColumnValue {
+            entity_id: *entity_id,
+            value: val.component_value(),
+        });
+        let Ok(col) = crate::ColumnPayload::try_from_value_iter(0, iter) else {
+            warn!("error creating column payload packet");
+            continue;
+        };
+
+        let _ = event.subscription.tx.send(Packet {
+            stream_id: event.subscription.stream_id,
+            payload: Payload::Column(col),
+        });
     }
 }
 
-#[derive(Resource, Default, Clone)]
-pub struct Subscriptions {
-    tree: Arc<
-        Mutex<
-            ip_network_table_deps_treebitmap::IpLookupTable<
-                ComponentId,
-                Vec<flume::Sender<Msg<'static>>>,
-            >,
-        >,
-    >,
+pub fn query_asset<T>(
+    mut events: EventReader<SubscribeEvent>,
+    store: Res<MetadataStore>,
+    query: Query<(&EntityId, &T)>,
+) where
+    T: Asset + bevy::prelude::Component + Debug,
+{
+    let asset_id = T::ASSET_ID;
+    for event in events.read() {
+        let ids = event.query.execute(&store);
+        if ids.len() != 1 {
+            warn!("only single id queries are supported right now");
+            continue;
+        }
+        if ids[0] != QueryId::Component(ComponentId(asset_id.0)) {
+            continue;
+        }
+
+        let msgs = query
+            .iter()
+            .map(|(id, val)| {
+                let bytes = postcard::to_allocvec(&val)?;
+                Ok(ControlMsg::Asset {
+                    id: asset_id,
+                    entity_id: *id,
+                    bytes: bytes.into(),
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()
+            .unwrap();
+
+        for msg in msgs.into_iter() {
+            let _ = event.subscription.tx.send(Packet {
+                stream_id: StreamId::CONTROL,
+                payload: Payload::ControlMsg(msg),
+            });
+        }
+    }
 }
 
-impl Subscriptions {
-    pub fn send(&mut self, data: ComponentData<'static>) -> Result<(), SendError> {
-        let mut tree = self.tree.lock().unwrap();
-        for (_, _, txes) in tree.matches_mut(data.component_id) {
-            let mut dead_sockets = vec![];
-            for (i, tx) in txes.iter().enumerate() {
-                if tx.send(Msg::Data(data.clone())).is_err() {
-                    dead_sockets.push(i);
-                }
-            }
-            for i in dead_sockets.into_iter().rev() {
-                txes.swap_remove(i);
-            }
-        }
-        Ok(())
+#[allow(clippy::type_complexity)]
+pub fn sync_asset<T>(
+    query: Query<(&EntityId, &T), (Changed<T>, Without<Received>)>,
+    subs: ResMut<Subscriptions>,
+) where
+    T: Asset + bevy::prelude::Component + Debug,
+{
+    let asset_id = T::ASSET_ID;
+    if query.is_empty() {
+        return;
     }
+    let Some(subs) = subs.get(&ComponentId(asset_id.0)) else {
+        return;
+    };
+    let msgs = query
+        .iter()
+        .map(|(id, val)| {
+            let bytes = postcard::to_allocvec(&val)?;
+            Ok(ControlMsg::Asset {
+                id: asset_id,
+                entity_id: *id,
+                bytes: bytes.into(),
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()
+        .unwrap();
+    for sub in subs.iter() {
+        for msg in msgs.iter().cloned() {
+            let _ = sub.tx.send(Packet {
+                stream_id: StreamId::CONTROL,
+                payload: Payload::ControlMsg(msg),
+            });
+        }
+    }
+}
 
-    pub fn subscribe(&mut self, filter: ComponentFilter, tx: flume::Sender<Msg<'static>>) {
-        info!("add filter {:?}", filter);
-        let mut tree = self.tree.lock().unwrap();
-        if let Some(vec) = tree.exact_match_mut(ComponentId(filter.id), filter.mask_len as u32) {
-            vec.push(tx);
-        } else {
-            tree.insert(ComponentId(filter.id), filter.mask_len as u32, vec![tx]);
-        }
-    }
+#[derive(Event)]
+pub struct SubscribeEvent {
+    query: crate::Query,
+    subscription: Subscription,
 }
 
 #[derive(Debug)]
 pub struct SendError;
 
-impl Address for ComponentId {
-    type Nibbles = [u8; 16];
+#[derive(bevy::prelude::Resource, Default, Clone)]
+pub struct Subscriptions {
+    map: HashMap<ComponentId, Vec<Subscription>>,
+}
 
-    fn nibbles(self) -> Self::Nibbles {
-        let mut ret: Self::Nibbles = [0; 16];
-        let bytes: [u8; 8] = self.0.to_be_bytes();
-        for (i, byte) in bytes.iter().enumerate() {
-            ret[i * 2] = byte >> 4;
-            ret[i * 2 + 1] = byte & 0xf;
-        }
-        ret
+impl Subscriptions {
+    pub fn get(&self, key: &ComponentId) -> Option<&Vec<Subscription>> {
+        self.map.get(key)
     }
 
-    fn from_nibbles(nibbles: &[u8]) -> Self {
-        let mut ret: [u8; 8] = [0; 8];
-        for (i, nibble) in nibbles.iter().enumerate().take(ret.len() * 2) {
-            match i % 2 {
-                0 => {
-                    ret[i / 2] = *nibble << 4;
-                }
-                _ => {
-                    ret[i / 2] |= *nibble;
-                }
-            }
-        }
-        ComponentId(u64::from_be_bytes(ret))
-    }
-
-    fn mask(self, masklen: u32) -> Self {
-        let masked = match masklen {
-            0 => 0,
-            n => self.0 & (!0 << (64 - n)),
-        };
-        Self(masked)
+    pub fn subscribe(&mut self, key: ComponentId, subscription: Subscription) {
+        let subs = self.map.entry(key).or_default();
+        subs.push(subscription);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{cid, cid_mask};
-
-    use super::*;
-
-    #[test]
-    fn test_subscription() {
-        let mut subs = Subscriptions::default();
-        let (tx, _rx) = flume::unbounded();
-        subs.subscribe(cid_mask!(31), tx);
-        assert!(subs.tree.lock().unwrap().matches(cid!(31:12)).any(|_| true));
-    }
+#[derive(Clone)]
+pub struct Subscription {
+    stream_id: StreamId,
+    tx: flume::Sender<Packet<Payload<Bytes>>>,
 }

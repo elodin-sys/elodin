@@ -22,6 +22,8 @@ parking_lot = "0.12.1"
 postcard = { version = "1.0", features = ["alloc"] }
 clap = { version = "4.4.18", features = ["derive"] }
 elodin = { path = "../../apps/elodin" }
+bytes = "1.0.5"
+
 
 # logs
 tracing = "0.1"
