@@ -99,6 +99,7 @@ fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
     let file_name = args.file.file_name().unwrap();
 
     let status = std::process::Command::new(&args.file)
+        .arg("--")
         .arg("monte-carlo")
         .arg("--build-dir")
         .arg(tmp_dir.path())
