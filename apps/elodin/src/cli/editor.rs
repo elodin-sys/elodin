@@ -106,12 +106,12 @@ impl Plugin for SimSupervisor {
 
 impl SimSupervisor {
     fn run(path: PathBuf) -> anyhow::Result<()> {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
                     tracing::debug!(?event, "received notify");
-                    let _ = tx.send(());
+                    let _ = tx.try_send(());
                 }
             })?;
         watcher.watch(&path, notify::RecursiveMode::NonRecursive)?;
@@ -121,7 +121,8 @@ impl SimSupervisor {
                 .arg("--")
                 .arg("run")
                 .spawn()?;
-            while rx.try_recv().is_ok() {}
+            // 500ms debounce
+            std::thread::sleep(std::time::Duration::from_millis(500));
             if rx.recv().is_err() {
                 break;
             }
