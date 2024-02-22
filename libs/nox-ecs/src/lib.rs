@@ -10,6 +10,7 @@ use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 use std::any::TypeId;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -100,6 +101,7 @@ pub struct World<S: WorldStore = HostStore> {
     pub archetypes: HashMap<ArchetypeId, Table<S>>,
     pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub assets: AssetStore,
+    pub tick: u64,
 }
 
 impl Clone for World {
@@ -108,6 +110,7 @@ impl Clone for World {
             archetypes: self.archetypes.clone(),
             component_map: self.component_map.clone(),
             assets: self.assets.clone(),
+            tick: 0,
         }
     }
 }
@@ -118,6 +121,7 @@ impl<S: WorldStore> Default for World<S> {
             archetypes: Default::default(),
             component_map: Default::default(),
             assets: Default::default(),
+            tick: 0,
         }
     }
 }
@@ -136,15 +140,15 @@ impl<S: WorldStore> World<S> {
         })
     }
 
-    pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, S>> {
+    pub fn column<C: Component + 'static>(&self) -> Option<HostColumnRef<'_, S>> {
         self.column_by_id(C::component_id())
     }
 
-    pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, S>> {
+    pub fn column_by_id(&self, id: ComponentId) -> Option<HostColumnRef<'_, S>> {
         let table_id = self.component_map.get(&id)?;
         let archetype = self.archetypes.get(table_id)?;
         let column = archetype.columns.get(&id)?;
-        Some(ColumnRef {
+        Some(HostColumnRef {
             column,
             entities: &archetype.entity_buffer,
             entity_map: &archetype.entity_map,
@@ -248,6 +252,7 @@ impl World<HostStore> {
             archetypes,
             component_map: self.component_map.clone(),
             assets: AssetStore::default(),
+            tick: self.tick,
         })
     }
 
@@ -329,13 +334,13 @@ impl WorldStore for HostStore {
     type EntityBuffer = HostColumn;
 }
 
-pub struct ColumnRef<'a, S: WorldStore = HostStore> {
+pub struct HostColumnRef<'a, S: WorldStore = HostStore> {
     pub column: &'a Column<S>,
     pub entities: &'a S::EntityBuffer,
     pub entity_map: &'a BTreeMap<EntityId, usize>,
 }
 
-impl ColumnRef<'_> {
+impl HostColumnRef<'_> {
     pub fn iter(&self) -> impl Iterator<Item = (EntityId, ComponentValue<'_>)> {
         self.entities
             .iter::<u64>()
@@ -1054,6 +1059,7 @@ impl WorldExec {
         self.tick_exec.run(&mut self.world, client)?;
         self.world.copy_all_columns()?;
         self.history.push_world(&self.world.host)?;
+        self.world.host.tick += 1;
         Ok(())
     }
 
@@ -1081,7 +1087,7 @@ impl WorldExec {
             .ok_or(Error::ComponentNotFound)
     }
 
-    pub fn column(&mut self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
+    pub fn column(&mut self, component_id: ComponentId) -> Result<HostColumnRef<'_>, Error> {
         if !self.world.loaded_components.contains(&component_id) {
             if let Some(client_world) = self.world.client.get() {
                 self.world
@@ -1096,7 +1102,7 @@ impl WorldExec {
             .ok_or(Error::ComponentNotFound)
     }
 
-    pub fn cached_column(&self, component_id: ComponentId) -> Result<ColumnRef<'_>, Error> {
+    pub fn cached_column(&self, component_id: ComponentId) -> Result<HostColumnRef<'_>, Error> {
         if !self.world.loaded_components.contains(&component_id) {
             return Err(Error::ComponentNotFound);
         }
@@ -1228,6 +1234,65 @@ impl System for JoinSystem {
             system.init_builder(builder)?;
         }
         Ok(())
+    }
+}
+
+pub trait ColumnStore {
+    type Column<'a>: ColumnRef
+    where
+        Self: 'a;
+    fn transfer_column(&mut self, id: ComponentId) -> Result<(), Error>;
+    fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error>;
+    fn assets(&self) -> Option<&AssetStore>;
+    fn tick(&self) -> u64;
+}
+
+impl ColumnStore for WorldExec {
+    type Column<'a> = HostColumnRef<'a>;
+
+    fn transfer_column(&mut self, id: ComponentId) -> Result<(), Error> {
+        let _ = WorldExec::column(self, id)?;
+        Ok(())
+    }
+
+    fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
+        self.cached_column(id)
+    }
+
+    fn assets(&self) -> Option<&AssetStore> {
+        Some(&self.world.host.assets)
+    }
+
+    fn tick(&self) -> u64 {
+        self.world.host.tick
+    }
+}
+
+pub trait ColumnRef {
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn entity_buf(&self) -> Cow<'_, [u8]>;
+    fn value_buf(&self) -> Cow<'_, [u8]>;
+    fn is_asset(&self) -> bool;
+}
+
+impl ColumnRef for HostColumnRef<'_> {
+    fn len(&self) -> usize {
+        self.column.buffer.len
+    }
+
+    fn entity_buf(&self) -> Cow<'_, [u8]> {
+        Cow::Borrowed(&self.entities.buf)
+    }
+
+    fn value_buf(&self) -> Cow<'_, [u8]> {
+        Cow::Borrowed(&self.column.buffer.buf)
+    }
+
+    fn is_asset(&self) -> bool {
+        self.column.buffer.asset
     }
 }
 
