@@ -12,13 +12,15 @@ use polars_arrow::{
     datatypes::ArrowDataType,
 };
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{collections::BTreeMap, fs::File, path::Path};
 
 use crate::{
-    ArchetypeId, AssetStore, Column, Error, HostColumn, HostStore, Table, World, WorldStore,
+    ArchetypeId, AssetStore, Column, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table,
+    World, WorldStore,
 };
 
 const ENTITY_ID_COMPONENT: ComponentId = ComponentId::new("entity_id");
@@ -33,6 +35,7 @@ pub struct PolarsWorld {
 pub struct Metadata {
     pub archetypes: BTreeMap<ArchetypeId, ArchetypeMetadata>,
     pub component_map: HashMap<ComponentId, ArchetypeId>,
+    pub tick: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -99,6 +102,7 @@ impl World<HostStore> {
         let metadata = Metadata {
             archetypes: archetype_metadata,
             component_map: self.component_map.clone(),
+            tick: self.tick,
         };
 
         Ok(PolarsWorld {
@@ -115,6 +119,7 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
         let Metadata {
             archetypes,
             component_map,
+            tick,
         } = polars.metadata;
         let archetypes = polars
             .archetypes
@@ -129,6 +134,7 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
             archetypes,
             component_map,
             assets: AssetStore::default(),
+            tick,
         })
     }
 }
@@ -476,6 +482,62 @@ pub fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
     }
     for buffer in array_data.buffers() {
         out.extend_from_slice(buffer.as_slice())
+    }
+}
+
+pub struct PolarsColumnRef<'a> {
+    entity_series: &'a Series,
+    buf: &'a Series,
+}
+
+impl<'a> ColumnStore for &'a PolarsWorld {
+    type Column<'b> = PolarsColumnRef<'b> where Self: 'b;
+
+    fn transfer_column(&mut self, _id: ComponentId) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
+        let entity_id_string = ENTITY_ID_COMPONENT.0.to_string();
+        let archetype = self
+            .metadata
+            .component_map
+            .get(&id)
+            .ok_or(Error::ComponentNotFound)?;
+        let table = self
+            .archetypes
+            .get(archetype)
+            .ok_or(Error::ComponentNotFound)?;
+        Ok(PolarsColumnRef {
+            entity_series: table.column(&entity_id_string)?,
+            buf: table.column(&id.0.to_string())?, // TODO(sphw): add a map to metadata between component id and series offset
+        })
+    }
+
+    fn assets(&self) -> Option<&AssetStore> {
+        None
+    }
+
+    fn tick(&self) -> u64 {
+        self.metadata.tick
+    }
+}
+
+impl ColumnRef for PolarsColumnRef<'_> {
+    fn len(&self) -> usize {
+        self.entity_series.len()
+    }
+
+    fn entity_buf(&self) -> std::borrow::Cow<'_, [u8]> {
+        Cow::Owned(self.entity_series.to_bytes())
+    }
+
+    fn value_buf(&self) -> std::borrow::Cow<'_, [u8]> {
+        Cow::Owned(self.buf.to_bytes())
+    }
+
+    fn is_asset(&self) -> bool {
+        false
     }
 }
 
