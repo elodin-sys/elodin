@@ -6,7 +6,7 @@ use crate::{polars::PolarsWorld, Error, World};
 
 #[derive(Default, Debug, Clone)]
 pub struct History {
-    worlds: Vec<PolarsWorld>,
+    pub worlds: Vec<PolarsWorld>,
 }
 
 impl History {
