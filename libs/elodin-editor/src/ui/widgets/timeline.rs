@@ -190,6 +190,7 @@ impl<'a> Timeline<'a> {
             );
 
             self.set_value(new_value);
+            response.changed();
         }
 
         // Paint the UI

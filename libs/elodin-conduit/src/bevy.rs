@@ -31,6 +31,12 @@ use bevy::{
 #[derive(bevy::prelude::Component)]
 pub struct Received;
 
+#[derive(bevy::prelude::Resource)]
+pub struct MaxTick(pub u64);
+
+#[derive(bevy::prelude::Resource)]
+pub struct Tick(pub u64);
+
 impl ColumnMsg<Bytes> {
     pub fn load_into_bevy(
         self,
@@ -316,6 +322,8 @@ fn recv_system(
     mut exit: EventWriter<AppExit>,
     mut subscribe_event: EventWriter<SubscribeEvent>,
     metadata: Res<MetadataStore>,
+    mut max_tick_res: ResMut<MaxTick>,
+    mut tick_res: ResMut<Tick>,
 ) {
     while let Ok(msg) = rx.try_recv() {
         match msg.msg {
@@ -355,6 +363,10 @@ fn recv_system(
             }
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
+            }
+            Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
+                max_tick_res.0 = max_tick;
+                tick_res.0 = tick;
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
@@ -423,8 +435,12 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(EntityMap::default());
         app.insert_resource(ComponentMap::default());
         app.insert_resource(AssetMap::default());
+        app.insert_resource(MaxTick(0));
+        app.insert_resource(Tick(0));
         app.insert_resource(ConduitRx(self.rx.clone()));
         app.add_event::<SubscribeEvent>();
+        app.add_event::<ControlMsg>();
+        app.add_systems(Update, control_msg);
         app.add_systems(Update, recv_system);
     }
 }
@@ -608,6 +624,17 @@ pub fn sync_asset<T>(
     }
 }
 
+pub fn control_msg(mut reader: EventReader<ControlMsg>, subs: Res<Subscriptions>) {
+    for msg in reader.read() {
+        for sub in &subs.connections {
+            let _ = sub.send(Packet {
+                stream_id: StreamId::CONTROL,
+                payload: Payload::ControlMsg(msg.clone()),
+            });
+        }
+    }
+}
+
 #[derive(Event)]
 pub struct SubscribeEvent {
     query: crate::Query,
@@ -620,6 +647,7 @@ pub struct SendError;
 #[derive(bevy::prelude::Resource, Default, Clone)]
 pub struct Subscriptions {
     map: HashMap<ComponentId, Vec<Subscription>>,
+    connections: Vec<flume::Sender<Packet<Payload<Bytes>>>>,
 }
 
 impl Subscriptions {
@@ -628,6 +656,7 @@ impl Subscriptions {
     }
 
     pub fn subscribe(&mut self, key: ComponentId, subscription: Subscription) {
+        self.connections.push(subscription.tx.clone());
         let subs = self.map.entry(key).or_default();
         subs.push(subscription);
     }

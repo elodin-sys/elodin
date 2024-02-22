@@ -112,17 +112,6 @@ impl crate::Component for TraceAnchor {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "bevy",
-    derive(bevy::prelude::Component, bevy::prelude::Resource)
-)]
-pub struct SimState {
-    pub paused: bool,
-    pub history_count: usize,
-    pub history_index: usize,
-}
-
 #[cfg(test)]
 mod tests {
     use nalgebra::UnitQuaternion;

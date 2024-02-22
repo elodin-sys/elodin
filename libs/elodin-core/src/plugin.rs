@@ -4,7 +4,6 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
-use elodin_conduit::well_known::SimState;
 use nalgebra::DMatrix;
 
 use crate::{
@@ -33,9 +32,6 @@ pub enum TickSet {
 pub struct PhysicsSchedule;
 
 fn run_physics_system(world: &mut World) {
-    if world.resource::<SimState>().paused {
-        return;
-    }
     let delta_time = world.resource::<Time>().delta();
     let mut tick_mode = world.resource_mut::<TickMode>();
     match tick_mode.as_mut() {
@@ -65,8 +61,7 @@ pub struct XpbdPlugin;
 
 impl Plugin for XpbdPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SimState::default())
-            .insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))) // FIXME
+        app.insert_resource(TreeMassMatrix(DMatrix::zeros(6, 6))) // FIXME
             .add_event::<SyncModels>()
             .add_plugins(crate::bevy_transform::TransformPlugin)
             .add_plugins(

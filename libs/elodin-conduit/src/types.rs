@@ -230,6 +230,7 @@ pub enum Payload<B> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub enum ControlMsg {
     Subscribe {
         query: Query,
@@ -242,6 +243,12 @@ pub enum ControlMsg {
         id: AssetId,
         entity_id: EntityId,
         bytes: Bytes,
+    },
+    SetPlaying(bool),
+    Rewind(u64),
+    Tick {
+        tick: u64,
+        max_tick: u64,
     },
     Exit,
 }
