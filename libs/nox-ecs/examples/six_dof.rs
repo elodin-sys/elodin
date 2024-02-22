@@ -26,6 +26,9 @@ fn main() {
     let model = world.insert_asset(Mesh::sphere(0.1, 36, 18));
     let material = world.insert_asset(Material::color(1.0, 1.0, 1.0));
 
+    let model_b = world.insert_asset(Mesh::sphere(0.1, 36, 18));
+    let material_b = world.insert_asset(Material::color(0.5, 10.0, 1.0));
+
     world.spawn(Body {
         pos: WorldPos(SpatialTransform {
             inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
@@ -45,6 +48,27 @@ fn main() {
             inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
         }),
     });
+
+    world.spawn(Body {
+        pos: WorldPos(SpatialTransform {
+            inner: vector![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+        }),
+        vel: WorldVel(SpatialMotion {
+            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
+        }),
+        accel: WorldAccel(SpatialMotion {
+            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+        }),
+        model: model_b,
+        material: material_b,
+        force: Force(SpatialForce {
+            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+        }),
+        mass: Inertia(SpatialInertia {
+            inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+        }),
+    });
+
     let builder = world
         .builder()
         .tick_pipeline(six_dof(|| gravity, 1.0 / 60.0));
