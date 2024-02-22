@@ -1,4 +1,4 @@
-use crate::{assets::Handle, Error, WorldExec};
+use crate::{assets::Handle, ColumnRef, ColumnStore, Error, WorldExec};
 use bytes::Bytes;
 use elodin_conduit::{
     client::{Msg, MsgPair},
@@ -24,6 +24,8 @@ pub struct ConduitExec {
     metadata_store: MetadataStore,
     rx: flume::Receiver<MsgPair>,
     exec: WorldExec,
+    playing: bool,
+    state: State,
 }
 
 impl ConduitExec {
@@ -47,35 +49,63 @@ impl ConduitExec {
                 rx,
                 exec,
                 metadata_store,
+                playing: true,
+                state: State::default(),
             },
             tx,
         )
     }
 
     pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
-        self.exec.run(client)?;
+        if self.playing {
+            match &mut self.state {
+                State::Running => {
+                    self.exec.run(client)?;
+                }
+                State::Replaying { index } => {
+                    *index += 1;
+                    if *index >= self.exec.history.worlds.len() {
+                        self.state = State::Running;
+                    }
+                }
+            }
+        }
         self.send()?;
         self.recv()?;
         Ok(())
     }
 
     pub fn send(&mut self) -> Result<(), Error> {
-        for (comp_id, subs) in &mut self.subscriptions {
-            for sub in subs.iter_mut() {
-                if let Err(err) = send_sub(&mut self.connections, &mut self.exec, comp_id, sub) {
-                    tracing::debug!(?err, ?comp_id, "send sub error")
-                }
+        match self.state {
+            State::Running => {
+                let max_tick = self.exec.history.worlds.len();
+                send(
+                    &mut self.subscriptions,
+                    &mut self.connections,
+                    &mut self.exec,
+                    max_tick,
+                )?;
+            }
+            State::Replaying { index } => {
+                let Some(mut polars) = &self.exec.history.worlds.get(index) else {
+                    return Ok(());
+                };
+                send(
+                    &mut self.subscriptions,
+                    &mut self.connections,
+                    &mut polars,
+                    self.exec.history.worlds.len(),
+                )?;
             }
         }
         Ok(())
     }
 
     pub fn recv(&mut self) -> Result<(), Error> {
-        let Ok(pair) = self.rx.try_recv() else {
-            return Ok(());
-        };
-        if let Err(err) = self.process_msg_pair(pair) {
-            tracing::warn!(?err, "error processing msg pair");
+        while let Ok(pair) = self.rx.try_recv() {
+            if let Err(err) = self.process_msg_pair(pair) {
+                tracing::warn!(?err, "error processing msg pair");
+            }
         }
 
         Ok(())
@@ -114,6 +144,12 @@ impl ConduitExec {
                     stream_id,
                 });
             }
+            Msg::Control(ControlMsg::SetPlaying(playing)) => self.playing = playing,
+            Msg::Control(ControlMsg::Rewind(index)) => {
+                self.state = State::Replaying {
+                    index: index as usize,
+                }
+            }
             Msg::Control(_) => {}
             Msg::Column(col) => {
                 for res in col.iter() {
@@ -149,28 +185,56 @@ impl ConduitExec {
     }
 }
 
+fn send(
+    subscriptions: &mut BTreeMap<ComponentId, Vec<Subscription>>,
+    connections: &mut [flume::Sender<Packet<Payload<Bytes>>>],
+    exec: &mut impl ColumnStore,
+    max_tick: usize,
+) -> Result<(), Error> {
+    for con in connections.iter_mut() {
+        con.send(Packet {
+            stream_id: StreamId::CONTROL,
+            payload: Payload::ControlMsg(ControlMsg::Tick {
+                tick: exec.tick(),
+                max_tick: max_tick as u64,
+            }),
+        })
+        .map_err(|_| Error::ChannelClosed)?;
+    }
+    for (comp_id, subs) in subscriptions {
+        for sub in subs.iter_mut() {
+            if let Err(err) = send_sub(connections, exec, comp_id, sub) {
+                tracing::debug!(?err, ?comp_id, "send sub error")
+            }
+        }
+    }
+    Ok(())
+}
+
 fn send_sub(
     connections: &mut [flume::Sender<Packet<Payload<Bytes>>>],
-    exec: &mut WorldExec,
+    exec: &mut impl ColumnStore,
     comp_id: &ComponentId,
     sub: &mut Subscription,
 ) -> Result<(), Error> {
     let tx = connections
         .get_mut(sub.connection_id.0)
         .ok_or(Error::AssetNotFound)?;
-    let _ = exec.column(*comp_id)?;
-    let col = exec.cached_column(*comp_id)?;
-    if col.column.buffer.asset {
-        let Some(buf) = col.column.buffer.typed_buf::<u64>() else {
+    exec.transfer_column(*comp_id)?;
+    let col = exec.column(*comp_id)?;
+    if col.is_asset() {
+        let Some(assets) = exec.assets() else {
+            return Ok(());
+        };
+        let buf = col.value_buf();
+        let Ok(buf) = bytemuck::try_cast_slice(&buf) else {
             // TODO: warn
             todo!()
         };
+
         let mut changed = false;
         for id in buf.iter() {
-            let gen = exec
-                .world
-                .host
-                .assets
+            let gen = assets
                 .gen(Handle::<()>::new(AssetId(*id)))
                 .ok_or(Error::AssetNotFound)?;
             if gen > sub.sent_generation {
@@ -181,14 +245,10 @@ fn send_sub(
         if !changed {
             return Ok(());
         }
-        let entities_buf = col.entities.typed_buf::<u64>().unwrap();
+        let entities_buf = col.entity_buf();
+        let entities_buf = bytemuck::cast_slice(&entities_buf);
         for (id, entity_id) in buf.iter().zip(entities_buf.iter().copied()) {
-            let Some(value) = exec
-                .world
-                .host
-                .assets
-                .value(Handle::<()>::new(AssetId(*id)))
-            else {
+            let Some(value) = assets.value(Handle::<()>::new(AssetId(*id))) else {
                 todo!("gracefully handle")
             };
             let packet = Packet {
@@ -205,15 +265,24 @@ fn send_sub(
         let packet = Packet {
             stream_id: sub.stream_id,
             payload: Payload::Column(ColumnPayload {
-                time: 0,
-                len: col.column.buffer.len as u32,
-                entity_buf: Bytes::copy_from_slice(&col.entities.buf),
-                value_buf: Bytes::copy_from_slice(&col.column.buffer.buf), // TODO: make the Vec<u8> here bytes so this is a ref-count
+                time: exec.tick(),
+                len: col.len() as u32,
+                entity_buf: Bytes::copy_from_slice(&col.entity_buf()),
+                value_buf: Bytes::copy_from_slice(&col.value_buf()), // TODO: make the Vec<u8> here bytes so this is a ref-count
             }),
         };
         tx.send(packet).map_err(|_| Error::ChannelClosed)?;
     }
     Ok(())
+}
+
+#[derive(Default)]
+enum State {
+    #[default]
+    Running,
+    Replaying {
+        index: usize,
+    },
 }
 
 #[cfg(feature = "tokio")]
