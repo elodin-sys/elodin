@@ -6,7 +6,10 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText, Rounding, Separator},
     EguiContexts,
 };
-use elodin_conduit::well_known::SimState;
+use elodin_conduit::{
+    bevy::{MaxTick, Tick},
+    ControlMsg,
+};
 
 use self::widgets::{button::ImageButton, timeline::Timeline};
 
@@ -15,38 +18,30 @@ pub mod images;
 mod theme;
 mod widgets;
 
-#[derive(Resource)]
-pub struct UiState {
-    history_index: usize,
-    history_count: usize,
-    show_stats: bool,
-}
+#[derive(Resource, Default)]
+pub struct Paused(pub bool);
 
-// NOTE: Temporary local state to test the UI
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            history_index: 1025,
-            history_count: 140 * 30, // 2min20sec at 30fps
-            show_stats: false,
-        }
-    }
-}
+#[derive(Resource, Default)]
+pub struct ShowStats(pub bool);
 
-pub fn shortcuts(mut ui_state: ResMut<UiState>, kbd: Res<Input<KeyCode>>) {
+pub fn shortcuts(mut show_stats: ResMut<ShowStats>, kbd: Res<Input<KeyCode>>) {
     if kbd.just_pressed(KeyCode::F12) {
-        ui_state.show_stats = !ui_state.show_stats;
+        show_stats.0 = !show_stats.0;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     mut contexts: EguiContexts,
-    mut sim_state: ResMut<SimState>,
-    mut ui_state: ResMut<UiState>,
+    mut paused: ResMut<Paused>,
+    max_tick: Res<MaxTick>,
+    mut tick: ResMut<Tick>,
+    show_stats: Res<ShowStats>,
     // picked: Query<(EntityQuery, &Picked, Entity)>,
     diagnostics: Res<DiagnosticsStore>,
     window: Query<&Window>,
     images: Local<images::Images>,
+    mut event: EventWriter<ControlMsg>,
 ) {
     let window = window.single();
     let width = window.resolution.width();
@@ -79,7 +74,7 @@ pub fn render(
     //             })
     //     });
 
-    if ui_state.show_stats {
+    if show_stats.0 {
         egui::Window::new("stats")
             .title_bar(false)
             .resizable(false)
@@ -108,6 +103,7 @@ pub fn render(
         .fixed_size(egui::vec2(500.0, 50.0))
         .fixed_pos(egui::pos2(width / 2.0 - 250.0, height - 160.0))
         .show(contexts.ctx_mut(), |ui| {
+            let mut tick_changed = false;
             egui::Frame::none()
                 .inner_margin(Margin::symmetric(16.0, 12.0))
                 .show(ui, |ui| {
@@ -119,52 +115,51 @@ pub fn render(
                             let skip_prev_btn =
                                 ui.add(ImageButton::new(icon_skip_prev_id).scale(1.4, 1.4));
 
-                            if skip_prev_btn.clicked() && ui_state.history_index > 0 {
-                                ui_state.history_index -= 1;
+                            if skip_prev_btn.clicked() && tick.0 > 0 {
+                                tick.0 = 0;
+                                tick_changed = true;
                             }
 
-                            if sim_state.paused {
+                            if paused.0 {
                                 let play_btn =
                                     ui.add(ImageButton::new(icon_play_id).scale(1.4, 1.4));
 
                                 if play_btn.clicked() {
-                                    sim_state.paused = false;
+                                    paused.0 = false;
                                 }
                             } else {
                                 let pause_btn =
                                     ui.add(ImageButton::new(icon_pause_id).scale(1.4, 1.4));
 
                                 if pause_btn.clicked() {
-                                    sim_state.paused = true;
+                                    paused.0 = true;
                                 }
                             }
 
                             let skip_next_btn =
                                 ui.add(ImageButton::new(icon_skip_next_id).scale(1.4, 1.4));
 
-                            if skip_next_btn.clicked()
-                                && ui_state.history_index < ui_state.history_count
-                            {
-                                ui_state.history_index += 1;
+                            if skip_next_btn.clicked() && tick.0 < max_tick.0 {
+                                tick.0 = max_tick.0 - 1;
+                                tick_changed = true;
                             }
                         });
 
                         ui.add_space(ui.available_width());
 
                         ui.add(Label::new(
-                            RichText::new(format!("{:0>5}", ui_state.history_index))
-                                .color(Color32::WHITE),
+                            RichText::new(format!("{:0>5}", tick.0)).color(Color32::WHITE),
                         ));
                     });
                 });
 
             ui.add(Separator::default().spacing(0.0));
 
-            let max_count = ui_state.history_count;
+            let max_count = max_tick.0;
             let frames_per_second = 60.0;
             ui.horizontal(|ui| {
-                ui.add(
-                    Timeline::new(&mut ui_state.history_index, 0..=max_count)
+                let response = ui.add(
+                    Timeline::new(&mut tick.bypass_change_detection().0, 0..=max_count)
                         .width(ui.available_width())
                         .height(32.0)
                         .handle_image_id(&icon_scrub_id)
@@ -172,7 +167,11 @@ pub fn render(
                         .segments(8)
                         .time(max_count as f64 / frames_per_second),
                 );
+                tick_changed |= response.changed();
             });
+            if tick_changed {
+                event.send(ControlMsg::Rewind(tick.0));
+            }
         });
 }
 

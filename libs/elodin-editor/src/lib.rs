@@ -24,7 +24,7 @@ use bevy_infinite_grid::{
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use elodin_conduit::well_known::{SimState, WorldPos};
+use elodin_conduit::{well_known::WorldPos, ControlMsg};
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
 
@@ -38,7 +38,6 @@ pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send
         bevy_sync::{SendPlbPlugin, SyncPlugin},
         client::{Demux, Msg, MsgPair},
         well_known::DEFAULT_SUB_FILTERS,
-        ControlMsg,
     };
 
     let (server_tx, server_rx) = flume::unbounded();
@@ -128,8 +127,8 @@ impl Plugin for EditorPlugin {
                 .disable::<LogPlugin>()
                 .build(),
         )
-        .insert_resource(SimState::default())
-        .init_resource::<ui::UiState>()
+        .init_resource::<ui::Paused>()
+        .init_resource::<ui::ShowStats>()
         .add_plugins(
             DefaultPickingPlugins
                 .build()
@@ -148,6 +147,7 @@ impl Plugin for EditorPlugin {
         .add_systems(Update, (ui::shortcuts, ui::render))
         .add_systems(Update, make_pickable)
         .add_systems(Update, sync_pos)
+        .add_systems(Update, sync_paused)
         .add_systems(Startup, setup_window_icon)
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
@@ -280,4 +280,10 @@ pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
             ..Default::default()
         }
     });
+}
+
+pub fn sync_paused(paused: Res<ui::Paused>, mut event: EventWriter<ControlMsg>) {
+    if paused.is_changed() {
+        event.send(ControlMsg::SetPlaying(!paused.0));
+    }
 }
