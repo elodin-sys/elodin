@@ -4,7 +4,7 @@ use elodin_conduit::{
     client::{Msg, MsgPair},
     query::{MetadataStore, QueryId},
     ser_de::ColumnValue,
-    AssetId, ColumnPayload, ComponentId, ControlMsg, EntityId, Metadata, Packet, Payload, StreamId,
+    ColumnPayload, ComponentId, ControlMsg, EntityId, Metadata, Packet, Payload, StreamId,
 };
 use tracing::warn;
 
@@ -79,23 +79,27 @@ impl ConduitExec {
         match self.state {
             State::Running => {
                 let max_tick = self.exec.history.worlds.len();
-                send(
+                if let Err(err) = send(
                     &mut self.subscriptions,
                     &mut self.connections,
                     &mut self.exec,
                     max_tick,
-                )?;
+                ) {
+                    warn!(?err, "error sending");
+                }
             }
             State::Replaying { index } => {
                 let Some(mut polars) = &self.exec.history.worlds.get(index) else {
                     return Ok(());
                 };
-                send(
+                if let Err(err) = send(
                     &mut self.subscriptions,
                     &mut self.connections,
                     &mut polars,
                     self.exec.history.worlds.len(),
-                )?;
+                ) {
+                    warn!(?err, "error sending");
+                }
             }
         }
         Ok(())
@@ -235,7 +239,7 @@ fn send_sub(
         let mut changed = false;
         for id in buf.iter() {
             let gen = assets
-                .gen(Handle::<()>::new(AssetId(*id)))
+                .gen(Handle::<()>::new(*id))
                 .ok_or(Error::AssetNotFound)?;
             if gen > sub.sent_generation {
                 changed = true;
@@ -248,7 +252,7 @@ fn send_sub(
         let entities_buf = col.entity_buf();
         let entities_buf = bytemuck::cast_slice(&entities_buf);
         for (id, entity_id) in buf.iter().zip(entities_buf.iter().copied()) {
-            let Some(value) = assets.value(Handle::<()>::new(AssetId(*id))) else {
+            let Some(value) = assets.value(Handle::<()>::new(*id)) else {
                 todo!("gracefully handle")
             };
             let packet = Packet {

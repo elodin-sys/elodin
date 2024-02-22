@@ -2,11 +2,11 @@ use bytes::Bytes;
 use elodin_conduit::{Asset, AssetId, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
 
-use std::{collections::HashMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct Handle<T> {
-    pub id: AssetId,
+    pub id: u64,
     _phantom: PhantomData<T>,
 }
 
@@ -19,7 +19,7 @@ impl<T> Clone for Handle<T> {
 impl<T> Copy for Handle<T> {}
 
 impl<T> Handle<T> {
-    pub fn new(id: AssetId) -> Self {
+    pub fn new(id: u64) -> Self {
         Self {
             id,
             _phantom: PhantomData,
@@ -30,7 +30,7 @@ impl<T> Handle<T> {
 impl<T> IntoOp for Handle<T> {
     fn into_op(self) -> Noxpr {
         use nox::NoxprScalarExt;
-        self.id.0.constant()
+        self.id.constant()
     }
 }
 
@@ -66,7 +66,6 @@ impl<T: Asset> crate::Component for Handle<T> {
 
 #[derive(Default, Clone)]
 pub struct AssetStore {
-    map: HashMap<AssetId, usize>,
     data: Vec<AssetItem>,
 }
 
@@ -90,27 +89,24 @@ impl AssetStore {
     pub fn insert_bytes(&mut self, asset_id: AssetId, bytes: impl Into<Bytes>) -> Handle<()> {
         let inner = bytes.into();
         let id = self.data.len();
-        self.map.insert(asset_id, id);
         self.data.push(AssetItem {
             generation: 1,
             inner,
             asset_id,
         });
         Handle {
-            id: asset_id,
+            id: id as u64,
             _phantom: PhantomData,
         }
     }
 
     pub fn value<C>(&self, handle: Handle<C>) -> Option<&AssetItem> {
-        let id = self.map.get(&handle.id)?;
-        let val = self.data.get(*id)?;
+        let val = self.data.get(handle.id as usize)?;
         Some(val)
     }
 
     pub fn gen<C>(&self, handle: Handle<C>) -> Option<usize> {
-        let id = self.map.get(&handle.id)?;
-        let val = self.data.get(*id)?;
+        let val = self.data.get(handle.id as usize)?;
         Some(val.generation)
     }
 }
