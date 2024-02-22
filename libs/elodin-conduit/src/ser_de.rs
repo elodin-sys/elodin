@@ -106,7 +106,7 @@ impl<'a> ColumnPayload<&'a [u8]> {
         let mut entity_buf = self.entity_buf;
         let mut value_buf = self.value_buf;
         (0..self.len).map(move |_| {
-            let entity_id = EntityId(entity_buf.try_get_u64()?);
+            let entity_id = EntityId(entity_buf.try_get_u64_le()?);
             let (size, value) = component_type.parse_value(value_buf)?;
             value_buf.advance(size);
             Ok(ColumnValue { entity_id, value })
@@ -114,6 +114,7 @@ impl<'a> ColumnPayload<&'a [u8]> {
     }
 }
 
+#[derive(Debug)]
 pub struct ColumnValue<'a> {
     pub entity_id: EntityId,
     pub value: ComponentValue<'a>,
@@ -177,10 +178,23 @@ impl ComponentType {
             buf: &[u8],
             shape: ndarray::IxDyn,
         ) -> Result<ndarray::CowArray<'_, T, ndarray::IxDyn>, Error> {
-            bytemuck::checked::try_cast_slice(buf)
-                .map_err(|_| Error::CheckedCast)
-                .and_then(|buf| ndarray::ArrayView::from_shape(shape, buf).map_err(Error::from))
-                .map(ndarray::CowArray::from)
+            if let Ok(buf) = bytemuck::checked::try_cast_slice(buf) {
+                ndarray::ArrayView::from_shape(shape, buf)
+                    .map_err(Error::from)
+                    .map(ndarray::CowArray::from)
+            } else {
+                let array: ndarray::Array<T, ndarray::Ix1> = buf
+                    .chunks_exact(size_of::<T>())
+                    .map(|chunk| {
+                        bytemuck::checked::try_pod_read_unaligned::<T>(chunk)
+                            .map_err(|_| Error::CheckedCast)
+                    })
+                    .collect::<Result<_, Error>>()?;
+                let array = array.into_dyn();
+                let array = array.into_shape(shape)?;
+
+                Ok(ndarray::CowArray::from(array))
+            }
         }
         let value = match self.primitive_ty {
             PrimitiveTy::U8 => ndarray::ArrayView::from_shape(shape, buf)

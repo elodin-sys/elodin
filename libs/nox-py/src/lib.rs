@@ -819,11 +819,11 @@ pub struct Handle {
 #[pymethods]
 impl Handle {
     fn asarray(&self) -> Result<PyObject, Error> {
-        Ok(nox::NoxprScalarExt::constant(self.inner.id.0).to_jax()?)
+        Ok(nox::NoxprScalarExt::constant(self.inner.id).to_jax()?)
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
-        let jax = nox::NoxprScalarExt::constant(self.inner.id.0).to_jax()?;
+        let jax = nox::NoxprScalarExt::constant(self.inner.id).to_jax()?;
         Ok(((jax,), None))
     }
 

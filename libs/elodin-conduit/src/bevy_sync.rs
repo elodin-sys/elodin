@@ -113,13 +113,6 @@ impl Plugin for SendPlbPlugin {
     }
 }
 
-pub fn setup_entity_map(
-    query: Query<(&EntityId, Entity), Changed<EntityId>>,
-    mut map: ResMut<EntityMap>,
-) {
-    *map = EntityMap(query.iter().map(|(id, e)| (*id, e)).collect());
-}
-
 pub fn sync_pbr(
     mesh_query: Query<(Entity, &Handle<Mesh>), Changed<Handle<Mesh>>>,
     mat_query: Query<(Entity, &Handle<StandardMaterial>), Changed<Handle<Mesh>>>,
