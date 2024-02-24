@@ -64,7 +64,7 @@ impl Plugin for EditorPlugin {
                     primary_window: Some(Window {
                         window_theme: Some(WindowTheme::Dark),
                         title: "Elodin Editor".into(),
-                        present_mode: PresentMode::AutoNoVsync,
+                        present_mode: PresentMode::AutoVsync,
                         fit_canvas_to_parent: true,
                         canvas: Some("#editor".to_string()),
                         ..default()
