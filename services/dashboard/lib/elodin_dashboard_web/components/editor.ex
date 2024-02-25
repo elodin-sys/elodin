@@ -21,7 +21,7 @@ defmodule ElodinDashboardWeb.EditorComponents do
       phx-update="ignore"
     >
       <.spinner id="editor-spinner" class="animate-spin w-16 h-16" />
-      <canvas id="editor" style="display: none" />
+      <canvas id="editor" style="display: none" oncontextmenu="return false;" />
     </div>
     """
   end
