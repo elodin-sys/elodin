@@ -46,7 +46,7 @@ pub use query::*;
 pub use nox_ecs_macros::{Archetype, Component};
 
 // 16.67 ms
-pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
+pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
 pub struct Table<S: WorldStore> {
     pub columns: BTreeMap<ComponentId, Column<S>>,
