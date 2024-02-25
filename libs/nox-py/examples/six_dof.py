@@ -2,7 +2,7 @@ from jax import numpy as np
 from jax.numpy import linalg as la
 from elodin import *
 
-TIME_STEP = 1.0 / 60.0
+TIME_STEP = 1.0 / 120.0
 
 def gravity_impl(pos, inertia, force):
   G = 6.67430e-11
