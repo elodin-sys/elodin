@@ -479,6 +479,7 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: PyObject,
+        time_step: Option<f64>,
         client: Option<&Client>,
     ) -> Result<(), Error> {
         tracing_subscriber::fmt::init();
@@ -487,35 +488,34 @@ impl WorldBuilder {
         let args = Args::parse_from(args);
         match args {
             Args::Build { dir } => {
-                let exec = self.build(py, sys)?.exec;
+                let exec = self.build(py, sys, time_step)?.exec;
                 exec.write_to_dir(dir)?;
                 Ok(())
             }
             Args::Run { addr } => {
-                let exec = self.build(py, sys)?.exec;
+                let exec = self.build(py, sys, time_step)?.exec;
                 let client = match client {
                     Some(c) => c.client.clone(),
                     None => nox::Client::cpu()?,
                 };
                 let ppid = std::os::unix::process::parent_id();
-                spawn_tcp_server(
-                    addr,
-                    exec,
-                    &client,
-                    Duration::from_secs_f64(1.0 / 60.0),
-                    || {
-                        let sig_err = py.check_signals().is_err();
-                        let current_ppid = std::os::unix::process::parent_id();
-                        let ppid_changed = ppid != current_ppid;
-                        sig_err || ppid_changed
-                    },
-                )?;
+                spawn_tcp_server(addr, exec, &client, || {
+                    let sig_err = py.check_signals().is_err();
+                    let current_ppid = std::os::unix::process::parent_id();
+                    let ppid_changed = ppid != current_ppid;
+                    sig_err || ppid_changed
+                })?;
                 Ok(())
             }
         }
     }
 
-    pub fn build(&mut self, py: Python<'_>, sys: PyObject) -> Result<Exec, Error> {
+    pub fn build(
+        &mut self,
+        py: Python<'_>,
+        sys: PyObject,
+        time_step: Option<f64>,
+    ) -> Result<Exec, Error> {
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
         let builder = PipelineBuilder { builder };
@@ -529,6 +529,14 @@ def build_expr(builder, sys):
     var_array = builder.var_arrays()
     xla = jax.xla_computation(lambda a: call(a, builder))(var_array)
     return xla";
+
+        if let Some(ts) = time_step {
+            let ts = Duration::from_secs_f64(ts);
+            // 4ms (~240 ticks/sec) is the minimum time step
+            if ts <= Duration::from_millis(4) {
+                return Err(Error::InvalidTimeStep(ts));
+            }
+        }
 
         let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
             .getattr("build_expr")?
@@ -547,6 +555,7 @@ def build_expr(builder, sys):
         let builder = builder.replace(PipelineBuilder::default());
         let builder = builder.builder;
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
+        let time_step = time_step.map(Duration::from_secs_f64);
         let exec = nox_ecs::WorldExec {
             world: SharedWorld {
                 host: builder.world,
@@ -555,6 +564,7 @@ def build_expr(builder, sys):
             tick_exec: nox_ecs::Exec {
                 exec: Default::default(),
                 metadata: nox_ecs::ExecMetadata {
+                    time_step,
                     arg_ids: builder.param_ids,
                     ret_ids,
                 },
@@ -720,6 +730,8 @@ pub enum Error {
     MissingArg(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("invalid time step: {0:?}")]
+    InvalidTimeStep(std::time::Duration),
 }
 
 impl From<Error> for PyErr {

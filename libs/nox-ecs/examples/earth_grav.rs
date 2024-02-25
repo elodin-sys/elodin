@@ -37,17 +37,14 @@ fn main() {
             inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
         }),
     });
-    let builder = world
+
+    let time_step = 1.0 / 60.0;
+    let exec = world
         .builder()
-        .tick_pipeline(six_dof(|| earth_gravity, 1.0 / 60.0));
+        .tick_pipeline(six_dof(|| earth_gravity, time_step))
+        .time_step(std::time::Duration::from_secs_f64(time_step))
+        .build()
+        .unwrap();
     let client = nox::Client::cpu().unwrap();
-    let exec = builder.build().unwrap();
-    spawn_tcp_server(
-        "0.0.0.0:2240".parse().unwrap(),
-        exec,
-        &client,
-        std::time::Duration::from_secs_f64(1.0 / 60.0),
-        || false,
-    )
-    .unwrap();
+    spawn_tcp_server("0.0.0.0:2240".parse().unwrap(), exec, &client, || false).unwrap();
 }

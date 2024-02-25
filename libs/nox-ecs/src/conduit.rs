@@ -302,13 +302,13 @@ pub fn spawn_tcp_server(
     socket_addr: std::net::SocketAddr,
     exec: WorldExec,
     client: &nox::Client,
-    tick_period: std::time::Duration,
     check_canceled: impl Fn() -> bool,
 ) -> Result<(), Error> {
     use std::time::Instant;
 
     use elodin_conduit::server::TcpServer;
 
+    let time_step = exec.time_step();
     let (tx, rx) = flume::unbounded();
     let mut conduit_exec = ConduitExec::new(exec, rx);
     std::thread::spawn(move || {
@@ -325,7 +325,7 @@ pub fn spawn_tcp_server(
         if check_canceled() {
             break Ok(());
         }
-        let sleep_time = tick_period.saturating_sub(start.elapsed());
+        let sleep_time = time_step.saturating_sub(start.elapsed());
         if !sleep_time.is_zero() {
             std::thread::sleep(sleep_time)
         }

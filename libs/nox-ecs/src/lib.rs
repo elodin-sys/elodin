@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub use elodin_conduit;
@@ -43,6 +44,9 @@ pub use integrator::*;
 pub use query::*;
 
 pub use nox_ecs_macros::{Archetype, Component};
+
+// 16.67 ms
+pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 pub struct Table<S: WorldStore> {
     pub columns: BTreeMap<ComponentId, Column<S>>,
@@ -275,11 +279,7 @@ impl World<HostStore> {
     }
 
     pub fn builder(self) -> WorldBuilder {
-        WorldBuilder {
-            world: self,
-            pipe: (),
-            startup_sys: (),
-        }
+        WorldBuilder::default().world(self)
     }
 }
 
@@ -597,7 +597,7 @@ pub trait IntoSystem<Marker, Arg, Ret> {
         Self: Sized,
         Self::System: Sized,
     {
-        WorldBuilder::from_pipeline(self.into_system())
+        World::default().builder().tick_pipeline(self.into_system())
     }
 }
 
@@ -790,10 +790,12 @@ impl<A: System, B: System> System for Pipe<A, B> {
     }
 }
 
+#[derive(Default)]
 pub struct WorldBuilder<Sys = (), StartupSys = ()> {
     world: World<HostStore>,
     pipe: Sys,
     startup_sys: StartupSys,
+    time_step: Option<Duration>,
 }
 
 impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
@@ -801,12 +803,9 @@ where
     Sys: System,
     StartupSys: System,
 {
-    pub fn new(world: World<HostStore>, pipe: Sys, startup_sys: StartupSys) -> Self {
-        WorldBuilder {
-            world,
-            pipe,
-            startup_sys,
-        }
+    pub fn world(mut self, world: World<HostStore>) -> Self {
+        self.world = world;
+        self
     }
 
     pub fn tick_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
@@ -817,6 +816,7 @@ where
             world: self.world,
             pipe: pipe.into_system(),
             startup_sys: self.startup_sys,
+            time_step: self.time_step,
         }
     }
 
@@ -828,7 +828,13 @@ where
             world: self.world,
             pipe: self.pipe,
             startup_sys: startup.into_system(),
+            time_step: self.time_step,
         }
+    }
+
+    pub fn time_step(mut self, time_step: Duration) -> Self {
+        self.time_step = Some(time_step);
+        self
     }
 
     pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
@@ -840,7 +846,8 @@ where
     }
 
     pub fn build(mut self) -> Result<WorldExec, Error> {
-        let tick_exec = self.pipe.build(&mut self.world)?;
+        let mut tick_exec = self.pipe.build(&mut self.world)?;
+        tick_exec.metadata.time_step = self.time_step;
         let startup_exec = self.startup_sys.build(&mut self.world)?;
         Ok(WorldExec {
             world: SharedWorld::from_host(self.world),
@@ -848,16 +855,6 @@ where
             startup_exec: Some(startup_exec),
             history: History::default(),
         })
-    }
-}
-
-impl<Sys: System> WorldBuilder<Sys> {
-    pub fn from_pipeline(pipe: Sys) -> Self {
-        WorldBuilder {
-            world: World::default(),
-            pipe,
-            startup_sys: (),
-        }
     }
 }
 
@@ -896,6 +893,7 @@ impl<S: System> SystemExt for S {
         *world = builder.world;
         Ok(Exec {
             metadata: ExecMetadata {
+                time_step: None,
                 arg_ids: builder.param_ids,
                 ret_ids,
             },
@@ -907,6 +905,7 @@ impl<S: System> SystemExt for S {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
+    pub time_step: Option<Duration>,
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
 }
@@ -1061,6 +1060,13 @@ impl WorldExec {
         self.history.push_world(&self.world.host)?;
         self.world.host.tick += 1;
         Ok(())
+    }
+
+    pub fn time_step(&self) -> Duration {
+        self.tick_exec
+            .metadata
+            .time_step
+            .unwrap_or(DEFAULT_TIME_STEP)
     }
 
     pub fn fork(&self) -> Self {
