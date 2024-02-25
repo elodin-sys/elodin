@@ -2,6 +2,8 @@ from jax import numpy as np
 from jax.numpy import linalg as la
 from elodin import *
 
+TIME_STEP = 1.0 / 60.0
+
 def gravity_impl(pos, inertia, force):
   G = 6.67430e-11
   big_m = 1/G
@@ -37,5 +39,5 @@ w.spawn(Body(
     mesh = w.insert_asset(Mesh.sphere(0.3)),
     material = w.insert_asset(Material.color(1.0, 1.0, 1.0))
 ))
-sys = six_dof(1.0 / 60.0, gravity)
-sim = w.run(sys)
+sys = six_dof(TIME_STEP, gravity)
+sim = w.run(sys, TIME_STEP)

@@ -15,7 +15,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tonic::{async_trait, transport::Server, Response, Status};
 use tracing::{error, info, info_span, Instrument};
@@ -131,6 +131,7 @@ impl ControlService {
 
         let rx = self.server_rx.clone();
         let client = self.client.clone();
+        let time_step = exec.time_step();
         let mut conduit_exec = ConduitExec::new(exec, rx);
 
         let span = info_span!("sim");
@@ -140,14 +141,13 @@ impl ControlService {
                 // TODO: implement update handling
                 return Ok(());
             }
-            let tick_period = Duration::from_secs_f64(1.0 / 60.0);
             loop {
                 let start = Instant::now();
                 if let Err(err) = conduit_exec.run(&client) {
                     error!(?err, "failed to run conduit exec");
                     return Err(err.into());
                 }
-                let sleep_time = tick_period.saturating_sub(start.elapsed());
+                let sleep_time = time_step.saturating_sub(start.elapsed());
                 if !sleep_time.is_zero() {
                     thread::sleep(sleep_time)
                 }
