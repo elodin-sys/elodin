@@ -1324,6 +1324,8 @@ pub enum Error {
     InvalidComponentId,
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
+    #[error("postcard {0}")]
+    Postcard(#[from] postcard::Error),
     #[error("world not found")]
     WorldNotFound,
 }
@@ -1331,6 +1333,12 @@ pub enum Error {
 impl From<nox::xla::Error> for Error {
     fn from(value: nox::xla::Error) -> Self {
         Error::Nox(nox::Error::Xla(value))
+    }
+}
+
+impl<T> From<flume::SendError<T>> for Error {
+    fn from(_: flume::SendError<T>) -> Self {
+        Error::ChannelClosed
     }
 }
 

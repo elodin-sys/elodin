@@ -41,6 +41,11 @@ impl SpatialTransform {
         nox::SpatialTransform::from_op(Noxpr::jax(jax)).into()
     }
 
+    #[staticmethod]
+    pub fn zero() -> Self {
+        nox::SpatialTransform::zero().into()
+    }
+
     fn linear(&self) -> Result<PyObject, Error> {
         Ok(self.inner.linear().into_op().to_jax()?)
     }
@@ -97,6 +102,11 @@ impl SpatialMotion {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::SpatialMotion::from_op(Noxpr::jax(jax)).into()
+    }
+
+    #[staticmethod]
+    pub fn zero() -> Self {
+        nox::SpatialMotion::zero().into()
     }
 
     fn linear(&self) -> Result<PyObject, Error> {
@@ -247,6 +257,10 @@ impl SpatialInertia {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::SpatialInertia::from_op(Noxpr::jax(jax)).into()
+    }
+
+    fn mass(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.mass().into_op().to_jax()?)
     }
 
     #[getter]

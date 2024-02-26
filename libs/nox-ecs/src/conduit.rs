@@ -8,19 +8,20 @@ use elodin_conduit::{
 };
 use tracing::warn;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-struct ConnectionId(usize);
+type Connection = flume::Sender<Packet<Payload<Bytes>>>;
 
 struct Subscription {
+    component_id: ComponentId,
     stream_id: StreamId,
-    connection_id: ConnectionId,
+    connection: Connection,
     sent_generation: usize,
 }
 
 pub struct ConduitExec {
-    subscriptions: BTreeMap<ComponentId, Vec<Subscription>>,
-    connections: Vec<flume::Sender<Packet<Payload<Bytes>>>>,
+    subscriptions: Vec<Subscription>,
+    connections: Vec<Connection>,
     metadata_store: MetadataStore,
     rx: flume::Receiver<MsgPair>,
     exec: WorldExec,
@@ -29,7 +30,7 @@ pub struct ConduitExec {
 }
 
 impl ConduitExec {
-    pub fn new(exec: WorldExec) -> (Self, flume::Sender<MsgPair>) {
+    pub fn new(exec: WorldExec, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
         for arch in exec.world.host.archetypes.values() {
             for (id, col) in &arch.columns {
@@ -41,19 +42,15 @@ impl ConduitExec {
                 metadata_store.push(metadata);
             }
         }
-        let (tx, rx) = flume::unbounded();
-        (
-            Self {
-                subscriptions: BTreeMap::new(),
-                connections: Vec::new(),
-                rx,
-                exec,
-                metadata_store,
-                playing: true,
-                state: State::default(),
-            },
-            tx,
-        )
+        Self {
+            subscriptions: Vec::new(),
+            connections: Vec::new(),
+            rx,
+            exec,
+            metadata_store,
+            playing: true,
+            state: State::default(),
+        }
     }
 
     pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
@@ -70,53 +67,67 @@ impl ConduitExec {
                 }
             }
         }
-        self.send()?;
-        self.recv()?;
+        self.send();
+        self.recv();
         Ok(())
     }
 
-    pub fn send(&mut self) -> Result<(), Error> {
+    pub fn send(&mut self) {
         match self.state {
             State::Running => {
                 let max_tick = self.exec.history.worlds.len();
-                if let Err(err) = send(
+                send(
                     &mut self.subscriptions,
                     &mut self.connections,
                     &mut self.exec,
                     max_tick,
-                ) {
-                    warn!(?err, "error sending");
-                }
+                );
             }
             State::Replaying { index } => {
                 let Some(mut polars) = &self.exec.history.worlds.get(index) else {
-                    return Ok(());
+                    return;
                 };
-                if let Err(err) = send(
+                send(
                     &mut self.subscriptions,
                     &mut self.connections,
                     &mut polars,
                     self.exec.history.worlds.len(),
-                ) {
-                    warn!(?err, "error sending");
-                }
+                );
             }
         }
-        Ok(())
     }
 
-    pub fn recv(&mut self) -> Result<(), Error> {
+    pub fn recv(&mut self) {
         while let Ok(pair) = self.rx.try_recv() {
             if let Err(err) = self.process_msg_pair(pair) {
                 tracing::warn!(?err, "error processing msg pair");
             }
         }
+    }
 
-        Ok(())
+    fn add_connection(&mut self, conn: Connection) {
+        let already_exits = self.connections.iter().any(|c| c.same_channel(&conn));
+        if !already_exits {
+            self.connections.push(conn);
+        }
     }
 
     fn process_msg_pair(&mut self, MsgPair { msg, tx }: MsgPair) -> Result<(), Error> {
+        let Some(tx) = tx.upgrade() else {
+            tracing::debug!("channel closed");
+            return Ok(());
+        };
         match msg {
+            Msg::Control(ControlMsg::Connect) => {
+                tracing::debug!("received connect, sending metadata");
+                tx.send(Packet {
+                    stream_id: StreamId::CONTROL,
+                    payload: Payload::ControlMsg(ControlMsg::StartSim {
+                        metadata_store: self.metadata_store.clone(),
+                    }),
+                })?;
+                self.add_connection(tx);
+            }
             Msg::Control(ControlMsg::Subscribe { query }) => {
                 let ids = query.execute(&self.metadata_store);
                 if ids.len() != 1 {
@@ -125,10 +136,6 @@ impl ConduitExec {
                 let QueryId::Component(id) = ids[0] else {
                     return Err(Error::InvalidQuery); // For now we only support ids with len 1
                 };
-                let connection_id = ConnectionId(self.connections.len());
-                let tx = tx.upgrade().ok_or(Error::ChannelClosed)?;
-                self.connections.push(tx.clone());
-                let subs = self.subscriptions.entry(id).or_default();
                 let stream_id = StreamId::rand();
                 let Some(metadata) = self.metadata_store.get_metadata(&id) else {
                     warn!(?id, "component not found");
@@ -142,8 +149,9 @@ impl ConduitExec {
                     }),
                 })
                 .map_err(|_| Error::ChannelClosed)?;
-                subs.push(Subscription {
-                    connection_id,
+                self.subscriptions.push(Subscription {
+                    component_id: id,
+                    connection: tx,
                     sent_generation: 0,
                     stream_id,
                 });
@@ -190,12 +198,13 @@ impl ConduitExec {
 }
 
 fn send(
-    subscriptions: &mut BTreeMap<ComponentId, Vec<Subscription>>,
-    connections: &mut [flume::Sender<Packet<Payload<Bytes>>>],
+    subscriptions: &mut Vec<Subscription>,
+    connections: &mut Vec<Connection>,
     exec: &mut impl ColumnStore,
     max_tick: usize,
-) -> Result<(), Error> {
-    for con in connections.iter_mut() {
+) {
+    // drop connections and subscriptions if the connection is closed
+    connections.retain_mut(|con| {
         con.send(Packet {
             stream_id: StreamId::CONTROL,
             payload: Payload::ControlMsg(ControlMsg::Tick {
@@ -203,29 +212,24 @@ fn send(
                 max_tick: max_tick as u64,
             }),
         })
-        .map_err(|_| Error::ChannelClosed)?;
-    }
-    for (comp_id, subs) in subscriptions {
-        for sub in subs.iter_mut() {
-            if let Err(err) = send_sub(connections, exec, comp_id, sub) {
-                tracing::debug!(?err, ?comp_id, "send sub error")
-            }
-        }
-    }
-    Ok(())
+        .inspect_err(|err| {
+            tracing::debug!(?err, "send tick error, dropping connection");
+        })
+        .is_ok()
+    });
+    subscriptions.retain_mut(|sub| {
+        send_sub(exec, sub)
+            .inspect_err(|err| {
+                tracing::debug!(?err, "send sub error, dropping connection");
+            })
+            .is_ok()
+    });
 }
 
-fn send_sub(
-    connections: &mut [flume::Sender<Packet<Payload<Bytes>>>],
-    exec: &mut impl ColumnStore,
-    comp_id: &ComponentId,
-    sub: &mut Subscription,
-) -> Result<(), Error> {
-    let tx = connections
-        .get_mut(sub.connection_id.0)
-        .ok_or(Error::AssetNotFound)?;
-    exec.transfer_column(*comp_id)?;
-    let col = exec.column(*comp_id)?;
+fn send_sub(exec: &mut impl ColumnStore, sub: &mut Subscription) -> Result<(), Error> {
+    let comp_id = sub.component_id;
+    exec.transfer_column(comp_id)?;
+    let col = exec.column(comp_id)?;
     if col.is_asset() {
         let Some(assets) = exec.assets() else {
             return Ok(());
@@ -263,7 +267,9 @@ fn send_sub(
                     id: value.asset_id,
                 }),
             };
-            tx.send(packet).map_err(|_| Error::ChannelClosed)?;
+            sub.connection
+                .send(packet)
+                .map_err(|_| Error::ChannelClosed)?;
         }
     } else {
         let packet = Packet {
@@ -275,7 +281,9 @@ fn send_sub(
                 value_buf: Bytes::copy_from_slice(&col.value_buf()), // TODO: make the Vec<u8> here bytes so this is a ref-count
             }),
         };
-        tx.send(packet).map_err(|_| Error::ChannelClosed)?;
+        sub.connection
+            .send(packet)
+            .map_err(|_| Error::ChannelClosed)?;
     }
     Ok(())
 }
@@ -301,11 +309,12 @@ pub fn spawn_tcp_server(
 
     use elodin_conduit::server::TcpServer;
 
-    let (mut conduit_exec, rx) = ConduitExec::new(exec);
+    let (tx, rx) = flume::unbounded();
+    let mut conduit_exec = ConduitExec::new(exec, rx);
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let server = TcpServer::bind(rx, socket_addr).await.unwrap();
+            let server = TcpServer::bind(tx, socket_addr).await.unwrap();
             server.run().await
         })
         .unwrap();

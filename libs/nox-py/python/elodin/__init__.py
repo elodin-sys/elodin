@@ -9,8 +9,6 @@ import typing
 import numpy
 
 __doc__ = elodin.__doc__
-if hasattr(elodin, "__all__"):
-    __all__ = elodin.__all__
 
 Self = TypeVar("Self")
 class System(Protocol):
@@ -224,7 +222,14 @@ class Body(Archetype):
     inertia: Inertia
     mesh: MeshAsset
     material: MaterialAsset
-
+    def __init__(self, mesh, material, world_pos = WorldPos.zero(), world_vel = WorldVel.zero(), inertia = Inertia.from_mass(1.0)):
+        self.world_pos = world_pos
+        self.world_vel = world_vel
+        self.world_accel = WorldAccel.zero()
+        self.force = Force.zero()
+        self.inertia = inertia
+        self.mesh = mesh
+        self.material = material
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
     sys.init(builder)
