@@ -64,12 +64,12 @@ impl<T: Asset> crate::Component for Handle<T> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetStore {
     data: Vec<AssetItem>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssetItem {
     pub generation: usize,
     pub inner: Bytes,
