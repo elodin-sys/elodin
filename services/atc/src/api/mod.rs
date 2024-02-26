@@ -6,18 +6,20 @@ use crate::{
     events::DbEvent,
     monte_carlo::SimStorageClient,
 };
-use axum::routing::get;
+use axum::http::Request;
+use axum::{extract::MatchedPath, routing::get};
 use elodin_types::api::*;
 use futures::Stream;
 use jsonwebtoken::jwk::JwkSet;
 use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, pin::Pin};
+use std::{net::SocketAddr, pin::Pin, time::Duration};
 use tokio::sync::broadcast;
 use tonic::async_trait;
 use tonic::{transport::Server, Response, Status};
-use tracing::info;
+use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
+use tracing::{info, Span};
 
 use crate::config::ApiConfig;
 
@@ -80,6 +82,26 @@ impl Api {
         info!(api.addr = ?address, "api listening");
 
         let rest = axum::Router::new()
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(|req: &Request<_>| {
+                        let matched_path = req
+                            .extensions()
+                            .get::<MatchedPath>()
+                            .map(MatchedPath::as_str);
+                        tracing::info_span!(
+                            "req",
+                            method = ?req.method(),
+                            matched_path,
+                            some_other_field = tracing::field::Empty,
+                        )
+                    })
+                    .on_failure(
+                        |err: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
+                            tracing::error!(error = ?err, "request failed");
+                        },
+                    ),
+            )
             .route("/sim/ws/:id", get(sim_socket))
             .route("/healthz", get(healthz))
             .with_state(WSContext {

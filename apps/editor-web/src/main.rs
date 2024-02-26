@@ -7,21 +7,20 @@ use tracing::error;
 
 mod web_sock;
 
-fn main() -> anyhow::Result<()> {
+fn main() {
     //tracing_wasm::set_as_global_default();
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    let url = get_url()?;
+    let url = get_url().unwrap();
     let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
-    web_sock::spawn_wasm(url, bevy_tx)?;
-    let mut app = App::new();
-    app.add_plugins(EditorPlugin)
+    web_sock::spawn_wasm(url, bevy_tx).unwrap();
+    App::new()
+        .add_plugins(EditorPlugin)
         .add_plugins(SyncPlugin {
             plugin: sub,
             subscriptions: Subscriptions::default(),
         })
         .add_systems(PostStartup, hide_loader.pipe(handle_error))
         .run();
-    Ok(())
 }
 
 fn hide_loader() -> anyhow::Result<()> {

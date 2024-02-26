@@ -266,6 +266,17 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                         "cpu": "0.3",
                         "memory": "500Mi"
                     }
+                },
+                "volumeMounts": [{
+                    "name": "tmp",
+                    "mountPath": "/tmp"
+                }]
+            }],
+            "volumes": [{
+                "name": "tmp",
+                "emptyDir": {
+                    "medium": "Memory",
+                    "sizeLimit": "500Mi"
                 }
             }]
         }

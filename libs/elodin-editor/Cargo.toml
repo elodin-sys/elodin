@@ -12,16 +12,7 @@ osx_minimum_system_version = "10.11"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-default = ["core"]
-core = ["elodin-core"]
-
 [dependencies]
-# core
-elodin-core.path = "../elodin-core"
-elodin-core.optional = true
-elodin-macros.path = "../elodin-macros"
-
 # math
 nalgebra = "0.32"
 
@@ -40,10 +31,6 @@ bevy_polyline.branch = "feature/bevy-0.12"
 
 # channel
 flume = "0.11"
-
-# args
-clap.version = "4.4"
-clap.features = ["derive"]
 
 elodin-conduit.path = "../../libs/elodin-conduit"
 

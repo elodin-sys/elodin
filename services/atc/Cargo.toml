@@ -55,10 +55,9 @@ tonic-health = "0.11"
 axum.version = "0.6.20"
 axum.features = ["ws", "headers"]
 tower.version = "0.4"
-tower-http.version = "0.5"
-tower-http.features = ["cors"]
 hyper.version = "0.14.24"
 hyper.features = ["stream"]
+tower-http = "0.4.4"
 
 # sql
 sea-orm.version = "0.12"

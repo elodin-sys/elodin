@@ -100,8 +100,8 @@ fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
 
     let status = std::process::Command::new(&args.file)
         .arg("--")
-        .arg("monte-carlo")
-        .arg("--build-dir")
+        .arg("build")
+        .arg("--dir")
         .arg(tmp_dir.path())
         .spawn()?
         .wait()?;

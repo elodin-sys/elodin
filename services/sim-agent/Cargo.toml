@@ -27,9 +27,8 @@ tracing-subscriber = "0.3"
 anyhow = "1"
 
 # elodin
-elodin-core.path = "../../libs/elodin-core"
-bevy.version = "0.12"
 elodin-conduit.path = "../../libs/elodin-conduit"
+elodin-conduit.default-features = false
 elodin-conduit.features = ["tokio"]
 
 # types
@@ -38,11 +37,6 @@ serde.features = ["derive"]
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]
 elodin-types.path = "../../libs/elodin-types/rust"
-
-
-# python
-pyo3.version = "0.20.0"
-elodin-py.path = "../../libs/elodin-py"
 
 # bytes
 bytes = "1.5"

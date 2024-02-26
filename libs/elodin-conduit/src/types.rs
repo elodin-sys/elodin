@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::{collections::HashMap, hash::Hash, mem::size_of};
 
+use crate::query::MetadataStore;
+
 #[derive(
     Clone,
     Copy,
@@ -232,6 +234,10 @@ pub enum Payload<B> {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub enum ControlMsg {
+    Connect,
+    StartSim {
+        metadata_store: MetadataStore,
+    },
     Subscribe {
         query: Query,
     },
@@ -251,6 +257,14 @@ pub enum ControlMsg {
         max_tick: u64,
     },
     Exit,
+}
+
+impl ControlMsg {
+    pub fn sub_component_id(id: ComponentId) -> Self {
+        ControlMsg::Subscribe {
+            query: Query::ComponentId(id),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

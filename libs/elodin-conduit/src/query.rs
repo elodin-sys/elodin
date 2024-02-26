@@ -3,7 +3,7 @@ use smallvec::{smallvec, SmallVec};
 use std::collections::HashMap;
 
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
-#[derive(Default, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, Debug, PartialEq)]
 pub struct MetadataStore {
     pub metadata: Vec<Metadata>,
     pub component_index: HashMap<ComponentId, usize>,
