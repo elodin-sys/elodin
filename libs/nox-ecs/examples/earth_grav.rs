@@ -1,4 +1,4 @@
-use elodin_conduit::well_known::{Material, Mesh, Pbr};
+use conduit::well_known::{Material, Mesh, Pbr};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
 use nox_ecs::World;

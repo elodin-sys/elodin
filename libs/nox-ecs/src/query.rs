@@ -1,5 +1,5 @@
 use crate::{Component, ComponentArray, Error, SystemParam};
-use elodin_conduit::{ComponentId, ComponentType, EntityId};
+use conduit::{ComponentId, ComponentType, EntityId};
 use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
 use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};

@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use bytemuck::Pod;
-use elodin_conduit::{ComponentId, ComponentType, ComponentValue};
+use conduit::{ComponentId, ComponentType, ComponentValue};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
@@ -79,7 +79,7 @@ impl HostColumn {
         })
     }
 
-    pub fn iter<T: elodin_conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
+    pub fn iter<T: conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
         assert_eq!(self.component_type, T::component_type());
         self.values_iter()
             .filter_map(|v| T::from_component_value(v))

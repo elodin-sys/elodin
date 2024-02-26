@@ -8,12 +8,12 @@ use std::{
 };
 
 use clap::Parser;
+use nox_ecs::conduit::Asset;
 use nox_ecs::{
-    elodin_conduit::{self},
-    join_many,
+    conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
-    spawn_tcp_server, ArchetypeId, Asset, ComponentArray, ErasedSystem, HostColumn, HostStore,
-    Query, SharedWorld, System, Table, World,
+    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore, Query,
+    SharedWorld, System, Table, World,
 };
 use numpy::{ndarray::ArrayViewD, PyArray, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::{
@@ -90,7 +90,7 @@ impl PipelineBuilder {
             .world
             .column_by_id(id)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
-        let ty: elodin_conduit::ComponentType = ty.into();
+        let ty: conduit::ComponentType = ty.into();
         let len = column.column.buffer.len();
         let shape = std::iter::once(len as i64)
             .chain(ty.shape.iter().map(|x| *x as i64))
@@ -166,7 +166,7 @@ impl PipelineBuilder {
 #[derive(Clone)]
 #[pyclass]
 pub struct ComponentId {
-    inner: nox_ecs::ComponentId,
+    inner: conduit::ComponentId,
 }
 
 #[pymethods]
@@ -175,11 +175,11 @@ impl ComponentId {
     fn new(py: Python<'_>, inner: PyObject) -> Result<Self, Error> {
         if let Ok(s) = inner.extract::<String>(py) {
             Ok(Self {
-                inner: nox_ecs::ComponentId::new(&s),
+                inner: conduit::ComponentId::new(&s),
             })
         } else if let Ok(s) = inner.extract::<u64>(py) {
             Ok(Self {
-                inner: nox_ecs::ComponentId(s),
+                inner: conduit::ComponentId(s),
             })
         } else {
             Err(Error::UnexpectedInput)
@@ -247,12 +247,12 @@ impl ComponentType {
     }
 }
 
-impl From<ComponentType> for elodin_conduit::ComponentType {
+impl From<ComponentType> for conduit::ComponentType {
     fn from(val: ComponentType) -> Self {
         Python::with_gil(|py| {
             let shape = val.shape.as_ref(py);
             let shape = shape.to_vec().unwrap().into();
-            elodin_conduit::ComponentType {
+            conduit::ComponentType {
                 primitive_ty: val.ty.into(),
                 shape,
             }
@@ -276,20 +276,20 @@ pub enum PrimitiveType {
     Bool,
 }
 
-impl From<PrimitiveType> for elodin_conduit::PrimitiveTy {
+impl From<PrimitiveType> for conduit::PrimitiveTy {
     fn from(val: PrimitiveType) -> Self {
         match val {
-            PrimitiveType::F64 => elodin_conduit::PrimitiveTy::F64,
-            PrimitiveType::F32 => elodin_conduit::PrimitiveTy::F32,
-            PrimitiveType::U64 => elodin_conduit::PrimitiveTy::U64,
-            PrimitiveType::U32 => elodin_conduit::PrimitiveTy::U32,
-            PrimitiveType::U16 => elodin_conduit::PrimitiveTy::U16,
-            PrimitiveType::U8 => elodin_conduit::PrimitiveTy::U8,
-            PrimitiveType::I64 => elodin_conduit::PrimitiveTy::I64,
-            PrimitiveType::I32 => elodin_conduit::PrimitiveTy::I32,
-            PrimitiveType::I16 => elodin_conduit::PrimitiveTy::I16,
-            PrimitiveType::I8 => elodin_conduit::PrimitiveTy::I8,
-            PrimitiveType::Bool => elodin_conduit::PrimitiveTy::Bool,
+            PrimitiveType::F64 => conduit::PrimitiveTy::F64,
+            PrimitiveType::F32 => conduit::PrimitiveTy::F32,
+            PrimitiveType::U64 => conduit::PrimitiveTy::U64,
+            PrimitiveType::U32 => conduit::PrimitiveTy::U32,
+            PrimitiveType::U16 => conduit::PrimitiveTy::U16,
+            PrimitiveType::U8 => conduit::PrimitiveTy::U8,
+            PrimitiveType::I64 => conduit::PrimitiveTy::I64,
+            PrimitiveType::I32 => conduit::PrimitiveTy::I32,
+            PrimitiveType::I16 => conduit::PrimitiveTy::I16,
+            PrimitiveType::I8 => conduit::PrimitiveTy::I8,
+            PrimitiveType::Bool => conduit::PrimitiveTy::Bool,
         }
     }
 }
@@ -346,8 +346,8 @@ impl WorldBuilder {
                 let table = Table {
                     columns,
                     entity_buffer: HostColumn::new(
-                        elodin_conduit::ComponentType::u64(),
-                        nox_ecs::ComponentId::new("entity_id"),
+                        conduit::ComponentType::u64(),
+                        conduit::ComponentId::new("entity_id"),
                     ),
                     entity_map: BTreeMap::default(),
                 };
@@ -376,7 +376,7 @@ impl PyAsset {
 }
 
 impl PyAsset {
-    fn asset_id(&self) -> elodin_conduit::AssetId {
+    fn asset_id(&self) -> conduit::AssetId {
         Python::with_gil(|py| {
             let id: u64 = self
                 .object
@@ -384,7 +384,7 @@ impl PyAsset {
                 .unwrap()
                 .extract(py)
                 .unwrap();
-            elodin_conduit::AssetId(id)
+            conduit::AssetId(id)
         })
     }
 
@@ -699,7 +699,7 @@ impl Client {
 #[derive(Clone)]
 #[pyclass]
 pub struct EntityId {
-    inner: elodin_conduit::EntityId,
+    inner: conduit::EntityId,
 }
 
 #[pymethods]
@@ -707,7 +707,7 @@ impl EntityId {
     #[staticmethod]
     pub fn rand() -> Self {
         EntityId {
-            inner: elodin_conduit::EntityId::rand(),
+            inner: conduit::EntityId::rand(),
         }
     }
 }
@@ -733,7 +733,7 @@ pub enum Error {
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
     #[error("conduit error {0}")]
-    Conduit(#[from] elodin_conduit::Error),
+    Conduit(#[from] conduit::Error),
 }
 
 impl From<Error> for PyErr {
@@ -755,7 +755,7 @@ impl From<Error> for PyErr {
 #[derive(Clone)]
 pub struct ComponentArrayMetadata {
     len: usize,
-    entity_map: BTreeMap<elodin_conduit::EntityId, usize>,
+    entity_map: BTreeMap<conduit::EntityId, usize>,
 }
 
 #[pymethods]
@@ -853,7 +853,7 @@ impl Handle {
 #[pyclass]
 #[derive(Clone)]
 pub struct Pbr {
-    inner: elodin_conduit::well_known::Pbr,
+    inner: conduit::well_known::Pbr,
 }
 
 #[pymethods]
@@ -861,7 +861,7 @@ impl Pbr {
     #[new]
     fn new(mesh: Mesh, material: Material) -> Self {
         Self {
-            inner: elodin_conduit::well_known::Pbr::Bundle {
+            inner: conduit::well_known::Pbr::Bundle {
                 mesh: mesh.inner,
                 material: material.inner,
             },
@@ -870,13 +870,13 @@ impl Pbr {
 
     #[staticmethod]
     fn from_url(url: String) -> Result<Self, Error> {
-        let inner = elodin_conduit::well_known::Pbr::Url(url);
+        let inner = conduit::well_known::Pbr::Url(url);
         Ok(Self { inner })
     }
 
     #[staticmethod]
     fn from_path(path: PathBuf) -> Result<Self, Error> {
-        let inner = elodin_conduit::well_known::Pbr::path(path)?;
+        let inner = conduit::well_known::Pbr::path(path)?;
         Ok(Self { inner })
     }
 
@@ -893,7 +893,7 @@ impl Pbr {
 #[pyclass]
 #[derive(Clone)]
 pub struct Mesh {
-    inner: elodin_conduit::well_known::Mesh,
+    inner: conduit::well_known::Mesh,
 }
 
 #[pymethods]
@@ -906,14 +906,14 @@ impl Mesh {
     #[staticmethod]
     pub fn cuboid(x: f32, y: f32, z: f32) -> Self {
         Self {
-            inner: elodin_conduit::well_known::Mesh::cuboid(x, y, z),
+            inner: conduit::well_known::Mesh::cuboid(x, y, z),
         }
     }
 
     #[staticmethod]
     pub fn sphere(radius: f32) -> Self {
         Self {
-            inner: elodin_conduit::well_known::Mesh::sphere(radius, 36, 18),
+            inner: conduit::well_known::Mesh::sphere(radius, 36, 18),
         }
     }
 }
@@ -921,7 +921,7 @@ impl Mesh {
 #[pyclass]
 #[derive(Clone)]
 pub struct Material {
-    inner: elodin_conduit::well_known::Material,
+    inner: conduit::well_known::Material,
 }
 
 #[pymethods]
@@ -934,7 +934,7 @@ impl Material {
     #[staticmethod]
     fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
-            inner: elodin_conduit::well_known::Material::color(r, g, b),
+            inner: conduit::well_known::Material::color(r, g, b),
         }
     }
 }

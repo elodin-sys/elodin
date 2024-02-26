@@ -24,7 +24,7 @@ pub fn component(input: TokenStream) -> TokenStream {
         data,
     } = Component::from_derive_input(&input).unwrap();
     let id_string = id.unwrap_or_else(|| ident.to_string().to_case(Case::Snake));
-    let id = quote! { #crate_name::elodin_conduit::ComponentId::new(#id_string) };
+    let id = quote! { #crate_name::conduit::ComponentId::new(#id_string) };
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0];
     let where_clause = &generics.where_clause;
@@ -53,11 +53,11 @@ pub fn component(input: TokenStream) -> TokenStream {
                 Self(<#ty as #crate_name::Component>::host(val))
             }
 
-            fn component_id() -> #crate_name::elodin_conduit::ComponentId {
+            fn component_id() -> #crate_name::conduit::ComponentId {
                 #id
             }
 
-            fn component_type() -> #crate_name::elodin_conduit::ComponentType {
+            fn component_type() -> #crate_name::conduit::ComponentType {
                 <#ty as #crate_name::Component>::component_type()
             }
         }

@@ -1,4 +1,4 @@
-use elodin_conduit::well_known::Pbr;
+use conduit::well_known::Pbr;
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{Archetype, Component};
 use nox_ecs::{Handle, IntoSystem, Query, Rk4Ext, System, WorldPos};
