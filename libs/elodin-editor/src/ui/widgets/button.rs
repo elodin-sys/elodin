@@ -20,7 +20,7 @@ impl ImageButton {
             image_id,
             image_tint: colors::WHITE,
             image_tint_click: colors::GREY_OPACITY_500,
-            background_color: colors::SURFACE_SECONDARY,
+            background_color: colors::STONE_950,
             width: 1.0,
             height: 1.0,
         }

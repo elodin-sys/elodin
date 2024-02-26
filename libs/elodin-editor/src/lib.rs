@@ -1,9 +1,7 @@
 use bevy::{
     asset::embedded_asset,
     core_pipeline::{
-        bloom::BloomSettings,
-        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
-        tonemapping::Tonemapping,
+        bloom::BloomSettings, experimental::taa::TemporalAntiAliasPlugin, tonemapping::Tonemapping,
     },
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
@@ -39,8 +37,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/icon_play.png");
         embedded_asset!(app, "assets/icons/icon_pause.png");
         embedded_asset!(app, "assets/icons/icon_scrub.png");
-        embedded_asset!(app, "assets/icons/icon_skip_next.png");
-        embedded_asset!(app, "assets/icons/icon_skip_prev.png");
+        embedded_asset!(app, "assets/icons/icon_jump_to_end.png");
+        embedded_asset!(app, "assets/icons/icon_jump_to_start.png");
+        embedded_asset!(app, "assets/icons/icon_frame_forward.png");
+        embedded_asset!(app, "assets/icons/icon_frame_back.png");
         embedded_asset!(app, "assets/textures/cube_side_top.png");
         embedded_asset!(app, "assets/textures/cube_side_bottom.png");
         embedded_asset!(app, "assets/textures/cube_side_front.png");
@@ -91,12 +91,14 @@ impl Plugin for EditorPlugin {
         .add_plugins(TracesPlugin)
         .add_plugins(NavigationGizmoPlugin)
         .add_plugins(FrameTimeDiagnosticsPlugin)
-        .add_systems(Startup, setup)
+        .add_systems(Startup, setup_main_camera)
+        .add_systems(Startup, setup_grid)
+        .add_systems(Startup, setup_window_icon)
         .add_systems(Update, (ui::shortcuts, ui::render))
         .add_systems(Update, make_pickable)
         .add_systems(Update, sync_pos)
         .add_systems(Update, sync_paused)
-        .add_systems(Startup, setup_window_icon)
+        .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
         .insert_resource(AmbientLight {
             color: Color::hex("#FFF").unwrap(),
             brightness: 1.0,
@@ -119,7 +121,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
-fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
+fn setup_grid(mut commands: Commands) {
     commands.spawn(InfiniteGridBundle {
         settings: InfiniteGridSettings {
             minor_line_color: Color::hex("#00081E").unwrap(),
@@ -131,7 +133,12 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
         },
         ..default()
     });
+}
 
+#[derive(Component)]
+pub struct MainCamera;
+
+fn setup_main_camera(mut commands: Commands) {
     // return the id so it can be fetched below
     let mut camera = commands.spawn((
         Camera3dBundle {
@@ -145,6 +152,7 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
         },
         // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
         RenderLayers::default(),
+        MainCamera,
     ));
 
     camera
@@ -165,8 +173,9 @@ fn setup(mut commands: Commands, _asset_server: Res<AssetServer>) {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
                 },
                 ..Default::default()
-            })
-            .insert(TemporalAntiAliasBundle::default());
+            });
+        // NOTE: Crashes custom camera viewport
+        // .insert(TemporalAntiAliasBundle::default());
 
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,

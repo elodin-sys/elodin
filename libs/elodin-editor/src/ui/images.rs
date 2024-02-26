@@ -8,8 +8,10 @@ pub struct Images {
     pub icon_play: Handle<Image>,
     pub icon_pause: Handle<Image>,
     pub icon_scrub: Handle<Image>,
-    pub icon_skip_next: Handle<Image>,
-    pub icon_skip_prev: Handle<Image>,
+    pub icon_jump_to_end: Handle<Image>,
+    pub icon_jump_to_start: Handle<Image>,
+    pub icon_frame_forward: Handle<Image>,
+    pub icon_frame_back: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -19,10 +21,14 @@ impl FromWorld for Images {
             icon_play: asset_server.load("embedded://elodin_editor/assets/icons/icon_play.png"),
             icon_pause: asset_server.load("embedded://elodin_editor/assets/icons/icon_pause.png"),
             icon_scrub: asset_server.load("embedded://elodin_editor/assets/icons/icon_scrub.png"),
-            icon_skip_next: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_skip_next.png"),
-            icon_skip_prev: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_skip_prev.png"),
+            icon_jump_to_end: asset_server
+                .load("embedded://elodin_editor/assets/icons/icon_jump_to_end.png"),
+            icon_jump_to_start: asset_server
+                .load("embedded://elodin_editor/assets/icons/icon_jump_to_start.png"),
+            icon_frame_forward: asset_server
+                .load("embedded://elodin_editor/assets/icons/icon_frame_forward.png"),
+            icon_frame_back: asset_server
+                .load("embedded://elodin_editor/assets/icons/icon_frame_back.png"),
         }
     }
 }

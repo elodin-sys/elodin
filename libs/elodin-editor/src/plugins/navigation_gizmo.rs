@@ -1,7 +1,7 @@
 use std::f32::consts;
 
 use bevy::{
-    app::{App, Plugin, Startup, Update},
+    app::{App, Plugin, PostUpdate, Startup},
     asset::{AssetServer, Assets, Handle},
     core_pipeline::{
         clear_color::ClearColorConfig,
@@ -9,7 +9,6 @@ use bevy::{
     },
     ecs::{
         component::Component,
-        event::EventReader,
         query::{With, Without},
         system::{Commands, Query, Res, ResMut, Resource},
     },
@@ -24,9 +23,10 @@ use bevy::{
     transform::components::Transform,
     ui::camera_config::UiCameraConfig,
     utils::default,
-    window::{Window, WindowResized},
+    window::Window,
 };
 
+use bevy_egui::EguiContexts;
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::PanOrbitCamera;
 
@@ -56,8 +56,8 @@ impl Plugin for NavigationGizmoPlugin {
         app.init_resource::<SharedCameraState>()
             .add_systems(Startup, nav_gizmo)
             .add_systems(Startup, nav_gizmo_camera)
-            .add_systems(Update, set_camera_viewports)
-            .add_systems(Update, sync_nav_camera);
+            .add_systems(PostUpdate, set_camera_viewport)
+            .add_systems(PostUpdate, sync_nav_camera);
     }
 }
 
@@ -882,24 +882,35 @@ pub fn sync_nav_camera(
     }
 }
 
-pub fn set_camera_viewports(
-    windows: Query<&Window>,
-    mut resize_events: EventReader<WindowResized>,
+pub fn set_camera_viewport(
+    window: Query<&Window>,
+    egui_settings: Res<bevy_egui::EguiSettings>,
+    mut contexts: EguiContexts,
     mut nav_camera_query: Query<&mut Camera, With<NavGizmoCamera>>,
 ) {
-    for resize_event in resize_events.read() {
-        let window = windows.get(resize_event.window).unwrap();
-        let mut nav_camera = nav_camera_query.single_mut();
+    let margin = 16.0;
+    let side_length = 128.0;
 
-        let margin = 32;
+    let available_rect = contexts.ctx_mut().available_rect();
 
-        nav_camera.viewport = Some(Viewport {
-            physical_position: UVec2::new(
-                window.resolution.physical_width() - (256 + margin),
-                margin,
-            ),
-            physical_size: UVec2::new(256, 256),
-            ..default()
-        });
-    }
+    let window = window.single();
+    let scale_factor = (window.scale_factor() * egui_settings.scale_factor) as f32;
+
+    let margin = margin * scale_factor;
+    let side_length = side_length * scale_factor;
+
+    let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
+    let viewport_size = available_rect.size() * scale_factor;
+
+    let nav_viewport_pos = Vec2::new(
+        (viewport_pos.x + viewport_size.x) - (side_length + margin),
+        viewport_pos.y + margin,
+    );
+
+    let mut nav_camera = nav_camera_query.single_mut();
+    nav_camera.viewport = Some(Viewport {
+        physical_position: UVec2::new(nav_viewport_pos.x as u32, nav_viewport_pos.y as u32),
+        physical_size: UVec2::new(side_length as u32, side_length as u32),
+        depth: 0.0..1.0,
+    });
 }
