@@ -1,3 +1,4 @@
+use anyhow::Context;
 use elodin_conduit::client::MsgPair;
 use elodin_conduit::server::TcpServer;
 use elodin_types::sandbox::{
@@ -6,14 +7,10 @@ use elodin_types::sandbox::{
     UpdateCodeReq, UpdateCodeResp,
 };
 use nox::Client;
-use nox_ecs::ConduitExec;
+use nox_ecs::{ConduitExec, WorldExec};
 use std::{
     io::{Seek, Write},
     net::SocketAddr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
     thread,
     time::Instant,
 };
@@ -35,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(sandbox_config) = config.sandbox {
         let (server_tx, server_rx) = flume::unbounded();
-        let control = ControlService::new(server_rx, sandbox_config.control_addr);
+        let sim_runner = SimRunner::new(server_rx);
+        let control = ControlService::new(sim_runner, sandbox_config.control_addr);
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
         let sim = async move {
             let sim = TcpServer::bind(server_tx, sandbox_config.sim_addr).await?;
@@ -58,19 +56,15 @@ async fn main() -> anyhow::Result<()> {
 
 #[derive(Clone)]
 struct ControlService {
-    server_rx: flume::Receiver<MsgPair>,
-    loaded: Arc<AtomicBool>,
+    sim_runner: SimRunner,
     address: SocketAddr,
-    client: Client,
 }
 
 impl ControlService {
-    fn new(server_rx: flume::Receiver<MsgPair>, address: SocketAddr) -> Self {
+    fn new(sim_runner: SimRunner, address: SocketAddr) -> Self {
         Self {
+            sim_runner,
             address,
-            server_rx,
-            loaded: Arc::new(AtomicBool::new(false)),
-            client: Client::cpu().unwrap(),
         }
     }
 
@@ -94,8 +88,6 @@ impl ControlService {
     }
 
     fn handle_update_code(&self, req: UpdateCodeReq) -> anyhow::Result<UpdateCodeResp> {
-        let loaded = self.loaded.clone();
-
         let mut code = tempfile::NamedTempFile::new()?;
         tracing::debug!(tmp_file = %code.path().display(), "writing code to temp file");
         code.write_all(req.code.as_bytes())?;
@@ -129,30 +121,7 @@ impl ControlService {
             }
         };
 
-        let rx = self.server_rx.clone();
-        let client = self.client.clone();
-        let time_step = exec.time_step();
-        let mut conduit_exec = ConduitExec::new(exec, rx);
-
-        let span = info_span!("sim");
-        thread::spawn(move || -> anyhow::Result<()> {
-            let _guard = span.enter();
-            if loaded.swap(true, Ordering::SeqCst) {
-                // TODO: implement update handling
-                return Ok(());
-            }
-            loop {
-                let start = Instant::now();
-                if let Err(err) = conduit_exec.run(&client) {
-                    error!(?err, "failed to run conduit exec");
-                    return Err(err.into());
-                }
-                let sleep_time = time_step.saturating_sub(start.elapsed());
-                if !sleep_time.is_zero() {
-                    thread::sleep(sleep_time)
-                }
-            }
-        });
+        self.sim_runner.update(exec)?;
 
         Ok(UpdateCodeResp {
             status: sandbox::Status::Success.into(),
@@ -183,5 +152,46 @@ impl SandboxControl for ControlService {
                 Err(status)
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct SimRunner {
+    exec_tx: flume::Sender<WorldExec>,
+}
+
+impl SimRunner {
+    fn new(server_rx: flume::Receiver<MsgPair>) -> Self {
+        let (exec_tx, exec_rx) = flume::bounded(1);
+        std::thread::spawn(move || -> anyhow::Result<()> {
+            let client = Client::cpu()?;
+            let exec: WorldExec = exec_rx.recv()?;
+            let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
+            loop {
+                let start = Instant::now();
+                if let Err(err) = conduit_exec.run(&client) {
+                    error!(?err, "failed to run conduit exec");
+                    return Err(err.into());
+                }
+                let sleep_time = conduit_exec.time_step().saturating_sub(start.elapsed());
+                thread::sleep(sleep_time);
+
+                if let Ok(exec) = exec_rx.try_recv() {
+                    tracing::info!("received new code, updating sim");
+                    let conns = conduit_exec.connections().to_vec();
+                    conduit_exec = ConduitExec::new(exec, server_rx.clone());
+                    for conn in conns {
+                        conduit_exec.add_connection(conn)?;
+                    }
+                }
+            }
+        });
+        Self { exec_tx }
+    }
+
+    fn update(&self, exec: WorldExec) -> anyhow::Result<()> {
+        self.exec_tx
+            .try_send(exec)
+            .context("failed to send new exec to sim runner")
     }
 }
