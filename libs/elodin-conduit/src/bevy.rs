@@ -330,7 +330,10 @@ fn recv_system(
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
         match msg {
-            Msg::Control(ControlMsg::StartSim { metadata_store: _ }) => {
+            Msg::Control(ControlMsg::StartSim {
+                metadata_store: _,
+                time_step: _,
+            }) => {
                 tracing::debug!("received startsim, sending subscribe messages");
                 for id in DEFAULT_SUB_FILTERS.iter() {
                     let packet = Packet {
