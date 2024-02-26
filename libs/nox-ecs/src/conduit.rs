@@ -124,6 +124,7 @@ impl ConduitExec {
             stream_id: StreamId::CONTROL,
             payload: Payload::ControlMsg(ControlMsg::StartSim {
                 metadata_store: self.metadata_store.clone(),
+                time_step: self.exec.time_step(),
             }),
         })?;
         self.connections.push(conn);
