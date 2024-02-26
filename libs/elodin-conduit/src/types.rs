@@ -3,7 +3,7 @@ use ndarray::{CowArray, IxDyn};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{collections::HashMap, hash::Hash, mem::size_of};
+use std::{collections::HashMap, hash::Hash, mem::size_of, time::Duration};
 
 use crate::query::MetadataStore;
 
@@ -237,6 +237,7 @@ pub enum ControlMsg {
     Connect,
     StartSim {
         metadata_store: MetadataStore,
+        time_step: Duration,
     },
     Subscribe {
         query: Query,
