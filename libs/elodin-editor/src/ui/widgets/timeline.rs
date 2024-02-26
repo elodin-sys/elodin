@@ -2,7 +2,7 @@ use std::ops::RangeInclusive;
 
 use bevy::ecs::{change_detection::DetectChangesMut, event::EventWriter, system::ResMut};
 use bevy_egui::egui::{self, emath, epaint::PathShape};
-use elodin_conduit::{
+use conduit::{
     bevy::{MaxTick, Tick},
     ControlMsg,
 };

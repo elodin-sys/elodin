@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use elodin_conduit::{Asset, AssetId, ComponentId, ComponentValue};
+use conduit::{Asset, AssetId, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
 
 use std::marker::PhantomData;
@@ -55,8 +55,8 @@ impl<T: Asset> crate::Component for Handle<T> {
         ComponentId(T::ASSET_ID.0)
     }
 
-    fn component_type() -> elodin_conduit::ComponentType {
-        elodin_conduit::ComponentType::u64()
+    fn component_type() -> conduit::ComponentType {
+        conduit::ComponentType::u64()
     }
 
     fn is_asset() -> bool {
@@ -116,12 +116,12 @@ pub trait ErasedComponent: Send + Sync {
     fn component_value(&self) -> ComponentValue<'_>;
 }
 
-impl<T: elodin_conduit::Component + Send + Sync> ErasedComponent for T {
+impl<T: conduit::Component + Send + Sync> ErasedComponent for T {
     fn component_id(&self) -> ComponentId {
         T::component_id()
     }
 
     fn component_value(&self) -> ComponentValue<'_> {
-        elodin_conduit::Component::component_value(self)
+        conduit::Component::component_value(self)
     }
 }

@@ -1,7 +1,7 @@
 extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
-use elodin_conduit::{ComponentValue, EntityId};
+use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
@@ -19,13 +19,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-pub use elodin_conduit;
-pub use elodin_conduit::{Asset, ComponentId, ComponentType};
+pub use conduit;
 pub use nox;
 
 mod assets;
 mod component;
-mod conduit;
+mod conduit_exec;
 mod dyn_array;
 mod host_column;
 mod integrator;
@@ -37,7 +36,7 @@ pub mod six_dof;
 
 pub use assets::*;
 pub use component::*;
-pub use conduit::*;
+pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use host_column::*;
 pub use integrator::*;
@@ -348,9 +347,7 @@ impl HostColumnRef<'_> {
             .zip(self.column.buffer.values_iter())
     }
 
-    pub fn typed_iter<T: elodin_conduit::Component>(
-        &self,
-    ) -> impl Iterator<Item = (EntityId, T)> + '_ {
+    pub fn typed_iter<T: conduit::Component>(&self) -> impl Iterator<Item = (EntityId, T)> + '_ {
         self.entities
             .iter::<u64>()
             .map(EntityId)
@@ -1311,7 +1308,7 @@ pub enum Error {
     #[error("component value had wrong size")]
     ValueSizeMismatch,
     #[error("conduit error")]
-    Conduit(#[from] elodin_conduit::Error),
+    Conduit(#[from] conduit::Error),
     #[error("asset not found")]
     AssetNotFound,
     #[error("channel closed")]
@@ -1351,7 +1348,7 @@ impl<T> From<flume::SendError<T>> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elodin_conduit::well_known::Pbr;
+    use conduit::well_known::Pbr;
     use nox::Scalar;
 
     #[test]

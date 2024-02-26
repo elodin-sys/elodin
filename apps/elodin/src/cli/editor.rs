@@ -4,7 +4,7 @@ use tokio::net::TcpStream;
 
 use crate::Cli;
 use bevy::{prelude::*, utils::tracing};
-use elodin_conduit::{client::MsgPair, server::handle_socket};
+use conduit::{client::MsgPair, server::handle_socket};
 use notify::Watcher;
 
 #[derive(clap::Args, Clone)]
@@ -32,8 +32,8 @@ impl std::str::FromStr for Simulator {
 
 impl Cli {
     pub fn editor(&self, args: Args) -> anyhow::Result<()> {
-        use elodin_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-        use elodin_conduit::bevy_sync::SyncPlugin;
+        use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
+        use conduit::bevy_sync::SyncPlugin;
         use elodin_editor::EditorPlugin;
         let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
 

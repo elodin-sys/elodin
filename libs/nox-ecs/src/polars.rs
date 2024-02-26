@@ -2,7 +2,7 @@ use arrow::array::{ArrayData, LargeListArray, ListArray, MapArray, StructArray, 
 use arrow::datatypes::{Field, Schema};
 use arrow::ffi::FFI_ArrowArray;
 use arrow::record_batch::RecordBatch;
-use elodin_conduit::{ComponentId, ComponentType, EntityId, PrimitiveTy};
+use conduit::{ComponentId, ComponentType, EntityId, PrimitiveTy};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use polars::prelude::SerReader;
@@ -555,7 +555,7 @@ mod tests {
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
         WorldPos,
     };
-    use elodin_conduit::{
+    use conduit::{
         well_known::{Material, Mesh, Pbr},
         ComponentId,
     };
