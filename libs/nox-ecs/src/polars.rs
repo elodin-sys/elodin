@@ -29,6 +29,7 @@ const ENTITY_ID_COMPONENT: ComponentId = ComponentId::new("entity_id");
 pub struct PolarsWorld {
     pub archetypes: BTreeMap<ArchetypeId, DataFrame>,
     pub metadata: Metadata,
+    pub assets: AssetStore,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -68,6 +69,9 @@ impl PolarsWorld {
             writer.write(record_batch.record_batch()).unwrap();
             writer.close().unwrap();
         }
+        let path = path.join("assets.bin");
+        let file = std::fs::File::create(path)?;
+        postcard::to_io(&self.assets, file).unwrap();
         Ok(())
     }
 
@@ -82,9 +86,12 @@ impl PolarsWorld {
             let df = polars::prelude::ParquetReader::new(file).finish()?;
             archetypes.insert(*id, df);
         }
+        let assets_buf = std::fs::read(path.join("assets.bin"))?;
+        let assets = postcard::from_bytes(&assets_buf)?;
         Ok(Self {
             archetypes,
             metadata,
+            assets,
         })
     }
 }
@@ -108,6 +115,7 @@ impl World<HostStore> {
         Ok(PolarsWorld {
             archetypes,
             metadata,
+            assets: self.assets.clone(),
         })
     }
 }
@@ -133,7 +141,7 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
         Ok(World {
             archetypes,
             component_map,
-            assets: AssetStore::default(),
+            assets: polars.assets,
             tick,
         })
     }

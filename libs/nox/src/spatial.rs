@@ -39,6 +39,12 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice([4])
     }
+
+    pub fn zero() -> Self {
+        SpatialTransform {
+            inner: Tensor::zeros(),
+        }
+    }
 }
 
 impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform<T> {
@@ -200,6 +206,12 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         let force = self.angular().cross(&other.torque()) + self.linear().cross(&other.force());
         let torque = self.angular().cross(&other.force());
         SpatialForce::new(torque, force)
+    }
+
+    pub fn zero() -> Self {
+        SpatialMotion {
+            inner: Tensor::zeros(),
+        }
     }
 }
 
