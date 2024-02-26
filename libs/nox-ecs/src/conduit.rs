@@ -53,6 +53,10 @@ impl ConduitExec {
         }
     }
 
+    pub fn time_step(&self) -> std::time::Duration {
+        self.exec.time_step()
+    }
+
     pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
         if self.playing {
             match &mut self.state {
@@ -105,11 +109,25 @@ impl ConduitExec {
         }
     }
 
-    fn add_connection(&mut self, conn: Connection) {
+    pub fn connections(&self) -> &[Connection] {
+        &self.connections
+    }
+
+    pub fn add_connection(&mut self, conn: Connection) -> Result<(), Error> {
         let already_exits = self.connections.iter().any(|c| c.same_channel(&conn));
-        if !already_exits {
-            self.connections.push(conn);
+        if already_exits {
+            tracing::debug!("connection already exists");
+            return Ok(());
         }
+        tracing::debug!("received connect, sending metadata");
+        conn.send(Packet {
+            stream_id: StreamId::CONTROL,
+            payload: Payload::ControlMsg(ControlMsg::StartSim {
+                metadata_store: self.metadata_store.clone(),
+            }),
+        })?;
+        self.connections.push(conn);
+        Ok(())
     }
 
     fn process_msg_pair(&mut self, MsgPair { msg, tx }: MsgPair) -> Result<(), Error> {
@@ -118,16 +136,7 @@ impl ConduitExec {
             return Ok(());
         };
         match msg {
-            Msg::Control(ControlMsg::Connect) => {
-                tracing::debug!("received connect, sending metadata");
-                tx.send(Packet {
-                    stream_id: StreamId::CONTROL,
-                    payload: Payload::ControlMsg(ControlMsg::StartSim {
-                        metadata_store: self.metadata_store.clone(),
-                    }),
-                })?;
-                self.add_connection(tx);
-            }
+            Msg::Control(ControlMsg::Connect) => self.add_connection(tx)?,
             Msg::Control(ControlMsg::Subscribe { query }) => {
                 let ids = query.execute(&self.metadata_store);
                 if ids.len() != 1 {
