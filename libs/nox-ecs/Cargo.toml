@@ -7,12 +7,12 @@ edition = "2021"
 #
 [features]
 default = ["tokio"]
-tokio = ["dep:tokio", "futures", "elodin-conduit/tokio"]
+tokio = ["dep:tokio", "futures", "conduit/tokio"]
 
 [dependencies]
 nox.path = "../nox"
-elodin-conduit.path = "../elodin-conduit"
-elodin-conduit.features = ["nox"]
+conduit.path = "../conduit"
+conduit.features = ["nox"]
 
 # data structures
 heapless = "0.8"
