@@ -3,12 +3,15 @@ name = "nox-py"
 version = "0.1.5"
 edition = "2021"
 
+[features]
+embed-cli = ["elodin"]
+
 [package.metadata.maturin]
 name = "elodin"
 
 [lib]
 name = "elodin"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.20.0", features = ["abi3-py310"] }
@@ -21,9 +24,8 @@ parking_lot = "0.12.1"
 
 postcard = { version = "1.0", features = ["alloc"] }
 clap = { version = "4.4.18", features = ["derive"] }
-elodin = { path = "../../apps/elodin" }
+elodin = { path = "../../apps/elodin", optional = true }
 bytes = "1.0.5"
-
 
 # logs
 tracing = "0.1"
