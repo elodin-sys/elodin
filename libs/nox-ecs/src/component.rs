@@ -1,4 +1,4 @@
-use elodin_conduit::{ComponentId, ComponentType, PrimitiveTy};
+use conduit::{ComponentId, ComponentType, PrimitiveTy};
 use nox::{IntoOp, Scalar, ScalarExt};
 
 use nox_ecs_macros::Component;
@@ -28,12 +28,12 @@ macro_rules! impl_scalar_primitive {
             }
 
             fn component_id() -> ComponentId {
-                use elodin_conduit::Component;
+                use conduit::Component;
                 $inner::component_id()
             }
 
             fn component_type() -> ComponentType {
-                use elodin_conduit::Component;
+                use conduit::Component;
                 $inner::component_type()
             }
         }
@@ -60,7 +60,7 @@ macro_rules! impl_spatial_ty {
             }
 
             fn component_id() -> ComponentId {
-                elodin_conduit::ComponentId::new($name)
+                conduit::ComponentId::new($name)
             }
 
             fn component_type() -> ComponentType {
