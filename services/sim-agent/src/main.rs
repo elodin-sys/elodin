@@ -1,27 +1,24 @@
-use elodin_conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-use elodin_conduit::bevy_sync::{SendPlbPlugin, SyncPlugin};
 use elodin_conduit::client::MsgPair;
 use elodin_conduit::server::TcpServer;
-use elodin_core::runner::IntoSimRunner;
-use elodin_py::SimBuilder;
 use elodin_types::sandbox::{
     self,
     sandbox_control_server::{SandboxControl, SandboxControlServer},
     UpdateCodeReq, UpdateCodeResp,
 };
-use pyo3::{types::PyModule, Python};
+use nox::Client;
+use nox_ecs::ConduitExec;
 use std::{
+    io::{Seek, Write},
     net::SocketAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
-
 use tonic::{async_trait, transport::Server, Response, Status};
-use tracing::{info, info_span, Instrument};
+use tracing::{error, info, info_span, Instrument};
 
 mod config;
 mod headless;
@@ -33,29 +30,19 @@ async fn main() -> anyhow::Result<()> {
         .with_target(false)
         .init();
 
-    {
-        use elodin_py::elodin_py;
-        pyo3::append_to_inittab!(elodin_py);
-    }
-
     let config = config::Config::new()?;
     let mut tasks = tokio::task::JoinSet::new();
 
     if let Some(sandbox_config) = config.sandbox {
         let (server_tx, server_rx) = flume::unbounded();
-        let control = ControlService::new(
-            server_tx.clone(),
-            server_rx,
-            sandbox_config.control_addr,
-            Subscriptions::default(),
-        );
+        let control = ControlService::new(server_rx, sandbox_config.control_addr);
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
         let sim = async move {
             let sim = TcpServer::bind(server_tx, sandbox_config.sim_addr).await?;
-            sim.run().instrument(info_span!("sim").or_current()).await?;
+            sim.run().await?;
             Ok(())
         };
-        tasks.spawn(sim);
+        tasks.spawn(sim.instrument(info_span!("sim").or_current()));
     }
 
     if let Some(mc_agent_config) = config.monte_carlo {
@@ -71,26 +58,19 @@ async fn main() -> anyhow::Result<()> {
 
 #[derive(Clone)]
 struct ControlService {
-    server_tx: flume::Sender<MsgPair>,
     server_rx: flume::Receiver<MsgPair>,
-    subscriptions: Subscriptions,
     loaded: Arc<AtomicBool>,
     address: SocketAddr,
+    client: Client,
 }
 
 impl ControlService {
-    fn new(
-        server_tx: flume::Sender<MsgPair>,
-        server_rx: flume::Receiver<MsgPair>,
-        address: SocketAddr,
-        subscriptions: Subscriptions,
-    ) -> Self {
+    fn new(server_rx: flume::Receiver<MsgPair>, address: SocketAddr) -> Self {
         Self {
             address,
-            server_tx,
             server_rx,
             loaded: Arc::new(AtomicBool::new(false)),
-            subscriptions,
+            client: Client::cpu().unwrap(),
         }
     }
 
@@ -103,12 +83,81 @@ impl ControlService {
             .build()
             .unwrap();
 
+        let span = info_span!("grpc");
         Server::builder()
+            .trace_fn(move |_| span.clone())
             .add_service(svc)
             .add_service(reflection)
             .serve(address)
             .await?;
         Ok(())
+    }
+
+    fn handle_update_code(&self, req: UpdateCodeReq) -> anyhow::Result<UpdateCodeResp> {
+        let loaded = self.loaded.clone();
+
+        let mut code = tempfile::NamedTempFile::new()?;
+        tracing::debug!(tmp_file = %code.path().display(), "writing code to temp file");
+        code.write_all(req.code.as_bytes())?;
+        code.rewind()?;
+
+        let tmp_dir = tempfile::tempdir()?;
+        tracing::debug!(tmp_dir = %tmp_dir.path().display(), "building artifacts");
+        let status = std::process::Command::new("python3")
+            .arg(code.path())
+            .arg("--")
+            .arg("build")
+            .arg("--dir")
+            .arg(tmp_dir.path())
+            .spawn()?
+            .wait()?;
+
+        if !status.success() {
+            return Ok(UpdateCodeResp {
+                status: sandbox::Status::Error.into(),
+                errors: vec![status.to_string()],
+            });
+        }
+
+        let exec = match nox_ecs::WorldExec::read_from_dir(tmp_dir.path()) {
+            Ok(exec) => exec,
+            Err(err) => {
+                return Ok(UpdateCodeResp {
+                    status: sandbox::Status::Error.into(),
+                    errors: vec![err.to_string()],
+                });
+            }
+        };
+
+        let rx = self.server_rx.clone();
+        let client = self.client.clone();
+        let mut conduit_exec = ConduitExec::new(exec, rx);
+
+        let span = info_span!("sim");
+        thread::spawn(move || -> anyhow::Result<()> {
+            let _guard = span.enter();
+            if loaded.swap(true, Ordering::SeqCst) {
+                // TODO: implement update handling
+                return Ok(());
+            }
+            let tick_period = Duration::from_secs_f64(1.0 / 60.0);
+            loop {
+                let start = Instant::now();
+                if let Err(err) = conduit_exec.run(&client) {
+                    error!(?err, "failed to run conduit exec");
+                    return Err(err.into());
+                }
+                let sleep_time = tick_period.saturating_sub(start.elapsed());
+                if !sleep_time.is_zero() {
+                    thread::sleep(sleep_time)
+                }
+            }
+        });
+
+        Ok(UpdateCodeResp {
+            status: sandbox::Status::Success.into(),
+            errors: vec![],
+        })
     }
 }
 
@@ -119,60 +168,20 @@ impl SandboxControl for ControlService {
         req: tonic::Request<UpdateCodeReq>,
     ) -> Result<Response<UpdateCodeResp>, Status> {
         let req = req.into_inner();
-        pyo3::prepare_freethreaded_python();
-        let loaded = self.loaded.clone();
-        let server_tx = self.server_tx.clone();
-        let res = Python::with_gil(|py| {
-            let sim = PyModule::from_code(py, &req.code, "./test.py", "./")?;
-            let callable = sim.getattr("sim")?;
-            let builder = callable.call0()?;
-            let builder: SimBuilder = builder.extract().unwrap();
-
-            pyo3::PyResult::Ok(builder.0)
-        });
-        let builder = match res {
-            Ok(builder) => builder,
-            Err(e) => {
-                let err = Python::with_gil(|py| {
-                    e.print_and_set_sys_last_vars(py);
-                    e
-                });
-                let err = err.to_string();
-                return Ok(Response::new(UpdateCodeResp {
-                    status: sandbox::Status::Error.into(),
-                    errors: vec![err],
-                }));
+        match self.handle_update_code(req) {
+            Ok(resp) => {
+                if !resp.errors.is_empty() {
+                    error!(err = ?resp.errors, "failed to update code");
+                } else {
+                    info!("updated code")
+                }
+                Ok(Response::new(resp))
             }
-        };
-        let rx = self.server_rx.clone();
-        let subscriptions = self.subscriptions.clone();
-        thread::spawn(move || -> anyhow::Result<()> {
-            if loaded.swap(true, Ordering::SeqCst) {
-                let (tx, _) = flume::unbounded();
-                server_tx.send(MsgPair {
-                    msg: elodin_conduit::client::Msg::Control(elodin_conduit::ControlMsg::Exit),
-                    tx: tx.downgrade(),
-                })?;
-
-                thread::sleep(Duration::from_millis(100));
+            Err(err) => {
+                error!(?err, "failed to update code");
+                let status = Status::internal(err.to_string());
+                Err(status)
             }
-            let runner = builder.into_runner();
-            let mut app = runner
-                .run_mode(elodin_core::runner::RunMode::RealTime)
-                .build_with_plugins((
-                    SyncPlugin {
-                        plugin: ConduitSubscribePlugin::new(rx),
-                        subscriptions,
-                    },
-                    SendPlbPlugin,
-                ));
-            app.run();
-            Ok(())
-        });
-
-        Ok(Response::new(UpdateCodeResp {
-            status: sandbox::Status::Success.into(),
-            errors: vec![],
-        }))
+        }
     }
 }

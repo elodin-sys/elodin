@@ -118,11 +118,8 @@ impl Api {
         txn: &DatabaseTransaction,
     ) -> Result<CreateSandboxResp, Error> {
         let code = match req.template.as_deref() {
-            Some("double-pend") => {
-                include_str!("../../python-templates/double-pend.py").to_string()
-            }
             Some("three-body") => {
-                include_str!("../../python-templates/three-body-broucke.py").to_string()
+                include_str!("../../../../libs/nox-py/examples/six_dof.py").to_string()
             }
             Some(_) | None => req.code,
         };
@@ -336,12 +333,14 @@ pub async fn sim_socket(
     let Ok(ip) = format!("{}:3563", pod_ip).parse() else {
         return Err(Error::VMBootFailed("vm has invalid ip".to_string()));
     };
+    tracing::debug!(%ip, "connecting to sim-agent");
     let sim_stream = sim_socket.connect(ip).await?;
     let (rx, tx) = sim_stream.into_split();
     let sim_tx = FramedWrite::new(tx, LengthDelimitedCodec::new());
     let sim_rx = FramedRead::new(rx, LengthDelimitedCodec::new());
 
     Ok(ws.on_upgrade(move |socket| async move {
+        tracing::debug!(%ip, "upgraded to websocket");
         let (ws_tx, ws_rx) = socket.split();
         let ws_rx = ws_rx
             .try_filter_map(|msg| async move {
@@ -351,8 +350,16 @@ pub async fn sim_socket(
                 Ok(Some(Bytes::from(bytes)))
             })
             .map_err(|err| std::io::Error::new(io::ErrorKind::Other, err));
-        let ws_to_sim = ws_rx.forward(sim_tx).map_err(Error::from);
+        let ws_to_sim = ws_rx
+            .inspect_ok(|b| {
+                tracing::debug!(bytes = b.len(), "ws -> sim");
+            })
+            .forward(sim_tx)
+            .map_err(Error::from);
         let sim_to_ws = sim_rx
+            .inspect_ok(|b| {
+                tracing::debug!(bytes = b.len(), "sim -> ws");
+            })
             .map(|m| m.map(|b| ws::Message::Binary(b.to_vec())))
             .map_err(axum::Error::new)
             .forward(ws_tx)
@@ -362,7 +369,7 @@ pub async fn sim_socket(
             res = sim_to_ws=> { res}
         };
         if let Err(err) = res {
-            trace!(?err, "error in sim proxy");
+            tracing::error!(?err, "error in sim proxy");
         }
     }))
 }

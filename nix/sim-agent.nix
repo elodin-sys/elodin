@@ -12,11 +12,13 @@ let
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml { cargoToml = ../services/sim-agent/Cargo.toml; };
   src = pkgs.nix-gitignore.gitignoreSource [] ../.;
+  arch = builtins.elemAt (lib.strings.splitString "-" system) 0;
   commonArgs = {
     inherit (crateName) pname version;
     inherit src;
     doCheck = false;
-    cargoExtraArgs = "--package=${crateName.pname}";
+    cargoExtraArgs = "--package=${crateName.pname} --package=nox-py";
+    nativeBuildInputs = with pkgs; [ maturin ];
     buildInputs = with pkgs;
       [
         systemdMinimal
@@ -28,17 +30,34 @@ let
         pango
         gtk3
       ]
-      ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-        pkgs.libiconv
-      ];
-      XLA_EXTENSION_DIR = "${xla_ext}";
-      LIBCLANG_PATH = "${pkgs.llvmPackages_14.libclang.lib}/lib";
-      BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
+      ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
+    XLA_EXTENSION_DIR = "${xla_ext}";
+    LIBCLANG_PATH = "${pkgs.llvmPackages_14.libclang.lib}/lib";
+    BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs // {
     inherit cargoArtifacts;
   });
+
+  wheelName = "elodin";
+  wheelVersion = (craneLib.crateNameFromCargoToml { cargoToml = ../libs/nox-py/Cargo.toml; }).version;
+  wheelSuffix = "cp310-abi3-linux_${arch}";
+  wheel = craneLib.buildPackage (commonArgs // {
+    inherit cargoArtifacts;
+    pname = "elodin";
+    buildPhase = "maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release";
+    installPhase = "install -D target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl -t $out/";
+  });
+  elodin = ps: ps.buildPythonPackage rec {
+    pname = wheelName;
+    format = "wheel";
+    version = wheelVersion;
+    src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
+    doCheck = false;
+    propagatedBuildInputs = with ps; [ jax jaxlib typing-extensions ];
+    pythonImportsCheck = [ wheelName ];
+  };
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-sim-agent";
@@ -46,7 +65,7 @@ let
     contents = with pkgs; [
       cacert
       busybox
-      (python3.withPackages (ps: with ps; [numpy jax jaxlib]))
+      (python3.withPackages (ps: with ps; [(elodin ps)]))
     ];
     config = {
       Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];

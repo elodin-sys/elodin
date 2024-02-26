@@ -3,6 +3,7 @@ use crate::client::Msg;
 use crate::client::MsgPair;
 use crate::query::{MetadataStore, QueryId};
 use crate::ser_de::ColumnValue;
+use crate::well_known::DEFAULT_SUB_FILTERS;
 use crate::Asset;
 use crate::AssetId;
 use crate::Error;
@@ -11,7 +12,7 @@ use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
 use bevy::ecs::system::EntityCommand;
-use bevy::prelude::{DetectChanges, Event, EventReader, Without, World};
+use bevy::prelude::*;
 use bevy::ptr::OwningPtr;
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -324,13 +325,23 @@ fn recv_system(
     metadata: Res<MetadataStore>,
     mut max_tick_res: ResMut<MaxTick>,
     mut tick_res: ResMut<Tick>,
+    mut sim_peer: ResMut<SimPeer>,
 ) {
-    while let Ok(msg) = rx.try_recv() {
-        match msg.msg {
+    while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
+        let Some(tx) = tx.upgrade() else { continue };
+        match msg {
+            Msg::Control(ControlMsg::StartSim { metadata_store: _ }) => {
+                tracing::debug!("received startsim, sending subscribe messages");
+                for id in DEFAULT_SUB_FILTERS.iter() {
+                    let packet = Packet {
+                        stream_id: StreamId::CONTROL,
+                        payload: Payload::ControlMsg::<Bytes>(ControlMsg::sub_component_id(*id)),
+                    };
+                    tx.send(packet).unwrap();
+                }
+                let _ = sim_peer.tx.insert(tx);
+            }
             Msg::Control(ControlMsg::Subscribe { query }) => {
-                let Some(tx) = msg.tx.upgrade() else {
-                    continue;
-                };
                 let subscription = Subscription {
                     stream_id: StreamId::rand(),
                     tx,
@@ -389,44 +400,6 @@ impl ConduitSubscribePlugin {
     pub fn pair() -> (ConduitSubscribePlugin, flume::Sender<MsgPair>) {
         let (tx, rx) = flume::unbounded();
         (ConduitSubscribePlugin { rx }, tx)
-    }
-
-    #[cfg(feature = "tokio")]
-    pub fn tcp(addr: std::net::SocketAddr) -> ConduitTcpSubscriber {
-        ConduitTcpSubscriber { addr }
-    }
-}
-
-#[cfg(feature = "tokio")]
-pub struct ConduitTcpSubscriber {
-    addr: std::net::SocketAddr,
-}
-
-#[cfg(feature = "tokio")]
-impl Plugin for ConduitTcpSubscriber {
-    fn build(&self, app: &mut bevy::prelude::App) {
-        use crate::server::handle_socket;
-        use std::thread;
-        use tokio::net::TcpStream;
-
-        #[derive(Resource)]
-        struct ConduitTokioHandle(thread::JoinHandle<()>);
-        let (sub_plugin, bevy_tx) = ConduitSubscribePlugin::pair();
-        let addr = self.addr;
-        let thread = thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .expect("tokio runtime failed to start");
-            rt.block_on(async move {
-                let (rx_socket, tx_socket) = TcpStream::connect(addr)
-                    .await
-                    .expect("tcp client failed")
-                    .into_split();
-                handle_socket(bevy_tx, tx_socket, rx_socket).await.unwrap()
-            });
-        });
-        app.add_plugins(sub_plugin)
-            .insert_resource(ConduitTokioHandle(thread));
     }
 }
 
@@ -624,10 +597,10 @@ pub fn sync_asset<T>(
     }
 }
 
-pub fn control_msg(mut reader: EventReader<ControlMsg>, subs: Res<Subscriptions>) {
+pub fn control_msg(mut reader: EventReader<ControlMsg>, sim_peer: Res<SimPeer>) {
     for msg in reader.read() {
-        for sub in &subs.connections {
-            let _ = sub.send(Packet {
+        if let Some(tx) = &sim_peer.tx {
+            let _ = tx.send(Packet {
                 stream_id: StreamId::CONTROL,
                 payload: Payload::ControlMsg(msg.clone()),
             });
@@ -644,10 +617,9 @@ pub struct SubscribeEvent {
 #[derive(Debug)]
 pub struct SendError;
 
-#[derive(bevy::prelude::Resource, Default, Clone)]
+#[derive(Resource, Default, Clone)]
 pub struct Subscriptions {
     map: HashMap<ComponentId, Vec<Subscription>>,
-    connections: Vec<flume::Sender<Packet<Payload<Bytes>>>>,
 }
 
 impl Subscriptions {
@@ -656,7 +628,6 @@ impl Subscriptions {
     }
 
     pub fn subscribe(&mut self, key: ComponentId, subscription: Subscription) {
-        self.connections.push(subscription.tx.clone());
         let subs = self.map.entry(key).or_default();
         subs.push(subscription);
     }
@@ -666,4 +637,9 @@ impl Subscriptions {
 pub struct Subscription {
     stream_id: StreamId,
     tx: flume::Sender<Packet<Payload<Bytes>>>,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct SimPeer {
+    tx: Option<flume::Sender<Packet<Payload<Bytes>>>>,
 }

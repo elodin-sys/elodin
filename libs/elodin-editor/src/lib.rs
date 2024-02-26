@@ -32,58 +32,6 @@ mod plugins;
 pub(crate) mod traces;
 mod ui;
 
-#[cfg(feature = "core")]
-pub fn editor<'a, T>(func: impl elodin_core::runner::IntoSimRunner<'a, T> + Send + Sync + 'static) {
-    use elodin_conduit::{
-        bevy_sync::{SendPlbPlugin, SyncPlugin},
-        client::{Demux, Msg, MsgPair},
-        well_known::DEFAULT_SUB_FILTERS,
-    };
-
-    let (server_tx, server_rx) = flume::unbounded();
-    let (client_tx, client_rx) = flume::unbounded();
-    let _ = std::thread::spawn(move || {
-        let runner = func.into_runner();
-        let mut app = runner
-            .run_mode(elodin_core::runner::RunMode::RealTime)
-            .build_with_plugins((SyncPlugin::new(server_rx), SendPlbPlugin));
-
-        app.run()
-    });
-    for id in DEFAULT_SUB_FILTERS {
-        server_tx
-            .send(MsgPair {
-                msg: Msg::Control(ControlMsg::Subscribe {
-                    query: elodin_conduit::Query::ComponentId(*id),
-                }),
-                tx: client_tx.downgrade(),
-            })
-            .unwrap();
-    }
-    let (parsed_client_tx, parsed_client_rx) = flume::unbounded();
-    std::thread::spawn(move || {
-        let mut demux = Demux::default();
-        while let Ok(msg) = client_rx.recv() {
-            let msg = match demux.handle(msg) {
-                Ok(m) => m,
-                Err(err) => {
-                    warn!(?err, "failed to parse message");
-                    continue;
-                }
-            };
-            if let Err(err) = parsed_client_tx.send(MsgPair {
-                msg,
-                tx: client_tx.downgrade(),
-            }) {
-                warn!(?err, "failed to send parsed message");
-            }
-        }
-    });
-    let mut app = App::new();
-    app.add_plugins((EditorPlugin, SyncPlugin::new(parsed_client_rx)));
-    app.run()
-}
-
 struct EmbeddedAssetPlugin;
 
 impl Plugin for EmbeddedAssetPlugin {

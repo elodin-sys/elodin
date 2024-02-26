@@ -1,7 +1,7 @@
 use std::ops::DerefMut;
 
 use crate::{
-    bevy::{AppExt, AssetAdapter, ConduitSubscribePlugin, EntityMap, Subscriptions},
+    bevy::{AppExt, AssetAdapter, ConduitSubscribePlugin, EntityMap, SimPeer, Subscriptions},
     client::MsgPair,
     well_known::{Material as SyncMaterial, Mesh as SyncMesh, TraceAnchor, WorldPos},
     EntityId,
@@ -28,6 +28,7 @@ impl Plugin for SyncPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         let sync_pbr = app.world.register_system(sync_pbr_to_bevy);
         app.add_plugins(self.plugin.clone())
+            .insert_resource(SimPeer::default())
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()

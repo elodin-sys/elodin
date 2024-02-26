@@ -399,9 +399,9 @@ impl PyAsset {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 enum Args {
-    MonteCarlo {
+    Build {
         #[arg(long)]
-        build_dir: PathBuf,
+        dir: PathBuf,
     },
     Run {
         #[arg(default_value = "0.0.0.0:2240")]
@@ -486,9 +486,9 @@ impl WorldBuilder {
         let args = std::env::args_os().skip(2);
         let args = Args::parse_from(args);
         match args {
-            Args::MonteCarlo { build_dir } => {
+            Args::Build { dir } => {
                 let exec = self.build(py, sys)?.exec;
-                exec.write_to_dir(build_dir)?;
+                exec.write_to_dir(dir)?;
                 Ok(())
             }
             Args::Run { addr } => {
@@ -515,7 +515,6 @@ impl WorldBuilder {
         }
     }
 
-    // TODO: reuse run() in build() after proper world serialization
     pub fn build(&mut self, py: Python<'_>, sys: PyObject) -> Result<Exec, Error> {
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
@@ -895,6 +894,7 @@ impl Material {
 }
 
 #[pyfunction]
+#[cfg(feature = "embed-cli")]
 // TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
 fn run_cli(_py: Python) -> PyResult<()> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -920,7 +920,8 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
-    m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
+    #[cfg(feature = "embed-cli")]
+    m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     Ok(())
 }

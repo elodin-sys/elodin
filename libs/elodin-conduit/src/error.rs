@@ -42,3 +42,9 @@ impl From<try_buf::ErrorKind> for Error {
         }
     }
 }
+
+impl<T> From<flume::SendError<T>> for Error {
+    fn from(_: flume::SendError<T>) -> Self {
+        Self::SendError
+    }
+}

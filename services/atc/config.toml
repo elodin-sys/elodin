@@ -1,4 +1,4 @@
-database_url = "postgres://sphw@localhost/atc_dev"
+database_url = "postgres://postgres:secret@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
 migrate = true
 pod_name = "foo"
@@ -22,5 +22,3 @@ sim_artifacts_bucket_name = ""
 sim_results_bucket_name = ""
 spawn_batches = false
 collect_results = false
-
-

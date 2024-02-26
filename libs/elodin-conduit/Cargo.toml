@@ -8,7 +8,7 @@ edition = "2021"
 [features]
 default = ["bevy", "rand"]
 tokio = ["dep:tokio", "tokio-util", "futures"]
-bevy = ["dep:bevy", "flume", "ip_network_table-deps-treebitmap"]
+bevy = ["dep:bevy", "flume"]
 nox = ["dep:nox"]
 rand = ["fastrand"]
 
@@ -20,7 +20,6 @@ serde.features = ["derive"]
 num_enum = "0.7.1"
 bytemuck.version = "1.14"
 bytemuck.features = ["derive"]
-heapless = "0.8"
 
 # async
 tokio.version = "1.34"
@@ -39,8 +38,6 @@ bevy.features = ["bevy_pbr"]
 bevy.optional = true
 flume.version = "0.11"
 flume.optional = true
-ip_network_table-deps-treebitmap.version = "0.5.0"
-ip_network_table-deps-treebitmap.optional = true
 
 # log
 tracing = "0.1"
@@ -60,7 +57,6 @@ fastrand.version = "2"
 fastrand.optional = true
 
 # well-known
-elodin-macros.path = "../elodin-macros"
 postcard.version = "1.0.8"
 postcard.features = ["alloc", "use-std"]
 

@@ -82,6 +82,7 @@ impl Plugin for SimClient {
                         continue;
                     };
                     let (rx_socket, tx_socket) = socket.into_split();
+
                     if let Err(err) = handle_socket(c.bevy_tx.clone(), tx_socket, rx_socket).await {
                         tracing::warn!(?err, "socket error");
                     }

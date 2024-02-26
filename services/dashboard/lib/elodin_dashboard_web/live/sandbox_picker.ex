@@ -91,12 +91,6 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
             <.sandbox_card
-              name="Double Pendulum"
-              img="/images/double-pend-bg.svg"
-              path={~p"/sandbox/new/double-pend"}
-              phx_click={show_template_new("double-pend")}
-            />
-            <.sandbox_card
               name="3 Body Problem"
               img="/images/3-body-bg.svg"
               path={~p"/sandbox/new/three-body"}
