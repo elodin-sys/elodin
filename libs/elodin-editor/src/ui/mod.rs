@@ -7,7 +7,7 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
     EguiContexts,
 };
-use elodin_conduit::{
+use conduit::{
     bevy::{EntityMap, MaxTick, Tick},
     ControlMsg,
 };

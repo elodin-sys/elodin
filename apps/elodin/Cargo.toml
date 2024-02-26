@@ -23,8 +23,8 @@ zstd = "0.13.0"
 
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
-elodin-conduit.path = "../../libs/elodin-conduit"
-elodin-conduit.features = ["tokio"]
+conduit.path = "../../libs/conduit"
+conduit.features = ["tokio"]
 bevy.version = "0.12"
 flume = "0.11.0"
 notify = "6.1.1"

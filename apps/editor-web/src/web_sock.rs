@@ -1,5 +1,5 @@
 use bytes::Buf;
-use elodin_conduit::{
+use conduit::{
     client::{Demux, MsgPair},
     Packet, Payload,
 };

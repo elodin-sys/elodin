@@ -2498,6 +2498,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "conduit"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bytemuck",
+ "bytes",
+ "const-fnv1a-hash",
+ "fastrand 2.0.1",
+ "flume",
+ "futures",
+ "nalgebra",
+ "ndarray",
+ "nox",
+ "num_enum 0.7.2",
+ "postcard",
+ "serde",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "try_buf",
+]
+
+[[package]]
 name = "config"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3088,8 +3113,8 @@ dependencies = [
  "anyhow",
  "bevy",
  "bytes",
+ "conduit",
  "console_error_panic_hook",
- "elodin-conduit",
  "elodin-editor",
  "flume",
  "js-sys",
@@ -3141,7 +3166,7 @@ dependencies = [
  "bevy",
  "chrono",
  "clap",
- "elodin-conduit",
+ "conduit",
  "elodin-editor",
  "elodin-types",
  "flume",
@@ -3161,31 +3186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elodin-conduit"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bytemuck",
- "bytes",
- "const-fnv1a-hash",
- "fastrand 2.0.1",
- "flume",
- "futures",
- "nalgebra",
- "ndarray",
- "nox",
- "num_enum 0.7.2",
- "postcard",
- "serde",
- "smallvec",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "try_buf",
-]
-
-[[package]]
 name = "elodin-editor"
 version = "0.1.0"
 dependencies = [
@@ -3197,7 +3197,7 @@ dependencies = [
  "bevy_panorbit_camera",
  "bevy_polyline",
  "cocoa",
- "elodin-conduit",
+ "conduit",
  "flume",
  "futures-lite 2.2.0",
  "nalgebra",
@@ -5498,7 +5498,7 @@ dependencies = [
  "arrow",
  "bytemuck",
  "bytes",
- "elodin-conduit",
+ "conduit",
  "flume",
  "futures",
  "heapless 0.8.0",
@@ -7959,8 +7959,8 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
+ "conduit",
  "config",
- "elodin-conduit",
  "elodin-types",
  "flume",
  "google-cloud-storage",

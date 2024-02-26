@@ -1,6 +1,6 @@
 use anyhow::Context;
-use elodin_conduit::client::MsgPair;
-use elodin_conduit::server::TcpServer;
+use conduit::client::MsgPair;
+use conduit::server::TcpServer;
 use elodin_types::sandbox::{
     self,
     sandbox_control_server::{SandboxControl, SandboxControlServer},

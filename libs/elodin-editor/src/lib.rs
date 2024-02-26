@@ -22,7 +22,7 @@ use bevy_infinite_grid::{
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
-use elodin_conduit::{well_known::WorldPos, ControlMsg};
+use conduit::{well_known::WorldPos, ControlMsg};
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
 
