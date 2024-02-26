@@ -1,0 +1,70 @@
+[package]
+name = "conduit"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["bevy", "rand"]
+tokio = ["dep:tokio", "tokio-util", "futures"]
+bevy = ["dep:bevy", "flume"]
+nox = ["dep:nox"]
+rand = ["fastrand"]
+
+[dependencies]
+nalgebra.version = "0.32"
+nalgebra.features = ["serde-serialize", "bytemuck"]
+serde.version = "1.0"
+serde.features = ["derive"]
+num_enum = "0.7.1"
+bytemuck.version = "1.14"
+bytemuck.features = ["derive"]
+
+# async
+tokio.version = "1.34"
+tokio.features = ["full"]
+tokio.optional = true
+tokio-util.version = "0.7"
+tokio-util.features = ["codec"]
+tokio-util.optional = true
+futures.version = "0.3.29"
+futures.optional = true
+
+# bevy
+bevy.version = "0.12"
+bevy.default_features = false
+bevy.features = ["bevy_pbr", "bevy_scene"]
+bevy.optional = true
+flume.version = "0.11"
+flume.optional = true
+
+# log
+tracing = "0.1"
+
+# hash
+const-fnv1a-hash = "1.1.0"
+
+# error
+thiserror = "1"
+
+# nox
+nox.path = "../nox"
+nox.optional = true
+
+# rand
+fastrand.version = "2"
+fastrand.optional = true
+
+# well-known
+postcard.version = "1.0.8"
+postcard.features = ["alloc", "use-std"]
+
+# types
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
+ndarray.version = "0.15"
+ndarray.features = ["serde"]
+bytes.version = "1.5"
+bytes.features = ["serde"]
+try_buf = "0.1.3"
