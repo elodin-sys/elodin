@@ -35,12 +35,12 @@ pub fn archetype(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     quote! {
         impl #crate_name::Archetype for #ident #generics #where_clause {
-            fn component_ids() -> Vec<#crate_name::elodin_conduit::ComponentId> {
+            fn component_ids() -> Vec<#crate_name::conduit::ComponentId> {
                 use #crate_name::Component;
                 vec![#( <#tys>::component_id(), )*]
             }
 
-            fn component_tys() -> Vec<#crate_name::elodin_conduit::ComponentType> {
+            fn component_tys() -> Vec<#crate_name::conduit::ComponentType> {
                 use #crate_name::Component;
                 vec![#( <#tys>::component_type(), )*]
             }

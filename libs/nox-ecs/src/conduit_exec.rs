@@ -1,6 +1,6 @@
 use crate::{assets::Handle, ColumnRef, ColumnStore, Error, WorldExec};
 use bytes::Bytes;
-use elodin_conduit::{
+use conduit::{
     client::{Msg, MsgPair},
     query::{MetadataStore, QueryId},
     ser_de::ColumnValue,
@@ -316,7 +316,7 @@ pub fn spawn_tcp_server(
 ) -> Result<(), Error> {
     use std::time::Instant;
 
-    use elodin_conduit::server::TcpServer;
+    use conduit::server::TcpServer;
 
     let time_step = exec.time_step();
     let (tx, rx) = flume::unbounded();
