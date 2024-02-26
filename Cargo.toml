@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "apps/editor-web",
-    "libs/elodin-macros",
     "libs/elodin-editor",
     "libs/elodin-types/rust",
     "libs/elodin-conduit",

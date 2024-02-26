@@ -3203,18 +3203,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elodin-macros"
-version = "0.1.0"
-dependencies = [
- "convert_case",
- "darling",
- "proc-macro-crate 3.1.0",
- "proc-macro2",
- "quote",
- "syn 2.0.50",
-]
-
-[[package]]
 name = "elodin-types"
 version = "0.1.0"
 dependencies = [
