@@ -3154,6 +3154,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tonic",
+ "tracing-subscriber",
  "uuid",
  "xdg",
  "zstd 0.13.0",

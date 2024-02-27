@@ -1,4 +1,4 @@
-use elodin_conduit::well_known::{Material, Mesh};
+use elodin_conduit::well_known::{Material, Mesh, Pbr};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
 use nox_ecs::World;
@@ -23,11 +23,15 @@ fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
 fn main() {
     tracing_subscriber::fmt::init();
     let mut world = World::default();
-    let model = world.insert_asset(Mesh::sphere(0.1, 36, 18));
-    let material = world.insert_asset(Material::color(1.0, 1.0, 1.0));
+    let pbr = world.insert_asset(Pbr::Bundle {
+        mesh: Mesh::sphere(0.1, 36, 18),
+        material: Material::color(1.0, 1.0, 1.0),
+    });
 
-    let model_b = world.insert_asset(Mesh::sphere(0.1, 36, 18));
-    let material_b = world.insert_asset(Material::color(0.5, 10.0, 1.0));
+    let pbr_b = world.insert_asset(Pbr::Bundle {
+        mesh: Mesh::sphere(0.1, 36, 18),
+        material: Material::color(0.5, 1.0, 1.0),
+    });
 
     world.spawn(Body {
         pos: WorldPos(SpatialTransform {
@@ -39,8 +43,7 @@ fn main() {
         accel: WorldAccel(SpatialMotion {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),
-        model,
-        material,
+        pbr,
         force: Force(SpatialForce {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),
@@ -59,8 +62,7 @@ fn main() {
         accel: WorldAccel(SpatialMotion {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),
-        model: model_b,
-        material: material_b,
+        pbr: pbr_b,
         force: Force(SpatialForce {
             inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
         }),

@@ -1,9 +1,34 @@
 //! The rendering thing not the beer
-//!
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId};
+use crate::{Asset, AssetId, Error};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+#[allow(clippy::large_enum_variant)]
+pub enum Pbr {
+    Url(String),
+    Bundle { mesh: Mesh, material: Material },
+}
+
+impl Pbr {
+    pub const ASSET_ID: AssetId = AssetId(2241);
+
+    pub fn path(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let path = std::fs::canonicalize(path)?;
+        let url = path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| Error::NonUtf8Path)?;
+        Ok(Self::Url(url))
+    }
+
+    pub fn bundle(mesh: Mesh, material: Material) -> Self {
+        Self::Bundle { mesh, material }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -12,8 +37,6 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub const ASSET_ID: AssetId = AssetId(2241);
-
     /// Create a new box, bachs since box is a reserved word
     pub fn bachs(x: f32, y: f32, z: f32) -> Self {
         Self::cuboid(x, y, z)
@@ -105,8 +128,6 @@ pub struct Material {
 }
 
 impl Material {
-    pub const ASSET_ID: AssetId = AssetId(2242);
-
     pub fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
             base_color: Color { r, g, b },
@@ -309,14 +330,7 @@ pub enum Face {
     Back = 1,
 }
 
-impl Asset for Mesh {
-    const ASSET_ID: AssetId = Self::ASSET_ID;
-    fn asset_id(&self) -> AssetId {
-        Self::ASSET_ID
-    }
-}
-
-impl Asset for Material {
+impl Asset for Pbr {
     const ASSET_ID: AssetId = Self::ASSET_ID;
     fn asset_id(&self) -> AssetId {
         Self::ASSET_ID

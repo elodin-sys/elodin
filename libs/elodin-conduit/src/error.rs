@@ -33,6 +33,8 @@ pub enum Error {
     InvalidAlignment,
     #[error("connection closed")]
     ConnectionClosed,
+    #[error("non utf8 path")]
+    NonUtf8Path,
 }
 
 impl From<try_buf::ErrorKind> for Error {

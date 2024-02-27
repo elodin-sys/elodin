@@ -34,7 +34,7 @@ futures.optional = true
 # bevy
 bevy.version = "0.12"
 bevy.default_features = false
-bevy.features = ["bevy_pbr"]
+bevy.features = ["bevy_pbr", "bevy_scene"]
 bevy.optional = true
 flume.version = "0.11"
 flume.optional = true
