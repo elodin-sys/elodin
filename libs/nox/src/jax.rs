@@ -299,10 +299,6 @@ impl TensorItem for JaxDynField {
     type Dim = ();
 
     const ELEM: ElementType = ElementType::F32;
-
-    fn from_op(op: Noxpr) -> Self::Item {
-        Scalar::from_op(op)
-    }
 }
 
 impl Field for JaxDynField {

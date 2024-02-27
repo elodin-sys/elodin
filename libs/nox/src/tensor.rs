@@ -28,14 +28,12 @@ where
 }
 
 pub trait TensorItem {
-    type Item;
+    type Item: FromOp;
     type Tensor<D>
     where
         D: TensorDim;
     type Dim: TensorDim;
     const ELEM: ElementType;
-
-    fn from_op(op: Noxpr) -> Self::Item;
 }
 
 impl<T: NativeType + ArrayElement> TensorItem for T {
@@ -44,10 +42,6 @@ impl<T: NativeType + ArrayElement> TensorItem for T {
     type Dim = ();
 
     const ELEM: ElementType = T::TY;
-
-    fn from_op(inner: Noxpr) -> Self::Item {
-        Scalar::from_op(inner)
-    }
 }
 
 impl<T: TensorItem, D: TensorDim> TensorItem for Tensor<T, D, Op> {
@@ -57,10 +51,6 @@ impl<T: TensorItem, D: TensorDim> TensorItem for Tensor<T, D, Op> {
     type Tensor<TD: TensorDim> = Tensor<T, TD>;
 
     const ELEM: ElementType = T::ELEM;
-
-    fn from_op(op: Noxpr) -> Self::Item {
-        T::from_op(op)
-    }
 }
 
 impl<T, D: TensorDim> FromOp for Tensor<T, D> {
@@ -84,7 +74,7 @@ where
     type Out = <T as TensorItem>::Item;
 
     fn collapse(self) -> Self::Out {
-        T::from_op(self.inner)
+        T::Item::from_op(self.inner)
     }
 }
 
