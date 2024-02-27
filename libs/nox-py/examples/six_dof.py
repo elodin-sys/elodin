@@ -19,25 +19,22 @@ def gravity(q: Query[WorldPos, Inertia, Force]) -> ComponentArray[Force]:
 
 w = WorldBuilder()
 w.spawn(Body(
-    world_pos = WorldPos.from_linear(np.array([0.,0.,0.01])),
-    world_vel = WorldVel.from_linear(np.array([0.,0.,0.])),
-    inertia = Inertia.from_mass(1.0),
-    mesh = w.insert_asset(Mesh.sphere(1)),
-    material = w.insert_asset(Material.color(25.3, 18.4, 1.0))
+  world_pos = WorldPos.from_linear(np.array([0.,0.,0.01])),
+  world_vel = WorldVel.from_linear(np.array([0.,0.,0.])),
+  inertia = Inertia.from_mass(1.0),
+  pbr = w.insert_asset(Pbr(Mesh.sphere(1.0), Material.color(25.3, 18.4, 1.0))),
 ))
 w.spawn(Body(
-    world_pos = WorldPos.from_linear(np.array([5.,0.,0.])),
-    world_vel = WorldVel.from_linear(np.array([0.,0.,10.])),
-    inertia = Inertia.from_mass(1.0),
-    mesh = w.insert_asset(Mesh.sphere(0.2)),
-    material = w.insert_asset(Material.color(1.0, 1.0, 1.0))
+  world_pos = WorldPos.from_linear(np.array([5.,0.,0.])),
+  world_vel = WorldVel.from_linear(np.array([0.,0.,10.])),
+  inertia = Inertia.from_mass(1.0),
+  pbr = w.insert_asset(Pbr(Mesh.sphere(0.2), Material.color(1.0, 1.0, 1.0)))
 ))
 w.spawn(Body(
-    world_pos = WorldPos.from_linear(np.array([8.,0.,0.])),
-    world_vel = WorldVel.from_linear(np.array([0.,0.,24.])),
-    inertia = Inertia.from_mass(2.0),
-    mesh = w.insert_asset(Mesh.sphere(0.3)),
-    material = w.insert_asset(Material.color(1.0, 1.0, 1.0))
+  world_pos = WorldPos.from_linear(np.array([8.,0.,0.])),
+  world_vel = WorldVel.from_linear(np.array([0.,0.,24.])),
+  inertia = Inertia.from_mass(2.0),
+  pbr = w.insert_asset(Pbr(Mesh.sphere(0.3), Material.color(1.0, 1.0, 1.0)))
 ))
 sys = six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)
