@@ -732,6 +732,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
+    #[error("conduit error {0}")]
+    Conduit(#[from] elodin_conduit::Error),
 }
 
 impl From<Error> for PyErr {
@@ -848,6 +850,45 @@ impl Handle {
         todo!()
     }
 }
+#[pyclass]
+#[derive(Clone)]
+pub struct Pbr {
+    inner: elodin_conduit::well_known::Pbr,
+}
+
+#[pymethods]
+impl Pbr {
+    #[new]
+    fn new(mesh: Mesh, material: Material) -> Self {
+        Self {
+            inner: elodin_conduit::well_known::Pbr::Bundle {
+                mesh: mesh.inner,
+                material: material.inner,
+            },
+        }
+    }
+
+    #[staticmethod]
+    fn from_url(url: String) -> Result<Self, Error> {
+        let inner = elodin_conduit::well_known::Pbr::Url(url);
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn from_path(path: PathBuf) -> Result<Self, Error> {
+        let inner = elodin_conduit::well_known::Pbr::path(path)?;
+        Ok(Self { inner })
+    }
+
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
+    }
+}
 
 #[pyclass]
 #[derive(Clone)]
@@ -857,10 +898,6 @@ pub struct Mesh {
 
 #[pymethods]
 impl Mesh {
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
-    }
-
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {
         let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
         Ok(PyBufBytes { bytes })
@@ -882,6 +919,7 @@ impl Mesh {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct Material {
     inner: elodin_conduit::well_known::Material,
 }
@@ -891,10 +929,6 @@ impl Material {
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {
         let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
         Ok(PyBufBytes { bytes })
-    }
-
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
     }
 
     #[staticmethod]
@@ -932,6 +966,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
+    m.add_class::<Pbr>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     #[cfg(feature = "embed-cli")]
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;

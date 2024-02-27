@@ -52,8 +52,6 @@ def test_six_dof() :
         world_pos = WorldPos.from_linear(np.array([0.,0.,0.])),
         world_vel = WorldVel.from_linear(np.array([1.,0.,0.])),
         inertia = Inertia.from_mass(1.0),
-        mesh = w.insert_asset(Mesh.cuboid(1.0, 1.0, 1.0)),
-        material = w.insert_asset(Material.color(1.0, 1.0, 1.0))
     ))
     client = Client.cpu()
     exec = w.build(six_dof(1.0 / 60.0))

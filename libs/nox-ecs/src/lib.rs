@@ -1351,7 +1351,7 @@ impl<T> From<flume::SendError<T>> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use elodin_conduit::well_known::Mesh;
+    use elodin_conduit::well_known::Pbr;
     use nox::Scalar;
 
     #[test]
@@ -1402,12 +1402,12 @@ mod tests {
 
         #[derive(Archetype)]
         struct Body {
-            mesh: Handle<Mesh>,
+            pbr: Handle<Pbr>,
             a: A,
         }
         let mut world = World::default();
         let body = Body {
-            mesh: world.insert_asset(Mesh::bachs(1., 1., 1.)),
+            pbr: world.insert_asset(Pbr::Url("foo-bar".to_string())),
             a: A(Scalar::host(1.0)),
         };
         world.spawn(body);

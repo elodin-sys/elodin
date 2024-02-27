@@ -77,6 +77,13 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
         SpatialForce { inner }
     }
 
+    pub fn from_torque(torque: impl Into<Vector<T, 3>>) -> Self {
+        let torque = torque.into();
+        let zero = T::zero().broadcast::<Const<3>>();
+        let inner = torque.concat(zero);
+        SpatialForce { inner }
+    }
+
     pub fn torque(&self) -> Vector<T, 3> {
         self.inner.fixed_slice([0])
     }
@@ -121,10 +128,11 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
     }
 
     pub fn from_mass(mass: impl Into<Scalar<T>>) -> Self {
+        let mass = mass.into();
         SpatialInertia::new(
-            T::one().broadcast::<Const<3>>(),
+            T::one().broadcast::<Const<3>>() * mass.clone(),
             Vector::zeros(),
-            mass.into(),
+            mass,
         )
     }
 
@@ -179,6 +187,13 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         let linear = linear.into();
         let zero = T::zero().broadcast::<Const<3>>();
         let inner = zero.concat(linear);
+        SpatialMotion { inner }
+    }
+
+    pub fn from_angular(angular: impl Into<Vector<T, 3>>) -> Self {
+        let angular = angular.into();
+        let zero = T::zero().broadcast::<Const<3>>();
+        let inner = angular.concat(zero);
         SpatialMotion { inner }
     }
 

@@ -210,26 +210,16 @@ WorldVel = Component[SpatialMotion, "world_vel", ComponentType.SpatialMotionF64]
 WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotionF64]
 Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
 Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
-MeshAsset = Component[Handle, 2241, ComponentType.U64, True]
-MaterialAsset = Component[Handle, 2242, ComponentType.U64, True]
+PbrAsset = Component[Handle, 2241, ComponentType.U64, True]
 
 @dataclass
 class Body(Archetype):
-    world_pos: WorldPos
-    world_vel: WorldVel
-    world_accel: WorldAccel
-    force: Force
-    inertia: Inertia
-    mesh: MeshAsset
-    material: MaterialAsset
-    def __init__(self, mesh, material, world_pos = WorldPos.zero(), world_vel = WorldVel.zero(), inertia = Inertia.from_mass(1.0)):
-        self.world_pos = world_pos
-        self.world_vel = world_vel
-        self.world_accel = WorldAccel.zero()
-        self.force = Force.zero()
-        self.inertia = inertia
-        self.mesh = mesh
-        self.material = material
+    world_pos: WorldPos = WorldPos.zero()
+    world_vel: WorldVel = WorldVel.zero()
+    inertia: Inertia = Inertia.from_mass(1.0)
+    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))
+    force: Force = Force.zero()
+    world_accel: WorldAccel = WorldAccel.zero()
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
     sys.init(builder)

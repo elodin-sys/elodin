@@ -89,6 +89,11 @@ impl SpatialMotion {
         nox::SpatialMotion::from_linear(Vector::from_op(Noxpr::jax(arr))).into()
     }
 
+    #[staticmethod]
+    fn from_angular(arr: PyObject) -> Self {
+        nox::SpatialMotion::from_angular(Vector::from_op(Noxpr::jax(arr))).into()
+    }
+
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
@@ -151,6 +156,11 @@ impl SpatialForce {
         nox::SpatialForce::from_linear(Vector::from_op(Noxpr::jax(arr))).into()
     }
 
+    #[staticmethod]
+    fn from_torque(arr: PyObject) -> Self {
+        nox::SpatialForce::from_torque(Vector::from_op(Noxpr::jax(arr))).into()
+    }
+
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
@@ -200,6 +210,10 @@ impl Quaternion {
         }
     }
 
+    fn vector(&self) -> PyObject {
+        self.inner.clone().into_op().to_jax().unwrap()
+    }
+
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
@@ -235,8 +249,13 @@ impl From<nox::SpatialInertia<f64>> for SpatialInertia {
 #[pymethods]
 impl SpatialInertia {
     #[new]
-    fn new(arr: PyObject) -> Self {
-        nox::SpatialInertia::from_op(Noxpr::jax(arr)).into()
+    fn new(mass: PyObject, inertia: PyObject) -> Self {
+        nox::SpatialInertia::new(
+            Vector::<f64, 3>::from_op(Noxpr::jax(inertia)),
+            Vector::<f64, 3>::zeros(),
+            Scalar::<f64>::from_op(Noxpr::jax(mass)),
+        )
+        .into()
     }
 
     #[staticmethod]

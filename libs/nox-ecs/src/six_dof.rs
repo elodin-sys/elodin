@@ -1,4 +1,4 @@
-use elodin_conduit::well_known::{Material, Mesh};
+use elodin_conduit::well_known::Pbr;
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{Archetype, Component};
 use nox_ecs::{Handle, IntoSystem, Query, Rk4Ext, System, WorldPos};
@@ -78,8 +78,7 @@ pub struct Body {
     pub accel: WorldAccel,
     pub force: Force,
     pub mass: Inertia,
-    pub model: Handle<Mesh>,
-    pub material: Handle<Material>,
+    pub pbr: Handle<Pbr>,
 }
 
 pub fn six_dof<Sys, M, A, R>(effectors: impl FnOnce() -> Sys, time_step: f64) -> impl System
