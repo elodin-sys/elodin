@@ -6,7 +6,7 @@ pub fn set_theme(context: &mut egui::Context) {
     let mut style = (*context.style()).clone();
 
     style.spacing.item_spacing = emath::vec2(0., 0.);
-    style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, colors::BORDER_GREY);
+    style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(0.2, colors::BORDER_GREY);
 
     context.set_fonts(configure_default_fonts());
 

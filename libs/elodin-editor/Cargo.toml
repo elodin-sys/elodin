@@ -20,6 +20,8 @@ nalgebra = "0.32"
 bevy.version = "0.12"
 bevy.features = ["wayland", ]
 bevy_egui = "0.24"
+winit.version = "0.28.7"
+raw-window-handle = "0.5.2"
 bevy_panorbit_camera.version = "0.12.1"
 bevy_panorbit_camera.features = ["bevy_egui"]
 bevy_atmosphere = "0.8.1"
@@ -48,3 +50,4 @@ futures-lite = "2.0"
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25.0"
+objc = "0.2.7"
