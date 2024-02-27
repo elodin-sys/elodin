@@ -3201,6 +3201,9 @@ dependencies = [
  "flume",
  "futures-lite 2.2.0",
  "nalgebra",
+ "objc",
+ "raw-window-handle",
+ "winit",
 ]
 
 [[package]]

@@ -88,6 +88,15 @@ pub fn render(
             });
     }
 
+    egui::TopBottomPanel::top("titlebar")
+        .frame(egui::Frame {
+            fill: colors::INTERFACE_BACKGROUND_BLACK,
+            stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
+            ..Default::default()
+        })
+        .resizable(false)
+        .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
+
     // NOTE(temp fix): Hide panels until simulation is loaded
     if entities.len() > 0 {
         if width > height {

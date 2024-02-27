@@ -1,20 +1,20 @@
+use std::time::Duration;
+
 use bevy::{
     asset::embedded_asset,
-    core_pipeline::{
-        bloom::BloomSettings, experimental::taa::TemporalAntiAliasPlugin, tonemapping::Tonemapping,
-    },
+    core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     pbr::{
-        DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionBundle,
-        ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings,
+        DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionQualityLevel,
+        ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
     render::view::RenderLayers,
     window::{PresentMode, WindowTheme},
+    winit::WinitSettings,
     DefaultPlugins,
 };
-use bevy_atmosphere::prelude::*;
 use bevy_egui::EguiPlugin;
 use bevy_infinite_grid::{
     GridShadowCamera, InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings,
@@ -75,6 +75,13 @@ impl Plugin for EditorPlugin {
                 .disable::<LogPlugin>()
                 .build(),
         )
+        .insert_resource(WinitSettings {
+            focused_mode: bevy::winit::UpdateMode::Continuous,
+            unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
+                wait: Duration::from_secs(1),
+            },
+            ..Default::default()
+        })
         .init_resource::<ui::Paused>()
         .init_resource::<ui::ShowStats>()
         .add_plugins(
@@ -99,24 +106,17 @@ impl Plugin for EditorPlugin {
         .add_systems(Update, sync_pos)
         .add_systems(Update, sync_paused)
         .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
-        .insert_resource(AmbientLight {
-            color: Color::hex("#FFF").unwrap(),
-            brightness: 1.0,
-        })
-        //.insert_resource(Editables::default())
-        .insert_resource(ClearColor(Color::hex("#16161A").unwrap()))
+        .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()))
         .insert_resource(Msaa::Off);
+
+        #[cfg(target_os = "macos")]
+        app.add_systems(Startup, setup_titlebar);
 
         // For adding features incompatible with wasm:
         if cfg!(not(target_arch = "wasm32")) {
-            app.add_plugins(TemporalAntiAliasPlugin)
-                .add_plugins(AtmospherePlugin)
-                .insert_resource(AtmosphereModel::new(Gradient {
-                    sky: Color::hex("1B2642").unwrap(),
-                    horizon: Color::hex("00081E").unwrap(),
-                    ground: Color::hex("#00081E").unwrap(),
-                }))
-                .insert_resource(DirectionalLightShadowMap { size: 8192 });
+            embedded_asset!(app, "./assets/diffuse.ktx2");
+            embedded_asset!(app, "./assets/specular.ktx2");
+            app.insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
 }
@@ -124,10 +124,10 @@ impl Plugin for EditorPlugin {
 fn setup_grid(mut commands: Commands) {
     commands.spawn(InfiniteGridBundle {
         settings: InfiniteGridSettings {
-            minor_line_color: Color::hex("#00081E").unwrap(),
-            major_line_color: Color::hex("#00081E").unwrap(),
-            x_axis_color: Color::RED,
-            z_axis_color: Color::BLUE,
+            minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+            major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+            z_axis_color: Color::hex("#264FFF").unwrap(),
+            x_axis_color: Color::hex("#EE3A43").unwrap(),
             shadow_color: None,
             ..Default::default()
         },
@@ -138,7 +138,7 @@ fn setup_grid(mut commands: Commands) {
 #[derive(Component)]
 pub struct MainCamera;
 
-fn setup_main_camera(mut commands: Commands) {
+fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
     // return the id so it can be fetched below
     let mut camera = commands.spawn((
         Camera3dBundle {
@@ -162,24 +162,104 @@ fn setup_main_camera(mut commands: Commands) {
 
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
-        camera
-            .insert(AtmosphereCamera::default())
-            // .insert(EnvironmentMapLight {
-            //     diffuse_map: asset_server.load("diffuse.ktx2"),
-            //     specular_map: asset_server.load("specular.ktx2"),
-            // })
-            .insert(ScreenSpaceAmbientOcclusionBundle {
-                settings: ScreenSpaceAmbientOcclusionSettings {
-                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
-                },
-                ..Default::default()
-            });
+        camera.insert(EnvironmentMapLight {
+            diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
+            specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
+        });
+        // .insert(ScreenSpaceAmbientOcclusionBundle {
+        //     settings: ScreenSpaceAmbientOcclusionSettings {
+        //         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+        //     },
+        //     ..Default::default()
+        // });
         // NOTE: Crashes custom camera viewport
         // .insert(TemporalAntiAliasBundle::default());
 
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
         });
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn setup_titlebar(
+    windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
+    use cocoa::{
+        appkit::{
+            NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
+        },
+        base::{id, nil, BOOL},
+    };
+    use objc::{
+        class,
+        declare::ClassDecl,
+        msg_send,
+        runtime::{Object, Sel},
+        sel, sel_impl,
+    };
+
+    for (id, _) in &windows {
+        let window = winit_windows.get_window(id).unwrap();
+        use raw_window_handle::HasRawWindowHandle;
+        let handle = window.raw_window_handle();
+        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
+            error!("non AppKit window on macOS");
+            continue;
+        };
+        let window = handle.ns_window;
+        let window: cocoa::base::id = unsafe { std::mem::transmute(window) };
+        if window.is_null() {
+            panic!("null window");
+        }
+        unsafe {
+            // define an objective class for NSToolbar's delegate,
+            // because NSToolbar will complain if we do not
+            let toolbar_delegate_class = {
+                let superclass = class!(NSObject);
+                let mut decl = ClassDecl::new("ToolbarDel", superclass).unwrap();
+                extern "C" fn toolbar(_: &Object, _: Sel, _: id, _: id, _: BOOL) -> *const Object {
+                    nil
+                }
+                extern "C" fn allowed(_: &Object, _: Sel, _: id) -> id {
+                    nil
+                }
+                decl.add_method(
+                    objc::sel!(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:),
+                    toolbar as extern "C" fn(&Object, Sel, id, id, bool) -> *const Object,
+                );
+                decl.add_method(
+                    objc::sel!(toolbarAllowedItemIdentifiers:),
+                    allowed as extern "C" fn(&Object, Sel, id) -> id,
+                );
+                decl.add_method(
+                    objc::sel!(toolbarDefaultItemIdentifiers:),
+                    allowed as extern "C" fn(&Object, Sel, id) -> id,
+                );
+                decl.register()
+            };
+            let del: id = msg_send![toolbar_delegate_class, alloc];
+            let del = msg_send![del, init];
+            let toolbar = NSToolbar::alloc(nil);
+            let toolbar = toolbar.init_();
+            toolbar.setDelegate_(del);
+            if toolbar.is_null() {
+                panic!("null toolbar");
+            }
+            window.setTitlebarAppearsTransparent_(true);
+            window.setStyleMask_(
+                NSWindowStyleMask::NSFullSizeContentViewWindowMask
+                    | NSWindowStyleMask::NSResizableWindowMask
+                    | NSWindowStyleMask::NSTitledWindowMask
+                    | NSWindowStyleMask::NSClosableWindowMask
+                    | NSWindowStyleMask::NSMiniaturizableWindowMask
+                    | NSWindowStyleMask::NSUnifiedTitleAndToolbarWindowMask,
+            );
+            window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnified);
+            window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
+            window.setToolbar_(toolbar);
+        }
     }
 }
 
