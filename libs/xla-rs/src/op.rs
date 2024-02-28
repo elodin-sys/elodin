@@ -375,6 +375,20 @@ impl XlaOp {
         self.wrap(raw)
     }
 
+    pub fn lt(&self, rhs: &Self) -> Self {
+        let op = &self.raw;
+        let raw = unsafe {
+            cpp!([op as "const XlaOp*", rhs as "const XlaOp*"] -> XlaOpRaw as "XlaOp" {
+                try {
+                    return XlaOp(Lt(*op, *rhs));
+                }catch(std::exception& e) {
+                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                }
+            })
+        };
+        self.wrap(raw)
+    }
+
     pub fn not(&self) -> Self {
         let op = &self.raw;
         let raw = unsafe {

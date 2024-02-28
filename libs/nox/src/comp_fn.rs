@@ -1,5 +1,6 @@
 use crate::{
-    ArrayTy, Builder, Comp, IntoOp, Noxpr, NoxprFn, Op, Tensor, TensorDim, TensorItem, XlaDim,
+    ArrayTy, Builder, Comp, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorDim, TensorItem,
+    XlaDim,
 };
 use smallvec::SmallVec;
 use std::{any, marker::PhantomData};
@@ -76,10 +77,10 @@ where
         shape.extend_from_slice(<T::Dim as XlaDim>::dims().as_ref());
         let inner = Noxpr::parameter(
             i,
-            ArrayTy {
+            NoxprTy::ArrayTy(ArrayTy {
                 element_type: T::ELEM,
                 shape,
-            },
+            }),
             format!("param_{}", i),
         );
         params.push(inner.clone());

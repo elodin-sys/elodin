@@ -15,10 +15,18 @@ fn test_compile() {
     let client = PjRtClient::cpu().expect("client create failed");
     let builder = XlaBuilder::new("test");
     let a = builder
-        .parameter(0, crate::ElementType::F32, &[], "a")
+        .parameter(
+            0,
+            Shape::array_with_type(crate::ElementType::F32, vec![]),
+            "a",
+        )
         .unwrap();
     let b = builder
-        .parameter(1, crate::ElementType::F32, &[], "b")
+        .parameter(
+            1,
+            Shape::array_with_type(crate::ElementType::F32, vec![]),
+            "b",
+        )
         .unwrap();
     let add = a.add(&b);
     let comp = builder.build(&add).unwrap();
@@ -30,10 +38,18 @@ fn test_exec() {
     let client = PjRtClient::cpu().expect("client create failed");
     let builder = XlaBuilder::new("test");
     let a = builder
-        .parameter(0, crate::ElementType::F32, &[], "a")
+        .parameter(
+            0,
+            Shape::array_with_type(crate::ElementType::F32, vec![]),
+            "a",
+        )
         .unwrap();
     let b = builder
-        .parameter(1, crate::ElementType::F32, &[], "b")
+        .parameter(
+            1,
+            Shape::array_with_type(crate::ElementType::F32, vec![]),
+            "b",
+        )
         .unwrap();
     let add = a.add(&b);
     let comp = builder.build(&add).unwrap();
@@ -73,8 +89,8 @@ fn add_op() -> Result<()> {
 fn tuple_op() -> Result<()> {
     let client = crate::PjRtClient::cpu()?;
     let builder = crate::XlaBuilder::new("test");
-    let x = builder.parameter(0, f32::TY, &[1], "x")?;
-    let y = builder.parameter(1, f32::TY, &[2], "x")?;
+    let x = builder.parameter(0, Shape::array_with_type(f32::TY, vec![1]), "x")?;
+    let y = builder.parameter(1, Shape::array_with_type(f32::TY, vec![2]), "x")?;
     let tuple = builder.tuple(&[x.as_ref(), y.as_ref()]).build()?;
     let tuple = client.compile(&tuple)?;
     let x = crate::Literal::scalar(3.1f32);
