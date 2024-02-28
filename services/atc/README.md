@@ -4,7 +4,19 @@ ATC manages everything to do with running distributed simulations. It is respons
 
 # Usage
 
-You can run ATC by running `cargo run`. There is an [example config file](./config.toml) in this directory
+## Requirements
+
+- [`Rust`](https://www.rust-lang.org/tools/install)
+- [`protoc`](https://grpc.io/docs/protoc-installation/)
+
+## Run locally
+
+1. Start and set up the `PostgreSQL`.
+2. Start the `Redis`.
+3. Create a local Kubernetes cluster: [`kind`](https://kind.sigs.k8s.io/)(windows) / [`orbstack`](https://orbstack.dev/)(mac)
+4. Set up the [`config file`](config.toml). Make sure that you've properly specified the database_url, redis_url and pod_name fields.
+5. Make sure you have set up the [`GOOGLE_APPLICATION_CREDENTIALS env`](https://cloud.google.com/docs/authentication/provide-credentials-adc).
+6. Run `cargo run` in this directory.
 
 ## Build Docker Image
 
@@ -15,4 +27,4 @@ docker load -i $(nix build .#packages.aarch64-linux.docker.image --print-out-pat
 docker load -i $(nix build .#packages.x86_64-linux.docker.image --print-out-paths) # for x86
 ```
 
-To build on macOS you will need to follow the instructions in [docs/nix.md](../../docs/nix.md) under macOS VM
+To build on macOS you will need to follow the instructions in [docs/nix.md](../../docs/internal/nix.md) under macOS VM

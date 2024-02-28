@@ -1,5 +1,6 @@
 database_url = "postgres://postgres:secret@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
+pod_name="elo-atc"
 migrate = true
 pod_name = "foo"
 
@@ -7,7 +8,6 @@ pod_name = "foo"
 address = "[::]:50051"
 auth0.domain = "auth.elodin.dev"
 auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
-
 
 [orca]
 vm_namespace = "vms"
