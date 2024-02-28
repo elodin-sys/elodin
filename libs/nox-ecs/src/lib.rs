@@ -480,7 +480,7 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
         ty.shape.insert(0, len as i64);
         let op = Noxpr::parameter(
             builder.param_ops.len() as i64,
-            ty,
+            nox::NoxprTy::ArrayTy(ty),
             format!(
                 "{}::{}",
                 std::any::type_name::<T>(),

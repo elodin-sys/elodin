@@ -1,5 +1,6 @@
 use crate::{
-    ElementType, Literal, NativeType, Result, Status, XlaComputation, XlaOp, XlaOpRaw, XlaOpRef,
+    ElementType, Literal, NativeType, Result, Shape, Status, XlaComputation, XlaOp, XlaOpRaw,
+    XlaOpRef,
 };
 use cpp::{cpp, cpp_class};
 use cxx::let_cxx_string;
@@ -84,23 +85,14 @@ impl XlaBuilder {
         }
     }
 
-    pub fn parameter(
-        &self,
-        num: i64,
-        element_ty: ElementType,
-        dims: &[i64],
-        name: &str,
-    ) -> Result<XlaOp> {
+    pub fn parameter(&self, num: i64, shape: Shape, name: &str) -> Result<XlaOp> {
+        let raw_shape = shape.raw_shape();
         let_cxx_string!(name = name);
-        let dims_ptr = dims.as_ptr();
-        let dims_len = dims.len();
-        let prim_type = element_ty.primitive_type() as i32;
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let op = unsafe {
-            cpp!([self as "std::shared_ptr<XlaBuilder>*", dims_ptr as "const int64_t*", dims_len as "size_t", prim_type as "int32_t", num as "int64_t", name as "std::string*"] -> XlaOpRaw as "XlaOp" {
+            cpp!([self as "std::shared_ptr<XlaBuilder>*", num as "int64_t", name as "std::string*", raw_shape as "Shape"] -> XlaOpRaw as "XlaOp" {
                 try {
-                    auto shape = ShapeUtil::MakeShape((PrimitiveType)prim_type, absl::Span(dims_ptr, dims_len));
-                    return XlaOp(Parameter((self->get()), num, shape, *name));
+                    return XlaOp(Parameter((self->get()), num, raw_shape, *name));
                 }catch(std::exception& e) {
                     return XlaOp((*self)->ReportError(tsl::errors::Internal(e.what())));
                 }

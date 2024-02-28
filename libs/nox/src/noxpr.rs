@@ -10,7 +10,8 @@ use smallvec::{smallvec, SmallVec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaOp, XlaOpRef};
 
 use crate::{
-    CompFn, DefaultMap, DefaultMappedDim, Error, IntoOp, MapDim, Tensor, TensorDim, TensorItem,
+    CompFn, DefaultMap, DefaultMappedDim, Error, FromOp, IntoOp, MapDim, Tensor, TensorDim,
+    TensorItem,
 };
 
 #[derive(Debug)]
@@ -33,6 +34,9 @@ pub enum NoxprNode {
     Div(BinaryOp),
     And(BinaryOp),
     Or(BinaryOp),
+    GreaterOrEqual(BinaryOp),
+    LessOrEqual(BinaryOp),
+    Less(BinaryOp),
 
     // Matrix Multiplication
     Dot(BinaryOp),
@@ -58,10 +62,14 @@ pub enum NoxprNode {
     DynamicSlice(DynamicSlice),
     DynamicUpdateSlice(DynamicUpdateSlice),
 
+    // Control Flow
+    Scan(Scan),
+
     #[cfg(feature = "jax")]
     Jax(pyo3::PyObject),
 }
 
+#[derive(Clone)]
 pub struct Constant {
     pub data: xla::Literal, // NOTE: it might make more sense to use the xla independent store below
     // pub data: SmallVec<[u8; size_of::<f64>()]>,
@@ -74,9 +82,28 @@ impl std::fmt::Debug for Constant {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum NoxprTy {
     Tuple(Vec<NoxprTy>),
     ArrayTy(ArrayTy),
+}
+
+impl NoxprTy {
+    fn pretty_print(&self, writer: &mut impl std::fmt::Write) -> std::fmt::Result {
+        match self {
+            NoxprTy::ArrayTy(a) => a.pretty_print(writer),
+            NoxprTy::Tuple(t) => {
+                write!(writer, "tuple(")?;
+                for (i, ty) in t.iter().enumerate() {
+                    if i != 0 {
+                        write!(writer, ", ")?;
+                    }
+                    ty.pretty_print(writer)?;
+                }
+                write!(writer, ")")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +117,28 @@ impl ArrayTy {
         Self {
             element_type,
             shape,
+        }
+    }
+
+    fn pretty_print(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(writer, "{:?}{:?}", self.element_type, &self.shape)
+    }
+}
+
+impl From<ArrayTy> for xla::ArrayShape {
+    fn from(val: ArrayTy) -> Self {
+        xla::ArrayShape::new_with_type(val.element_type, val.shape.to_vec())
+    }
+}
+
+impl From<NoxprTy> for xla::Shape {
+    fn from(val: NoxprTy) -> Self {
+        match val {
+            NoxprTy::ArrayTy(ty) => xla::Shape::Array(ty.into()),
+            NoxprTy::Tuple(tys) => {
+                let tys = tys.into_iter().map(Into::into).collect::<Vec<_>>();
+                xla::Shape::tuple(tys)
+            }
         }
     }
 }
@@ -296,6 +345,13 @@ pub struct Noxpr {
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Scan {
+    pub inputs: Vec<Noxpr>,
+    pub initial_state: Noxpr,
+    pub scan_fn: NoxprFn,
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct NoxprId(usize);
 
@@ -307,7 +363,7 @@ impl Noxpr {
         }
     }
 
-    pub fn parameter(number: i64, ty: ArrayTy, name: String) -> Self {
+    pub fn parameter(number: i64, ty: NoxprTy, name: String) -> Self {
         Self::new(NoxprNode::Param(ParamExpr { ty, number, name }))
     }
 
@@ -391,6 +447,18 @@ impl Noxpr {
         Self::new(NoxprNode::And(BinaryOp { lhs: self, rhs }))
     }
 
+    pub fn greater_or_equal(self, rhs: Noxpr) -> Self {
+        Self::new(NoxprNode::GreaterOrEqual(BinaryOp { lhs: self, rhs }))
+    }
+
+    pub fn less_or_equal(self, rhs: Noxpr) -> Self {
+        Self::new(NoxprNode::LessOrEqual(BinaryOp { lhs: self, rhs }))
+    }
+
+    pub fn less(self, rhs: Noxpr) -> Self {
+        Self::new(NoxprNode::Less(BinaryOp { lhs: self, rhs }))
+    }
+
     pub fn reshape(self, new_sizes: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Reshape(Reshape {
             expr: self,
@@ -429,16 +497,80 @@ impl Noxpr {
         }))
     }
 
-    pub fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
+    pub fn scan(inputs: Vec<Noxpr>, initial_state: Noxpr, scan_fn: NoxprFn) -> Self {
+        Self::new(NoxprNode::Scan(Scan {
+            inputs,
+            initial_state,
+            scan_fn,
+        }))
+    }
+
+    pub fn element_type(&self) -> Option<ElementType> {
         match self.deref() {
-            NoxprNode::Constant(c) => Some(c.ty.shape.clone()),
-            NoxprNode::Param(p) => Some(p.ty.shape.clone()),
+            NoxprNode::Constant(c) => Some(c.ty.element_type),
+            NoxprNode::Param(p) => match &p.ty {
+                NoxprTy::Tuple(_) => None,
+                NoxprTy::ArrayTy(a) => Some(a.element_type),
+            },
             NoxprNode::Add(ref b)
             | NoxprNode::Sub(ref b)
             | NoxprNode::Div(ref b)
             | NoxprNode::Mul(ref b)
             | NoxprNode::And(ref b)
-            | NoxprNode::Or(ref b) => b.shape(),
+            | NoxprNode::Or(ref b) => b.rhs.element_type(),
+            NoxprNode::GreaterOrEqual(_) | NoxprNode::LessOrEqual(_) | NoxprNode::Less(_) => {
+                Some(ElementType::Pred)
+            }
+            NoxprNode::Dot(b) => b.rhs.element_type(),
+            NoxprNode::DotGeneral(s) => s.rhs.element_type(),
+            NoxprNode::Sqrt(expr) | NoxprNode::Neg(expr) => expr.element_type(),
+            NoxprNode::Concat(concat) => concat.nodes.first()?.element_type(),
+            NoxprNode::Slice(slice) => slice.expr.element_type(),
+            NoxprNode::DynamicSlice(dynamic_slice) => dynamic_slice.expr.element_type(),
+            NoxprNode::Reshape(r) => r.expr.element_type(),
+            NoxprNode::Tuple(_) => None,
+            NoxprNode::Log(l) => l.element_type(),
+            NoxprNode::Broadcast(b) => b.expr.element_type(),
+            NoxprNode::BroadcastInDim(b) => b.expr.element_type(),
+            NoxprNode::Transpose(t) => t.expr.element_type(),
+            NoxprNode::Gather(gather) => gather.expr.element_type(),
+            NoxprNode::Iota(i) => Some(i.shape.element_type),
+            NoxprNode::DynamicUpdateSlice(d) => d.expr.element_type(),
+            NoxprNode::GetTupleElement(g) => match g.expr.deref() {
+                NoxprNode::Tuple(elems) => elems.get(g.index)?.element_type(),
+                NoxprNode::Param(p) => {
+                    if let NoxprTy::Tuple(elems) = &p.ty {
+                        let ty = elems.get(g.index)?;
+                        if let NoxprTy::ArrayTy(a) = ty {
+                            return Some(a.element_type);
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            },
+            NoxprNode::Scan(s) => s.initial_state.element_type(),
+            #[cfg(feature = "jax")]
+            NoxprNode::Jax(_) => todo!(),
+        }
+    }
+
+    pub fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
+        match self.deref() {
+            NoxprNode::Constant(c) => Some(c.ty.shape.clone()),
+            NoxprNode::Param(p) => match &p.ty {
+                NoxprTy::Tuple(_) => None,
+                NoxprTy::ArrayTy(a) => Some(a.shape.clone()),
+            },
+            NoxprNode::Add(ref b)
+            | NoxprNode::Sub(ref b)
+            | NoxprNode::Div(ref b)
+            | NoxprNode::Mul(ref b)
+            | NoxprNode::And(ref b)
+            | NoxprNode::Or(ref b)
+            | NoxprNode::GreaterOrEqual(ref b)
+            | NoxprNode::LessOrEqual(ref b)
+            | NoxprNode::Less(ref b) => b.shape(),
 
             NoxprNode::Dot(b) => {
                 let lhs_shape = b.lhs.shape()?;
@@ -540,18 +672,38 @@ impl Noxpr {
             }
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
             NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
-            NoxprNode::GetTupleElement(g) => {
-                let NoxprNode::Tuple(elems) = g.expr.deref() else {
-                    return None;
-                };
-                elems.get(g.index)?.shape()
-            }
+            NoxprNode::GetTupleElement(g) => match g.expr.deref() {
+                NoxprNode::Tuple(elems) => elems.get(g.index)?.shape(),
+                NoxprNode::Param(p) => {
+                    if let NoxprTy::Tuple(elems) = &p.ty {
+                        let ty = elems.get(g.index)?;
+                        if let NoxprTy::ArrayTy(a) = ty {
+                            return Some(a.shape.clone());
+                        }
+                    }
+                    None
+                }
+                _ => None,
+            },
+            NoxprNode::Scan(s) => s.initial_state.shape(),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
                 let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
                 Some(SmallVec::from_vec(shape))
             }),
         }
+    }
+
+    pub fn dynamic_slice(
+        &self,
+        start_indices: Vec<Noxpr>,
+        size_indices: SmallVec<[i64; 4]>,
+    ) -> Noxpr {
+        Noxpr::new(NoxprNode::DynamicSlice(DynamicSlice {
+            expr: self.clone(),
+            start_indices,
+            size_indices,
+        }))
     }
 
     pub fn dynamic_update_slice(&self, start_indicies: Vec<Noxpr>, update: Noxpr) -> Noxpr {
@@ -584,6 +736,9 @@ impl Noxpr {
             NoxprNode::Div(_) => "Div",
             NoxprNode::And(_) => "And",
             NoxprNode::Or(_) => "Or",
+            NoxprNode::GreaterOrEqual(_) => "GreaterOrEqual",
+            NoxprNode::LessOrEqual(_) => "LessOrEqual",
+            NoxprNode::Less(_) => "Less",
             NoxprNode::Dot(_) => "Dot",
             NoxprNode::DotGeneral(_) => "DotGeneral",
             NoxprNode::Sqrt(_) => "Sqrt",
@@ -598,6 +753,7 @@ impl Noxpr {
             NoxprNode::Slice(_) => "Slice",
             NoxprNode::DynamicSlice(_) => "DynamicSlice",
             NoxprNode::DynamicUpdateSlice(_) => "DynamicUpdateSlice",
+            NoxprNode::Scan(_) => "Scan",
             NoxprNode::Jax(_) => "Jax",
         }
     }
@@ -622,11 +778,11 @@ impl Deref for Noxpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParamExpr {
     pub number: i64,
     pub name: String,
-    pub ty: ArrayTy,
+    pub ty: NoxprTy,
 }
 
 impl Neg for Noxpr {
@@ -677,7 +833,7 @@ impl XlaTracer {
             NoxprNode::Constant(c) => self.builder.constant_literal(&c.data)?.reshape(&c.ty.shape),
             NoxprNode::Param(p) => {
                 self.builder
-                    .parameter(p.number, p.ty.element_type, &p.ty.shape, &p.name)?
+                    .parameter(p.number, p.ty.clone().into(), &p.name)?
             }
             NoxprNode::Add(b) => {
                 let (lhs, rhs) = self.visit_binary_op(b)?;
@@ -716,6 +872,18 @@ impl XlaTracer {
             NoxprNode::Or(b) => {
                 let (lhs, rhs) = self.visit_binary_op(b)?;
                 lhs.or(&rhs)
+            }
+            NoxprNode::GreaterOrEqual(b) => {
+                let (lhs, rhs) = self.visit_binary_op(b)?;
+                lhs.ge(&rhs)
+            }
+            NoxprNode::LessOrEqual(b) => {
+                let (lhs, rhs) = self.visit_binary_op(b)?;
+                lhs.le(&rhs)
+            }
+            NoxprNode::Less(b) => {
+                let (lhs, rhs) = self.visit_binary_op(b)?;
+                lhs.lt(&rhs)
             }
             NoxprNode::Sqrt(expr) => {
                 let expr = self.visit(expr)?;
@@ -813,6 +981,101 @@ impl XlaTracer {
             NoxprNode::Jax(_) => {
                 unimplemented!()
             }
+            NoxprNode::Scan(s) => {
+                let mut xs_shape = None;
+                let mut input_shape = vec![];
+                for arg in &s.inputs {
+                    let shape = arg.shape().unwrap();
+                    let element_type = arg.element_type().unwrap();
+                    input_shape.push(NoxprTy::ArrayTy(ArrayTy {
+                        shape: shape.clone(),
+                        element_type,
+                    }));
+                    if xs_shape.is_none() {
+                        xs_shape = Some(shape);
+                    } else if let Some(xs_shape) = xs_shape.as_mut() {
+                        if xs_shape.first() != shape.first() {
+                            return Err(Error::ScanShapeMismatch);
+                        }
+                    }
+                }
+                let arg_shape = xs_shape.unwrap();
+                if s.inputs.is_empty() {
+                    return Err(Error::ScanMissingArg);
+                }
+                let xs_arg = if s.inputs.len() > 1 {
+                    Noxpr::tuple(s.inputs.clone())
+                } else {
+                    s.inputs[0].clone()
+                };
+                fn index(noxpr: &Noxpr, index: Noxpr) -> Option<Noxpr> {
+                    if let NoxprNode::Tuple(elems) = noxpr.deref() {
+                        let elems = elems
+                            .iter()
+                            .map(|e| index_single(e, index.clone()))
+                            .collect::<Option<Vec<_>>>()?;
+                        Some(Noxpr::tuple(elems))
+                    } else {
+                        index_single(noxpr, index)
+                    }
+                }
+                fn index_single(noxpr: &Noxpr, index: Noxpr) -> Option<Noxpr> {
+                    let mut shape = noxpr.shape()?;
+                    *shape.first_mut()? = 1;
+                    let starts = std::iter::once(index)
+                        .chain((0..(shape.len() - 1)).map(|_| 0i64.constant()))
+                        .collect();
+                    let out = noxpr.dynamic_slice(starts, shape.clone());
+                    shape.remove(0);
+                    Some(out.reshape(shape))
+                }
+                let input_ty = if s.inputs.len() > 1 {
+                    NoxprTy::Tuple(input_shape)
+                } else {
+                    input_shape.first().unwrap().clone()
+                };
+                let init_tuple = vec![
+                    NoxprTy::ArrayTy(ArrayTy {
+                        element_type: ElementType::S64,
+                        shape: smallvec![],
+                    }),
+                    input_ty,
+                ];
+                let scan_fn = {
+                    let mut scan_fn = s.scan_fn.collapse_params(init_tuple)?;
+                    let inner_xs_arg = scan_fn.args[0].get_tuple_element(1);
+                    let next = scan_fn.args[0].get_tuple_element(0).add(1i64.constant());
+                    let Some(next_x) = index(&inner_xs_arg, next.clone()) else {
+                        panic!()
+                    };
+                    scan_fn.inner =
+                        Noxpr::tuple(vec![next.clone(), inner_xs_arg, next_x, scan_fn.inner]);
+                    scan_fn
+                };
+                let cond = {
+                    let len = *arg_shape.first().unwrap();
+                    let arg = scan_fn.args[0].clone();
+
+                    let index = arg.get_tuple_element(0);
+                    let inner = index.less(len.constant());
+                    NoxprFn {
+                        args: scan_fn.args.clone(),
+                        inner,
+                    }
+                    .build("scan_cond")?
+                    .build()?
+                };
+                let scan_fn = scan_fn.build("scan_fn")?.build()?;
+                let initial_state = Noxpr::tuple(vec![
+                    0i64.constant(),
+                    xs_arg.clone(),
+                    s.initial_state.clone(),
+                    index(&xs_arg, 0i64.constant()).unwrap(),
+                ]);
+                let initial_state = self.visit(&initial_state)?;
+                let out = cond.stmt_while(&scan_fn, &initial_state);
+                out.get_tuple_element(3)
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -824,6 +1087,7 @@ impl XlaTracer {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct NoxprFn {
     pub args: Vec<Noxpr>,
     pub inner: Noxpr,
@@ -841,6 +1105,179 @@ impl NoxprFn {
         }
         tracer.visit(&self.inner)
     }
+
+    pub fn collapse_params(&self, mut init_tuple: Vec<NoxprTy>) -> Result<Self, Error> {
+        let init_offset = init_tuple.len();
+        for a in self.args.iter() {
+            let NoxprNode::Param(p) = a.deref() else {
+                return Err(Error::UnbatchableArgument);
+            };
+            init_tuple.push(p.ty.clone());
+        }
+        let new_param = Noxpr::parameter(
+            0,
+            NoxprTy::Tuple(init_tuple),
+            "collapsed_params".to_string(),
+        );
+        let cache = self
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                (
+                    arg.id(),
+                    Noxpr::get_tuple_element(&new_param, i + init_offset),
+                )
+            })
+            .collect();
+        let mut tracer = ReplacementTracer { cache };
+        let mut final_fn = tracer.visit_fn(self);
+        final_fn.args = vec![new_param];
+        Ok(final_fn)
+    }
+
+    pub fn pretty_print(
+        &self,
+        parent_printer: &PrettyPrintTracer,
+        mut writer: &mut dyn std::fmt::Write,
+    ) -> std::fmt::Result {
+        let mut printer = parent_printer.clone();
+        write!(writer, "fn(")?;
+        for (i, _) in self.args.iter().enumerate() {
+            if i != 0 {
+                write!(writer, ", ")?;
+            }
+            write!(writer, "var_{}", i)?;
+        }
+        writeln!(writer, ") {{")?;
+        let mut ident_writer =
+            indent_write::fmt::IndentWriter::new("  ", &mut writer as &mut dyn std::fmt::Write);
+        printer.visit(&self.inner, &mut ident_writer)?;
+        writeln!(writer, "}}")
+    }
+}
+
+impl std::fmt::Display for NoxprFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let printer = PrettyPrintTracer::default();
+        self.pretty_print(&printer, f)
+    }
+}
+
+pub struct ReplacementTracer {
+    cache: HashMap<NoxprId, Noxpr>,
+}
+
+impl ReplacementTracer {
+    fn visit_fn(&mut self, func: &NoxprFn) -> NoxprFn {
+        let args = func.args.iter().map(|a| self.visit(a)).collect::<Vec<_>>();
+        let inner = self.visit(&func.inner);
+        NoxprFn::new(args, inner)
+    }
+
+    fn visit(&mut self, expr: &Noxpr) -> Noxpr {
+        let id = expr.id();
+        if let Some(expr) = self.cache.get(&id) {
+            return expr.clone();
+        }
+        let expr = match expr.deref() {
+            NoxprNode::Param(p) => Noxpr::new(NoxprNode::Param(p.clone())),
+            NoxprNode::Tuple(t) => Noxpr::tuple(t.iter().map(|e| self.visit(e)).collect()),
+            NoxprNode::GetTupleElement(g) => {
+                Noxpr::new(NoxprNode::GetTupleElement(GetTupleElement {
+                    expr: self.visit(&g.expr),
+                    index: g.index,
+                }))
+            }
+            NoxprNode::Constant(c) => Noxpr::new(NoxprNode::Constant(c.clone())),
+            NoxprNode::Iota(i) => Noxpr::new(NoxprNode::Iota(i.clone())),
+            NoxprNode::Add(a) => Noxpr::new(NoxprNode::Add(self.visit_binary_op(a))),
+            NoxprNode::Sub(s) => Noxpr::new(NoxprNode::Sub(self.visit_binary_op(s))),
+            NoxprNode::Mul(x) => Noxpr::new(NoxprNode::Mul(self.visit_binary_op(x))),
+            NoxprNode::Div(x) => Noxpr::new(NoxprNode::Div(self.visit_binary_op(x))),
+            NoxprNode::And(x) => Noxpr::new(NoxprNode::And(self.visit_binary_op(x))),
+            NoxprNode::GreaterOrEqual(x) => {
+                Noxpr::new(NoxprNode::GreaterOrEqual(self.visit_binary_op(x)))
+            }
+            NoxprNode::LessOrEqual(x) => {
+                Noxpr::new(NoxprNode::LessOrEqual(self.visit_binary_op(x)))
+            }
+            NoxprNode::Less(x) => Noxpr::new(NoxprNode::Less(self.visit_binary_op(x))),
+            NoxprNode::Or(x) => Noxpr::new(NoxprNode::Or(self.visit_binary_op(x))),
+            NoxprNode::Dot(x) => Noxpr::new(NoxprNode::Dot(self.visit_binary_op(x))),
+            NoxprNode::DotGeneral(d) => Noxpr::new(NoxprNode::DotGeneral(DotGeneral {
+                lhs: self.visit(&d.lhs),
+                rhs: self.visit(&d.rhs),
+                dimensions: d.dimensions.clone(),
+            })),
+            NoxprNode::Sqrt(s) => Noxpr::new(NoxprNode::Sqrt(self.visit(s))),
+            NoxprNode::Neg(n) => Noxpr::new(NoxprNode::Neg(self.visit(n))),
+            NoxprNode::Log(l) => Noxpr::new(NoxprNode::Log(self.visit(l))),
+            NoxprNode::Concat(c) => Noxpr::new(NoxprNode::Concat(Concat {
+                nodes: c.nodes.iter().map(|n| self.visit(n)).collect(),
+                dimension: c.dimension,
+            })),
+            NoxprNode::Reshape(r) => Noxpr::new(NoxprNode::Reshape(Reshape {
+                expr: self.visit(&r.expr),
+                new_sizes: r.new_sizes.clone(),
+            })),
+            NoxprNode::Broadcast(b) => Noxpr::new(NoxprNode::Broadcast(Broadcast {
+                expr: self.visit(&b.expr),
+                sizes: b.sizes.clone(),
+            })),
+            NoxprNode::BroadcastInDim(b) => Noxpr::new(NoxprNode::BroadcastInDim(BroadcastInDim {
+                expr: self.visit(&b.expr),
+                sizes: b.sizes.clone(),
+                broadcast_dims: b.broadcast_dims.clone(),
+            })),
+            NoxprNode::Transpose(t) => Noxpr::new(NoxprNode::Transpose(Transpose {
+                expr: self.visit(&t.expr),
+                permutation: t.permutation.clone(),
+            })),
+            NoxprNode::Gather(g) => Noxpr::new(NoxprNode::Gather(Gather {
+                expr: self.visit(&g.expr),
+                indices: self.visit(&g.indices),
+                offset_dims: g.offset_dims.clone(),
+                collapsed_slice_dims: g.collapsed_slice_dims.clone(),
+                start_index_map: g.start_index_map.clone(),
+                slice_sizes: g.slice_sizes.clone(),
+                index_vector_dim: g.index_vector_dim,
+            })),
+            NoxprNode::Slice(s) => Noxpr::new(NoxprNode::Slice(Slice {
+                expr: self.visit(&s.expr),
+                start_indices: s.start_indices.clone(),
+                stop_indices: s.stop_indices.clone(),
+                strides: s.strides.clone(),
+            })),
+            NoxprNode::DynamicSlice(d) => Noxpr::new(NoxprNode::DynamicSlice(DynamicSlice {
+                expr: self.visit(&d.expr),
+                start_indices: d.start_indices.iter().map(|e| self.visit(e)).collect(),
+                size_indices: d.size_indices.clone(),
+            })),
+            NoxprNode::DynamicUpdateSlice(d) => {
+                Noxpr::new(NoxprNode::DynamicUpdateSlice(DynamicUpdateSlice {
+                    expr: self.visit(&d.expr),
+                    start_indicies: d.start_indicies.iter().map(|e| self.visit(e)).collect(),
+                    update: self.visit(&d.update),
+                }))
+            }
+            NoxprNode::Scan(s) => Noxpr::new(NoxprNode::Scan(Scan {
+                inputs: s.inputs.iter().map(|e| self.visit(e)).collect(),
+                initial_state: self.visit(&s.initial_state),
+                scan_fn: s.scan_fn.clone(),
+            })),
+            NoxprNode::Jax(j) => Noxpr::new(NoxprNode::Jax(j.clone())),
+        };
+        self.cache.insert(id, expr.clone());
+        expr
+    }
+
+    fn visit_binary_op(&mut self, op: &BinaryOp) -> BinaryOp {
+        BinaryOp {
+            lhs: self.visit(&op.lhs),
+            rhs: self.visit(&op.rhs),
+        }
+    }
 }
 
 impl Noxpr {
@@ -850,8 +1287,6 @@ impl Noxpr {
         args: &[Noxpr],
     ) -> Result<Noxpr, Error> {
         if in_axis.len() != args.len() {
-            dbg!(in_axis);
-            dbg!(args);
             return Err(Error::VmapInAxisMismatch);
         }
         let shape = args
@@ -906,8 +1341,20 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
             phantom: std::marker::PhantomData,
         })
     }
+
+    pub fn scan<O: FromOp + IntoOp>(
+        &self,
+        initial_state: O,
+        func: impl CompFn<(O, T::Tensor<<D::DefaultMapDim as MapDim<D>>::Item>), O>,
+    ) -> Result<O, Error> {
+        let scan_fn = func.build_expr()?;
+        let initial_state = initial_state.into_op();
+        let res = Noxpr::scan(vec![self.inner.clone()], initial_state, scan_fn);
+        Ok(O::from_op(res))
+    }
 }
 
+#[derive(Clone)]
 pub struct BatchTracer {
     cache: HashMap<NoxprId, BatchedExpr>,
     out_axis: BatchAxis,
@@ -1003,6 +1450,9 @@ impl BatchTracer {
             NoxprNode::Div(b) => self.visit_binary_op(b, Noxpr::div)?,
             NoxprNode::And(b) => self.visit_binary_op(b, Noxpr::and)?,
             NoxprNode::Or(b) => self.visit_binary_op(b, Noxpr::or)?,
+            NoxprNode::GreaterOrEqual(b) => self.visit_binary_op(b, Noxpr::greater_or_equal)?,
+            NoxprNode::LessOrEqual(b) => self.visit_binary_op(b, Noxpr::less_or_equal)?,
+            NoxprNode::Less(b) => self.visit_binary_op(b, Noxpr::less)?,
             NoxprNode::Sqrt(e) => self.visit_unary_op(e, Noxpr::sqrt)?,
             NoxprNode::Neg(e) => self.visit_unary_op(e, Noxpr::neg)?,
             NoxprNode::Log(e) => self.visit_unary_op(e, Noxpr::log)?,
@@ -1312,6 +1762,65 @@ impl BatchTracer {
                 let expr = elems.get(g.index).ok_or(Error::UnbatchableArgument)?;
                 self.visit(expr)?
             }
+            NoxprNode::Scan(s) => {
+                let mut inputs: Vec<_> = s
+                    .inputs
+                    .iter()
+                    .map(|e| self.visit(e))
+                    .collect::<Result<_, Error>>()?;
+                let initial_state = self.visit(&s.initial_state)?;
+                let batch_axis = inputs
+                    .iter()
+                    .find(|i| i.batch_axis != BatchAxis::NotMapped)
+                    .map(|i| i.batch_axis.clone())
+                    .unwrap_or(BatchAxis::NotMapped);
+                match &batch_axis {
+                    BatchAxis::NotMapped => {
+                        let inputs = inputs.into_iter().map(|i| i.inner).collect();
+                        let inner = Noxpr::scan(inputs, initial_state.inner, s.scan_fn.clone());
+                        BatchedExpr {
+                            inner,
+                            batch_axis: BatchAxis::NotMapped,
+                        }
+                        .move_batch_axis(self.out_axis.clone())
+                        .ok_or(Error::UnbatchableArgument)?
+                    }
+                    BatchAxis::Mapped { .. } => {
+                        for input in &mut inputs {
+                            *input = input
+                                .clone()
+                                .move_batch_axis(batch_axis.clone())
+                                .ok_or(Error::UnbatchableArgument)?;
+                        }
+                        let mut inner_batcher = self.clone();
+                        let mut args = vec![];
+                        for arg in s.scan_fn.args.iter() {
+                            let id = arg.id();
+                            let arg = BatchedExpr {
+                                inner: arg.clone(),
+                                batch_axis: BatchAxis::NotMapped,
+                            }
+                            .move_batch_axis(batch_axis.clone())
+                            .ok_or(Error::UnbatchableArgument)?;
+                            args.push(arg.inner.clone());
+                            inner_batcher.cache.insert(id, arg);
+                        }
+                        let inner = inner_batcher.visit(&s.scan_fn.inner)?;
+                        let scan_fn = NoxprFn {
+                            args,
+                            inner: inner.inner,
+                        };
+                        BatchedExpr {
+                            inner: Noxpr::scan(
+                                inputs.into_iter().map(|i| i.inner).collect(),
+                                initial_state.inner,
+                                scan_fn,
+                            ),
+                            batch_axis,
+                        }
+                    }
+                }
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -1574,6 +2083,262 @@ impl<T: NativeType + ArrayElement> NoxprScalarExt for T {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PrettyPrintTracer {
+    printed: HashMap<NoxprId, usize>,
+}
+
+impl PrettyPrintTracer {
+    fn print_var_label(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(writer, "var_{}", self.printed.len())
+    }
+
+    fn print_var(
+        &mut self,
+        id: NoxprId,
+        writer: &mut dyn std::fmt::Write,
+    ) -> Result<usize, std::fmt::Error> {
+        write!(writer, "let ")?;
+        self.print_var_label(writer)?;
+        write!(writer, " = ")?;
+        let num = self.printed.len();
+        self.printed.insert(id, num);
+        Ok(num)
+    }
+
+    fn visit<W: std::fmt::Write>(
+        &mut self,
+        expr: &Noxpr,
+        writer: &mut W,
+    ) -> Result<usize, std::fmt::Error> {
+        let id = expr.id();
+        if let Some(num) = self.printed.get(&id) {
+            return Ok(*num);
+        }
+        let num = match expr.deref() {
+            NoxprNode::Param(p) => {
+                let num = self.print_var(id, writer)?;
+                write!(writer, "param(num = {}, name = {}, ty = ", p.number, p.name,)?;
+                p.ty.pretty_print(writer)?;
+                write!(writer, ")")?;
+                Ok(num)
+            }
+            NoxprNode::Tuple(t) => {
+                let nums: Vec<_> = t
+                    .iter()
+                    .map(|e| self.visit(e, writer))
+                    .collect::<Result<_, _>>()?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "(")?;
+                for num in nums {
+                    write!(writer, "var_{}, ", num)?;
+                }
+                write!(writer, ")")?;
+                Ok(num)
+            }
+            NoxprNode::GetTupleElement(t) => {
+                self.visit(&t.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, ".{}", t.index)?;
+                Ok(num)
+            }
+            NoxprNode::Constant(c) => {
+                let num = self.print_var(id, writer)?;
+                write!(writer, "constant(")?;
+                c.ty.pretty_print(writer)?;
+                write!(writer, ")")?;
+                Ok(num)
+            }
+            NoxprNode::Iota(i) => {
+                let num = self.print_var(id, writer)?;
+                write!(writer, "iota({:?}, ", i.dim,)?;
+                i.shape.pretty_print(writer)?;
+                write!(writer, ")")?;
+                Ok(num)
+            }
+            NoxprNode::Add(a) => self.visit_binary_op(id, a, "+", writer),
+            NoxprNode::Sub(s) => self.visit_binary_op(id, s, "-", writer),
+            NoxprNode::Mul(m) => self.visit_binary_op(id, m, "*", writer),
+            NoxprNode::Div(d) => self.visit_binary_op(id, d, "/", writer),
+            NoxprNode::And(a) => self.visit_binary_op(id, a, "&&", writer),
+            NoxprNode::Or(o) => self.visit_binary_op(id, o, "||", writer),
+            NoxprNode::GreaterOrEqual(g) => self.visit_binary_op(id, g, ">=", writer),
+            NoxprNode::LessOrEqual(le) => self.visit_binary_op(id, le, "<=", writer),
+            NoxprNode::Less(l) => self.visit_binary_op(id, l, "<", writer),
+            NoxprNode::Dot(d) => self.visit_binary_op(id, d, ".", writer),
+            NoxprNode::DotGeneral(d) => {
+                let lhs = self.visit(&d.lhs, writer)?;
+                let rhs = self.visit(&d.rhs, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "dot_general(lhs = var_{}, rhs = var_{}, dims = {:?})",
+                    lhs, rhs, d.dimensions
+                )?;
+                Ok(num)
+            }
+            NoxprNode::Sqrt(s) => {
+                let arg = self.visit(s, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "sqrt(var_{})", arg)?;
+                Ok(num)
+            }
+            NoxprNode::Neg(n) => {
+                let arg = self.visit(n, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "-var_{}", arg)?;
+                Ok(num)
+            }
+            NoxprNode::Log(l) => {
+                let arg = self.visit(l, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "log(var_{})", arg)?;
+                Ok(num)
+            }
+            NoxprNode::Concat(c) => {
+                let nums: Vec<_> = c
+                    .nodes
+                    .iter()
+                    .map(|e| self.visit(e, writer))
+                    .collect::<Result<_, _>>()?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "concat(")?;
+                for num in nums {
+                    write!(writer, "var_{}, ", num)?;
+                }
+                write!(writer, "dim = {})", c.dimension)?;
+                Ok(num)
+            }
+            NoxprNode::Reshape(r) => {
+                let arg = self.visit(&r.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "reshape(var_{}, {:?})", arg, r.new_sizes)?;
+                Ok(num)
+            }
+            NoxprNode::Broadcast(b) => {
+                let arg = self.visit(&b.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "broadcast(var_{}, {:?})", arg, b.sizes)?;
+                Ok(num)
+            }
+            NoxprNode::BroadcastInDim(b) => {
+                let arg = self.visit(&b.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "broadcast_in_dim(var_{}, {:?}, {:?})",
+                    arg, b.sizes, b.broadcast_dims
+                )?;
+                Ok(num)
+            }
+            NoxprNode::Transpose(t) => {
+                let arg = self.visit(&t.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "transpose(var_{}, {:?})", arg, t.permutation)?;
+                Ok(num)
+            }
+            NoxprNode::Gather(g) => {
+                let expr = self.visit(&g.expr, writer)?;
+                let indices = self.visit(&g.indices, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "gather(expr = var_{}, indices = var_{}, offset_dims = {:?}, collapsed_slice_dims = {:?}, start_index_map = {:?}, slice_sizes = {:?}, index_vector_dim = {})",
+                    expr, indices, g.offset_dims, g.collapsed_slice_dims, g.start_index_map, g.slice_sizes, g.index_vector_dim
+                )?;
+                Ok(num)
+            }
+            NoxprNode::Slice(s) => {
+                let expr = self.visit(&s.expr, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "slice(expr = var_{}, start_indices = {:?}, stop_indices = {:?}, strides = {:?})",
+                    expr, s.start_indices, s.stop_indices, s.strides
+                )?;
+                Ok(num)
+            }
+            NoxprNode::DynamicSlice(d) => {
+                let expr = self.visit(&d.expr, writer)?;
+                let start_indices: Vec<_> = d
+                    .start_indices
+                    .iter()
+                    .map(|e| self.visit(e, writer))
+                    .collect::<Result<_, _>>()?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "dynamic_slice(expr = var_{}, start_indices = [",
+                    expr
+                )?;
+                for num in start_indices {
+                    write!(writer, "var_{}, ", num)?;
+                }
+                write!(writer, "], slice_sizes = {:?})", &d.size_indices[..])?;
+                Ok(num)
+            }
+            NoxprNode::DynamicUpdateSlice(d) => {
+                let expr = self.visit(&d.expr, writer)?;
+                let update = self.visit(&d.update, writer)?;
+                let start_indices: Vec<_> = d
+                    .start_indicies
+                    .iter()
+                    .map(|e| self.visit(e, writer))
+                    .collect::<Result<_, _>>()?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "dynamic_update_slice(expr = var_{}, update = var_{}, start_indices = [",
+                    expr, update
+                )?;
+                for num in start_indices {
+                    write!(writer, "var_{}, ", num)?;
+                }
+                write!(writer, "])")?;
+                Ok(num)
+            }
+            NoxprNode::Scan(s) => {
+                let inputs = s
+                    .inputs
+                    .iter()
+                    .map(|e| self.visit(e, writer).map(|n| format!("var_{}", n)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let init = self.visit(&s.initial_state, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "scan(inputs = var_{:?}, xs = init_{}, fn = ",
+                    &inputs, init
+                )?;
+                s.scan_fn.pretty_print(self, writer)?;
+                write!(writer, ")")?;
+                Ok(num)
+            }
+            NoxprNode::Jax(j) => {
+                let num = self.print_var(id, writer)?;
+                write!(writer, "jax({:?})", j)?;
+                Ok(num)
+            }
+        };
+        writeln!(writer)?;
+        num
+    }
+
+    fn visit_binary_op(
+        &mut self,
+        id: NoxprId,
+        op: &BinaryOp,
+        op_label: &str,
+        writer: &mut impl std::fmt::Write,
+    ) -> Result<usize, std::fmt::Error> {
+        let lhs = self.visit(&op.lhs, writer)?;
+        let rhs = self.visit(&op.rhs, writer)?;
+        let num = self.print_var(id, writer)?;
+        write!(writer, "{} {} {}", lhs, op_label, rhs)?;
+        Ok(num)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Client, Collapse, CompFn, Dot, Matrix, Scalar, Tensor, ToHost, Vector};
@@ -1746,5 +2511,55 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, matrix![1.0, 0.0, 0.0; 0.0, 1.0, 0.0])
+    }
+
+    #[test]
+    fn test_scalar_add_scan() {
+        let client = Client::cpu().unwrap();
+        fn add_one(mat: Vector<f32, 5>) -> Scalar<f32> {
+            use crate::ScalarExt;
+            mat.scan(0f32.constant(), |acc, x| acc + x).unwrap()
+        }
+        let comp = add_one.build().unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec
+            .run(&client, vector![1.0f32, 2.0, 3.0, 5.0, 6.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, 17.0)
+    }
+
+    #[test]
+    fn test_vec_add_scan() {
+        let client = Client::cpu().unwrap();
+        fn add_one(mat: Matrix<f32, 3, 2>) -> Vector<f32, 2> {
+            mat.scan(Vector::<f32, 2>::zeros(), |acc, x| acc + x)
+                .unwrap()
+        }
+        let comp = add_one.build().unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec
+            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![10.0, 14.0])
     }
 }

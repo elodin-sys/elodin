@@ -11,7 +11,7 @@ use clap::Parser;
 use nox_ecs::conduit::Asset;
 use nox_ecs::{
     conduit, join_many,
-    nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, ScalarExt},
+    nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
     spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore, Query,
     SharedWorld, System, Table, World,
 };
@@ -97,10 +97,10 @@ impl PipelineBuilder {
             .collect();
         let op = Noxpr::parameter(
             self.builder.param_ops.len() as i64,
-            ArrayTy {
+            NoxprTy::ArrayTy(ArrayTy {
                 element_type: ty.primitive_ty.element_type(),
                 shape, // FIXME
-            },
+            }),
             format!("{:?}::{}", id, self.builder.param_ops.len()),
         );
         self.builder.param_ops.push(op.clone());
@@ -116,8 +116,11 @@ impl PipelineBuilder {
                 continue;
             };
             let jnp = py.import("jax.numpy")?;
-            let dtype = nox::jax::dtype(&p.ty.element_type)?;
-            let shape = PyTuple::new(py, p.ty.shape.iter().collect::<Vec<_>>());
+            let NoxprTy::ArrayTy(ty) = &p.ty else {
+                unreachable!()
+            };
+            let dtype = nox::jax::dtype(&ty.element_type)?;
+            let shape = PyTuple::new(py, ty.shape.iter().collect::<Vec<_>>());
             let arr = jnp.call_method1("zeros", (shape, dtype))?; // NOTE(sphw): this could be a huge bottleneck
             res.push(arr.into());
         }

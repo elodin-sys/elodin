@@ -20,4 +20,10 @@ pub enum Error {
     OutOfBoundsAccess,
     #[error("pyo3 error {0}")]
     PyO3(#[from] pyo3::PyErr),
+    #[error("scan must have two arguments")]
+    ScanWrongArgCount,
+    #[error("scan must have at least one input")]
+    ScanMissingArg,
+    #[error("all scan arguments must have the same first dim")]
+    ScanShapeMismatch,
 }

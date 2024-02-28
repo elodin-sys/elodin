@@ -36,6 +36,8 @@ bytemuck.optional = true
 # macros
 nox-ecs-macros.path = "../nox-ecs-macros"
 
+# debug
+indent_write = "2.2.0"
 
 [dev-dependencies]
 approx = "0.5"
