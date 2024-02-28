@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use conduit::{Asset, AssetId, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
+use serde::{Deserialize, Serialize};
 
 use std::marker::PhantomData;
 
@@ -64,12 +65,12 @@ impl<T: Asset> crate::Component for Handle<T> {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct AssetStore {
     data: Vec<AssetItem>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AssetItem {
     pub generation: usize,
     pub inner: Bytes,

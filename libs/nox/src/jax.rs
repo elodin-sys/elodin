@@ -1,11 +1,15 @@
-use std::{collections::HashMap, ops::Deref};
-
-use pyo3::{PyObject, Python};
+use pyo3::{
+    exceptions::PyValueError,
+    types::{PyDict, PyTuple},
+    PyObject, PyResult, Python,
+};
 use smallvec::SmallVec;
+use std::{collections::HashMap, ops::Deref};
 use xla::{ArrayElement, ElementType, Literal};
 
 use crate::{
-    BinaryOp, CompFn, Error, Field, IntoOp, Noxpr, NoxprId, NoxprNode, Scalar, Tensor, TensorItem,
+    BinaryOp, CompFn, Error, Field, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode, Scalar, Tensor,
+    TensorItem,
 };
 
 impl Noxpr {
@@ -15,6 +19,7 @@ impl Noxpr {
     }
 }
 
+#[derive(Clone)]
 pub struct JaxTracer {
     lax: PyObject,
     jnp: PyObject,
@@ -77,6 +82,9 @@ impl JaxTracer {
             NoxprNode::And(op) => self.visit_binary_lax(op, "bitwise_and")?,
             NoxprNode::Or(op) => self.visit_binary_lax(op, "bitwise_or")?,
             NoxprNode::Dot(op) => self.visit_binary_lax(op, "dot")?,
+            NoxprNode::GreaterOrEqual(op) => self.visit_binary_lax(op, "ge")?,
+            NoxprNode::LessOrEqual(op) => self.visit_binary_lax(op, "le")?,
+            NoxprNode::Less(op) => self.visit_binary_lax(op, "lt")?,
             NoxprNode::DotGeneral(d) => {
                 let lhs = self.visit(&d.lhs)?;
                 let rhs = self.visit(&d.rhs)?;
@@ -206,6 +214,20 @@ impl JaxTracer {
                 }
                 _ => return Err(Error::GetTupleElemWrongType),
             },
+            NoxprNode::Scan(s) => {
+                let initial_state = self.visit(&s.initial_state)?;
+                let inputs = s
+                    .inputs
+                    .iter()
+                    .map(|x| self.visit(x))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let scan_fn = self.visit_fn(&s.scan_fn);
+                Python::with_gil(|py| {
+                    self.lax
+                        .call_method1(py, "scan", (scan_fn, initial_state, inputs))
+                        .map_err(Error::PyO3)
+                })?
+            }
             NoxprNode::Jax(o) => o.clone(),
         };
         self.cache.insert(id, op.clone());
@@ -227,6 +249,39 @@ impl JaxTracer {
     fn visit_unary_lax(&mut self, op: &Noxpr, method: &str) -> Result<PyObject, Error> {
         let inner = self.visit(op)?;
         Python::with_gil(|py| self.lax.call_method1(py, method, (inner,))).map_err(Error::PyO3)
+    }
+
+    fn visit_fn(&mut self, op: &NoxprFn) -> JaxNoxprFn {
+        JaxNoxprFn {
+            tracer: self.clone(),
+            inner: op.clone(),
+        }
+    }
+}
+
+#[pyo3::prelude::pyclass]
+struct JaxNoxprFn {
+    tracer: JaxTracer,
+    inner: NoxprFn,
+}
+
+#[pyo3::prelude::pymethods]
+impl JaxNoxprFn {
+    #[allow(unused_variables)]
+    #[pyo3(signature = (*args, **kwargs))]
+    fn __call__(
+        &mut self,
+        _py: Python<'_>,
+        args: &PyTuple,
+        kwargs: Option<&PyDict>,
+    ) -> PyResult<PyObject> {
+        for (i, arg) in self.inner.args.iter().enumerate() {
+            let a = args.get_item(i)?;
+            self.tracer.cache.insert(arg.id(), a.into());
+        }
+        self.tracer
+            .visit(&self.inner.inner)
+            .map_err(|err| PyValueError::new_err(err.to_string()))
     }
 }
 
