@@ -82,8 +82,8 @@ pub(crate) fn spawn_wasm(url: String, bevy_tx: flume::Sender<MsgPair>) -> anyhow
         ws_ready_rx.recv_async().await.unwrap();
         while let Ok(msg) = out_rx.recv_async().await {
             let mut buf = bytes::BytesMut::new();
-            msg.write(&mut buf).unwrap();
-            send_ws.send_with_u8_array(buf.chunk()).unwrap();
+            msg.write(&mut buf).unwrap_throw();
+            send_ws.send_with_u8_array(buf.chunk()).unwrap()
         }
     });
 

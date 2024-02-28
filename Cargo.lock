@@ -4401,6 +4401,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indent_write"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cfe9645a18782869361d9c8732246be7b410ad4e919d3609ebabdac00ba12c3"
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5480,6 +5486,7 @@ dependencies = [
  "boxcar",
  "bytemuck",
  "fn-traits",
+ "indent_write",
  "itertools 0.12.1",
  "nalgebra",
  "nox-ecs-macros",
