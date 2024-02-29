@@ -17,6 +17,14 @@ pub struct Edge {
     pub to: EntityId,
 }
 
+impl Edge {
+    pub fn new(from: impl Into<EntityId>, to: impl Into<EntityId>) -> Self {
+        let from = from.into();
+        let to = to.into();
+        Self { from, to }
+    }
+}
+
 impl IntoOp for Edge {
     fn into_op(self) -> Noxpr {
         Noxpr::constant(
@@ -244,15 +252,15 @@ mod tests {
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A::host(10.0));
-        let b = world.spawn(A::host(100.0));
-        let c = world.spawn(A::host(1000.0));
+        let a = world.spawn(A::host(10.0)).id();
+        let b = world.spawn(A::host(100.0)).id();
+        let c = world.spawn(A::host(1000.0)).id();
         world.spawn(A::host(10000.0));
         //world.spawn(Edge { from: c, to: d });
-        world.spawn(Edge { from: a, to: b });
-        world.spawn(Edge { from: a, to: c });
-        world.spawn(Edge { from: b, to: a });
-        world.spawn(Edge { from: b, to: c });
+        world.spawn(Edge::new(a, b));
+        world.spawn(Edge::new(a, c));
+        world.spawn(Edge::new(b, a));
+        world.spawn(Edge::new(b, c));
 
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build().unwrap();
@@ -274,11 +282,11 @@ mod tests {
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A::host(10.0));
-        let b = world.spawn(A::host(100.0));
+        let a = world.spawn(A::host(10.0)).id();
+        let b = world.spawn(A::host(100.0)).id();
         world.spawn(A::host(1000.0));
         world.spawn(A::host(10000.0));
-        world.spawn(Edge { from: a, to: b });
+        world.spawn(Edge::new(a, b));
 
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build().unwrap();

@@ -1,14 +1,15 @@
-use std::ops::DerefMut;
+use std::{marker::PhantomData, ops::DerefMut};
 
 use crate::{
     bevy::{AppExt, AssetAdapter, ConduitSubscribePlugin, EntityMap, SimPeer, Subscriptions},
     client::MsgPair,
-    well_known::{Pbr, TraceAnchor, WorldPos},
-    EntityId,
+    well_known::{EntityMetadata, Pbr, TraceAnchor, WorldPos},
+    Asset, EntityId,
 };
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bytes::Bytes;
+use serde::de::DeserializeOwned;
 
 pub struct SyncPlugin {
     pub plugin: ConduitSubscribePlugin,
@@ -33,15 +34,32 @@ impl Plugin for SyncPlugin {
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
             .add_conduit_component::<TraceAnchor>()
-            .add_conduit_asset::<Pbr>(Pbr::ASSET_ID, Box::new(SyncPbrAdapter { sync_pbr }));
+            .add_conduit_asset::<EntityMetadata>(
+                EntityMetadata::ASSET_ID,
+                Box::new(SyncPostcardAdapter::<EntityMetadata>::new(None)),
+            )
+            .add_conduit_asset::<Pbr>(
+                Pbr::ASSET_ID,
+                Box::new(SyncPostcardAdapter::<Pbr>::new(Some(sync_pbr))),
+            );
     }
 }
 
-struct SyncPbrAdapter {
-    sync_pbr: SystemId,
+struct SyncPostcardAdapter<T: DeserializeOwned> {
+    sync_system: Option<SystemId>,
+    phantom_data: PhantomData<T>,
 }
 
-impl AssetAdapter for SyncPbrAdapter {
+impl<T: DeserializeOwned> SyncPostcardAdapter<T> {
+    fn new(sync_system: Option<SystemId>) -> Self {
+        Self {
+            sync_system,
+            phantom_data: PhantomData,
+        }
+    }
+}
+
+impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
     fn insert(
         &self,
         commands: &mut Commands,
@@ -49,7 +67,7 @@ impl AssetAdapter for SyncPbrAdapter {
         entity_id: EntityId,
         value: Bytes,
     ) {
-        let Ok(mat) = postcard::from_bytes::<Pbr>(&value) else {
+        let Ok(comp) = postcard::from_bytes::<T>(&value) else {
             warn!("failed to deserialize material");
             return;
         };
@@ -63,8 +81,10 @@ impl AssetAdapter for SyncPbrAdapter {
             entity_map.0.insert(entity_id, e.id());
             e
         };
-        e.insert(mat);
-        commands.run_system(self.sync_pbr);
+        e.insert(comp);
+        if let Some(sync_system) = self.sync_system {
+            commands.run_system(sync_system);
+        }
     }
 }
 
