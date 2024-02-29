@@ -259,7 +259,7 @@ where
     fn add(self, rhs: SpatialMotion<T>) -> Self::Output {
         let omega: Vector<T, 3> = rhs.angular() / T::two();
         let zero = T::zero().reshape::<Const<1>>();
-        let omega = Quaternion(zero.concat(omega));
+        let omega = Quaternion(omega.concat(zero));
         let q = self.angular();
         let angular = q.clone() + omega * q;
         let angular = angular.normalize();
@@ -323,6 +323,37 @@ mod tests {
                 1.0,
                 -0.41421356237309515,
                 1.414213562373095,
+                0.0
+            ]
+        )
+    }
+
+    #[test]
+    fn test_spatial_transform_add() {
+        let f = || -> Vector<f64, 7> {
+            let a = SpatialTransform::new(
+                nalgebra::UnitQuaternion::identity().into_inner(),
+                nalgebra::Vector3::new(0.0, 0.0, 0.0),
+            );
+            let b = SpatialMotion::new(
+                nalgebra::Vector3::new(0.0, 0.0, 1.0),
+                nalgebra::Vector3::new(0.0, 0.0, 0.0),
+            );
+            (a + b).inner
+        };
+        let client = crate::Client::cpu().unwrap();
+        let comp = f.build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let res = exec.run(&client).unwrap().to_host();
+        assert_eq!(
+            res,
+            vector![
+                0.0,
+                0.0,
+                0.7071067811865475,
+                0.7071067811865475,
+                0.0,
+                0.0,
                 0.0
             ]
         )

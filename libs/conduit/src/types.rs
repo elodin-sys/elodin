@@ -25,10 +25,6 @@ pub struct EntityId(pub u64);
 
 impl EntityId {
     pub const RESOURCE: EntityId = EntityId(224);
-
-    pub fn rand() -> Self {
-        EntityId(fastrand::u64(..))
-    }
 }
 
 impl From<u64> for EntityId {
