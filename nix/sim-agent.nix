@@ -59,6 +59,57 @@ let
     pythonImportsCheck = [ wheelName ];
   };
 
+  mkrootfs =
+    {
+      init,
+      copyToRoot
+    }:
+    pkgs.runCommand "copy-contents"
+      {
+        init = init;
+        contents = copyToRoot;
+        closureInfo = pkgs.closureInfo {
+          rootPaths = copyToRoot;
+        };
+        nativeBuildInputs = with pkgs; [ rsync zstd squashfsTools ];
+      }
+      ''
+        mkdir -p rootfs/nix/store
+        cd rootfs
+        mkdir -p nix/store proc sys tmp dev
+        cp $init init
+        for item in $contents; do
+          rsync -aK $item/ .
+        done
+        for item in $(< $closureInfo/store-paths); do
+          rsync -aK $item ./nix/store/
+        done
+        mkdir $out
+        mksquashfs . $out/root.squashfs -comp zstd
+      '';
+
+  # TODO(Akhil): use s6 supervision suite instead as running workload as pid 1 is not recommended
+  init = pkgs.writeScript "init"
+    ''
+    #!/bin/sh
+
+    mount -n -t proc none /proc
+    mount -n -t sysfs none /sys
+    mount -n -t tmpfs none /tmp
+    mdev -s
+
+    setsid sh -c 'sh </dev/ttyS0 >/dev/ttyS0 2>&1'
+    poweroff -f
+    '';
+  vm = mkrootfs {
+    init = init;
+    copyToRoot = with pkgs; [
+      cacert
+      busybox
+      (python3.withPackages (ps: with ps; [(elodin ps)]))
+    ];
+  };
+
   image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-sim-agent";
     tag = "latest";
@@ -75,4 +126,5 @@ let
 in
 {
   packages.sim-agent-image = image;
+  packages.sandbox-vm = vm;
 }
