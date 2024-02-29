@@ -1,6 +1,7 @@
 extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
+use conduit::well_known::EntityMetadata;
 use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
@@ -181,6 +182,34 @@ impl<S: WorldStore> World<S> {
     }
 }
 
+pub struct Entity<'a> {
+    id: EntityId,
+    world: &'a mut World<HostStore>,
+}
+
+impl Entity<'_> {
+    pub fn metadata(self, metadata: EntityMetadata) -> Self {
+        let metadata = self.world.insert_asset(metadata);
+        self.world.spawn_with_id(metadata, self.id);
+        self
+    }
+
+    pub fn insert(self, archetype: impl Archetype + 'static) -> Self {
+        self.world.spawn_with_id(archetype, self.id);
+        self
+    }
+
+    pub fn id(&self) -> EntityId {
+        self.id
+    }
+}
+
+impl From<Entity<'_>> for EntityId {
+    fn from(val: Entity<'_>) -> Self {
+        val.id
+    }
+}
+
 impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
         let archetype_id = ArchetypeId::type_id(TypeId::of::<A>());
@@ -209,10 +238,13 @@ impl World<HostStore> {
         })
     }
 
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
         let entity_id = EntityId::rand();
         self.spawn_with_id(archetype, entity_id);
-        entity_id
+        Entity {
+            id: entity_id,
+            world: self,
+        }
     }
 
     pub fn spawn_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
@@ -836,7 +868,7 @@ where
         self
     }
 
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> EntityId {
+    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
         self.world.spawn(archetype)
     }
 

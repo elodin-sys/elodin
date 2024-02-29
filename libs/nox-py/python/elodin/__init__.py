@@ -211,6 +211,7 @@ WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotion
 Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
 Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
 PbrAsset = Component[Handle, 2241, ComponentType.U64, True]
+EntityMetadataAsset = Component[Handle, 2242, ComponentType.U64, True]
 
 @dataclass
 class Body(Archetype):
