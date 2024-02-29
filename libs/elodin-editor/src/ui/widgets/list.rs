@@ -1,12 +1,15 @@
-use bevy::ecs::{entity::Entity, system::ResMut};
+use bevy::ecs::{
+    entity::Entity,
+    system::{Query, ResMut},
+};
 use bevy_egui::egui;
-use conduit::{bevy::ComponentValueMap, well_known::WorldPos, EntityId};
+use conduit::{well_known::EntityMetadata, EntityId};
 
-use crate::ui::{colors, SelectedEntity};
+use crate::ui::{colors, EntityPair, SelectedEntity};
 
 pub fn entity_list(
     ui: &mut egui::Ui,
-    entities: Vec<(Entity, &EntityId, &WorldPos, &ComponentValueMap)>,
+    entities: Query<(Entity, &EntityId, &EntityMetadata)>,
     mut selected_entity: ResMut<SelectedEntity>,
 ) -> egui::Response {
     egui::ScrollArea::both()
@@ -23,15 +26,15 @@ pub fn entity_list(
 
                 ui.separator();
 
-                for (_, entity_id, _, _) in entities {
-                    let selected = selected_entity.0.is_some_and(|id| id == *entity_id);
-                    let list_item = ui.add(list_item(
-                        selected,
-                        format!("Untitled Entity - {}", entity_id.0),
-                    ));
+                for (entity, entity_id, metadata) in entities.iter() {
+                    let selected = selected_entity.0.is_some_and(|id| id.conduit == *entity_id);
+                    let list_item = ui.add(list_item(selected, metadata.name.clone()));
 
                     if list_item.clicked() {
-                        selected_entity.0 = Some(*entity_id);
+                        selected_entity.0 = Some(EntityPair {
+                            bevy: entity,
+                            conduit: *entity_id,
+                        })
                     }
                 }
 
