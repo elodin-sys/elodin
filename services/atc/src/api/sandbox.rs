@@ -121,6 +121,9 @@ impl Api {
             Some("three-body") => {
                 include_str!("../../../../libs/nox-py/examples/six_dof.py").to_string()
             }
+            Some("cube-sat") => {
+                include_str!("../../../../libs/nox-py/examples/cube_sat.py").to_string()
+            }
             Some(_) | None => req.code,
         };
         let mut redis = self.redis.clone();

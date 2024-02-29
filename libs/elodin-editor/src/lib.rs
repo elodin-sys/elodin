@@ -22,6 +22,7 @@ use bevy_infinite_grid::{
 use bevy_mod_picking::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
+use bevy_web_asset::WebAssetPlugin;
 use conduit::{well_known::WorldPos, ControlMsg};
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
@@ -58,57 +59,58 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        window_theme: Some(WindowTheme::Dark),
-                        title: "Elodin Editor".into(),
-                        present_mode: PresentMode::AutoVsync,
-                        fit_canvas_to_parent: true,
-                        canvas: Some("#editor".to_string()),
+        app.add_plugins(WebAssetPlugin)
+            .add_plugins(
+                DefaultPlugins
+                    .set(WindowPlugin {
+                        primary_window: Some(Window {
+                            window_theme: Some(WindowTheme::Dark),
+                            title: "Elodin Editor".into(),
+                            present_mode: PresentMode::AutoVsync,
+                            fit_canvas_to_parent: true,
+                            canvas: Some("#editor".to_string()),
+                            ..default()
+                        }),
                         ..default()
-                    }),
-                    ..default()
-                })
-                .disable::<DiagnosticsPlugin>()
-                .disable::<LogPlugin>()
-                .build(),
-        )
-        .insert_resource(WinitSettings {
-            focused_mode: bevy::winit::UpdateMode::Continuous,
-            unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
-                wait: Duration::from_millis(16),
-            },
-            ..Default::default()
-        })
-        .init_resource::<ui::Paused>()
-        .init_resource::<ui::ShowStats>()
-        .init_resource::<ui::SelectedEntity>()
-        .add_plugins(
-            DefaultPickingPlugins
-                .build()
-                .disable::<DebugPickingPlugin>()
-                .disable::<DefaultHighlightingPlugin>(),
-        )
-        .add_plugins(EmbeddedAssetPlugin)
-        .add_plugins(EguiPlugin)
-        .add_plugins(PanOrbitCameraPlugin)
-        .add_plugins(InfiniteGridPlugin)
-        .add_plugins(PolylinePlugin)
-        .add_plugins(TracesPlugin)
-        .add_plugins(NavigationGizmoPlugin)
-        .add_plugins(FrameTimeDiagnosticsPlugin)
-        .add_systems(Startup, setup_main_camera)
-        .add_systems(Startup, setup_grid)
-        .add_systems(Startup, setup_window_icon)
-        .add_systems(Update, (ui::shortcuts, ui::render))
-        .add_systems(Update, make_pickable)
-        .add_systems(Update, sync_pos)
-        .add_systems(Update, sync_paused)
-        .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
-        .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()))
-        .insert_resource(Msaa::Off);
+                    })
+                    .disable::<DiagnosticsPlugin>()
+                    .disable::<LogPlugin>()
+                    .build(),
+            )
+            .insert_resource(WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
+                    wait: Duration::from_millis(16),
+                },
+                ..Default::default()
+            })
+            .init_resource::<ui::Paused>()
+            .init_resource::<ui::ShowStats>()
+            .init_resource::<ui::SelectedEntity>()
+            .add_plugins(
+                DefaultPickingPlugins
+                    .build()
+                    .disable::<DebugPickingPlugin>()
+                    .disable::<DefaultHighlightingPlugin>(),
+            )
+            .add_plugins(EmbeddedAssetPlugin)
+            .add_plugins(EguiPlugin)
+            .add_plugins(PanOrbitCameraPlugin)
+            .add_plugins(InfiniteGridPlugin)
+            .add_plugins(PolylinePlugin)
+            .add_plugins(TracesPlugin)
+            .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(FrameTimeDiagnosticsPlugin)
+            .add_systems(Startup, setup_main_camera)
+            .add_systems(Startup, setup_grid)
+            .add_systems(Startup, setup_window_icon)
+            .add_systems(Update, (ui::shortcuts, ui::render))
+            .add_systems(Update, make_pickable)
+            .add_systems(Update, sync_pos)
+            .add_systems(Update, sync_paused)
+            .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
+            .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()))
+            .insert_resource(Msaa::Off);
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
