@@ -37,6 +37,7 @@ pub struct Metadata {
     pub archetypes: BTreeMap<ArchetypeId, ArchetypeMetadata>,
     pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub tick: u64,
+    pub entity_len: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -110,6 +111,7 @@ impl World<HostStore> {
             archetypes: archetype_metadata,
             component_map: self.component_map.clone(),
             tick: self.tick,
+            entity_len: self.entity_len,
         };
 
         Ok(PolarsWorld {
@@ -128,6 +130,7 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
             archetypes,
             component_map,
             tick,
+            entity_len,
         } = polars.metadata;
         let archetypes = polars
             .archetypes
@@ -143,6 +146,7 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
             component_map,
             assets: polars.assets,
             tick,
+            entity_len,
         })
     }
 }

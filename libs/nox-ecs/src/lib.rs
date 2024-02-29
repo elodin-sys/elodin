@@ -107,6 +107,7 @@ pub struct World<S: WorldStore = HostStore> {
     pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub assets: AssetStore,
     pub tick: u64,
+    pub entity_len: u64,
 }
 
 impl Clone for World {
@@ -116,6 +117,7 @@ impl Clone for World {
             component_map: self.component_map.clone(),
             assets: self.assets.clone(),
             tick: 0,
+            entity_len: self.entity_len,
         }
     }
 }
@@ -127,6 +129,7 @@ impl<S: WorldStore> Default for World<S> {
             component_map: Default::default(),
             assets: Default::default(),
             tick: 0,
+            entity_len: 0,
         }
     }
 }
@@ -239,7 +242,7 @@ impl World<HostStore> {
     }
 
     pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
-        let entity_id = EntityId::rand();
+        let entity_id = EntityId(self.entity_len);
         self.spawn_with_id(archetype, entity_id);
         Entity {
             id: entity_id,
@@ -253,10 +256,9 @@ impl World<HostStore> {
         table
             .entity_map
             .insert(entity_id, table.entity_buffer.len());
-        table
-            .entity_buffer
-            .push((table.entity_buffer.len() as u64).constant());
+        table.entity_buffer.push(entity_id.0.constant());
         archetype.insert_into_table(table);
+        self.entity_len += 1;
     }
 
     pub fn copy_to_client(&self, client: &Client) -> Result<World<ClientStore>, Error> {
@@ -289,6 +291,7 @@ impl World<HostStore> {
             component_map: self.component_map.clone(),
             assets: AssetStore::default(),
             tick: self.tick,
+            entity_len: self.entity_len,
         })
     }
 

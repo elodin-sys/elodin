@@ -8,8 +8,8 @@ use bevy_egui::{
     EguiContexts,
 };
 use conduit::{
-    bevy::{ComponentValueMap, MaxTick, Received, Tick},
-    well_known::{EntityMetadata, WorldPos},
+    bevy::{ComponentValueMap, MaxTick, Tick},
+    well_known::EntityMetadata,
     ControlMsg, EntityId,
 };
 
@@ -29,7 +29,13 @@ pub struct Paused(pub bool);
 pub struct ShowStats(pub bool);
 
 #[derive(Resource, Default)]
-pub struct SelectedEntity(pub Option<EntityId>);
+pub struct SelectedEntity(pub Option<EntityPair>);
+
+#[derive(Clone, Copy)]
+pub struct EntityPair {
+    pub bevy: Entity,
+    pub conduit: EntityId,
+}
 
 pub fn shortcuts(
     mut show_stats: ResMut<ShowStats>,
@@ -55,8 +61,8 @@ pub fn render(
     max_tick: Res<MaxTick>,
     show_stats: Res<ShowStats>,
     diagnostics: Res<DiagnosticsStore>,
-    _meta_entities: Query<(&EntityId, &EntityMetadata)>,
-    entity_components: Query<(Entity, &EntityId, &WorldPos, &ComponentValueMap), With<Received>>,
+    meta_entities: Query<(Entity, &EntityId, &EntityMetadata)>,
+    entity_components: Query<(Entity, &EntityId, &ComponentValueMap)>,
     window: Query<&Window>,
     images: Local<images::Images>,
 ) {
@@ -77,6 +83,11 @@ pub fn render(
         handle: contexts.add_image(images.icon_scrub.clone_weak()),
     };
 
+    let selected_metadata = selected_entity
+        .0
+        .and_then(|e| meta_entities.get(e.bevy).ok())
+        .map(|(b, _, meta)| (b, meta.clone()));
+
     egui::TopBottomPanel::top("titlebar")
         .frame(egui::Frame {
             fill: colors::INTERFACE_BACKGROUND_BLACK,
@@ -87,11 +98,12 @@ pub fn render(
         .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
 
     // NOTE(temp fix): Hide panels until simulation is loaded
-    if !entity_components.is_empty() {
-        let entities =
-            entity_components
-                .iter()
-                .collect::<Vec<(Entity, &EntityId, &WorldPos, &ComponentValueMap)>>();
+    if !meta_entities.is_empty() {
+        // let entities =
+        // entity_components
+        //     .iter()
+        //     .collect::<Vec<(Entity, &EntityId, &WorldPos, &ComponentValueMap)>>();
+        // NOTE(sphw): temporarily not needed @andrei will use this
 
         if width * 0.75 > height {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
@@ -106,10 +118,10 @@ pub fn render(
                 .default_width(width * 0.20)
                 .max_width(width * 0.25)
                 .show(contexts.ctx_mut(), |ui| {
-                    list::entity_list(ui, entities, selected_entity);
+                    list::entity_list(ui, meta_entities, selected_entity);
                 });
 
-            if let Some(selected) = selected {
+            if let Some((entity, metadata)) = selected_metadata.as_ref() {
                 egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
                     .resizable(true)
                     .frame(egui::Frame {
@@ -122,7 +134,10 @@ pub fn render(
                     .default_width(width * 0.20)
                     .max_width(width * 0.25)
                     .show(contexts.ctx_mut(), |ui| {
-                        ui.label(format!("Untitled Entity - {}", selected.0));
+                        ui.label(metadata.name.clone());
+                        if let Ok((_, _, map)) = entity_components.get(*entity) {
+                            draw_component_values(ui, map)
+                        }
 
                         ui.allocate_space(ui.available_size());
                     });
@@ -145,11 +160,11 @@ pub fn render(
                         .default_width(width * 0.5)
                         .max_width(width * 0.75)
                         .show_inside(ui, |ui| {
-                            list::entity_list(ui, entities, selected_entity);
+                            list::entity_list(ui, meta_entities, selected_entity);
                             ui.allocate_space(ui.available_size());
                         });
 
-                    if let Some(selected) = selected {
+                    if let Some((entity, metadata)) = selected_metadata.as_ref() {
                         egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
                             .resizable(false)
                             .frame(egui::Frame {
@@ -160,7 +175,10 @@ pub fn render(
                             })
                             .exact_width(width - outline.response.rect.width())
                             .show_inside(ui, |ui| {
-                                ui.label(format!("Untitled Entity - {}", selected.0));
+                                ui.label(metadata.name.clone());
+                                if let Ok((_, _, map)) = entity_components.get(*entity) {
+                                    draw_component_values(ui, map)
+                                }
                                 ui.allocate_space(ui.available_size());
                             });
                     }
@@ -204,25 +222,24 @@ pub fn render(
                 ui.add(Label::new(
                     RichText::new(format!("FPS: {fps_str}")).color(Color32::WHITE),
                 ));
-
-                for (_, entity_id, world_pos, map) in entity_components.iter() {
-                    if selected.is_some_and(|id| id == *entity_id) {
-                        ui.add(Label::new(
-                            RichText::new(format!(
-                                "SELECTED: ID[{}] POS{:?} ATT{:?}",
-                                entity_id.0, world_pos.pos, world_pos.att
-                            ))
+                if let Some((_, entity_id, map)) =
+                    selected.and_then(|s| entity_components.get(s.bevy).ok())
+                {
+                    ui.add(Label::new(
+                        RichText::new(format!("SELECTED: ID[{}] ", entity_id.0,))
                             .color(Color32::WHITE),
-                        ));
-                        for (id, value) in map.0.iter() {
-                            ui.add(Label::new(
-                                RichText::new(format!("COMP ID[{}] VAL = {:?}", id.0, value))
-                                    .color(Color32::WHITE),
-                            ));
-                        }
-                    }
+                    ));
+                    draw_component_values(ui, map)
                 }
             });
+    }
+}
+
+fn draw_component_values(ui: &mut egui::Ui, map: &ComponentValueMap) {
+    for (id, value) in map.0.iter() {
+        ui.add(Label::new(
+            RichText::new(format!("COMP ID[{}] VAL = {:?}", id.0, value)).color(Color32::WHITE),
+        ));
     }
 }
 

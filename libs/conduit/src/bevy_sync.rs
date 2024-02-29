@@ -1,7 +1,10 @@
-use std::{marker::PhantomData, ops::DerefMut};
+use std::{collections::HashMap, marker::PhantomData, ops::DerefMut};
 
 use crate::{
-    bevy::{AppExt, AssetAdapter, ConduitSubscribePlugin, EntityMap, SimPeer, Subscriptions},
+    bevy::{
+        AppExt, AssetAdapter, ComponentValueMap, ConduitSubscribePlugin, EntityMap, SimPeer,
+        Subscriptions,
+    },
     client::MsgPair,
     well_known::{EntityMetadata, Pbr, TraceAnchor, WorldPos},
     Asset, EntityId,
@@ -77,7 +80,14 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
             };
             e
         } else {
-            let e = commands.spawn_empty();
+            let e = commands.spawn((
+                EntityMetadata {
+                    name: format!("{:?}", entity_id),
+                    color: Color::WHITE.into(),
+                },
+                entity_id,
+                ComponentValueMap(HashMap::default()),
+            ));
             entity_map.0.insert(entity_id, e.id());
             e
         };
