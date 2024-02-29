@@ -60,8 +60,6 @@ def control(
             + -1.0 * (p.angular().vector() - i.angular().vector())[:3] * k
         ),
     ).buf[0]
-    for buf in rw.bufs:
-        print(buf.shape)
     return rw.map(
         RWForce,
         lambda axis, _torque: RWForce.from_torque(
@@ -85,7 +83,8 @@ b = Body(
     world_accel=WorldVel.from_linear(np.array([0.0, 0.0, 0.0])),
     force=Force.zero(),
     inertia=Inertia(12.0, j),
-    pbr=w.insert_asset(Pbr.from_path("examples/oresat-low.glb")),
+    #pbr=w.insert_asset(Pbr.from_path("examples/oresat-low.glb")),
+    pbr=w.insert_asset(Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
 )
 w.spawn(
     ReactionWheel(
@@ -110,7 +109,7 @@ w.spawn(
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
     ControlInput(
-        SpatialTransform(axis_angle(np.array([1.0, 1.0, 0.0]), np.radians(45)))
+        SpatialTransform(axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(120)))
     )
 )
 
