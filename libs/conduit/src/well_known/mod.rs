@@ -3,7 +3,7 @@ use ndarray::{array, CowArray, Ix1};
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
-use crate::{ComponentId, ComponentType, ComponentValue, PrimitiveTy};
+use crate::{ComponentType, ComponentValue, PrimitiveTy};
 
 #[cfg(feature = "bevy")]
 mod bevy_conv;
@@ -14,13 +14,6 @@ mod primitives;
 
 pub use metadata::*;
 pub use pbr::*;
-
-pub const DEFAULT_SUB_FILTERS: &[ComponentId] = &[
-    ComponentId::new("world_pos"),    // 6709265627763630702
-    ComponentId(2241),                // pbr
-    ComponentId(2242),                // entity_metadata
-    ComponentId::new("trace_anchor"), //5639674603227263162
-];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]

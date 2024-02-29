@@ -248,6 +248,16 @@ impl ComponentType {
             shape,
         }
     }
+
+    #[classattr]
+    #[pyo3(name = "F64")]
+    fn f64(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+        Self {
+            ty: PrimitiveType::F64,
+            shape,
+        }
+    }
 }
 
 impl From<ComponentType> for conduit::ComponentType {
@@ -421,7 +431,10 @@ impl WorldBuilder {
 
     pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: PyObject) -> Result<Entity, Error> {
         Python::with_gil(|py| {
-            let entity_id = EntityId::rand();
+            let entity_id = EntityId {
+                inner: conduit::EntityId(slf.world.entity_len),
+            };
+
             slf.spawn_with_entity_id(py, archetype, entity_id.clone())?;
             let world = slf.into();
             Ok(Entity {
@@ -442,9 +455,7 @@ impl WorldBuilder {
         table
             .entity_map
             .insert(entity_id, table.entity_buffer.len());
-        table
-            .entity_buffer
-            .push((table.entity_buffer.len() as u64).constant());
+        table.entity_buffer.push(entity_id.0.constant());
 
         let datas = archetype
             .call_method0(py, "component_data")?
@@ -473,6 +484,7 @@ impl WorldBuilder {
             };
             col.buffer.push_raw(buf);
         }
+        self.world.entity_len += 1;
         Ok(EntityId { inner: entity_id })
     }
 
@@ -710,16 +722,6 @@ impl Client {
 #[pyclass]
 pub struct EntityId {
     inner: conduit::EntityId,
-}
-
-#[pymethods]
-impl EntityId {
-    #[staticmethod]
-    pub fn rand() -> Self {
-        EntityId {
-            inner: conduit::EntityId::rand(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -1050,6 +1052,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Handle>()?;
     m.add_class::<Pbr>()?;
     m.add_class::<EntityMetadata>()?;
+    m.add_class::<PrimitiveType>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     #[cfg(feature = "embed-cli")]
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
