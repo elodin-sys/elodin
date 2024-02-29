@@ -31,6 +31,7 @@ mod integrator;
 mod polars;
 mod query;
 
+pub mod graph;
 pub mod history;
 pub mod six_dof;
 
@@ -526,6 +527,7 @@ pub fn update_var(
 ) -> Noxpr {
     use nox::NoxprScalarExt;
     let (old, new, _) = intersect_ids(old_entity_map, update_entity_map);
+    println!("{}", update_buffer);
     let shape = update_buffer.shape().unwrap();
     old.iter().zip(new.iter()).fold(
         old_buffer.clone(),
