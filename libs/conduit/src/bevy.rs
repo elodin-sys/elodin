@@ -4,7 +4,6 @@ use crate::client::MsgPair;
 use crate::query::{MetadataStore, QueryId};
 use crate::ser_de::ColumnValue;
 use crate::well_known::EntityMetadata;
-use crate::well_known::DEFAULT_SUB_FILTERS;
 use crate::Asset;
 use crate::AssetId;
 use crate::Error;
@@ -30,6 +29,9 @@ use bevy::{
     },
 };
 
+#[derive(bevy::prelude::Component, Debug)]
+pub struct ComponentValueMap(pub HashMap<ComponentId, ComponentValue<'static>>);
+
 #[derive(bevy::prelude::Component)]
 pub struct Received;
 
@@ -45,18 +47,45 @@ impl ColumnMsg<Bytes> {
         entity_map: &mut EntityMap,
         component_map: &ComponentMap,
         commands: &mut Commands,
+        value_map: &mut Query<&mut ComponentValueMap>,
     ) {
         let component_id = self.metadata.component_id;
-        let Some(adapter) = component_map.0.get(&component_id) else {
-            warn!(?component_id, "unknown insert fn");
-            return;
-        };
 
         for res in self.iter() {
             let Ok(ColumnValue { entity_id, value }) = res else {
                 warn!("error parsing column value");
                 continue;
             };
+
+            let e = if let Some(entity) = entity_map.0.get(&entity_id) {
+                let Some(e) = commands.get_entity(*entity) else {
+                    return;
+                };
+                e.id()
+            } else {
+                let e = commands.spawn((
+                    EntityMetadata {
+                        name: format!("{:?}", entity_id),
+                        color: Color::WHITE.into(),
+                    },
+                    entity_id,
+                    ComponentValueMap(HashMap::default()),
+                ));
+                entity_map.0.insert(entity_id, e.id());
+                e.id()
+            };
+
+            if let Ok(mut value_map) = value_map.get_mut(e) {
+                value_map.0.insert(component_id, value.clone().into_owned());
+            } else {
+                warn!("no component value map");
+            }
+
+            let Some(adapter) = component_map.0.get(&component_id) else {
+                warn!(?component_id, "unknown insert fn");
+                continue;
+            };
+
             adapter.insert(commands, entity_map, entity_id, value);
         }
     }
@@ -112,15 +141,10 @@ where
             };
             e
         } else {
-            let e = commands.spawn(EntityMetadata {
-                name: format!("{:?}", entity_id),
-                color: Color::WHITE.into(),
-            });
-            entity_map.0.insert(entity_id, e.id());
-            e
+            return;
         };
         if let Some(c) = C::from_component_value(value) {
-            e.insert((c, Received));
+            e.insert((c, entity_id, Received));
         }
     }
 }
@@ -152,50 +176,6 @@ impl<C: Resource + Component + std::fmt::Debug> ComponentAdapter for StaticResou
         if let Some(r) = C::from_component_value(value) {
             commands.insert_resource(r)
         }
-    }
-}
-
-struct DynamicComponentAdapter {
-    component_id: bevy::ecs::component::ComponentId,
-}
-
-impl ComponentAdapter for DynamicComponentAdapter {
-    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue> {
-        unsafe {
-            Some(
-                world
-                    .get_by_id(entity, self.component_id)?
-                    .deref::<ComponentValue>()
-                    .to_owned(),
-            )
-        }
-    }
-
-    fn insert(
-        &self,
-        commands: &mut Commands,
-        entity_map: &mut EntityMap,
-        entity_id: EntityId,
-        value: ComponentValue,
-    ) {
-        let e = if let Some(entity) = entity_map.0.get(&entity_id) {
-            let Some(e) = commands.get_entity(*entity) else {
-                return;
-            };
-            e
-        } else {
-            let e = commands.spawn_empty();
-            entity_map.0.insert(entity_id, e.id());
-            e
-        };
-        let id = e.id();
-        commands.add(
-            InsertValueById {
-                component_id: self.component_id,
-                value: value.into_owned(),
-            }
-            .with_entity(id),
-        )
     }
 }
 
@@ -330,16 +310,17 @@ fn recv_system(
     mut max_tick_res: ResMut<MaxTick>,
     mut tick_res: ResMut<Tick>,
     mut sim_peer: ResMut<SimPeer>,
+    mut value_map: Query<&mut ComponentValueMap>,
 ) {
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
         match msg {
             Msg::Control(ControlMsg::StartSim {
-                metadata_store: _,
+                metadata_store,
                 time_step: _,
             }) => {
                 tracing::debug!("received startsim, sending subscribe messages");
-                for id in DEFAULT_SUB_FILTERS.iter() {
+                for id in metadata_store.component_index.keys() {
                     let packet = Packet {
                         stream_id: StreamId::CONTROL,
                         payload: Payload::ControlMsg::<Bytes>(ControlMsg::sub_component_id(*id)),
@@ -388,7 +369,12 @@ fn recv_system(
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
-                col.load_into_bevy(entity_map.as_mut(), component_map.as_ref(), &mut commands);
+                col.load_into_bevy(
+                    entity_map.as_mut(),
+                    component_map.as_ref(),
+                    &mut commands,
+                    &mut value_map,
+                );
             }
         }
     }
