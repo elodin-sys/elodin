@@ -84,6 +84,7 @@ impl Plugin for EditorPlugin {
         })
         .init_resource::<ui::Paused>()
         .init_resource::<ui::ShowStats>()
+        .init_resource::<ui::SelectedEntity>()
         .add_plugins(
             DefaultPickingPlugins
                 .build()

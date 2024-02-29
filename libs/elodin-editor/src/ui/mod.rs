@@ -8,14 +8,14 @@ use bevy_egui::{
     EguiContexts,
 };
 use conduit::{
-    bevy::{MaxTick, Tick},
-    well_known::EntityMetadata,
-    ControlMsg,
+    bevy::{ComponentValueMap, MaxTick, Received, Tick},
+    well_known::{EntityMetadata, WorldPos},
+    ControlMsg, EntityId,
 };
 
 use crate::MainCamera;
 
-use self::widgets::timeline::{timeline_area, TimelineIcons};
+use self::widgets::{list, timeline};
 
 mod colors;
 pub mod images;
@@ -27,6 +27,9 @@ pub struct Paused(pub bool);
 
 #[derive(Resource, Default)]
 pub struct ShowStats(pub bool);
+
+#[derive(Resource, Default)]
+pub struct SelectedEntity(pub Option<EntityId>);
 
 pub fn shortcuts(
     mut show_stats: ResMut<ShowStats>,
@@ -48,20 +51,23 @@ pub fn render(
     mut contexts: EguiContexts,
     mut paused: ResMut<Paused>,
     mut tick: ResMut<Tick>,
+    selected_entity: ResMut<SelectedEntity>,
     max_tick: Res<MaxTick>,
     show_stats: Res<ShowStats>,
     diagnostics: Res<DiagnosticsStore>,
-    entities: Query<&EntityMetadata>,
+    _meta_entities: Query<(&EntityId, &EntityMetadata)>,
+    entity_components: Query<(Entity, &EntityId, &WorldPos, &ComponentValueMap), With<Received>>,
     window: Query<&Window>,
     images: Local<images::Images>,
 ) {
     let window = window.single();
     let width = window.resolution.width();
     let height = window.resolution.height();
+    let selected = selected_entity.0;
 
     theme::set_theme(contexts.ctx_mut());
 
-    let timeline_icons = TimelineIcons {
+    let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
         jump_to_end: contexts.add_image(images.icon_jump_to_end.clone_weak()),
         frame_forward: contexts.add_image(images.icon_frame_forward.clone_weak()),
@@ -70,24 +76,6 @@ pub fn render(
         pause: contexts.add_image(images.icon_pause.clone_weak()),
         handle: contexts.add_image(images.icon_scrub.clone_weak()),
     };
-
-    if show_stats.0 {
-        egui::Window::new("stats")
-            .title_bar(false)
-            .resizable(false)
-            .frame(egui::Frame::default())
-            .fixed_pos(egui::pos2(32.0, 32.0))
-            .show(contexts.ctx_mut(), |ui| {
-                let fps_str = diagnostics
-                    .get(FrameTimeDiagnosticsPlugin::FPS)
-                    .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
-                    .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
-
-                ui.add(Label::new(
-                    RichText::new(format!("FPS: {fps_str}")).color(Color32::WHITE),
-                ));
-            });
-    }
 
     egui::TopBottomPanel::top("titlebar")
         .frame(egui::Frame {
@@ -99,8 +87,13 @@ pub fn render(
         .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
 
     // NOTE(temp fix): Hide panels until simulation is loaded
-    if !entities.is_empty() {
-        if width > height {
+    if !entity_components.is_empty() {
+        let entities =
+            entity_components
+                .iter()
+                .collect::<Vec<(Entity, &EntityId, &WorldPos, &ComponentValueMap)>>();
+
+        if width * 0.75 > height {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
                 .resizable(true)
                 .frame(egui::Frame {
@@ -109,24 +102,68 @@ pub fn render(
                     inner_margin: Margin::same(4.0),
                     ..Default::default()
                 })
-                .default_width(200.0)
+                .min_width(width * 0.15)
+                .default_width(width * 0.20)
+                .max_width(width * 0.25)
                 .show(contexts.ctx_mut(), |ui| {
-                    entity_list(ui, entities);
-                    // ui.allocate_space(ui.available_size());
+                    list::entity_list(ui, entities, selected_entity);
                 });
+
+            if let Some(selected) = selected {
+                egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
+                    .resizable(true)
+                    .frame(egui::Frame {
+                        fill: colors::STONE_950,
+                        stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                        inner_margin: Margin::same(4.0),
+                        ..Default::default()
+                    })
+                    .min_width(width * 0.15)
+                    .default_width(width * 0.20)
+                    .max_width(width * 0.25)
+                    .show(contexts.ctx_mut(), |ui| {
+                        ui.label(format!("Untitled Entity - {}", selected.0));
+
+                        ui.allocate_space(ui.available_size());
+                    });
+            }
         } else {
-            egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "outline_bottom")
+            egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
                 .resizable(true)
-                .frame(egui::Frame {
-                    fill: colors::STONE_950,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                    inner_margin: Margin::same(4.0),
-                    ..Default::default()
-                })
+                .frame(egui::Frame::default())
                 .default_height(200.0)
                 .show(contexts.ctx_mut(), |ui| {
-                    entity_list(ui, entities);
-                    ui.allocate_space(ui.available_size());
+                    let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
+                        .resizable(true)
+                        .frame(egui::Frame {
+                            fill: colors::STONE_950,
+                            stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                            inner_margin: Margin::same(4.0),
+                            ..Default::default()
+                        })
+                        .min_width(width * 0.25)
+                        .default_width(width * 0.5)
+                        .max_width(width * 0.75)
+                        .show_inside(ui, |ui| {
+                            list::entity_list(ui, entities, selected_entity);
+                            ui.allocate_space(ui.available_size());
+                        });
+
+                    if let Some(selected) = selected {
+                        egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
+                            .resizable(false)
+                            .frame(egui::Frame {
+                                fill: colors::STONE_950,
+                                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                                inner_margin: Margin::same(4.0),
+                                ..Default::default()
+                            })
+                            .exact_width(width - outline.response.rect.width())
+                            .show_inside(ui, |ui| {
+                                ui.label(format!("Untitled Entity - {}", selected.0));
+                                ui.allocate_space(ui.available_size());
+                            });
+                    }
                 });
         }
     }
@@ -139,7 +176,7 @@ pub fn render(
         })
         .resizable(false)
         .show(contexts.ctx_mut(), |ui| {
-            timeline_area(
+            timeline::timeline_area(
                 ui,
                 &mut paused,
                 &max_tick,
@@ -148,44 +185,45 @@ pub fn render(
                 timeline_icons,
             );
         });
-}
 
-fn entity_list(ui: &mut egui::Ui, entities: Query<&EntityMetadata>) -> egui::Response {
-    egui::ScrollArea::both()
-        .show(ui, |ui| {
-            ui.vertical(|ui| {
-                egui::Frame::none()
-                    .inner_margin(Margin::symmetric(16.0, 16.0))
-                    .show(ui, |ui| {
-                        ui.add(
-                            Label::new(RichText::new("ENTITIES").color(Color32::WHITE)).wrap(false),
-                        );
-                    });
+    let viewport_left_top = contexts.ctx_mut().available_rect().left_top();
+    let viewport_margins = egui::vec2(16.0, 16.0);
 
-                ui.separator();
+    if show_stats.0 {
+        egui::Window::new("stats")
+            .title_bar(false)
+            .resizable(false)
+            .frame(egui::Frame::default())
+            .fixed_pos(viewport_left_top + viewport_margins)
+            .show(contexts.ctx_mut(), |ui| {
+                let fps_str = diagnostics
+                    .get(FrameTimeDiagnosticsPlugin::FPS)
+                    .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
+                    .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
 
-                for entity_metadata in entities.iter() {
-                    // TODO: Replace with custom `toggle` widget
-                    egui::Frame::none()
-                        .inner_margin(Margin::symmetric(32.0, 8.0))
-                        .outer_margin(2.0)
-                        .fill(colors::STONE_950)
-                        .show(ui, |ui| {
-                            ui.add(
-                                Label::new(
-                                    RichText::new(entity_metadata.name.clone())
-                                        .color(Color32::WHITE),
-                                )
-                                .wrap(false),
-                            );
-                        });
+                ui.add(Label::new(
+                    RichText::new(format!("FPS: {fps_str}")).color(Color32::WHITE),
+                ));
+
+                for (_, entity_id, world_pos, map) in entity_components.iter() {
+                    if selected.is_some_and(|id| id == *entity_id) {
+                        ui.add(Label::new(
+                            RichText::new(format!(
+                                "SELECTED: ID[{}] POS{:?} ATT{:?}",
+                                entity_id.0, world_pos.pos, world_pos.att
+                            ))
+                            .color(Color32::WHITE),
+                        ));
+                        for (id, value) in map.0.iter() {
+                            ui.add(Label::new(
+                                RichText::new(format!("COMP ID[{}] VAL = {:?}", id.0, value))
+                                    .color(Color32::WHITE),
+                            ));
+                        }
+                    }
                 }
-
-                ui.allocate_space(ui.available_size());
-            })
-        })
-        .inner
-        .response
+            });
+    }
 }
 
 pub fn set_camera_viewport(
