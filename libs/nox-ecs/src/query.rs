@@ -418,14 +418,16 @@ mod tests {
         let mut world = add_e.world();
         world.spawn(Body { x: X::host(-91.0) });
 
-        let id = world.spawn(Body { x: X::host(-55.0) });
-        world.spawn_with_id(E::host(1000.0), id);
+        world
+            .spawn(Body { x: X::host(-55.0) })
+            .insert(E::host(1000.0));
 
         world.spawn(Body { x: X::host(5.0) });
         world.spawn(Body { x: X::host(200.0) });
 
-        let id = world.spawn(Body { x: X::host(100.0) });
-        world.spawn_with_id(E::host(-50000.0), id);
+        world
+            .spawn(Body { x: X::host(100.0) })
+            .insert(E::host(-50000.0));
         world.spawn(Body { x: X::host(400.0) });
 
         let client = nox::Client::cpu().unwrap();

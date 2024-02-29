@@ -419,9 +419,16 @@ impl WorldBuilder {
         Self::default()
     }
 
-    pub fn spawn(&mut self, py: Python<'_>, archetype: PyObject) -> Result<EntityId, Error> {
-        let entity_id = EntityId::rand();
-        self.spawn_with_entity_id(py, archetype, entity_id)
+    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: PyObject) -> Result<Entity, Error> {
+        Python::with_gil(|py| {
+            let entity_id = EntityId::rand();
+            slf.spawn_with_entity_id(py, archetype, entity_id.clone())?;
+            let world = slf.into();
+            Ok(Entity {
+                id: entity_id,
+                world,
+            })
+        })
     }
 
     pub fn spawn_with_entity_id(
@@ -715,6 +722,33 @@ impl EntityId {
     }
 }
 
+#[derive(Clone)]
+#[pyclass]
+pub struct Entity {
+    id: EntityId,
+    world: Py<WorldBuilder>,
+}
+
+#[pymethods]
+impl Entity {
+    pub fn id(&self) -> EntityId {
+        self.id.clone()
+    }
+
+    pub fn insert(&mut self, py: Python<'_>, archetype: PyObject) -> Result<Self, Error> {
+        let mut world = self.world.borrow_mut(py);
+        world.spawn_with_entity_id(py, archetype, self.id())?;
+        Ok(self.clone())
+    }
+
+    pub fn metadata(&mut self, py: Python<'_>, metadata: EntityMetadata) -> Self {
+        let mut world = self.world.borrow_mut(py);
+        let metadata = world.world.insert_asset(metadata.inner);
+        world.world.spawn_with_id(metadata, self.id.inner);
+        self.clone()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
@@ -942,6 +976,51 @@ impl Material {
     }
 }
 
+#[derive(Clone)]
+#[pyclass]
+pub struct Color {
+    inner: conduit::well_known::Color,
+}
+
+#[pymethods]
+impl Color {
+    #[new]
+    fn new(r: f32, g: f32, b: f32) -> Self {
+        Color {
+            inner: conduit::well_known::Color::rgb(r, g, b),
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct EntityMetadata {
+    inner: conduit::well_known::EntityMetadata,
+}
+
+#[pymethods]
+impl EntityMetadata {
+    #[new]
+    fn new(name: String, color: Option<Color>) -> Self {
+        let color = color.unwrap_or(Color::new(1.0, 1.0, 1.0));
+        Self {
+            inner: conduit::well_known::EntityMetadata {
+                name,
+                color: color.inner,
+            },
+        }
+    }
+
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
+    }
+}
+
 #[pyfunction]
 #[cfg(feature = "embed-cli")]
 // TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
@@ -970,6 +1049,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
     m.add_class::<Pbr>()?;
+    m.add_class::<EntityMetadata>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     #[cfg(feature = "embed-cli")]
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;

@@ -3,6 +3,7 @@ use crate::client::Msg;
 use crate::client::MsgPair;
 use crate::query::{MetadataStore, QueryId};
 use crate::ser_de::ColumnValue;
+use crate::well_known::EntityMetadata;
 use crate::well_known::DEFAULT_SUB_FILTERS;
 use crate::Asset;
 use crate::AssetId;
@@ -111,7 +112,10 @@ where
             };
             e
         } else {
-            let e = commands.spawn_empty();
+            let e = commands.spawn(EntityMetadata {
+                name: format!("{:?}", entity_id),
+                color: Color::WHITE.into(),
+            });
             entity_map.0.insert(entity_id, e.id());
             e
         };
