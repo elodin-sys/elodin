@@ -96,6 +96,12 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
               path={~p"/sandbox/new/three-body"}
               phx_click={show_template_new("three-body")}
             />
+            <.sandbox_card
+              name="Cube Sat"
+              img="/images/cube-sat-bg.svg"
+              path={~p"/sandbox/new/cube-sat"}
+              phx_click={show_template_new("cube-sat")}
+            />
           </div>
         </div>
         <div class="flex flex-wrap flex-col items-start self-stretch w-full flex-[0_0_auto] rounded-elo-xs ">
