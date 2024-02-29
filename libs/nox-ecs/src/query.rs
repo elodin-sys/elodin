@@ -239,6 +239,32 @@ impl<G: ComponentGroup> Query<G> {
             phantom_data: PhantomData,
         }
     }
+
+    pub fn filter(&self, ids: &[EntityId]) -> Query<G> {
+        let indexes: Vec<u32> = ids
+            .iter()
+            .flat_map(|id| self.entity_map.get(id).copied())
+            .map(|id| id as u32)
+            .collect();
+        let exprs = self
+            .exprs
+            .iter()
+            .map(|expr| filter_index(&indexes, expr))
+            .collect();
+        let entity_map = self
+            .entity_map
+            .iter()
+            .filter(|(id, _)| ids.contains(id))
+            .enumerate()
+            .map(|(index, (id, _))| (*id, index))
+            .collect();
+        Query {
+            exprs,
+            len: indexes.len(),
+            entity_map,
+            phantom_data: PhantomData,
+        }
+    }
 }
 
 impl<A: Component> ComponentArray<A> {

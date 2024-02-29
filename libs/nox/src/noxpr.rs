@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -161,6 +163,23 @@ impl BinaryOp {
         let rhs_shape = self.rhs.shape()?;
         broadcast_dims(&lhs_shape, &rhs_shape)
     }
+
+    fn ty(&self) -> Option<NoxprTy> {
+        let NoxprTy::ArrayTy(lhs_ty) = self.lhs.ty()? else {
+            return None;
+        };
+        let NoxprTy::ArrayTy(rhs_ty) = self.rhs.ty()? else {
+            return None;
+        };
+        if lhs_ty.element_type != rhs_ty.element_type {
+            return None;
+        }
+        let shape = broadcast_dims(&lhs_ty.shape, &rhs_ty.shape);
+        Some(NoxprTy::ArrayTy(ArrayTy {
+            element_type: lhs_ty.element_type,
+            shape: shape?,
+        }))
+    }
 }
 
 pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 4]>> {
@@ -229,6 +248,58 @@ impl DotGeneral {
             .chain(rhs_tensored_shape)
             .collect::<SmallVec<[i64; 4]>>();
         Some(result)
+    }
+
+    fn ty(&self) -> Option<NoxprTy> {
+        let NoxprTy::ArrayTy(lhs) = self.lhs.ty()? else {
+            return None;
+        };
+        let NoxprTy::ArrayTy(rhs) = self.rhs.ty()? else {
+            return None;
+        };
+        let DotDimensionNums {
+            lhs_contracting_dimensions: lhs_contracting,
+            rhs_contracting_dimensions: rhs_contracting,
+            lhs_batch_dimensions: lhs_batch,
+            rhs_batch_dimensions: rhs_batch,
+        } = self.dimensions.clone();
+        let batch_shape = lhs_batch
+            .iter()
+            .map(|i| lhs.shape[*i as usize])
+            .collect::<SmallVec<[i64; 4]>>();
+        let lhs_contract_or_batch = lhs_contracting
+            .iter()
+            .chain(lhs_batch.iter())
+            .cloned()
+            .collect::<SmallVec<[i64; 4]>>();
+        let lhs_tensored_shape = lhs
+            .shape
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !lhs_contract_or_batch.contains(&(*i as i64)))
+            .map(|(_, v)| *v)
+            .collect::<SmallVec<[i64; 4]>>();
+        let rhs_contract_or_batch = rhs_contracting
+            .iter()
+            .chain(rhs_batch.iter())
+            .cloned()
+            .collect::<SmallVec<[i64; 4]>>();
+        let rhs_tensored_shape = rhs
+            .shape
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !rhs_contract_or_batch.contains(&(*i as i64)))
+            .map(|(_, v)| *v)
+            .collect::<SmallVec<[i64; 4]>>();
+        let result = batch_shape
+            .into_iter()
+            .chain(lhs_tensored_shape)
+            .chain(rhs_tensored_shape)
+            .collect::<SmallVec<[i64; 4]>>();
+        Some(NoxprTy::ArrayTy(ArrayTy {
+            element_type: lhs.element_type,
+            shape: result,
+        }))
     }
 }
 
@@ -505,6 +576,220 @@ impl Noxpr {
         }))
     }
 
+    pub fn ty(&self) -> Option<NoxprTy> {
+        match self.deref() {
+            NoxprNode::Constant(c) => Some(NoxprTy::ArrayTy(ArrayTy {
+                element_type: c.ty.element_type,
+                shape: c.ty.shape.clone(),
+            })),
+            NoxprNode::Param(p) => Some(p.ty.clone()),
+            NoxprNode::Add(ref b)
+            | NoxprNode::Sub(ref b)
+            | NoxprNode::Div(ref b)
+            | NoxprNode::Mul(ref b)
+            | NoxprNode::And(ref b)
+            | NoxprNode::Or(ref b)
+            | NoxprNode::GreaterOrEqual(ref b)
+            | NoxprNode::LessOrEqual(ref b)
+            | NoxprNode::Less(ref b) => b.ty(),
+
+            NoxprNode::Dot(b) => {
+                let NoxprTy::ArrayTy(lhs_ty) = b.lhs.ty()? else {
+                    return None;
+                };
+                let NoxprTy::ArrayTy(rhs_ty) = b.rhs.ty()? else {
+                    return None;
+                };
+                if lhs_ty.element_type != rhs_ty.element_type {
+                    return None;
+                }
+                let shape = match (lhs_ty.shape.len(), rhs_ty.shape.len()) {
+                    (1, 1) => SmallVec::new(),
+                    (2, 1) => smallvec![lhs_ty.shape[0]],
+                    (2, 2) => smallvec![lhs_ty.shape[0], rhs_ty.shape[1]],
+                    _ => return None,
+                };
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: lhs_ty.element_type,
+                    shape,
+                }))
+            }
+            NoxprNode::DotGeneral(s) => s.ty(),
+            NoxprNode::Sqrt(expr) | NoxprNode::Neg(expr) => expr.ty(),
+
+            NoxprNode::Concat(concat) => {
+                let tys = concat
+                    .nodes
+                    .iter()
+                    .map(Noxpr::ty)
+                    .map(|s| match s {
+                        Some(NoxprTy::ArrayTy(t)) => Some(t),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let ty = tys.first()?;
+                let mut shape = ty.shape.clone();
+                let rank = shape.len();
+                let dim = concat.dimension;
+                // TODO(sphw): ensure that all shapes are the same, except for a particular dim
+                if tys.iter().any(|ty| ty.shape.len() != rank) {
+                    return None;
+                }
+                if concat.dimension >= rank {
+                    return None;
+                }
+                let new_len = tys
+                    .iter()
+                    .map(|ty| ty.shape[concat.dimension])
+                    .fold(0, |xs, x| {
+                        if x == -1 || xs == -1 {
+                            return -1;
+                        }
+                        xs + x
+                    });
+                shape[dim] = new_len;
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ty.element_type,
+                    shape,
+                }))
+            }
+            NoxprNode::Slice(slice) => {
+                if slice.start_indices.len() != slice.stop_indices.len() {
+                    return None;
+                }
+                let shape = slice
+                    .start_indices
+                    .iter()
+                    .zip(slice.stop_indices.iter())
+                    .zip(slice.strides.iter())
+                    .map(|((start, stop), stride)| {
+                        stop.checked_sub(*start)
+                            .and_then(|l| l.checked_div(*stride))
+                    })
+                    .collect::<Option<SmallVec<_>>>()?;
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: slice.expr.element_type()?,
+                    shape,
+                }))
+            }
+            NoxprNode::DynamicSlice(dynamic_slice) => {
+                let ty = dynamic_slice.expr.ty()?;
+                let NoxprTy::ArrayTy(ty) = ty else {
+                    return None;
+                };
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ty.element_type,
+                    shape: dynamic_slice.size_indices.clone(),
+                }))
+            }
+            NoxprNode::Reshape(reshape) => {
+                let NoxprTy::ArrayTy(ty) = reshape.expr.ty()? else {
+                    return None;
+                };
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ty.element_type,
+                    shape: reshape.new_sizes.clone(),
+                }))
+            }
+            NoxprNode::Tuple(t) => {
+                let tys = t.iter().map(Noxpr::ty).collect::<Option<Vec<_>>>()?;
+                Some(NoxprTy::Tuple(tys))
+            }
+            NoxprNode::Log(l) => l.ty(),
+            NoxprNode::Broadcast(b) => {
+                let NoxprTy::ArrayTy(in_ty) = b.expr.ty()? else {
+                    return None;
+                };
+                let mut out_shape = b.sizes.clone();
+                out_shape.extend_from_slice(&in_ty.shape);
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: in_ty.element_type,
+                    shape: out_shape,
+                }))
+            }
+            NoxprNode::BroadcastInDim(b) => {
+                let NoxprTy::ArrayTy(in_ty) = b.expr.ty()? else {
+                    return None;
+                };
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: in_ty.element_type,
+                    shape: b.sizes.clone(),
+                }))
+            }
+            NoxprNode::Transpose(t) => {
+                let NoxprTy::ArrayTy(ty) = t.expr.ty()? else {
+                    return None;
+                };
+                let new_shape = t
+                    .permutation
+                    .iter()
+                    .map(|dim| ty.shape[*dim as usize])
+                    .collect();
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ty.element_type,
+                    shape: new_shape,
+                }))
+            }
+            NoxprNode::Gather(gather) => {
+                let NoxprTy::ArrayTy(ty) = gather.expr.ty()? else {
+                    return None;
+                };
+                let NoxprTy::ArrayTy(indices_ty) = gather.indices.ty()? else {
+                    return None;
+                };
+                let indices_shape = indices_ty.shape;
+                let output_rank = gather.offset_dims.len() + indices_shape.len() - 1;
+                let index_vector_dim = indices_shape.len() - 1;
+                let mut expanded_indices_shape = indices_shape.clone();
+                expanded_indices_shape.remove(index_vector_dim);
+                let mut expanded_indices_shape_iter = expanded_indices_shape.iter().copied();
+                let mut adjusted_slice_sizes = gather
+                    .slice_sizes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !gather.collapsed_slice_dims.contains(&(*i as i64)))
+                    .map(|(_, x)| *x);
+                let shape = (0..output_rank)
+                    .filter_map(|i| {
+                        if gather.offset_dims.contains(&(i as i64)) {
+                            adjusted_slice_sizes.next()
+                        } else {
+                            expanded_indices_shape_iter.next()
+                        }
+                    })
+                    .collect();
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ty.element_type,
+                    shape,
+                }))
+            }
+            NoxprNode::Iota(i) => Some(NoxprTy::ArrayTy(i.shape.clone())),
+            NoxprNode::DynamicUpdateSlice(d) => d.expr.ty(),
+            NoxprNode::GetTupleElement(g) => {
+                let NoxprTy::Tuple(ty) = g.expr.ty()? else {
+                    return None;
+                };
+                ty.get(g.index).cloned()
+            }
+            NoxprNode::Scan(s) => s.initial_state.ty(),
+            #[cfg(feature = "jax")]
+            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+                let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
+                let shape = SmallVec::from_vec(shape);
+                let element_type = o
+                    .getattr(py, "dtype.name")
+                    .ok()?
+                    .extract::<String>(py)
+                    .ok()?;
+                let element_type = ElementType::from_str(&element_type).ok()?;
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    shape,
+                    element_type,
+                }))
+            }),
+        }
+    }
+
     pub fn element_type(&self) -> Option<ElementType> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(c.ty.element_type),
@@ -551,7 +836,14 @@ impl Noxpr {
             },
             NoxprNode::Scan(s) => s.initial_state.element_type(),
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(_) => todo!(),
+            NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+                let element_type = o
+                    .getattr(py, "dtype.name")
+                    .ok()?
+                    .extract::<String>(py)
+                    .ok()?;
+                ElementType::from_str(&element_type).ok()
+            }),
         }
     }
 
@@ -637,7 +929,7 @@ impl Noxpr {
             }
             NoxprNode::BroadcastInDim(b) => Some(b.sizes.clone()),
             NoxprNode::Transpose(t) => {
-                let shape = self.shape()?;
+                let shape = t.expr.shape()?;
                 let new_shape = t
                     .permutation
                     .iter()
@@ -767,6 +1059,14 @@ impl Noxpr {
             out_shape.push(1);
         }
         Some(self.broadcast_in_dim(out_shape, broadcast_dims))
+    }
+}
+
+impl Display for Noxpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut tracer = PrettyPrintTracer::default();
+        tracer.visit(self, f)?;
+        Ok(())
     }
 }
 
@@ -1003,23 +1303,8 @@ impl XlaTracer {
                 if s.inputs.is_empty() {
                     return Err(Error::ScanMissingArg);
                 }
-                let xs_arg = if s.inputs.len() > 1 {
-                    Noxpr::tuple(s.inputs.clone())
-                } else {
-                    s.inputs[0].clone()
-                };
+
                 fn index(noxpr: &Noxpr, index: Noxpr) -> Option<Noxpr> {
-                    if let NoxprNode::Tuple(elems) = noxpr.deref() {
-                        let elems = elems
-                            .iter()
-                            .map(|e| index_single(e, index.clone()))
-                            .collect::<Option<Vec<_>>>()?;
-                        Some(Noxpr::tuple(elems))
-                    } else {
-                        index_single(noxpr, index)
-                    }
-                }
-                fn index_single(noxpr: &Noxpr, index: Noxpr) -> Option<Noxpr> {
                     let mut shape = noxpr.shape()?;
                     *shape.first_mut()? = 1;
                     let starts = std::iter::once(index)
@@ -1029,27 +1314,30 @@ impl XlaTracer {
                     shape.remove(0);
                     Some(out.reshape(shape))
                 }
-                let input_ty = if s.inputs.len() > 1 {
-                    NoxprTy::Tuple(input_shape)
-                } else {
-                    input_shape.first().unwrap().clone()
-                };
-                let init_tuple = vec![
+                let mut init_tuple = input_shape.clone();
+                init_tuple.insert(
+                    0,
                     NoxprTy::ArrayTy(ArrayTy {
                         element_type: ElementType::S64,
                         shape: smallvec![],
                     }),
-                    input_ty,
-                ];
+                );
                 let scan_fn = {
                     let mut scan_fn = s.scan_fn.collapse_params(init_tuple)?;
-                    let inner_xs_arg = scan_fn.args[0].get_tuple_element(1);
                     let next = scan_fn.args[0].get_tuple_element(0).add(1i64.constant());
-                    let Some(next_x) = index(&inner_xs_arg, next.clone()) else {
-                        panic!()
-                    };
-                    scan_fn.inner =
-                        Noxpr::tuple(vec![next.clone(), inner_xs_arg, next_x, scan_fn.inner]);
+                    let mut tuple = vec![next.clone()];
+                    for i in 0..s.inputs.len() {
+                        tuple.push(scan_fn.args[0].get_tuple_element(1 + i));
+                    }
+                    tuple.push(scan_fn.inner);
+                    for i in 0..s.inputs.len() {
+                        let inner_xs_arg = scan_fn.args[0].get_tuple_element(1 + i);
+                        let Some(next_x) = index(&inner_xs_arg, next.clone()) else {
+                            panic!()
+                        };
+                        tuple.push(next_x);
+                    }
+                    scan_fn.inner = Noxpr::tuple(tuple);
                     scan_fn
                 };
                 let cond = {
@@ -1066,15 +1354,19 @@ impl XlaTracer {
                     .build()?
                 };
                 let scan_fn = scan_fn.build("scan_fn")?.build()?;
-                let initial_state = Noxpr::tuple(vec![
-                    0i64.constant(),
-                    xs_arg.clone(),
-                    s.initial_state.clone(),
-                    index(&xs_arg, 0i64.constant()).unwrap(),
-                ]);
+                let mut initial_state = vec![0i64.constant()];
+                for i in s.inputs.iter() {
+                    initial_state.push(i.clone())
+                }
+                initial_state.push(s.initial_state.clone());
+                for i in s.inputs.iter() {
+                    initial_state.push(index(i, 0i64.constant()).unwrap())
+                }
+                let last_elem = s.inputs.len() + 1;
+                let initial_state = Noxpr::tuple(initial_state);
                 let initial_state = self.visit(&initial_state)?;
                 let out = cond.stmt_while(&scan_fn, &initial_state);
-                out.get_tuple_element(3)
+                out.get_tuple_element(last_elem as i64)
             }
         };
         self.cache.insert(id, op.clone());
@@ -1109,10 +1401,7 @@ impl NoxprFn {
     pub fn collapse_params(&self, mut init_tuple: Vec<NoxprTy>) -> Result<Self, Error> {
         let init_offset = init_tuple.len();
         for a in self.args.iter() {
-            let NoxprNode::Param(p) = a.deref() else {
-                return Err(Error::UnbatchableArgument);
-            };
-            init_tuple.push(p.ty.clone());
+            init_tuple.push(a.ty().unwrap())
         }
         let new_param = Noxpr::parameter(
             0,
@@ -1293,14 +1582,15 @@ impl Noxpr {
             .first()
             .ok_or(Error::VmapArgsEmpty)?
             .shape()
-            .ok_or(Error::UnbatchableArgument)?;
+            .ok_or(Error::UnbatchableArgument)
+            .unwrap();
         let mut tracer = BatchTracer::new(BatchAxis::Mapped {
             index: in_axis[0],
             size: shape[in_axis[0]] as usize,
         });
         for ((arg, axis), arg_expr) in args.iter().zip(in_axis).zip(func.args) {
             let arg_id = arg_expr.id();
-            let shape = arg.shape().ok_or(Error::UnbatchableArgument)?;
+            let shape = arg.shape().ok_or(Error::UnbatchableArgument).unwrap();
             let batch_axis = BatchAxis::Mapped {
                 index: *axis,
                 size: shape[*axis] as usize,
@@ -1313,10 +1603,11 @@ impl Noxpr {
                 },
             );
         }
-        let expr = tracer.visit(&func.inner)?;
+        let expr = tracer.visit(&func.inner).unwrap();
         let expr = expr
             .move_batch_axis(tracer.out_axis)
-            .ok_or(Error::UnbatchableArgument)?;
+            .ok_or(Error::UnbatchableArgument)
+            .unwrap();
         Ok(expr.inner)
     }
 }
@@ -1402,7 +1693,10 @@ impl BatchedExpr {
                 let inner = self.inner.transpose(perm);
                 Some(Self {
                     inner,
-                    batch_axis: dest,
+                    batch_axis: BatchAxis::Mapped {
+                        index: dest_axis,
+                        size: shape[index] as usize,
+                    },
                 })
             }
         }
@@ -1766,9 +2060,19 @@ impl BatchTracer {
                 let mut inputs: Vec<_> = s
                     .inputs
                     .iter()
-                    .map(|e| self.visit(e))
+                    .map(|e| {
+                        self.visit(e).and_then(|b| {
+                            let out = b
+                                .move_batch_axis(BatchAxis::Mapped { index: 1, size: 1 })
+                                .ok_or(Error::UnbatchableArgument)?;
+                            Ok(out)
+                        })
+                    })
                     .collect::<Result<_, Error>>()?;
-                let initial_state = self.visit(&s.initial_state)?;
+                let initial_state = self
+                    .visit(&s.initial_state)?
+                    .move_batch_axis(self.out_axis.clone())
+                    .unwrap();
                 let batch_axis = inputs
                     .iter()
                     .find(|i| i.batch_axis != BatchAxis::NotMapped)
@@ -1816,7 +2120,7 @@ impl BatchTracer {
                                 initial_state.inner,
                                 scan_fn,
                             ),
-                            batch_axis,
+                            batch_axis: self.out_axis.clone(),
                         }
                     }
                 }
@@ -2561,5 +2865,58 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, vector![10.0, 14.0])
+    }
+
+    #[test]
+    fn test_scan_order() {
+        let client = Client::cpu().unwrap();
+        fn acc_only(mat: Matrix<f32, 3, 2>) -> Vector<f32, 2> {
+            mat.scan(Vector::<f32, 2>::zeros(), |acc, _| acc).unwrap()
+        }
+        let comp = acc_only.build().unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec
+            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![0.0, 0.0])
+    }
+
+    #[test]
+    fn test_vmap_add_scan() {
+        let client = Client::cpu().unwrap();
+        fn add_one(mat: Matrix<f32, 3, 2>) -> Vector<f32, 3> {
+            use crate::ScalarExt;
+            mat.vmap(|vec: Vector<f32, 2>| vec.scan(0f32.constant(), |acc, x| acc + x).unwrap())
+                .unwrap()
+                .collapse()
+            // mat.scan(Vector::<f32, 2>::zeros(), |acc, x| acc + x)
+            //     .unwrap()
+        }
+        let comp = add_one.build().unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec
+            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![3.0, 8.0, 13.0])
     }
 }
