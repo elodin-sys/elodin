@@ -8,7 +8,8 @@ use bevy_egui::{
     EguiContexts,
 };
 use conduit::{
-    bevy::{EntityMap, MaxTick, Tick},
+    bevy::{MaxTick, Tick},
+    well_known::EntityMetadata,
     ControlMsg,
 };
 
@@ -50,7 +51,7 @@ pub fn render(
     max_tick: Res<MaxTick>,
     show_stats: Res<ShowStats>,
     diagnostics: Res<DiagnosticsStore>,
-    entities: Res<EntityMap>,
+    entities: Query<&EntityMetadata>,
     window: Query<&Window>,
     images: Local<images::Images>,
 ) {
@@ -98,7 +99,7 @@ pub fn render(
         .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
 
     // NOTE(temp fix): Hide panels until simulation is loaded
-    if entities.len() > 0 {
+    if !entities.is_empty() {
         if width > height {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
                 .resizable(true)
@@ -149,7 +150,7 @@ pub fn render(
         });
 }
 
-fn entity_list(ui: &mut egui::Ui, entities: Res<EntityMap>) -> egui::Response {
+fn entity_list(ui: &mut egui::Ui, entities: Query<&EntityMetadata>) -> egui::Response {
     egui::ScrollArea::both()
         .show(ui, |ui| {
             ui.vertical(|ui| {
@@ -163,7 +164,7 @@ fn entity_list(ui: &mut egui::Ui, entities: Res<EntityMap>) -> egui::Response {
 
                 ui.separator();
 
-                for entity_id in entities.0.values() {
+                for entity_metadata in entities.iter() {
                     // TODO: Replace with custom `toggle` widget
                     egui::Frame::none()
                         .inner_margin(Margin::symmetric(32.0, 8.0))
@@ -172,7 +173,8 @@ fn entity_list(ui: &mut egui::Ui, entities: Res<EntityMap>) -> egui::Response {
                         .show(ui, |ui| {
                             ui.add(
                                 Label::new(
-                                    RichText::new(format!("{entity_id:?}")).color(Color32::WHITE),
+                                    RichText::new(entity_metadata.name.clone())
+                                        .color(Color32::WHITE),
                                 )
                                 .wrap(false),
                             );
