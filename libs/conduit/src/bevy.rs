@@ -11,9 +11,7 @@ use crate::Metadata;
 use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
-use bevy::ecs::system::EntityCommand;
 use bevy::prelude::*;
-use bevy::ptr::OwningPtr;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -175,21 +173,6 @@ impl<C: Resource + Component + std::fmt::Debug> ComponentAdapter for StaticResou
     ) {
         if let Some(r) = C::from_component_value(value) {
             commands.insert_resource(r)
-        }
-    }
-}
-
-struct InsertValueById {
-    component_id: bevy::ecs::component::ComponentId,
-    value: ComponentValue<'static>,
-}
-
-impl EntityCommand for InsertValueById {
-    fn apply(self, id: Entity, world: &mut World) {
-        if let Some(mut e) = world.get_or_spawn(id) {
-            OwningPtr::make(self.value, |ptr| unsafe {
-                e.insert_by_id(self.component_id, ptr);
-            })
         }
     }
 }
