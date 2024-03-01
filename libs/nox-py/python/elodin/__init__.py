@@ -59,6 +59,7 @@ class ComponentData:
     type: ComponentType
     asset: bool
     from_expr: Callable[[Any], Any]
+    name: str
 
 O = TypeVar('O')
 T = TypeVar('T', bound='Union[jax.Array, FromArray]')
@@ -175,18 +176,18 @@ class Component:
             else:
                 return ty.from_array
         if len(params) == 4:
-            (t, id, type, asset) = params
-            id = parse_id(id)
-            return Annotated.__class_getitem__((t, ComponentData(id, type, asset, from_expr(t)))) # type: ignore
+            (t, raw_id, type, asset) = params
+            id = parse_id(raw_id)
+            return Annotated.__class_getitem__((t, ComponentData(id, type, asset, from_expr(t), f"{raw_id}"))) # type: ignore
         if len(params) == 3:
-            (t, id, type) = params
-            id = parse_id(id)
-            return Annotated.__class_getitem__((t, ComponentData(id, type, False, from_expr(t)))) # type: ignore
+            (t, raw_id, type) = params
+            id = parse_id(raw_id)
+            return Annotated.__class_getitem__((t, ComponentData(id, type, False, from_expr(t), f"{raw_id}"))) # type: ignore
         elif len(params) == 2:
-            (t, id) = params
-            id = parse_id(id)
+            (t, raw_id) = params
+            id = parse_id(raw_id)
             type = t.__metadata__[0].type
-            return Annotated.__class_getitem__((t, ComponentData(id, type, from_expr(t)))) # type: ignore
+            return Annotated.__class_getitem__((t, ComponentData(id, type, False, from_expr(t), f"{raw_id}"))) # type: ignore
         else:
             raise Exception("Component must be called an ID and type")
 

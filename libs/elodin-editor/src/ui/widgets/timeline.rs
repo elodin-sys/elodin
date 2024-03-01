@@ -402,11 +402,12 @@ pub fn timeline_area(
     paused: &mut Paused,
     max_tick: &MaxTick,
     tick: &mut ResMut<Tick>,
+    frames_per_second: f64,
     event: &mut EventWriter<ControlMsg>,
     icons: TimelineIcons,
 ) -> egui::Response {
     let handle_icon = icons.handle;
-    let frames_per_second = 60.0;
+    let available_width = ui.available_width();
 
     ui.vertical(|ui| {
         let mut tick_changed = false;
@@ -418,99 +419,82 @@ pub fn timeline_area(
                     let btn_default_size = ui.spacing().interact_size.y;
 
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.columns(3, |columns| {
-                        columns[0].horizontal_centered(|col_ui| {
-                            // let btn_size = col_ui.spacing().interact_size * btn_scale;
-                            // let btn_reset = col_ui
-                            //     .add(
-                            //         egui::Button::new(
-                            //             egui::RichText::new("RESET").color(colors::WHITE),
-                            //         )
-                            //         .fill(colors::NEUTRAL_900)
-                            //         .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
-                            //         .rounding(egui::Rounding::same(1.0))
-                            //         .min_size(btn_size),
-                            //     )
-                            //     .on_hover_cursor(egui::CursorIcon::PointingHand);
 
-                            egui::Frame::none()
-                                .inner_margin(egui::Margin::symmetric(0.0, 4.0))
-                                .show(col_ui, |ui| {
-                                    let text = egui::RichText::new(format!("{:0>5}", tick.0))
-                                        .color(colors::WHITE);
+                    ui.horizontal_centered(|col_ui| {
+                        egui::Frame::none()
+                            .inner_margin(egui::Margin::symmetric(0.0, 4.0))
+                            .show(col_ui, |ui| {
+                                let text = egui::RichText::new(format!("{:0>8}", tick.0))
+                                    .color(colors::WHITE);
 
-                                    ui.add(egui::Label::new(text));
-                                });
-                        });
+                                ui.add(egui::Label::new(text));
+                            });
+                    });
 
-                        columns[1].horizontal_centered(|col_ui| {
-                            let btn_number = 6.0;
-                            let btn_spacing = 8.0;
-                            let ctrl_width = btn_spacing * (btn_number - 1.0)
-                                + btn_default_size * btn_scale * btn_number;
-                            let padding_left = (col_ui.available_width() - ctrl_width) / 2.0;
+                    ui.horizontal_centered(|col_ui| {
+                        let btn_number = 6.0;
+                        let btn_spacing = 8.0;
+                        let ctrl_width = btn_spacing * (btn_number - 1.0)
+                            + btn_default_size * btn_scale * btn_number;
+                        let padding_left = (col_ui.available_width() - ctrl_width) / 2.0;
 
-                            col_ui.add_space(padding_left);
+                        col_ui.add_space(padding_left);
 
-                            col_ui.style_mut().spacing.item_spacing.x = btn_spacing;
+                        col_ui.style_mut().spacing.item_spacing.x = btn_spacing;
 
-                            let jump_to_start_btn = col_ui.add(
-                                ImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
-                            );
+                        let jump_to_start_btn = col_ui
+                            .add(ImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale));
 
-                            if jump_to_start_btn.clicked() {
-                                tick.0 = 0;
-                                tick_changed = true;
+                        if jump_to_start_btn.clicked() {
+                            tick.0 = 0;
+                            tick_changed = true;
+                        }
+
+                        let frame_back_btn = col_ui
+                            .add(ImageButton::new(icons.frame_back).scale(btn_scale, btn_scale));
+
+                        if frame_back_btn.clicked() && tick.0 > 0 {
+                            tick.0 -= 1;
+                            tick_changed = true;
+                        }
+
+                        if paused.0 {
+                            let play_btn = col_ui
+                                .add(ImageButton::new(icons.play).scale(btn_scale, btn_scale));
+
+                            if play_btn.clicked() {
+                                paused.0 = false;
                             }
+                        } else {
+                            let pause_btn = col_ui
+                                .add(ImageButton::new(icons.pause).scale(btn_scale, btn_scale));
 
-                            let frame_back_btn = col_ui.add(
-                                ImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
-                            );
-
-                            if frame_back_btn.clicked() && tick.0 > 0 {
-                                tick.0 -= 1;
-                                tick_changed = true;
+                            if pause_btn.clicked() {
+                                paused.0 = true;
                             }
+                        }
 
-                            if paused.0 {
-                                let play_btn = col_ui
-                                    .add(ImageButton::new(icons.play).scale(btn_scale, btn_scale));
+                        let frame_forward_btn = col_ui
+                            .add(ImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale));
 
-                                if play_btn.clicked() {
-                                    paused.0 = false;
-                                }
-                            } else {
-                                let pause_btn = col_ui
-                                    .add(ImageButton::new(icons.pause).scale(btn_scale, btn_scale));
+                        if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
+                            tick.0 += 1;
+                            tick_changed = true;
+                        }
 
-                                if pause_btn.clicked() {
-                                    paused.0 = true;
-                                }
-                            }
+                        let jump_to_end_btn = col_ui
+                            .add(ImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale));
 
-                            let frame_forward_btn = col_ui.add(
-                                ImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
-                            );
+                        if jump_to_end_btn.clicked() {
+                            tick.0 = max_tick.0 - 1;
+                            tick_changed = true;
+                        }
+                    });
 
-                            if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                                tick.0 += 1;
-                                tick_changed = true;
-                            }
-
-                            let jump_to_end_btn = col_ui.add(
-                                ImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
-                            );
-
-                            if jump_to_end_btn.clicked() {
-                                tick.0 = max_tick.0 - 1;
-                                tick_changed = true;
-                            }
-                        });
-
-                        columns[2].horizontal_centered(|col_ui| {
-                            let label_width = 64.0;
-                            col_ui.add_space(col_ui.available_width() - label_width);
-
+                    ui.allocate_ui_with_layout(
+                        ui.available_size(),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |col_ui| {
                             let current_time_sec =
                                 (tick.0 as f64 / frames_per_second).floor() as usize;
 
@@ -523,19 +507,19 @@ pub fn timeline_area(
 
                                     ui.add(egui::Label::new(text));
                                 });
-                        });
-                    });
+                        },
+                    );
                 });
             });
 
         ui.add(egui::Separator::default().spacing(0.0));
 
-        let segment_count = (ui.available_width() / 100.0) as u8;
+        let segment_count = (available_width / 100.0) as u8;
         ui.horizontal(|ui| {
             let response = ui
                 .add(
                     Timeline::new(&mut tick.bypass_change_detection().0, 0..=max_tick.0)
-                        .width(ui.available_width())
+                        .width(available_width)
                         .height(32.0)
                         .handle_image_id(handle_icon)
                         .handle_aspect_ratio(12.0 / 30.0)

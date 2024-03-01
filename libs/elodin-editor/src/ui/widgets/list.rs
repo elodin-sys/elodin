@@ -1,15 +1,15 @@
-use bevy::ecs::{
-    entity::Entity,
-    system::{Query, ResMut},
-};
+use bevy::ecs::system::{Query, ResMut};
 use bevy_egui::egui;
-use conduit::{well_known::EntityMetadata, EntityId};
+use conduit::well_known::EntityMetadata;
 
-use crate::ui::{colors, EntityPair, SelectedEntity};
+use crate::ui::{
+    colors::{self, EColor},
+    EntityMeta, EntityPair, SelectedEntity,
+};
 
 pub fn entity_list(
     ui: &mut egui::Ui,
-    entities: Query<(Entity, &EntityId, &EntityMetadata)>,
+    entities: Query<EntityMeta>,
     mut selected_entity: ResMut<SelectedEntity>,
 ) -> egui::Response {
     egui::ScrollArea::both()
@@ -19,22 +19,38 @@ pub fn entity_list(
                     .inner_margin(egui::Margin::symmetric(16.0, 16.0))
                     .show(ui, |ui| {
                         ui.add(
-                            egui::Label::new(egui::RichText::new("ENTITIES").color(colors::WHITE))
-                                .wrap(false),
+                            egui::Label::new(
+                                egui::RichText::new("ENTITIES")
+                                    .color(colors::with_opacity(colors::ORANGE_50, 0.4)),
+                            )
+                            .wrap(false),
                         );
                     });
 
-                ui.separator();
+                // TODO: Improve sorting efficiency
+                let mut ent_vec = entities.iter().collect::<Vec<EntityMeta>>();
+                ent_vec.sort_by(|(a, _, _), (b, _, _)| a.0.cmp(&b.0));
 
-                for (entity, entity_id, metadata) in entities.iter() {
+                for (entity_id, entity, metadata) in ent_vec {
                     let selected = selected_entity.0.is_some_and(|id| id.conduit == *entity_id);
-                    let list_item = ui.add(list_item(selected, metadata.name.clone()));
+                    let list_item = ui.add(list_item(selected, metadata));
 
                     if list_item.clicked() {
-                        selected_entity.0 = Some(EntityPair {
-                            bevy: entity,
-                            conduit: *entity_id,
-                        })
+                        if let Some(prev) = selected_entity.0 {
+                            selected_entity.0 = if prev.conduit == *entity_id {
+                                None
+                            } else {
+                                Some(EntityPair {
+                                    bevy: entity,
+                                    conduit: *entity_id,
+                                })
+                            };
+                        } else {
+                            selected_entity.0 = Some(EntityPair {
+                                bevy: entity,
+                                conduit: *entity_id,
+                            })
+                        }
                     }
                 }
 
@@ -45,7 +61,7 @@ pub fn entity_list(
         .response
 }
 
-fn list_item_ui(ui: &mut egui::Ui, on: bool, label: String) -> egui::Response {
+fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui::Response {
     let image_tint = colors::WHITE;
     let image_tint_click = colors::GREY_OPACITY_500;
     let background_color = if on { colors::WHITE } else { colors::STONE_950 };
@@ -87,13 +103,13 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, label: String) -> egui::Response {
         ui.painter().rect(
             icon_rect,
             egui::Rounding::same(2.0),
-            colors::GREEN_300,
+            metadata.color.into_color32(),
             egui::Stroke::NONE,
         );
 
         // Label
         let left_text_margin = horizontal_margin + 12.0 + icon_side;
-        let text = egui::RichText::new(label).color(text_color);
+        let text = egui::RichText::new(metadata.name.to_owned()).color(text_color);
 
         let wrap_width = ui.available_width() - left_text_margin - horizontal_margin;
         let mut layout_job = egui::text::LayoutJob::single_section(
@@ -120,6 +136,6 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, label: String) -> egui::Response {
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-pub fn list_item(on: bool, label: String) -> impl egui::Widget {
-    move |ui: &mut egui::Ui| list_item_ui(ui, on, label)
+pub fn list_item(on: bool, metadata: &EntityMetadata) -> impl egui::Widget + '_ {
+    move |ui: &mut egui::Ui| list_item_ui(ui, on, metadata)
 }
