@@ -142,14 +142,9 @@ defmodule ElodinDashboardWeb.EditorLive do
   def render(assigns) do
     ~H"""
     <.navbar_layout current_user={@current_user}>
-      <:navbar_left>
-        <.link patch={~p"/"}>
-          <.arrow_left class="mr-elo-m" />
-        </.link>
-        <span class="font-semibold">
-          Sandbox - <%= @sandbox.name %>
-        </span>
-      </:navbar_left>
+      <:navbar_center>
+        <span class="font-semibold"><%= @sandbox.name %></span>
+      </:navbar_center>
       <:navbar_right>
         <.link patch={~p"/sandbox/#{@sandbox.id_string}/share"} phx-click={show_modal("share")}>
           <.button type="outline" class="mr-1.5">
@@ -162,7 +157,7 @@ defmodule ElodinDashboardWeb.EditorLive do
         <div class="flex w-full h-full">
           <div class="flex flex-col w-1/2 h-full">
             <div
-              class="pt-3 bg-code transition-all"
+              class="pt-2 bg-black-primary transition-all"
               style={
                 if @show_console, do: "height: calc(100% - 20rem)", else: "height: calc(100% - 4rem)"
               }
@@ -178,27 +173,25 @@ defmodule ElodinDashboardWeb.EditorLive do
                       "language" => "python",
                       "minimap" => %{"enabled" => false},
                       "automaticLayout" => true,
-                      "readOnly" => @sandbox.readonly
+                      "readOnly" => @sandbox.readonly,
+                      "theme" => "vs-dark"
                     }
                   )
                 }
               />
             </div>
 
-            <div class="flex flex-row justify-between h-16 p-4 shadow-lg bg-secondary-surface flex items-center">
+            <div class="flex flex-row justify-between h-16 p-4 shadow-lg bg-black-primary flex items-center">
               <.button
-                type="outline"
+                type="secondary"
                 class="flex gap-2 py-2"
                 phx-click={JS.push("toggle_console", value: %{show_console: !@show_console})}
               >
-                <img
-                  src="/images/arrow-chevron-up.svg"
-                  class={if @show_console, do: "rotate-180", else: "rotate-0"}
-                />
+                <.arrow_chevron_up class={if @show_console, do: "rotate-180", else: "rotate-0"} />
                 <span class="leading-4">Console</span>
               </.button>
               <.button class="flex gap-2 py-2.5" phx-click={JS.push("update_code")}>
-                <img src="/images/lightning.svg" />
+                <.lightning />
                 <span class="leading-3">Update Sim</span>
               </.button>
             </div>
@@ -232,8 +225,8 @@ defmodule ElodinDashboardWeb.EditorLive do
         <.input name="public" type="checkbox" id="public" value={@sandbox.public} />
         <.label for="public" class="mr-elo-m">Public Sandbox?</.label>
       </.form>
-      <div class="flex justify-center items-center flex-row gap-elo-xl mt-elo-xl">
-        <.input name="share-link" id="share-link" value={@share_link} />
+      <div class="flex items-center flex-row gap-elo-xl mt-elo-xl">
+        <.input name="share-link" id="share-link" value={@share_link} class="w-full max-w-[300px]" />
         <.button class="h-[36px] mt-2" phx-click={JS.dispatch("phx:copy", to: "\#share-link")}>
           Copy Link
         </.button>

@@ -2,20 +2,20 @@ defmodule ElodinDashboardWeb.NavbarComponents do
   use Phoenix.Component
   import ElodinDashboardWeb.CoreComponents
 
-  slot(:navbar_left, required: false)
+  slot(:navbar_center, required: false)
   slot(:navbar_right, required: false)
   attr(:current_user, :map, required: false)
 
   def navbar(assigns) do
     ~H"""
-    <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-start h-16 bg-surface-secondary text-white shrink-0 fixed">
+    <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-4 justify-start h-16 bg-black-secondary text-white shrink-0 fixed border-b-sep-black border-b border-b-solid">
       <li class="mr-auto flex ">
-        <%= render_slot(@navbar_left) %>
-      </li>
-      <li style="position: absolute; left: calc(50% - 25px/2);">
-        <.link href="https://www.elodin.systems">
+        <.link href="/">
           <img src="/images/o-logo.svg" class="w-5" />
         </.link>
+      </li>
+      <li style="position: absolute; left: calc(50%); transform: translate(-50%);">
+        <%= render_slot(@navbar_center) %>
       </li>
       <li class="text-[0.8125rem] ml-auto flex items-center">
         <%= render_slot(@navbar_right) %>
@@ -64,16 +64,16 @@ defmodule ElodinDashboardWeb.NavbarComponents do
   end
 
   slot(:inner_block, required: true)
-  slot(:navbar_left, required: false)
+  slot(:navbar_center, required: false)
   slot(:navbar_right, required: false)
   attr(:current_user, :map, required: false)
 
   def navbar_layout(assigns) do
     ~H"""
     <.navbar current_user={@current_user}>
-      <:navbar_left>
-        <%= render_slot(@navbar_left) %>
-      </:navbar_left>
+      <:navbar_center>
+        <%= render_slot(@navbar_center) %>
+      </:navbar_center>
       <:navbar_right>
         <%= render_slot(@navbar_right) %>
       </:navbar_right>

@@ -39,7 +39,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
   """
   attr(:id, :string, required: true)
   attr(:show, :boolean, default: false)
-  attr(:wrapper_class, :string, default: "w-full max-w-[400px]")
+  attr(:wrapper_class, :string, default: "w-full max-w-[500px]")
   attr(:bg_color, :string, default: "surface-secondary")
   attr(:container_padding, :string, default: "elo-xl")
   attr(:on_cancel, JS, default: %JS{})
@@ -74,7 +74,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
               phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
               phx-key="escape"
               phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
-              class={"relative hidden overflow-hidden rounded-elo-md bg-#{@bg_color} text-white p-#{@container_padding} pt-[48px] shadow-lg transition"}
+              class={"relative hidden overflow-hidden rounded-elo-xs bg-#{@bg_color} text-white p-#{@container_padding} pt-[48px] shadow-lg transition"}
             >
               <div class="absolute top-elo-xl right-5">
                 <button
@@ -234,12 +234,18 @@ defmodule ElodinDashboardWeb.CoreComponents do
 
   slot(:inner_block, required: true)
 
-  def button(%{type: "outline"} = assigns) do
+  def button(%{type: "outline", class: class} = assigns) do
+    button(Map.merge(assigns, %{type: "", class: [class, "bg-transparent"]}))
+  end
+
+  def button(%{type: "secondary", class: class} = assigns) do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-sm border-solid border bg-transparent border-white-opacity-300 p-[12px] ",
-        "text-[12px] leading-[8px] font-semibold text-white active:text-white/80",
+        "phx-submit-loading:opacity-75 rounded-elo-xs border-solid border border-white border-opacity-5 p-[12px] ",
+        "bg-opacity-0 bg-white",
+        "hover:bg-opacity-5 hover:border-opacity-20",
+        "text-[12px] leading-[8px] font-semibold text-crema active:text-white/80",
         @class
       ]}
       {@rest}
@@ -268,10 +274,12 @@ defmodule ElodinDashboardWeb.CoreComponents do
   def button(assigns) do
     ~H"""
     <button
-      type={@type}
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-sm bg-hyper-blue hover:bg-hyper-blue-dim p-[12px] ",
-        "text-[12px] leading-[8px] font-semibold text-white active:text-white/80",
+        "phx-submit-loading:opacity-75 rounded-elo-xs border-solid border border-green border-opacity-40 p-[12px] ",
+        "transition-colors",
+        "bg-green bg-opacity-5",
+        "hover:bg-opacity-15 hover:border-opacity-30",
+        "text-[12px] leading-[8px] font-semibold text-green active:text-white/80",
         @class
       ]}
       {@rest}
@@ -326,6 +334,8 @@ defmodule ElodinDashboardWeb.CoreComponents do
   attr(:prompt, :string, default: nil, doc: "the prompt for select inputs")
   attr(:options, :list, doc: "the options to pass to Phoenix.HTML.Form.options_for_select/2")
   attr(:multiple, :boolean, default: false, doc: "the multiple flag for select inputs")
+
+  attr(:class, :string, default: nil)
 
   attr(:rest, :global,
     include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
@@ -419,10 +429,13 @@ defmodule ElodinDashboardWeb.CoreComponents do
         id={@id}
         value={Phoenix.HTML.Form.normalize_value(@type, @value)}
         class={[
-          "font-mono mt-2 block w-full rounded-elo-sm text-900 focus:ring-0 sm:text-sm sm:leading-6 bg-surface-secondary",
-          "phx-no-feedback:border-white-opacity-200 phx-no-feedback:focus:border-blue",
+          "font-mono mt-2 block w-full rounded-elo-xs text-900 focus:ring-0 sm:text-sm sm:leading-6",
+          "bg-opacity-0 bg-white",
+          "phx-no-feedback:border-white phx-no-feedback:border-opacity-5",
+          "phx-no-feedback:focus:bg-opacity-5 phx-no-feedback:focus:border-opacity-20",
           @errors == [] && "border-zinc-300 focus:border-zinc-400",
-          @errors != [] && "border-rose-400 focus:border-rose-400"
+          @errors != [] && "border-rose-400 focus:border-rose-400",
+          @class
         ]}
         {@rest}
       />

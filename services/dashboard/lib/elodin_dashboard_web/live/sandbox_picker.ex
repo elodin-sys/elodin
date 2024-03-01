@@ -79,13 +79,13 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
     <.navbar_layout current_user={@current_user}>
       <:navbar_right>
         <.link patch={~p"/sandbox/new"} phx-click={show_modal("new")}>
-          <.button type="link" class="mr-1.5">
+          <.button type="link" type="outline" class="mr-1.5">
             Create New
           </.button>
         </.link>
       </:navbar_right>
-      <div class="flex flex-col min-h-full items-start p-elo-lg bg-surface-secondary">
-        <div class="flex flex-col flex-wrap items-start w-full bg-primative-colors-white-opacity-50 rounded-elo-sm bg-primative-colors-white-opacity-50">
+      <div class="flex flex-col min-h-full items-start p-elo-lg bg-black-secondary">
+        <div class="flex flex-col flex-wrap items-start w-full rounded-elo-xs bg-black-primary">
           <div class="p-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
             Elodin templates
           </div>
