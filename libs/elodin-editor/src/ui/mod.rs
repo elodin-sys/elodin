@@ -8,14 +8,15 @@ use bevy_egui::{
     EguiContexts,
 };
 use conduit::{
-    bevy::{ComponentValueMap, MaxTick, Tick},
+    bevy::{ComponentValueMap, MaxTick, Received, Tick, TimeStep},
+    query::MetadataStore,
     well_known::EntityMetadata,
     ControlMsg, EntityId,
 };
 
 use crate::MainCamera;
 
-use self::widgets::{list, timeline};
+use self::widgets::{inspector, list, timeline};
 
 mod colors;
 pub mod images;
@@ -30,6 +31,9 @@ pub struct ShowStats(pub bool);
 
 #[derive(Resource, Default)]
 pub struct SelectedEntity(pub Option<EntityPair>);
+
+#[derive(Resource, Default)]
+pub struct HoveredEntity(pub Option<EntityPair>);
 
 #[derive(Clone, Copy)]
 pub struct EntityPair {
@@ -51,6 +55,9 @@ pub fn shortcuts(
     }
 }
 
+pub type EntityData<'a> = (&'a EntityId, Entity, &'a ComponentValueMap);
+pub type EntityMeta<'a> = (&'a EntityId, Entity, &'a EntityMetadata);
+
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     mut event: EventWriter<ControlMsg>,
@@ -58,20 +65,64 @@ pub fn render(
     mut paused: ResMut<Paused>,
     mut tick: ResMut<Tick>,
     selected_entity: ResMut<SelectedEntity>,
+    hovered_entity: Res<HoveredEntity>,
     max_tick: Res<MaxTick>,
+    tick_time: Res<TimeStep>,
     show_stats: Res<ShowStats>,
     diagnostics: Res<DiagnosticsStore>,
-    meta_entities: Query<(Entity, &EntityId, &EntityMetadata)>,
-    entity_components: Query<(Entity, &EntityId, &ComponentValueMap)>,
+    entities: Query<EntityData>,
+    entities_meta: Query<EntityMeta>,
     window: Query<&Window>,
     images: Local<images::Images>,
+    metadata_store: Res<MetadataStore>,
 ) {
     let window = window.single();
     let width = window.resolution.width();
     let height = window.resolution.height();
-    let selected = selected_entity.0;
+    let selected_entity_pair = selected_entity.0;
+
+    let selected_entity_full = selected_entity_pair.and_then(|eid| entities.get(eid.bevy).ok());
+    let selected_entity_meta = entities_meta
+        .iter()
+        .find(|(id, _, _)| selected_entity_pair.is_some_and(|eid| eid.conduit == **id))
+        .map(|(_, _, metadata)| metadata.to_owned());
+    let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
+        entities_meta
+            .iter()
+            .find(|(id, _, _)| hovered_entity_pair.conduit == **id)
+            .map(|(_, _, metadata)| metadata.to_owned())
+    } else {
+        None
+    };
 
     theme::set_theme(contexts.ctx_mut());
+
+    if let Some(hovered_entity_meta) = hovered_entity_meta {
+        contexts
+            .ctx_mut()
+            .set_cursor_icon(egui::CursorIcon::PointingHand);
+
+        if let Some(cursor_pos) = window.cursor_position() {
+            let offset = 16.0;
+            let window_pos = egui::pos2(cursor_pos.x + offset, cursor_pos.y + offset);
+
+            egui::Window::new("hovered_entity")
+                .title_bar(false)
+                .resizable(false)
+                .frame(egui::Frame {
+                    fill: colors::with_opacity(colors::STONE_950, 0.5),
+                    stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
+                    inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                    ..Default::default()
+                })
+                .fixed_pos(window_pos)
+                .show(contexts.ctx_mut(), |ui| {
+                    ui.add(Label::new(
+                        RichText::new(hovered_entity_meta.name).color(Color32::WHITE),
+                    ));
+                });
+        }
+    }
 
     let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -83,11 +134,6 @@ pub fn render(
         handle: contexts.add_image(images.icon_scrub.clone_weak()),
     };
 
-    let selected_metadata = selected_entity
-        .0
-        .and_then(|e| meta_entities.get(e.bevy).ok())
-        .map(|(b, _, meta)| (b, meta.clone()));
-
     egui::TopBottomPanel::top("titlebar")
         .frame(egui::Frame {
             fill: colors::INTERFACE_BACKGROUND_BLACK,
@@ -98,13 +144,7 @@ pub fn render(
         .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
 
     // NOTE(temp fix): Hide panels until simulation is loaded
-    if !meta_entities.is_empty() {
-        // let entities =
-        // entity_components
-        //     .iter()
-        //     .collect::<Vec<(Entity, &EntityId, &WorldPos, &ComponentValueMap)>>();
-        // NOTE(sphw): temporarily not needed @andrei will use this
-
+    if !entities_meta.is_empty() {
         if width * 0.75 > height {
             egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
                 .resizable(true)
@@ -116,37 +156,36 @@ pub fn render(
                 })
                 .min_width(width * 0.15)
                 .default_width(width * 0.20)
-                .max_width(width * 0.25)
+                .max_width(width * 0.35)
                 .show(contexts.ctx_mut(), |ui| {
-                    list::entity_list(ui, meta_entities, selected_entity);
+                    list::entity_list(ui, entities_meta, selected_entity);
                 });
 
-            if let Some((entity, metadata)) = selected_metadata.as_ref() {
-                egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
-                    .resizable(true)
-                    .frame(egui::Frame {
-                        fill: colors::STONE_950,
-                        stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                        inner_margin: Margin::same(4.0),
-                        ..Default::default()
-                    })
-                    .min_width(width * 0.15)
-                    .default_width(width * 0.20)
-                    .max_width(width * 0.25)
-                    .show(contexts.ctx_mut(), |ui| {
-                        ui.label(metadata.name.clone());
-                        if let Ok((_, _, map)) = entity_components.get(*entity) {
-                            draw_component_values(ui, map)
-                        }
-
-                        ui.allocate_space(ui.available_size());
-                    });
-            }
+            egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
+                .resizable(true)
+                .frame(egui::Frame {
+                    fill: colors::STONE_950,
+                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    ..Default::default()
+                })
+                .min_width(width * 0.15)
+                .default_width(width * 0.20)
+                .max_width(width * 0.35)
+                .show(contexts.ctx_mut(), |ui| {
+                    inspector::inspector(
+                        ui,
+                        selected_entity_meta,
+                        selected_entity_full,
+                        &metadata_store,
+                    );
+                    ui.allocate_space(ui.available_size());
+                });
         } else {
             egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
                 .resizable(true)
                 .frame(egui::Frame::default())
                 .default_height(200.0)
+                .max_height(width * 0.5)
                 .show(contexts.ctx_mut(), |ui| {
                     let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
                         .resizable(true)
@@ -160,31 +199,30 @@ pub fn render(
                         .default_width(width * 0.5)
                         .max_width(width * 0.75)
                         .show_inside(ui, |ui| {
-                            list::entity_list(ui, meta_entities, selected_entity);
+                            list::entity_list(ui, entities_meta, selected_entity);
                             ui.allocate_space(ui.available_size());
                         });
 
-                    if let Some((entity, metadata)) = selected_metadata.as_ref() {
-                        egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
-                            .resizable(false)
-                            .frame(egui::Frame {
-                                fill: colors::STONE_950,
-                                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                                inner_margin: Margin::same(4.0),
-                                ..Default::default()
-                            })
-                            .exact_width(width - outline.response.rect.width())
-                            .show_inside(ui, |ui| {
-                                ui.label(metadata.name.clone());
-                                if let Ok((_, _, map)) = entity_components.get(*entity) {
-                                    draw_component_values(ui, map)
-                                }
-                                ui.allocate_space(ui.available_size());
-                            });
-                    }
+                    egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
+                        .resizable(false)
+                        .frame(egui::Frame {
+                            fill: colors::STONE_950,
+                            ..Default::default()
+                        })
+                        .exact_width(width - outline.response.rect.width())
+                        .show_inside(ui, |ui| {
+                            inspector::inspector(
+                                ui,
+                                selected_entity_meta,
+                                selected_entity_full,
+                                &metadata_store,
+                            );
+                        });
                 });
         }
     }
+
+    let sim_fps = 1.0 / tick_time.0.as_secs_f64();
 
     egui::TopBottomPanel::bottom("timeline")
         .frame(egui::Frame {
@@ -199,47 +237,35 @@ pub fn render(
                 &mut paused,
                 &max_tick,
                 &mut tick,
+                sim_fps,
                 &mut event,
                 timeline_icons,
             );
         });
 
-    let viewport_left_top = contexts.ctx_mut().available_rect().left_top();
-    let viewport_margins = egui::vec2(16.0, 16.0);
-
     if show_stats.0 {
+        let viewport_left_top = contexts.ctx_mut().available_rect().left_top();
+        let viewport_margins = egui::vec2(16.0, 16.0);
+
         egui::Window::new("stats")
             .title_bar(false)
             .resizable(false)
             .frame(egui::Frame::default())
             .fixed_pos(viewport_left_top + viewport_margins)
             .show(contexts.ctx_mut(), |ui| {
-                let fps_str = diagnostics
+                let render_fps_str = diagnostics
                     .get(FrameTimeDiagnosticsPlugin::FPS)
                     .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
                     .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
 
                 ui.add(Label::new(
-                    RichText::new(format!("FPS: {fps_str}")).color(Color32::WHITE),
+                    RichText::new(format!("FPS [VIEW]: {render_fps_str}")).color(Color32::WHITE),
                 ));
-                if let Some((_, entity_id, map)) =
-                    selected.and_then(|s| entity_components.get(s.bevy).ok())
-                {
-                    ui.add(Label::new(
-                        RichText::new(format!("SELECTED: ID[{}] ", entity_id.0,))
-                            .color(Color32::WHITE),
-                    ));
-                    draw_component_values(ui, map)
-                }
-            });
-    }
-}
 
-fn draw_component_values(ui: &mut egui::Ui, map: &ComponentValueMap) {
-    for (id, value) in map.0.iter() {
-        ui.add(Label::new(
-            RichText::new(format!("COMP ID[{}] VAL = {:?}", id.0, value)).color(Color32::WHITE),
-        ));
+                ui.add(Label::new(
+                    RichText::new(format!("FPS [SIM]: {sim_fps:>4.0}")).color(Color32::WHITE),
+                ));
+            });
     }
 }
 
@@ -247,7 +273,9 @@ pub fn set_camera_viewport(
     window: Query<&Window>,
     egui_settings: Res<bevy_egui::EguiSettings>,
     mut contexts: EguiContexts,
-    mut main_camera_query: Query<&mut Camera, With<MainCamera>>,
+    mut main_camera_query: Query<(&mut Camera, &mut Transform), With<MainCamera>>,
+    entity_transform_query: Query<&Transform, (With<Received>, Without<MainCamera>)>,
+    selected_entity: ResMut<SelectedEntity>,
 ) {
     let available_rect = contexts.ctx_mut().available_rect();
 
@@ -257,10 +285,16 @@ pub fn set_camera_viewport(
     let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
     let viewport_size = available_rect.size() * scale_factor;
 
-    let mut camera = main_camera_query.single_mut();
+    let (mut camera, mut cam_transform) = main_camera_query.single_mut();
     camera.viewport = Some(Viewport {
         physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
         physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
         depth: 0.0..1.0,
     });
+
+    if let Some(entity_pair) = selected_entity.0 {
+        if let Ok(entity_transform) = entity_transform_query.get(entity_pair.bevy) {
+            cam_transform.look_at(entity_transform.translation, Vec3::Y);
+        }
+    }
 }

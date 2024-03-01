@@ -26,6 +26,7 @@ use bevy_web_asset::WebAssetPlugin;
 use conduit::{well_known::WorldPos, ControlMsg};
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
+use ui::{EntityMeta, EntityPair, HoveredEntity, SelectedEntity};
 
 mod plugins;
 pub(crate) mod traces;
@@ -69,6 +70,11 @@ impl Plugin for EditorPlugin {
                             present_mode: PresentMode::AutoVsync,
                             fit_canvas_to_parent: true,
                             canvas: Some("#editor".to_string()),
+                            resize_constraints: WindowResizeConstraints {
+                                min_width: 400.,
+                                min_height: 400.,
+                                ..Default::default()
+                            },
                             ..default()
                         }),
                         ..default()
@@ -87,6 +93,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<ui::Paused>()
             .init_resource::<ui::ShowStats>()
             .init_resource::<ui::SelectedEntity>()
+            .init_resource::<ui::HoveredEntity>()
             .add_plugins(
                 DefaultPickingPlugins
                     .build()
@@ -105,7 +112,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Update, (ui::shortcuts, ui::render))
-            .add_systems(Update, make_pickable)
+            .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
             .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
@@ -301,13 +308,43 @@ fn set_icon_mac() {
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn make_pickable(
+#[derive(Component)]
+pub struct EntityConfigured;
+
+fn make_entities_selectable(
     mut commands: Commands,
-    meshes: Query<Entity, (With<Handle<Mesh>>, Without<Pickable>, Changed<Handle<Mesh>>)>,
+    entities: Query<EntityMeta, Without<EntityConfigured>>,
 ) {
-    for entity in meshes.iter() {
-        commands.entity(entity).insert((PickableBundle::default(),));
+    for (entity_id, entity, _) in entities.iter() {
+        let entity_id = entity_id.to_owned();
+        commands.entity(entity).insert((
+            EntityConfigured,
+            On::<Pointer<Out>>::run(
+                move |_event: Listener<Pointer<Out>>, mut hovered_entity: ResMut<HoveredEntity>| {
+                    hovered_entity.0 = None
+                },
+            ),
+            On::<Pointer<Over>>::run(
+                move |_event: Listener<Pointer<Over>>,
+                      mut hovered_entity: ResMut<HoveredEntity>| {
+                    hovered_entity.0 = Some(EntityPair {
+                        bevy: entity,
+                        conduit: entity_id,
+                    })
+                },
+            ),
+            On::<Pointer<Click>>::run(
+                move |event: Listener<Pointer<Click>>,
+                      mut selected_entity: ResMut<SelectedEntity>| {
+                    if event.button == PointerButton::Primary {
+                        selected_entity.0 = Some(EntityPair {
+                            bevy: entity,
+                            conduit: entity_id,
+                        })
+                    }
+                },
+            ),
+        ));
     }
 }
 
