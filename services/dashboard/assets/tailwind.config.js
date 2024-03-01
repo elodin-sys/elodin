@@ -17,10 +17,14 @@ module.exports = {
         "hyper-blue": "#1E43E2",
         "hyper-blue-dim": "#1736b5",
         blue: "#1E43E2",
+
         "light-blue": "#8EA1F1",
         tan: "#F3E5C5",
         orange: "#EF5800",
-        green: "#00CA71",
+        green: "#88DE9F",
+        "green-opacity": {
+          "40": "rgba(136, 222, 159, 0.4)"
+        },
         "dark-matte": "#131212",
         "code": "#282C34",
         "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
@@ -30,6 +34,8 @@ module.exports = {
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
         "surface-secondary": "#1F1F1F",
+        "crema": "rgba(255, 251, 240, 1)",
+        "black-primary": "rgba(23, 22, 21, 1)",
         "black-secondary": "rgba(13, 13, 13, 1)",
         "black-opacity": {
           "600": "rgba(0, 0, 0, 0.6)",
@@ -38,6 +44,7 @@ module.exports = {
           "300": "rgba(255, 255, 255, 0.3)",
           "200": "rgba(255, 255, 255, 0.2)"
         },
+        "sep-black": "#202020"
       },
       spacing: {
         'elo-xxs': "4px",
@@ -47,6 +54,7 @@ module.exports = {
         'elo-xl': "24px",
       },
       borderRadius: {
+        'elo-xxs': "4px",
         'elo-xs': "4px",
         'elo-sm': "8px",
         'elo-md': "12px"
