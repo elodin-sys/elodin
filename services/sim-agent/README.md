@@ -17,13 +17,15 @@ NOTE: Only works on Linux due to host kernel dependency
 
 ```
 nix build .#sandbox-vm
-qemu-system-x86_64 -M microvm -kernel /boot/vmlinuz-(uname -r) -append 'quiet root=/dev/vda ro init=/init' -cpu host -enable-kvm -m 1G -nographic -drive file=result/root.squashfs,format=raw,id=root,if=none,readonly=on -device virtio-blk-device,drive=root
+qemu-system-x86_64 -M microvm,pcie=on,rtc=on -kernel result/bzImage -append 'quiet root=/dev/vda init=/init raid=noautodetect ro' -cpu host -enable-kvm -m 1G -nographic -drive file=result/root.squashfs,format=raw,id=root,if=none,readonly=on -device virtio-blk-pci,drive=root -virtfs local,path=.,security_model=mapped-xattr,mount_tag=workdir
 ```
 
-- `-kernel /boot/vmlinuz-(uname -r)`
-    - Use host kernel. This is fine for now, but eventually we should bundle a smaller, more locked down kernel.
+- `-M microvm,pcie=on,rtc=on`
+    - Enabling pcie and RTC actually decrease boot time by preventing the kernel from probing missing devices.
 - `-append 'quiet root=/dev/vda init=/init' ro`
     - Replace "quiet" with "debug" to view more kernel logs, which is especially useful for debugging the init process.
     - `root=/dev/vda init=/init` is used to skip initrd/initramfs and jump directly to the `/init` process in the attached squashfs drive.
 - `-drive file=result/root.squashfs,format=raw,id=root,if=none,readonly=on`
     - Use a read-only squashfs root file-system. An immutable file-system should be compatible with our use cases. If not, we can just mount an overlayfs on top.
+- `-virtfs local,path=.,security_model=mapped-xattr,mount_tag=workdir`
+    - Mount the `./` host directory into the VM.
