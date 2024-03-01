@@ -48,8 +48,7 @@ pub struct ArchetypeMetadata {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ColumnMetadata {
-    pub component_id: ComponentId,
-    pub component_type: ComponentType,
+    pub metadata: conduit::Metadata,
     pub asset: bool,
 }
 
@@ -176,12 +175,17 @@ impl Table<HostStore> {
             .iter()
             .zip(df.iter().filter(|s| s.name() != entity_id_string))
             .map(|(metadata, series)| {
-                let component_id = metadata.component_id;
-                let component_type = metadata.component_type.clone();
                 let asset = metadata.asset;
-                let buffer = HostColumn::from_series(series, component_type, asset)?;
-                let column = Column { buffer };
-                Ok((component_id, column))
+                let buffer = HostColumn::from_series(
+                    series,
+                    metadata.metadata.component_type.clone(),
+                    asset,
+                )?;
+                let column = Column {
+                    buffer,
+                    metadata: metadata.metadata.clone(),
+                };
+                Ok((metadata.metadata.component_id, column))
             })
             .collect::<Result<_, Error>>()?;
         let column = df
@@ -201,8 +205,7 @@ impl Table<HostStore> {
             .columns
             .values()
             .map(|c| ColumnMetadata {
-                component_id: c.buffer.component_id,
-                component_type: c.buffer.component_type.clone(),
+                metadata: c.metadata.clone(),
                 asset: c.buffer.asset,
             })
             .collect();
