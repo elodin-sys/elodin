@@ -59,6 +59,19 @@ let
     pythonImportsCheck = [ wheelName ];
   };
 
+  kernel = (pkgs.linux_6_6.override {
+    defconfig = "defconfig kvm_guest.config";
+    autoModules = false;
+    ignoreConfigErrors = true;
+    structuredExtraConfig = with lib.kernel; {
+      SQUASHFS = yes;
+    };
+  }).overrideAttrs(_: {
+    postInstall = ''
+      rm -rf $out/{lib,System.map}
+    '';
+  });
+
   mkrootfs =
     {
       init,
@@ -76,7 +89,7 @@ let
       ''
         mkdir -p rootfs/nix/store
         cd rootfs
-        mkdir -p nix/store proc sys tmp dev
+        mkdir -p nix/store proc sys tmp dev mnt/workdir usr/bin
         cp $init init
         for item in $contents; do
           rsync -aK $item/ .
@@ -84,6 +97,7 @@ let
         for item in $(< $closureInfo/store-paths); do
           rsync -aK $item ./nix/store/
         done
+        ln -s /sbin/busybox usr/bin/env
         mkdir $out
         mksquashfs . $out/root.squashfs -comp zstd
       '';
@@ -96,7 +110,7 @@ let
     mount -n -t proc none /proc
     mount -n -t sysfs none /sys
     mount -n -t tmpfs none /tmp
-    mdev -s
+    mount -t 9p -o trans=virtio workdir /mnt/workdir || true
 
     setsid sh -c 'sh </dev/ttyS0 >/dev/ttyS0 2>&1'
     poweroff -f
@@ -126,5 +140,8 @@ let
 in
 {
   packages.sim-agent-image = image;
-  packages.sandbox-vm = vm;
+  packages.sandbox-vm = pkgs.buildEnv {
+    name = "sandbox-vm";
+    paths = [ vm kernel ];
+  };
 }
