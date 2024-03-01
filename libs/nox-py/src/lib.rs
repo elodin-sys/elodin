@@ -8,7 +8,7 @@ use std::{
 };
 
 use clap::Parser;
-use nox_ecs::conduit::Asset;
+use nox_ecs::conduit::{Asset, TagValue};
 use nox_ecs::{
     conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
@@ -345,10 +345,21 @@ impl WorldBuilder {
                     .iter()
                     .map(|data| {
                         let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-                        let ty = data.getattr(py, "type")?.extract::<ComponentType>(py)?;
+                        let ty: nox_ecs::conduit::ComponentType = data
+                            .getattr(py, "type")?
+                            .extract::<ComponentType>(py)?
+                            .into();
                         let asset = data.getattr(py, "asset")?.extract::<bool>(py)?;
-                        let mut col =
-                            nox_ecs::Column::<HostStore>::new(HostColumn::new(ty.into(), id.inner));
+                        let name = data.getattr(py, "name")?.extract::<String>(py)?;
+                        let mut col = nox_ecs::Column::<HostStore>::new(
+                            HostColumn::new(ty.clone(), id.inner),
+                            conduit::Metadata {
+                                component_id: id.inner,
+                                component_type: ty,
+                                tags: std::iter::once(("name".to_string(), TagValue::String(name)))
+                                    .collect(),
+                            },
+                        );
                         col.buffer.asset = asset;
                         Ok((id.inner, col))
                     })

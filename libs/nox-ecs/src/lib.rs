@@ -2,7 +2,7 @@ extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
 use conduit::well_known::EntityMetadata;
-use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId};
+use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId, Metadata};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
@@ -81,12 +81,14 @@ where
 
 pub struct Column<S: WorldStore> {
     pub buffer: S::Column,
+    pub metadata: Metadata,
 }
 
 impl Clone for Column<HostStore> {
     fn clone(&self) -> Self {
         Self {
             buffer: self.buffer.clone(),
+            metadata: self.metadata.clone(),
         }
     }
 }
@@ -226,6 +228,11 @@ impl World<HostStore> {
                         *id,
                         Column {
                             buffer: HostColumn::new(ty.clone(), *id),
+                            metadata: Metadata {
+                                component_id: *id,
+                                component_type: ty.clone(),
+                                tags: HashMap::new(),
+                            },
                         },
                     )
                 })
@@ -274,6 +281,7 @@ impl World<HostStore> {
                             *id,
                             Column {
                                 buffer: column.buffer.copy_to_client(client)?,
+                                metadata: column.metadata.clone(),
                             },
                         ))
                     })
@@ -443,8 +451,8 @@ impl<T: Component + 'static> Archetype for T {
 }
 
 impl<S: WorldStore> Column<S> {
-    pub fn new(buffer: S::Column) -> Self {
-        Self { buffer }
+    pub fn new(buffer: S::Column, metadata: Metadata) -> Self {
+        Self { buffer, metadata }
     }
 }
 
