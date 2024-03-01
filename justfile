@@ -41,3 +41,6 @@ clean-dev-branch branch_codename:
   gcloud container clusters get-credentials {{cluster}} --region {{region}} --project {{project}}
   kubectl get namespace elodin-app-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-app-{{branch_codename}} || echo "elodin-app-{{branch_codename}} already deleted"
   kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"
+
+sync-open-source:
+  git filter-repo --refs main --path libs/conduit --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/xla-rs --target ../elodin

@@ -58,6 +58,7 @@
           docker
           kubectl
           jq
+          git-filter-repo
           (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
         ];
       doCheck = false;
