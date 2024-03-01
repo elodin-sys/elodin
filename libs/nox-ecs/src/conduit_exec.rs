@@ -8,8 +8,6 @@ use conduit::{
 };
 use tracing::warn;
 
-use std::collections::HashMap;
-
 type Connection = flume::Sender<Packet<Payload<Bytes>>>;
 
 struct Subscription {
@@ -33,13 +31,8 @@ impl ConduitExec {
     pub fn new(exec: WorldExec, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
         for arch in exec.world.host.archetypes.values() {
-            for (id, col) in &arch.columns {
-                let metadata = Metadata {
-                    component_id: *id,
-                    component_type: col.buffer.component_type.clone(),
-                    tags: HashMap::new(),
-                };
-                metadata_store.push(metadata);
+            for col in arch.columns.values() {
+                metadata_store.push(col.metadata.clone());
             }
         }
         Self {
