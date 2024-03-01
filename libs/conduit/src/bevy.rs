@@ -16,6 +16,7 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::time::Duration;
 use tracing::warn;
 
 use bevy::{
@@ -38,6 +39,9 @@ pub struct MaxTick(pub u64);
 
 #[derive(bevy::prelude::Resource)]
 pub struct Tick(pub u64);
+
+#[derive(bevy::prelude::Resource)]
+pub struct TimeStep(pub Duration);
 
 impl ColumnMsg<Bytes> {
     pub fn load_into_bevy(
@@ -289,8 +293,9 @@ fn recv_system(
     mut subscriptions: ResMut<Subscriptions>,
     mut exit: EventWriter<AppExit>,
     mut subscribe_event: EventWriter<SubscribeEvent>,
-    metadata: Res<MetadataStore>,
+    mut metadata_store: ResMut<MetadataStore>,
     mut max_tick_res: ResMut<MaxTick>,
+    mut time_step_res: ResMut<TimeStep>,
     mut tick_res: ResMut<Tick>,
     mut sim_peer: ResMut<SimPeer>,
     mut value_map: Query<&mut ComponentValueMap>,
@@ -299,10 +304,12 @@ fn recv_system(
         let Some(tx) = tx.upgrade() else { continue };
         match msg {
             Msg::Control(ControlMsg::StartSim {
-                metadata_store,
-                time_step: _,
+                metadata_store: new_metadata_store,
+                time_step,
             }) => {
                 tracing::debug!("received startsim, sending subscribe messages");
+                *metadata_store = new_metadata_store;
+                *time_step_res = TimeStep(time_step);
                 for id in metadata_store.component_index.keys() {
                     let packet = Packet {
                         stream_id: StreamId::CONTROL,
@@ -317,7 +324,7 @@ fn recv_system(
                     stream_id: StreamId::rand(),
                     tx,
                 };
-                let ids = query.execute(&metadata);
+                let ids = query.execute(&metadata_store);
                 if ids.len() != 1 {
                     warn!("only single id queries are supported for now");
                     continue;
@@ -386,6 +393,7 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(AssetMap::default());
         app.insert_resource(MaxTick(0));
         app.insert_resource(Tick(0));
+        app.insert_resource(TimeStep(Duration::default()));
         app.insert_resource(ConduitRx(self.rx.clone()));
         app.add_event::<SubscribeEvent>();
         app.add_event::<ControlMsg>();

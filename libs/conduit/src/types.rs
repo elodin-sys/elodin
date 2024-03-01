@@ -293,6 +293,15 @@ pub enum TagValue {
     String(String),
 }
 
+impl TagValue {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            TagValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct MetadataPair(pub String, pub TagValue);
 
