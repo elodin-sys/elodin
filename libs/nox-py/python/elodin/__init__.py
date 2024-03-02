@@ -10,6 +10,8 @@ import numpy
 
 __doc__ = elodin.__doc__
 
+jax.config.update("jax_enable_x64", True)
+
 Self = TypeVar("Self")
 class System(Protocol):
     @staticmethod
