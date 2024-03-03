@@ -384,13 +384,13 @@ pub async fn sim_socket(
             .map_err(|err| std::io::Error::new(io::ErrorKind::Other, err));
         let ws_to_sim = ws_rx
             .inspect_ok(|b| {
-                tracing::debug!(bytes = b.len(), "ws -> sim");
+                tracing::trace!(bytes = b.len(), "ws -> sim");
             })
             .forward(sim_tx)
             .map_err(Error::from);
         let sim_to_ws = sim_rx
             .inspect_ok(|b| {
-                tracing::debug!(bytes = b.len(), "sim -> ws");
+                tracing::trace!(bytes = b.len(), "sim -> ws");
             })
             .map(|m| m.map(|b| ws::Message::Binary(b.to_vec())))
             .map_err(axum::Error::new)
