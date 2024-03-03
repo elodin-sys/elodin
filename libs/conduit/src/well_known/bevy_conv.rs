@@ -3,6 +3,7 @@ pub use super::{
     OpaqueRendererMethod, ParallaxMappingMethod, TextureDimension, TextureFormat,
 };
 use bevy::prelude::Assets;
+use bevy::render::render_asset::RenderAssetUsages;
 impl From<MeshData> for bevy::prelude::Mesh {
     fn from(data: MeshData) -> Self {
         use bevy::prelude::Mesh as BevyMesh;
@@ -17,7 +18,7 @@ impl From<MeshData> for bevy::prelude::Mesh {
             _ => PrimitiveTopology::TriangleList,
         };
 
-        let mut mesh = BevyMesh::new(mesh_type_enum);
+        let mut mesh = BevyMesh::new(mesh_type_enum, RenderAssetUsages::all());
 
         if let Some(positions) = data.positions {
             mesh.insert_attribute(BevyMesh::ATTRIBUTE_POSITION, positions);
@@ -48,7 +49,7 @@ impl From<MeshData> for bevy::prelude::Mesh {
         }
 
         if let Some(indices) = data.indices {
-            mesh.set_indices(Some(Indices::U32(indices)));
+            mesh.insert_indices(Indices::U32(indices));
         }
 
         mesh
@@ -144,31 +145,12 @@ impl From<bevy::prelude::Mesh> for MeshData {
 
 impl From<Mesh> for bevy::prelude::Mesh {
     fn from(val: Mesh) -> Self {
-        use bevy::prelude::shape;
         match val.inner {
-            MeshInner::Sphere {
-                radius,
-                sectors,
-                stacks,
-            } => shape::UVSphere {
-                radius,
-                sectors,
-                stacks,
+            MeshInner::Sphere { radius, .. } => bevy::math::primitives::Sphere { radius }.into(),
+            MeshInner::Box { x, y, z } => bevy::math::primitives::Cuboid::new(x, y, z).into(),
+            MeshInner::Cylinder { radius, height, .. } => {
+                bevy::math::primitives::Cylinder::new(radius, height).into()
             }
-            .into(),
-            MeshInner::Box { x, y, z } => shape::Box::new(x, y, z).into(),
-            MeshInner::Cylinder {
-                radius,
-                height,
-                resolution,
-                segments,
-            } => shape::Cylinder {
-                radius,
-                height,
-                resolution,
-                segments,
-            }
-            .into(),
             MeshInner::Data(d) => d.into(),
         }
     }
@@ -526,6 +508,8 @@ impl From<bevy::render::render_resource::TextureFormat> for TextureFormat {
             BevyTextureFormat::EacRg11Unorm => TextureFormat::EacRg11Unorm,
             BevyTextureFormat::EacRg11Snorm => TextureFormat::EacRg11Snorm,
             BevyTextureFormat::Astc { .. } => todo!(),
+            BevyTextureFormat::Rgb10a2Uint => todo!(),
+            BevyTextureFormat::NV12 => todo!(),
         }
     }
 }
@@ -537,6 +521,7 @@ impl From<Image> for bevy::prelude::Image {
             val.texture_dimension.into(),
             val.data,
             val.format.into(),
+            RenderAssetUsages::all(),
         )
     }
 }
@@ -559,14 +544,19 @@ impl Material {
     ) -> bevy::prelude::StandardMaterial {
         bevy::prelude::StandardMaterial {
             base_color: self.base_color.into(),
-            base_color_texture: self.base_color_texture.map(|x| images.add(x.into())),
+            base_color_texture: self
+                .base_color_texture
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
+            //.map(|x| images.add(x.into::<bevy::prelude::Image>())),
             emissive: self.emissive.into(),
-            emissive_texture: self.emissive_texture.map(|x| images.add(x.into())),
+            emissive_texture: self
+                .emissive_texture
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
             perceptual_roughness: self.perceptual_roughness,
             metallic: self.metallic,
             metallic_roughness_texture: self
                 .metallic_roughness_texture
-                .map(|x| images.add(x.into())),
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
             reflectance: self.reflectance,
             diffuse_transmission: self.diffuse_transmission,
             specular_transmission: self.specular_transmission,
@@ -574,21 +564,28 @@ impl Material {
             ior: self.ior,
             attenuation_distance: self.attenuation_distance,
             attenuation_color: self.attenuation_color.into(),
-            normal_map_texture: self.normal_map_texture.map(|x| images.add(x.into())),
+            normal_map_texture: self
+                .normal_map_texture
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
             flip_normal_map_y: self.flip_normal_map_y,
-            occlusion_texture: self.occlusion_texture.map(|x| images.add(x.into())),
+            occlusion_texture: self
+                .occlusion_texture
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
             double_sided: self.double_sided,
             cull_mode: self.cull_mode.map(Face::into),
             unlit: self.unlit,
             fog_enabled: self.fog_enabled,
             alpha_mode: self.alpha_mode.into(),
             depth_bias: self.depth_bias,
-            depth_map: self.depth_map.map(|x| images.add(x.into())),
+            depth_map: self
+                .depth_map
+                .map(|x| images.add(bevy::prelude::Image::from(x))),
             parallax_depth_scale: self.parallax_depth_scale,
             parallax_mapping_method: self.parallax_mapping_method.into(),
             max_parallax_layer_count: self.max_parallax_layer_count,
             opaque_render_method: self.opaque_render_method.into(),
             deferred_lighting_pass_id: self.deferred_lighting_pass_id,
+            lightmap_exposure: 0.0,
         }
     }
 }
