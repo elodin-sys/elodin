@@ -77,11 +77,16 @@ impl ControlService {
             .build()
             .unwrap();
 
+        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_serving::<SandboxControlServer<ControlService>>()
+            .await;
         let span = info_span!("grpc");
         Server::builder()
             .trace_fn(move |_| span.clone())
             .add_service(svc)
             .add_service(reflection)
+            .add_service(health_service)
             .serve(address)
             .await?;
         Ok(())

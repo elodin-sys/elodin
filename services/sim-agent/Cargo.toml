@@ -9,6 +9,7 @@ edition = "2021"
 # grpc
 tonic = "0.11"
 tonic-reflection = "0.11"
+tonic-health = "0.11"
 
 # codec
 tokio-util.version = "0.7"
