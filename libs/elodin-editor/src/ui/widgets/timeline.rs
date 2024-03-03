@@ -325,7 +325,7 @@ impl<'a> Timeline<'a> {
                         let segment_label = time_label(segment_size * i, false);
                         let label_text = egui::RichText::new(segment_label).size(font_size);
 
-                        column.put(column_rect, egui::Label::new(label_text));
+                        column.put(column_rect, egui::Label::new(label_text).selectable(false));
 
                         // center line
 
@@ -427,7 +427,7 @@ pub fn timeline_area(
                                 let text = egui::RichText::new(format!("{:0>8}", tick.0))
                                     .color(colors::WHITE);
 
-                                ui.add(egui::Label::new(text));
+                                ui.add(egui::Label::new(text).selectable(false));
                             });
                     });
 
@@ -505,7 +505,7 @@ pub fn timeline_area(
                                         egui::RichText::new(time_label(current_time_sec, true))
                                             .color(colors::WHITE);
 
-                                    ui.add(egui::Label::new(text));
+                                    ui.add(egui::Label::new(text).selectable(false));
                                 });
                         },
                     );

@@ -120,17 +120,13 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         layout_job.wrap.max_rows = 1;
         layout_job.wrap.break_anywhere = true;
 
-        let text_job = egui::widget_text::WidgetTextJob {
-            job: layout_job,
-            job_has_color: true,
-        };
-        let galley = ui.fonts(|f| f.layout_job(text_job.job));
+        let galley = ui.fonts(|f| f.layout_job(layout_job));
 
         let text_rect = egui::Align2::LEFT_CENTER.anchor_rect(egui::Rect::from_min_size(
             egui::pos2(left_center_pos.x + left_text_margin, left_center_pos.y),
             galley.size(),
         ));
-        ui.painter().galley(text_rect.min, galley);
+        ui.painter().galley(text_rect.min, galley, text_color);
     }
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

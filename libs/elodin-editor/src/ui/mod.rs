@@ -44,7 +44,7 @@ pub struct EntityPair {
 pub fn shortcuts(
     mut show_stats: ResMut<ShowStats>,
     mut paused: ResMut<Paused>,
-    kbd: Res<Input<KeyCode>>,
+    kbd: Res<ButtonInput<KeyCode>>,
 ) {
     if kbd.just_pressed(KeyCode::F12) {
         show_stats.0 = !show_stats.0;
@@ -254,7 +254,7 @@ pub fn render(
             .fixed_pos(viewport_left_top + viewport_margins)
             .show(contexts.ctx_mut(), |ui| {
                 let render_fps_str = diagnostics
-                    .get(FrameTimeDiagnosticsPlugin::FPS)
+                    .get(&FrameTimeDiagnosticsPlugin::FPS)
                     .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
                     .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
 
@@ -280,10 +280,12 @@ pub fn set_camera_viewport(
     let available_rect = contexts.ctx_mut().available_rect();
 
     let window = window.single();
-    let scale_factor = (window.scale_factor() * egui_settings.scale_factor) as f32;
-
+    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
     let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
     let viewport_size = available_rect.size() * scale_factor;
+    if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
+        return;
+    }
 
     let (mut camera, mut cam_transform) = main_camera_query.single_mut();
     camera.viewport = Some(Viewport {

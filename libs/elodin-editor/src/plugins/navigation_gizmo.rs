@@ -3,25 +3,26 @@ use std::f32::consts;
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup},
     asset::{AssetServer, Assets, Handle},
-    core_pipeline::{
-        clear_color::ClearColorConfig,
-        core_3d::{Camera3d, Camera3dBundle},
-    },
+    core_pipeline::core_3d::{Camera3d, Camera3dBundle},
     ecs::{
         component::Component,
         query::{With, Without},
         system::{Commands, Query, Res, ResMut, Resource},
     },
-    math::{Quat, UVec2, Vec2, Vec3},
+    math::{
+        primitives::{Cuboid, Rectangle},
+        Quat, UVec2, Vec2, Vec3,
+    },
     pbr::{PbrBundle, StandardMaterial},
+    prelude::ClearColorConfig,
     render::{
         camera::{Camera, Viewport},
         color::Color,
-        mesh::{shape, Mesh},
+        mesh::Mesh,
         texture::Image,
     },
     transform::components::Transform,
-    ui::camera_config::UiCameraConfig,
+    //ui::camera_config::UiCameraConfig,
     utils::default,
     window::Window,
 };
@@ -158,9 +159,9 @@ pub fn nav_gizmo(
 ) {
     let nav_materials = NavGizmoMaterials::new(asset_server);
 
-    let quad_mesh = meshes.add(Mesh::from(shape::Quad::new(Vec2::new(0.6, 0.6))));
-    let edge_mesh = meshes.add(Mesh::from(shape::Box::new(0.2, 0.2, 0.6)));
-    let corner_mesh = meshes.add(Mesh::from(shape::Box::new(0.2, 0.2, 0.2)));
+    let quad_mesh = meshes.add(Mesh::from(Rectangle::new(0.6, 0.6)));
+    let edge_mesh = meshes.add(Mesh::from(Cuboid::new(0.2, 0.2, 0.6)));
+    let corner_mesh = meshes.add(Mesh::from(Cuboid::new(0.2, 0.2, 0.2)));
 
     //--------------------------------------------------------------------------
 
@@ -834,16 +835,14 @@ pub fn nav_gizmo_camera(mut commands: Commands) {
                 camera: Camera {
                     order: 1,
                     hdr: true,
-                    ..Default::default()
-                },
-                camera_3d: Camera3d {
                     // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
                     clear_color: ClearColorConfig::None,
-                    ..default()
+                    ..Default::default()
                 },
+                camera_3d: Camera3d { ..default() },
                 ..default()
             },
-            UiCameraConfig { show_ui: false },
+            //UiCameraConfig { show_ui: false },
             NAVIGATION_GIZMO_LAYER,
             NavGizmoCamera,
         ))
@@ -894,7 +893,12 @@ pub fn set_camera_viewport(
     let available_rect = contexts.ctx_mut().available_rect();
 
     let window = window.single();
-    let scale_factor = (window.scale_factor() * egui_settings.scale_factor) as f32;
+
+    if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
+        return;
+    }
+
+    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
 
     let margin = margin * scale_factor;
     let side_length = side_length * scale_factor;

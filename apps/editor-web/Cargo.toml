@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 elodin-editor.path = "../../libs/elodin-editor"
-bevy.version = "0.12"
+bevy.version = "0.13"
 bevy.features = []
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]
