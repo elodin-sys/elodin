@@ -15,30 +15,35 @@ impl super::Api {
     pub async fn authed_route<Req, Resp, RespFuture>(
         &self,
         req: Request<Req>,
-        handler: impl FnOnce(Req, Claims) -> RespFuture,
+        handler: impl FnOnce(Req, Option<Claims>) -> RespFuture,
     ) -> Result<tonic::Response<Resp>, Status>
     where
         RespFuture: Future<Output = Result<Resp, Error>>,
     {
-        let auth_header = req
-            .metadata()
-            .get("Authorization")
-            .ok_or(Error::Unauthorized)?;
-        let auth_header = auth_header.to_str().map_err(|_| Error::Unauthorized)?;
-        let token = auth_header
-            .split("Bearer ")
-            .nth(1)
-            .ok_or(Error::Unauthorized)?;
-        let claims = validate_auth_header(
+        let handle = |req: Request<Req>, claims| async move {
+            handler(req.into_inner(), claims)
+                .await
+                .map_err(Error::status)
+                .map(Response::new)
+        };
+        let Some(auth_header) = req.metadata().get("Authorization") else {
+            return handle(req, None).await;
+        };
+
+        let Ok(auth_header) = auth_header.to_str() else {
+            return handle(req, None).await;
+        };
+        let Some(token) = auth_header.split("Bearer ").nth(1) else {
+            return handle(req, None).await;
+        };
+        let Ok(claims) = validate_auth_header(
             token,
             &self.auth_context.auth_config.domain,
             &self.auth_context.auth0_keys,
-        )?;
-
-        handler(req.into_inner(), claims)
-            .await
-            .map_err(Error::status)
-            .map(Response::new)
+        ) else {
+            return handle(req, None).await;
+        };
+        handle(req, Some(claims)).await
     }
 
     pub async fn authed_route_userinfo<Req, Resp, RespFuture>(
@@ -75,6 +80,7 @@ macro_rules! current_user_route_txn {
     ($self:ident, $req:ident, $handler:expr) => {
         $self
             .authed_route($req, move |req, claims| async move {
+                let claims = claims.ok_or(Error::Unauthorized)?;
                 let txn = $self.db.begin().await?;
                 let user = atc_entity::User::find()
                     .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
@@ -104,6 +110,54 @@ macro_rules! current_user_route {
                     .await?
                     .ok_or_else(|| Error::Unauthorized)?;
                 $handler($self, req, CurrentUser { user, claims }).await
+            })
+            .await
+    };
+}
+
+#[macro_export]
+macro_rules! optional_current_user_route {
+    ($self:ident, $req:ident, $handler:expr) => {
+        $self
+            .authed_route($req, move |req, claims| async move {
+                if let Some(claims) = claims {
+                    let user = atc_entity::User::find()
+                        .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
+                        .one(&$self.db)
+                        .await?
+                        .ok_or_else(|| Error::Unauthorized)?;
+                    $handler($self, req, Some(CurrentUser { user, claims })).await
+                } else {
+                    $handler($self, req, None).await
+                }
+            })
+            .await
+    };
+}
+
+#[macro_export]
+macro_rules! optional_current_user_route_txn {
+    ($self:ident, $req:ident, $handler:expr) => {
+        $self
+            .authed_route($req, move |req, claims| async move {
+                let txn = $self.db.begin().await?;
+                let user = if let Some(claims) = claims {
+                    let user = atc_entity::User::find()
+                        .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
+                        .one(&$self.db)
+                        .await?
+                        .ok_or_else(|| Error::Unauthorized)?;
+                    Some(CurrentUser { user, claims })
+                } else {
+                    None
+                };
+                let res = $handler($self, req, user, &txn).await;
+                if res.is_ok() {
+                    txn.commit().await?;
+                } else {
+                    txn.rollback().await?;
+                }
+                res
             })
             .await
     };

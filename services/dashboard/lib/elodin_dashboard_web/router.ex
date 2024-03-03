@@ -65,8 +65,6 @@ defmodule ElodinDashboardWeb.Router do
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
       live("/sandbox/new/:template", SandboxPickerLive, :new)
-      live("/sandbox/:id/share", EditorLive, :share)
-      live("/sandbox/:id", EditorLive, :edit)
     end
   end
 
@@ -75,5 +73,12 @@ defmodule ElodinDashboardWeb.Router do
 
     get("/users/log_in", UserSessionController, :log_in)
     get("/users/log_out", UserSessionController, :delete)
+
+    live_session :unauthed,
+      on_mount: [{ElodinDashboardWeb.UserAuth, :mount_current_user}] do
+      live("/sandbox/hn/:template", SandboxHNTemplateLive, :new)
+      live("/sandbox/:id", EditorLive, :edit)
+      live("/sandbox/:id/share", EditorLive, :share)
+    end
   end
 end

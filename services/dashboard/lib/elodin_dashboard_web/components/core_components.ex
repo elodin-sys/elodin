@@ -242,7 +242,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-xs border-solid border border-white border-opacity-5 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-white border-opacity-5 p-[12px] ",
         "bg-opacity-0 bg-white",
         "hover:bg-opacity-5 hover:border-opacity-20",
         "text-[12px] leading-[8px] font-semibold text-crema active:text-white/80",
@@ -275,7 +275,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-xs border-solid border border-green border-opacity-40 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-green border-opacity-40 p-[12px] ",
         "transition-colors",
         "bg-green bg-opacity-5",
         "hover:bg-opacity-15 hover:border-opacity-30",

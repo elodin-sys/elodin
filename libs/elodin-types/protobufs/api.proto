@@ -80,7 +80,7 @@ message Sandbox {
     }
     string draft_code = 5;
     bool public = 6;
-    bytes user_id = 7;
+    optional bytes user_id = 7;
 }
 
 message Page {

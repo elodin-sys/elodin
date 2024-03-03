@@ -145,7 +145,7 @@ defmodule ElodinDashboardWeb.UserAuth do
          {:ok, user} <- get_user_by_token(user_token) do
       assign(conn, :current_user, user)
     else
-      _ -> conn
+      _ -> assign(conn, :current_user, nil)
     end
   end
 
