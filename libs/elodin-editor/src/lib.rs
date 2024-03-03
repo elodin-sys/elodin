@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bevy::{
-    asset::embedded_asset,
+    asset::{embedded_asset, AssetMetaCheck},
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
@@ -10,7 +10,10 @@ use bevy::{
         ScreenSpaceAmbientOcclusionSettings,
     },
     prelude::*,
-    render::view::RenderLayers,
+    render::{
+        camera::{Exposure, PhysicalCameraParameters},
+        view::RenderLayers,
+    },
     window::{PresentMode, WindowTheme},
     winit::WinitSettings,
     DefaultPlugins,
@@ -60,7 +63,8 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(WebAssetPlugin)
+        app.insert_resource(AssetMetaCheck::Never)
+            .add_plugins(WebAssetPlugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
@@ -68,7 +72,6 @@ impl Plugin for EditorPlugin {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin Editor".into(),
                             present_mode: PresentMode::AutoVsync,
-                            fit_canvas_to_parent: true,
                             canvas: Some("#editor".to_string()),
                             resize_constraints: WindowResizeConstraints {
                                 min_width: 400.,
@@ -88,7 +91,6 @@ impl Plugin for EditorPlugin {
                 unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
                     wait: Duration::from_millis(16),
                 },
-                ..Default::default()
             })
             .init_resource::<ui::Paused>()
             .init_resource::<ui::ShowStats>()
@@ -123,9 +125,9 @@ impl Plugin for EditorPlugin {
         app.add_systems(Startup, setup_titlebar);
 
         // For adding features incompatible with wasm:
+        embedded_asset!(app, "./assets/diffuse.ktx2");
+        embedded_asset!(app, "./assets/specular.ktx2");
         if cfg!(not(target_arch = "wasm32")) {
-            embedded_asset!(app, "./assets/diffuse.ktx2");
-            embedded_asset!(app, "./assets/specular.ktx2");
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
@@ -150,6 +152,10 @@ pub struct MainCamera;
 
 fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
     // return the id so it can be fetched below
+    // commands.insert_resource(AmbientLight {
+    //     color: Color::WHITE,
+    //     brightness: 0.15,
+    // });
     let mut camera = commands.spawn((
         Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
@@ -158,6 +164,11 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
                 ..Default::default()
             },
             tonemapping: Tonemapping::TonyMcMapface,
+            exposure: Exposure::from_physical_camera(PhysicalCameraParameters {
+                aperture_f_stops: 2.8,
+                shutter_speed_s: 1.0 / 200.0,
+                sensitivity_iso: 400.0,
+            }),
             ..default()
         },
         // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
@@ -170,12 +181,14 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera);
 
+    camera.insert(EnvironmentMapLight {
+        diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
+        specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
+        intensity: 2000.0,
+    });
+
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
-        camera.insert(EnvironmentMapLight {
-            diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
-            specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
-        });
         // .insert(ScreenSpaceAmbientOcclusionBundle {
         //     settings: ScreenSpaceAmbientOcclusionSettings {
         //         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,

@@ -38,7 +38,7 @@ fn hide_loader() -> anyhow::Result<()> {
         .set_attribute("style", "display: none;")
         .map_err(|e| anyhow!("set attr err {:?}", e))?;
     canvas
-        .set_attribute("style", "display: block;")
+        .set_attribute("style", "display: block; width: 100%; height: 100%;")
         .map_err(|e| anyhow!("set attr err {:?}", e))?;
     Ok(())
 }
