@@ -32,7 +32,7 @@ futures.version = "0.3.29"
 futures.optional = true
 
 # bevy
-bevy.version = "0.12"
+bevy.version = "0.13"
 bevy.default_features = false
 bevy.features = ["bevy_pbr", "bevy_scene"]
 bevy.optional = true
