@@ -7,7 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
 
-    pub user_id: Uuid,
+    pub user_id: Option<Uuid>,
 
     pub name: String,
     pub code: String,
@@ -85,7 +85,7 @@ impl From<Model> for elodin_types::api::Sandbox {
             draft_code: sandbox.draft_code,
             status: elodin_types::api::sandbox::Status::from(sandbox.status).into(),
             public: sandbox.public,
-            user_id: sandbox.user_id.as_bytes().to_vec(),
+            user_id: sandbox.user_id.map(|id| id.as_bytes().to_vec()),
         }
     }
 }

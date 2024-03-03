@@ -34,19 +34,22 @@ impl Api {
     pub async fn get_sandbox(
         &self,
         req: GetSandboxReq,
-        CurrentUser { user, .. }: CurrentUser,
+        user: Option<CurrentUser>,
         txn: &DatabaseTransaction,
     ) -> Result<Sandbox, Error> {
         let id = req.id()?;
         let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id).one(txn).await? else {
             return Err(Error::NotFound);
         };
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
-            && !sandbox.public
-        {
-            return Err(Error::NotFound);
+        if sandbox.user_id.is_some() {
+            let CurrentUser { user, .. } = user.ok_or(Error::Unauthorized)?;
+            if !user
+                .permissions
+                .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
+                && !sandbox.public
+            {
+                return Err(Error::NotFound);
+            }
         }
         Ok(sandbox.into())
     }
@@ -114,7 +117,7 @@ impl Api {
     pub async fn create_sandbox(
         &self,
         req: CreateSandboxReq,
-        CurrentUser { mut user, .. }: CurrentUser,
+        user: Option<CurrentUser>,
         txn: &DatabaseTransaction,
     ) -> Result<CreateSandboxResp, Error> {
         let code = match req.template.as_deref() {
@@ -128,9 +131,10 @@ impl Api {
         };
         let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
+        let user_id = user.as_ref().map(|u| u.user.id);
         sandbox::ActiveModel {
             id: Set(id),
-            user_id: Set(user.id),
+            user_id: Set(user_id),
             name: Set(req.name),
             code: Set(code.clone()),
             draft_code: Set(code),
@@ -141,15 +145,17 @@ impl Api {
         }
         .insert_with_event(txn, &mut redis)
         .await?;
-        user.permissions
-            .insert(id, Permission::new(EntityType::Sandbox, Verb::all()));
-        atc_entity::user::ActiveModel {
-            id: Unchanged(user.id),
-            permissions: ActiveValue::Set(user.permissions),
-            ..Default::default()
+        if let Some(CurrentUser { mut user, .. }) = user {
+            user.permissions
+                .insert(id, Permission::new(EntityType::Sandbox, Verb::all()));
+            atc_entity::user::ActiveModel {
+                id: Unchanged(user.id),
+                permissions: ActiveValue::Set(user.permissions),
+                ..Default::default()
+            }
+            .update_with_event(txn, &mut redis)
+            .await?;
         }
-        .update_with_event(txn, &mut redis)
-        .await?;
         Ok(CreateSandboxResp {
             id: id.as_bytes().to_vec(),
         })
@@ -158,16 +164,23 @@ impl Api {
     pub async fn update_sandbox(
         &self,
         req: UpdateSandboxReq,
-        CurrentUser { user, .. }: CurrentUser,
+        user: Option<CurrentUser>,
         txn: &DatabaseTransaction,
     ) -> Result<UpdateSandboxResp, Error> {
         let mut redis = self.redis.clone();
         let id = req.id()?;
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
-        {
-            return Err(Error::Unauthorized);
+        let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
+            return Err(Error::NotFound);
+        };
+        if sandbox.user_id.is_some() {
+            let CurrentUser { user, .. } = user.ok_or(Error::Unauthorized)?;
+
+            if !user
+                .permissions
+                .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
+            {
+                return Err(Error::Unauthorized);
+            }
         }
         let sandbox = sandbox::ActiveModel {
             id: Unchanged(id),
@@ -205,7 +218,7 @@ impl Api {
     pub async fn boot_sandbox(
         &self,
         req: BootSandboxReq,
-        CurrentUser { user, .. }: CurrentUser,
+        user: Option<CurrentUser>,
     ) -> Result<BootSandboxResp, Error> {
         let mut redis = self.redis.clone();
         let id = req.id()?;
@@ -213,13 +226,18 @@ impl Api {
             return Err(Error::NotFound);
         };
 
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
-            && !sandbox.public
-        {
-            return Err(Error::Unauthorized);
+        if sandbox.user_id.is_some() {
+            let CurrentUser { user, .. } = user.ok_or(Error::Unauthorized)?;
+
+            if !user
+                .permissions
+                .has_perm(&id, EntityType::Sandbox, Verb::Write.into())
+                && !sandbox.public
+            {
+                return Err(Error::Unauthorized);
+            }
         }
+
         if sandbox.vm_id.is_some() {
             sandbox::ActiveModel {
                 id: Unchanged(id),
@@ -255,7 +273,7 @@ impl Api {
     pub async fn sandbox_events(
         &self,
         req: GetSandboxReq,
-        CurrentUser { user, .. }: CurrentUser,
+        user: Option<CurrentUser>,
     ) -> Result<<Api as api_server::Api>::SandboxEventsStream, Error> {
         let id = req.id()?;
 
@@ -265,13 +283,18 @@ impl Api {
         else {
             return Err(Error::NotFound);
         };
-        if !user
-            .permissions
-            .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
-            && !sandbox.public
-        {
-            return Err(Error::NotFound);
+
+        if sandbox.user_id.is_some() {
+            let CurrentUser { user, .. } = user.ok_or(Error::Unauthorized)?;
+            if !user
+                .permissions
+                .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
+                && !sandbox.public
+            {
+                return Err(Error::NotFound);
+            }
         }
+
         let sandbox_events = self.sandbox_events.resubscribe();
         let stream = tokio_stream::wrappers::BroadcastStream::new(sandbox_events);
         let stream = stream.filter_map(move |res| async move {
@@ -299,28 +322,34 @@ pub async fn sim_socket(
     auth: Query<WsAuth>,
 ) -> Result<impl IntoResponse, Error> {
     trace!(?sandbox_id, "sandbox id");
-    let claims = validate_auth_header(
-        &auth.token,
-        &context.auth_context.auth_config.domain,
-        &context.auth_context.auth0_keys,
-    )?;
-    let user = atc_entity::User::find()
-        .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
-        .one(&context.db)
-        .await?
-        .ok_or_else(|| Error::Unauthorized)?;
     let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(sandbox_id)
         .one(&context.db)
         .await?
     else {
         return Err(Error::NotFound);
     };
-    if !user
-        .permissions
-        .has_perm(&sandbox_id, EntityType::Sandbox, Verb::Read.into())
-        && !sandbox.public
-    {
-        return Err(Error::NotFound);
+
+    if sandbox.user_id.is_some() {
+        if let Ok(claims) = validate_auth_header(
+            &auth.token,
+            &context.auth_context.auth_config.domain,
+            &context.auth_context.auth0_keys,
+        ) {
+            let user = atc_entity::User::find()
+                .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
+                .one(&context.db)
+                .await?
+                .ok_or_else(|| Error::Unauthorized)?;
+            if !user
+                .permissions
+                .has_perm(&sandbox_id, EntityType::Sandbox, Verb::Read.into())
+                && !sandbox.public
+            {
+                return Err(Error::NotFound);
+            }
+        } else {
+            return Err(Error::Unauthorized);
+        }
     }
     trace!(?sandbox, "found sandbox");
     let Some(vm_id) = sandbox.vm_id else {

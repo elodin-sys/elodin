@@ -1,10 +1,11 @@
 use crate::{
     api::{multiplex::MultiplexService, sandbox::sim_socket},
     config::Auth0Config,
-    current_user_route, current_user_route_txn,
+    current_user_route_txn,
     error::Error,
     events::DbEvent,
     monte_carlo::SimStorageClient,
+    optional_current_user_route, optional_current_user_route_txn,
 };
 use axum::http::Request;
 use axum::{extract::MatchedPath, routing::get};
@@ -158,8 +159,11 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<CurrentUserReq>,
     ) -> Result<Response<CurrentUserResp>, Status> {
-        self.authed_route(req, |_, claims| self.current_user(claims))
-            .await
+        self.authed_route(req, |_, claims| async {
+            let claims = claims.ok_or(Error::Unauthorized)?;
+            self.current_user(claims).await
+        })
+        .await
     }
 
     async fn create_user(
@@ -174,21 +178,21 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<CreateSandboxReq>,
     ) -> Result<Response<CreateSandboxResp>, Status> {
-        current_user_route_txn!(self, req, Self::create_sandbox)
+        optional_current_user_route_txn!(self, req, Self::create_sandbox)
     }
 
     async fn update_sandbox(
         &self,
         req: tonic::Request<UpdateSandboxReq>,
     ) -> Result<Response<UpdateSandboxResp>, Status> {
-        current_user_route_txn!(self, req, Self::update_sandbox)
+        optional_current_user_route_txn!(self, req, Self::update_sandbox)
     }
 
     async fn boot_sandbox(
         &self,
         req: tonic::Request<BootSandboxReq>,
     ) -> Result<Response<BootSandboxResp>, Status> {
-        current_user_route!(self, req, Self::boot_sandbox)
+        optional_current_user_route!(self, req, Self::boot_sandbox)
     }
 
     async fn list_sandboxes(
@@ -202,7 +206,7 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<GetSandboxReq>,
     ) -> Result<Response<Sandbox>, Status> {
-        current_user_route_txn!(self, req, Self::get_sandbox)
+        optional_current_user_route_txn!(self, req, Self::get_sandbox)
     }
 
     type SandboxEventsStream = Pin<Box<dyn Stream<Item = Result<Sandbox, Status>> + Send + Sync>>;
@@ -210,7 +214,7 @@ impl api_server::Api for Api {
         &self,
         req: tonic::Request<GetSandboxReq>,
     ) -> Result<Response<Self::SandboxEventsStream>, Status> {
-        current_user_route!(self, req, Self::sandbox_events)
+        optional_current_user_route!(self, req, Self::sandbox_events)
     }
 
     async fn create_monte_carlo_run(
