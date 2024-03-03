@@ -131,15 +131,24 @@ impl Orca {
     }
 
     async fn handle_pod_change(&self, pod: &Pod) -> Result<(), Error> {
-        let Some(phase) = pod.status.as_ref().and_then(|s| s.phase.as_ref()) else {
+        let Some(status) = pod.status.as_ref() else {
+            return Ok(());
+        };
+        let ready = status
+            .conditions
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .any(|c| c.type_ == "Ready" && c.status == "True");
+        let Some(phase) = status.phase.as_ref() else {
             return Ok(());
         };
         let Some(name) = &pod.metadata.name else {
             return Ok(());
         };
         let status = match phase.as_str() {
-            "Pending" => Status::Booting,
-            "Running" => Status::Running,
+            _ if ready => Status::Running,
+            "Running" | "Pending" => Status::Booting,
             "Failed" => Status::Error,
             "Unknown" => Status::Error,
             _ => Status::Error,
@@ -269,7 +278,11 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                 "volumeMounts": [{
                     "name": "tmp",
                     "mountPath": "/tmp"
-                }]
+                }],
+                "readinessProbe": {
+                    "grpc": { "port": 50051 },
+                    "periodSeconds": 1
+                }
             }],
             "volumes": [{
                 "name": "tmp",
