@@ -79,15 +79,15 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
     <.navbar_layout current_user={@current_user}>
       <:navbar_right>
         <.link patch={~p"/sandbox/new"} phx-click={show_modal("new")}>
-          <.button type="link" type="outline" class="mr-1.5">
-            Create New
+          <.button class="mr-1.5">
+            CREATE NEW
           </.button>
         </.link>
       </:navbar_right>
-      <div class="flex flex-col min-h-full items-start p-elo-lg bg-black-secondary">
-        <div class="flex flex-col flex-wrap items-start w-full rounded-elo-xs bg-black-primary">
+      <div class="flex flex-col min-h-full items-start p-elo-lg py-elo-xl bg-black-primary">
+        <div class="flex flex-col flex-wrap items-start w-full rounded-elo-xs bg-black-secondary border border-white border-opacity-10 border-solid">
           <div class="p-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
-            Elodin templates
+            ELODIN TEMPLATES
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
             <.sandbox_card
@@ -104,15 +104,15 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             />
           </div>
         </div>
-        <div class="flex flex-wrap flex-col items-start self-stretch w-full flex-[0_0_auto] rounded-elo-xs ">
+        <div class="px-elo-xl flex flex-wrap flex-col items-start self-stretch w-full flex-[0_0_auto] rounded-elo-xs ">
           <div class="py-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
-            Your sandboxes
+            YOUR SANDBOXES
           </div>
           <div class="inline-flex items-start flex-wrap gap-elo-lg">
             <.sandbox_card
               :for={sandbox <- @sandboxes}
               name={sandbox.name}
-              img="/images/blue-circle-8.svg"
+              img="/images/white-bg.svg"
               href={~p"/sandbox/#{sandbox.id}"}
             />
           </div>
@@ -122,7 +122,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
     <.guide_modal
       id="onboarding"
-      bg_color={if @onboarding_step == 1, do: "hyper-blue", else: "surface-secondary"}
+      bg_color={if @onboarding_step == 1, do: "black-primary", else: "black-primary"}
       show={@is_onboarding}
       step_count={4}
       cur_step={@onboarding_step}
@@ -140,20 +140,20 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
         </div>
 
         <div class="mb-[18px] mt-[34px] h-[100px] w-[380px] flex flex-col text-center text-white">
-          <div class="border-b border-l border-white-opacity-200">
+          <div>
             Welcome and thanks for trying our alpha demo.
           </div>
-          <div class="border-b border-l border-r border-white-opacity-200">
+          <div>
             Check out the following screens to see what you
           </div>
-          <div class="border-b border-l border-r border-white-opacity-200">
+          <div>
             can do, and what to look forward to!
           </div>
-          <div class="h-full border-r border-white-opacity-200"></div>
+          <div class="h-full"></div>
         </div>
 
-        <.button class="px-6 py-4" type="invert" phx-click={JS.push("change_page", value: %{step: 2})}>
-          Continue
+        <.button class="px-6 py-4" phx-click={JS.push("change_page", value: %{step: 2})}>
+          CONTINUE
         </.button>
       <% end %>
 

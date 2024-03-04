@@ -22,7 +22,7 @@ defmodule ElodinDashboardWeb.ModalComponents do
   """
   attr(:id, :string, required: true)
   attr(:show, :boolean, default: false)
-  attr(:bg_color, :string, default: "surface-secondary")
+  attr(:bg_color, :string, default: "black-primary")
   attr(:step_count, :integer, default: 4)
   attr(:cur_step, :integer, default: 1)
   attr(:prev_page, JS, default: %JS{})
@@ -45,12 +45,12 @@ defmodule ElodinDashboardWeb.ModalComponents do
           <%= render_slot(@inner_block) %>
         </div>
 
-        <div class="basis-1/6 flex items-center justify-between bg-hyper-blue">
+        <div class="basis-1/6 flex items-center justify-between bg-black-primary">
           <div class="px-6">
             <.button
               :if={@cur_step > 1 && @cur_step <= @step_count}
               class="px-6 py-4"
-              type="outline"
+              type="secondary"
               phx-click={@prev_page}
             >
               Previous
@@ -67,13 +67,12 @@ defmodule ElodinDashboardWeb.ModalComponents do
             <.button
               :if={@cur_step > 1 && @cur_step <= @step_count}
               class="px-6 py-4"
-              type="invert"
               phx-click={if @cur_step == @step_count, do: @on_cancel, else: @next_page}
             >
               <%= if @cur_step == @step_count do %>
-                Get Started
+                GET STARTED
               <% else %>
-                Continue
+                CONTINUE
               <% end %>
             </.button>
           </div>
