@@ -4,6 +4,8 @@ import jax.numpy as np
 import numpy
 from elodin import *
 
+initial_angular_vel = np.array([-2.0, 3.0, 1.0])
+rw_force_clamp = 0.2
 
 def axis_angle(axis, angle):
     axis = axis / np.linalg.norm(axis)
@@ -63,7 +65,7 @@ def control(
     return rw.map(
         RWForce,
         lambda axis, _torque: RWForce.from_torque(
-            np.clip(np.dot(control_force[:3], axis) * axis, -0.5, 0.5)
+            np.clip(np.dot(control_force[:3], axis) * axis, -rw_force_clamp, rw_force_clamp)
         ),
     )
 
@@ -79,9 +81,7 @@ def rw_effector(
 w = WorldBuilder()
 b = Body(
     world_pos=SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-    world_vel=WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
-    world_accel=WorldVel.from_linear(np.array([0.0, 0.0, 0.0])),
-    force=Force.zero(),
+    world_vel=WorldVel.from_angular(initial_angular_vel),
     inertia=Inertia(12.0, j),
     #pbr=w.insert_asset(Pbr.from_path("examples/oresat-low.glb")),
     pbr=w.insert_asset(Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
