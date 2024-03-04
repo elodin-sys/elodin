@@ -4,7 +4,7 @@ use conduit::well_known::EntityMetadata;
 
 use crate::ui::{
     colors::{self, EColor},
-    EntityMeta, EntityPair, SelectedEntity,
+    utils, EntityMeta, EntityPair, SelectedEntity,
 };
 
 pub fn entity_list(
@@ -109,19 +109,14 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
 
         // Label
         let left_text_margin = horizontal_margin + 12.0 + icon_side;
-        let text = egui::RichText::new(metadata.name.to_owned()).color(text_color);
 
-        let wrap_width = ui.available_width() - left_text_margin - horizontal_margin;
-        let mut layout_job = egui::text::LayoutJob::single_section(
-            text.text().to_string(),
-            egui::TextFormat::simple(font_id, text_color),
+        let layout_job = utils::get_galley_layout_job(
+            metadata.name.to_owned(),
+            ui.available_width() - left_text_margin - horizontal_margin,
+            font_id,
+            text_color,
         );
-        layout_job.wrap.max_width = wrap_width;
-        layout_job.wrap.max_rows = 1;
-        layout_job.wrap.break_anywhere = true;
-
         let galley = ui.fonts(|f| f.layout_job(layout_job));
-
         let text_rect = egui::Align2::LEFT_CENTER.anchor_rect(egui::Rect::from_min_size(
             egui::pos2(left_center_pos.x + left_text_margin, left_center_pos.y),
             galley.size(),
