@@ -147,7 +147,7 @@ defmodule ElodinDashboardWeb.EditorLive do
       </:navbar_center>
       <:navbar_right>
         <.link patch={~p"/sandbox/#{@sandbox.id_string}/share"} phx-click={show_modal("share")}>
-          <.button type="outline" class="mr-1.5">
+          <.button class="mr-1.5">
             Share
           </.button>
         </.link>
@@ -188,11 +188,11 @@ defmodule ElodinDashboardWeb.EditorLive do
                 phx-click={JS.push("toggle_console", value: %{show_console: !@show_console})}
               >
                 <.arrow_chevron_up class={if @show_console, do: "rotate-180", else: "rotate-0"} />
-                <span class="leading-4">Console</span>
+                <span class="leading-4">CONSOLE</span>
               </.button>
               <.button class="flex gap-2 py-2.5" phx-click={JS.push("update_code")}>
                 <.lightning />
-                <span class="leading-3">Update Sim</span>
+                <span class="leading-3">UPDATE SIM</span>
               </.button>
             </div>
 

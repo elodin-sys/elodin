@@ -20,7 +20,7 @@ defmodule ElodinDashboardWeb.NavbarComponents do
       <li class="text-[0.8125rem] ml-auto flex items-center">
         <%= render_slot(@navbar_right) %>
         <.link href="https://docs.elodin.systems">
-          <.button type="outline" class="mr-1.5">
+          <.button type="secondary" class="mr-1.5">
             Docs
           </.button>
         </.link>
@@ -57,7 +57,7 @@ defmodule ElodinDashboardWeb.NavbarComponents do
         </div>
       </div>
       <.link href="/users/log_out">
-        <.button type="outline" class="m-elo-md">Log Out</.button>
+        <.button class="m-elo-md">Log Out</.button>
       </.link>
     </div>
     """

@@ -134,6 +134,7 @@ pub fn render(
         handle: contexts.add_image(images.icon_scrub.clone_weak()),
     };
 
+    #[cfg(target_os = "macos")]
     egui::TopBottomPanel::top("titlebar")
         .frame(egui::Frame {
             fill: colors::INTERFACE_BACKGROUND_BLACK,

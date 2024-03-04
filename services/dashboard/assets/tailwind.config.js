@@ -22,10 +22,13 @@ module.exports = {
         tan: "#F3E5C5",
         orange: "#EF5800",
         green: "#88DE9F",
+        "green-40": "rgb(30 32 28)",
         "green-opacity": {
           "40": "rgba(136, 222, 159, 0.4)"
         },
         "dark-matte": "#131212",
+        "red": "rgba(233, 75, 20, 1)",
+        "red-40": "rgb(31 21 17)",
         "code": "#282C34",
         "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
         "primative-colors-white-opacity-100": "rgba(255, 255, 255, 0.1)",
@@ -54,7 +57,7 @@ module.exports = {
         'elo-xl': "24px",
       },
       borderRadius: {
-        'elo-xxs': "4px",
+        'elo-xxs': "2px",
         'elo-xs': "4px",
         'elo-sm': "8px",
         'elo-md': "12px"
