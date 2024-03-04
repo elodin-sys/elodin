@@ -21,6 +21,7 @@ use self::widgets::{inspector, list, timeline};
 mod colors;
 pub mod images;
 mod theme;
+mod utils;
 mod widgets;
 
 #[derive(Resource, Default)]
@@ -170,7 +171,7 @@ pub fn render(
                     ..Default::default()
                 })
                 .min_width(width * 0.15)
-                .default_width(width * 0.20)
+                .default_width(width * 0.25)
                 .max_width(width * 0.35)
                 .show(contexts.ctx_mut(), |ui| {
                     inspector::inspector(
@@ -179,7 +180,6 @@ pub fn render(
                         selected_entity_full,
                         &metadata_store,
                     );
-                    ui.allocate_space(ui.available_size());
                 });
         } else {
             egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
