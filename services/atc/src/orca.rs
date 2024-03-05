@@ -249,6 +249,7 @@ impl Orca {
 }
 
 fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod {
+    let cid = const_fnv1a_hash::fnv1a_hash_str_32(pod_name);
     serde_json::from_value(serde_json::json!({
         "apiVersion": "v1",
         "kind":  "Pod",
@@ -261,34 +262,59 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
         },
         "spec": {
             "runtimeClassName": runtime_class,
-            "containers": [{
-                "name": "payload",
-                "image": image_name,
-                "env": [
-                    { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
-                    { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
-                    { "name": "RUST_LOG", "value": "debug" }
-                ],
-                "resources": {
-                    "requests": {
-                        "cpu": "0.3",
-                        "memory": "500Mi"
+            "shareProcessNamespace": true,
+            "containers": [
+                {
+                    "name": "payload",
+                    "image": image_name,
+                    "env": [
+                        { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
+                        { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
+                        { "name": "ELODIN_SANDBOX.BUILDER_CID", "value": cid.to_string() },
+                        { "name": "RUST_LOG", "value": "sim_agent=debug,info" }
+                    ],
+                    "resources": {
+                        "requests": {
+                            "cpu": "0.3",
+                            "memory": "500Mi"
+                        }
+                    },
+                    "volumeMounts": [{
+                        "name": "tmp",
+                        "mountPath": "/tmp"
+                    }],
+                    "readinessProbe": {
+                        "grpc": { "port": 50051 },
+                        "periodSeconds": 1
                     }
                 },
-                "volumeMounts": [{
-                    "name": "tmp",
-                    "mountPath": "/tmp"
-                }],
-                "readinessProbe": {
-                    "grpc": { "port": 50051 },
-                    "periodSeconds": 1
+                {
+                    "name": "builder",
+                    "image": image_name,
+                    "command": ["/vm/runvm"],
+                    "env": [
+                        { "name": "CID", "value": cid.to_string() },
+                    ],
+                    "resources": {
+                        "requests": {
+                            "cpu": "0.5",
+                            "memory": "1Gi",
+                        },
+                        "limits": {
+                            "dev/kvm": "1",
+                            "dev/vhost-vsock": "1"
+                        }
+                    },
+                    "volumeMounts": [{
+                        "name": "tmp",
+                        "mountPath": "/tmp"
+                    }],
                 }
-            }],
+            ],
             "volumes": [{
                 "name": "tmp",
                 "emptyDir": {
-                    "medium": "Memory",
-                    "sizeLimit": "500Mi"
+                    "sizeLimit": "8Gi"
                 }
             }]
         }

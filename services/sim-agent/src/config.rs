@@ -12,6 +12,7 @@ pub struct Config {
 pub struct SandboxConfig {
     pub control_addr: SocketAddr,
     pub sim_addr: SocketAddr,
+    pub builder_cid: u32,
 }
 
 #[derive(Debug, Deserialize)]

@@ -12,7 +12,6 @@ spec:
       labels:
         app.kubernetes.io/name: sim-agent-balloon
     spec:
-      runtimeClassName: gvisor
       priorityClassName: placeholder-priority
       terminationGracePeriodSeconds: 0
       containers:
@@ -24,3 +23,6 @@ spec:
           requests:
             cpu: 300m
             memory: 500Mi
+          limits:
+            dev/kvm: 1
+            dev/vhost-vsock: 1

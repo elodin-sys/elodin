@@ -85,3 +85,5 @@ chrono = "0.4"
 
 # gcs
 google-cloud-storage = { version = "0.15.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
+
+const-fnv1a-hash = "1.1.0"
