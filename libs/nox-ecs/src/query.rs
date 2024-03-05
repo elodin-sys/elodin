@@ -23,7 +23,8 @@ impl<Param> Clone for Query<Param> {
 }
 
 impl<Param> Query<Param> {
-    fn transmute<B>(self) -> Query<B> {
+    #[inline(always)]
+    pub(crate) fn transmute<B>(self) -> Query<B> {
         Query {
             exprs: self.exprs,
             entity_map: self.entity_map,
@@ -176,7 +177,18 @@ impl<G: ComponentGroup> SystemParam for Query<G> {
     }
 
     fn insert_into_builder(self, builder: &mut crate::PipelineBuilder) {
-        for (expr, id) in self.exprs.iter().zip(G::component_ids()) {
+        self.insert_into_builder_erased(builder, G::component_ids());
+    }
+}
+
+impl<C> Query<C> {
+    #[doc(hidden)]
+    pub fn insert_into_builder_erased(
+        &self,
+        builder: &mut crate::PipelineBuilder,
+        component_ids: impl Iterator<Item = ComponentId>,
+    ) {
+        for (expr, id) in self.exprs.iter().zip(component_ids) {
             let array: ComponentArray<()> = ComponentArray {
                 buffer: expr.clone(),
                 len: self.len,
@@ -239,8 +251,10 @@ impl<G: ComponentGroup> Query<G> {
             phantom_data: PhantomData,
         }
     }
+}
 
-    pub fn filter(&self, ids: &[EntityId]) -> Query<G> {
+impl<G> Query<G> {
+    pub fn filter(&self, ids: &[EntityId]) -> Self {
         let indexes: Vec<u32> = ids
             .iter()
             .flat_map(|id| self.entity_map.get(id).copied())

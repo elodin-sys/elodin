@@ -4,16 +4,20 @@ use std::{
     net::SocketAddr,
     ops::Deref,
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
 use clap::Parser;
-use nox_ecs::conduit::{Asset, TagValue};
 use nox_ecs::{
     conduit, join_many,
     nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
-    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore, Query,
+    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore,
     SharedWorld, System, Table, World,
+};
+use nox_ecs::{
+    conduit::{Asset, TagValue},
+    join_query,
 };
 use numpy::{ndarray::ArrayViewD, PyArray, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::{
@@ -22,7 +26,10 @@ use pyo3::{
     types::{PyBytes, PyTuple},
 };
 
+mod graph;
 mod spatial;
+
+pub use graph::*;
 pub use spatial::*;
 
 #[pyclass]
@@ -166,7 +173,7 @@ impl PipelineBuilder {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 #[pyclass]
 pub struct ComponentId {
     inner: conduit::ComponentId,
@@ -255,6 +262,16 @@ impl ComponentType {
         let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
         Self {
             ty: PrimitiveType::F64,
+            shape,
+        }
+    }
+
+    #[classattr]
+    #[pyo3(name = "Edge")]
+    fn edge(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![2]).to_owned();
+        Self {
+            ty: PrimitiveType::U64,
             shape,
         }
     }
@@ -823,7 +840,7 @@ impl ComponentArrayMetadata {
             phantom_data: PhantomData::<()>,
         };
         let other_exprs = other_exprs.into_iter().map(Noxpr::jax).collect();
-        let query = Query {
+        let query = nox_ecs::Query {
             exprs: other_exprs,
             entity_map: other_metadata.entity_map,
             len: other_metadata.len,
@@ -1034,6 +1051,120 @@ impl EntityMetadata {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct QueryInner {
+    query: nox_ecs::Query<()>,
+    metadata: Vec<Metadata>,
+}
+
+#[pymethods]
+impl QueryInner {
+    #[staticmethod]
+    fn from_builder(
+        builder: &mut PipelineBuilder,
+        component_ids: Vec<ComponentId>,
+    ) -> Result<QueryInner, Error> {
+        let metadata = component_ids
+            .iter()
+            .map(|id| {
+                builder
+                    .builder
+                    .world
+                    .column_by_id(id.inner)
+                    .map(|c| Metadata {
+                        inner: Arc::new(c.column.metadata.clone()),
+                    })
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(Error::NoxEcs(nox_ecs::Error::ComponentNotFound))?;
+        let query = component_ids
+            .iter()
+            .copied()
+            .map(|id| {
+                builder
+                    .builder
+                    .vars
+                    .get(&id.inner)
+                    .ok_or(nox_ecs::Error::ComponentNotFound)
+            })
+            .try_fold(None, |mut query, a| {
+                let a = a?;
+                if query.is_some() {
+                    query = Some(join_many(query.take().unwrap(), &*a.borrow()));
+                } else {
+                    let a = a.borrow().clone();
+                    let q: nox_ecs::Query<()> = a.into();
+                    query = Some(q);
+                }
+                Ok::<_, Error>(query)
+            })?
+            .expect("query must not be empty");
+        Ok(Self { query, metadata })
+    }
+
+    fn map(&self, new_buf: PyObject, metadata: Metadata) -> QueryInner {
+        let expr = Noxpr::jax(new_buf);
+        QueryInner {
+            query: nox_ecs::Query {
+                exprs: vec![expr],
+                entity_map: self.query.entity_map.clone(),
+                len: self.query.len,
+                phantom_data: PhantomData,
+            },
+            metadata: vec![metadata],
+        }
+    }
+
+    fn arrays(&self) -> Result<Vec<PyObject>, Error> {
+        self.query
+            .exprs
+            .iter()
+            .map(|e| e.to_jax().map_err(Error::from))
+            .collect()
+    }
+
+    fn insert_into_builder(&self, builder: &mut PipelineBuilder) {
+        self.query.insert_into_builder_erased(
+            &mut builder.builder,
+            self.metadata.iter().map(|m| m.inner.component_id),
+        );
+    }
+
+    fn join_query(&self, other: &QueryInner) -> QueryInner {
+        let query = join_query(self.query.clone(), other.query.clone());
+        let metadata = self
+            .metadata
+            .iter()
+            .cloned()
+            .chain(other.metadata.iter().cloned())
+            .collect();
+        QueryInner { query, metadata }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Metadata {
+    inner: Arc<conduit::Metadata>,
+}
+
+#[pymethods]
+impl Metadata {
+    #[new]
+    fn new(component_id: ComponentId, ty: ComponentType, name: Option<String>) -> Self {
+        let inner = Arc::new(conduit::Metadata {
+            component_id: component_id.inner,
+            component_type: ty.into(),
+            tags: name
+                .into_iter()
+                .map(|n| ("name".to_string(), TagValue::String(n)))
+                .collect(),
+        });
+        Metadata { inner }
+    }
+}
+
 #[pyfunction]
 #[cfg(feature = "embed-cli")]
 // TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
@@ -1064,6 +1195,10 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Pbr>()?;
     m.add_class::<EntityMetadata>()?;
     m.add_class::<PrimitiveType>()?;
+    m.add_class::<Metadata>()?;
+    m.add_class::<QueryInner>()?;
+    m.add_class::<GraphQueryInner>()?;
+    m.add_class::<Edge>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     #[cfg(feature = "embed-cli")]
     m.add_function(wrap_pyfunction!(run_cli, m)?)?;
