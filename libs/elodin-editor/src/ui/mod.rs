@@ -59,6 +59,21 @@ pub fn shortcuts(
 pub type EntityData<'a> = (&'a EntityId, Entity, &'a ComponentValueMap);
 pub type EntityMeta<'a> = (&'a EntityId, Entity, &'a EntityMetadata);
 
+pub struct UiPlugin;
+
+impl Plugin for UiPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Paused>()
+            .init_resource::<ShowStats>()
+            .init_resource::<SelectedEntity>()
+            .init_resource::<HoveredEntity>()
+            .add_systems(Update, shortcuts)
+            .add_systems(Update, render)
+            .add_systems(Update, render_viewport.after(render))
+            .add_systems(Update, set_camera_viewport.after(render_viewport));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     mut event: EventWriter<ControlMsg>,
@@ -66,11 +81,8 @@ pub fn render(
     mut paused: ResMut<Paused>,
     mut tick: ResMut<Tick>,
     selected_entity: ResMut<SelectedEntity>,
-    hovered_entity: Res<HoveredEntity>,
     max_tick: Res<MaxTick>,
     tick_time: Res<TimeStep>,
-    show_stats: Res<ShowStats>,
-    diagnostics: Res<DiagnosticsStore>,
     entities: Query<EntityData>,
     entities_meta: Query<EntityMeta>,
     window: Query<&Window>,
@@ -87,43 +99,8 @@ pub fn render(
         .iter()
         .find(|(id, _, _)| selected_entity_pair.is_some_and(|eid| eid.conduit == **id))
         .map(|(_, _, metadata)| metadata.to_owned());
-    let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
-        entities_meta
-            .iter()
-            .find(|(id, _, _)| hovered_entity_pair.conduit == **id)
-            .map(|(_, _, metadata)| metadata.to_owned())
-    } else {
-        None
-    };
 
     theme::set_theme(contexts.ctx_mut());
-
-    if let Some(hovered_entity_meta) = hovered_entity_meta {
-        contexts
-            .ctx_mut()
-            .set_cursor_icon(egui::CursorIcon::PointingHand);
-
-        if let Some(cursor_pos) = window.cursor_position() {
-            let offset = 16.0;
-            let window_pos = egui::pos2(cursor_pos.x + offset, cursor_pos.y + offset);
-
-            egui::Window::new("hovered_entity")
-                .title_bar(false)
-                .resizable(false)
-                .frame(egui::Frame {
-                    fill: colors::with_opacity(colors::STONE_950, 0.5),
-                    stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
-                    inner_margin: egui::Margin::symmetric(16.0, 8.0),
-                    ..Default::default()
-                })
-                .fixed_pos(window_pos)
-                .show(contexts.ctx_mut(), |ui| {
-                    ui.add(Label::new(
-                        RichText::new(hovered_entity_meta.name).color(Color32::WHITE),
-                    ));
-                });
-        }
-    }
 
     let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -243,8 +220,58 @@ pub fn render(
                 timeline_icons,
             );
         });
+}
+
+pub fn render_viewport(
+    mut contexts: EguiContexts,
+    window: Query<&Window>,
+    entities_meta: Query<EntityMeta>,
+    show_stats: Res<ShowStats>,
+    tick_time: Res<TimeStep>,
+    diagnostics: Res<DiagnosticsStore>,
+    hovered_entity: Res<HoveredEntity>,
+) {
+    let window = window.single();
+
+    let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
+        entities_meta
+            .iter()
+            .find(|(id, _, _)| hovered_entity_pair.conduit == **id)
+            .map(|(_, _, metadata)| metadata.to_owned())
+    } else {
+        None
+    };
+
+    if let Some(hovered_entity_meta) = hovered_entity_meta {
+        contexts
+            .ctx_mut()
+            .set_cursor_icon(egui::CursorIcon::PointingHand);
+
+        if let Some(cursor_pos) = window.cursor_position() {
+            let offset = 16.0;
+            let window_pos = egui::pos2(cursor_pos.x + offset, cursor_pos.y + offset);
+
+            egui::Window::new("hovered_entity")
+                .title_bar(false)
+                .resizable(false)
+                .frame(egui::Frame {
+                    fill: colors::with_opacity(colors::STONE_950, 0.5),
+                    stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
+                    inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                    ..Default::default()
+                })
+                .fixed_pos(window_pos)
+                .show(contexts.ctx_mut(), |ui| {
+                    ui.add(Label::new(
+                        RichText::new(hovered_entity_meta.name).color(Color32::WHITE),
+                    ));
+                });
+        }
+    }
 
     if show_stats.0 {
+        let sim_fps = 1.0 / tick_time.0.as_secs_f64();
+
         let viewport_left_top = contexts.ctx_mut().available_rect().left_top();
         let viewport_margins = egui::vec2(16.0, 16.0);
 

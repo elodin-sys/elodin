@@ -92,10 +92,6 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
-            .init_resource::<ui::Paused>()
-            .init_resource::<ui::ShowStats>()
-            .init_resource::<ui::SelectedEntity>()
-            .init_resource::<ui::HoveredEntity>()
             .add_plugins(
                 DefaultPickingPlugins
                     .build()
@@ -109,15 +105,14 @@ impl Plugin for EditorPlugin {
             .add_plugins(PolylinePlugin)
             .add_plugins(TracesPlugin)
             .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_systems(Startup, setup_main_camera)
             .add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
-            .add_systems(Update, (ui::shortcuts, ui::render))
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
-            .add_systems(PostUpdate, ui::set_camera_viewport.after(ui::render))
             .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()))
             .insert_resource(Msaa::Off);
 
