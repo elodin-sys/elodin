@@ -318,6 +318,13 @@ fn recv_system(
                     tx.send(packet).unwrap();
                 }
                 let _ = sim_peer.tx.insert(tx);
+
+                for (_, entity) in entity_map.iter() {
+                    if let Some(mut entity_commands) = commands.get_entity(*entity) {
+                        entity_commands.despawn();
+                    }
+                }
+                entity_map.0 = HashMap::new();
             }
             Msg::Control(ControlMsg::Subscribe { query }) => {
                 let subscription = Subscription {
