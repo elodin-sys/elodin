@@ -32,16 +32,11 @@ let
         systemdMinimal
         alsa-lib
         pkg-config
-        (python3.withPackages (ps: with ps; [numpy jax jaxlib]))
-        clang
+        python3
         protobuf
-        pango
-        gtk3
       ]
       ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
     XLA_EXTENSION_DIR = "${xla_ext}";
-    LIBCLANG_PATH = "${pkgs.llvmPackages_14.libclang.lib}/lib";
-    BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''${lib.optionalString stdenv.cc.isGNU "-isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc} -isystem ${stdenv.cc.cc}/include/c++/${lib.getVersion stdenv.cc.cc}/${stdenv.hostPlatform.config} -idirafter ${stdenv.cc.cc}/lib/gcc/${stdenv.hostPlatform.config}/${lib.getVersion stdenv.cc.cc}/include"}'';
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs // {
