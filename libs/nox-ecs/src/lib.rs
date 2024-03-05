@@ -9,7 +9,6 @@ use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
 use once_cell::sync::OnceCell;
 use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
-use smallvec::smallvec;
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -570,7 +569,6 @@ pub fn update_var(
 ) -> Noxpr {
     use nox::NoxprScalarExt;
     let (old, new, _) = intersect_ids(old_entity_map, update_entity_map);
-    println!("{}", update_buffer);
     let shape = update_buffer.shape().unwrap();
     old.iter().zip(new.iter()).fold(
         old_buffer.clone(),
@@ -582,13 +580,17 @@ pub fn update_var(
             }
             let mut stop = shape.clone();
             stop[0] = *update_index as i64 + 1;
+            let start = std::iter::once(*update_index as i64)
+                .chain(std::iter::repeat(0).take(shape.len() - 1))
+                .collect();
+            let existing_index = std::iter::once((*existing_index as i64).constant())
+                .chain(std::iter::repeat(0i64.constant()).take(shape.len() - 1))
+                .collect();
             buffer.dynamic_update_slice(
-                vec![(*existing_index).constant()],
-                update_buffer.clone().slice(
-                    smallvec![*update_index as i64],
-                    stop,
-                    shape.iter().map(|_| 1).collect(),
-                ),
+                existing_index,
+                update_buffer
+                    .clone()
+                    .slice(start, stop, shape.iter().map(|_| 1).collect()),
             )
         },
     )

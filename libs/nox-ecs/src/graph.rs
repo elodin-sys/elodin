@@ -3,11 +3,12 @@ use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{Component, ComponentArray, ComponentGroup, Query, SystemParam};
+use crate::{Component, ComponentArray, ComponentGroup, Error, Query, SystemParam};
 
-pub struct GraphQuery<E: EdgeComponent, G: ComponentGroup> {
+#[derive(Clone)]
+pub struct GraphQuery<E, G> {
     pub edges: Vec<Edge>,
-    exprs: BTreeMap<usize, (Query<G>, Query<G>)>,
+    pub exprs: BTreeMap<usize, (Query<G>, Query<G>)>,
     phantom_data: PhantomData<(E, G)>,
 }
 
@@ -107,17 +108,38 @@ impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E
             .map(move |_| {
                 let (size, value) = ty.parse_value(buf).unwrap();
                 buf.advance(size);
-                dbg!(E::from_value(value).map(|e| e.to_edge()))
+                E::from_value(value).map(|e| e.to_edge())
             })
             .collect::<Option<Vec<_>>>()
             .unwrap();
+        let g_query = Query::<G>::from_builder(builder);
+        let GraphQuery { edges, exprs, .. } =
+            GraphQuery::from_queries(edges, g_query.transmute()).unwrap();
+        let exprs = exprs
+            .into_iter()
+            .map(|(id, edge)| {
+                let (from, to) = edge;
+                (id, (from.transmute(), to.transmute()))
+            })
+            .collect();
+        GraphQuery {
+            edges,
+            exprs,
+            phantom_data: PhantomData,
+        }
+    }
+
+    fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
+}
+
+impl GraphQuery<(), ()> {
+    pub fn from_queries(edges: Vec<Edge>, g_query: Query<()>) -> Result<GraphQuery<(), ()>, Error> {
         let mut from_map = BTreeMap::new();
         for edge in &edges {
             let vec: &mut Vec<EntityId> = from_map.entry(edge.from).or_default();
             vec.push(edge.to);
         }
-        let g_query = Query::<G>::from_builder(builder);
-        let mut exprs: BTreeMap<usize, (Query<G>, Query<G>)> = BTreeMap::new();
+        let mut exprs: BTreeMap<usize, (Query<()>, Query<()>)> = BTreeMap::new();
         for (from_id, ids) in from_map {
             let from = g_query.filter(&[from_id]);
             let mut to = g_query.filter(&ids);
@@ -150,14 +172,12 @@ impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E
                 }
             }
         }
-        GraphQuery {
+        Ok(GraphQuery {
             edges,
             phantom_data: PhantomData,
             exprs,
-        }
+        })
     }
-
-    fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
 }
 
 impl<E: EdgeComponent, G: ComponentGroup> GraphQuery<E, G> {
