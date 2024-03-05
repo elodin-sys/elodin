@@ -2144,15 +2144,12 @@ dependencies = [
  "itertools 0.12.1",
  "lazy_static",
  "lazycell",
- "log",
- "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
  "shlex",
  "syn 2.0.52",
- "which",
 ]
 
 [[package]]
@@ -11114,7 +11111,6 @@ checksum = "054a8e68b76250b253f671d1268cb7f1ae089ec35e195b2efb2a4e9a836d0621"
 name = "xla"
 version = "0.1.6"
 dependencies = [
- "bindgen",
  "bytemuck",
  "cc",
  "cpp",
