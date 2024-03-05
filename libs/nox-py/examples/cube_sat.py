@@ -34,6 +34,7 @@ print(axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(45))[:3] * k)
 
 Goal = Component[SpatialTransform, "goal", ComponentType.SpatialPosF64]
 
+
 @dataclass
 class ControlInput(Archetype):
     goal: Goal
@@ -54,14 +55,14 @@ class ReactionWheel(Archetype):
 @system
 def control(
     sensor: Query[WorldPos, WorldVel, Goal], rw: Query[RWAxis, RWForce]
-) -> ComponentArray[RWForce]:
+) -> Query[RWForce]:
     control_force = sensor.map(
         Force,
         lambda p, v, i: Force.from_torque(
             -1.0 * v.angular() * d
             + -1.0 * (p.angular().vector() - i.angular().vector())[:3] * k
         ),
-    ).buf[0]
+    ).bufs[0][0]
     return rw.map(
         RWForce,
         lambda axis, _torque: RWForce.from_torque(
@@ -72,9 +73,9 @@ def control(
 
 @system
 def rw_effector(
-    rw_force: ComponentArray[RWForce], torque: Query[WorldPos, WorldVel, Force]
-) -> ComponentArray[Force]:
-    force = np.sum(rw_force.buf, 0)
+    rw_force: Query[RWForce], torque: Query[WorldPos, WorldVel, Force]
+) -> Query[Force]:
+    force = np.sum(rw_force.bufs[0], 0)
     return torque.map(Force, lambda _p, _v, _torque: Force.from_torque(force[:3]))
 
 
@@ -83,8 +84,12 @@ b = Body(
     world_pos=SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
     world_vel=WorldVel.from_angular(initial_angular_vel),
     inertia=Inertia(12.0, j),
-    #pbr=w.insert_asset(Pbr.from_path("examples/oresat-low.glb")),
-    pbr=w.insert_asset(Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
+    # pbr=w.insert_asset(Pbr.from_path("./examples/oresat-low.glb")),
+    pbr=w.insert_asset(
+        Pbr.from_url(
+            "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
+        )
+    ),
 )
 w.spawn(
     ReactionWheel(

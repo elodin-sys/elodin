@@ -13,10 +13,10 @@ use crate::{Component, DynArrayView, Error};
 /// A type erased columnar data store located on the host CPU
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct HostColumn {
-    pub(crate) buf: Vec<u8>,
-    pub(crate) len: usize,
-    pub(crate) component_type: ComponentType,
-    pub(crate) component_id: ComponentId,
+    pub buf: Vec<u8>,
+    pub len: usize,
+    pub component_type: ComponentType,
+    pub component_id: ComponentId,
     pub asset: bool,
 }
 
