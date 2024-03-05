@@ -877,6 +877,7 @@ dependencies = [
  "chrono",
  "compact_str",
  "config 0.14.0",
+ "const-fnv1a-hash",
  "elodin-types",
  "enumflags2",
  "flume",
@@ -5874,6 +5875,7 @@ dependencies = [
  "bitflags 2.4.2",
  "cfg-if",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -8658,12 +8660,33 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "tokio-vsock",
  "tonic",
  "tonic-health",
  "tonic-reflection",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "zstd 0.13.0",
+]
+
+[[package]]
+name = "sim-builder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "elodin-types",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-vsock",
+ "tonic",
+ "tonic-health",
+ "tonic-reflection",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9661,6 +9684,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-vsock"
+version = "0.5.0"
+source = "git+https://github.com/rust-vsock/tokio-vsock?rev=44321de#44321dea947725807f1a1af80b621ebff8c8760c"
+dependencies = [
+ "bytes",
+ "futures",
+ "libc",
+ "tokio",
+ "tonic",
+ "vsock",
+]
+
+[[package]]
 name = "toml"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9745,6 +9781,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots 0.26.1",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -10163,6 +10200,16 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vsock"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dfb6e7a74830912f1f4a7655227c9ded1ea4e9136676311fedf54bedb412f35"
+dependencies = [
+ "libc",
+ "nix 0.27.1",
+]
 
 [[package]]
 name = "waker-fn"
@@ -11174,6 +11221,15 @@ dependencies = [
 
 [[package]]
 name = "zstd"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
+dependencies = [
+ "zstd-safe 6.0.6",
+]
+
+[[package]]
+name = "zstd"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bffb3309596d527cfcba7dfc6ed6052f1d39dfbd7c867aa2e865e4a449c10110"
@@ -11186,6 +11242,16 @@ name = "zstd-safe"
 version = "5.0.2+zstd.1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d2a5585e04f9eea4b2a3d1eca508c4dee9592a89ef6f450c11719da0726f4db"
+dependencies = [
+ "libc",
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "6.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
 dependencies = [
  "libc",
  "zstd-sys",

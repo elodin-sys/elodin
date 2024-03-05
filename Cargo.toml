@@ -16,6 +16,7 @@ members = [
     "services/sim-agent",
     "libs/redmq",
     "apps/elodin",
+    "services/sim-builder",
 ]
 
 [profile.wasm-release]

@@ -11,13 +11,21 @@ let
   };
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml { cargoToml = ../services/sim-agent/Cargo.toml; };
-  src = pkgs.nix-gitignore.gitignoreSource [] ../.;
+
+  pyFilter = path: _type: builtins.match ".*py$" path != null;
+  protoFilter = path: _type: builtins.match ".*proto$" path != null;
+  assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
+  srcFilter = path: type: (pyFilter path type) || (protoFilter path type) || (assetFilter path type) || (craneLib.filterCargoSources path type);
+  src = lib.cleanSourceWith {
+    src = craneLib.path ./..;
+    filter = srcFilter;
+  };
+
   arch = builtins.elemAt (lib.strings.splitString "-" system) 0;
   commonArgs = {
     inherit (crateName) pname version;
     inherit src;
     doCheck = false;
-    cargoExtraArgs = "--package=${crateName.pname} --package=nox-py";
     nativeBuildInputs = with pkgs; [ maturin ];
     buildInputs = with pkgs;
       [
@@ -65,63 +73,48 @@ let
     ignoreConfigErrors = true;
     structuredExtraConfig = with lib.kernel; {
       SQUASHFS = yes;
+      VIRTIO_MMIO = yes;
+      VSOCKETS = yes;
+      VIRTIO_VSOCKETS = yes;
+      VIRTIO_VSOCKETS_COMMON = yes;
+      VHOST_VSOCK = yes;
     };
-  }).overrideAttrs(_: {
-    postInstall = ''
-      rm -rf $out/{lib,System.map}
-    '';
   });
-
-  mkrootfs =
-    {
-      init,
-      copyToRoot
-    }:
-    pkgs.runCommand "copy-contents"
-      {
-        init = init;
-        contents = copyToRoot;
-        closureInfo = pkgs.closureInfo {
-          rootPaths = copyToRoot;
-        };
-        nativeBuildInputs = with pkgs; [ rsync zstd squashfsTools ];
-      }
-      ''
-        mkdir -p rootfs/nix/store
-        cd rootfs
-        mkdir -p nix/store proc sys tmp dev mnt/workdir usr/bin
-        cp $init init
-        for item in $contents; do
-          rsync -aK $item/ .
-        done
-        for item in $(< $closureInfo/store-paths); do
-          rsync -aK $item ./nix/store/
-        done
-        ln -s /sbin/busybox usr/bin/env
-        mkdir $out
-        mksquashfs . $out/root.squashfs -comp zstd
-      '';
-
-  # TODO(Akhil): use s6 supervision suite instead as running workload as pid 1 is not recommended
-  init = pkgs.writeScript "init"
+  rootfs = pkgs.runCommand "rootfs"
+    rec {
+      contents = with pkgs; [
+        busybox
+        config.packages.sim-builder
+        (python3.withPackages (ps: with ps; [(elodin ps)]))
+      ];
+      closureInfo = pkgs.closureInfo { rootPaths = contents; };
+      nativeBuildInputs = with pkgs; [ rsync zstd squashfsTools ];
+    }
     ''
-    #!/bin/sh
-
-    mount -n -t proc none /proc
-    mount -n -t sysfs none /sys
-    mount -n -t tmpfs none /tmp
-    mount -t 9p -o trans=virtio workdir /mnt/workdir || true
-
-    setsid sh -c 'sh </dev/ttyS0 >/dev/ttyS0 2>&1'
-    poweroff -f
+      mkdir rootfs
+      cd rootfs
+      mkdir -p nix/store proc sys tmp dev
+      cp ${../services/sim-builder/init} init
+      for item in $contents; do
+        rsync -aK $item/ .
+      done
+      for item in $(< $closureInfo/store-paths); do
+        rsync -aK $item ./nix/store/
+      done
+      mkdir $out
+      mksquashfs . $out/root.squashfs -comp zstd
     '';
-  vm = mkrootfs {
-    init = init;
-    copyToRoot = with pkgs; [
-      cacert
-      busybox
-      (python3.withPackages (ps: with ps; [(elodin ps)]))
+  runvm = pkgs.runCommand "runvm" {} "mkdir $out; cp ${../services/sim-builder/runvm} $out/runvm";
+  vm = pkgs.buildEnv {
+    name = "sim-builder-vm";
+    extraPrefix = "/vm";
+    paths = [
+      pkgs.qboot
+      kernel
+      rootfs
+      runvm
     ];
+    postBuild = "rm -rf $out/vm/{bios.bin.elf,lib,System.map}";
   };
 
   image = pkgs.dockerTools.buildLayeredImage {
@@ -130,7 +123,8 @@ let
     contents = with pkgs; [
       cacert
       busybox
-      (python3.withPackages (ps: with ps; [(elodin ps)]))
+      vm
+      qemu_kvm
     ];
     config = {
       Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
@@ -140,8 +134,5 @@ let
 in
 {
   packages.sim-agent-image = image;
-  packages.sandbox-vm = pkgs.buildEnv {
-    name = "sandbox-vm";
-    paths = [ vm kernel ];
-  };
+  packages.sandbox-vm = vm;
 }

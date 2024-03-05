@@ -1,0 +1,15 @@
+#!/bin/sh
+
+cid=${CID:-3}
+qemu-system-x86_64 \
+    -machine microvm,rtc=on \
+    -bios vm/bios.bin \
+    -kernel vm/bzImage \
+    -append 'console=ttyS0 quiet panic=-1 reboot=t root=/dev/vda init=/init raid=noautodetect ro' \
+    -drive "file=vm/root.squashfs,format=raw,id=root,if=none,readonly=on" -device virtio-blk-device,drive=root \
+    -device "vhost-vsock-device,id=vsock_id,guest-cid=$cid" \
+    -cpu host \
+    -m 1G \
+    -accel kvm \
+    -nographic \
+    -no-reboot

@@ -59,6 +59,7 @@
             ./nix/dashboard.nix
             ./nix/docs.nix
             ./nix/elodin-cli.nix
+            ./nix/sim-builder.nix
           ];
         };
     };

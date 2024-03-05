@@ -6,6 +6,10 @@ service SandboxControl {
     rpc UpdateCode(UpdateCodeReq) returns (UpdateCodeResp);
 }
 
+service BuildSim {
+    rpc Build(BuildReq) returns (BuildResp);
+}
+
 message UpdateCodeReq {
     string code = 1;
 }
@@ -17,4 +21,12 @@ message UpdateCodeResp {
 enum Status {
     Success = 0;
     Error = 1;
+}
+
+message BuildReq {
+    string code = 1;
+}
+
+message BuildResp {
+    bytes artifacts = 1;
 }

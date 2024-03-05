@@ -61,3 +61,6 @@ zstd = "0.13.0"
 tempfile = "3.10.0"
 nox = { path = "../../libs/nox" }
 nox-ecs = { path = "../../libs/nox-ecs" }
+
+tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "44321de", features = ["tonic-conn"] }
+tower = "0.4.13"
