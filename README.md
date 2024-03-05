@@ -4,11 +4,16 @@ Elodin is a platform for rapid design, testing, and simulation of
 drones, satellites, and aerospace control systems. This repository
 is a collection of core libraries:
 
-- `libs/nox`
-- `libs/nox-ecs`
-- `libs/nox-ecs-macros`
-- `libs/conduit`
-- `libs/xla-rs`
+- `libs/nox`: Tensor library that compiles to XLA (like
+JAX, but for Rust).
+- `libs/nox-ecs`: ECS framework built to work with Jax and Nox,
+that allows you to build your own physics engine.
+- `libs/nox-ecs-macros`: Derive macros to generate implementations of
+ECS and Nox traits.
+- `libs/conduit`: Column-based protocol for transferring ECS data
+between different systems.
+- `libs/xla-rs`: Rust bindings to XLA's C++ API (originally based on
+https://github.com/LaurentMazare/xla-rs).
 
 ## License
 
