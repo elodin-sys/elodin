@@ -39,7 +39,6 @@ class ControlInput(Archetype):
     goal: Goal
 
 
-RWSpeed = Component[jax.Array, "rw_speed", ComponentType.F64]
 RWAxis = Component[jax.Array, "rw_axis", ComponentType(PrimitiveType.F64, (3,))]
 RWForce = Component[SpatialForce, "rw_force", ComponentType.SpatialMotionF64]
 
@@ -47,7 +46,6 @@ RWForce = Component[SpatialForce, "rw_force", ComponentType.SpatialMotionF64]
 @dataclass
 class ReactionWheel(Archetype):
     rw_force: RWForce
-    speed: RWSpeed
     axis: RWAxis
 
 
@@ -109,7 +107,7 @@ w.spawn(
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
     ControlInput(
-        SpatialTransform(axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(120)))
+        SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(45)))
     )
 )
 
