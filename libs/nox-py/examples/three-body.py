@@ -23,7 +23,7 @@ def gravity(q: GraphQuery[GravityEdge, WorldPos, Inertia]) -> Query[Force]:
         norm = la.norm(r)
         f = G * M * m * r / (norm * norm * norm)
         return Force.from_linear(force[3:] - f)
-    return q.edge_fold(Force, np.array([0.0,0.0,0.0, 0.0, 0.0, 0.0]), gravity_inner)
+    return q.edge_fold(Force, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), gravity_inner)
 
 
 w = WorldBuilder()
