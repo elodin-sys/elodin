@@ -1,4 +1,8 @@
-# Elodin
+<h1 align="center">
+  <a href="https://www.elodin.systems/">
+    <img alt="banner" src="https://github.com/elodin-sys/elodin/assets/1129228/0e0197e9-12ec-42bd-b377-fa3ced2a1b7e">
+  </a>
+</h1>
 
 Elodin is a platform for rapid design, testing, and simulation of
 drones, satellites, and aerospace control systems.
