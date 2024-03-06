@@ -35,7 +35,7 @@ Join us on Discord: https://discord.gg/agvGJaZXy5!
 
 ```fish 
 python3 -m venv .venv
- . .venv/bin/activate.fish # or activate.sh if you don't use fish
+ . .venv/bin/activate.fish # or activate.sh if you do not use fish
 ```
 3. Install `elodin`, and `matplotlib` with
 
