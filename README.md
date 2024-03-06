@@ -1,8 +1,14 @@
 # Elodin
 
 Elodin is a platform for rapid design, testing, and simulation of
-drones, satellites, and aerospace control systems. This repository
-is a collection of core libraries:
+drones, satellites, and aerospace control systems.
+
+Quick Demo: https://app.elodin.systems/sandbox/hn/cube-sat
+
+Sandbox Alpha: https://app.elodin.systems  
+Docs (WIP): https://docs.elodin.systems
+
+This repository is a collection of core libraries:
 
 - `libs/nox`: Tensor library that compiles to XLA (like
 JAX, but for Rust).
@@ -14,6 +20,8 @@ ECS and Nox traits.
 between different systems.
 - `libs/xla-rs`: Rust bindings to XLA's C++ API (originally based on
 https://github.com/LaurentMazare/xla-rs).
+
+Join us on Discord: https://discord.gg/agvGJaZXy5!
 
 ## License
 
