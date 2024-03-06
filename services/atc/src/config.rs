@@ -8,6 +8,7 @@ pub struct Config {
     pub api: Option<ApiConfig>,
     pub orca: Option<OrcaConfig>,
     pub garbage_collect: Option<GarbageCollect>,
+    #[serde(default)]
     pub monte_carlo: MonteCarloConfig,
     pub database_url: String,
     pub redis_url: String,
@@ -34,7 +35,7 @@ pub struct OrcaConfig {
     pub runtime_class: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct MonteCarloConfig {
     pub spawn_batches: bool,
     pub collect_results: bool,

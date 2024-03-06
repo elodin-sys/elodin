@@ -1,0 +1,8 @@
+database_url = "postgresql://postgres:secret@postgres.elodin-app-prod.svc.cluster.local:5432/postgres"
+redis_url = "redis://redis.elodin-app-prod.svc.cluster.local:6379"
+migrate = false
+
+[api]
+address = "[::]:50051"
+auth0.domain = "auth.elodin.systems"
+auth0.client_id = "Fduve612Omqy9gUXGxcZ5RoTP9IJ6gly"

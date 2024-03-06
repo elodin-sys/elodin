@@ -79,6 +79,10 @@ configMapGenerator:
   namespace: elodin-app
   files:
   - atc.toml=elo-atc-config.toml
+- name: elo-atc-proxy-config
+  namespace: elodin-app
+  files:
+  - atc.toml=elo-atc-proxy-config.toml
 - name: elo-sim-config
   namespace: elodin-vms
   files:
