@@ -257,7 +257,6 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
             "name": pod_name,
             "labels": {
                 "app.kubernetes.io/managed-by": "atc",
-                "security.elodin.systems": "sim-agent-web-runner"
             }
         },
         "spec": {

@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
 - namespace.yaml
 - cluster-roles.yaml
-- network-policy.yaml
 - placeholder-priority.yaml
 - sim-agent-balloon.yaml
 - sim-agent-mc.yaml
