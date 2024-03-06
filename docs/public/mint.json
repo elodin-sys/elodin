@@ -34,7 +34,7 @@
   "navigation": [
     {
       "group": "Get Started",
-      "pages": ["introduction", "tutorial/double-pend", "tutorial/3-body"]
+      "pages": ["introduction", "tutorial/3-body"]
     },
     {
       "group": "The Tao of Elodin",
