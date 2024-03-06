@@ -6,7 +6,7 @@ resources:
 
 replicas:
 - name: sim-agent-balloon
-  count: 4
+  count: 8
 
 patches:
 - target:

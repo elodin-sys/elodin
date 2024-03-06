@@ -21,8 +21,8 @@ spec:
         args: ["infinity"]
         resources:
           requests:
-            cpu: 300m
-            memory: 500Mi
+            cpu: 1
+            memory: 1Gi
           limits:
             dev/kvm: 1
             dev/vhost-vsock: 1

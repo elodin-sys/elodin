@@ -36,10 +36,8 @@ spec:
           name: http
         resources:
           requests:
-            cpu: 100m
-          limits:
-            cpu: 500m
-            memory: 2Gi
+            cpu: 1
+            memory: 1Gi
         readinessProbe:
           httpGet:
             path: /healthz
