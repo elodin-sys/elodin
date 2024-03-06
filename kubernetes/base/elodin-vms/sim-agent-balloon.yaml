@@ -26,3 +26,9 @@ spec:
           limits:
             dev/kvm: 1
             dev/vhost-vsock: 1
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL

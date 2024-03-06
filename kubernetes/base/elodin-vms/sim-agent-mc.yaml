@@ -41,6 +41,12 @@ spec:
           requests:
             cpu: 300m
             memory: 500Mi
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       volumes:
       - name: tmp
         emptyDir:

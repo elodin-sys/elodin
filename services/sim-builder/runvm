@@ -8,6 +8,7 @@ qemu-system-x86_64 \
     -append 'console=ttyS0 quiet panic=-1 reboot=t root=/dev/vda init=/init raid=noautodetect ro' \
     -drive "file=vm/root.squashfs,format=raw,id=root,if=none,readonly=on" -device virtio-blk-device,drive=root \
     -device "vhost-vsock-device,id=vsock_id,guest-cid=$cid" \
+    -sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny \
     -cpu host \
     -m 1G \
     -accel kvm \
