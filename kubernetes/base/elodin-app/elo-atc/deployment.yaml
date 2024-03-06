@@ -5,9 +5,6 @@ metadata:
 spec:
   replicas: 1
   template:
-    metadata:
-      labels:
-        security.elodin.systems: atc
     spec:
       serviceAccountName: elo-atc
       containers:
