@@ -87,27 +87,24 @@ b = Body(
 w.spawn(
     ReactionWheel(
         rw_force=SpatialForce.zero(),
-        speed=np.array(0.0),
         axis=np.array([1.0, 0.0, 0.0]),
     )
 ).metadata(EntityMetadata("RW1"))
 w.spawn(
     ReactionWheel(
         rw_force=SpatialForce.zero(),
-        speed=np.array(0.0),
         axis=np.array([0.0, 1.0, 0.0]),
     )
 ).metadata(EntityMetadata("RW2"))
 w.spawn(
     ReactionWheel(
         rw_force=SpatialForce.zero(),
-        speed=np.array(0.0),
         axis=np.array([0.0, 0.0, 1.0]),
     )
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
     ControlInput(
-        SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(45)))
+        SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90)))
     )
 )
 
