@@ -22,6 +22,10 @@ spec:
         - name: redis-data
           mountPath: /data
           readOnly: false
+        resources:
+          requests:
+            cpu: 1
+            memory: 1Gi
       volumes:
       - name: config
         configMap:
