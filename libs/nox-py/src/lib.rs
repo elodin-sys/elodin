@@ -1165,15 +1165,6 @@ impl Metadata {
     }
 }
 
-#[pyfunction]
-#[cfg(feature = "embed-cli")]
-// TODO: remove after https://github.com/PyO3/maturin/issues/368 is resolved
-fn run_cli(_py: Python) -> PyResult<()> {
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    ::elodin::Cli::from_args(&args).run();
-    Ok(())
-}
-
 #[pymodule]
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
@@ -1200,7 +1191,5 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
-    #[cfg(feature = "embed-cli")]
-    m.add_function(wrap_pyfunction!(run_cli, m)?)?;
     Ok(())
 }
