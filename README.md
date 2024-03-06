@@ -16,8 +16,9 @@ This repository is a collection of core libraries:
 
 - `libs/nox`: Tensor library that compiles to XLA (like
 JAX, but for Rust).
-- `libs/nox-ecs`: ECS framework built to work with Jax and Nox,
+- `libs/nox-ecs`: Rust ECS framework built to work with JAX and Nox,
 that allows you to build your own physics engine.
+- `libs/nox-py`: Python version of `nox-ecs`, that works with JAX
 - `libs/nox-ecs-macros`: Derive macros to generate implementations of
 ECS and Nox traits.
 - `libs/conduit`: Column-based protocol for transferring ECS data
@@ -29,19 +30,21 @@ Join us on Discord: https://discord.gg/agvGJaZXy5!
 
 ## Getting Started
 
-1. Setup a new venv with:
+1. Install Rust using https://rustup.rs
+2. Setup a new venv with:
 
 ```fish 
 python3 -m venv .venv
  . .venv/bin/activate.fish # or activate.sh if you don't use fish
 ```
-2. Install `elodins`, and `matplotlib` with
+3. Install `elodin`, and `matplotlib` with
 
 ``` fish
-pip install elodin matplotlib
+pip install libs/nox-py
+pip install matplotlib
 ```
 
-3. Try running the following code
+4. Try running the following code
 
 ```python 
 import matplotlib.pyplot as plt
