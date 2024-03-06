@@ -16,9 +16,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        # Disable gvisor because it's broken:
-        # - name: ELODIN_ORCA.RUNTIME_CLASS
-        #   value: gvisor
         - name: RUST_LOG
           value: info,atc=debug,redmq=debug
         volumeMounts:
@@ -38,6 +35,12 @@ spec:
         resources:
           requests:
             cpu: 200m
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       volumes:
       - name: config
         configMap:

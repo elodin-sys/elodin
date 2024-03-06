@@ -38,6 +38,12 @@ spec:
           requests:
             cpu: 1
             memory: 1Gi
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
         readinessProbe:
           httpGet:
             path: /healthz

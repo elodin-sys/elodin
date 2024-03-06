@@ -17,6 +17,8 @@ spec:
         - containerPort: 16379
           name: gossip
         volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         - name: config
           mountPath: /conf
         - name: redis-data
@@ -26,7 +28,17 @@ spec:
           requests:
             cpu: 1
             memory: 1Gi
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 500Mi
       - name: config
         configMap:
           name: redis-config
