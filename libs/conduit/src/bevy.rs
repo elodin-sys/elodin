@@ -320,8 +320,8 @@ fn recv_system(
                 let _ = sim_peer.tx.insert(tx);
 
                 for (_, entity) in entity_map.iter() {
-                    if let Some(mut entity_commands) = commands.get_entity(*entity) {
-                        entity_commands.despawn();
+                    if let Some(entity_commands) = commands.get_entity(*entity) {
+                        entity_commands.despawn_recursive();
                     }
                 }
                 entity_map.0 = HashMap::new();
