@@ -34,7 +34,6 @@ print(axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(45))[:3] * k)
 
 Goal = Component[SpatialTransform, "goal", ComponentType.SpatialPosF64]
 
-
 @dataclass
 class ControlInput(Archetype):
     goal: Goal
@@ -84,12 +83,8 @@ b = Body(
     world_pos=SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
     world_vel=WorldVel.from_angular(initial_angular_vel),
     inertia=Inertia(12.0, j),
-    # pbr=w.insert_asset(Pbr.from_path("./examples/oresat-low.glb")),
-    pbr=w.insert_asset(
-        Pbr.from_url(
-            "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
-        )
-    ),
+    pbr=w.insert_asset( Pbr.from_url( "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
+    # Credit to the OreSat program https://www.oresat.org for the model above
 )
 w.spawn(
     ReactionWheel(
