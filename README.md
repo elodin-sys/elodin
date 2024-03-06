@@ -23,6 +23,62 @@ https://github.com/LaurentMazare/xla-rs).
 
 Join us on Discord: https://discord.gg/agvGJaZXy5!
 
+## Getting Started
+
+1. Setup a new venv with:
+
+```fish 
+python3 -m venv .venv
+ . .venv/bin/activate.fish # or activate.sh if you don't use fish
+```
+2. Install `elodins`, and `matplotlib` with
+
+``` fish
+pip install elodin matplotlib
+```
+
+3. Try running the following code
+
+```python 
+import matplotlib.pyplot as plt
+import jax.numpy as np
+from elodin import *
+
+@system
+def gravity(q: Query[WorldPos]) -> Query[Force]:
+  return q.map(Force, lambda _p: Force.from_linear(np.array([0.0, -9.81, 0.0])))
+
+@system
+def bounce(q: Query[WorldPos, WorldVel]) -> Query[WorldVel]:
+  return q.map(WorldVel, lambda p, v: jax.lax.cond(
+    jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
+    lambda _: WorldVel.from_linear(v.linear() * np.array([1.,-1.,1.]) * 0.85),
+    lambda _: v,
+    operand=None
+  ))
+
+w = WorldBuilder()
+w.spawn(
+    Body(
+        world_pos=WorldPos.from_linear(np.array([0.0, 10.0, 0.0])),
+        world_vel=WorldVel.from_linear(np.array([0.0, 0.0, 0.0])),
+        inertia=Inertia.from_mass(1.0),
+    )
+)
+client = Client.cpu()
+exec = w.build(bounce.pipe(six_dof(1.0 / 60.0, gravity)))
+t = range(500)
+pos = []
+for _ in t:
+    exec.run(client)
+    y = exec.column_array(ComponentId("world_pos"))[0, 5]
+    pos.append(y)
+fig, ax = plt.subplots()
+ax.plot(t, pos)
+plt.show()
+```
+
+
 ## License
 
 Licensed under either of
