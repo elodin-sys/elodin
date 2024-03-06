@@ -13,9 +13,10 @@ let
   crateName = craneLib.crateNameFromCargoToml { cargoToml = ../services/sim-agent/Cargo.toml; };
 
   pyFilter = path: _type: builtins.match ".*py$" path != null;
+  mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
   protoFilter = path: _type: builtins.match ".*proto$" path != null;
   assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
-  srcFilter = path: type: (pyFilter path type) || (protoFilter path type) || (assetFilter path type) || (craneLib.filterCargoSources path type);
+  srcFilter = path: type: (pyFilter path type) || (mdFilter path type) || (protoFilter path type) || (assetFilter path type) || (craneLib.filterCargoSources path type);
   src = lib.cleanSourceWith {
     src = craneLib.path ./..;
     filter = srcFilter;
