@@ -122,7 +122,7 @@ impl Api {
     ) -> Result<CreateSandboxResp, Error> {
         let code = match req.template.as_deref() {
             Some("three-body") => {
-                include_str!("../../../../libs/nox-py/examples/six_dof.py").to_string()
+                include_str!("../../../../libs/nox-py/examples/three-body.py").to_string()
             }
             Some("cube-sat") => {
                 include_str!("../../../../libs/nox-py/examples/cube_sat.py").to_string()

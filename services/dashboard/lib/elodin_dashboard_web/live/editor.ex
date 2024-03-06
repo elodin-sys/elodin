@@ -40,7 +40,8 @@ defmodule ElodinDashboardWeb.EditorLive do
            draft_code: sandbox.draft_code,
            status: sandbox.status,
            public: sandbox.public,
-           readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
+           readonly:
+             sandbox.user_id != socket.assigns[:current_user]["id"] && sandbox.user_id != ""
          })
          |> assign(:errors, [])
          |> assign(:share_link, "#{ElodinDashboardWeb.Endpoint.url()}/sandbox/#{id_string}")
@@ -87,7 +88,7 @@ defmodule ElodinDashboardWeb.EditorLive do
        draft_code: sandbox.draft_code,
        status: sandbox.status,
        public: sandbox.public,
-       readonly: sandbox.user_id != socket.assigns[:current_user]["id"]
+       readonly: sandbox.user_id != socket.assigns[:current_user]["id"] && sandbox.user_id != ""
      })}
   end
 
