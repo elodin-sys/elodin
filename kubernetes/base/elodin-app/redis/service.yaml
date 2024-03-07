@@ -3,7 +3,6 @@ kind: Service
 metadata:
   name: redis
 spec:
-  clusterIP: None
   ports:
   - port: 6379
     targetPort: 6379
