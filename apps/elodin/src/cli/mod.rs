@@ -39,13 +39,11 @@ impl Cli {
             .enable_all()
             .build()
             .expect("tokio runtime failed to start");
-        let res = rt.block_on(async {
-            match &self.command {
-                Commands::Login => rt.block_on(self.login()),
-                Commands::MonteCarlo(args) => rt.block_on(self.monte_carlo(args)),
-                Commands::Editor(args) => self.editor(args.clone()),
-            }
-        });
+        let res = match &self.command {
+            Commands::Login => rt.block_on(self.login()),
+            Commands::MonteCarlo(args) => rt.block_on(self.monte_carlo(args)),
+            Commands::Editor(args) => self.editor(args.clone()),
+        };
         if let Err(err) = res {
             eprintln!("Error: {:#}", err);
             std::process::exit(1);
