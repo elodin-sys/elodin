@@ -5,6 +5,7 @@ use bevy::{
 };
 
 pub struct Images {
+    pub logo: Handle<Image>,
     pub icon_play: Handle<Image>,
     pub icon_pause: Handle<Image>,
     pub icon_scrub: Handle<Image>,
@@ -18,6 +19,7 @@ impl FromWorld for Images {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         Self {
+            logo: asset_server.load("embedded://elodin_editor/assets/logo.png"),
             icon_play: asset_server.load("embedded://elodin_editor/assets/icons/icon_play.png"),
             icon_pause: asset_server.load("embedded://elodin_editor/assets/icons/icon_pause.png"),
             icon_scrub: asset_server.load("embedded://elodin_editor/assets/icons/icon_scrub.png"),
