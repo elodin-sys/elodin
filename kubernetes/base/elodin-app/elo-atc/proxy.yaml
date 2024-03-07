@@ -12,6 +12,16 @@ spec:
       labels:
         atc-role: proxy
     spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: cloud.google.com/gke-nodepool
+                operator: In
+                values:
+                - default
       containers:
       - name: elo-atc-proxy
         imagePullPolicy: Always

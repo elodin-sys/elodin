@@ -7,6 +7,16 @@ spec:
   template:
     spec:
       serviceAccountName: elo-atc
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: cloud.google.com/gke-nodepool
+                operator: In
+                values:
+                - default
       containers:
       - name: elo-atc
         imagePullPolicy: Always
