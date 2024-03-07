@@ -12,6 +12,7 @@ spec:
       labels:
         atc-role: proxy
     spec:
+      serviceAccountName: elo-atc
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
