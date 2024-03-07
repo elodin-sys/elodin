@@ -39,6 +39,7 @@ struct EmbeddedAssetPlugin;
 
 impl Plugin for EmbeddedAssetPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "assets/logo.png");
         embedded_asset!(app, "assets/icons/icon_play.png");
         embedded_asset!(app, "assets/icons/icon_pause.png");
         embedded_asset!(app, "assets/icons/icon_scrub.png");

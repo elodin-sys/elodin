@@ -92,6 +92,32 @@ pub fn render(
     let window = window.single();
     let width = window.resolution.width();
     let height = window.resolution.height();
+
+    theme::set_theme(contexts.ctx_mut());
+
+    let is_loading = entities_meta.is_empty();
+
+    if is_loading {
+        let logo_size = egui::vec2(80.0, 100.0);
+        let logo_image_id = contexts.add_image(images.logo.clone_weak());
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                fill: colors::STONE_950,
+                ..Default::default()
+            })
+            .show(contexts.ctx_mut(), |ui| {
+                ui.painter().image(
+                    logo_image_id,
+                    egui::Rect::from_center_size(egui::pos2(width / 2.0, height / 2.0), logo_size),
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    colors::WHITE,
+                );
+            });
+
+        return;
+    }
+
     let selected_entity_pair = selected_entity.0;
 
     let selected_entity_full = selected_entity_pair.and_then(|eid| entities.get(eid.bevy).ok());
@@ -99,8 +125,6 @@ pub fn render(
         .iter()
         .find(|(id, _, _)| selected_entity_pair.is_some_and(|eid| eid.conduit == **id))
         .map(|(_, _, metadata)| metadata.to_owned());
-
-    theme::set_theme(contexts.ctx_mut());
 
     let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -122,82 +146,79 @@ pub fn render(
         .resizable(false)
         .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
 
-    // NOTE(temp fix): Hide panels until simulation is loaded
-    if !entities_meta.is_empty() {
-        if width * 0.75 > height {
-            egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
-                .resizable(true)
-                .frame(egui::Frame {
-                    fill: colors::STONE_950,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                    inner_margin: Margin::same(4.0),
-                    ..Default::default()
-                })
-                .min_width(width * 0.15)
-                .default_width(width * 0.20)
-                .max_width(width * 0.35)
-                .show(contexts.ctx_mut(), |ui| {
-                    list::entity_list(ui, entities_meta, selected_entity);
-                });
+    if width * 0.75 > height {
+        egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: colors::STONE_950,
+                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                inner_margin: Margin::same(4.0),
+                ..Default::default()
+            })
+            .min_width(width * 0.15)
+            .default_width(width * 0.20)
+            .max_width(width * 0.35)
+            .show(contexts.ctx_mut(), |ui| {
+                list::entity_list(ui, entities_meta, selected_entity);
+            });
 
-            egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
-                .resizable(true)
-                .frame(egui::Frame {
-                    fill: colors::STONE_950,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                    ..Default::default()
-                })
-                .min_width(width * 0.15)
-                .default_width(width * 0.25)
-                .max_width(width * 0.35)
-                .show(contexts.ctx_mut(), |ui| {
-                    inspector::inspector(
-                        ui,
-                        selected_entity_meta,
-                        selected_entity_full,
-                        &metadata_store,
-                    );
-                });
-        } else {
-            egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
-                .resizable(true)
-                .frame(egui::Frame::default())
-                .default_height(200.0)
-                .max_height(width * 0.5)
-                .show(contexts.ctx_mut(), |ui| {
-                    let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
-                        .resizable(true)
-                        .frame(egui::Frame {
-                            fill: colors::STONE_950,
-                            stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                            inner_margin: Margin::same(4.0),
-                            ..Default::default()
-                        })
-                        .min_width(width * 0.25)
-                        .default_width(width * 0.5)
-                        .max_width(width * 0.75)
-                        .show_inside(ui, |ui| {
-                            list::entity_list(ui, entities_meta, selected_entity);
-                            ui.allocate_space(ui.available_size());
-                        });
+        egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: colors::STONE_950,
+                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                ..Default::default()
+            })
+            .min_width(width * 0.15)
+            .default_width(width * 0.25)
+            .max_width(width * 0.35)
+            .show(contexts.ctx_mut(), |ui| {
+                inspector::inspector(
+                    ui,
+                    selected_entity_meta,
+                    selected_entity_full,
+                    &metadata_store,
+                );
+            });
+    } else {
+        egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
+            .resizable(true)
+            .frame(egui::Frame::default())
+            .default_height(200.0)
+            .max_height(width * 0.5)
+            .show(contexts.ctx_mut(), |ui| {
+                let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
+                    .resizable(true)
+                    .frame(egui::Frame {
+                        fill: colors::STONE_950,
+                        stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                        inner_margin: Margin::same(4.0),
+                        ..Default::default()
+                    })
+                    .min_width(width * 0.25)
+                    .default_width(width * 0.5)
+                    .max_width(width * 0.75)
+                    .show_inside(ui, |ui| {
+                        list::entity_list(ui, entities_meta, selected_entity);
+                        ui.allocate_space(ui.available_size());
+                    });
 
-                    egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
-                        .resizable(false)
-                        .frame(egui::Frame {
-                            fill: colors::STONE_950,
-                            ..Default::default()
-                        })
-                        .exact_width(width - outline.response.rect.width())
-                        .show_inside(ui, |ui| {
-                            inspector::inspector(
-                                ui,
-                                selected_entity_meta,
-                                selected_entity_full,
-                                &metadata_store,
-                            );
-                        });
-                });
-        }
+                egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
+                    .resizable(false)
+                    .frame(egui::Frame {
+                        fill: colors::STONE_950,
+                        ..Default::default()
+                    })
+                    .exact_width(width - outline.response.rect.width())
+                    .show_inside(ui, |ui| {
+                        inspector::inspector(
+                            ui,
+                            selected_entity_meta,
+                            selected_entity_full,
+                            &metadata_store,
+                        );
+                    });
+            });
     }
 
     let sim_fps = 1.0 / tick_time.0.as_secs_f64();
