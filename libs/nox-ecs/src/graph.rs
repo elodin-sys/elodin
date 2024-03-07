@@ -318,38 +318,29 @@ mod tests {
         );
     }
 
-    // FIXME(sphw): this example crashes some of the time, it is not clear
-    // why at the moment. It is seemingly random, so likely some unknown source of
-    // non determinism is to blame
-    // #[test]
-    // fn test_fold_complex_graph() {
-    //     #[derive(Component)]
-    //     struct A(Scalar<f64>);
+    #[test]
+    fn test_complex_graph_compile() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
 
-    //     fn fold_system(a: GraphQuery<Edge, A>) -> ComponentArray<A> {
-    //         a.edge_fold(A(5.0.constant()), |acc: A, (_, b): (A, A)| A(acc.0 + b.0))
-    //     }
+        fn fold_system(a: GraphQuery<Edge, A>) -> ComponentArray<A> {
+            a.edge_fold(A(5.0.constant()), |acc: A, (_, b): (A, A)| A(acc.0 + b.0))
+        }
+        // NOTE: this loops 5000 times because that was the only way to repro
+        // a very specific failure case caused by an old impl of `NoxprId`
+        for _ in 0..5000 {
+            let mut world = fold_system.world();
+            let c = world.spawn(A::host(1000.0)).id();
+            let a = world.spawn(A::host(10.0)).id();
+            let b = world.spawn(A::host(100.0)).id();
+            let d = world.spawn(A::host(10000.0)).id();
+            world.spawn(Edge::new(c, d));
+            world.spawn(Edge::new(a, b));
+            world.spawn(Edge::new(a, c));
+            world.spawn(Edge::new(b, a));
+            world.spawn(Edge::new(b, c));
 
-    //     let mut world = fold_system.world();
-    //     let c = world.spawn(A::host(1000.0));
-    //     let a = world.spawn(A::host(10.0));
-    //     println!("a {:?}", a);
-    //     let b = world.spawn(A::host(100.0));
-    //     println!("b {:?}", b);
-    //     let d = world.spawn(A::host(10000.0));
-    //     world.spawn(Edge { from: c, to: d });
-    //     world.spawn(Edge { from: a, to: b });
-    //     world.spawn(Edge { from: a, to: c });
-    //     world.spawn(Edge { from: b, to: a });
-    //     world.spawn(Edge { from: b, to: c });
-
-    //     let client = nox::Client::cpu().unwrap();
-    //     let mut exec = world.build().unwrap();
-    //     exec.run(&client).unwrap();
-    //     let c = exec.column(A::component_id()).unwrap();
-    //     assert_eq!(
-    //         c.typed_buf::<f64>().unwrap(),
-    //         &[10005.0, 1105.0, 1015.0, 10000.0] //&[1105., 1015., 10005., 10000.0]
-    //     );
-    // }
+            world.build().unwrap();
+        }
+    }
 }

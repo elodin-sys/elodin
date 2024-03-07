@@ -413,6 +413,7 @@ pub struct GetTupleElement {
 #[derive(Debug, Clone)]
 pub struct Noxpr {
     pub node: Arc<NoxprNode>,
+    pub id: NoxprId,
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
@@ -426,10 +427,18 @@ pub struct Scan {
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct NoxprId(usize);
 
+impl Default for NoxprId {
+    fn default() -> Self {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        Self(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
 impl Noxpr {
     pub fn new(node: NoxprNode) -> Self {
         Self {
             backtrace: Arc::new(std::backtrace::Backtrace::capture()),
+            id: NoxprId::default(),
             node: Arc::new(node),
         }
     }
@@ -1012,7 +1021,7 @@ impl Noxpr {
     }
 
     pub fn id(&self) -> NoxprId {
-        NoxprId(Arc::as_ptr(&self.node) as usize)
+        self.id
     }
 
     pub fn name(&self) -> &'static str {
