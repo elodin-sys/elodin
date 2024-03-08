@@ -16,7 +16,7 @@ use conduit::{
 
 use crate::MainCamera;
 
-use self::widgets::{inspector, list, timeline};
+use self::widgets::{hierarchy, inspector, timeline};
 
 mod colors;
 pub mod images;
@@ -35,6 +35,9 @@ pub struct SelectedEntity(pub Option<EntityPair>);
 
 #[derive(Resource, Default)]
 pub struct HoveredEntity(pub Option<EntityPair>);
+
+#[derive(Resource, Default)]
+pub struct EntityFilter(pub String);
 
 #[derive(Clone, Copy)]
 pub struct EntityPair {
@@ -67,6 +70,7 @@ impl Plugin for UiPlugin {
             .init_resource::<ShowStats>()
             .init_resource::<SelectedEntity>()
             .init_resource::<HoveredEntity>()
+            .init_resource::<EntityFilter>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
             .add_systems(Update, render_viewport.after(render))
@@ -80,6 +84,7 @@ pub fn render(
     mut contexts: EguiContexts,
     mut paused: ResMut<Paused>,
     mut tick: ResMut<Tick>,
+    entity_filter: ResMut<EntityFilter>,
     selected_entity: ResMut<SelectedEntity>,
     max_tick: Res<MaxTick>,
     tick_time: Res<TimeStep>,
@@ -98,7 +103,7 @@ pub fn render(
     let is_loading = entities_meta.is_empty();
 
     if is_loading {
-        let logo_size = egui::vec2(80.0, 100.0);
+        let logo_size = egui::vec2(48.0, 60.0);
         let logo_image_id = contexts.add_image(images.logo.clone_weak());
 
         egui::CentralPanel::default()
@@ -135,6 +140,7 @@ pub fn render(
         pause: contexts.add_image(images.icon_pause.clone_weak()),
         handle: contexts.add_image(images.icon_scrub.clone_weak()),
     };
+    let search_icon = contexts.add_image(images.icon_search.clone_weak());
 
     #[cfg(target_os = "macos")]
     egui::TopBottomPanel::top("titlebar")
@@ -159,7 +165,11 @@ pub fn render(
             .default_width(width * 0.20)
             .max_width(width * 0.35)
             .show(contexts.ctx_mut(), |ui| {
-                list::entity_list(ui, entities_meta, selected_entity);
+                let search_text = entity_filter.0.clone();
+
+                hierarchy::header(ui, entity_filter, search_icon, false);
+
+                hierarchy::entity_list(ui, entities_meta, selected_entity, &search_text);
             });
 
         egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
@@ -196,10 +206,15 @@ pub fn render(
                         ..Default::default()
                     })
                     .min_width(width * 0.25)
-                    .default_width(width * 0.5)
+                    .default_width(width * 0.4)
                     .max_width(width * 0.75)
                     .show_inside(ui, |ui| {
-                        list::entity_list(ui, entities_meta, selected_entity);
+                        let search_text = entity_filter.0.clone();
+
+                        hierarchy::header(ui, entity_filter, search_icon, true);
+
+                        hierarchy::entity_list(ui, entities_meta, selected_entity, &search_text);
+
                         ui.allocate_space(ui.available_size());
                     });
 

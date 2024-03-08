@@ -4,34 +4,78 @@ use conduit::well_known::EntityMetadata;
 
 use crate::ui::{
     colors::{self, EColor},
-    utils, EntityMeta, EntityPair, SelectedEntity,
+    utils, EntityFilter, EntityMeta, EntityPair, SelectedEntity,
 };
+
+pub fn header(
+    ui: &mut egui::Ui,
+    mut entity_filter: ResMut<EntityFilter>,
+    search_icon: egui::TextureId,
+    compact: bool,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        egui::Frame::none()
+            .outer_margin(egui::Margin::same(16.0))
+            .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
+            .rounding(egui::Rounding::same(3.0))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
+
+                    ui.add(
+                        egui::widgets::Image::new(egui::load::SizedTexture::new(
+                            search_icon,
+                            [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
+                        ))
+                        .tint(colors::with_opacity(colors::ORANGE_50, 0.4)),
+                    );
+
+                    ui.add(egui::TextEdit::singleline(&mut entity_filter.0).frame(false));
+                });
+            });
+
+        if !compact {
+            ui.separator();
+
+            egui::Frame::none()
+                .inner_margin(egui::Margin::symmetric(16.0, 16.0))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("ENTITIES")
+                                .color(colors::with_opacity(colors::ORANGE_50, 0.4)),
+                        )
+                        .wrap(false),
+                    );
+                });
+        }
+    })
+    .response
+}
 
 pub fn entity_list(
     ui: &mut egui::Ui,
     entities: Query<EntityMeta>,
     mut selected_entity: ResMut<SelectedEntity>,
+    entity_filter: &str,
 ) -> egui::Response {
     egui::ScrollArea::both()
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                egui::Frame::none()
-                    .inner_margin(egui::Margin::symmetric(16.0, 16.0))
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new("ENTITIES")
-                                    .color(colors::with_opacity(colors::ORANGE_50, 0.4)),
-                            )
-                            .wrap(false),
-                        );
-                    });
+                // TODO: Improve filter & sorting efficiency
+                let mut filtered_entities = entities
+                    .iter()
+                    .filter(|(_, _, metadata)| {
+                        metadata
+                            .name
+                            .to_lowercase()
+                            .contains(&entity_filter.to_lowercase())
+                    })
+                    .collect::<Vec<EntityMeta>>();
+                filtered_entities.sort_by(|(a, _, _), (b, _, _)| a.0.cmp(&b.0));
 
-                // TODO: Improve sorting efficiency
-                let mut ent_vec = entities.iter().collect::<Vec<EntityMeta>>();
-                ent_vec.sort_by(|(a, _, _), (b, _, _)| a.0.cmp(&b.0));
-
-                for (entity_id, entity, metadata) in ent_vec {
+                for (entity_id, entity, metadata) in filtered_entities {
                     let selected = selected_entity.0.is_some_and(|id| id.conduit == *entity_id);
                     let list_item = ui.add(list_item(selected, metadata));
 

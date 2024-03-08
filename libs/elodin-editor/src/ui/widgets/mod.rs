@@ -1,4 +1,4 @@
 pub mod button;
+pub mod hierarchy;
 pub mod inspector;
-pub mod list;
 pub mod timeline;
