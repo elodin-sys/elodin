@@ -1,5 +1,5 @@
 from .elodin import *
-from typing import Protocol, Generic, TypeVar, Any, Callable, Annotated, Type, Union
+from typing import Protocol, Generic, TypeVar, Any, Callable, Annotated, Type, Union, Optional, Tuple
 from typing_extensions import TypeVarTuple, Unpack
 from dataclasses import dataclass
 from jax.tree_util import tree_flatten, tree_unflatten
@@ -8,7 +8,6 @@ import jax
 import typing
 import numpy
 import code
-import asyncio
 import readline
 import rlcompleter
 
@@ -25,10 +24,10 @@ class System(Protocol):
     def call(builder: PipelineBuilder):
         ...
 
-    def init(builder: PipelineBuilder) -> PipelineBuilder:
+    def init(self, builder: PipelineBuilder) -> PipelineBuilder:
         ...
 
-    def pipe(self, other: Self) -> Self:
+    def pipe(self, other: Any) -> Any:
         return Pipe(self, other)
 
 
@@ -46,9 +45,9 @@ class Pipe(System):
         self.b.call(builder)
 
 
-def system(func) -> Callable[[Any], None]:
+def system(func) -> System:
     class Inner(System):
-        func
+        func: Callable[[Any], Any]
 
         def init(self, builder):
             sig = inspect.signature(func)
@@ -132,7 +131,7 @@ class Query(Generic[Unpack[A]]):
 
 E = TypeVar("E")
 class GraphQuery(Generic[E, Unpack[A]]):
-    bufs: dict[int, (list[jax.Array], list[jax.Array])]
+    bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
     component_data: list[ComponentData]
     inner: GraphQueryInner
     def __init__(self, inner: GraphQueryInner, component_data: list[ComponentData]):
@@ -159,8 +158,7 @@ class GraphQuery(Generic[E, Unpack[A]]):
             component_data: ComponentData = t_arg.__metadata__[0]
             buf = builder.init_var(component_data.id, component_data.ty)
     def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[[O, A, A], O]) -> Q:
-        out_bufs = []
-        queries = []
+        out_bufs: list[jax.typings.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)
         for (i, (f, to)) in self.bufs.items():
             def vmap_inner(a):
@@ -197,6 +195,21 @@ class FromArray(Protocol):
 
 
 class Component:
+    def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
+        if isinstance(tys, tuple) and isinstance(values, tuple):
+            self.data = [ty.__metadata__[0] for ty in tys]
+            self.bufs = [ numpy.asarray(tree_flatten(v)[0][0]) for v in values]
+        else:
+            self.data = [tys.__metadata__[0]]
+            self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
+
+    def archetype_id(self) -> int:
+        return abs(hash(type(self).__name__))
+    def arrays(self):
+        return self.bufs
+    def component_data(self):
+        return self.data
+
     def __class_getitem__(cls, params):
         def parse_id(id):
             if isinstance(id, str) or isinstance(id, int):
@@ -252,29 +265,29 @@ class Archetype(Protocol):
 
 
 jax.tree_util.register_pytree_node(
-    elodin.SpatialTransform,
-    elodin.SpatialTransform.flatten,
-    elodin.SpatialTransform.unflatten,
+    SpatialTransform,
+    SpatialTransform.flatten,
+    SpatialTransform.unflatten,
 )
 jax.tree_util.register_pytree_node(
-    elodin.SpatialMotion, elodin.SpatialMotion.flatten, elodin.SpatialMotion.unflatten
+    SpatialMotion, SpatialMotion.flatten, SpatialMotion.unflatten
 )
 jax.tree_util.register_pytree_node(
-    elodin.SpatialForce, elodin.SpatialForce.flatten, elodin.SpatialForce.unflatten
+    SpatialForce, SpatialForce.flatten, SpatialForce.unflatten
 )
 jax.tree_util.register_pytree_node(
-    elodin.SpatialInertia,
-    elodin.SpatialInertia.flatten,
-    elodin.SpatialInertia.unflatten,
+    SpatialInertia,
+    SpatialInertia.flatten,
+    SpatialInertia.unflatten,
 )
 jax.tree_util.register_pytree_node(
-    elodin.Quaternion, elodin.Quaternion.flatten, elodin.Quaternion.unflatten
+    Quaternion, Quaternion.flatten, Quaternion.unflatten
 )
 jax.tree_util.register_pytree_node(
-    elodin.Handle, elodin.Handle.flatten, elodin.Handle.unflatten
+    Handle, Handle.flatten, Handle.unflatten
 )
 jax.tree_util.register_pytree_node(
-    elodin.Edge, elodin.Edge.flatten, elodin.Edge.unflatten
+    Edge, Edge.flatten, Edge.unflatten
 )
 
 WorldPos = Component[SpatialTransform, "world_pos", ComponentType.SpatialPosF64]
@@ -284,6 +297,9 @@ Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
 Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
 PbrAsset = Component[Handle, 2241, ComponentType.U64, True]
 EntityMetadataAsset = Component[Handle, 2242, ComponentType.U64, True]
+
+C = Component
+Q = Query
 
 
 @dataclass
