@@ -48,6 +48,8 @@ pub enum NoxprNode {
     Sqrt(Noxpr),
     Neg(Noxpr),
     Log(Noxpr),
+    Sin(Noxpr),
+    Cos(Noxpr),
 
     // Nary ops
     Concat(Concat),
@@ -470,6 +472,14 @@ impl Noxpr {
         Self::new(NoxprNode::Sqrt(self))
     }
 
+    pub fn sin(self) -> Self {
+        Self::new(NoxprNode::Sin(self))
+    }
+
+    pub fn cos(self) -> Self {
+        Self::new(NoxprNode::Cos(self))
+    }
+
     pub fn constant(data: xla::Literal, ty: ArrayTy) -> Self {
         Self::new(NoxprNode::Constant(Constant { data, ty }))
     }
@@ -624,7 +634,10 @@ impl Noxpr {
                 }))
             }
             NoxprNode::DotGeneral(s) => s.ty(),
-            NoxprNode::Sqrt(expr) | NoxprNode::Neg(expr) => expr.ty(),
+            NoxprNode::Sqrt(expr)
+            | NoxprNode::Neg(expr)
+            | NoxprNode::Sin(expr)
+            | NoxprNode::Cos(expr) => expr.ty(),
 
             NoxprNode::Concat(concat) => {
                 let tys = concat
@@ -817,13 +830,16 @@ impl Noxpr {
             }
             NoxprNode::Dot(b) => b.rhs.element_type(),
             NoxprNode::DotGeneral(s) => s.rhs.element_type(),
-            NoxprNode::Sqrt(expr) | NoxprNode::Neg(expr) => expr.element_type(),
+            NoxprNode::Sqrt(expr)
+            | NoxprNode::Neg(expr)
+            | NoxprNode::Log(expr)
+            | NoxprNode::Sin(expr)
+            | NoxprNode::Cos(expr) => expr.element_type(),
             NoxprNode::Concat(concat) => concat.nodes.first()?.element_type(),
             NoxprNode::Slice(slice) => slice.expr.element_type(),
             NoxprNode::DynamicSlice(dynamic_slice) => dynamic_slice.expr.element_type(),
             NoxprNode::Reshape(r) => r.expr.element_type(),
             NoxprNode::Tuple(_) => None,
-            NoxprNode::Log(l) => l.element_type(),
             NoxprNode::Broadcast(b) => b.expr.element_type(),
             NoxprNode::BroadcastInDim(b) => b.expr.element_type(),
             NoxprNode::Transpose(t) => t.expr.element_type(),
@@ -884,7 +900,10 @@ impl Noxpr {
                 }
             }
             NoxprNode::DotGeneral(s) => s.shape(),
-            NoxprNode::Sqrt(expr) | NoxprNode::Neg(expr) => expr.shape(),
+            NoxprNode::Sqrt(expr)
+            | NoxprNode::Neg(expr)
+            | NoxprNode::Sin(expr)
+            | NoxprNode::Cos(expr) => expr.shape(),
 
             NoxprNode::Concat(concat) => {
                 let shapes = concat
@@ -1056,6 +1075,8 @@ impl Noxpr {
             NoxprNode::DynamicUpdateSlice(_) => "DynamicUpdateSlice",
             NoxprNode::Scan(_) => "Scan",
             NoxprNode::Jax(_) => "Jax",
+            NoxprNode::Sin(_) => "Sin",
+            NoxprNode::Cos(_) => "Cos",
         }
     }
 
@@ -1205,6 +1226,14 @@ impl XlaTracer {
             NoxprNode::Neg(expr) => {
                 let expr = self.visit(expr)?;
                 expr.neg()
+            }
+            NoxprNode::Sin(expr) => {
+                let expr = self.visit(expr)?;
+                expr.sin()
+            }
+            NoxprNode::Cos(expr) => {
+                let expr = self.visit(expr)?;
+                expr.cos()
             }
             NoxprNode::Concat(concat) => {
                 let ops = concat
@@ -1511,6 +1540,8 @@ impl ReplacementTracer {
             NoxprNode::Sqrt(s) => Noxpr::new(NoxprNode::Sqrt(self.visit(s))),
             NoxprNode::Neg(n) => Noxpr::new(NoxprNode::Neg(self.visit(n))),
             NoxprNode::Log(l) => Noxpr::new(NoxprNode::Log(self.visit(l))),
+            NoxprNode::Sin(s) => Noxpr::new(NoxprNode::Sin(self.visit(s))),
+            NoxprNode::Cos(c) => Noxpr::new(NoxprNode::Cos(self.visit(c))),
             NoxprNode::Concat(c) => Noxpr::new(NoxprNode::Concat(Concat {
                 nodes: c.nodes.iter().map(|n| self.visit(n)).collect(),
                 dimension: c.dimension,
@@ -1759,6 +1790,8 @@ impl BatchTracer {
             NoxprNode::Sqrt(e) => self.visit_unary_op(e, Noxpr::sqrt)?,
             NoxprNode::Neg(e) => self.visit_unary_op(e, Noxpr::neg)?,
             NoxprNode::Log(e) => self.visit_unary_op(e, Noxpr::log)?,
+            NoxprNode::Sin(e) => self.visit_unary_op(e, Noxpr::sin)?,
+            NoxprNode::Cos(e) => self.visit_unary_op(e, Noxpr::cos)?,
             NoxprNode::Concat(c) => {
                 let nodes = c
                     .nodes
@@ -2508,6 +2541,19 @@ impl PrettyPrintTracer {
                 write!(writer, "log(var_{})", arg)?;
                 Ok(num)
             }
+            NoxprNode::Sin(s) => {
+                let arg = self.visit(s, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "sin(var_{})", arg)?;
+                Ok(num)
+            }
+            NoxprNode::Cos(c) => {
+                let arg = self.visit(c, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "cos(var_{})", arg)?;
+                Ok(num)
+            }
+
             NoxprNode::Concat(c) => {
                 let nums: Vec<_> = c
                     .nodes
