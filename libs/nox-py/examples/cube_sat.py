@@ -7,13 +7,6 @@ from elodin import *
 initial_angular_vel = np.array([-2.0, 3.0, 1.0])
 rw_force_clamp = 0.2
 
-def axis_angle(axis, angle):
-    axis = axis / np.linalg.norm(axis)
-    c = np.cos(angle / 2)
-    s = np.sin(angle / 2)
-    return np.array([s * axis[0], s * axis[1], s * axis[2], c, 0.0, 0.0, 0.0])
-
-
 def lqr_control_mat(j, q, r):
     d_diag = np.array(
         [
@@ -30,9 +23,7 @@ q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
-print(axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(45))[:3] * k)
-
-Goal = Component[SpatialTransform, "goal", ComponentType.SpatialPosF64]
+Goal = Component[Quaternion, "goal", ComponentType.Quaternion]
 
 @dataclass
 class ControlInput(Archetype):
@@ -57,7 +48,7 @@ def control(
         Force,
         lambda p, v, i: Force.from_torque(
             -1.0 * v.angular() * d
-            + -1.0 * (p.angular().vector() - i.angular().vector())[:3] * k
+            + -1.0 * (p.angular().vector() - i.vector())[:3] * k
         ),
     ).bufs[0][0]
     return rw.map(
@@ -81,7 +72,7 @@ b = Body(
     world_pos=SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
     world_vel=WorldVel.from_angular(initial_angular_vel),
     inertia=Inertia(12.0, j),
-    pbr=w.insert_asset( Pbr.from_url( "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
+    pbr=w.insert_asset( Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")),
     # Credit to the OreSat program https://www.oresat.org for the model above
 )
 w.spawn(
@@ -103,7 +94,7 @@ w.spawn(
     )
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
-    ControlInput(SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90))))
+    ControlInput(Quaternion.from_axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90)))
 )
 
 exec = w.run(six_dof(1.0 / 60.0, control.pipe(rw_effector)), 1.0 / 60.0)
