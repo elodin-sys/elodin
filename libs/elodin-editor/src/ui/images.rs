@@ -13,6 +13,7 @@ pub struct Images {
     pub icon_jump_to_start: Handle<Image>,
     pub icon_frame_forward: Handle<Image>,
     pub icon_frame_back: Handle<Image>,
+    pub icon_search: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -20,17 +21,18 @@ impl FromWorld for Images {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         Self {
             logo: asset_server.load("embedded://elodin_editor/assets/logo.png"),
-            icon_play: asset_server.load("embedded://elodin_editor/assets/icons/icon_play.png"),
-            icon_pause: asset_server.load("embedded://elodin_editor/assets/icons/icon_pause.png"),
-            icon_scrub: asset_server.load("embedded://elodin_editor/assets/icons/icon_scrub.png"),
+            icon_play: asset_server.load("embedded://elodin_editor/assets/icons/play.png"),
+            icon_pause: asset_server.load("embedded://elodin_editor/assets/icons/pause.png"),
+            icon_scrub: asset_server.load("embedded://elodin_editor/assets/icons/scrub.png"),
             icon_jump_to_end: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_jump_to_end.png"),
+                .load("embedded://elodin_editor/assets/icons/jump_to_end.png"),
             icon_jump_to_start: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_jump_to_start.png"),
+                .load("embedded://elodin_editor/assets/icons/jump_to_start.png"),
             icon_frame_forward: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_frame_forward.png"),
+                .load("embedded://elodin_editor/assets/icons/frame_forward.png"),
             icon_frame_back: asset_server
-                .load("embedded://elodin_editor/assets/icons/icon_frame_back.png"),
+                .load("embedded://elodin_editor/assets/icons/frame_back.png"),
+            icon_search: asset_server.load("embedded://elodin_editor/assets/icons/search.png"),
         }
     }
 }

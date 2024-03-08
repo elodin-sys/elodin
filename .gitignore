@@ -6,6 +6,7 @@ out.rrd
 result
 result-bin
 .venv
+.vscode
 
 # kubernetes
 

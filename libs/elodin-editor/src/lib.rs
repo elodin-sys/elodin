@@ -40,13 +40,14 @@ struct EmbeddedAssetPlugin;
 impl Plugin for EmbeddedAssetPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "assets/logo.png");
-        embedded_asset!(app, "assets/icons/icon_play.png");
-        embedded_asset!(app, "assets/icons/icon_pause.png");
-        embedded_asset!(app, "assets/icons/icon_scrub.png");
-        embedded_asset!(app, "assets/icons/icon_jump_to_end.png");
-        embedded_asset!(app, "assets/icons/icon_jump_to_start.png");
-        embedded_asset!(app, "assets/icons/icon_frame_forward.png");
-        embedded_asset!(app, "assets/icons/icon_frame_back.png");
+        embedded_asset!(app, "assets/icons/play.png");
+        embedded_asset!(app, "assets/icons/pause.png");
+        embedded_asset!(app, "assets/icons/scrub.png");
+        embedded_asset!(app, "assets/icons/jump_to_end.png");
+        embedded_asset!(app, "assets/icons/jump_to_start.png");
+        embedded_asset!(app, "assets/icons/frame_forward.png");
+        embedded_asset!(app, "assets/icons/frame_back.png");
+        embedded_asset!(app, "assets/icons/search.png");
         embedded_asset!(app, "assets/textures/cube_side_top.png");
         embedded_asset!(app, "assets/textures/cube_side_bottom.png");
         embedded_asset!(app, "assets/textures/cube_side_front.png");
