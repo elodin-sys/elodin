@@ -6028,13 +6028,16 @@ version = "0.1.8"
 dependencies = [
  "bytes",
  "clap",
+ "conduit",
  "nox-ecs",
  "nox-ecs-macros",
  "numpy",
  "parking_lot",
  "postcard",
  "pyo3",
+ "pyo3-asyncio",
  "thiserror",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7406,6 +7409,19 @@ dependencies = [
  "pyo3-ffi",
  "pyo3-macros",
  "unindent",
+]
+
+[[package]]
+name = "pyo3-asyncio"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea6b68e93db3622f3bb3bf363246cf948ed5375afe7abff98ccbdd50b184995"
+dependencies = [
+ "futures",
+ "once_cell",
+ "pin-project-lite",
+ "pyo3",
+ "tokio",
 ]
 
 [[package]]

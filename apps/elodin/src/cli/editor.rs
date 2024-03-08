@@ -42,6 +42,15 @@ impl Cli {
             Simulator::File(path) => ("127.0.0.1:2240".parse()?, Some(path)),
         };
 
+        if let Some(path) = &path {
+            std::process::Command::new("python3")
+                .arg(path)
+                .arg("--")
+                .arg("repl")
+                .arg(addr.to_string())
+                .spawn()?;
+        }
+
         App::new()
             .add_plugins(EditorPlugin)
             .add_plugins(SimClient { addr, bevy_tx })
@@ -121,6 +130,7 @@ impl SimSupervisor {
                 .arg(&path)
                 .arg("--")
                 .arg("run")
+                .arg("--no-repl")
                 .spawn()?;
             // 500ms debounce
             std::thread::sleep(std::time::Duration::from_millis(500));

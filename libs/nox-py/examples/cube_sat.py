@@ -76,7 +76,7 @@ def rw_effector(
     return torque.map(Force, lambda _p, _v, _torque: Force.from_torque(force[:3]))
 
 
-w = WorldBuilder()
+w = World()
 b = Body(
     world_pos=SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
     world_vel=WorldVel.from_angular(initial_angular_vel),
@@ -103,9 +103,7 @@ w.spawn(
     )
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
-    ControlInput(
-        SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90)))
-    )
+    ControlInput(SpatialTransform(axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90))))
 )
 
 exec = w.run(six_dof(1.0 / 60.0, control.pipe(rw_effector)), 1.0 / 60.0)
