@@ -6024,7 +6024,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.1.5"
+version = "0.1.8"
 dependencies = [
  "bytes",
  "clap",
