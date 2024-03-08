@@ -227,6 +227,19 @@ pub enum Payload<B> {
     Column(ColumnPayload<B>),
 }
 
+impl<T> Packet<Payload<T>> {
+    pub fn metadata(stream_id: StreamId, metadata: Metadata) -> Self {
+        let payload = Payload::ControlMsg(ControlMsg::Metadata {
+            stream_id,
+            metadata,
+        });
+        Packet {
+            stream_id: StreamId::CONTROL,
+            payload,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub enum ControlMsg {

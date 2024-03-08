@@ -7,6 +7,11 @@ import inspect
 import jax
 import typing
 import numpy
+import code
+import asyncio
+import readline
+import rlcompleter
+
 
 __doc__ = elodin.__doc__
 
@@ -69,18 +74,6 @@ def system(func) -> Callable[[Any], None]:
     return inner
 
 
-@dataclass
-class ComponentData:
-    id: ComponentId
-    type: ComponentType
-    asset: bool
-    from_expr: Callable[[Any], Any]
-    name: str
-    def to_metadata(self) -> Metadata:
-        metadata = Metadata(self.id, self.type, self.name)
-        return metadata
-
-
 O = TypeVar("O")
 T = TypeVar("T", bound="Union[jax.Array, FromArray]")
 Q = TypeVar("Q", bound="Query[Any]")
@@ -131,7 +124,7 @@ class Query(Generic[Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: ComponentData = t_arg.__metadata__[0]
-            buf = builder.init_var(component_data.id, component_data.type)
+            buf = builder.init_var(component_data.id, component_data.ty)
 
     def insert_into_builder(self, builder: PipelineBuilder):
         self.inner.insert_into_builder(builder)
@@ -164,7 +157,7 @@ class GraphQuery(Generic[E, Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: ComponentData = t_arg.__metadata__[0]
-            buf = builder.init_var(component_data.id, component_data.type)
+            buf = builder.init_var(component_data.id, component_data.ty)
     def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[[O, A, A], O]) -> Q:
         out_bufs = []
         queries = []
@@ -232,7 +225,7 @@ class Component:
         elif len(params) == 2:
             (t, raw_id) =params
             id = parse_id(raw_id)
-            type = t.__metadata__[0].type
+            type = t.__metadata__[0].ty
             return Annotated.__class_getitem__(
                 (t, ComponentData(id, type, False, from_expr(t), f"{raw_id}"))
             )  # type: ignore
@@ -312,3 +305,16 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
 
     xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
     return xla
+
+
+class World(WorldBuilder):
+    def run(self, sys: System, time_step: float, client = None):
+        frame = inspect.currentframe().f_back
+        addr = super().run(sys, time_step, client)
+        locals = frame.f_locals
+        if addr is not None:
+            client = elodin.Conduit.tcp(addr)
+            locals["client"] = client
+            readline.set_completer(rlcompleter.Completer(locals).complete)
+            readline.parse_and_bind("tab: complete")
+            code.InteractiveConsole(locals=locals).interact()
