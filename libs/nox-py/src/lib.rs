@@ -26,6 +26,7 @@ use pyo3::{
     types::{PyBytes, PyTuple},
 };
 
+mod conduit_client;
 mod graph;
 mod spatial;
 
@@ -324,7 +325,7 @@ impl From<PrimitiveType> for conduit::PrimitiveTy {
     }
 }
 
-#[pyclass]
+#[pyclass(subclass)]
 #[derive(Default)]
 pub struct WorldBuilder {
     world: World<HostStore>,
@@ -333,56 +334,43 @@ pub struct WorldBuilder {
 impl WorldBuilder {
     fn get_or_insert_archetype(
         &mut self,
-        py: Python<'_>,
-        archetype: &PyObject,
+        archetype: &Archetype,
     ) -> Result<&mut Table<HostStore>, Error> {
-        let archetype_id = archetype
-            .call_method0(py, "archetype_id")?
-            .extract::<u64>(py)?;
-        let archetype_id = ArchetypeId::new(archetype_id.into());
-
+        let archetype_id = archetype.archetype_id;
         match self.world.archetypes.entry(archetype_id) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
-                let archetype_id = archetype
-                    .call_method0(py, "archetype_id")?
-                    .extract::<u64>(py)?;
-                let archetype_id = ArchetypeId::new(archetype_id.into());
-                let datas = archetype
-                    .call_method0(py, "component_data")?
-                    .extract::<Vec<PyObject>>(py)?;
-                let component_ids = datas
+                let columns = archetype
+                    .component_datas
                     .iter()
-                    .map(|data| {
-                        let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-                        Ok(id.inner)
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
-                let columns = datas
-                    .iter()
-                    .map(|data| {
-                        let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-                        let ty: nox_ecs::conduit::ComponentType = data
-                            .getattr(py, "type")?
-                            .extract::<ComponentType>(py)?
-                            .into();
-                        let asset = data.getattr(py, "asset")?.extract::<bool>(py)?;
-                        let name = data.getattr(py, "name")?.extract::<String>(py)?;
-                        let mut col = nox_ecs::Column::<HostStore>::new(
-                            HostColumn::new(ty.clone(), id.inner),
-                            conduit::Metadata {
-                                component_id: id.inner,
-                                component_type: ty,
-                                tags: std::iter::once(("name".to_string(), TagValue::String(name)))
+                    .map(
+                        |ComponentData {
+                             id,
+                             ty,
+                             asset,
+                             name,
+                             ..
+                         }| {
+                            let name = name.to_owned().unwrap_or_default();
+                            let mut col = nox_ecs::Column::<HostStore>::new(
+                                HostColumn::new(ty.clone().into(), id.inner),
+                                conduit::Metadata {
+                                    component_id: id.inner,
+                                    component_type: ty.clone().into(),
+                                    tags: std::iter::once((
+                                        "name".to_string(),
+                                        TagValue::String(name),
+                                    ))
                                     .collect(),
-                            },
-                        );
-                        col.buffer.asset = asset;
-                        Ok((id.inner, col))
-                    })
+                                },
+                            );
+                            col.buffer.asset = *asset;
+                            Ok((id.inner, col))
+                        },
+                    )
                     .collect::<Result<_, Error>>()?;
-                for id in component_ids {
-                    self.world.component_map.insert(id, archetype_id);
+                for id in &archetype.component_ids {
+                    self.world.component_map.insert(id.inner, archetype_id);
                 }
                 let table = Table {
                     columns,
@@ -444,9 +432,15 @@ enum Args {
         #[arg(long)]
         dir: PathBuf,
     },
+    Repl {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+    },
     Run {
         #[arg(default_value = "0.0.0.0:2240")]
         addr: SocketAddr,
+        #[arg(long)]
+        no_repl: bool,
     },
 }
 
@@ -457,59 +451,42 @@ impl WorldBuilder {
         Self::default()
     }
 
-    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: PyObject) -> Result<Entity, Error> {
-        Python::with_gil(|py| {
-            let entity_id = EntityId {
-                inner: conduit::EntityId(slf.world.entity_len),
-            };
+    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: Archetype<'_>) -> Result<Entity, Error> {
+        let entity_id = EntityId {
+            inner: conduit::EntityId(slf.world.entity_len),
+        };
 
-            slf.spawn_with_entity_id(py, archetype, entity_id.clone())?;
-            let world = slf.into();
-            Ok(Entity {
-                id: entity_id,
-                world,
-            })
+        slf.spawn_with_entity_id(archetype, entity_id.clone())?;
+        let world = slf.into();
+        Ok(Entity {
+            id: entity_id,
+            world,
         })
     }
 
     pub fn spawn_with_entity_id(
         &mut self,
-        py: Python<'_>,
-        archetype: PyObject,
+        archetype: Archetype,
         entity_id: EntityId,
     ) -> Result<EntityId, Error> {
         let entity_id = entity_id.inner;
-        let table = self.get_or_insert_archetype(py, &archetype)?;
+        let table = self.get_or_insert_archetype(&archetype)?;
         table
             .entity_map
             .insert(entity_id, table.entity_buffer.len());
         table.entity_buffer.push(entity_id.0.constant());
-
-        let datas = archetype
-            .call_method0(py, "component_data")?
-            .extract::<Vec<PyObject>>(py)?;
-        let component_ids = datas.iter().map(|data| {
-            let id = data.getattr(py, "id")?.extract::<ComponentId>(py)?;
-            Ok::<_, Error>(id.inner)
-        });
-        let arrays = archetype.call_method0(py, "arrays")?;
-        let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>(py)?;
-        for (arr, id) in arrays.iter().zip(component_ids) {
-            let id = id?;
+        for (arr, id) in archetype
+            .arrays
+            .iter()
+            .zip(archetype.component_ids.into_iter())
+        {
             let col = table
                 .columns
-                .get_mut(&id)
+                .get_mut(&id.inner)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
             let ty = col.buffer.component_type();
             let size = ty.primitive_ty.element_type().element_size_in_bytes();
-            let buf = unsafe {
-                if !arr.is_c_contiguous() {
-                    panic!("array must be c-style contiguous")
-                }
-                let len = arr.shape().iter().product::<usize>() * size;
-                let obj = &*arr.as_array_ptr();
-                std::slice::from_raw_parts(obj.data as *const u8, len)
-            };
+            let buf = unsafe { arr.buf(size) };
             col.buffer.push_raw(buf);
         }
         self.world.entity_len += 1;
@@ -531,7 +508,7 @@ impl WorldBuilder {
         sys: PyObject,
         time_step: Option<f64>,
         client: Option<&Client>,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<String>, Error> {
         tracing_subscriber::fmt::init();
         // skip `python3 <name of script>`
         let args = std::env::args_os().skip(2);
@@ -540,22 +517,30 @@ impl WorldBuilder {
             Args::Build { dir } => {
                 let exec = self.build(py, sys, time_step)?.exec;
                 exec.write_to_dir(dir)?;
-                Ok(())
+                Ok(None)
             }
-            Args::Run { addr } => {
+            Args::Repl { addr } => Ok(Some(addr.to_string())),
+            Args::Run { addr, no_repl } => {
                 let exec = self.build(py, sys, time_step)?.exec;
                 let client = match client {
                     Some(c) => c.client.clone(),
                     None => nox::Client::cpu()?,
                 };
-                let ppid = std::os::unix::process::parent_id();
-                spawn_tcp_server(addr, exec, &client, || {
-                    let sig_err = py.check_signals().is_err();
-                    let current_ppid = std::os::unix::process::parent_id();
-                    let ppid_changed = ppid != current_ppid;
-                    sig_err || ppid_changed
-                })?;
-                Ok(())
+                if no_repl {
+                    let ppid = std::os::unix::process::parent_id();
+                    spawn_tcp_server(addr, exec, &client, || {
+                        let sig_err = py.check_signals().is_err();
+                        let current_ppid = std::os::unix::process::parent_id();
+                        let ppid_changed = ppid != current_ppid;
+                        sig_err || ppid_changed
+                    })?;
+                    Ok(None)
+                } else {
+                    std::thread::spawn(move || {
+                        spawn_tcp_server(addr, exec, &client, || false).unwrap()
+                    });
+                    Ok(Some(addr.to_string()))
+                }
             }
         }
     }
@@ -625,6 +610,84 @@ def build_expr(builder, sys):
         };
 
         Ok(Exec { exec })
+    }
+}
+
+trait PyUntypedArrayExt {
+    unsafe fn buf(&self, elem_size: usize) -> &[u8];
+}
+
+impl PyUntypedArrayExt for PyUntypedArray {
+    unsafe fn buf(&self, elem_size: usize) -> &[u8] {
+        if !self.is_c_contiguous() {
+            panic!("array must be c-style contiguous")
+        }
+        let len = self.shape().iter().product::<usize>() * elem_size;
+        let obj = &*self.as_array_ptr();
+        std::slice::from_raw_parts(obj.data as *const u8, len)
+    }
+}
+
+#[derive(Clone)]
+#[pyclass(get_all, set_all)]
+pub struct ComponentData {
+    id: ComponentId,
+    ty: ComponentType,
+    asset: bool,
+    from_expr: PyObject,
+    name: Option<String>,
+}
+
+#[pymethods]
+impl ComponentData {
+    #[new]
+    pub fn new(
+        id: ComponentId,
+        ty: ComponentType,
+        asset: bool,
+        from_expr: PyObject,
+        name: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            ty,
+            asset,
+            from_expr,
+            name,
+        }
+    }
+
+    pub fn to_metadata(&self) -> Metadata {
+        Metadata::new(self.id, self.ty.clone(), self.name.clone())
+    }
+}
+
+pub struct Archetype<'py> {
+    component_datas: Vec<ComponentData>,
+    component_ids: Vec<ComponentId>,
+    arrays: Vec<&'py PyUntypedArray>,
+    archetype_id: ArchetypeId,
+}
+
+impl<'s> FromPyObject<'s> for Archetype<'s> {
+    fn extract(archetype: &'s PyAny) -> PyResult<Self> {
+        let archetype_id = archetype.call_method0("archetype_id")?.extract::<u64>()?;
+        let archetype_id = ArchetypeId::new(archetype_id.into());
+        let component_datas = archetype
+            .call_method0("component_data")?
+            .extract::<Vec<ComponentData>>()?;
+        let component_ids = component_datas
+            .iter()
+            .map(|data| data.id)
+            .collect::<Vec<_>>();
+        let arrays = archetype.call_method0("arrays")?;
+        let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
+        Ok(Self {
+            component_datas,
+            component_ids,
+            arrays,
+            archetype_id,
+        })
     }
 }
 
@@ -752,6 +815,14 @@ pub struct EntityId {
     inner: conduit::EntityId,
 }
 
+#[pymethods]
+impl EntityId {
+    #[new]
+    fn new(id: u64) -> Self {
+        EntityId { inner: id.into() }
+    }
+}
+
 #[derive(Clone)]
 #[pyclass]
 pub struct Entity {
@@ -765,9 +836,9 @@ impl Entity {
         self.id.clone()
     }
 
-    pub fn insert(&mut self, py: Python<'_>, archetype: PyObject) -> Result<Self, Error> {
+    pub fn insert(&mut self, py: Python<'_>, archetype: Archetype<'_>) -> Result<Self, Error> {
         let mut world = self.world.borrow_mut(py);
-        world.spawn_with_entity_id(py, archetype, self.id())?;
+        world.spawn_with_entity_id(archetype, self.id())?;
         Ok(self.clone())
     }
 
@@ -1190,6 +1261,8 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
+    m.add_class::<ComponentData>()?;
+    m.add_class::<conduit_client::Conduit>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
 }

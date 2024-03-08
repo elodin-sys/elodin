@@ -26,7 +26,7 @@ def gravity(q: GraphQuery[GravityEdge, WorldPos, Inertia]) -> Query[Force]:
     return q.edge_fold(Force, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), gravity_inner)
 
 
-w = WorldBuilder()
+w = World()
 a = w.spawn(
     Body(
         world_pos=WorldPos.from_linear(np.array([0.8822391241, 0, 0])),

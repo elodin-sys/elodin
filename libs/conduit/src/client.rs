@@ -74,8 +74,11 @@ mod tokio_impl {
     use bytes::{Bytes, BytesMut};
     use futures::Sink;
     use std::io;
-    use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-    use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+    use tokio::net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream,
+    };
+    use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 
     use super::*;
 
@@ -153,4 +156,15 @@ mod tokio_impl {
     }
 
     pub type TcpWriter = AsyncClient<FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>>;
+
+    pub type TcpClient = AsyncClient<Framed<TcpStream, LengthDelimitedCodec>>;
+
+    impl<T> AsyncClient<Framed<T, LengthDelimitedCodec>>
+    where
+        T: tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin,
+    {
+        pub fn from_stream(stream: T) -> Self {
+            AsyncClient::new(Framed::new(stream, LengthDelimitedCodec::default()))
+        }
+    }
 }
