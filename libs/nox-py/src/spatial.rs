@@ -26,6 +26,20 @@ impl SpatialTransform {
         nox::SpatialTransform::from_linear(Vector::from_op(Noxpr::jax(arr))).into()
     }
 
+    #[staticmethod]
+    fn from_angular(quat: Quaternion) -> Self {
+        nox::SpatialTransform::from_angular(quat.inner).into()
+    }
+
+    #[staticmethod]
+    fn from_axis_angle(axis: PyObject, angle: PyObject) -> Self {
+        nox::SpatialTransform::from_axis_angle(
+            Vector::from_op(Noxpr::jax(axis)),
+            Scalar::from_op(Noxpr::jax(angle)),
+        )
+        .into()
+    }
+
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
@@ -190,6 +204,7 @@ impl SpatialForce {
     }
 }
 
+#[derive(Clone)]
 #[pyclass]
 pub struct Quaternion {
     inner: nox::Quaternion<f64>,
@@ -232,6 +247,15 @@ impl Quaternion {
     #[getter]
     fn shape(&self) -> PyObject {
         Python::with_gil(|py| PyTuple::new(py, [4]).into())
+    }
+
+    #[staticmethod]
+    fn from_axis_angle(axis: PyObject, angle: PyObject) -> Self {
+        nox::Quaternion::from_axis_angle(
+            Vector::from_op(Noxpr::jax(axis)),
+            Scalar::from_op(Noxpr::jax(angle)),
+        )
+        .into()
     }
 }
 

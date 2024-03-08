@@ -6,7 +6,7 @@ use xla::{ArrayElement, NativeType};
 
 use crate::{
     AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FixedSliceExt, FromBuilder,
-    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, ToHost, Vector,
+    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, Scalar, ToHost, Vector,
 };
 
 pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
@@ -36,9 +36,19 @@ impl<T: Field> Quaternion<T> {
             .concat(T::one().reshape::<Const<1>>());
         Quaternion(inner)
     }
-}
 
-impl<T: Field> Quaternion<T> {
+    pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
+        let axis = axis.into();
+        let axis = axis.normalize();
+        let angle = angle.into();
+        let half_angle = angle / (T::two());
+        let half_angle = half_angle.sin();
+        let sin = half_angle.sin();
+        let cos = half_angle.cos();
+        let inner = (axis * sin).concat(cos.reshape::<Const<1>>());
+        Quaternion(inner)
+    }
+
     fn parts(&self) -> [Vector<T, 1>; 4] {
         let Quaternion(v) = self;
         v.parts()
@@ -48,9 +58,7 @@ impl<T: Field> Quaternion<T> {
         let [i, j, k, w] = self.parts();
         Quaternion(Vector::from_arr([-i, -j, -k, w]))
     }
-}
 
-impl<T: Field> Quaternion<T> {
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())

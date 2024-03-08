@@ -11,7 +11,7 @@ use std::{
 use clap::Parser;
 use nox_ecs::{
     conduit, join_many,
-    nox::{self, jax::JaxTracer, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
+    nox::{self, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
     spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore,
     SharedWorld, System, Table, World,
 };
@@ -41,53 +41,6 @@ struct PipelineBuilder {
 
 #[pymethods]
 impl PipelineBuilder {
-    fn get_var(&mut self, id: ComponentId) -> Result<(ComponentArrayMetadata, PyObject), Error> {
-        let var = self
-            .builder
-            .vars
-            .get(&id.inner)
-            .ok_or(nox_ecs::Error::ComponentNotFound)?;
-        let var = var.borrow();
-        // let NoxprNode::Jax(buf) = var.buffer().deref() else {
-        //     todo!()
-        // };
-        let buf = var.buffer().to_jax()?;
-        let obj = Python::with_gil(|py| buf.to_object(py));
-        let metadata = ComponentArrayMetadata {
-            len: var.len,
-            entity_map: var.entity_map.clone(),
-        };
-        Ok((metadata, obj))
-    }
-
-    fn set_var(
-        &mut self,
-        id: ComponentId,
-        metadata: &ComponentArrayMetadata,
-        value: PyObject,
-    ) -> Result<(), Error> {
-        let var = self
-            .builder
-            .vars
-            .get(&id.inner)
-            .ok_or(nox_ecs::Error::ComponentNotFound)?;
-        let mut var = var.borrow_mut();
-        let update_buffer = Noxpr::jax(value);
-        if var.entity_map == metadata.entity_map {
-            var.buffer = update_buffer;
-        } else {
-            let mut tracer = JaxTracer::new();
-            let new_buf = nox_ecs::update_var(
-                &var.entity_map,
-                &metadata.entity_map,
-                &var.buffer,
-                &update_buffer,
-            );
-            var.buffer = Noxpr::jax(tracer.visit(&new_buf)?);
-        }
-        Ok(())
-    }
-
     fn init_var(&mut self, id: ComponentId, ty: ComponentType) -> Result<(), Error> {
         let id = id.inner;
         if self.builder.param_ids.contains(&id) {
@@ -273,6 +226,16 @@ impl ComponentType {
         let shape = numpy::PyArray1::from_vec(py, vec![2]).to_owned();
         Self {
             ty: PrimitiveType::U64,
+            shape,
+        }
+    }
+
+    #[classattr]
+    #[pyo3(name = "Quaternion")]
+    fn quaternion(py: Python<'_>) -> Self {
+        let shape = numpy::PyArray1::from_vec(py, vec![4]).to_owned();
+        Self {
+            ty: PrimitiveType::F64,
             shape,
         }
     }
@@ -890,49 +853,6 @@ impl From<Error> for PyErr {
 }
 
 #[pyclass]
-#[derive(Clone)]
-pub struct ComponentArrayMetadata {
-    len: usize,
-    entity_map: BTreeMap<conduit::EntityId, usize>,
-}
-
-#[pymethods]
-impl ComponentArrayMetadata {
-    fn join(
-        &self,
-        expr: PyObject,
-        other_metadata: ComponentArrayMetadata,
-        other_exprs: Vec<PyObject>,
-    ) -> Result<(ComponentArrayMetadata, Vec<PyObject>), Error> {
-        let arr = ComponentArray {
-            buffer: Noxpr::jax(expr),
-            len: self.len,
-            entity_map: self.entity_map.clone(),
-            phantom_data: PhantomData::<()>,
-        };
-        let other_exprs = other_exprs.into_iter().map(Noxpr::jax).collect();
-        let query = nox_ecs::Query {
-            exprs: other_exprs,
-            entity_map: other_metadata.entity_map,
-            len: other_metadata.len,
-            phantom_data: PhantomData::<()>,
-        };
-        let out = join_many(query, &arr);
-        let mut tracer = JaxTracer::new();
-        let exprs = out
-            .exprs
-            .into_iter()
-            .map(|expr| tracer.visit(&expr))
-            .collect::<Result<Vec<_>, _>>()?;
-        let metadata = ComponentArrayMetadata {
-            len: out.len,
-            entity_map: out.entity_map,
-        };
-        Ok((metadata, exprs))
-    }
-}
-
-#[pyclass]
 pub struct RustSystem {
     inner: Box<dyn System<Arg = (), Ret = ()> + Send + Sync>,
 }
@@ -1244,7 +1164,6 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<WorldBuilder>()?;
     m.add_class::<EntityId>()?;
     m.add_class::<Client>()?;
-    m.add_class::<ComponentArrayMetadata>()?;
     m.add_class::<SpatialTransform>()?;
     m.add_class::<SpatialForce>()?;
     m.add_class::<SpatialMotion>()?;
