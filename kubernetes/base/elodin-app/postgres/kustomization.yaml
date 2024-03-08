@@ -5,5 +5,21 @@ resources:
 - stateful-set.yaml
 - service.yaml
 
-commonLabels:
-  app: postgres
+labels:
+- pairs:
+    app: postgres
+  fields:
+  - path: metadata/labels
+    create: true
+  - path: spec/selector
+    create: true
+    kind: Service
+  - path: spec/selector/matchLabels
+    create: true
+    kind: StatefulSet
+  - path: spec/template/metadata/labels
+    create: true
+    kind: StatefulSet
+  - path: spec/selector/matchLabels
+    create: true
+    kind: PodDisruptionBudget

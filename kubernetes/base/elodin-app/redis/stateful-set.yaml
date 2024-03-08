@@ -10,13 +10,11 @@ spec:
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 1
+          - weight: 100
             preference:
               matchExpressions:
-              - key: cloud.google.com/gke-nodepool
-                operator: In
-                values:
-                - default
+              - key: cloud.google.com/gke-spot
+                operator: DoesNotExist
       containers:
       - name: redis
         image: redis:7.2-alpine
@@ -36,8 +34,8 @@ spec:
           readOnly: false
         resources:
           requests:
-            cpu: 1
-            memory: 1Gi
+            cpu: 0.5
+            memory: 500Mi
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
@@ -61,3 +59,10 @@ spec:
       resources:
         requests:
           storage: 5Gi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+spec:
+  maxUnavailable: 0

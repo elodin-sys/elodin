@@ -10,13 +10,11 @@ spec:
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 1
+          - weight: 100
             preference:
               matchExpressions:
-              - key: cloud.google.com/gke-nodepool
-                operator: In
-                values:
-                - default
+              - key: cloud.google.com/gke-spot
+                operator: DoesNotExist
       containers:
       - name: elo-atc
         imagePullPolicy: Always
@@ -45,6 +43,7 @@ spec:
         resources:
           requests:
             cpu: 200m
+            memory: 200Mi
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
