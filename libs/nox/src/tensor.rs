@@ -117,6 +117,14 @@ impl<T, D: TensorDim> Tensor<T, D, Op> {
     pub fn log(&self) -> Self {
         Self::from_op(self.inner.clone().log())
     }
+
+    pub fn sin(&self) -> Self {
+        Self::from_op(self.inner.clone().sin())
+    }
+
+    pub fn cos(&self) -> Self {
+        Self::from_op(self.inner.clone().cos())
+    }
 }
 
 impl<T: Field, D: TensorDim + XlaDim> Tensor<T, D, Op> {

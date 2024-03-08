@@ -32,6 +32,10 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
         SpatialTransform::new(Quaternion::identity(), linear)
     }
 
+    pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
+        Self::from_angular(Quaternion::from_axis_angle(axis, angle))
+    }
+
     pub fn angular(&self) -> Quaternion<T> {
         Quaternion(self.inner.fixed_slice([0]))
     }

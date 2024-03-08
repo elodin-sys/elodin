@@ -106,6 +106,10 @@ impl<T: Field> Vector<T, 3, Op> {
         let z = &ax * &by - &ay * &bx;
         Vector::from_arr([x, y, z])
     }
+
+    pub fn normalize(&self) -> Self {
+        self.clone() / self.norm()
+    }
 }
 
 #[cfg(test)]
