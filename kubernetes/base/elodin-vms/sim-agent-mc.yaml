@@ -39,7 +39,7 @@ spec:
           mountPath: /etc/elodin
         resources:
           requests:
-            cpu: 300m
+            cpu: 0.5
             memory: 500Mi
         securityContext:
           readOnlyRootFilesystem: true

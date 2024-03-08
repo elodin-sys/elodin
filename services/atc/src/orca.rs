@@ -297,7 +297,7 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                     "resources": {
                         "requests": {
                             "cpu": "0.5",
-                            "memory": "1Gi",
+                            "memory": "500Mi",
                         },
                         "limits": {
                             "dev/kvm": "1",
