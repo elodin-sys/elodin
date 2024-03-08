@@ -43,4 +43,4 @@ clean-dev-branch branch_codename:
   kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"
 
 sync-open-source:
-  git filter-repo --refs main --path libs/conduit --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/xla-rs --target ../elodin
+  git filter-repo --refs main --path libs/conduit --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --target ../elodin
