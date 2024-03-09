@@ -6,3 +6,7 @@ migrate = false
 address = "[::]:50051"
 auth0.domain = "auth.elodin.dev"
 auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
+
+[monte_carlo]
+sim_artifacts_bucket_name = "sim-artifacts-dev"
+sim_results_bucket_name = "sim-results-dev"

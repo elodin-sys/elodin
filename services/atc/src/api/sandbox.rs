@@ -1,6 +1,7 @@
 use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
-use crate::{error::Error, events::DbExt, sandbox::update_sandbox_code};
+use crate::{error::Error, sandbox::update_sandbox_code};
 use atc_entity::{
+    events::DbExt,
     sandbox::{self},
     user::{EntityType, Permission, Verb},
     vm,

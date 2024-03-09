@@ -21,4 +21,3 @@ timeout = 600.0
 sim_artifacts_bucket_name = ""
 sim_results_bucket_name = ""
 spawn_batches = false
-collect_results = false

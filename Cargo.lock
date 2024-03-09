@@ -875,7 +875,6 @@ dependencies = [
  "atc-migration",
  "axum",
  "chrono",
- "compact_str",
  "config 0.14.0",
  "const-fnv1a-hash",
  "elodin-types",
@@ -913,12 +912,18 @@ dependencies = [
 name = "atc-entity"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "elodin-types",
  "enumflags2",
+ "futures-util",
+ "postcard",
+ "redis",
  "sea-orm",
  "serde",
  "serde_json",
+ "thiserror",
+ "tokio",
  "uuid",
 ]
 
@@ -2458,15 +2463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "castaway"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a17ed5635fc8536268e5d4de1e22e81ac34419e5f052d4d51f4e01dcc263fcc"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "cc"
 version = "1.0.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2731,20 +2727,6 @@ dependencies = [
  "strum",
  "strum_macros",
  "unicode-width",
-]
-
-[[package]]
-name = "compact_str"
-version = "0.8.0-beta"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a2dc81369dde6d31456eedbb4fd3d320f0b9713573dfe06e569e2bce7607f2"
-dependencies = [
- "castaway",
- "cfg-if",
- "itoa",
- "rustversion",
- "ryu",
- "static_assertions",
 ]
 
 [[package]]
@@ -3555,6 +3537,7 @@ dependencies = [
 name = "elodin-types"
 version = "0.1.0"
 dependencies = [
+ "bit-vec",
  "chrono",
  "prost",
  "serde",
@@ -8655,6 +8638,7 @@ name = "sim-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atc-entity",
  "bytes",
  "chrono",
  "conduit",
@@ -8667,6 +8651,7 @@ dependencies = [
  "postcard",
  "redis",
  "redmq",
+ "sea-orm",
  "serde",
  "tar",
  "tempfile",

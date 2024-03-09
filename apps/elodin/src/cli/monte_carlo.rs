@@ -98,7 +98,8 @@ fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
     }
     let file_name = args.file.file_name().unwrap();
 
-    let status = std::process::Command::new(&args.file)
+    let status = std::process::Command::new("python3")
+        .arg(&args.file)
         .arg("--")
         .arg("build")
         .arg("--dir")

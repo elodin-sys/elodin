@@ -1,3 +1,4 @@
+use atc_entity::events::{DbEvent, DbExt, EntityExt, Error as EventError, EventModel};
 use atc_entity::{
     sandbox,
     vm::{self, Status},
@@ -16,12 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, trace, warn};
 use uuid::Uuid;
 
-use crate::{
-    config::OrcaConfig,
-    error::Error,
-    events::{DbEvent, DbExt, EntityExt},
-    sandbox::update_sandbox_code,
-};
+use crate::{config::OrcaConfig, error::Error, sandbox::update_sandbox_code};
 
 pub struct Orca {
     k8s: kube::Client,
@@ -59,7 +55,7 @@ impl Orca {
         let events = watcher(pods, watcher::Config::default())
             .map(|e| e.map(OrcaMsg::K8sEvent).map_err(Error::from));
         tokio::pin!(events);
-        redis.subscribe("vm_events").await?;
+        redis.subscribe(vm::Model::topic_name().as_str()).await?;
         let mut rx = redis.on_message().map(|msg| {
             postcard::from_bytes(msg.get_payload_bytes())
                 .map(OrcaMsg::DbEvent)
@@ -216,10 +212,10 @@ impl Orca {
         };
         let model = match vm::Entity::delete_with_event(id, &self.db, &mut self.redis).await {
             Ok(model) => model,
-            Err(Error::NotFound) | Err(Error::Db(sea_orm::DbErr::RecordNotFound(_))) => {
+            Err(EventError::NotFound) | Err(EventError::Db(sea_orm::DbErr::RecordNotFound(_))) => {
                 return Ok(())
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         };
         if let Some(sandbox_id) = model.sandbox_id {
             sandbox::ActiveModel {

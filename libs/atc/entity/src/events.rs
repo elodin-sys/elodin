@@ -1,23 +1,36 @@
-use atc_entity::{sandbox, user, vm};
-use compact_str::CompactString;
-use futures::StreamExt;
+use futures_util::StreamExt;
 use redis::{aio::PubSub, AsyncCommands};
-use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
-    PrimaryKeyTrait,
-};
+use sea_orm::prelude::*;
+use sea_orm::IntoActiveModel;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
-use tonic::async_trait;
 
-use crate::error::Error;
-
-pub trait EventModel {
-    fn topic_name() -> CompactString;
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("db error: {0}")]
+    Db(#[from] sea_orm::DbErr),
+    #[error("not found")]
+    NotFound,
+    #[error("postcard: {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error("redis: {0}")]
+    Redis(#[from] redis::RedisError),
 }
 
-#[async_trait]
+pub trait EventModel {
+    fn topic_name() -> String;
+}
+
+impl<E: ModelTrait + Serialize + DeserializeOwned> EventModel for E {
+    fn topic_name() -> String {
+        // TODO: memoize this if necessary
+        let entity = <Self as ModelTrait>::Entity::default();
+        let table_name = entity.table_name();
+        format!("{table_name}_events")
+    }
+}
+
+#[async_trait::async_trait]
 pub trait DbExt: ActiveModelTrait {
     async fn update_with_event(
         self,
@@ -31,7 +44,7 @@ pub trait DbExt: ActiveModelTrait {
     ) -> Result<<Self::Entity as EntityTrait>::Model, Error>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<A: ActiveModelTrait + ActiveModelBehavior + Send + Sync> DbExt for A
 where
     <Self::Entity as EntityTrait>::Model: IntoActiveModel<Self> + EventModel + Serialize,
@@ -70,7 +83,7 @@ where
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 pub trait EntityExt: EntityTrait {
     async fn delete_with_event(
         id: <Self::PrimaryKey as PrimaryKeyTrait>::ValueType,
@@ -79,7 +92,7 @@ pub trait EntityExt: EntityTrait {
     ) -> Result<Self::Model, Error>;
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl<M: EntityTrait> EntityExt for M
 where
     <Self::PrimaryKey as PrimaryKeyTrait>::ValueType: Clone + Send + Sync,
@@ -122,52 +135,20 @@ impl<M> DbEvent<M> {
     }
 }
 
-impl EventModel for vm::Model {
-    fn topic_name() -> CompactString {
-        "vm_events".into()
-    }
-}
-
-impl EventModel for user::Model {
-    fn topic_name() -> CompactString {
-        "user_events".into()
-    }
-}
-
-impl EventModel for sandbox::Model {
-    fn topic_name() -> CompactString {
-        "sandbox_events".into()
-    }
-}
-
-pub struct EventMonitor<M> {
-    tx: broadcast::Sender<DbEvent<M>>,
-}
-
-impl<M: EventModel + DeserializeOwned + Send + 'static + Clone> EventMonitor<M> {
-    pub fn pair() -> (Self, broadcast::Receiver<DbEvent<M>>) {
-        let (tx, rx) = broadcast::channel(128);
-        (EventMonitor { tx }, rx)
-    }
-    pub async fn run(
-        self,
-        mut redis: PubSub,
-        cancel_token: CancellationToken,
-    ) -> anyhow::Result<()> {
-        let cancel_on_drop = cancel_token.clone().drop_guard();
-        redis.subscribe(M::topic_name().as_str()).await?;
-        let mut stream = redis.on_message();
-        loop {
-            let msg = tokio::select! {
-                _ = cancel_token.cancelled() => break,
-                Some(msg) = stream.next() => msg,
-                else => break,
-            };
+pub async fn subscribe<M: EventModel + DeserializeOwned + Send + 'static + Clone>(
+    mut redis: PubSub,
+) -> Result<broadcast::Receiver<DbEvent<M>>, Error> {
+    let (tx, rx) = broadcast::channel(128);
+    redis.subscribe(M::topic_name().as_str()).await?;
+    let mut stream = redis.into_on_message();
+    tokio::spawn(async move {
+        while let Some(msg) = stream.next().await {
             let msg = postcard::from_bytes(msg.get_payload_bytes())?;
-            let _ = self.tx.send(msg);
+            if tx.send(msg).is_err() {
+                break;
+            }
         }
-        drop(cancel_on_drop);
-        tracing::debug!("done");
-        Ok(())
-    }
+        Ok::<_, Error>(())
+    });
+    Ok(rx)
 }

@@ -7,6 +7,8 @@ mod m20240115_010451_add_public_sandbox;
 mod m20240125_172746_add_monte_carlo_run;
 mod m20240212_165856_add_max_duration;
 mod m20240301_223247_add_anon_sandbox;
+mod m20240307_235204_add_run_start;
+mod m20240308_002847_add_batches;
 
 pub struct Migrator;
 
@@ -21,6 +23,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240125_172746_add_monte_carlo_run::Migration),
             Box::new(m20240212_165856_add_max_duration::Migration),
             Box::new(m20240301_223247_add_anon_sandbox::Migration),
+            Box::new(m20240307_235204_add_run_start::Migration),
+            Box::new(m20240308_002847_add_batches::Migration),
         ]
     }
 }

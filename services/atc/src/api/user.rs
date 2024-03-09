@@ -1,5 +1,6 @@
 use super::{Api, Claims, UserInfo};
-use crate::{error::Error, events::DbExt};
+use crate::error::Error;
+use atc_entity::events::DbExt;
 use atc_entity::user::{self, Permissions};
 use elodin_types::api::{CreateUserReq, CreateUserResp, CurrentUserResp};
 use sea_orm::{prelude::Uuid, ColumnTrait, EntityTrait, QueryFilter, Set};

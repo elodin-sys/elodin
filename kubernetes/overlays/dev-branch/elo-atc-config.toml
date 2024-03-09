@@ -18,6 +18,5 @@ timeout = 600.0
 
 [monte_carlo]
 spawn_batches = true
-collect_results = true
 sim_artifacts_bucket_name = "sim-artifacts-dev"
 sim_results_bucket_name = "sim-results-dev"
