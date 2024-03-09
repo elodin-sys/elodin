@@ -22,7 +22,7 @@ spec:
               - key: cloud.google.com/gke-spot
                 operator: DoesNotExist
       containers:
-      - name: elo-atc-proxy
+      - name: elo-atc
         imagePullPolicy: Always
         image: elodin-infra/elo-atc:latest
         env:

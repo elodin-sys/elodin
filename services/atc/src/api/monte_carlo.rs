@@ -1,6 +1,6 @@
 use crate::{api, error, monte_carlo};
 
-use atc_entity::mc;
+use atc_entity::mc_run;
 use elodin_types::{api::*, Run, RUN_TOPIC};
 use sea_orm::prelude::*;
 
@@ -22,14 +22,15 @@ impl api::Api {
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
         let max_duration =
             i64::try_from(req.max_duration).map_err(|_| error::Error::InvalidRequest)?;
-        let mc_run = atc_entity::mc::ActiveModel {
+        let mc_run = atc_entity::mc_run::ActiveModel {
             id: sea_orm::Set(id),
             user_id: sea_orm::Set(user.id),
             samples: sea_orm::Set(samples),
             name: sea_orm::Set(req.name),
-            status: sea_orm::Set(mc::Status::Pending),
+            status: sea_orm::Set(mc_run::Status::Pending),
             metadata: sea_orm::Set(Json::Null),
             max_duration: sea_orm::Set(max_duration),
+            started: sea_orm::Set(None),
         }
         .insert(txn)
         .await?;
@@ -48,20 +49,22 @@ impl api::Api {
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<StartMonteCarloRunResp, error::Error> {
         let id = req.id()?;
+        let start_time = chrono::Utc::now();
         tracing::debug!(%user.id, %id, "start monte carlo run");
 
         let mc_run = atc_entity::MonteCarloRun::find_by_id(id)
-            .filter(mc::Column::UserId.eq(user.id))
+            .filter(mc_run::Column::UserId.eq(user.id))
             .one(txn)
             .await?
             .ok_or(error::Error::NotFound)?;
 
         // change status from pending -> running
-        if mc_run.status != mc::Status::Pending {
+        if mc_run.status != mc_run::Status::Pending {
             return Err(error::Error::InvalidRequest);
         }
-        let mut mc_run: mc::ActiveModel = mc_run.into();
-        mc_run.status = sea_orm::Set(mc::Status::Running);
+        let mut mc_run: mc_run::ActiveModel = mc_run.into();
+        mc_run.status = sea_orm::Set(mc_run::Status::Running);
+        mc_run.started = sea_orm::Set(Some(start_time));
         let mc_run = mc_run.update(txn).await?;
 
         let mc_run_msg = Run {
@@ -69,7 +72,7 @@ impl api::Api {
             name: mc_run.name,
             samples: mc_run.samples as usize,
             batch_size: monte_carlo::BATCH_SIZE,
-            start_time: chrono::Utc::now(),
+            start_time,
             max_duration: mc_run.max_duration as u64,
         };
         self.msg_queue.send(RUN_TOPIC, vec![mc_run_msg]).await?;

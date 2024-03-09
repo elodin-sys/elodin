@@ -65,6 +65,10 @@ patches:
   path: atc-gcs-key-patch.yaml
 - target:
     kind: Deployment
+    name: elo-atc-proxy
+  path: atc-gcs-key-patch.yaml
+- target:
+    kind: Deployment
     name: sim-agent-mc
   path: sim-agent-gcs-key-patch.yaml
 

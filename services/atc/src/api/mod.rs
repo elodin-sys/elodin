@@ -3,10 +3,10 @@ use crate::{
     config::Auth0Config,
     current_user_route_txn,
     error::Error,
-    events::DbEvent,
     monte_carlo::SimStorageClient,
     optional_current_user_route, optional_current_user_route_txn,
 };
+use atc_entity::events::DbEvent;
 use axum::http::Request;
 use axum::{extract::MatchedPath, routing::get};
 use elodin_types::api::*;

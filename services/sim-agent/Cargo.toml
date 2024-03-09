@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # grpc
-tonic = "0.11"
+tonic = { version = "0.11", features = ["zstd"] }
 tonic-reflection = "0.11"
 tonic-health = "0.11"
 
@@ -61,6 +61,10 @@ zstd = "0.13.0"
 tempfile = "3.10.0"
 nox = { path = "../../libs/nox" }
 nox-ecs = { path = "../../libs/nox-ecs" }
+atc-entity = { path = "../../libs/atc/entity" }
 
 tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "44321de", features = ["tonic-conn"] }
 tower = "0.4.13"
+
+sea-orm.version = "0.12"
+sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]

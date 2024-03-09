@@ -1,36 +1,55 @@
 use std::io::Seek;
 
 use anyhow::Context;
-use elodin_types::{Batch, BatchResults, Run, BATCH_TOPIC, RUN_TOPIC};
+use atc_entity::events::DbExt;
+use elodin_types::{Batch, BitVec, Run, BATCH_TOPIC, RUN_TOPIC};
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::WorldExec;
+use sea_orm::prelude::*;
 use tracing::Instrument;
 
 use crate::config::MonteCarloConfig;
 
 pub struct Runner {
+    db: DatabaseConnection,
+    redis_conn: redis::aio::MultiplexedConnection,
     msg_queue: redmq::MsgQueue,
     nox_client: NoxClient,
     gcs_client: GcsClient,
     sim_artifacts_bucket_name: String,
     sim_results_bucket_name: String,
+    uploads: tokio::task::JoinSet<anyhow::Result<()>>,
+}
+
+struct BatchResults {
+    pub batch_no: usize,
+    pub failed: BitVec,
+    pub finish_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl Runner {
     pub async fn new(config: MonteCarloConfig) -> anyhow::Result<Self> {
+        let mut opt = sea_orm::ConnectOptions::new(config.database_url);
+        opt.sqlx_logging(false);
+        let db = sea_orm::Database::connect(opt).await?;
+
         let redis = redis::Client::open(config.redis_url)?;
+        let redis_conn = redis.get_multiplexed_tokio_connection().await?;
         let msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
         let gcs_config = ClientConfig::default().with_auth().await?;
         Ok(Self {
+            db,
+            redis_conn,
             msg_queue,
             nox_client: NoxClient::cpu()?,
             gcs_client: GcsClient::new(gcs_config),
             sim_artifacts_bucket_name: config.sim_artifacts_bucket_name,
             sim_results_bucket_name: config.sim_results_bucket_name,
+            uploads: tokio::task::JoinSet::new(),
         })
     }
 
@@ -57,9 +76,6 @@ impl Runner {
             anyhow::bail!("monte carlo run {} not found", run_id);
         };
 
-        // TODO: run the batch simulations, collect and upload the results
-        let start_time = chrono::Utc::now();
-
         // TODO: use streaming API to avoid buffering the entire archive in memory
         // TODO: cache the artifacts based on the run id to avoid downloading them multiple times
         tracing::info!("downloading sim artifacts for run {}", run.id);
@@ -75,7 +91,6 @@ impl Runner {
             )
             .await?;
 
-        let mut uploads = tokio::task::JoinSet::new();
         let results = tokio::task::block_in_place(|| {
             let span = tracing::info_span!("run", name = %run.name);
             let _guard = span.enter();
@@ -89,86 +104,103 @@ impl Runner {
 
             let mut results = Vec::default();
             for b in batches {
-                let span = tracing::info_span!("batch", no = %b.batch_no);
-                let _guard = span.enter();
-
-                let batch_exec = run_exec.fork();
-                let mut failed = 0;
-                // TODO: parallelize batch sim execution
-                for i in 0..run.batch_size {
-                    let mut sample_exec = batch_exec.fork();
-                    let sample_no = b.batch_no * run.batch_size + i;
-                    let span = tracing::info_span!("sample", no = %sample_no);
-                    let _guard = span.enter();
-
-                    if let Err(err) = self.run_sim(&run, &mut sample_exec) {
-                        tracing::error!(?err, "simulation failed");
-                        failed += 1;
-                    } else {
-                        tracing::debug!("simulation completed");
-                    }
-
-                    let gcs_client = self.gcs_client.clone();
-                    let bucket = self.sim_results_bucket_name.clone();
-                    let file_name = format!("runs/{}/samples/{}.tar.zst", run.id, sample_no);
-                    uploads.spawn(
-                        async move {
-                            // TODO: if/when polars supports streaming from compressed parquet files,
-                            // upload files directly instead of archiving them into a tarball
-                            tracing::trace!("generating replay archive");
-                            let results_dir = tempfile::tempdir()?;
-                            let results_archive = tempfile::tempfile()?;
-                            sample_exec.history.write_to_dir(&results_dir)?;
-                            let buf = std::io::BufWriter::new(results_archive);
-                            let zstd = zstd::Encoder::new(buf, 0)?;
-                            let mut ar = tar::Builder::new(zstd);
-                            ar.append_dir_all("results", &results_dir)?;
-                            // TODO: write directly to compressed archive instead of through through tmp fs
-                            let mut results_archive = ar.into_inner()?.finish()?.into_inner()?;
-                            results_archive.rewind()?;
-                            let len = results_archive.metadata()?.len();
-
-                            tracing::trace!(file_name, len, "uploading replay archive");
-                            gcs_client
-                                .upload_object(
-                                    &UploadObjectRequest {
-                                        bucket,
-                                        ..Default::default()
-                                    },
-                                    tokio::fs::File::from_std(results_archive),
-                                    &UploadType::Simple(Media::new(file_name.clone())),
-                                )
-                                .await
-                                .with_context(|| format!("gcs upload failed: {}", file_name))?;
-                            tracing::trace!(file_name, "uploaded replay archive");
-                            Ok::<_, anyhow::Error>(())
-                        }
-                        .in_current_span(),
-                    );
-                }
-
-                let runtime = (chrono::Utc::now() - start_time).to_std()?;
-                let batch_results = BatchResults {
-                    batch_no: b.batch_no,
-                    failed,
-                    start_time,
-                    run_time_seconds: runtime.as_secs(),
-                };
-                tracing::info!(failed = %batch_results.failed, ?runtime, "simulated batch");
+                let batch_results = self.process_batch(&run, &run_exec, b.batch_no);
                 results.push(batch_results);
             }
             Ok::<_, anyhow::Error>(results)
         })?;
 
-        while let Some(result) = uploads.join_next().await {
+        while let Some(result) = self.uploads.join_next().await {
             if let Err(err) = result.unwrap() {
                 tracing::error!(?err, "upload failed");
             }
         }
 
-        let results_topic = format!("mc:results:{}", run.id);
-        self.msg_queue.send(&results_topic, results).await?;
+        for r in results.iter() {
+            let results_model = atc_entity::batches::ActiveModel {
+                run_id: sea_orm::Set(run.id),
+                batch_number: sea_orm::Set(r.batch_no as i32),
+                samples: sea_orm::Set(run.batch_size as i32),
+                failures: sea_orm::Set(r.failed.to_bytes()),
+                finished: sea_orm::Set(r.finish_time),
+            };
+            results_model
+                .insert_with_event(&self.db, &mut self.redis_conn.clone())
+                .await?;
+        }
         Ok(())
+    }
+
+    fn process_batch(&mut self, run: &Run, run_exec: &WorldExec, batch_no: usize) -> BatchResults {
+        let span = tracing::info_span!("batch", no = %batch_no);
+        let _guard = span.enter();
+        let start_time = chrono::Utc::now();
+
+        let batch_exec = run_exec.fork();
+        let mut failed = BitVec::with_capacity(run.batch_size);
+        // TODO: parallelize batch sim execution
+        for i in 0..run.batch_size {
+            let mut sample_exec = batch_exec.fork();
+            let sample_no = batch_no * run.batch_size + i;
+            let span = tracing::info_span!("sample", no = %sample_no);
+            let _guard = span.enter();
+
+            if let Err(err) = self.run_sim(run, &mut sample_exec) {
+                tracing::error!(?err, "simulation failed");
+                failed.push(true);
+            } else {
+                tracing::debug!("simulation completed");
+                failed.push(false);
+            }
+
+            let gcs_client = self.gcs_client.clone();
+            let bucket = self.sim_results_bucket_name.clone();
+            let file_name = format!("runs/{}/samples/{}.tar.zst", run.id, sample_no);
+            self.uploads.spawn(
+                async move {
+                    // TODO: if/when polars supports streaming from compressed parquet files,
+                    // upload files directly instead of archiving them into a tarball
+                    tracing::trace!("generating replay archive");
+                    let results_dir = tempfile::tempdir()?;
+                    let results_archive = tempfile::tempfile()?;
+                    sample_exec.history.write_to_dir(&results_dir)?;
+                    let buf = std::io::BufWriter::new(results_archive);
+                    let zstd = zstd::Encoder::new(buf, 0)?;
+                    let mut ar = tar::Builder::new(zstd);
+                    ar.append_dir_all("results", &results_dir)?;
+                    // TODO: write directly to compressed archive instead of through through tmp fs
+                    let mut results_archive = ar.into_inner()?.finish()?.into_inner()?;
+                    results_archive.rewind()?;
+                    let len = results_archive.metadata()?.len();
+
+                    tracing::trace!(file_name, len, "uploading replay archive");
+                    gcs_client
+                        .upload_object(
+                            &UploadObjectRequest {
+                                bucket,
+                                ..Default::default()
+                            },
+                            tokio::fs::File::from_std(results_archive),
+                            &UploadType::Simple(Media::new(file_name.clone())),
+                        )
+                        .await
+                        .with_context(|| format!("gcs upload failed: {}", file_name))?;
+                    tracing::trace!(file_name, "uploaded replay archive");
+                    Ok::<_, anyhow::Error>(())
+                }
+                .in_current_span(),
+            );
+        }
+
+        let finish_time = chrono::Utc::now();
+        let runtime = (finish_time - start_time).to_std().unwrap();
+        let failed_count = failed.iter().filter(|b| *b).count();
+        tracing::info!(failed_count, ?runtime, "simulated batch");
+        BatchResults {
+            batch_no,
+            failed,
+            finish_time,
+        }
     }
 
     fn run_sim(&self, run: &Run, exec: &mut WorldExec) -> Result<(), nox_ecs::Error> {

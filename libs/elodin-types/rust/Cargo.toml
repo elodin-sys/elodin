@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bit-vec = "0.6.3"
 tonic = "0.11"
 prost = "0.12"
 uuid = { version = "1.6.1", features = ["serde"] }

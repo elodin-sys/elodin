@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use crate::{error::Error, events::EntityExt};
-use atc_entity::{sandbox, vm};
+use crate::error::Error;
+use atc_entity::{events::EntityExt, sandbox, vm};
 use chrono::Utc;
 use elodin_types::sandbox::{
     sandbox_control_client::SandboxControlClient, UpdateCodeReq, UpdateCodeResp,

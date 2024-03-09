@@ -22,7 +22,6 @@ uuid.version = "1.6.1"
 uuid.features = ["fast-rng", "v7"]
 enumflags2.version = "0.7.8"
 enumflags2.features = ["serde"]
-compact_str = "0.8.0-beta"
 
 # logs
 tracing = "0.1"
@@ -62,8 +61,8 @@ tower-http = "0.4.4"
 # sql
 sea-orm.version = "0.12"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]
-atc-entity.path = "./entity"
-atc-migration.path = "./migration"
+atc-entity.path = "../../libs/atc/entity"
+atc-migration.path = "../../libs/atc/migration"
 
 # crypto
 jsonwebtoken = "9"

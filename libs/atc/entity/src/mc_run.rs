@@ -12,6 +12,7 @@ pub struct Model {
     pub metadata: Json,
     pub status: Status,
     pub max_duration: i64,
+    pub started: Option<ChronoDateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -10,13 +10,13 @@ members = [
     "libs/nox-ecs-macros",
     "libs/nox-py",
     "libs/xla-rs",
-    "services/atc",
-    "services/atc/migration",
-    "services/atc/entity",
-    "services/sim-agent",
+    "libs/atc/migration",
+    "libs/atc/entity",
     "libs/redmq",
-    "apps/elodin",
+    "services/atc",
+    "services/sim-agent",
     "services/sim-builder",
+    "apps/elodin",
 ]
 
 [profile.wasm-release]

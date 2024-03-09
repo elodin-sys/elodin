@@ -1,3 +1,4 @@
+use atc_entity::events::Error as EventError;
 use elodin_types::ValidationError;
 use sea_orm::TransactionError;
 use std::io;
@@ -40,6 +41,17 @@ pub enum Error {
     TonicTransport(#[from] tonic::transport::Error),
     #[error("signed url error: {0}")]
     SignedURL(#[from] google_cloud_storage::sign::SignedURLError),
+}
+
+impl From<EventError> for Error {
+    fn from(value: EventError) -> Self {
+        match value {
+            EventError::Db(err) => Error::Db(err),
+            EventError::NotFound => Error::NotFound,
+            EventError::Postcard(err) => Error::Postcard(err),
+            EventError::Redis(err) => Error::Redis(err),
+        }
+    }
 }
 
 impl From<TransactionError<Error>> for Error {

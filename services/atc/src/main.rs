@@ -6,12 +6,11 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn, Instrument};
 
-use crate::{events::EventMonitor, orca::Orca, sandbox::garbage_collect};
+use crate::{orca::Orca, sandbox::garbage_collect};
 
 mod api;
 mod config;
 mod error;
-mod events;
 mod monte_carlo;
 mod orca;
 mod sandbox;
@@ -56,15 +55,10 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     if let Some(api_config) = config.api {
-        let (sandbox_monitor, sandbox_events) = EventMonitor::<atc_entity::sandbox::Model>::pair();
-        {
+        let sandbox_events = {
             let redis = redis.get_tokio_connection().await?;
             let redis = redis.into_pubsub();
-            services.spawn(
-                sandbox_monitor
-                    .run(redis, cancel_token.clone())
-                    .instrument(tracing::info_span!("sandbox_monitor")),
-            )
+            atc_entity::events::subscribe(redis).await?
         };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
@@ -104,15 +98,6 @@ async fn main() -> anyhow::Result<()> {
             batch_spawner
                 .run(cancel_token.clone())
                 .instrument(tracing::info_span!("batch_spawner")),
-        );
-    }
-
-    if config.monte_carlo.collect_results {
-        let aggregator = monte_carlo::Aggregator::new(&redis, db, &config.pod_name).await?;
-        services.spawn(
-            aggregator
-                .run(cancel_token.clone())
-                .instrument(tracing::info_span!("aggregator")),
         );
     }
 
