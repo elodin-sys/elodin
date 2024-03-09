@@ -29,7 +29,7 @@ web-sys.features = [
   "WebSocket",
 
 ]
-wasm-bindgen = "0.2.88"
+wasm-bindgen = "=0.2.91"
 tracing = "0.1"
 flume = "0.11"
 conduit.path = "../../libs/conduit"
