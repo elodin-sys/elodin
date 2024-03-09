@@ -1,6 +1,6 @@
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{prelude::*, Duration};
+use chrono::{prelude::*, TimeDelta};
 use tonic::{metadata, service};
 
 use super::Cli;
@@ -147,7 +147,8 @@ impl Cli {
             if res.status().is_success() {
                 let token_res = res.json::<TokenResponse>().await?;
 
-                let expires_at = Utc::now() + Duration::seconds(token_res.expires_in as i64);
+                let expires_in = TimeDelta::try_seconds(token_res.expires_in as i64).unwrap();
+                let expires_at = Utc::now() + expires_in;
                 let xdg_dirs = self.xdg_dirs();
                 let id_token_path = xdg_dirs.place_data_file("id_token")?;
                 let acess_token_path = xdg_dirs.place_data_file("access_token")?;
