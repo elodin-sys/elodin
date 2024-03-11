@@ -17,9 +17,7 @@ module.exports = {
         "hyper-blue": "#1E43E2",
         "hyper-blue-dim": "#1736b5",
         blue: "#1E43E2",
-
         "light-blue": "#8EA1F1",
-        tan: "#F3E5C5",
         orange: "#EF5800",
         green: "#88DE9F",
         "green-40": "rgb(30 32 28)",
@@ -27,8 +25,14 @@ module.exports = {
           "40": "rgba(136, 222, 159, 0.4)"
         },
         "dark-matte": "#131212",
-        "red": "rgba(233, 75, 20, 1)",
-        "red-40": "rgb(31 21 17)",
+        "red": {
+          DEFAULT: "rgb(233, 75, 20)",
+          40: "rgb(31, 21, 17)",
+          30: "rgba(233, 75, 20, 0.3)",
+          5: "rgba(233, 75, 20, 0.05)"
+        },
+        "yellow": "rgba(254, 197, 4, 1)",
+        "tan": "rgb(255, 215, 179)",
         "code": "#282C34",
         "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
         "primative-colors-white-opacity-100": "rgba(255, 255, 255, 0.1)",
@@ -36,16 +40,20 @@ module.exports = {
         "primative-colors-white-opacity-900": "rgba(255, 255, 255, 1)",
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
-        "surface-secondary": "#1F1F1F",
-        "crema": "rgba(255, 251, 240, 1)",
+        "crema": {
+          DEFAULT: "rgba(255, 251, 240, 1)",
+          60:  "rgba(255, 251, 240, 0.6)",
+        },
         "black-primary": "rgba(23, 22, 21, 1)",
         "black-secondary": "rgba(13, 13, 13, 1)",
+        "black-header": "rgb(20, 20, 20)",
         "black-opacity": {
           "600": "rgba(0, 0, 0, 0.6)",
         },
         "white-opacity": {
-          "300": "rgba(255, 255, 255, 0.3)",
-          "200": "rgba(255, 255, 255, 0.2)"
+          "30": "rgba(255, 255, 255, 0.3)",
+          "20": "rgba(255, 255, 255, 0.2)",
+          "10": "rgba(255, 255, 255, 0.1)"
         },
         "sep-black": "#202020"
       },
@@ -56,14 +64,26 @@ module.exports = {
         'elo-lg': "16px",
         'elo-xl': "24px",
       },
+      height: {
+        '128': '32rem',
+      },
       borderRadius: {
         'elo-xxs': "2px",
         'elo-xs': "4px",
         'elo-sm': "8px",
         'elo-md': "12px"
       },
+      gridTemplateColumns: {
+        '10': 'repeat(10, minmax(0, 1fr))',
+        '16': 'repeat(16, minmax(0, 1fr))',
+        '20': 'repeat(20, minmax(0, 1fr))',
+      },
       fontFamily: {
-        'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"]
+        'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"],
+        'mono': ["IBM Plex Mono", "ui-monospace", "mono"]
+      },
+      screens: {
+        "elo-grid-md": "1100px",
       }
     },
   },

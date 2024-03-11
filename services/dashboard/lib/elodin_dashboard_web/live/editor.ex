@@ -154,14 +154,16 @@ defmodule ElodinDashboardWeb.EditorLive do
         </.link>
       </:navbar_right>
 
-      <div class="flex flex-col h-full">
-        <div class="flex w-full h-full">
-          <div class="flex flex-col w-1/2 h-full">
+      <div class="flex flex-col overflow-auto h-full bg-black-primary">
+        <div class="flex w-full md:h-full flex-col-reverse md:flex-row">
+          <div class="flex flex-col md:w-1/2 md:h-full">
             <div
-              class="pt-2 bg-black-primary transition-all"
-              style={
-                if @show_console, do: "height: calc(100% - 20rem)", else: "height: calc(100% - 4rem)"
-              }
+              class={[
+                "bg-black-primary transition-all",
+                "max-md:h-[calc(50vh-128px)]",
+                if(@show_console, do: "md:h-[calc(100%-20rem)]", else: "md:h-[calc(100%-4rem)]")
+              ]}
+              style={}
             >
               <LiveMonacoEditor.code_editor
                 class="code-editor"
@@ -182,33 +184,38 @@ defmodule ElodinDashboardWeb.EditorLive do
               />
             </div>
 
-            <div class="flex flex-row justify-between h-16 p-4 shadow-lg bg-black-primary flex items-center">
-              <.button
-                type="secondary"
-                class="flex gap-2 py-2"
-                phx-click={JS.push("toggle_console", value: %{show_console: !@show_console})}
-              >
-                <.arrow_chevron_up class={if @show_console, do: "rotate-180", else: "rotate-0"} />
-                <span class="leading-4">CONSOLE</span>
-              </.button>
-              <.button class="flex gap-2 py-2.5" phx-click={JS.push("update_code")}>
-                <.lightning />
-                <span class="leading-3">UPDATE SIM</span>
-              </.button>
-            </div>
+            <div class="max-md:fixed max-md:w-[100vh] max-md:bottom-0">
+              <div class="flex flex-row justify-between h-16 p-4 shadow-lg bg-black-primary flex items-center">
+                <.button
+                  type="secondary"
+                  class="flex gap-2 py-2"
+                  phx-click={JS.push("toggle_console", value: %{show_console: !@show_console})}
+                >
+                  <.arrow_chevron_up class={[
+                    "transition-all",
+                    if(@show_console, do: "-scale-100", else: "")
+                  ]} />
+                  <span class="leading-4">CONSOLE</span>
+                </.button>
+                <.button class="flex gap-2 py-2.5" phx-click={JS.push("update_code")}>
+                  <.lightning />
+                  <span class="leading-3">UPDATE SIM</span>
+                </.button>
+              </div>
 
-            <EditorComponents.console
-              hide={!@show_console}
-              logs={([@sandbox.status] ++ @errors) |> Enum.join("\n")}
-            />
-          </div>
-          <%= if @sandbox.status == :RUNNING do %>
-            <EditorComponents.editor_wasm url={@url} />
-          <% else %>
-            <div class="w-1/2 h-full flex justify-center items-center">
-              <.spinner class="animate-spin w-16 h-16" />
+              <EditorComponents.console
+                hide={!@show_console}
+                logs={([@sandbox.status] ++ @errors) |> Enum.join("\n")}
+              />
             </div>
-          <% end %>
+          </div>
+          <div class="flex max-md:h-[50vh] md:w-1/2 md:h-full justify-center items-center">
+            <%= if @sandbox.status == :RUNNING do %>
+              <EditorComponents.editor_wasm url={@url} />
+            <% else %>
+              <.spinner class="animate-spin w-16 h-16" />
+            <% end %>
+          </div>
         </div>
       </div>
     </.navbar_layout>

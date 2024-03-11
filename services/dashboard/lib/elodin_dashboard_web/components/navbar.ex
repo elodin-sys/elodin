@@ -42,7 +42,7 @@ defmodule ElodinDashboardWeb.NavbarComponents do
   def user_dropdown(assigns) do
     ~H"""
     <div
-      class="hidden absolute right-2 top-[68px] z-10 mt-2 w-56 origin-top-right rounded-elo-md bg-surface-secondary shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+      class="hidden absolute right-2 top-[68px] z-10 mt-2 w-56 origin-top-right rounded-elo-md bg-black-primrary shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
       role="menu"
       aria-orientation="vertical"
       aria-labelledby="menu-button"
@@ -78,7 +78,7 @@ defmodule ElodinDashboardWeb.NavbarComponents do
         <%= render_slot(@navbar_right) %>
       </:navbar_right>
     </.navbar>
-    <div class="h-full pt-[56px]">
+    <div class="h-full pt-[64px]">
       <%= render_slot(@inner_block) %>
     </div>
     """

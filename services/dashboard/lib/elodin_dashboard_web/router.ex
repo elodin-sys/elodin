@@ -65,6 +65,8 @@ defmodule ElodinDashboardWeb.Router do
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
       live("/sandbox/new/:template", SandboxPickerLive, :new)
+
+      live("/monte_carlo/:project/:run", MonteCarloRunLive, :view)
     end
   end
 
