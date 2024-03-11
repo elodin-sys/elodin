@@ -11,14 +11,12 @@ async fn main() -> anyhow::Result<()> {
         .map(|p| std::fs::read_to_string(p).unwrap())
         .unwrap_or(DEFAULT_CODE.to_string());
 
-    let channel = if use_vsock {
-        let addr = "vsock://3:50051".parse::<Uri>()?;
-        Endpoint::from(addr).connect_with_connector_lazy(tower::service_fn(vsock_connect))
+    let addr = if use_vsock {
+        "vsock://3:50051"
     } else {
-        let addr = "http://[::1]:50051".parse()?;
-        println!("connecting to {addr}");
-        Channel::builder(addr).connect_lazy()
+        "http://[::1]:50051"
     };
+    let channel = builder_channel(addr.parse().unwrap());
     let mut client = BuildSimClient::new(channel)
         .send_compressed(CompressionEncoding::Zstd)
         .accept_compressed(CompressionEncoding::Zstd);
@@ -29,6 +27,21 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn builder_channel(addr: Uri) -> Channel {
+    let scheme = addr.scheme().map(|s| s.as_str());
+    let use_vsock = scheme == Some("vsock");
+    let endpoint = Endpoint::from(addr);
+
+    if use_vsock {
+        #[cfg(not(target_os = "linux"))]
+        panic!("vsock not supported on os");
+        #[cfg(target_os = "linux")]
+        return endpoint.connect_with_connector_lazy(tower::service_fn(vsock_connect));
+    }
+    endpoint.connect_lazy()
+}
+
+#[cfg(target_os = "linux")]
 async fn vsock_connect(uri: Uri) -> Result<tokio_vsock::VsockStream, std::io::Error> {
     let cid = uri.host().unwrap().parse::<u32>().unwrap();
     let port = uri.port_u16().unwrap();

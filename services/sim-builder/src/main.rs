@@ -42,19 +42,22 @@ async fn main() -> anyhow::Result<()> {
         Err(err) => tracing::warn!(?err, "failed to bind tcp socket"),
     }
 
-    let vsock_addr = tokio_vsock::VsockAddr::new(tokio_vsock::VMADDR_CID_ANY, 50051);
-    match tokio_vsock::VsockListener::bind(vsock_addr) {
-        Ok(vsock_listener) => {
-            tracing::info!(?vsock_addr, "listening");
-            let vsock_stream = vsock_listener.incoming();
-            let router = server.add_routes(routes);
-            tasks.spawn(async move {
-                if let Err(err) = router.serve_with_incoming(vsock_stream).await {
-                    tracing::error!(?err, "vsock stream terminated");
-                }
-            });
+    #[cfg(target_os = "linux")]
+    {
+        let vsock_addr = tokio_vsock::VsockAddr::new(tokio_vsock::VMADDR_CID_ANY, 50051);
+        match tokio_vsock::VsockListener::bind(vsock_addr) {
+            Ok(vsock_listener) => {
+                tracing::info!(?vsock_addr, "listening");
+                let vsock_stream = vsock_listener.incoming();
+                let router = server.add_routes(routes);
+                tasks.spawn(async move {
+                    if let Err(err) = router.serve_with_incoming(vsock_stream).await {
+                        tracing::error!(?err, "vsock stream terminated");
+                    }
+                });
+            }
+            Err(err) => tracing::warn!(?err, "failed to bind vsock"),
         }
-        Err(err) => tracing::warn!(?err, "failed to bind vsock"),
     }
 
     while let Some(res) = tasks.join_next().await {
