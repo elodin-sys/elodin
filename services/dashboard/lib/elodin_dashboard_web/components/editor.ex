@@ -5,7 +5,7 @@ defmodule ElodinDashboardWeb.EditorComponents do
 
   def console(assigns) do
     ~H"""
-    <pre class={"#{if @hide, do: "h-0 hidden", else: "h-64"} whitespace-pre-wrap overflow-auto text-white bg-dark-matte p-2"}>
+    <pre class={"#{if @hide, do: "h-0", else: "h-64 p-2"} whitespace-pre-wrap overflow-auto text-white bg-dark-matte transition-all"}>
     <%= @logs %>
     </pre>
     """
@@ -16,7 +16,7 @@ defmodule ElodinDashboardWeb.EditorComponents do
     <div
       phx-hook="EditorWasmHook"
       id="editor-container"
-      class="bg-black-secondary h-full w-1/2 flex items-center justify-center"
+      class="bg-black-secondary h-full flex items-center justify-center"
       data-ws-url={@url}
       phx-update="ignore"
     >

@@ -20,6 +20,52 @@ defmodule ElodinDashboardWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   import ElodinDashboardWeb.Gettext
 
+  attr(:value, :float, default: 50.0)
+  attr(:label, :string, default: "LABEL")
+  attr(:color, :string, default: "bg-green")
+
+  def label_progress_bar(assigns) do
+    ~H"""
+    <.horizontal_label value={@value} label={@label} class="mb-elo-md" />
+    <.progress_bar value={@value} color={@color} />
+    """
+  end
+
+  attr(:value, :float, default: 50.0)
+  attr(:color, :string, default: "bg-green")
+
+  def progress_bar(assigns) do
+    ~H"""
+    <div class="w-full h-6 flex mb-elo-xl">
+      <div class={["h-full rounded-elo-xs mr-2", @color]} style={"width: #{@value}%;"} />
+      <div class="border border-crema-60 h-full rounded-elo-xs" style={"width: #{100.0 - @value}%;"} />
+    </div>
+    """
+  end
+
+  def divider(assigns) do
+    ~H"""
+    <hr class="border-t border-white border-opacity-20 my-elo-lg" />
+    """
+  end
+
+  attr(:label, :string, default: "LABEL")
+  attr(:value, :string, default: "FOO")
+  attr(:class, :string, default: nil)
+
+  def horizontal_label(assigns) do
+    ~H"""
+    <div class={["w-full mb-elo-lg font-mono content-stretch", @class]}>
+      <span class="text-crema-60 text-sm font-medium">
+        <%= @label %>
+      </span>
+      <span class="text-crema float-right text-sm">
+        <%= @value %>
+      </span>
+    </div>
+    """
+  end
+
   @doc """
   Renders a modal.
 
@@ -40,7 +86,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
   attr(:id, :string, required: true)
   attr(:show, :boolean, default: false)
   attr(:wrapper_class, :string, default: "w-full max-w-[500px]")
-  attr(:bg_color, :string, default: "surface-secondary")
+  attr(:bg_color, :string, default: "black-primary")
   attr(:container_padding, :string, default: "elo-xl")
   attr(:on_cancel, JS, default: %JS{})
   slot(:inner_block, required: true)
@@ -264,6 +310,26 @@ defmodule ElodinDashboardWeb.CoreComponents do
       class={[
         "rounded-elo-sm bg-white hover:bg-white/80 p-[12px] ",
         "text-[12px] leading-[8px] font-semibold text-hyper-blue active:text-hyper-blue-dim",
+        @class
+      ]}
+      {@rest}
+    >
+      <%= render_slot(@inner_block) %>
+    </button>
+    """
+  end
+
+  def button(%{type: "danger"} = assigns) do
+    ~H"""
+    <button
+      class={[
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-red border-opacity-40 p-[12px] ",
+        "flex gap-2 justify-center items-center h-[38px]",
+        "transition-all",
+        "bg-red bg-opacity-5",
+        "hover:bg-opacity-15 hover:border-opacity-30",
+        "active:brightness-75",
+        "text-[12px] leading-[8px] font-semibold text-red",
         @class
       ]}
       {@rest}

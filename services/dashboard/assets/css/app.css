@@ -5,8 +5,13 @@
 
 /* This file is for your main application CSS */
 
+:root {
+  color-scheme: dark;
+}
+
 html, body, [data-phx-main], main {
     height: 100%;
+  font-feature-settings: "ss04" 1;
 }
 
 .code-editor {
@@ -57,4 +62,28 @@ html, body, [data-phx-main], main {
   font-style: normal;
   font-weight: 600;
   src: url(/fonts/IBMPlexSans-SemiBold.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-feature-settings: “ss04” 1;
+  src: url(/fonts/IBMPlexMono-Regular.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-feature-settings: “ss04” 1;
+  src: url(/fonts/IBMPlexMono-Medium.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-feature-settings: "ss04" 1;
+  src: url(/fonts/IBMPlexMono-SemiBold.ttf);
 }
