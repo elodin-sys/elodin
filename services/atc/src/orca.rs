@@ -246,6 +246,7 @@ impl Orca {
 
 fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod {
     let cid = const_fnv1a_hash::fnv1a_hash_str_32(pod_name);
+    let builder_addr = format!("vsock://{}:50051", cid);
     serde_json::from_value(serde_json::json!({
         "apiVersion": "v1",
         "kind":  "Pod",
@@ -265,7 +266,7 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                     "env": [
                         { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
                         { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
-                        { "name": "ELODIN_SANDBOX.BUILDER_CID", "value": cid.to_string() },
+                        { "name": "ELODIN_SANDBOX.BUILDER_ADDR", "value": builder_addr },
                         { "name": "RUST_LOG", "value": "sim_agent=debug,info" }
                     ],
                     "resources": {

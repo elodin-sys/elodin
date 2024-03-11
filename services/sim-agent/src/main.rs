@@ -39,12 +39,12 @@ async fn main() -> anyhow::Result<()> {
     if let Some(SandboxConfig {
         control_addr,
         sim_addr,
-        builder_cid,
+        builder_addr,
     }) = config.sandbox
     {
         let (server_tx, server_rx) = flume::unbounded();
         let sim_runner = SimRunner::new(server_rx);
-        let control = ControlService::new(sim_runner, control_addr, builder_cid)?;
+        let control = ControlService::new(sim_runner, control_addr, builder_addr)?;
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
         let sim = async move {
             let sim = TcpServer::bind(server_tx, sim_addr).await?;
@@ -74,10 +74,8 @@ struct ControlService {
 }
 
 impl ControlService {
-    fn new(sim_runner: SimRunner, address: SocketAddr, builder_cid: u32) -> anyhow::Result<Self> {
-        let addr = format!("vsock://{}:50051", builder_cid).parse::<Uri>()?;
-        let channel =
-            Endpoint::from(addr).connect_with_connector_lazy(tower::service_fn(vsock_connect));
+    fn new(sim_runner: SimRunner, address: SocketAddr, addr: Uri) -> anyhow::Result<Self> {
+        let channel = builder_channel(addr);
         let sim_builder = BuildSimClient::new(channel.clone())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
@@ -240,6 +238,21 @@ impl SimRunner {
     }
 }
 
+fn builder_channel(addr: Uri) -> Channel {
+    let scheme = addr.scheme().map(|s| s.as_str());
+    let use_vsock = scheme == Some("vsock");
+    let endpoint = Endpoint::from(addr);
+
+    if use_vsock {
+        #[cfg(not(target_os = "linux"))]
+        panic!("vsock not supported on os");
+        #[cfg(target_os = "linux")]
+        return endpoint.connect_with_connector_lazy(tower::service_fn(vsock_connect));
+    }
+    endpoint.connect_lazy()
+}
+
+#[cfg(target_os = "linux")]
 async fn vsock_connect(uri: Uri) -> Result<tokio_vsock::VsockStream, std::io::Error> {
     let cid = uri.host().unwrap().parse::<u32>().unwrap();
     let port = uri.port_u16().unwrap();

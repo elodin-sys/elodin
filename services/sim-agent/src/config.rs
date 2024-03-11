@@ -12,7 +12,8 @@ pub struct Config {
 pub struct SandboxConfig {
     pub control_addr: SocketAddr,
     pub sim_addr: SocketAddr,
-    pub builder_cid: u32,
+    #[serde(with = "http_serde::uri")]
+    pub builder_addr: tonic::transport::Uri,
 }
 
 #[derive(Debug, Deserialize)]
