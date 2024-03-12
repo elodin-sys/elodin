@@ -104,6 +104,7 @@ macro_rules! current_user_route {
     ($self:ident, $req:ident, $handler:expr) => {
         $self
             .authed_route($req, move |req, claims| async move {
+                let claims = claims.ok_or(Error::Unauthorized)?;
                 let user = atc_entity::User::find()
                     .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
                     .one(&$self.db)

@@ -1,7 +1,7 @@
 defmodule Elodin.Types.Api.Sandbox.Status do
   @moduledoc false
 
-  use Protobuf, enum: true, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, enum: true, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :OFF, 0
   field :VM_BOOTING, 1
@@ -9,16 +9,36 @@ defmodule Elodin.Types.Api.Sandbox.Status do
   field :RUNNING, 3
 end
 
+defmodule Elodin.Types.Api.MonteCarloRun.Status do
+  @moduledoc false
+
+  use Protobuf, enum: true, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :PENDING, 0
+  field :RUNNING, 1
+  field :DONE, 2
+end
+
+defmodule Elodin.Types.Api.MonteCarloBatch.Status do
+  @moduledoc false
+
+  use Protobuf, enum: true, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :PENDING, 0
+  field :RUNNING, 1
+  field :DONE, 2
+end
+
 defmodule Elodin.Types.Api.CurrentUserReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 end
 
 defmodule Elodin.Types.Api.CurrentUserResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
   field :email, 2, type: :string
@@ -29,7 +49,7 @@ end
 defmodule Elodin.Types.Api.CreateUserReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :email, 1, proto3_optional: true, type: :string
   field :name, 2, proto3_optional: true, type: :string
@@ -38,7 +58,7 @@ end
 defmodule Elodin.Types.Api.CreateUserResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
 end
@@ -46,7 +66,7 @@ end
 defmodule Elodin.Types.Api.CreateSandboxReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :name, 1, type: :string
   field :code, 2, type: :string
@@ -56,7 +76,7 @@ end
 defmodule Elodin.Types.Api.CreateSandboxResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
 end
@@ -64,7 +84,7 @@ end
 defmodule Elodin.Types.Api.UpdateSandboxReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
   field :name, 2, type: :string
@@ -76,7 +96,7 @@ end
 defmodule Elodin.Types.Api.UpdateSandboxResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :errors, 1, repeated: true, type: :string
 end
@@ -84,7 +104,7 @@ end
 defmodule Elodin.Types.Api.BootSandboxReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
 end
@@ -92,13 +112,13 @@ end
 defmodule Elodin.Types.Api.BootSandboxResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 end
 
 defmodule Elodin.Types.Api.Sandbox do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
   field :name, 2, type: :string
@@ -106,13 +126,13 @@ defmodule Elodin.Types.Api.Sandbox do
   field :status, 4, type: Elodin.Types.Api.Sandbox.Status, enum: true
   field :draft_code, 5, type: :string, json_name: "draftCode"
   field :public, 6, type: :bool
-  field :user_id, 7, type: :bytes, json_name: "userId"
+  field :user_id, 7, proto3_optional: true, type: :bytes, json_name: "userId"
 end
 
 defmodule Elodin.Types.Api.Page do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :last_id, 1, type: :bytes, json_name: "lastId"
   field :count, 2, type: :uint32
@@ -121,7 +141,7 @@ end
 defmodule Elodin.Types.Api.ListSandboxesReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :page, 1, type: Elodin.Types.Api.Page
 end
@@ -129,7 +149,7 @@ end
 defmodule Elodin.Types.Api.ListSandboxesResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :sandboxes, 1, repeated: true, type: Elodin.Types.Api.Sandbox
   field :next_page, 2, type: Elodin.Types.Api.Page, json_name: "nextPage"
@@ -138,7 +158,7 @@ end
 defmodule Elodin.Types.Api.GetSandboxReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
 end
@@ -146,24 +166,26 @@ end
 defmodule Elodin.Types.Api.CreateMonteCarloRunReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :name, 1, type: :string
   field :samples, 2, type: :uint32
+  field :max_duration, 3, type: :uint64, json_name: "maxDuration"
 end
 
 defmodule Elodin.Types.Api.CreateMonteCarloRunResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
+  field :upload_url, 2, type: :string, json_name: "uploadUrl"
 end
 
 defmodule Elodin.Types.Api.StartMonteCarloRunReq do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
 end
@@ -171,7 +193,43 @@ end
 defmodule Elodin.Types.Api.StartMonteCarloRunResp do
   @moduledoc false
 
-  use Protobuf, protoc_gen_elixir_version: "0.12.0", syntax: :proto3
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+end
+
+defmodule Elodin.Types.Api.GetMonteCarloRunReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :id, 1, type: :bytes
+end
+
+defmodule Elodin.Types.Api.MonteCarloRun do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :id, 1, type: :bytes
+  field :name, 2, type: :string
+  field :samples, 3, type: :uint32
+  field :max_duration, 4, type: :uint64, json_name: "maxDuration"
+  field :status, 5, type: Elodin.Types.Api.MonteCarloRun.Status, enum: true
+  field :metadata, 6, type: :string
+  field :started, 7, proto3_optional: true, type: :uint64
+  field :batches, 8, repeated: true, type: Elodin.Types.Api.MonteCarloBatch
+end
+
+defmodule Elodin.Types.Api.MonteCarloBatch do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :run_id, 1, type: :bytes, json_name: "runId"
+  field :batch_number, 2, type: :uint32, json_name: "batchNumber"
+  field :samples, 3, type: :uint32
+  field :failures, 4, type: :bytes
+  field :finished_time, 5, type: :uint64, json_name: "finishedTime"
+  field :status, 6, type: Elodin.Types.Api.MonteCarloBatch.Status, enum: true
 end
 
 defmodule Elodin.Types.Api.Api.Service do
@@ -202,6 +260,16 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :StartMonteCarloRun,
       Elodin.Types.Api.StartMonteCarloRunReq,
       Elodin.Types.Api.StartMonteCarloRunResp
+
+  rpc :GetMonteCarloRun, Elodin.Types.Api.GetMonteCarloRunReq, Elodin.Types.Api.MonteCarloRun
+
+  rpc :MonteCarloRunEvents,
+      Elodin.Types.Api.GetMonteCarloRunReq,
+      stream(Elodin.Types.Api.MonteCarloRun)
+
+  rpc :MonteCarloBatchEvents,
+      Elodin.Types.Api.GetMonteCarloRunReq,
+      stream(Elodin.Types.Api.MonteCarloBatch)
 end
 
 defmodule Elodin.Types.Api.Api.Stub do

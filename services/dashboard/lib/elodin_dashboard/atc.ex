@@ -117,6 +117,15 @@ defmodule ElodinDashboard.AtcAgent do
       )
     end)
   end
+
+  def get_monte_carlo_run(pid, request, token) do
+    ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
+      channel
+      |> Elodin.Types.Api.Api.Stub.get_monte_carlo_run(request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
 end
 
 defmodule ElodinDashboard.Atc do
@@ -186,6 +195,16 @@ defmodule ElodinDashboard.Atc do
       :atc,
       fn pid ->
         ElodinDashboard.AtcAgent.list_sandboxes(pid, request, token)
+      end,
+      @timeout
+    )
+  end
+
+  def get_monte_carlo_run(request, token) do
+    :poolboy.transaction(
+      :atc,
+      fn pid ->
+        ElodinDashboard.AtcAgent.get_monte_carlo_run(pid, request, token)
       end,
       @timeout
     )

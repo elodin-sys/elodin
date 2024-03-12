@@ -1,7 +1,7 @@
 use crate::{
     api::{multiplex::MultiplexService, sandbox::sim_socket},
     config::Auth0Config,
-    current_user_route_txn,
+    current_user_route, current_user_route_txn,
     error::Error,
     monte_carlo::SimStorageClient,
     optional_current_user_route, optional_current_user_route_txn,
@@ -39,6 +39,8 @@ pub struct Api {
     redis: MultiplexedConnection,
     msg_queue: redmq::MsgQueue,
     sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
+    monte_carlo_run_events: broadcast::Receiver<DbEvent<atc_entity::mc_run::Model>>,
+    monte_carlo_batch_events: broadcast::Receiver<DbEvent<atc_entity::batches::Model>>,
 }
 
 #[derive(Clone)]
@@ -54,6 +56,7 @@ pub struct WSContext {
 }
 
 impl Api {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: ApiConfig,
         db: DatabaseConnection,
@@ -61,6 +64,8 @@ impl Api {
         msg_queue: redmq::MsgQueue,
         sim_storage_client: SimStorageClient,
         sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
+        monte_carlo_run_events: broadcast::Receiver<DbEvent<atc_entity::mc_run::Model>>,
+        monte_carlo_batch_events: broadcast::Receiver<DbEvent<atc_entity::batches::Model>>,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
         let auth_context = AuthContext {
@@ -75,6 +80,8 @@ impl Api {
             auth_context,
             sandbox_events,
             sim_storage_client,
+            monte_carlo_run_events,
+            monte_carlo_batch_events,
         })
     }
 
@@ -229,6 +236,33 @@ impl api_server::Api for Api {
         req: tonic::Request<StartMonteCarloRunReq>,
     ) -> Result<Response<StartMonteCarloRunResp>, Status> {
         current_user_route_txn!(self, req, Self::start_monte_carlo_run)
+    }
+
+    async fn get_monte_carlo_run(
+        &self,
+        req: tonic::Request<GetMonteCarloRunReq>,
+    ) -> Result<Response<MonteCarloRun>, Status> {
+        current_user_route!(self, req, Self::get_monte_carlo_run)
+    }
+
+    type MonteCarloRunEventsStream =
+        Pin<Box<dyn Stream<Item = Result<MonteCarloRun, Status>> + Send + Sync>>;
+
+    async fn monte_carlo_run_events(
+        &self,
+        req: tonic::Request<GetMonteCarloRunReq>,
+    ) -> Result<Response<Self::MonteCarloRunEventsStream>, Status> {
+        current_user_route!(self, req, Self::monte_carlo_run_events)
+    }
+
+    type MonteCarloBatchEventsStream =
+        Pin<Box<dyn Stream<Item = Result<MonteCarloBatch, Status>> + Send + Sync>>;
+
+    async fn monte_carlo_batch_events(
+        &self,
+        req: tonic::Request<GetMonteCarloRunReq>,
+    ) -> Result<Response<Self::MonteCarloBatchEventsStream>, Status> {
+        current_user_route!(self, req, Self::monte_carlo_batch_events)
     }
 }
 

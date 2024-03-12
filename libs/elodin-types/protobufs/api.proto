@@ -20,6 +20,9 @@ service Api {
     // Monte Carlo
     rpc CreateMonteCarloRun(CreateMonteCarloRunReq) returns (CreateMonteCarloRunResp);
     rpc StartMonteCarloRun(StartMonteCarloRunReq) returns (StartMonteCarloRunResp);
+    rpc GetMonteCarloRun(GetMonteCarloRunReq) returns (MonteCarloRun);
+    rpc MonteCarloRunEvents(GetMonteCarloRunReq) returns (stream MonteCarloRun);
+    rpc MonteCarloBatchEvents(GetMonteCarloRunReq) returns (stream MonteCarloBatch);
 }
 
 message CurrentUserReq {}
@@ -117,3 +120,38 @@ message StartMonteCarloRunReq {
 }
 
 message StartMonteCarloRunResp {}
+
+message GetMonteCarloRunReq {
+    bytes id = 1;
+}
+
+message MonteCarloRun {
+    bytes id = 1;
+    string name = 2;
+    uint32 samples = 3;
+    uint64 max_duration = 4;
+    Status status = 5;
+    enum Status {
+        PENDING = 0;
+        RUNNING = 1;
+        DONE = 2;
+    }
+    string metadata = 6;
+    optional uint64 started = 7;
+    repeated MonteCarloBatch batches = 8;
+}
+
+message MonteCarloBatch {
+    bytes run_id = 1;
+    uint32 batch_number = 2;
+    uint32 samples = 3;
+    bytes failures = 4;
+    optional uint64 finished_time = 5;
+    Status status = 6;
+    enum Status {
+        PENDING = 0;
+        RUNNING = 1;
+        DONE = 2;
+    }
+
+}

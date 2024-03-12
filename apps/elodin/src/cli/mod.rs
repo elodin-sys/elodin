@@ -51,7 +51,7 @@ impl Cli {
     }
 
     fn is_dev(&self) -> bool {
-        self.url.ends_with("elodin.dev")
+        self.url.ends_with("elodin.dev") || self.url.contains("localhost")
     }
 
     fn xdg_dirs(&self) -> xdg::BaseDirectories {

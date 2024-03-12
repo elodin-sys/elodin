@@ -60,6 +60,16 @@ async fn main() -> anyhow::Result<()> {
             let redis = redis.into_pubsub();
             atc_entity::events::subscribe(redis).await?
         };
+        let monte_carlo_run_events = {
+            let redis = redis.get_tokio_connection().await?;
+            let redis = redis.into_pubsub();
+            atc_entity::events::subscribe(redis).await?
+        };
+        let monte_carlo_batch_events = {
+            let redis = redis.get_tokio_connection().await?;
+            let redis = redis.into_pubsub();
+            atc_entity::events::subscribe(redis).await?
+        };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let api = Api::new(
@@ -69,6 +79,8 @@ async fn main() -> anyhow::Result<()> {
             msg_queue,
             sim_storage_client,
             sandbox_events,
+            monte_carlo_run_events,
+            monte_carlo_batch_events,
         )
         .await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();

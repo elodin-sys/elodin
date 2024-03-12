@@ -9,7 +9,7 @@ use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::WorldExec;
-use sea_orm::prelude::*;
+use sea_orm::{prelude::*, TransactionTrait};
 use tracing::Instrument;
 
 use crate::config::MonteCarloConfig;
@@ -76,6 +76,20 @@ impl Runner {
             anyhow::bail!("monte carlo run {} not found", run_id);
         };
 
+        for batch in batches {
+            let txn = self.db.begin().await?;
+            let batch_model = atc_entity::batches::ActiveModel {
+                run_id: sea_orm::Unchanged(run.id),
+                batch_number: sea_orm::Unchanged(batch.batch_no as i32),
+                status: sea_orm::Set(atc_entity::batches::Status::Running),
+                ..Default::default()
+            };
+            batch_model
+                .update_with_event(&txn, &mut self.redis_conn.clone())
+                .await?;
+            txn.commit().await?;
+        }
+
         // TODO: use streaming API to avoid buffering the entire archive in memory
         // TODO: cache the artifacts based on the run id to avoid downloading them multiple times
         tracing::info!("downloading sim artifacts for run {}", run.id);
@@ -118,14 +132,15 @@ impl Runner {
 
         for r in results.iter() {
             let results_model = atc_entity::batches::ActiveModel {
-                run_id: sea_orm::Set(run.id),
-                batch_number: sea_orm::Set(r.batch_no as i32),
+                run_id: sea_orm::Unchanged(run.id),
+                batch_number: sea_orm::Unchanged(r.batch_no as i32),
                 samples: sea_orm::Set(run.batch_size as i32),
                 failures: sea_orm::Set(r.failed.to_bytes()),
-                finished: sea_orm::Set(r.finish_time),
+                finished: sea_orm::Set(Some(r.finish_time)),
+                status: sea_orm::Set(atc_entity::batches::Status::Done),
             };
             results_model
-                .insert_with_event(&self.db, &mut self.redis_conn.clone())
+                .update_with_event(&self.db, &mut self.redis_conn.clone())
                 .await?;
         }
         Ok(())
