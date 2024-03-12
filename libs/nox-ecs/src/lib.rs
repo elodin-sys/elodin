@@ -5,15 +5,17 @@ use conduit::well_known::EntityMetadata;
 use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId, Metadata};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, Noxpr, NoxprFn};
+use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
 use once_cell::sync::OnceCell;
 use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
+use smallvec::{smallvec, SmallVec};
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::iter::once;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -481,7 +483,7 @@ impl<T> Clone for ComponentArray<T> {
 }
 
 impl<T> ComponentArray<T> {
-    // NOTE: this is not generlaly safe to run, you should only cast `ComponentArray`,
+    // NOTE: this is not generally safe to run, you should only cast `ComponentArray`,
     // when you are sure the destination type is the actual type of the inner `Op`
     pub(crate) fn cast<D>(self) -> ComponentArray<D> {
         ComponentArray {
@@ -503,6 +505,25 @@ impl<T> ComponentArray<T> {
             len: self.len,
             entity_map: self.entity_map,
         }
+    }
+}
+
+impl<T: Component + FromOp> ComponentArray<T> {
+    pub fn get(&self, offset: i64) -> T {
+        let ty: ArrayTy = T::component_type().into();
+        let shape = ty.shape;
+
+        // if shape = [3, 4], start_indices = [offset, 0, 0], stop_indices = [offset + 1, 3, 4]
+        let start_indices: SmallVec<_> = once(offset).chain(shape.iter().map(|_| 0)).collect();
+        let stop_indices: SmallVec<_> = once(offset + 1).chain(shape.clone()).collect();
+        let strides: SmallVec<_> = smallvec![1; shape.len() + 1];
+
+        let op = self
+            .buffer
+            .clone()
+            .slice(start_indices, stop_indices, strides)
+            .reshape(shape);
+        T::from_op(op)
     }
 }
 
@@ -1396,7 +1417,8 @@ impl<T> From<flume::SendError<T>> for Error {
 mod tests {
     use super::*;
     use conduit::well_known::Pbr;
-    use nox::{Scalar, ScalarExt};
+    use nox::nalgebra::{self, vector};
+    use nox::{Scalar, ScalarExt, Vector};
 
     #[test]
     fn test_simple() {
@@ -1437,6 +1459,55 @@ mod tests {
         exec.run(&client).unwrap();
         let c = exec.column(C::component_id()).unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
+    }
+
+    #[test]
+    fn test_get_scalar() {
+        #[derive(Component)]
+        struct Seed(Scalar<f64>);
+
+        #[derive(Component)]
+        struct Value(Scalar<f64>);
+
+        fn add_system(s: ComponentArray<Seed>, v: ComponentArray<Value>) -> ComponentArray<Value> {
+            v.map(|v: Value| Value(v.0 + s.get(0).0)).unwrap()
+        }
+
+        let mut world = add_system.world();
+        world.spawn(Seed(5.0.constant()));
+        world.spawn(Value((-1.0).constant()));
+        world.spawn(Value(7.0.constant()));
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world.build().unwrap();
+        exec.run(&client).unwrap();
+        let v = exec.column(Value::component_id()).unwrap();
+        assert_eq!(v.typed_buf::<f64>().unwrap(), &[4.0, 12.0])
+    }
+
+    #[test]
+    fn test_get_vector() {
+        #[derive(Component)]
+        struct Seed(Vector<f64, 3>);
+
+        #[derive(Component)]
+        struct Value(Vector<f64, 3>);
+
+        fn add_system(s: ComponentArray<Seed>, v: ComponentArray<Value>) -> ComponentArray<Value> {
+            v.map(|v: Value| Value(v.0 + s.get(0).0)).unwrap()
+        }
+
+        let mut world = add_system.world();
+        world.spawn(Seed(vector![5.0, 2.0, -3.0].into()));
+        world.spawn(Value(vector![-1.0, 3.5, 6.0].into()));
+        world.spawn(Value(vector![7.0, -1.0, 1.0].into()));
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world.build().unwrap();
+        exec.run(&client).unwrap();
+        let v = exec.column(Value::component_id()).unwrap();
+        assert_eq!(
+            v.typed_buf::<f64>().unwrap(),
+            &[4.0, 5.5, 3.0, 12.0, 1.0, -2.0]
+        )
     }
 
     #[test]

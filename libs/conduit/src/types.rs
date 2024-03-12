@@ -207,7 +207,10 @@ impl<'a> ComponentValue<'a> {
 }
 
 pub trait Component {
-    fn component_id() -> ComponentId;
+    const NAME: &'static str;
+    fn component_id() -> ComponentId {
+        ComponentId::new(Self::NAME)
+    }
     fn component_type() -> ComponentType;
     fn component_value<'a>(&self) -> ComponentValue<'a>;
     fn from_component_value(value: ComponentValue<'_>) -> Option<Self>

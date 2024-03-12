@@ -23,9 +23,7 @@ pub struct WorldPos {
 }
 
 impl crate::Component for WorldPos {
-    fn component_id() -> crate::ComponentId {
-        crate::ComponentId::new("world_pos")
-    }
+    const NAME: &'static str = "world_pos";
 
     fn component_type() -> ComponentType {
         ComponentType {
@@ -74,9 +72,7 @@ pub struct TraceAnchor {
 }
 
 impl crate::Component for TraceAnchor {
-    fn component_id() -> crate::ComponentId {
-        crate::ComponentId::new("trace_anchor")
-    }
+    const NAME: &'static str = "trace_anchor";
 
     fn component_type() -> ComponentType {
         ComponentType {
