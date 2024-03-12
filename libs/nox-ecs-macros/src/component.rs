@@ -47,11 +47,6 @@ pub fn component(input: TokenStream) -> TokenStream {
 
         impl #crate_name::Component for #ident #generics #where_clause {
             type Inner = #ty;
-            type HostTy = <#ty as #crate_name::Component>::HostTy;
-
-            fn host(val: Self::HostTy) -> Self {
-                Self(<#ty as #crate_name::Component>::host(val))
-            }
 
             fn component_id() -> #crate_name::conduit::ComponentId {
                 #id
