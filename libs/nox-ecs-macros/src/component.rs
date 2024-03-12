@@ -36,6 +36,12 @@ pub fn component(input: TokenStream) -> TokenStream {
             }
         }
 
+        impl #crate_name::nox::FromOp for #ident #generics #where_clause {
+            fn from_op(noxpr: #crate_name::nox::Noxpr) -> Self {
+                Self(<#ty as #crate_name::nox::FromOp>::from_op(noxpr))
+            }
+        }
+
         impl #crate_name::nox::FromBuilder for #ident #generics #where_clause {
             type Item<'a> = Self;
 
