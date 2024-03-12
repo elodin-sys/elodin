@@ -410,7 +410,7 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 mod tests {
     use super::*;
     use crate::{Archetype, IntoSystem};
-    use nox::Scalar;
+    use nox::{Scalar, ScalarExt};
     use nox_ecs_macros::{ComponentGroup, FromBuilder};
 
     #[test]
@@ -430,19 +430,31 @@ mod tests {
             a.map(|e: E, x: X| X(x.0 + e.0)).unwrap()
         }
         let mut world = add_e.world();
-        world.spawn(Body { x: X::host(-91.0) });
+        world.spawn(Body {
+            x: X((-91.0).constant()),
+        });
 
         world
-            .spawn(Body { x: X::host(-55.0) })
-            .insert(E::host(1000.0));
+            .spawn(Body {
+                x: X((-55.0).constant()),
+            })
+            .insert(E(1000.0.constant()));
 
-        world.spawn(Body { x: X::host(5.0) });
-        world.spawn(Body { x: X::host(200.0) });
+        world.spawn(Body {
+            x: X(5.0.constant()),
+        });
+        world.spawn(Body {
+            x: X(200.0.constant()),
+        });
 
         world
-            .spawn(Body { x: X::host(100.0) })
-            .insert(E::host(-50000.0));
-        world.spawn(Body { x: X::host(400.0) });
+            .spawn(Body {
+                x: X(100.0.constant()),
+            })
+            .insert(E((-50000.0).constant()));
+        world.spawn(Body {
+            x: X(400.0.constant()),
+        });
 
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build().unwrap();
@@ -484,15 +496,15 @@ mod tests {
 
         let mut world = add_system.world();
         world.spawn(Body {
-            a: A::host(1.0),
-            b: B::host(2.0),
-            c: C::host(-1.0),
+            a: A(1.0.constant()),
+            b: B(2.0.constant()),
+            c: C((-1.0).constant()),
         });
 
         world.spawn(Body {
-            a: A::host(2.0),
-            b: B::host(2.0),
-            c: C::host(-1.0),
+            a: A(2.0.constant()),
+            b: B(2.0.constant()),
+            c: C((-1.0).constant()),
         });
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build().unwrap();
