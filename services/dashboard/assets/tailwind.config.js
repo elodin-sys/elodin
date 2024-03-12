@@ -78,12 +78,19 @@ module.exports = {
         '16': 'repeat(16, minmax(0, 1fr))',
         '20': 'repeat(20, minmax(0, 1fr))',
       },
+      fontSize: {
+        sm: '13px'
+      },
       fontFamily: {
         'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"],
         'mono': ["IBM Plex Mono", "ui-monospace", "mono"]
       },
       screens: {
         "elo-grid-md": "1100px",
+      },
+      letterSpacing: {
+        "elo-mono-medium": "1.04px",
+        "elo-mono-small": "0.48px"
       }
     },
   },

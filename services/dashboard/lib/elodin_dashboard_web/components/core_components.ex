@@ -20,13 +20,14 @@ defmodule ElodinDashboardWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   import ElodinDashboardWeb.Gettext
 
+  attr(:number, :float, default: 50.0)
   attr(:value, :float, default: 50.0)
   attr(:label, :string, default: "LABEL")
   attr(:color, :string, default: "bg-green")
 
   def label_progress_bar(assigns) do
     ~H"""
-    <.horizontal_label value={@value} label={@label} class="mb-elo-md" />
+    <.horizontal_label value={@number} label={@label} class="mb-elo-md" />
     <.progress_bar value={@value} color={@color} />
     """
   end
@@ -37,15 +38,20 @@ defmodule ElodinDashboardWeb.CoreComponents do
   def progress_bar(assigns) do
     ~H"""
     <div class="w-full h-6 flex mb-elo-xl">
-      <div class={["h-full rounded-elo-xs mr-2", @color]} style={"width: #{@value}%;"} />
-      <div class="border border-crema-60 h-full rounded-elo-xs" style={"width: #{100.0 - @value}%;"} />
+      <div class={["h-full rounded-elo-xs mr-2", @color]} style={"width: #{@value * 100.0}%;"} />
+      <%= if 1.0 > @value  do %>
+        <div
+          class="border border-crema-60 h-full rounded-elo-xs"
+          style={"width: #{(1.0 - @value) * 100}%;"}
+        />
+      <% end %>
     </div>
     """
   end
 
   def divider(assigns) do
     ~H"""
-    <hr class="border-t border-white border-opacity-20 my-elo-lg" />
+    <hr class="border-t border-white border-opacity-20 my-elo-xl" />
     """
   end
 
@@ -55,11 +61,11 @@ defmodule ElodinDashboardWeb.CoreComponents do
 
   def horizontal_label(assigns) do
     ~H"""
-    <div class={["w-full mb-elo-lg font-mono content-stretch", @class]}>
-      <span class="text-crema-60 text-sm font-medium">
+    <div class={["w-full font-mono tracking-elo-mono-medium content-stretch", @class]}>
+      <span class="float-left text-crema-60 text-sm font-medium leading-tight">
         <%= @label %>
       </span>
-      <span class="text-crema float-right text-sm">
+      <span class="text-crema float-right text-sm leading-tight">
         <%= @value %>
       </span>
     </div>

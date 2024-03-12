@@ -1,7 +1,8 @@
 use crate::{api, error, monte_carlo};
 
-use atc_entity::mc_run;
+use atc_entity::{batches, mc_run};
 use elodin_types::{api::*, Run, RUN_TOPIC};
+use futures::StreamExt;
 use sea_orm::prelude::*;
 
 impl api::Api {
@@ -34,6 +35,22 @@ impl api::Api {
         }
         .insert(txn)
         .await?;
+        let batch_count = (samples + 100 - 1) / 100;
+        for i in 0..batch_count {
+            let samples = 100.min(samples);
+            let byte_count = (samples as usize + 8 - 1) / 8;
+            let failures = vec![0; byte_count];
+            atc_entity::batches::ActiveModel {
+                run_id: sea_orm::Set(id),
+                batch_number: sea_orm::Set(i),
+                samples: sea_orm::Set(samples),
+                failures: sea_orm::Set(failures),
+                finished: sea_orm::Set(None),
+                status: sea_orm::Set(batches::Status::Pending),
+            }
+            .insert(txn)
+            .await?;
+        }
         tracing::debug!(%user.id, id = %mc_run.id, "created monte carlo run");
 
         Ok(CreateMonteCarloRunResp {
@@ -79,5 +96,80 @@ impl api::Api {
         tracing::debug!(%user.id, %id, "started monte carlo run");
 
         Ok(StartMonteCarloRunResp {})
+    }
+
+    pub async fn get_monte_carlo_run(
+        &self,
+        req: GetMonteCarloRunReq,
+        api::CurrentUser { user, .. }: api::CurrentUser,
+    ) -> Result<MonteCarloRun, error::Error> {
+        let id = req.id()?;
+
+        let mc_run = atc_entity::MonteCarloRun::find_by_id(id)
+            .filter(mc_run::Column::UserId.eq(user.id))
+            .one(&self.db)
+            .await?
+            .ok_or(error::Error::NotFound)?;
+        let batches = atc_entity::Batches::find()
+            .filter(batches::Column::RunId.eq(id))
+            .all(&self.db)
+            .await?;
+        let batches = batches.into_iter().map(|b| b.into()).collect();
+        Ok(MonteCarloRun {
+            batches,
+            ..mc_run.into()
+        })
+    }
+
+    pub async fn monte_carlo_run_events(
+        &self,
+        req: GetMonteCarloRunReq,
+        api::CurrentUser { user, .. }: api::CurrentUser,
+    ) -> Result<<super::Api as api_server::Api>::MonteCarloRunEventsStream, error::Error> {
+        let id = req.id()?;
+        let _ = atc_entity::MonteCarloRun::find_by_id(id)
+            .filter(mc_run::Column::UserId.eq(user.id))
+            .one(&self.db)
+            .await?
+            .ok_or(error::Error::NotFound)?;
+
+        let monte_carlo_run_events = self.monte_carlo_run_events.resubscribe();
+        let stream = tokio_stream::wrappers::BroadcastStream::new(monte_carlo_run_events);
+        let stream = stream.filter_map(move |res| async move {
+            if let Ok(event) = res {
+                let model = event.into_model();
+                if model.id == id {
+                    return Some(Ok(model.into()));
+                }
+            }
+            None
+        });
+        Ok(Box::pin(stream))
+    }
+
+    pub async fn monte_carlo_batch_events(
+        &self,
+        req: GetMonteCarloRunReq,
+        api::CurrentUser { user, .. }: api::CurrentUser,
+    ) -> Result<<super::Api as api_server::Api>::MonteCarloBatchEventsStream, error::Error> {
+        let id = req.id()?;
+        let _ = atc_entity::MonteCarloRun::find_by_id(id)
+            .filter(mc_run::Column::UserId.eq(user.id))
+            .one(&self.db)
+            .await?
+            .ok_or(error::Error::NotFound)?;
+
+        let monte_carlo_batch_events = self.monte_carlo_batch_events.resubscribe();
+        let stream = tokio_stream::wrappers::BroadcastStream::new(monte_carlo_batch_events);
+        let stream = stream.filter_map(move |res| async move {
+            if let Ok(event) = res {
+                let model = event.into_model();
+                if model.run_id == id {
+                    return Some(Ok(model.into()));
+                }
+            }
+            None
+        });
+        Ok(Box::pin(stream))
     }
 }
