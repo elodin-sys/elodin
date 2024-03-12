@@ -1,14 +1,12 @@
 use conduit::{ComponentId, ComponentType, PrimitiveTy};
-use nox::{IntoOp, Scalar, ScalarExt};
+use nox::{IntoOp, Scalar};
 
 use nox_ecs_macros::Component;
 use smallvec::smallvec;
 
 pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
     type Inner;
-    type HostTy;
 
-    fn host(val: Self::HostTy) -> Self;
     fn component_id() -> ComponentId;
     fn component_type() -> ComponentType;
     fn is_asset() -> bool {
@@ -20,12 +18,6 @@ macro_rules! impl_scalar_primitive {
     ($inner:tt) => {
         impl Component for Scalar<$inner> {
             type Inner = Self;
-
-            type HostTy = $inner;
-
-            fn host(val: Self::HostTy) -> Self {
-                val.constant()
-            }
 
             fn component_id() -> ComponentId {
                 use conduit::Component;
@@ -53,11 +45,6 @@ macro_rules! impl_spatial_ty {
     ($nox_ty:ty, $prim_ty:expr, $shape:expr, $name: tt) => {
         impl Component for $nox_ty {
             type Inner = Self;
-            type HostTy = Self;
-
-            fn host(val: Self::HostTy) -> Self {
-                val
-            }
 
             fn component_id() -> ComponentId {
                 conduit::ComponentId::new($name)

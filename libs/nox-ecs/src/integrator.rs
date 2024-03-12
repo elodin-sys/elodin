@@ -105,7 +105,7 @@ mod tests {
     use crate::Component;
     use crate::{Archetype, World};
     use nox::nalgebra::vector;
-    use nox::{nalgebra, Scalar, SpatialMotion, SpatialTransform};
+    use nox::{nalgebra, Scalar, ScalarExt, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 
     #[test]
@@ -148,8 +148,8 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(Body {
-            x: X::host(0.0),
-            v: V::host(10.0),
+            x: X(0.0.constant()),
+            v: V(10.0.constant()),
         });
         let builder = world.builder().tick_pipeline(().rk4::<X, V>());
         let client = nox::Client::cpu().unwrap();

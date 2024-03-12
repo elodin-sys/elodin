@@ -49,12 +49,6 @@ impl FromBuilder for Edge {
 impl Component for Edge {
     type Inner = Self;
 
-    type HostTy = Self;
-
-    fn host(val: Self::HostTy) -> Self {
-        val
-    }
-
     fn component_id() -> conduit::ComponentId {
         ComponentId::new("edge")
     }
@@ -272,10 +266,10 @@ mod tests {
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A::host(10.0)).id();
-        let b = world.spawn(A::host(100.0)).id();
-        let c = world.spawn(A::host(1000.0)).id();
-        world.spawn(A::host(10000.0));
+        let a = world.spawn(A(10.0.constant())).id();
+        let b = world.spawn(A(100.0.constant())).id();
+        let c = world.spawn(A(1000.0.constant())).id();
+        world.spawn(A(10000.0.constant()));
         //world.spawn(Edge { from: c, to: d });
         world.spawn(Edge::new(a, b));
         world.spawn(Edge::new(a, c));
@@ -302,10 +296,10 @@ mod tests {
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A::host(10.0)).id();
-        let b = world.spawn(A::host(100.0)).id();
-        world.spawn(A::host(1000.0));
-        world.spawn(A::host(10000.0));
+        let a = world.spawn(A(10.0.constant())).id();
+        let b = world.spawn(A(100.0.constant())).id();
+        world.spawn(A(1000.0.constant()));
+        world.spawn(A(10000.0.constant()));
         world.spawn(Edge::new(a, b));
 
         let client = nox::Client::cpu().unwrap();
@@ -330,10 +324,10 @@ mod tests {
         // a very specific failure case caused by an old impl of `NoxprId`
         for _ in 0..5000 {
             let mut world = fold_system.world();
-            let c = world.spawn(A::host(1000.0)).id();
-            let a = world.spawn(A::host(10.0)).id();
-            let b = world.spawn(A::host(100.0)).id();
-            let d = world.spawn(A::host(10000.0)).id();
+            let c = world.spawn(A(1000.0.constant())).id();
+            let a = world.spawn(A(10.0.constant())).id();
+            let b = world.spawn(A(100.0.constant())).id();
+            let d = world.spawn(A(10000.0.constant())).id();
             world.spawn(Edge::new(c, d));
             world.spawn(Edge::new(a, b));
             world.spawn(Edge::new(a, c));

@@ -1396,7 +1396,7 @@ impl<T> From<flume::SendError<T>> for Error {
 mod tests {
     use super::*;
     use conduit::well_known::Pbr;
-    use nox::Scalar;
+    use nox::{Scalar, ScalarExt};
 
     #[test]
     fn test_simple() {
@@ -1422,15 +1422,15 @@ mod tests {
 
         let mut world = add_system.world();
         world.spawn(Body {
-            a: A::host(1.0),
-            b: B::host(2.0),
-            c: C::host(-1.0),
+            a: A(1.0.constant()),
+            b: B(2.0.constant()),
+            c: C((-1.0).constant()),
         });
 
         world.spawn(Body {
-            a: A::host(2.0),
-            b: B::host(2.0),
-            c: C::host(-1.0),
+            a: A(2.0.constant()),
+            b: B(2.0.constant()),
+            c: C((-1.0).constant()),
         });
         let client = nox::Client::cpu().unwrap();
         let mut exec = world.build().unwrap();
@@ -1452,7 +1452,7 @@ mod tests {
         let mut world = World::default();
         let body = Body {
             pbr: world.insert_asset(Pbr::Url("foo-bar".to_string())),
-            a: A(Scalar::host(1.0)),
+            a: A(1.0.constant()),
         };
         world.spawn(body);
     }
@@ -1471,7 +1471,7 @@ mod tests {
         }
 
         let mut world = World::default();
-        world.spawn(A(Scalar::host(1.0)));
+        world.spawn(A(1.0.constant()));
         let client = nox::Client::cpu().unwrap();
         let mut exec = world
             .builder()
@@ -1498,7 +1498,7 @@ mod tests {
         }
 
         let mut world = World::default();
-        world.spawn(A(Scalar::host(1.0)));
+        world.spawn(A(1.0.constant()));
         let client = nox::Client::cpu().unwrap();
         let exec = world
             .builder()
