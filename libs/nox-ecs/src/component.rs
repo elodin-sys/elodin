@@ -1,5 +1,6 @@
 use conduit::{ComponentId, ComponentType, PrimitiveTy};
-use nox::{IntoOp, Scalar};
+use nox::xla::{ArrayElement, NativeType};
+use nox::{IntoOp, Tensor, TensorDim, XlaDim};
 
 use nox_ecs_macros::Component;
 use smallvec::smallvec;
@@ -14,32 +15,31 @@ pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
     }
 }
 
-macro_rules! impl_scalar_primitive {
-    ($inner:tt) => {
-        impl Component for Scalar<$inner> {
-            type Inner = Self;
+impl<T: ArrayElement + NativeType + conduit::Component, D: TensorDim + XlaDim> Component
+    for Tensor<T, D>
+{
+    type Inner = Self;
 
-            fn component_id() -> ComponentId {
-                use conduit::Component;
-                $inner::component_id()
-            }
+    fn component_id() -> ComponentId {
+        let name = T::NAME;
+        // TODO(Akhil): Make this more efficient
+        let dims = D::dims()
+            .as_ref()
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("_");
+        let comp_name = format!("tensor_{name}_{dims}");
+        ComponentId::new(comp_name.as_str())
+    }
 
-            fn component_type() -> ComponentType {
-                use conduit::Component;
-                $inner::component_type()
-            }
-        }
-    };
+    fn component_type() -> ComponentType {
+        let mut ty = T::component_type();
+        let dims: Vec<_> = D::dims().as_ref().iter().map(|i| *i as usize).collect();
+        ty.shape.insert_from_slice(0, &dims);
+        ty
+    }
 }
-
-impl_scalar_primitive!(f64);
-impl_scalar_primitive!(f32);
-impl_scalar_primitive!(u64);
-impl_scalar_primitive!(u32);
-impl_scalar_primitive!(u16);
-impl_scalar_primitive!(i64);
-impl_scalar_primitive!(i32);
-impl_scalar_primitive!(i16);
 
 macro_rules! impl_spatial_ty {
     ($nox_ty:ty, $prim_ty:expr, $shape:expr, $name: tt) => {
