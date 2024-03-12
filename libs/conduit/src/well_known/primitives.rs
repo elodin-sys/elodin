@@ -11,9 +11,7 @@ macro_rules! impl_primitive {
         }
 
         impl Component for $ty {
-            fn component_id() -> crate::ComponentId {
-                crate::ComponentId::new(stringify!($ty))
-            }
+            const NAME: &'static str = stringify!($ty);
 
             fn component_type() -> ComponentType {
                 ComponentType {
