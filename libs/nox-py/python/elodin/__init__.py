@@ -125,6 +125,12 @@ class Query(Generic[Unpack[A]]):
             component_data: ComponentData = t_arg.__metadata__[0]
             buf = builder.init_var(component_data.id, component_data.ty)
 
+    def __getitem__(self, index: int) -> [*A][0]:
+        if len(self.bufs) > 1:
+            raise Exception("Cannot index into a query with multiple inputs")
+        data = self.component_data[0]
+        return data.from_expr(self.bufs[0][index])
+
     def insert_into_builder(self, builder: PipelineBuilder):
         self.inner.insert_into_builder(builder)
 
