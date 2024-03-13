@@ -47,8 +47,6 @@ impl FromBuilder for Edge {
 }
 
 impl Component for Edge {
-    type Inner = Self;
-
     fn component_id() -> conduit::ComponentId {
         ComponentId::new("edge")
     }

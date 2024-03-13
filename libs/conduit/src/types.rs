@@ -101,7 +101,7 @@ impl PrimitiveTy {
     }
 }
 
-type Shape = SmallVec<[usize; 4]>;
+type Shape = SmallVec<[i64; 4]>;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ComponentType {
@@ -114,7 +114,7 @@ impl ComponentType {
         if self.shape.is_empty() {
             return self.primitive_ty.size();
         }
-        self.shape.iter().product::<usize>() * self.primitive_ty.size()
+        self.shape.iter().map(|i| *i as usize).product::<usize>() * self.primitive_ty.size()
     }
 }
 
@@ -150,20 +150,23 @@ impl<'a> ComponentValue<'a> {
         }
     }
 
-    pub fn shape(&self) -> SmallVec<[usize; 4]> {
+    pub fn shape(&self) -> SmallVec<[i64; 4]> {
         match self {
-            ComponentValue::U8(a) => a.shape().into(),
-            ComponentValue::U16(a) => a.shape().into(),
-            ComponentValue::U32(a) => a.shape().into(),
-            ComponentValue::U64(a) => a.shape().into(),
-            ComponentValue::I8(a) => a.shape().into(),
-            ComponentValue::I16(a) => a.shape().into(),
-            ComponentValue::I32(a) => a.shape().into(),
-            ComponentValue::I64(a) => a.shape().into(),
-            ComponentValue::Bool(a) => a.shape().into(),
-            ComponentValue::F32(a) => a.shape().into(),
-            ComponentValue::F64(a) => a.shape().into(),
+            ComponentValue::U8(a) => a.shape(),
+            ComponentValue::U16(a) => a.shape(),
+            ComponentValue::U32(a) => a.shape(),
+            ComponentValue::U64(a) => a.shape(),
+            ComponentValue::I8(a) => a.shape(),
+            ComponentValue::I16(a) => a.shape(),
+            ComponentValue::I32(a) => a.shape(),
+            ComponentValue::I64(a) => a.shape(),
+            ComponentValue::Bool(a) => a.shape(),
+            ComponentValue::F32(a) => a.shape(),
+            ComponentValue::F64(a) => a.shape(),
         }
+        .iter()
+        .map(|n| *n as _)
+        .collect()
     }
 
     pub fn ty(&self) -> ComponentType {
