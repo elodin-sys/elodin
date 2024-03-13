@@ -1,6 +1,6 @@
 use conduit::{ComponentId, ComponentType, PrimitiveTy};
 use nox::xla::{ArrayElement, NativeType};
-use nox::{IntoOp, Tensor, TensorDim, XlaDim};
+use nox::{IntoOp, Scalar, ScalarExt, Tensor, TensorDim, XlaDim};
 
 use nox_ecs_macros::Component;
 use smallvec::smallvec;
@@ -90,3 +90,12 @@ impl_spatial_ty!(
 
 #[derive(Component)]
 pub struct WorldPos(pub nox::SpatialTransform<f64>);
+
+#[derive(Component)]
+pub struct Seed(pub Scalar<u64>);
+
+impl Seed {
+    pub fn zero() -> Self {
+        Seed(0u64.constant())
+    }
+}
