@@ -15,7 +15,6 @@ conduit.path = "../conduit"
 conduit.features = ["nox"]
 
 # data structures
-heapless = "0.8"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
 bytemuck.version = "1.14"

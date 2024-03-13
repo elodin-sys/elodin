@@ -68,12 +68,8 @@ impl PjRtClient {
         Ok(client)
     }
 
-    pub fn copy_host_buffer<T: ArrayElement>(
-        &self,
-        buf: &[T],
-        dims: &[usize],
-    ) -> Result<PjRtBuffer> {
-        let element_count: usize = dims.iter().product();
+    pub fn copy_host_buffer<T: ArrayElement>(&self, buf: &[T], dims: &[i64]) -> Result<PjRtBuffer> {
+        let element_count: usize = dims.iter().product::<i64>() as usize;
         if element_count != buf.len() {
             return Err(Error::WrongElementCount {
                 dims: dims.to_vec(),
@@ -118,9 +114,9 @@ impl PjRtClient {
         &self,
         ty: super::ElementType,
         buf: &[u8],
-        dims: &[usize],
+        dims: &[i64],
     ) -> Result<PjRtBuffer> {
-        let element_count: usize = dims.iter().product();
+        let element_count: usize = dims.iter().product::<i64>() as usize;
         let element_size_in_bytes = ty.element_size_in_bytes();
         if element_count * element_size_in_bytes != buf.len() {
             Err(Error::WrongElementCount {
