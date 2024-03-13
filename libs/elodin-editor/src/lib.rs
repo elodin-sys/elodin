@@ -89,6 +89,13 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .insert_resource(WinitSettings {
+                // On MacOS we use a special winit fork that requests a redraw every screen refresh,
+                // I believe other platforms have similar behavior, but I have not fully tested them yet
+                #[cfg(target_os = "macos")]
+                focused_mode: bevy::winit::UpdateMode::Reactive {
+                    wait: Duration::MAX,
+                },
+                #[cfg(not(target_os = "macos"))]
                 focused_mode: bevy::winit::UpdateMode::Continuous,
                 unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
                     wait: Duration::from_millis(16),
