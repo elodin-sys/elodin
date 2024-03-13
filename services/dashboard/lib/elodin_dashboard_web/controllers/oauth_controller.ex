@@ -6,4 +6,8 @@ defmodule ElodinDashboardWeb.OAuthController do
   def callback(conn, %{"code" => code, "state" => state}) do
     conn |> UserAuth.callback(%{"code" => code, "state" => state})
   end
+
+  def log_out_callback(conn, _) do
+    conn |> UserAuth.log_out_user()
+  end
 end

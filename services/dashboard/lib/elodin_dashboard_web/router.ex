@@ -75,6 +75,7 @@ defmodule ElodinDashboardWeb.Router do
 
     get("/users/log_in", UserSessionController, :log_in)
     get("/users/log_out", UserSessionController, :delete)
+    get("/oauth/log_out_callback", OAuthController, :log_out_callback)
 
     live_session :unauthed,
       on_mount: [{ElodinDashboardWeb.UserAuth, :mount_current_user}] do

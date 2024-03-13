@@ -22,6 +22,8 @@ config :logger, level: :info
 
 config :elodin_dashboard, ElodinDashboardWeb.UserAuth,
   authorize_url: "/authorize",
+  logout_url: "/oidc/logout",
+  alt_logout_url: "/v2/logout",
   token_url: "/oauth/token",
   user_url: "/userinfo",
   auth_method: :client_secret_post
