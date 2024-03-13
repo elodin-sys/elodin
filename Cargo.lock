@@ -3495,6 +3495,7 @@ dependencies = [
  "elodin-types",
  "flume",
  "notify",
+ "nox-ecs",
  "opener",
  "reqwest",
  "serde",

@@ -1,5 +1,3 @@
-use std::ffi::OsString;
-
 use clap::{Parser, Subcommand};
 
 mod auth;
@@ -27,10 +25,6 @@ enum Commands {
 impl Cli {
     pub fn from_os_args() -> Self {
         Self::parse()
-    }
-
-    pub fn from_args(args: &[OsString]) -> Self {
-        Self::parse_from(args)
     }
 
     pub fn run(self) {

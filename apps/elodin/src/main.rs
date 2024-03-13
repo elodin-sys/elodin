@@ -1,3 +1,5 @@
+mod cli;
+
 fn main() {
-    elodin::Cli::from_os_args().run();
+    cli::Cli::from_os_args().run();
 }
