@@ -1,14 +1,18 @@
 defmodule ElodinDashboardWeb.UserAuth do
   use ElodinDashboardWeb, :verified_routes
+  import Logger
   import Plug.Conn
   import Phoenix.Controller
 
   alias Assent.Strategy.Auth0
+  alias Assent.Strategy.OIDC
 
   # Make the remember me cookie valid for 60 days.
   # If you want bump or reduce this value, also change
   # the token expiry itself in UserToken.
   @max_age 60 * 60 * 24 * 60
+  @id_token_cookie "_elodin_dashboard_web_user_token_id"
+  @id_token_options [sign: true]
   @remember_me_cookie "_elodin_dashboard_web_user_remember_me"
   @remember_me_options [sign: true, max_age: @max_age, same_site: "Lax"]
 
@@ -53,7 +57,7 @@ defmodule ElodinDashboardWeb.UserAuth do
       |> Assent.Config.put(:session_params, %{state: state})
       |> Auth0.callback(params)
 
-    log_in_user(conn, token["access_token"])
+    log_in_user(conn, token, params)
   end
 
   @doc """
@@ -70,11 +74,12 @@ defmodule ElodinDashboardWeb.UserAuth do
   """
   def log_in_user(conn, token, params \\ %{}) do
     user_return_to = get_session(conn, :user_return_to)
+    access_token = token["access_token"]
 
     query_params =
-      case get_user_by_token(token) do
+      case get_user_by_token(access_token) do
         {:error, %GRPC.RPCError{status: 5}} ->
-          ElodinDashboard.Atc.create_user(struct(Elodin.Types.Api.CreateUserReq), token)
+          ElodinDashboard.Atc.create_user(struct(Elodin.Types.Api.CreateUserReq), access_token)
           "?onboarding=1"
 
         {:error, _} ->
@@ -86,8 +91,9 @@ defmodule ElodinDashboardWeb.UserAuth do
 
     conn
     |> renew_session()
-    |> put_token_in_session(token)
-    |> maybe_write_remember_me_cookie(token, params)
+    |> put_user_id_token(token["id_token"])
+    |> put_token_in_session(access_token)
+    |> maybe_write_remember_me_cookie(access_token, params)
     |> redirect(to: "#{user_return_to || signed_in_path(conn)}#{query_params}")
   end
 
@@ -97,6 +103,22 @@ defmodule ElodinDashboardWeb.UserAuth do
 
   defp maybe_write_remember_me_cookie(conn, _token, _params) do
     conn
+  end
+
+  defp put_user_id_token(conn, token) do
+    state = get_session(conn, :session_params)
+    config = assent_config() |> Assent.Config.put(:session_params, %{state: state})
+
+    case OIDC.validate_id_token(config, token) do
+      {:ok, jwt} ->
+        max_age = jwt.claims["exp"] - :os.system_time(:second)
+
+        put_resp_cookie(conn, @id_token_cookie, token, [{:max_age, max_age} | @id_token_options])
+
+      {:error, error} ->
+        info("Failed to validate id_token: #{inspect(error)}")
+        conn
+    end
   end
 
   # This function renews the session ID and erases the whole
@@ -120,19 +142,95 @@ defmodule ElodinDashboardWeb.UserAuth do
     |> clear_session()
   end
 
+  defp drop_session(conn) do
+    conn
+    |> configure_session(drop: true)
+    |> clear_session()
+    |> delete_resp_cookie(@remember_me_cookie)
+    |> delete_resp_cookie(@id_token_cookie)
+  end
+
+  defp logout_url(config, params, alt \\ false) do
+    with {:ok, base_url} <- Assent.Config.__base_url__(config) do
+      logout_url =
+        case alt do
+          true -> Assent.Config.get(config, :alt_logout_url, "/v2/logout")
+          false -> Assent.Config.get(config, :logout_url, "/oidc/logout")
+        end
+
+      Assent.Strategy.to_url(base_url, logout_url, params)
+    end
+  end
+
+  defp fetch_id_token(conn, config) do
+    conn = fetch_cookies(conn, signed: [@id_token_cookie])
+
+    case conn.cookies[@id_token_cookie] do
+      token when not is_nil(token) ->
+        case OIDC.validate_id_token(config, token) do
+          {:ok, _} ->
+            token
+
+          {:error, error} ->
+            info("Failed to validate id_token: #{inspect(error)}")
+            nil
+        end
+
+      _ ->
+        info("User's id_token is missing")
+        nil
+    end
+  end
+
+  def redirect_to_logout(conn) do
+    state = get_session(conn, :session_params)
+    config = assent_config() |> Assent.Config.put(:session_params, %{state: state})
+
+    {:ok, client_id} = Assent.Config.fetch(config, :client_id)
+
+    {:ok, post_logout_redirect_uri} =
+      Assent.Config.fetch(config, :post_logout_redirect_uri)
+
+    logout_url =
+      case fetch_id_token(conn, config) do
+        id_token when not is_nil(id_token) ->
+          logout_url(config, [
+            {:id_token, id_token},
+            {:client_id, client_id},
+            {:post_logout_redirect_uri, post_logout_redirect_uri}
+          ])
+
+        _ ->
+          logout_url(
+            config,
+            [
+              {:client_id, client_id},
+              {:returnTo, post_logout_redirect_uri}
+            ],
+            true
+          )
+      end
+
+    redirect(conn, external: logout_url)
+  end
+
+  defp disconnect_socket(conn) do
+    if live_socket_id = get_session(conn, :live_socket_id) do
+      ElodinDashboardWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
+    end
+
+    conn
+  end
+
   @doc """
   Logs the user out.
 
   It clears all session data for safety. See renew_session.
   """
   def log_out_user(conn) do
-    if live_socket_id = get_session(conn, :live_socket_id) do
-      ElodinDashboardWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
-    end
-
     conn
-    |> renew_session()
-    |> delete_resp_cookie(@remember_me_cookie)
+    |> disconnect_socket()
+    |> drop_session()
     |> redirect(to: ~p"/")
   end
 

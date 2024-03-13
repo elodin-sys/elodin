@@ -9,6 +9,6 @@ defmodule ElodinDashboardWeb.UserSessionController do
 
   def delete(conn, _params) do
     conn
-    |> UserAuth.log_out_user()
+    |> UserAuth.redirect_to_logout()
   end
 end

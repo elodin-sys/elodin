@@ -57,6 +57,7 @@ if config_env() == :prod do
     client_id: auth_client_id,
     client_secret: auth_client_secret,
     redirect_uri: "https://#{host}/oauth/callback",
+    post_logout_redirect_uri: "https://#{host}/oauth/log_out_callback",
     base_url: auth_base_url,
     authorization_params: [
       scope: "openid profile email",

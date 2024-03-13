@@ -85,6 +85,13 @@ window.addEventListener("phx:copy", (event) => {
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 
+liveSocket.getSocket().onClose(e => {
+  if(e.wasClean){
+    document.querySelector("#client-error").style.display = 'none';
+  }
+})
+
+
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
