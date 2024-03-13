@@ -52,8 +52,6 @@ pub fn component(input: TokenStream) -> TokenStream {
 
 
         impl #crate_name::Component for #ident #generics #where_clause {
-            type Inner = #ty;
-
             fn component_id() -> #crate_name::conduit::ComponentId {
                 #id
             }

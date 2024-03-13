@@ -54,9 +54,7 @@ impl PipelineBuilder {
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
         let ty: conduit::ComponentType = ty.into();
         let len = column.column.buffer.len();
-        let shape = std::iter::once(len as i64)
-            .chain(ty.shape.iter().map(|x| *x as i64))
-            .collect();
+        let shape = std::iter::once(len as i64).chain(ty.shape).collect();
         let op = Noxpr::parameter(
             self.builder.param_ops.len() as i64,
             NoxprTy::ArrayTy(ArrayTy {
@@ -158,15 +156,15 @@ pub struct ComponentType {
     #[pyo3(get, set)]
     pub ty: PrimitiveType,
     #[pyo3(get, set)]
-    pub shape: Py<PyArray1<usize>>,
+    pub shape: Py<PyArray1<i64>>,
 }
 
 #[pymethods]
 impl ComponentType {
     #[new]
-    fn new(ty: PrimitiveType, shape: numpy::PyArrayLike1<usize>) -> Self {
-        let py_readonly: &PyReadonlyArray1<usize> = shape.deref();
-        let py_array: &PyArray1<usize> = py_readonly.deref();
+    fn new(ty: PrimitiveType, shape: numpy::PyArrayLike1<i64>) -> Self {
+        let py_readonly: &PyReadonlyArray1<i64> = shape.deref();
+        let py_array: &PyArray1<i64> = py_readonly.deref();
         let shape = py_array.to_owned();
         Self { ty, shape }
     }
