@@ -25,3 +25,7 @@ opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = "debuginfo"
+
+[patch.crates-io]
+winit.git = "https://github.com/elodin-sys/winit.git"
+winit.branch = "feature/cv-display-link"
