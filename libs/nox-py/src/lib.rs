@@ -489,13 +489,7 @@ impl WorldBuilder {
                     None => nox::Client::cpu()?,
                 };
                 if no_repl {
-                    let ppid = std::os::unix::process::parent_id();
-                    spawn_tcp_server(addr, exec, &client, || {
-                        let sig_err = py.check_signals().is_err();
-                        let current_ppid = std::os::unix::process::parent_id();
-                        let ppid_changed = ppid != current_ppid;
-                        sig_err || ppid_changed
-                    })?;
+                    spawn_tcp_server(addr, exec, &client, || py.check_signals().is_err())?;
                     Ok(None)
                 } else {
                     std::thread::spawn(move || {
