@@ -37,11 +37,11 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
     }
 
     pub fn angular(&self) -> Quaternion<T> {
-        Quaternion(self.inner.fixed_slice([0]))
+        Quaternion(self.inner.fixed_slice(&[0]))
     }
 
     pub fn linear(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([4])
+        self.inner.fixed_slice(&[4])
     }
 
     pub fn zero() -> Self {
@@ -89,11 +89,11 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
     }
 
     pub fn torque(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([0])
+        self.inner.fixed_slice(&[0])
     }
 
     pub fn force(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([3])
+        self.inner.fixed_slice(&[3])
     }
 
     pub fn zero() -> Self {
@@ -141,13 +141,13 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
     }
 
     pub fn inertia_diag(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([0])
+        self.inner.fixed_slice(&[0])
     }
     pub fn momentum(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([3])
+        self.inner.fixed_slice(&[3])
     }
     pub fn mass(&self) -> Scalar<T> {
-        self.inner.fixed_slice::<Const<1>>([6]).reshape()
+        self.inner.fixed_slice::<Const<1>>(&[6]).reshape()
     }
 }
 
@@ -202,11 +202,11 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
     }
 
     pub fn angular(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([0])
+        self.inner.fixed_slice(&[0])
     }
 
     pub fn linear(&self) -> Vector<T, 3> {
-        self.inner.fixed_slice([3])
+        self.inner.fixed_slice(&[3])
     }
 
     pub fn offset(&self, pos: SpatialTransform<T>) -> Self {

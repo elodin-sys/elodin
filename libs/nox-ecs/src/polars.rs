@@ -297,7 +297,7 @@ fn tensor_array(ty: &ComponentType, inner: Box<dyn Array>) -> Box<dyn Array> {
         Box::new(polars_arrow::datatypes::Field::new(
             "inner", data_type, false,
         )),
-        ty.shape.iter().product::<usize>(),
+        ty.shape.iter().map(|i| *i as usize).product(),
     );
     Box::new(polars_arrow::array::FixedSizeListArray::new(
         data_type, inner, None,

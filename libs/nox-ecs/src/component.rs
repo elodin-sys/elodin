@@ -6,8 +6,6 @@ use nox_ecs_macros::Component;
 use smallvec::smallvec;
 
 pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
-    type Inner;
-
     fn component_id() -> ComponentId;
     fn component_type() -> ComponentType;
     fn is_asset() -> bool {
@@ -18,13 +16,10 @@ pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
 impl<T: ArrayElement + NativeType + conduit::Component, D: TensorDim + XlaDim> Component
     for Tensor<T, D>
 {
-    type Inner = Self;
-
     fn component_id() -> ComponentId {
         let name = T::NAME;
         // TODO(Akhil): Make this more efficient
-        let dims = D::dims()
-            .as_ref()
+        let dims = D::shape()
             .iter()
             .map(|i| i.to_string())
             .collect::<Vec<_>>()
@@ -35,8 +30,7 @@ impl<T: ArrayElement + NativeType + conduit::Component, D: TensorDim + XlaDim> C
 
     fn component_type() -> ComponentType {
         let mut ty = T::component_type();
-        let dims: Vec<_> = D::dims().as_ref().iter().map(|i| *i as usize).collect();
-        ty.shape.insert_from_slice(0, &dims);
+        ty.shape.insert_from_slice(0, &D::shape());
         ty
     }
 }
@@ -44,8 +38,6 @@ impl<T: ArrayElement + NativeType + conduit::Component, D: TensorDim + XlaDim> C
 macro_rules! impl_spatial_ty {
     ($nox_ty:ty, $prim_ty:expr, $shape:expr, $name: tt) => {
         impl Component for $nox_ty {
-            type Inner = Self;
-
             fn component_id() -> ComponentId {
                 conduit::ComponentId::new($name)
             }
