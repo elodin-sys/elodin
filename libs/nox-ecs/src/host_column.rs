@@ -56,9 +56,8 @@ impl HostColumn {
     }
 
     pub fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
-        let mut dims: heapless::Vec<usize, 3> = heapless::Vec::default();
-        dims.extend(self.component_type.shape.iter().copied());
-        dims.push(self.len).unwrap();
+        let mut dims = self.component_type.shape.clone();
+        dims.insert(0, self.len as i64);
         client
             .0
             .copy_raw_host_buffer(
@@ -101,9 +100,8 @@ impl HostColumn {
     }
 
     pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
-        let shape: SmallVec<[usize; 4]> = std::iter::once(self.len)
-            .chain(self.component_type.shape.iter().copied())
-            .collect();
+        let comp_shape = self.component_type.shape.iter().map(|n| *n as _);
+        let shape: SmallVec<[usize; 4]> = std::iter::once(self.len).chain(comp_shape).collect();
         let buf = self.typed_buf::<T>()?;
         ndarray::ArrayViewD::from_shape(&shape[..], buf).ok()
     }
