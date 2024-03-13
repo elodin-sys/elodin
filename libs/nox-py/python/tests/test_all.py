@@ -1,6 +1,7 @@
 import pytest
 import jax
 import jax.numpy as np
+from jax import random
 from elodin import *
 from dataclasses import dataclass
 
@@ -66,6 +67,7 @@ def test_six_dof():
     x = exec.column_array(ComponentId("world_pos"))
     assert (x == [0, 0, 0, 1, 1.0 / 60.0, 0.0, 0.0]).all()
 
+
 def test_graph():
     X = Component[jax.Array, "x", ComponentType.F64]
     E = Component[Edge, "test_edge", ComponentType.Edge]
@@ -94,3 +96,53 @@ def test_graph():
     exec.run(client)
     x = exec.column_array(ComponentId("x"))
     assert (x == [11.0, 9.0, 2.0]).all()
+
+
+def test_seed():
+    X = Component[jax.Array, "x", ComponentType.F64]
+    Y = Component[jax.Array, "y", ComponentType.F64]
+
+    @system
+    def foo(x: Query[X]) -> Query[X]:
+        return x.map(X, lambda x: x * 2)
+
+    @system
+    def bar(q: Query[X, Y]) -> Query[X]:
+        return q.map(X, lambda x, y: x * y)
+
+    @system
+    def seed_mul(s: Query[Seed], q: Query[X]) -> Query[X]:
+        return q.map(X, lambda x: x * s[0])
+
+    @system
+    def seed_sample(s: Query[Seed], q: Query[X, Y]) -> Query[Y]:
+        def sample_inner(x, y):
+            key = random.key(s[0])
+            key = random.fold_in(key, x)
+            scaler = random.uniform(key, minval=1.0, maxval=2.0)
+            return y * scaler
+
+        return q.map(Y, sample_inner)
+
+    @dataclass
+    class Globals(Archetype):
+        seed: Seed
+
+    @dataclass
+    class Test(Archetype):
+        x: X
+        y: Y
+
+    sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
+    client = Client.cpu()
+    w = WorldBuilder()
+    w.spawn(Globals(seed=2))
+    w.spawn(Test(1.0, 500.0))
+    w.spawn(Test(15.0, 500.0))
+    exec = w.build(sys)
+    exec.run(client)
+    x1 = exec.column_array(ComponentId("x"))
+    y1 = exec.column_array(ComponentId("y"))
+    assert (x1 == [2000.0, 30000.0]).all()
+    assert (y1 >= [500.0, 500.0]).all()
+    assert (y1 <= [1000.0, 1000.0]).all()
