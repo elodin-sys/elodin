@@ -16,6 +16,10 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
       resp.batches
       |> Enum.flat_map(fn b -> batch_samples(b) end)
 
+    grid_count = max((samples |> Enum.count()) / 400, 1) |> ceil()
+
+    grid = calculate_grid(samples)
+
     stats = calculate_stats(samples)
 
     run =
@@ -30,7 +34,8 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
 
     {:ok,
      socket
-     |> stream(:grid, samples)
+     |> stream(:grid, grid)
+     |> stream(:samples, samples)
      |> assign(:run, run)
      |> assign(:samples, samples |> Enum.to_list())}
   end
@@ -70,7 +75,6 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
             {:DONE, true} -> "fail"
             {:DONE, false} -> "pass"
           end,
-        # if(is_failure, do: "fail", else: "pass"),
         progress:
           case b.status do
             :PENDING -> 0
@@ -78,6 +82,32 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
             :DONE -> 100
           end
       }
+    end)
+  end
+
+  def calculate_grid(samples) do
+    max_grid_count = 400
+    grid_count = max((samples |> Enum.count()) / max_grid_count, 1) |> ceil()
+
+    samples
+    |> Enum.chunk_every(grid_count)
+    |> Enum.with_index()
+    |> Enum.map(fn {chunk, i} ->
+      chunk
+      |> Enum.reduce(
+        %{
+          id: i,
+          type: "pending"
+        },
+        fn sample, acc ->
+          if acc[:type] == "fail",
+            do: acc,
+            else: %{
+              id: acc[:id],
+              type: sample.type
+            }
+        end
+      )
     end)
   end
 
@@ -125,10 +155,13 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
         samples |> List.replace_at(index + offset, Enum.at(new_samples, index))
       end)
 
+    grid = calculate_grid(samples)
+
     {:noreply,
      socket
      |> assign(:samples, samples)
-     |> stream(:grid, samples)
+     |> stream(:grid, grid)
+     |> stream(:samples, samples)
      |> assign(:run, run |> Map.merge(calculate_stats(samples)))}
   end
 
@@ -254,7 +287,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
               </tr>
             </thead>
             <tbody>
-              <tr :for={{id, sample} <- @streams.grid} class="h-[51px] font-mono font-medium">
+              <tr :for={{id, sample} <- @streams.samples} class="h-[51px] font-mono font-medium">
                 <td class="pl-elo-xl"><%= sample.id %></td>
                 <td><.status_label type={sample.type} /></td>
                 <td><.smolgress value={sample.progress} type={sample.type} /></td>
