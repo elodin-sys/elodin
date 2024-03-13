@@ -43,7 +43,10 @@ where
     type HostTy = nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>;
 
     fn from_host(client: &Client, native: Self::HostTy) -> Self {
-        let inner = client.0.copy_host_buffer(native.as_slice(), &[R]).unwrap();
+        let inner = client
+            .0
+            .copy_host_buffer(native.as_slice(), &[R as i64])
+            .unwrap();
         Vector {
             inner,
             phantom: PhantomData,
@@ -57,7 +60,10 @@ where
     T: NativeType + Field + ArrayElement,
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
-        let inner = client.0.copy_host_buffer(self.as_slice(), &[R]).unwrap();
+        let inner = client
+            .0
+            .copy_host_buffer(self.as_slice(), &[R as i64])
+            .unwrap();
         MaybeOwned::Owned(inner)
     }
 }
@@ -90,7 +96,7 @@ impl<T, const R: usize> Vector<T, R, Op> {
     pub fn parts(&self) -> [Vector<T, 1>; R] {
         let mut i = 0;
         [0; R].map(|_| {
-            let slice = self.fixed_slice([i]);
+            let slice = self.fixed_slice(&[i]);
             i += 1;
             slice
         })

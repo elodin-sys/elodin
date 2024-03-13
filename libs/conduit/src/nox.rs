@@ -43,7 +43,7 @@ impl From<ComponentType> for ArrayTy {
     fn from(val: ComponentType) -> Self {
         ArrayTy {
             element_type: val.primitive_ty.element_type(),
-            shape: val.shape.into_iter().map(|d| d as i64).collect(),
+            shape: val.shape,
         }
     }
 }

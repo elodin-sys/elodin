@@ -2,7 +2,6 @@ use crate::{
     ArrayTy, Builder, Comp, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorDim, TensorItem,
     XlaDim,
 };
-use smallvec::SmallVec;
 use std::{any, marker::PhantomData};
 
 pub trait CompFn<T, R>: Send + Sync {
@@ -65,16 +64,14 @@ impl<'b> FromBuilder for &'b Builder {
 impl<T: TensorItem, D: XlaDim + TensorDim> FromBuilder for Tensor<T, D, Op>
 where
     T::Dim: XlaDim,
-    <T::Dim as XlaDim>::Array: AsRef<[i64]>,
-    D::Array: AsRef<[i64]>,
 {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
         let mut params = builder.params.borrow_mut();
         let i = params.len() as i64;
-        let mut shape = SmallVec::from_slice(D::dims().as_ref());
-        shape.extend_from_slice(<T::Dim as XlaDim>::dims().as_ref());
+        let mut shape = D::shape();
+        shape.extend_from_slice(T::Dim::shape().as_ref());
         let inner = Noxpr::parameter(
             i,
             NoxprTy::ArrayTy(ArrayTy {

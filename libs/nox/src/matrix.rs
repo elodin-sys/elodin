@@ -75,7 +75,10 @@ where
         for row in self.row_iter() {
             buf.extend(row.iter())
         }
-        let inner = client.0.copy_host_buffer(&buf, &[R, C]).unwrap();
+        let inner = client
+            .0
+            .copy_host_buffer(&buf, &[R as i64, C as i64])
+            .unwrap();
         Matrix {
             inner,
             phantom: PhantomData,
@@ -116,7 +119,10 @@ where
         for mat in native.iter() {
             buf.extend_from_slice(mat.as_slice());
         }
-        let inner = client.0.copy_host_buffer(&buf, &[N, R, C]).unwrap();
+        let inner = client
+            .0
+            .copy_host_buffer(&buf, &[N as i64, R as i64, C as i64])
+            .unwrap();
         Tensor {
             inner,
             phantom: PhantomData,
@@ -137,7 +143,10 @@ where
         for mat in self.iter() {
             buf.extend_from_slice(mat.as_slice());
         }
-        let inner = client.0.copy_host_buffer(&buf, &[N, R, C]).unwrap();
+        let inner = client
+            .0
+            .copy_host_buffer(&buf, &[N as i64, R as i64, C as i64])
+            .unwrap();
         MaybeOwned::Owned(inner)
     }
 }
@@ -221,7 +230,7 @@ mod tests {
     fn test_fixed_slice() {
         let client = Client::cpu().unwrap();
         fn slice(mat: Matrix<f32, 1, 4>) -> Matrix<f32, 1, 1> {
-            mat.fixed_slice::<(Const<1>, Const<1>)>([0, 2])
+            mat.fixed_slice::<(Const<1>, Const<1>)>(&[0, 2])
         }
         let comp = slice.build().unwrap();
         let exec = match comp.compile(&client) {

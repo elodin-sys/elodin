@@ -91,7 +91,7 @@ impl<T: Field> Mul<Vector<T, 3>> for Quaternion<T> {
         let zero: Vector<T, 1> = T::zero().reshape();
         let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
-        (self * v * inv).0.fixed_slice([0])
+        (self * v * inv).0.fixed_slice(&[0])
     }
 }
 

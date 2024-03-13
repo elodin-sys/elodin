@@ -141,6 +141,7 @@ impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
 
 pub trait TensorDim {}
 pub trait NonScalarDim {}
+pub trait ConstDim {}
 
 pub type ScalarDim = ();
 impl TensorDim for ScalarDim {}
@@ -151,61 +152,30 @@ impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
 impl<T: TensorDim> DimDiv<T, T> for ShapeConstraint {}
 
-pub trait ConstDim<const RANK: usize> {
-    const RANK: usize = RANK;
-    fn dims() -> [usize; RANK];
-}
-
 pub trait XlaDim {
-    type Array: AsRef<[i64]>;
-    fn dims() -> Self::Array;
+    fn shape() -> SmallVec<[i64; 4]>;
 }
 
-pub trait DimRank<const RANK: usize> {
-    const RANK: usize = RANK;
-}
-
-impl ConstDim<0> for ScalarDim {
-    fn dims() -> [usize; 0] {
-        []
-    }
-}
+impl ConstDim for ScalarDim {}
 
 impl XlaDim for ScalarDim {
-    type Array = [i64; 0];
-    fn dims() -> [i64; 0] {
-        []
+    fn shape() -> SmallVec<[i64; 4]> {
+        smallvec![]
     }
 }
 
-impl DimRank<0> for ScalarDim {}
-
-impl<const N: usize> ConstDim<1> for Const<N> {
-    fn dims() -> [usize; 1] {
-        [N]
-    }
-}
+impl<const N: usize> ConstDim for Const<N> {}
 
 impl<const N: usize> XlaDim for Const<N> {
-    type Array = [i64; 1];
-    fn dims() -> [i64; 1] {
-        [N as i64]
+    fn shape() -> SmallVec<[i64; 4]> {
+        smallvec![N as i64]
     }
 }
-
-impl XlaDim for nalgebra::Dyn {
-    type Array = [i64; 1];
-    fn dims() -> [i64; 1] {
-        [-1]
-    }
-}
-
-impl<const N: usize> DimRank<1> for Const<N> {}
 
 // This macro allows us to implement `TensorDim` for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_tensor_dim {
-      ($num:literal; $($ty:tt),+) => {
+    ($num:literal; $($ty:tt),+) => {
         impl<$($ty,)*> TensorDim for ($($ty,)*)
               where $($ty: TensorDim, )*
         {
@@ -216,31 +186,21 @@ macro_rules! impl_tensor_dim {
         {
         }
 
-
-        impl<$($ty,)*> DimRank<$num> for ($($ty,)*)
-              where $($ty: NonScalarDim, )*
+        impl<$($ty,)*> ConstDim for ($($ty,)*)
+              where $($ty: ConstDim, )*
         {
-        }
-
-        impl<$($ty,)*> ConstDim<$num> for ($($ty,)*)
-              where $($ty: ConstDim<1>, )*
-        {
-            fn dims() -> [usize; $num] {
-                [$($ty::dims()[0],)*]
-            }
         }
 
         impl<$($ty,)*> XlaDim for ($($ty,)*)
-              where $($ty: XlaDim<Array = [i64; 1]>, )*
+              where $($ty: XlaDim, )*
         {
-            type Array = [i64; $num];
-            fn dims() -> [i64; $num] {
-                [$($ty::dims()[0],)*]
+            fn shape() -> SmallVec<[i64; 4]> {
+                let mut shape = SmallVec::new();
+                $(shape.extend_from_slice(&$ty::shape());)*
+                shape
             }
         }
-
-
-      }
+    }
 }
 
 impl_tensor_dim!(1; T1);
@@ -355,24 +315,21 @@ impl<'a, T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for &'a Tensor<T, D> {
     }
 }
 
-impl<T, D: TensorDim + DimRank<R>, const R: usize> FixedSliceExt<T, D, R> for Tensor<T, D, Op> {
-    fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op> {
-        let offsets: SmallVec<_> = offsets.into_iter().map(|o| o as i64).collect();
+impl<T, D: TensorDim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
+    fn fixed_slice<ND: TensorDim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op> {
+        let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
         let new_offsets = offsets
             .iter()
-            .zip(ND::dims())
-            .map(|(a, b)| a + b as i64)
+            .zip(ND::shape())
+            .map(|(a, b)| a + b)
             .collect();
-        Tensor::from_op(
-            self.inner
-                .clone()
-                .slice(offsets, new_offsets, smallvec![1i64; R]),
-        )
+        let strides = smallvec![1i64; offsets.len()];
+        Tensor::from_op(self.inner.clone().slice(offsets, new_offsets, strides))
     }
 }
 
-pub trait FixedSliceExt<T, D: TensorDim, const R: usize> {
-    fn fixed_slice<ND: TensorDim + ConstDim<R>>(&self, offsets: [usize; R]) -> Tensor<T, ND, Op>;
+pub trait FixedSliceExt<T, D: TensorDim> {
+    fn fixed_slice<ND: TensorDim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op>;
 }
 
 impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: TensorDim> Mul<T>
@@ -569,12 +526,9 @@ impl<T, D: TensorDim> Tensor<T, D> {
     pub fn reshape<ND>(self) -> Tensor<T, ND>
     where
         ND: TensorDim + XlaDim,
-        ND::Array: AsRef<[i64]>,
     {
         Tensor {
-            inner: self
-                .inner
-                .reshape(SmallVec::from_slice(ND::dims().as_ref())),
+            inner: self.inner.reshape(ND::shape()),
             phantom: PhantomData,
         }
     }
@@ -582,11 +536,8 @@ impl<T, D: TensorDim> Tensor<T, D> {
     pub fn broadcast<ND: TensorDim>(self) -> Tensor<T, ND>
     where
         ND: TensorDim + XlaDim,
-        ND::Array: AsRef<[i64]>,
     {
-        let inner = self
-            .inner
-            .broadcast(SmallVec::from_slice(ND::dims().as_ref()));
+        let inner = self.inner.broadcast(ND::shape());
         Tensor {
             inner,
             phantom: PhantomData,
@@ -699,7 +650,6 @@ impl<T: TensorItem, D: TensorDim + DefaultMap, IT: ArrayElement, const N: usize>
     for Vector<IT, N>
 where
     ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: XlaDim,
-    <ReplaceMappedDim<D::DefaultMapDim, D, Const<1>> as XlaDim>::Array: AsRef<[i64]>,
 {
     type Output = Tensor<T, ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>>;
 
@@ -707,9 +657,7 @@ where
         let indices = self
             .inner
             .broadcast_in_dim(smallvec![N as i64, 1], smallvec![0]);
-        let slice_shape = SmallVec::from_slice(
-            ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::dims().as_ref(),
-        );
+        let slice_shape = ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::shape();
 
         let offset_dims = (1..slice_shape.len() as i64).collect();
         let inner = tensor.inner.gather(

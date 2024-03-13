@@ -162,7 +162,7 @@ impl ComponentType {
             PrimitiveTy::try_from(prim_type).map_err(|_| Error::UnknownPrimitiveTy)?;
         let dim = buf.try_get_u8()?;
         let shape = (0..dim)
-            .map(|_| buf.try_get_u64().map(|d| d as usize))
+            .map(|_| buf.try_get_i64())
             .collect::<Result<_, try_buf::ErrorKind>>()?;
         Ok(ComponentType {
             primitive_ty,
@@ -173,7 +173,8 @@ impl ComponentType {
     pub fn parse_value<'a>(&self, buf: &'a [u8]) -> Result<(usize, ComponentValue<'a>), Error> {
         let size = self.size();
         let buf = buf.get(..size).ok_or(Error::EOF)?;
-        let shape = ndarray::IxDyn(&self.shape);
+        let comp_shape = self.shape.iter().map(|n| *n as _).collect::<Vec<_>>();
+        let shape = ndarray::IxDyn(&comp_shape);
         fn cow_array<T: CheckedBitPattern>(
             buf: &[u8],
             shape: ndarray::IxDyn,

@@ -12,7 +12,7 @@ pub enum Error {
     /// Incorrect number of elements.
     #[error("wrong element count {element_count} for dims {dims:?}")]
     WrongElementCount {
-        dims: Vec<usize>,
+        dims: Vec<i64>,
         element_count: usize,
     },
 
