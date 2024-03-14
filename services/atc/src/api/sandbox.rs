@@ -126,7 +126,7 @@ impl Api {
                 include_str!("../../../../libs/nox-py/examples/three-body.py").to_string()
             }
             Some("cube-sat") => {
-                include_str!("../../../../libs/nox-py/examples/cube_sat.py").to_string()
+                include_str!("../../../../libs/nox-py/examples/cube-sat.py").to_string()
             }
             Some(_) | None => req.code,
         };
