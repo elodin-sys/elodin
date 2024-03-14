@@ -73,11 +73,11 @@ impl Cli {
 
     fn access_token(&self) -> anyhow::Result<String> {
         (|| {
-            let access_token_path = self
-                .xdg_dirs()
-                .find_data_file("access_token")
-                .ok_or(anyhow::anyhow!("Missing access token"))?;
-            println!("reading from {}", access_token_path.display());
+            let dirs = self
+                .dirs()
+                .ok_or(anyhow::anyhow!("failed to get data directory"))?;
+            let data_dir = dirs.data_dir();
+            let access_token_path = data_dir.join("access_token");
             let access_token = std::fs::read_to_string(access_token_path)?;
             let payload = access_token
                 .split('.')
@@ -150,10 +150,12 @@ impl Cli {
 
                 let expires_in = TimeDelta::try_seconds(token_res.expires_in as i64).unwrap();
                 let expires_at = Utc::now() + expires_in;
-                let xdg_dirs = self.xdg_dirs();
-                let id_token_path = xdg_dirs.place_data_file("id_token")?;
-                let access_token_path = xdg_dirs.place_data_file("access_token")?;
-                let expires_at_path = xdg_dirs.place_data_file("expires_at")?;
+                let dirs = self.dirs().expect("failed to get data directory");
+                let data_dir = dirs.data_dir();
+                std::fs::create_dir_all(data_dir).context("failed to create data directory")?;
+                let id_token_path = data_dir.join("id_token");
+                let access_token_path = data_dir.join("access_token");
+                let expires_at_path = data_dir.join("expires_at");
                 std::fs::write(id_token_path, token_res.id_token)?;
                 std::fs::write(access_token_path, token_res.access_token)?;
                 std::fs::write(expires_at_path, expires_at.to_rfc3339())?;
