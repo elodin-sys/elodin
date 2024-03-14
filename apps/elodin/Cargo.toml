@@ -17,7 +17,7 @@ tempfile = "3.10.0"
 tokio = { version = "1.35.1", features = ["full"] }
 tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"] }
 uuid = "1.7.0"
-xdg = "2.5.2"
+directories = "5.0.1"
 zstd = "0.13.0"
 bevy.version = "0.13"
 flume = "0.11.0"

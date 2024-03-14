@@ -48,8 +48,8 @@ impl Cli {
         self.url.ends_with("elodin.dev") || self.url.contains("localhost")
     }
 
-    fn xdg_dirs(&self) -> xdg::BaseDirectories {
-        let profile = if self.is_dev() { "dev" } else { "" };
-        xdg::BaseDirectories::with_profile("elodin", profile).unwrap()
+    fn dirs(&self) -> Option<directories::ProjectDirs> {
+        let app_name = if self.is_dev() { "cli-dev" } else { "cli" };
+        directories::ProjectDirs::from("systems", "elodin", app_name)
     }
 }
