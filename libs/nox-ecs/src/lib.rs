@@ -428,6 +428,10 @@ impl ColumnRefMut<'_, HostStore> {
             .map(EntityId)
             .zip(self.column.buffer.values_iter())
     }
+
+    pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
+        self.column.buffer.typed_buf_mut()
+    }
 }
 
 pub trait Archetype {
@@ -1151,10 +1155,12 @@ impl WorldExec {
                     .load_column_from_client(component_id, client_world)?;
             }
         }
-        self.world.dirty_components.insert(component_id);
         self.world
             .host
             .column_by_id_mut(component_id)
+            .inspect(|_| {
+                self.world.dirty_components.insert(component_id);
+            })
             .ok_or(Error::ComponentNotFound)
     }
 
