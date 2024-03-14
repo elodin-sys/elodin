@@ -99,6 +99,13 @@ impl HostColumn {
         bytemuck::try_cast_slice(self.buf.as_slice()).ok()
     }
 
+    pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
+        if self.component_type.primitive_ty.element_type() != T::TY {
+            return None;
+        }
+        bytemuck::try_cast_slice_mut(self.buf.as_mut_slice()).ok()
+    }
+
     pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
         let comp_shape = self.component_type.shape.iter().map(|n| *n as _);
         let shape: SmallVec<[usize; 4]> = std::iter::once(self.len).chain(comp_shape).collect();
