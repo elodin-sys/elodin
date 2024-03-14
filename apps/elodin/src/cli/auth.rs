@@ -77,6 +77,7 @@ impl Cli {
                 .xdg_dirs()
                 .find_data_file("access_token")
                 .ok_or(anyhow::anyhow!("Missing access token"))?;
+            println!("reading from {}", access_token_path.display());
             let access_token = std::fs::read_to_string(access_token_path)?;
             let payload = access_token
                 .split('.')
@@ -151,10 +152,10 @@ impl Cli {
                 let expires_at = Utc::now() + expires_in;
                 let xdg_dirs = self.xdg_dirs();
                 let id_token_path = xdg_dirs.place_data_file("id_token")?;
-                let acess_token_path = xdg_dirs.place_data_file("access_token")?;
+                let access_token_path = xdg_dirs.place_data_file("access_token")?;
                 let expires_at_path = xdg_dirs.place_data_file("expires_at")?;
                 std::fs::write(id_token_path, token_res.id_token)?;
-                std::fs::write(acess_token_path, token_res.access_token)?;
+                std::fs::write(access_token_path, token_res.access_token)?;
                 std::fs::write(expires_at_path, expires_at.to_rfc3339())?;
                 println!("Logged in successfully.");
                 return Ok(());
