@@ -8,7 +8,7 @@ use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
-use nox_ecs::WorldExec;
+use nox_ecs::{Component, Seed, WorldExec};
 use sea_orm::{prelude::*, TransactionTrait};
 use tracing::Instrument;
 
@@ -160,6 +160,13 @@ impl Runner {
             let span = tracing::info_span!("sample", no = %sample_no);
             let _guard = span.enter();
 
+            if let Ok(mut col) = sample_exec.column_mut(Seed::component_id()) {
+                tracing::info!("setting seed");
+                col.typed_buf_mut::<u64>()
+                    .unwrap_or_default()
+                    .iter_mut()
+                    .for_each(|s| *s = sample_no as u64);
+            }
             if let Err(err) = self.run_sim(run, &mut sample_exec) {
                 tracing::error!(?err, "simulation failed");
                 failed.push(true);
