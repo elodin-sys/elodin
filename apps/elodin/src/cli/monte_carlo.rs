@@ -33,6 +33,9 @@ struct RunArgs {
     max_duration: u64,
     /// Path to the simulation configuration
     file: PathBuf,
+    /// Open the dashboard in the browser
+    #[arg(long)]
+    open: bool,
 }
 
 type Client = ApiClient<InterceptedService<transport::Channel, AuthInterceptor>>;
@@ -56,11 +59,18 @@ impl Cli {
     }
 
     async fn monte_carlo_run(&self, args: &RunArgs) -> anyhow::Result<()> {
+        let RunArgs {
+            name,
+            samples,
+            max_duration,
+            file,
+            open,
+        } = args.clone();
         let mut client = self.client().await?;
         let create_req = CreateMonteCarloRunReq {
-            name: args.name.clone(),
-            samples: args.samples,
-            max_duration: args.max_duration,
+            name: name.clone(),
+            samples,
+            max_duration,
         };
         let create_res = client
             .create_monte_carlo_run(create_req)
@@ -69,8 +79,7 @@ impl Cli {
         let id = uuid::Uuid::from_slice(&create_res.id)?;
         let upload_url = create_res.upload_url;
 
-        let args = args.clone();
-        let artifacts_file = tokio::task::spawn_blocking(|| prepare_artifacts(args))
+        let artifacts_file = tokio::task::spawn_blocking(|| prepare_artifacts(file))
             .await
             .unwrap()?;
         let artifacts_file = tokio::fs::File::from_std(artifacts_file);
@@ -87,19 +96,25 @@ impl Cli {
         client.start_monte_carlo_run(start_req).await?.into_inner();
         println!("Created Monte Carlo run with id: {id}");
 
+        let dashboard_url = format!("{}/monte_carlo/{}/{}", self.url, name, id);
+        println!("Monitor the Monte Carlo run at: {dashboard_url}");
+        if open {
+            opener::open_browser(dashboard_url)?;
+        }
+
         Ok(())
     }
 }
 
-fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
+fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     let tmp_dir = tempfile::tempdir()?;
-    if !args.file.is_file() {
-        anyhow::bail!("Not a file: {}", args.file.display());
+    if !file.is_file() {
+        anyhow::bail!("Not a file: {}", file.display());
     }
-    let file_name = args.file.file_name().unwrap();
+    let file_name = file.file_name().unwrap();
 
     let status = std::process::Command::new("python3")
-        .arg(&args.file)
+        .arg(&file)
         .arg("--")
         .arg("build")
         .arg("--dir")
@@ -113,7 +128,7 @@ fn prepare_artifacts(args: RunArgs) -> anyhow::Result<std::fs::File> {
 
     // Copy the original file into the temporary directory for debugging purposes
     // TODO(Akhil): Remove this once this actually works e2e
-    std::fs::copy(&args.file, tmp_dir.path().join(file_name))?;
+    std::fs::copy(&file, tmp_dir.path().join(file_name))?;
 
     let archive_file = tempfile::tempfile()?;
     let buf = std::io::BufWriter::new(archive_file);
