@@ -306,7 +306,7 @@ impl WorldBuilder {
                     .component_datas
                     .iter()
                     .map(
-                        |ComponentData {
+                        |Component {
                              id,
                              ty,
                              asset,
@@ -586,31 +586,34 @@ impl PyUntypedArrayExt for PyUntypedArray {
 
 #[derive(Clone)]
 #[pyclass(get_all, set_all)]
-pub struct ComponentData {
+pub struct Component {
     id: ComponentId,
     ty: ComponentType,
     asset: bool,
-    from_expr: PyObject,
     name: Option<String>,
 }
 
 #[pymethods]
-impl ComponentData {
+impl Component {
     #[new]
     pub fn new(
-        id: ComponentId,
+        py: Python<'_>,
+        id: PyObject,
         ty: ComponentType,
-        asset: bool,
-        from_expr: PyObject,
         name: Option<String>,
-    ) -> Self {
-        Self {
+        asset: Option<bool>,
+    ) -> Result<Self, Error> {
+        let id = if let Ok(id) = id.extract::<ComponentId>(py) {
+            id
+        } else {
+            ComponentId::new(py, id)?
+        };
+        Ok(Self {
             id,
             ty,
-            asset,
-            from_expr,
             name,
-        }
+            asset: asset.unwrap_or_default(),
+        })
     }
 
     pub fn to_metadata(&self) -> Metadata {
@@ -619,7 +622,7 @@ impl ComponentData {
 }
 
 pub struct Archetype<'py> {
-    component_datas: Vec<ComponentData>,
+    component_datas: Vec<Component>,
     component_ids: Vec<ComponentId>,
     arrays: Vec<&'py PyUntypedArray>,
     archetype_id: ArchetypeId,
@@ -631,7 +634,7 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
         let archetype_id = ArchetypeId::new(archetype_id.into());
         let component_datas = archetype
             .call_method0("component_data")?
-            .extract::<Vec<ComponentData>>()?;
+            .extract::<Vec<Component>>()?;
         let component_ids = component_datas
             .iter()
             .map(|data| data.id)
@@ -1183,7 +1186,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
-    m.add_class::<ComponentData>()?;
+    m.add_class::<Component>()?;
     m.add_class::<conduit_client::Conduit>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
