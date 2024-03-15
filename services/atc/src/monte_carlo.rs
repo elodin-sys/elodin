@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config::MonteCarloConfig;
 use crate::error::Error;
 
-pub const BATCH_SIZE: usize = 100;
+pub const BATCH_SIZE: usize = 10;
 pub const MAX_SAMPLE_COUNT: usize = 100_000;
 
 pub const SPAWN_GROUP: &str = "atc:spawn";
@@ -102,7 +102,7 @@ impl BatchSpawner {
 
 #[cfg(test)]
 mod tests {
-    use super::{Batch, Run};
+    use super::{Batch, Run, BATCH_SIZE};
 
     #[test]
     fn ser_de_run() {
@@ -110,7 +110,7 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             name: "test_run".to_string(),
             samples: 774,
-            batch_size: 100,
+            batch_size: BATCH_SIZE,
             start_time: chrono::Utc::now(),
             max_duration: 30,
         };
