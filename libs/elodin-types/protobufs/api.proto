@@ -18,6 +18,8 @@ service Api {
     rpc SandboxEvents(GetSandboxReq) returns (stream Sandbox);
 
     // Monte Carlo
+    rpc ListMonteCarloRuns(ListMonteCarloRunsReq) returns (ListMonteCarloRunsResp);
+
     rpc CreateMonteCarloRun(CreateMonteCarloRunReq) returns (CreateMonteCarloRunResp);
     rpc StartMonteCarloRun(StartMonteCarloRunReq) returns (StartMonteCarloRunResp);
     rpc GetMonteCarloRun(GetMonteCarloRunReq) returns (MonteCarloRun);
@@ -102,6 +104,13 @@ message ListSandboxesResp {
 
 message GetSandboxReq {
     bytes id = 1;
+}
+
+
+message ListMonteCarloRunsReq {}
+
+message ListMonteCarloRunsResp {
+    repeated MonteCarloRun monte_carlo_runs = 1;
 }
 
 message CreateMonteCarloRunReq {

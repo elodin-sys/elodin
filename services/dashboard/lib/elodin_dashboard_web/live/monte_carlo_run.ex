@@ -4,11 +4,21 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
   alias ElodinDashboard.Atc
   import ElodinDashboardWeb.CoreComponents
   import ElodinDashboardWeb.NavbarComponents
+  import ElodinDashboardWeb.SidebarComponents
   import ElodinDashboardWeb.IconComponents
 
-  def mount(%{"project" => _project, "run" => id}, _, socket) do
+  def mount(%{"project" => project, "run" => run_id}, _, socket) do
     token = socket.assigns[:current_user]["token"]
-    uuid = UUID.string_to_binary!(id)
+
+    case UUID.info(run_id) do
+      {:ok, _} -> with_run_data(socket, token, project, run_id)
+      {:error, _} -> {:ok, socket |> redirect(to: ~p"/monte_carlo/#{project}")}
+    end
+  end
+
+  def with_run_data(socket, token, project, run_id) do
+    uuid = UUID.string_to_binary!(run_id)
+
     {:ok, resp} = Atc.get_monte_carlo_run(%Api.GetMonteCarloRunReq{id: uuid}, token)
     {:ok, started_at} = DateTime.from_unix(resp.started)
 
@@ -24,7 +34,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
 
     run =
       %{
-        id: resp.id,
+        id: UUID.binary_to_string!(resp.id),
         name: resp.name,
         started: DateTime.to_string(started_at)
       }
@@ -32,12 +42,34 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
 
     spawn_batch_event_task(self(), token, uuid)
 
+    monte_carlo_runs =
+      case Atc.list_monte_carlo_runs(%Api.ListMonteCarloRunsReq{}, token) do
+        {:ok, monte_carlo_runs} ->
+          Enum.map(monte_carlo_runs.monte_carlo_runs, fn run ->
+            %{
+              id: UUID.binary_to_string!(run.id),
+              name: run.name,
+              progress:
+                case run.status do
+                  :PENDING -> 0.1
+                  :RUNNING -> 0.5
+                  :DONE -> 1.0
+                end
+            }
+          end)
+
+        {:error, _} ->
+          []
+      end
+
     {:ok,
      socket
      |> stream(:grid, grid)
      |> stream(:samples, samples)
+     |> assign(:project, project)
      |> assign(:run, run)
-     |> assign(:samples, samples |> Enum.to_list())}
+     |> assign(:samples, samples |> Enum.to_list())
+     |> assign(:project_runs, monte_carlo_runs)}
   end
 
   defp spawn_batch_event_task(pid, token, uuid) do
@@ -225,75 +257,82 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
   def render(assigns) do
     ~H"""
     <.navbar_layout current_user={@current_user}>
-      <div class="flex flex-col min-h-full p-6 bg-black-primary">
-        <div class="flex w-full gap-elo-xl flex-col elo-grid-md:flex-row">
-          <div class="flex min-w-[22rem] bg-black-secondary rounded-elo-xs border border-white border-opacity-10 flex-col">
-            <div class="flex w-full p-6 flex-col">
-              <div class="text-crema pb-1">
-                <%= @run.name %>
+      <.sidebar project={@project} project_run={@run.id} project_runs={@project_runs} />
+
+      <div class="flex grow overflow-scroll">
+        <div class="flex flex-col min-h-full p-6 bg-black-primary">
+          <div class="flex w-full gap-elo-xl flex-col xl:flex-row">
+            <.frame>
+              <div class="flex w-full flex-col min-w-[22rem]">
+                <div class="text-crema pb-1">
+                  <%= @run.name %>
+                </div>
+                <div class="text-crema-60">
+                  Project
+                </div>
+                <.divider />
+                <.horizontal_label label="STARTED" value={@run.started} class="mb-elo-lg" />
+                <.horizontal_label label="EST TIME REMAINING" value="3:00:00" class="mb-elo-lg" />
+                <.horizontal_label label="SAMPLE COUNT" value={@run.sample_count} class="" />
+                <.divider />
+                <.label_progress_bar
+                  number={@run.passed_count}
+                  value={@run.passed_count / @run.sample_count}
+                  label="PASS"
+                />
+                <.label_progress_bar
+                  number={@run.failure_count}
+                  value={@run.failure_count / @run.sample_count}
+                  label="FAIL"
+                  color="bg-red"
+                />
+                <.label_progress_bar
+                  number={@run.active_count}
+                  value={@run.active_count / @run.sample_count}
+                  label="ACTIVE"
+                  color="bg-yellow"
+                />
+                <.label_progress_bar
+                  number={@run.pending_count}
+                  value={@run.pending_count / @run.sample_count}
+                  label="PENDING"
+                  color="bg-tan"
+                />
+                <%= if @run.pending_count > 0 do %>
+                  <.button type="danger">
+                    <.stop />
+                    <span class="leading-3">STOP</span>
+                  </.button>
+                <% end %>
               </div>
-              <div class="text-crema-60">
-                Project
+            </.frame>
+            <.frame>
+              <div class="grid grid-cols-12 lg:grid-cols-18 xl:grid-cols-16 elo-grid-xl:grid-cols-20 gap-2 text-white">
+                <.grid_box :for={{_, sample} <- @streams.grid} type={sample.type} />
               </div>
-              <.divider />
-              <.horizontal_label label="STARTED" value={@run.started} class="mb-elo-lg" />
-              <.horizontal_label label="EST TIME REMAINING" value="3:00:00" class="mb-elo-lg" />
-              <.horizontal_label label="SAMPLE COUNT" value={@run.sample_count} class="" />
-              <.divider />
-              <.label_progress_bar
-                number={@run.passed_count}
-                value={@run.passed_count / @run.sample_count}
-                label="PASS"
-              />
-              <.label_progress_bar
-                number={@run.failure_count}
-                value={@run.failure_count / @run.sample_count}
-                label="FAIL"
-                color="bg-red"
-              />
-              <.label_progress_bar
-                number={@run.active_count}
-                value={@run.active_count / @run.sample_count}
-                label="ACTIVE"
-                color="bg-yellow"
-              />
-              <.label_progress_bar
-                number={@run.pending_count}
-                value={@run.pending_count / @run.sample_count}
-                label="PENDING"
-                color="bg-tan"
-              />
-              <%= if @run.pending_count > 0 do %>
-                <.button type="danger">
-                  <.stop />
-                  <span class="leading-3">STOP</span>
-                </.button>
-              <% end %>
-            </div>
+            </.frame>
           </div>
-          <div class="flex max-md:h-full md:h-[682px] w-[360px] sm:w-[500px] md:w-[682px] bg-black-secondary rounded-elo-xs border border-white border-opacity-10 flex-col items-center self-center">
-            <div class="grid grid-cols-10 sm:grid-cols-16 md:grid-cols-20 gap-2 text-white p-6">
-              <.grid_box :for={{id, sample} <- @streams.grid} type={sample.type} />
-            </div>
+          <div
+            class="flex w-full shrink-0 mt-elo-xl bg-black-secondary rounded-elo-xs border border-white border-opacity-10 overflow-scroll font-mono font-medium tracking-elo-mono-small"
+            style="max-height: 80vh"
+          >
+            <table class="w-full text-crema text-sm text-left">
+              <thead class="sticky top-0">
+                <tr class="h-[51px] bg-black-header text-crema text-crema-60 text-sm">
+                  <td class="pl-elo-xl">SAMPLE</td>
+                  <td>STATE</td>
+                  <td>PROGRESS</td>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={{_, sample} <- @streams.samples} class="h-[51px] font-mono font-medium">
+                  <td class="pl-elo-xl"><%= sample.id %></td>
+                  <td><.status_label type={sample.type} /></td>
+                  <td><.smolgress value={sample.progress} type={sample.type} /></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </div>
-        <div class="flex w-full max-h-[500px] mt-elo-xl bg-black-secondary rounded-elo-xs border border-white border-opacity-10 overflow-scroll font-mono font-medium tracking-elo-mono-small">
-          <table class="w-full text-crema text-sm text-left">
-            <thead class="sticky top-0">
-              <tr class="h-[51px] bg-black-header text-crema text-crema-60 text-sm">
-                <td class="pl-elo-xl">SAMPLE</td>
-                <td>STATE</td>
-                <td>PROGRESS</td>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={{id, sample} <- @streams.samples} class="h-[51px] font-mono font-medium">
-                <td class="pl-elo-xl"><%= sample.id %></td>
-                <td><.status_label type={sample.type} /></td>
-                <td><.smolgress value={sample.progress} type={sample.type} /></td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </.navbar_layout>

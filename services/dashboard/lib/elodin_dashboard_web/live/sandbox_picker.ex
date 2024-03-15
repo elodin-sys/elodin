@@ -83,8 +83,13 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             CREATE NEW
           </.button>
         </.link>
+        <.link href="https://docs.elodin.systems">
+          <.button type="secondary" class="mr-1.5">
+            Docs
+          </.button>
+        </.link>
       </:navbar_right>
-      <div class="flex flex-col min-h-full items-start p-elo-lg py-elo-xl bg-black-primary">
+      <div class="flex flex-col min-h-full w-full items-start p-elo-lg py-elo-xl bg-black-primary">
         <div class="flex flex-col flex-wrap items-start w-full rounded-elo-xs bg-black-secondary border border-white border-opacity-10 border-solid">
           <div class="p-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
             ELODIN TEMPLATES
@@ -183,14 +188,14 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             </div>
           </div>
 
-          <%!-- <div class="flex h-[158px] w-[200px] flex-col rounded-md border border-black">
+          <div class="flex h-[158px] w-[200px] flex-col rounded-md border border-black">
             <div class="basis-3/4 overflow-hidden">
               <img src="/images/onboarding/1-3-sim-timeline.svg" />
             </div>
             <div class="flex basis-1/4 items-center justify-center text-sm font-medium text-white">
               Sim Timeline
             </div>
-          </div> --%>
+          </div>
         </div>
       <% end %>
 

@@ -92,4 +92,34 @@ defmodule ElodinDashboardWeb.IconComponents do
     </svg>
     """
   end
+
+  def icon_link(assigns) do
+    ~H"""
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g id="icon_18_external_link" clip-path="url(#clip0_927_406)">
+        <path
+          id="Vector (Stroke)"
+          fill-rule="evenodd"
+          clip-rule="evenodd"
+          d="M4.5 4.5L13.5533 4.5L13.5533 13.5L12.0533 13.5L12.0533 6L4.5 6V4.5Z"
+          fill="#FFFBF0"
+        />
+        <rect
+          id="Rectangle 659"
+          x="11.6519"
+          y="5.25"
+          width="1.5"
+          height="9.49847"
+          transform="rotate(45 11.6519 5.25)"
+          fill="#FFFBF0"
+        />
+      </g>
+      <defs>
+        <clipPath id="clip0_927_406">
+          <rect width="18" height="18" fill="white" />
+        </clipPath>
+      </defs>
+    </svg>
+    """
+  end
 end

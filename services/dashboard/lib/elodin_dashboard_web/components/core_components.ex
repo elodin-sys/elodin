@@ -153,6 +153,23 @@ defmodule ElodinDashboardWeb.CoreComponents do
   end
 
   @doc """
+  Renders frame wrapper with default style.
+
+  ## Examples
+
+      <.frame>Welcome Back!</.frame>
+  """
+  slot(:inner_block, required: true)
+
+  def frame(assigns) do
+    ~H"""
+    <div class="p-6 bg-black-secondary border border-white border-opacity-10 rounded-elo-xs">
+      <%= render_slot(@inner_block) %>
+    </div>
+    """
+  end
+
+  @doc """
   Renders flash notices.
 
   ## Examples

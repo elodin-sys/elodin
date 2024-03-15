@@ -224,6 +224,13 @@ impl api_server::Api for Api {
         optional_current_user_route!(self, req, Self::sandbox_events)
     }
 
+    async fn list_monte_carlo_runs(
+        &self,
+        req: tonic::Request<ListMonteCarloRunsReq>,
+    ) -> Result<Response<ListMonteCarloRunsResp>, Status> {
+        current_user_route!(self, req, Self::list_monte_carlo_runs)
+    }
+
     async fn create_monte_carlo_run(
         &self,
         req: tonic::Request<CreateMonteCarloRunReq>,
