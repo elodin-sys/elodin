@@ -163,6 +163,20 @@ defmodule Elodin.Types.Api.GetSandboxReq do
   field :id, 1, type: :bytes
 end
 
+defmodule Elodin.Types.Api.ListMonteCarloRunsReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+end
+
+defmodule Elodin.Types.Api.ListMonteCarloRunsResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :monte_carlo_runs, 1, repeated: true, type: Elodin.Types.Api.MonteCarloRun
+end
+
 defmodule Elodin.Types.Api.CreateMonteCarloRunReq do
   @moduledoc false
 
@@ -252,6 +266,8 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :BootSandbox, Elodin.Types.Api.BootSandboxReq, Elodin.Types.Api.BootSandboxResp
 
   rpc :SandboxEvents, Elodin.Types.Api.GetSandboxReq, stream(Elodin.Types.Api.Sandbox)
+
+  rpc :ListMonteCarloRuns, Elodin.Types.Api.ListMonteCarloRunsReq, Elodin.Types.Api.ListMonteCarloRunsResp
 
   rpc :CreateMonteCarloRun,
       Elodin.Types.Api.CreateMonteCarloRunReq,

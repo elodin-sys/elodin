@@ -7,6 +7,24 @@ use futures::StreamExt;
 use sea_orm::prelude::*;
 
 impl api::Api {
+    pub async fn list_monte_carlo_runs(
+        &self,
+        _req: ListMonteCarloRunsReq,
+        api::CurrentUser { user, .. }: api::CurrentUser,
+    ) -> Result<ListMonteCarloRunsResp, error::Error> {
+        let mc_runs = atc_entity::MonteCarloRun::find()
+            .filter(mc_run::Column::UserId.eq(user.id))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(MonteCarloRun::from)
+            .collect::<Vec<_>>();
+
+        Ok(ListMonteCarloRunsResp {
+            monte_carlo_runs: mc_runs,
+        })
+    }
+
     pub async fn create_monte_carlo_run(
         &self,
         req: CreateMonteCarloRunReq,

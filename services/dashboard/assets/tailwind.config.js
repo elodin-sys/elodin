@@ -18,9 +18,15 @@ module.exports = {
         "hyper-blue-dim": "#1736b5",
         blue: "#1E43E2",
         "light-blue": "#8EA1F1",
-        orange: "#EF5800",
-        green: "#88DE9F",
-        "green-40": "rgb(30 32 28)",
+        orange: {
+          DEFAULT: "#EF5800",
+          50: "#FFFBF0",
+        },
+        green: {
+          DEFAULT: "#88DE9F",
+          40: "rgb(30 32 28)",
+          300: "#88DE9F",
+        },
         "green-opacity": {
           "40": "rgba(136, 222, 159, 0.4)"
         },
@@ -31,7 +37,10 @@ module.exports = {
           30: "rgba(233, 75, 20, 0.3)",
           5: "rgba(233, 75, 20, 0.05)"
         },
-        "yellow": "rgba(254, 197, 4, 1)",
+        yellow: {
+          DEFAULT: "rgba(254, 197, 4, 1)",
+          400: "#FEC504",
+        },
         "tan": "rgb(255, 215, 179)",
         "code": "#282C34",
         "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
@@ -76,6 +85,7 @@ module.exports = {
       gridTemplateColumns: {
         '10': 'repeat(10, minmax(0, 1fr))',
         '16': 'repeat(16, minmax(0, 1fr))',
+        '18': 'repeat(18, minmax(0, 1fr))',
         '20': 'repeat(20, minmax(0, 1fr))',
       },
       fontSize: {
@@ -86,7 +96,7 @@ module.exports = {
         'mono': ["IBM Plex Mono", "ui-monospace", "mono"]
       },
       screens: {
-        "elo-grid-md": "1100px",
+        "elo-grid-xl": "1400px",
       },
       letterSpacing: {
         "elo-mono-medium": "1.04px",

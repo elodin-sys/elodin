@@ -152,6 +152,11 @@ defmodule ElodinDashboardWeb.EditorLive do
             Share
           </.button>
         </.link>
+        <.link href="https://docs.elodin.systems">
+          <.button type="secondary" class="mr-1.5">
+            Docs
+          </.button>
+        </.link>
       </:navbar_right>
 
       <div class="flex flex-col overflow-auto h-full bg-black-primary">
