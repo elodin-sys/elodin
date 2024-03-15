@@ -3,7 +3,7 @@ use ndarray::{CowArray, IxDyn};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{collections::HashMap, hash::Hash, mem::size_of, time::Duration};
+use std::{collections::HashMap, fmt, hash::Hash, mem::size_of, time::Duration};
 
 use crate::query::MetadataStore;
 
@@ -83,6 +83,24 @@ pub enum PrimitiveTy {
     F64,
 }
 
+impl fmt::Display for PrimitiveTy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PrimitiveTy::U8 => write!(f, "u8"),
+            PrimitiveTy::U16 => write!(f, "u16"),
+            PrimitiveTy::U32 => write!(f, "u32"),
+            PrimitiveTy::U64 => write!(f, "u64"),
+            PrimitiveTy::I8 => write!(f, "i8"),
+            PrimitiveTy::I16 => write!(f, "i16"),
+            PrimitiveTy::I32 => write!(f, "i32"),
+            PrimitiveTy::I64 => write!(f, "i64"),
+            PrimitiveTy::Bool => write!(f, "bool"),
+            PrimitiveTy::F32 => write!(f, "f32"),
+            PrimitiveTy::F64 => write!(f, "f64"),
+        }
+    }
+}
+
 impl PrimitiveTy {
     fn size(&self) -> usize {
         match self {
@@ -107,6 +125,22 @@ type Shape = SmallVec<[i64; 4]>;
 pub struct ComponentType {
     pub primitive_ty: PrimitiveTy,
     pub shape: Shape,
+}
+
+impl fmt::Display for ComponentType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shape.is_empty() {
+            return write!(f, "{}", self.primitive_ty);
+        }
+        write!(f, "{}:[", self.primitive_ty)?;
+        for (i, dim) in self.shape.iter().enumerate() {
+            if i != 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", dim)?;
+        }
+        write!(f, "]")
+    }
 }
 
 impl ComponentType {
@@ -212,7 +246,9 @@ impl<'a> ComponentValue<'a> {
 pub trait Component {
     const NAME: &'static str;
     fn component_id() -> ComponentId {
-        ComponentId::new(Self::NAME)
+        let name = Self::NAME;
+        let ty = Self::component_type();
+        ComponentId::new(&format!("{name}:{ty}"))
     }
     fn component_type() -> ComponentType;
     fn component_value<'a>(&self) -> ComponentValue<'a>;
@@ -335,4 +371,24 @@ pub struct ColumnPayload<B = Bytes> {
 pub trait Asset: Serialize {
     const ASSET_ID: AssetId;
     fn asset_id(&self) -> AssetId;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smallvec::smallvec;
+
+    #[test]
+    fn test_component_ty_display() {
+        let ty = ComponentType {
+            primitive_ty: PrimitiveTy::F64,
+            shape: smallvec![3, 4],
+        };
+        let shapeless_ty = ComponentType {
+            primitive_ty: PrimitiveTy::F64,
+            shape: smallvec![],
+        };
+        assert_eq!(ty.to_string(), "f64:[3,4]");
+        assert_eq!(shapeless_ty.to_string(), "f64");
+    }
 }

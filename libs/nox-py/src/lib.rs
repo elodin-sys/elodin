@@ -24,7 +24,7 @@ use numpy::{ndarray::ArrayViewD, PyArray, PyArray1, PyReadonlyArray1, PyUntypedA
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
-    types::{PyBytes, PyTuple},
+    types::{PyBytes, PySequence, PyTuple},
 };
 
 mod conduit_client;
@@ -135,10 +135,11 @@ pub struct ComponentId {
 #[pymethods]
 impl ComponentId {
     #[new]
-    fn new(py: Python<'_>, inner: PyObject) -> Result<Self, Error> {
+    fn new(py: Python<'_>, inner: PyObject, ty: ComponentType) -> Result<Self, Error> {
         if let Ok(s) = inner.extract::<String>(py) {
+            let ty = conduit::ComponentType::from(ty);
             Ok(Self {
-                inner: conduit::ComponentId::new(&s),
+                inner: conduit::ComponentId::new(&format!("{s}:{ty}")),
             })
         } else if let Ok(s) = inner.extract::<u64>(py) {
             Ok(Self {
@@ -585,11 +586,15 @@ impl PyUntypedArrayExt for PyUntypedArray {
 }
 
 #[derive(Clone)]
-#[pyclass(get_all, set_all)]
+#[pyclass]
 pub struct Component {
+    #[pyo3(set)]
     id: ComponentId,
+    #[pyo3(get, set)]
     ty: ComponentType,
+    #[pyo3(get, set)]
     asset: bool,
+    #[pyo3(get, set)]
     name: Option<String>,
 }
 
@@ -606,7 +611,7 @@ impl Component {
         let id = if let Ok(id) = id.extract::<ComponentId>(py) {
             id
         } else {
-            ComponentId::new(py, id)?
+            ComponentId::new(py, id, ty.clone())?
         };
         Ok(Self {
             id,
@@ -614,6 +619,16 @@ impl Component {
             name,
             asset: asset.unwrap_or_default(),
         })
+    }
+
+    #[staticmethod]
+    pub fn id(py: Python<'_>, component: PyObject) -> Result<ComponentId, Error> {
+        let metadata_attr = component.getattr(py, "__metadata__")?;
+        let metadata = metadata_attr
+            .downcast::<PySequence>(py)
+            .map_err(PyErr::from)?;
+        let component = metadata.get_item(0)?.extract::<Self>()?;
+        Ok(component.id)
     }
 
     pub fn to_metadata(&self) -> Metadata {
