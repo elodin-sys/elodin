@@ -162,12 +162,13 @@ class Edge:
     @staticmethod
     def unflatten(aux: Any, jax : Any) -> Any: ...
 class Component:
-    id: ComponentId
     ty: ComponentType
     asset: bool
     name: Optional[str]
     def __init__(self, id: ComponentId, ty: ComponentType, asset: bool, name: Optional[str]): ...
     def to_metadata(self) -> Metadata: ...
+    @staticmethod
+    def id(component: Any) -> ComponentId: ...
 
 class Conduit:
     @staticmethod
