@@ -1,5 +1,5 @@
 use bytes::Buf;
-use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
+use conduit::{ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -47,10 +47,6 @@ impl FromBuilder for Edge {
 }
 
 impl Component for Edge {
-    fn component_id() -> conduit::ComponentId {
-        ComponentId::new("edge")
-    }
-
     fn component_type() -> conduit::ComponentType {
         ComponentType {
             primitive_ty: conduit::PrimitiveTy::U64,

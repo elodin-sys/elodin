@@ -117,7 +117,7 @@ class Query(Generic[Unpack[A]]):
             data = t_arg.__metadata__[0]
             component_data.append(data)
             component_classes.append(t_arg)
-            ids.append(data.id)
+            ids.append(Component.id(t_arg))
         return Query(QueryInner.from_builder(builder, ids), component_data, component_classes)
 
     @staticmethod
@@ -125,7 +125,7 @@ class Query(Generic[Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            buf = builder.init_var(component_data.id, component_data.ty)
+            buf = builder.init_var(Component.id(t_arg), component_data.ty)
 
     def __getitem__(self, index: int) -> Any:
         if len(self.bufs) > 1:
@@ -163,19 +163,19 @@ class GraphQuery(Generic[E, Unpack[A]]):
         component_data = []
         component_classes = []
         edge_ty = t_args[0]
-        edge_id = edge_ty.__metadata__[0].id
+        edge_id = Component.id(edge_ty)
         for t_arg in t_args[1:]:
             component_classes.append(t_arg)
             data = t_arg.__metadata__[0]
             component_data.append(data)
-            ids.append(data.id)
+            ids.append(Component.id(t_arg))
         return GraphQuery(GraphQueryInner.from_builder(builder, edge_id, ids), component_data, component_classes)
     @staticmethod
     def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            buf = builder.init_var(component_data.id, component_data.ty)
+            buf = builder.init_var(Component.id(t_arg), component_data.ty)
     def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
         out_bufs: list[jax.typing.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)

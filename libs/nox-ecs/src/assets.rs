@@ -44,10 +44,6 @@ impl<T> FromBuilder for Handle<T> {
 }
 
 impl<T: Asset> crate::Component for Handle<T> {
-    fn component_id() -> ComponentId {
-        ComponentId(T::ASSET_ID.0)
-    }
-
     fn component_type() -> conduit::ComponentType {
         conduit::ComponentType::u64()
     }

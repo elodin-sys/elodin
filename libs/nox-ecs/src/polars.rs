@@ -560,12 +560,9 @@ impl ColumnRef for PolarsColumnRef<'_> {
 mod tests {
     use crate::{
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
-        WorldPos,
+        Component, WorldPos,
     };
-    use conduit::{
-        well_known::{Material, Mesh, Pbr},
-        ComponentId,
-    };
+    use conduit::well_known::{Material, Mesh, Pbr};
     use nox::{
         nalgebra::{self, vector},
         SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform,
@@ -605,7 +602,7 @@ mod tests {
         let df = polars.archetypes[&ArchetypeId::of::<Body>()].clone();
         let out = df
             .lazy()
-            .select(&[col(&ComponentId::new("world_pos").0.to_string())])
+            .select(&[col(&WorldPos::component_id().0.to_string())])
             .collect()
             .unwrap();
         let pos = out
