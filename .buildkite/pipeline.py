@@ -83,7 +83,11 @@ test_steps = [
       label = "maturin build",
       emoji = ":python:",
       command = "cd libs/nox-py && python3 -m venv .venv && maturin develop && .venv/bin/python -m pytest",
-    )
+    ),
+    rust_step(
+      label = "mypy", emoji = ":python:",
+      command = "cd libs/nox-py && python3 -m venv .venv && .venv/bin/pip install mypy && .venv/bin/mypy . --check-untyped-defs",
+    ),
   ]),
   group(name = ":elixir: elixir", steps = [
     nix_step(

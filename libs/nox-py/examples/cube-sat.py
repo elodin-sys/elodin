@@ -23,15 +23,15 @@ q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
-Goal = Component[Quaternion, "goal", ComponentType.Quaternion]
+Goal = Annotated[Quaternion, Component("goal", ComponentType.Quaternion)]
 
 @dataclass
 class ControlInput(Archetype):
     goal: Goal
 
 
-RWAxis = Component[jax.Array, "rw_axis", ComponentType(PrimitiveType.F64, (3,))]
-RWForce = Component[SpatialForce, "rw_force", ComponentType.SpatialMotionF64]
+RWAxis = Annotated[jax.Array, Component("rw_axis", ComponentType(PrimitiveType.F64, (3,)))]
+RWForce = Annotated[SpatialForce, Component("rw_force", ComponentType.SpatialMotionF64)]
 
 
 @dataclass

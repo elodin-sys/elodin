@@ -12,7 +12,7 @@ import readline
 import rlcompleter
 
 
-__doc__ = elodin.__doc__
+__doc__ = elodin.__doc__ # type: ignore
 
 jax.config.update("jax_enable_x64", True)
 
@@ -79,99 +79,112 @@ Q = TypeVar("Q", bound="Query[Any]")
 
 
 A = TypeVarTuple("A")
-B = TypeVar("B", bound="Query[Any]")
-
 
 class Query(Generic[Unpack[A]]):
     bufs: list[jax.Array]
-    component_data: list[ComponentData]
+    component_data: list[Component]
+    component_classes: list[type[Any]]
     inner: QueryInner
 
-    def __init__(self, inner: QueryInner, component_data: list[ComponentData]):
+    def __init__(self, inner: QueryInner, component_data: list[Component], component_classes: list[type[Any]]):
         self.bufs = inner.arrays()
         self.inner = inner
         self.component_data = component_data
+        self.component_classes = component_classes
 
-    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> Q:
+    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> 'Query[O]':
         buf = jax.vmap(
             lambda b: f(
-                *[data.from_expr(x) for (x, data) in zip(b, self.component_data)]
+                *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]
             ),
             in_axes=0,
             out_axes=0,
         )(self.bufs)
         (bufs, _) = tree_flatten(buf)
-        component_data = out_tp.__metadata__[0]
-        return Query(self.inner.map(bufs[0], component_data.to_metadata()), [component_data])
+        component_data = out_tp.__metadata__[0] # type: ignore
+        return Query(self.inner.map(bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
-    def join(self, other) -> B:
-        return Query(self.inner.join_query(other.inner), self.component_data + other.component_data)
+    def join(self, other: 'Query[Unpack[A]]') -> 'Query[Any]':
+        return Query(self.inner.join_query(other.inner), self.component_data + other.component_data, self.component_classes + other.component_classes)
 
     @staticmethod
-    def from_builder(new_tp: type[B], builder: PipelineBuilder) -> Q:
+    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> 'Query[Any]':
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
+        component_classes = []
         for t_arg in t_args:
             data = t_arg.__metadata__[0]
             component_data.append(data)
+            component_classes.append(t_arg)
             ids.append(data.id)
-        return Query(QueryInner.from_builder(builder, ids), component_data)
+        return Query(QueryInner.from_builder(builder, ids), component_data, component_classes)
 
     @staticmethod
-    def init_builder(new_tp: Type[B], builder: PipelineBuilder):
+    def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
-            component_data: ComponentData = t_arg.__metadata__[0]
+            component_data: Component = t_arg.__metadata__[0]
             buf = builder.init_var(component_data.id, component_data.ty)
 
-    def __getitem__(self, index: int) -> [*A][0]:
+    def __getitem__(self, index: int) -> Any:
         if len(self.bufs) > 1:
             raise Exception("Cannot index into a query with multiple inputs")
-        data = self.component_data[0]
-        return data.from_expr(self.bufs[0][index])
+        cls = self.component_classes[0]
+        return from_array(cls, self.bufs[0][index])
 
     def insert_into_builder(self, builder: PipelineBuilder):
         self.inner.insert_into_builder(builder)
 
+def from_array(cls, arr):
+    if hasattr(cls, "__origin__"):
+        cls = cls.__origin__
+    if cls is jax.Array:
+        return arr
+    else:
+        return cls.from_array(arr)
 
 E = TypeVar("E")
 class GraphQuery(Generic[E, Unpack[A]]):
     bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
-    component_data: list[ComponentData]
+    component_data: list[Component]
+    component_classes: list[type[Any]]
     inner: GraphQueryInner
-    def __init__(self, inner: GraphQueryInner, component_data: list[ComponentData]):
+    def __init__(self, inner: GraphQueryInner, component_data: list[Component], component_classes: list[type[Any]]):
         self.bufs = inner.arrays()
         self.inner = inner
         self.component_data = component_data
+        self.component_classes = component_classes
 
     @staticmethod
-    def from_builder(new_tp: type[B], builder: PipelineBuilder) -> Q:
+    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> 'GraphQuery[E, Any]':
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
+        component_classes = []
         edge_ty = t_args[0]
         edge_id = edge_ty.__metadata__[0].id
         for t_arg in t_args[1:]:
+            component_classes.append(t_arg)
             data = t_arg.__metadata__[0]
             component_data.append(data)
             ids.append(data.id)
-        return GraphQuery(GraphQueryInner.from_builder(builder, edge_id, ids), component_data)
+        return GraphQuery(GraphQueryInner.from_builder(builder, edge_id, ids), component_data, component_classes)
     @staticmethod
-    def init_builder(new_tp: Type[B], builder: PipelineBuilder):
+    def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
-            component_data: ComponentData = t_arg.__metadata__[0]
+            component_data: Component = t_arg.__metadata__[0]
             buf = builder.init_var(component_data.id, component_data.ty)
-    def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[[O, A, A], O]) -> Q:
-        out_bufs: list[jax.typings.ArrayLike] = []
+    def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
+        out_bufs: list[jax.typing.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)
         for (i, (f, to)) in self.bufs.items():
             def vmap_inner(a):
                 (f, to) = a
                 def scan_inner(xs, to):
                     xs = tree_unflatten(init_value_tree, xs)
-                    args = [data.from_expr(x) for (x, data) in zip(f, self.component_data)] + [data.from_expr(x) for (x, data) in zip(to, self.component_data)]
+                    args = [from_array(data, x) for (x, data) in zip(f, self.component_classes)] + [from_array(data, x) for (x, data) in zip(to, self.component_classes)]
                     o = fn(xs, *args)
                     o_flat,_ = tree_flatten(o)
                     return (o_flat, 0)
@@ -184,8 +197,8 @@ class GraphQuery(Generic[E, Unpack[A]]):
                 out_bufs = new_bufs
             else:
                 out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
-            component_data = out_tp.__metadata__[0]
-        return Query(self.inner.map(out_bufs[0], component_data.to_metadata()), [component_data])
+            component_data = out_tp.__metadata__[0] # type: ignore
+        return Query(self.inner.map(out_bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
 
 class SystemParam(Protocol):
@@ -200,69 +213,18 @@ class FromArray(Protocol):
         ...
 
 
-class Component:
-    def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
-        if isinstance(tys, tuple) and isinstance(values, tuple):
-            self.data = [ty.__metadata__[0] for ty in tys]
-            self.bufs = [ numpy.asarray(tree_flatten(v)[0][0]) for v in values]
-        else:
-            self.data = [tys.__metadata__[0]]
-            self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
-
-    def archetype_id(self) -> int:
-        return abs(hash(type(self).__name__))
-    def arrays(self):
-        return self.bufs
-    def component_data(self):
-        return self.data
-
-    def __class_getitem__(cls, params):
-        def parse_id(id):
-            if isinstance(id, str) or isinstance(id, int):
-                return ComponentId(id)
-            else:
-                return id
-
-        def from_expr(ty):
-            if ty is jax.Array:
-                return lambda x: x
-            else:
-                return ty.from_array
-
-        if len(params) == 4:
-            (t, raw_id, type, asset) = params
-            id = parse_id(raw_id)
-            return Annotated.__class_getitem__(
-                (t, ComponentData(id, type, asset, from_expr(t), f"{raw_id}"))
-            )  # type: ignore
-        if len(params) == 3:
-            (t, raw_id, type) = params
-            id = parse_id(raw_id)
-            return Annotated.__class_getitem__(
-                (t, ComponentData(id, type, False, from_expr(t), f"{raw_id}"))
-            )  # type: ignore
-        elif len(params) == 2:
-            (t, raw_id) =params
-            id = parse_id(raw_id)
-            type = t.__metadata__[0].ty
-            return Annotated.__class_getitem__(
-                (t, ComponentData(id, type, False, from_expr(t), f"{raw_id}"))
-            )  # type: ignore
-        else:
-            raise Exception("Component must be called an ID and type")
-
 
 class Archetype(Protocol):
     def archetype_id(self) -> int:
         return abs(hash(type(self).__name__))
 
-    def component_data(self) -> list[ComponentData]:
+    def component_data(self) -> list[Component]:
         return [
             v.__metadata__[0]
             for v in typing.get_type_hints(self, include_extras=True).values()
         ]
 
-    def arrays(self) -> list[jax.Array]:
+    def arrays(self) -> list[numpy.ndarray]:
         return [
             numpy.asarray(tree_flatten(v)[0][0])
             for (a, v) in self.__dict__.items()
@@ -296,25 +258,37 @@ jax.tree_util.register_pytree_node(
     Edge, Edge.flatten, Edge.unflatten
 )
 
-WorldPos = Component[SpatialTransform, "world_pos", ComponentType.SpatialPosF64]
-WorldVel = Component[SpatialMotion, "world_vel", ComponentType.SpatialMotionF64]
-WorldAccel = Component[SpatialMotion, "world_accel", ComponentType.SpatialMotionF64]
-Force = Component[SpatialForce, "force", ComponentType.SpatialMotionF64]
-Inertia = Component[SpatialInertia, "inertia", ComponentType.SpatialPosF64]
-PbrAsset = Component[Handle, 2241, ComponentType.U64, True]
-EntityMetadataAsset = Component[Handle, 2242, ComponentType.U64, True]
-Seed = Component[jax.Array, "seed", ComponentType.U64]
+WorldPos = Annotated[SpatialTransform, Component("world_pos", ComponentType.SpatialPosF64)]
+WorldVel = Annotated[SpatialMotion, Component("world_vel", ComponentType.SpatialMotionF64)]
+WorldAccel = Annotated[SpatialMotion, Component("world_accel", ComponentType.SpatialMotionF64)]
+Force = Annotated[SpatialForce, Component("force", ComponentType.SpatialMotionF64)]
+Inertia = Annotated[SpatialInertia, Component("inertia", ComponentType.SpatialPosF64)]
+PbrAsset = Annotated[Handle, Component(241, ComponentType.U64, "pbr_asset", True)]
+EntityMetadataAsset = Annotated[Handle, Component(242, ComponentType.U64, "metadata_asset", True)]
+Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
 
-C = Component
-Q = Query
+class C:
+    def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
+        if isinstance(tys, tuple) and isinstance(values, tuple):
+            self.data = [ty.__metadata__[0] for ty in tys] # type: ignore
+            self.bufs = [ numpy.asarray(tree_flatten(v)[0][0]) for v in values]
+        else:
+            self.data = [tys.__metadata__[0]] # type: ignore
+            self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
 
+    def archetype_id(self) -> int:
+        return abs(hash(type(self).__name__))
+    def arrays(self):
+        return self.bufs
+    def component_data(self):
+        return self.data
 
 @dataclass
 class Body(Archetype):
     world_pos: WorldPos = WorldPos.zero()
     world_vel: WorldVel = WorldVel.zero()
     inertia: Inertia = Inertia.from_mass(1.0)
-    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))
+    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0)) # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
     force: Force = Force.zero()
     world_accel: WorldAccel = WorldAccel.zero()
 
@@ -331,13 +305,18 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
 
 
 class World(WorldBuilder):
-    def run(self, sys: System, time_step: float, client = None):
-        frame = inspect.currentframe().f_back
+    def run(self, sys: System, time_step: Optional[float] = None, client: Optional[Client] = None):
+        current_frame = inspect.currentframe()
+        if current_frame is None:
+            raise Exception("No current frame")
+        frame = current_frame.f_back
+        if frame is None:
+            raise Exception("No previous frame")
         addr = super().run(sys, time_step, client)
         locals = frame.f_locals
         if addr is not None:
-            client = elodin.Conduit.tcp(addr)
-            locals["client"] = client
+            conduit_client = Conduit.tcp(addr)
+            locals["client"] = conduit_client
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
