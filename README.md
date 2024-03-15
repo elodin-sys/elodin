@@ -78,7 +78,7 @@ t = range(500)
 pos = []
 for _ in t:
     exec.run(client)
-    y = exec.column_array(ComponentId("world_pos"))[0, 5]
+    y = exec.column_array(Component.id(WorldPos))[0, 5]
     pos.append(y)
 fig, ax = plt.subplots()
 ax.plot(t, pos)
