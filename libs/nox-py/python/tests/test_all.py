@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 
 def test_basic_system():
-    X = Component[jax.Array, "x", ComponentType.F32]
-    Y = Component[jax.Array, "y", ComponentType.F32]
-    E = Component[jax.Array, "e", ComponentType.F32]
+    X = Annotated[jax.Array, Component("x", ComponentType.F32)]
+    Y = Annotated[jax.Array, Component("y", ComponentType.F32)]
+    E = Annotated[jax.Array, Component("e", ComponentType.F32)]
 
     @system
     def foo(x: Query[X]) -> Query[X]:
@@ -69,8 +69,8 @@ def test_six_dof():
 
 
 def test_graph():
-    X = Component[jax.Array, "x", ComponentType.F64]
-    E = Component[Edge, "test_edge", ComponentType.Edge]
+    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
+    E = Annotated[Edge, Component("test_edge", ComponentType.Edge)]
 
     @dataclass
     class Test(Archetype):
@@ -99,8 +99,8 @@ def test_graph():
 
 
 def test_seed():
-    X = Component[jax.Array, "x", ComponentType.F64]
-    Y = Component[jax.Array, "y", ComponentType.F64]
+    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
+    Y = Annotated[jax.Array, Component("y", ComponentType.F64)]
 
     @system
     def foo(x: Query[X]) -> Query[X]:
@@ -136,9 +136,9 @@ def test_seed():
     sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
     client = Client.cpu()
     w = WorldBuilder()
-    w.spawn(Globals(seed=2))
-    w.spawn(Test(1.0, 500.0))
-    w.spawn(Test(15.0, 500.0))
+    w.spawn(Globals(seed=np.array(2)))
+    w.spawn(Test(np.array(1.0), np.array(500.0)))
+    w.spawn(Test(np.array(15.0), np.array(500.0)))
     exec = w.build(sys)
     exec.run(client)
     x1 = exec.column_array(ComponentId("x"))
