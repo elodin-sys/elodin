@@ -4,7 +4,7 @@ from elodin import *
 
 TIME_STEP = 1.0 / 120.0
 
-GravityEdge = Component[Edge, "gravity_edge", ComponentType.Edge]
+GravityEdge = Annotated[Edge, Component("gravity_edge", ComponentType.Edge)]
 G = 6.6743e-11
 
 @dataclass
@@ -22,8 +22,8 @@ def gravity(q: GraphQuery[GravityEdge, WorldPos, Inertia]) -> Query[Force]:
         M = b_inertia.mass()
         norm = la.norm(r)
         f = G * M * m * r / (norm * norm * norm)
-        return Force.from_linear(force[3:] - f)
-    return q.edge_fold(Force, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]), gravity_inner)
+        return Force.from_linear(force.force() - f)
+    return q.edge_fold(Force, Force(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])), gravity_inner)
 
 
 w = World()

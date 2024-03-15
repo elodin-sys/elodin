@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{Archetype, ComponentData, EntityId, Error, PyUntypedArrayExt};
+use crate::{Archetype, Component, EntityId, Error, PyUntypedArrayExt};
 
 #[pyclass]
 pub struct Conduit {
@@ -74,7 +74,7 @@ impl ConduitInner {
     async fn send(
         &mut self,
         entity_id: EntityId,
-        component_datas: Vec<ComponentData>,
+        component_datas: Vec<Component>,
         arrays: Vec<Bytes>,
         time: u64,
     ) -> Result<(), Error> {
@@ -95,7 +95,7 @@ impl ConduitInner {
 async fn send_inner(
     client: &mut conduit::client::TcpClient,
     entity_id: EntityId,
-    component_datas: &[ComponentData],
+    component_datas: &[Component],
     arrays: &[Bytes],
     time: u64,
 ) -> Result<(), conduit::Error> {

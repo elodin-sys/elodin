@@ -44,10 +44,15 @@ impl SpatialTransform {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
     }
-
     #[staticmethod]
-    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
-        nox::SpatialTransform::from_op(Noxpr::jax(jax)).into()
+    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+            tuple.get_item(0)?.into()
+        } else {
+            jax
+        };
+
+        Ok(nox::SpatialTransform::from_op(Noxpr::jax(jax)).into())
     }
 
     #[staticmethod]
@@ -112,10 +117,15 @@ impl SpatialMotion {
         let jax = self.inner.clone().into_op().to_jax()?;
         Ok(((jax,), None))
     }
-
     #[staticmethod]
-    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
-        nox::SpatialMotion::from_op(Noxpr::jax(jax)).into()
+    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+            tuple.get_item(0)?.into()
+        } else {
+            jax
+        };
+
+        Ok(nox::SpatialMotion::from_op(Noxpr::jax(jax)).into())
     }
 
     #[staticmethod]
@@ -181,8 +191,13 @@ impl SpatialForce {
     }
 
     #[staticmethod]
-    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
-        nox::SpatialForce::from_op(Noxpr::jax(jax)).into()
+    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+            tuple.get_item(0)?.into()
+        } else {
+            jax
+        };
+        Ok(nox::SpatialForce::from_op(Noxpr::jax(jax)).into())
     }
 
     #[staticmethod]
@@ -191,6 +206,10 @@ impl SpatialForce {
     }
 
     fn force(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.force().into_op().to_jax()?)
+    }
+
+    fn linear(&self) -> Result<PyObject, Error> {
         Ok(self.inner.force().into_op().to_jax()?)
     }
 
@@ -235,8 +254,14 @@ impl Quaternion {
     }
 
     #[staticmethod]
-    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
-        nox::Quaternion::from_op(Noxpr::jax(jax)).into()
+    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+            tuple.get_item(0)?.into()
+        } else {
+            jax
+        };
+
+        Ok(nox::Quaternion::from_op(Noxpr::jax(jax)).into())
     }
 
     #[staticmethod]
@@ -293,8 +318,14 @@ impl SpatialInertia {
     }
 
     #[staticmethod]
-    fn unflatten(_aux: PyObject, jax: PyObject) -> Self {
-        nox::SpatialInertia::from_op(Noxpr::jax(jax)).into()
+    fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
+        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+            tuple.get_item(0)?.into()
+        } else {
+            jax
+        };
+
+        Ok(nox::SpatialInertia::from_op(Noxpr::jax(jax)).into())
     }
 
     #[staticmethod]
