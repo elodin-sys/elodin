@@ -1,4 +1,5 @@
-use crate::{api, error, monte_carlo};
+use crate::monte_carlo::{BATCH_SIZE, MAX_SAMPLE_COUNT};
+use crate::{api, error};
 
 use atc_entity::{batches, mc_run};
 use elodin_types::{api::*, Run, RUN_TOPIC};
@@ -17,7 +18,7 @@ impl api::Api {
         let id = Uuid::now_v7();
         let upload_url = self.sim_storage_client.signed_upload_url(id).await?;
 
-        if req.samples > monte_carlo::MAX_SAMPLE_COUNT as u32 {
+        if req.samples > MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
         }
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
@@ -35,9 +36,10 @@ impl api::Api {
         }
         .insert(txn)
         .await?;
-        let batch_count = (samples + 100 - 1) / 100;
+        let batch_size = BATCH_SIZE as i32;
+        let batch_count = (samples + batch_size - 1) / batch_size;
         for i in 0..batch_count {
-            let samples = 100.min(samples);
+            let samples = batch_size.min(samples);
             let byte_count = (samples as usize + 8 - 1) / 8;
             let failures = vec![0; byte_count];
             atc_entity::batches::ActiveModel {
@@ -88,7 +90,7 @@ impl api::Api {
             id: mc_run.id,
             name: mc_run.name,
             samples: mc_run.samples as usize,
-            batch_size: monte_carlo::BATCH_SIZE,
+            batch_size: BATCH_SIZE,
             start_time,
             max_duration: mc_run.max_duration as u64,
         };

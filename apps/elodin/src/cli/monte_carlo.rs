@@ -29,7 +29,7 @@ struct RunArgs {
     #[arg(short, long, default_value_t = 100)]
     samples: u32,
     /// Max simulation duration in seconds
-    #[arg(short, long, default_value_t = 30)]
+    #[arg(short, long, default_value_t = 10)]
     max_duration: u64,
     /// Path to the simulation configuration
     file: PathBuf,

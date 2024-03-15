@@ -146,7 +146,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
   def handle_info({:batch_event, batch}, socket) do
     samples = socket.assigns[:samples]
     run = socket.assigns[:run]
-    offset = batch.batch_number * 100
+    offset = batch.batch_number * batch.samples
     new_samples = batch_samples(batch)
 
     samples =
