@@ -1,4 +1,3 @@
-use convert_case::{Case, Casing};
 use darling::ast::{self};
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
@@ -8,7 +7,7 @@ use syn::{parse_macro_input, DeriveInput, Generics, Ident};
 #[derive(Debug, FromDeriveInput)]
 #[darling(attributes(nox), supports(struct_tuple, struct_named))]
 pub struct Component {
-    id: Option<String>,
+    name: Option<String>,
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), syn::Type>,
@@ -18,16 +17,19 @@ pub fn component(input: TokenStream) -> TokenStream {
     let crate_name = crate::nox_ecs_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let Component {
-        id,
+        name,
         ident,
         generics,
         data,
     } = Component::from_derive_input(&input).unwrap();
-    let id_string = id.unwrap_or_else(|| ident.to_string().to_case(Case::Snake));
-    let id = quote! { #crate_name::conduit::ComponentId::new(#id_string) };
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0];
     let where_clause = &generics.where_clause;
+    let name = if let Some(name) = name {
+        quote! { Some(#name) }
+    } else {
+        quote! { None }
+    };
     quote! {
         impl #crate_name::nox::IntoOp for #ident #generics #where_clause {
             fn into_op(self) -> #crate_name::nox::Noxpr {
@@ -52,9 +54,7 @@ pub fn component(input: TokenStream) -> TokenStream {
 
 
         impl #crate_name::Component for #ident #generics #where_clause {
-            fn component_id() -> #crate_name::conduit::ComponentId {
-                #id
-            }
+            const NAME: Option<&'static str> = #name;
 
             fn component_type() -> #crate_name::conduit::ComponentType {
                 <#ty as #crate_name::Component>::component_type()

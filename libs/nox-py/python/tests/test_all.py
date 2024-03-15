@@ -41,13 +41,13 @@ def test_basic_system():
     ).insert(Effect(np.array([15.0], dtype="float32")))
     exec = w.build(sys)
     exec.run(client)
-    x1 = exec.column_array(ComponentId("x"))
-    y1 = exec.column_array(ComponentId("y"))
+    x1 = exec.column_array(Component.id(X))
+    y1 = exec.column_array(Component.id(Y))
     assert (x1 == [1000.0, 15015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
     exec.run(client)
-    x1 = exec.column_array(ComponentId("x"))
-    y1 = exec.column_array(ComponentId("y"))
+    x1 = exec.column_array(Component.id(X))
+    y1 = exec.column_array(Component.id(Y))
     assert (x1 == [1000000.0, 15015015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
 
@@ -64,7 +64,7 @@ def test_six_dof():
     client = Client.cpu()
     exec = w.build(six_dof(1.0 / 60.0))
     exec.run(client)
-    x = exec.column_array(ComponentId("world_pos"))
+    x = exec.column_array(Component.id(WorldPos))
     assert (x == [0, 0, 0, 1, 1.0 / 60.0, 0.0, 0.0]).all()
 
 
@@ -94,7 +94,7 @@ def test_graph():
     client = Client.cpu()
     exec = w.build(fold_test)
     exec.run(client)
-    x = exec.column_array(ComponentId("x"))
+    x = exec.column_array(Component.id(X))
     assert (x == [11.0, 9.0, 2.0]).all()
 
 
@@ -141,8 +141,8 @@ def test_seed():
     w.spawn(Test(np.array(15.0), np.array(500.0)))
     exec = w.build(sys)
     exec.run(client)
-    x1 = exec.column_array(ComponentId("x"))
-    y1 = exec.column_array(ComponentId("y"))
+    x1 = exec.column_array(Component.id(X))
+    y1 = exec.column_array(Component.id(Y))
     assert (x1 == [2000.0, 30000.0]).all()
     assert (y1 >= [500.0, 500.0]).all()
     assert (y1 <= [1000.0, 1000.0]).all()
