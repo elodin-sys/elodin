@@ -245,6 +245,13 @@ impl api_server::Api for Api {
         current_user_route_txn!(self, req, Self::start_monte_carlo_run)
     }
 
+    async fn get_sample_results(
+        &self,
+        req: tonic::Request<GetSampleResultsReq>,
+    ) -> Result<Response<GetSampleResultsResp>, Status> {
+        current_user_route!(self, req, Self::get_sample_results)
+    }
+
     async fn get_monte_carlo_run(
         &self,
         req: tonic::Request<GetMonteCarloRunReq>,

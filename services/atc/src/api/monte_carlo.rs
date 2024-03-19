@@ -34,7 +34,7 @@ impl api::Api {
         tracing::debug!(%user.id, "create monte carlo run");
 
         let id = Uuid::now_v7();
-        let upload_url = self.sim_storage_client.signed_upload_url(id).await?;
+        let upload_url = self.sim_storage_client.upload_artifacts_url(id).await?;
 
         if req.samples > MAX_SAMPLE_COUNT as u32 {
             return Err(error::Error::InvalidRequest);
@@ -191,5 +191,20 @@ impl api::Api {
             None
         });
         Ok(Box::pin(stream))
+    }
+
+    pub async fn get_sample_results(
+        &self,
+        req: GetSampleResultsReq,
+        api::CurrentUser { user, .. }: api::CurrentUser,
+    ) -> Result<GetSampleResultsResp, error::Error> {
+        tracing::debug!(%user.id, "get sample results");
+        let GetSampleResultsReq { id, sample_number } = req;
+        let id = Uuid::from_slice(&id).map_err(|_| error::Error::InvalidRequest)?;
+        let download_url = self
+            .sim_storage_client
+            .download_results_url(id, sample_number)
+            .await?;
+        Ok(GetSampleResultsResp { download_url })
     }
 }
