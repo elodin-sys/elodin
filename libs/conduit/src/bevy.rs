@@ -212,7 +212,6 @@ pub trait AppExt {
 
     fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
-        asset_id: AssetId,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self;
 }
@@ -269,11 +268,10 @@ impl AppExt for bevy::app::App {
 
     fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
-        asset_id: AssetId,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self {
         let mut map = self.world.get_resource_or_insert_with(AssetMap::default);
-        map.0.insert(asset_id, adapter);
+        map.0.insert(R::ASSET_ID, adapter);
         self.add_systems(Update, sync_asset::<R>);
         self.add_systems(Update, query_asset::<R>);
         self

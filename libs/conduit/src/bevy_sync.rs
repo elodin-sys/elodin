@@ -7,7 +7,7 @@ use crate::{
     },
     client::MsgPair,
     well_known::{EntityMetadata, Pbr, TraceAnchor, WorldPos},
-    Asset, EntityId,
+    EntityId,
 };
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
@@ -37,14 +37,10 @@ impl Plugin for SyncPlugin {
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
             .add_conduit_component::<TraceAnchor>()
-            .add_conduit_asset::<EntityMetadata>(
-                EntityMetadata::ASSET_ID,
-                Box::new(SyncPostcardAdapter::<EntityMetadata>::new(None)),
-            )
-            .add_conduit_asset::<Pbr>(
-                Pbr::ASSET_ID,
-                Box::new(SyncPostcardAdapter::<Pbr>::new(Some(sync_pbr))),
-            );
+            .add_conduit_asset::<EntityMetadata>(Box::new(
+                SyncPostcardAdapter::<EntityMetadata>::new(None),
+            ))
+            .add_conduit_asset::<Pbr>(Box::new(SyncPostcardAdapter::<Pbr>::new(Some(sync_pbr))));
     }
 }
 
