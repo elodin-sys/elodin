@@ -18,6 +18,8 @@ pub struct Args {
 enum Commands {
     /// Create and submit a Monte Carlo run
     Run(RunArgs),
+    /// Download the results of a Monte Carlo sample
+    DownloadResults(DownloadArgs),
 }
 
 #[derive(clap::Args, Clone)]
@@ -38,6 +40,18 @@ struct RunArgs {
     open: bool,
 }
 
+#[derive(clap::Args, Clone)]
+pub struct DownloadArgs {
+    /// ID of the Monte Carlo run
+    #[arg(short, long)]
+    run_id: uuid::Uuid,
+    /// Number of the sample
+    #[arg(short, long)]
+    sample_number: u32,
+    /// Path to download the results to
+    path: PathBuf,
+}
+
 type Client = ApiClient<InterceptedService<transport::Channel, AuthInterceptor>>;
 
 impl Cli {
@@ -55,6 +69,7 @@ impl Cli {
     pub async fn monte_carlo(&self, args: &Args) -> anyhow::Result<()> {
         match &args.command {
             Commands::Run(run_args) => self.monte_carlo_run(run_args).await,
+            Commands::DownloadResults(download_args) => self.download_results(download_args).await,
         }
     }
 
@@ -102,6 +117,37 @@ impl Cli {
             opener::open_browser(dashboard_url)?;
         }
 
+        Ok(())
+    }
+
+    pub async fn download_results(&self, args: &DownloadArgs) -> anyhow::Result<()> {
+        let DownloadArgs {
+            run_id: id,
+            sample_number,
+            path,
+        } = args.clone();
+        let mut client = self.client().await?;
+        let sample = client
+            .get_sample_results(GetSampleResultsReq {
+                id: id.as_bytes().to_vec(),
+                sample_number,
+            })
+            .await?
+            .into_inner();
+
+        let data = reqwest::get(&sample.download_url)
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
+        let zstd = zstd::Decoder::new(data.as_ref())?;
+        let mut tar = tar::Archive::new(zstd);
+        tar.unpack(&path)?;
+        println!(
+            "Copied results of sample {} to: {}",
+            sample_number,
+            path.display()
+        );
         Ok(())
     }
 }

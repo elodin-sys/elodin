@@ -20,7 +20,7 @@ pub const SPAWN_GROUP: &str = "atc:spawn";
 pub struct SimStorageClient {
     gcs_client: GcsClient,
     sim_artifacts_bucket_name: String,
-    _sim_results_bucket_name: String,
+    sim_results_bucket_name: String,
 }
 
 pub struct BatchSpawner {
@@ -34,11 +34,11 @@ impl SimStorageClient {
         Ok(SimStorageClient {
             gcs_client,
             sim_artifacts_bucket_name: config.sim_artifacts_bucket_name.clone(),
-            _sim_results_bucket_name: config.sim_results_bucket_name.clone(),
+            sim_results_bucket_name: config.sim_results_bucket_name.clone(),
         })
     }
 
-    pub async fn signed_upload_url(&self, id: uuid::Uuid) -> Result<String, Error> {
+    pub async fn upload_artifacts_url(&self, id: uuid::Uuid) -> Result<String, Error> {
         let object_name = format!("runs/{}.tar.zst", id);
         let options = SignedURLOptions {
             method: SignedURLMethod::PUT,
@@ -48,6 +48,29 @@ impl SimStorageClient {
             .gcs_client
             .signed_url(
                 &self.sim_artifacts_bucket_name,
+                &object_name,
+                None,
+                None,
+                options,
+            )
+            .await?;
+        Ok(url)
+    }
+
+    pub async fn download_results_url(
+        &self,
+        id: uuid::Uuid,
+        sample_number: u32,
+    ) -> Result<String, Error> {
+        let object_name = format!("runs/{}/samples/{}.tar.zst", id, sample_number);
+        let options = SignedURLOptions {
+            method: SignedURLMethod::GET,
+            ..Default::default()
+        };
+        let url = self
+            .gcs_client
+            .signed_url(
+                &self.sim_results_bucket_name,
                 &object_name,
                 None,
                 None,
