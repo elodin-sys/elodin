@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{hash_map::Entry, BTreeMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap},
     marker::PhantomData,
     net::SocketAddr,
     ops::Deref,
@@ -10,6 +10,7 @@ use std::{
 };
 
 use clap::Parser;
+use conduit::well_known::GizmoType;
 use nox_ecs::{
     conduit, join_many,
     nox::{self, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
@@ -311,20 +312,15 @@ impl WorldBuilder {
                              id,
                              ty,
                              asset,
-                             name,
+                             metadata,
                              ..
                          }| {
-                            let name = name.to_owned().unwrap_or_default();
                             let mut col = nox_ecs::Column::<HostStore>::new(
                                 HostColumn::new(ty.clone().into(), id.inner),
                                 conduit::Metadata {
                                     component_id: id.inner,
                                     component_type: ty.clone().into(),
-                                    tags: std::iter::once((
-                                        "name".to_string(),
-                                        TagValue::String(name),
-                                    ))
-                                    .collect(),
+                                    tags: metadata.clone(),
                                 },
                             );
                             col.buffer.asset = *asset;
@@ -594,8 +590,7 @@ pub struct Component {
     ty: ComponentType,
     #[pyo3(get, set)]
     asset: bool,
-    #[pyo3(get, set)]
-    name: Option<String>,
+    metadata: HashMap<String, TagValue>,
 }
 
 #[pymethods]
@@ -613,10 +608,14 @@ impl Component {
         } else {
             ComponentId::new(py, id, ty.clone())?
         };
+        let metadata = name
+            .into_iter()
+            .map(|n| ("name".to_string(), TagValue::String(n)))
+            .collect();
         Ok(Self {
             id,
             ty,
-            name,
+            metadata,
             asset: asset.unwrap_or_default(),
         })
     }
@@ -631,8 +630,63 @@ impl Component {
         Ok(component.id)
     }
 
+    pub fn tag(&mut self, key: String, value: &PyAny) -> Result<(), Error> {
+        let value = if let Ok(s) = value.extract::<String>() {
+            TagValue::String(s)
+        } else if let Ok(f) = value.extract::<bool>() {
+            TagValue::Bool(f)
+        } else if let Ok(u) = value.extract::<String>() {
+            TagValue::String(u)
+        } else if let Ok(b) = value
+            .call_method0("bytes")
+            .and_then(|x| x.extract::<&PyBytes>())
+        {
+            TagValue::Bytes(b.as_bytes().to_vec())
+        } else {
+            return Err(Error::UnexpectedInput);
+        };
+        self.metadata.insert(key, value);
+        Ok(())
+    }
+
     pub fn to_metadata(&self) -> Metadata {
-        Metadata::new(self.id, self.ty.clone(), self.name.clone())
+        let inner = Arc::new(conduit::Metadata {
+            component_id: self.id.inner,
+            component_type: self.ty.clone().into(),
+            tags: self.metadata.clone(),
+        });
+        Metadata { inner }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct Gizmo {
+    inner: conduit::well_known::Gizmo,
+}
+
+#[pymethods]
+impl Gizmo {
+    #[staticmethod]
+    fn vector(id: ComponentId, offset: usize, color: Color) -> Self {
+        Self {
+            inner: conduit::well_known::Gizmo {
+                id: id.inner,
+                ty: GizmoType::Vector {
+                    range: offset..offset + 3,
+                    color: color.inner,
+                },
+            },
+        }
+    }
+
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
     }
 }
 
@@ -1203,6 +1257,8 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
     m.add_class::<conduit_client::Conduit>()?;
+    m.add_class::<Gizmo>()?;
+    m.add_class::<Color>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
 }

@@ -346,6 +346,7 @@ pub enum TagValue {
     Unit,
     Bool(bool),
     String(String),
+    Bytes(Vec<u8>),
 }
 
 impl TagValue {
