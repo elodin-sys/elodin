@@ -1324,6 +1324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_editor_cam"
+version = "0.1.0"
+source = "git+https://github.com/aevyrie/bevy_editor_cam.git?branch=bevy-0.13#fae223cd8bf640c104e185e71f10571bd0614e78"
+dependencies = [
+ "bevy",
+ "bevy_picking_core",
+]
+
+[[package]]
 name = "bevy_egui"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1577,28 +1586,22 @@ dependencies = [
 
 [[package]]
 name = "bevy_mod_picking"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d79f17a34025d95e2e3525207ec73090647c6f40c3136fc674f87e167a9ae6be"
 dependencies = [
  "bevy_app",
  "bevy_core",
- "bevy_core_pipeline",
  "bevy_ecs",
  "bevy_egui",
  "bevy_eventlistener",
  "bevy_math",
  "bevy_picking_core",
  "bevy_picking_egui",
- "bevy_picking_highlight",
  "bevy_picking_input",
  "bevy_picking_raycast",
- "bevy_picking_selection",
- "bevy_picking_sprite",
- "bevy_picking_ui",
  "bevy_reflect",
  "bevy_render",
- "bevy_text",
- "bevy_ui",
  "bevy_utils",
  "bevy_window",
 ]
@@ -1661,8 +1664,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_picking_core"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41c8cdca408508a7d006bf077c6cbb6660a65895323333f206b7cce7b801a8e2"
 dependencies = [
  "bevy_app",
  "bevy_derive",
@@ -1678,8 +1682,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_picking_egui"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfc4196736e2a5d7ce709eab3e19ff4cf62e8f175f8a29d5e1a9ffe4ab6fe93b"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1691,25 +1696,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_picking_highlight"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_ecs",
- "bevy_pbr",
- "bevy_picking_core",
- "bevy_picking_selection",
- "bevy_reflect",
- "bevy_render",
- "bevy_sprite",
-]
-
-[[package]]
 name = "bevy_picking_input"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60182209f48943de6c8bc3305a70f52012a18ef26f92f460f9436441b8badf0b"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1717,7 +1707,6 @@ dependencies = [
  "bevy_input",
  "bevy_math",
  "bevy_picking_core",
- "bevy_picking_selection",
  "bevy_reflect",
  "bevy_render",
  "bevy_utils",
@@ -1726,8 +1715,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_picking_raycast"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2677d0a3402fea3327a216649c104f969685a5c01d969d274c89facba86c164d"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1741,8 +1731,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_picking_selection"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbc986eefd38058918322418d1e6ae398e74d48730e623a55dc20be78d5ee24b"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
@@ -1751,39 +1742,6 @@ dependencies = [
  "bevy_picking_core",
  "bevy_reflect",
  "bevy_utils",
-]
-
-[[package]]
-name = "bevy_picking_sprite"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_ecs",
- "bevy_math",
- "bevy_picking_core",
- "bevy_render",
- "bevy_sprite",
- "bevy_transform",
- "bevy_window",
-]
-
-[[package]]
-name = "bevy_picking_ui"
-version = "0.17.0"
-source = "git+https://github.com/StrikeForceZero/bevy_mod_picking.git?branch=bevy-0.13#2a262bb9207d1cd87e2851f4cbefa65b74738aec"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_hierarchy",
- "bevy_math",
- "bevy_picking_core",
- "bevy_render",
- "bevy_transform",
- "bevy_ui",
- "bevy_utils",
- "bevy_window",
 ]
 
 [[package]]
@@ -2001,6 +1959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_tweening"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e85ee55885db7a35d9bdd3b27ef9d9e36f7188801dc24ad5d3a013ee62b0579a"
+dependencies = [
+ "bevy",
+ "interpolation",
+]
+
+[[package]]
 name = "bevy_ui"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2113,6 +2081,15 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "winit",
+]
+
+[[package]]
+name = "big_space"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4815577381d1aecb813f653f38b8f153a747e65f8b64d68754275b2f8bcf8408"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]
@@ -2733,6 +2710,7 @@ name = "conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "big_space",
  "bytemuck",
  "bytes",
  "const-fnv1a-hash",
@@ -3232,7 +3210,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e3d747f100290a1ca24b752186f61f6637e1deffe3bf6320de6fcb29510a307"
 dependencies = [
  "bitflags 2.4.2",
- "libloading 0.7.4",
+ "libloading 0.8.3",
  "winapi",
 ]
 
@@ -3527,18 +3505,22 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_atmosphere",
+ "bevy_editor_cam",
  "bevy_egui",
  "bevy_infinite_grid",
  "bevy_mod_picking",
  "bevy_panorbit_camera",
  "bevy_polyline",
+ "bevy_tweening",
  "bevy_web_asset",
+ "big_space",
  "cocoa",
  "conduit",
  "flume",
  "futures-lite 2.2.0",
  "nalgebra",
  "objc",
+ "postcard",
  "raw-window-handle 0.5.2",
  "winit",
 ]
@@ -4941,6 +4923,12 @@ name = "integer-encoding"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
+
+[[package]]
+name = "interpolation"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9c13ae9d91148fcb4aab6654c4c2a7d02a15395ea9e23f65170f175f8b269ce"
 
 [[package]]
 name = "io-kit-sys"
@@ -10576,7 +10564,7 @@ dependencies = [
  "js-sys",
  "khronos-egl",
  "libc",
- "libloading 0.7.4",
+ "libloading 0.8.3",
  "log",
  "metal",
  "naga",

@@ -27,17 +27,23 @@ bevy_panorbit_camera.version = "0.16"
 bevy_panorbit_camera.features = ["bevy_egui"]
 bevy_atmosphere = "0.9"
 bevy_infinite_grid.git = "https://github.com/ThomasAlban/bevy_infinite_grid.git"
-bevy_mod_picking.git = "https://github.com/StrikeForceZero/bevy_mod_picking.git"
-bevy_mod_picking.branch = "bevy-0.13"
-bevy_mod_picking.features = ["backend_egui"]
+bevy_mod_picking = { version = "0.18", default-features = false, features = [
+    "backend_egui",
+    "backend_raycast",
+] }
 bevy_polyline.git = "https://github.com/elodin-sys/bevy_polyline.git"
 bevy_polyline.branch = "feature/bevy-0.13"
 bevy_web_asset.version = "0.8"
+big_space.version = "0.5.0"
+bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam.git"
+bevy_editor_cam.branch = "bevy-0.13"
+bevy_tweening = "0.10"
 
 # channel
 flume = "0.11"
 
 conduit.path = "../../libs/conduit"
+postcard.version = "1.0.8"
 
 # python
 # pyo3.version = "0.20.0"

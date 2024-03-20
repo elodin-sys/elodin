@@ -7,6 +7,7 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
     EguiContexts,
 };
+use big_space::GridCell;
 use conduit::{
     bevy::{ComponentValueMap, MaxTick, Received, Tick, TimeStep},
     query::MetadataStore,
@@ -18,7 +19,7 @@ use crate::MainCamera;
 
 use self::widgets::{hierarchy, inspector, timeline};
 
-mod colors;
+pub mod colors;
 pub mod images;
 mod theme;
 mod utils;
@@ -337,9 +338,13 @@ pub fn set_camera_viewport(
     window: Query<&Window>,
     egui_settings: Res<bevy_egui::EguiSettings>,
     mut contexts: EguiContexts,
-    mut main_camera_query: Query<(&mut Camera, &mut Transform), With<MainCamera>>,
-    entity_transform_query: Query<&Transform, (With<Received>, Without<MainCamera>)>,
+    mut main_camera_query: Query<
+        (Entity, &mut Camera, &mut Transform, &mut GridCell<i128>),
+        With<MainCamera>,
+    >,
     selected_entity: ResMut<SelectedEntity>,
+    entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
+    mut commands: Commands,
 ) {
     let available_rect = contexts.ctx_mut().available_rect();
 
@@ -351,16 +356,24 @@ pub fn set_camera_viewport(
         return;
     }
 
-    let (mut camera, mut cam_transform) = main_camera_query.single_mut();
+    let (entity, mut camera, mut cam_transform, mut grid_cell) = main_camera_query.single_mut();
     camera.viewport = Some(Viewport {
         physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
         physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
         depth: 0.0..1.0,
     });
 
-    if let Some(entity_pair) = selected_entity.0 {
-        if let Ok(entity_transform) = entity_transform_query.get(entity_pair.bevy) {
-            cam_transform.look_at(entity_transform.translation, Vec3::Y);
+    let mut entity = commands.entity(entity);
+    if selected_entity.is_changed() {
+        if let Some(entity_pair) = selected_entity.0 {
+            if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
+                entity.set_parent(entity_pair.bevy);
+                let rot_matrix = Mat3::from_quat(cam_transform.rotation);
+                cam_transform.translation = rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, 10.0));
+                *grid_cell = *entity_cell;
+            }
+        } else {
+            entity.remove_parent();
         }
     }
 }

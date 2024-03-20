@@ -1,10 +1,9 @@
-import elodin
 import jax
 import jax.numpy as np
 import numpy
 from elodin import *
 
-initial_angular_vel = np.array([-2.0, 3.0, 1.0])
+initial_angular_vel = np.array([-0.0, 1.0, 1.0])
 rw_force_clamp = 0.2
 
 def lqr_control_mat(j, q, r):
@@ -94,7 +93,7 @@ w.spawn(
     )
 ).metadata(EntityMetadata("RW3"))
 w.spawn(b).metadata(EntityMetadata("OreSat")).insert(
-    ControlInput(Quaternion.from_axis_angle(np.array([1.0, 0.0, 1.0]), np.radians(-90)))
+    ControlInput(Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)))
 )
 
 exec = w.run(six_dof(1.0 / 60.0, control.pipe(rw_effector)), 1.0 / 60.0)
