@@ -5,6 +5,7 @@ use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
+    math::DVec3,
     pbr::{
         DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionQualityLevel,
         ScreenSpaceAmbientOcclusionSettings,
@@ -18,14 +19,17 @@ use bevy::{
     winit::WinitSettings,
     DefaultPlugins,
 };
+use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
 use bevy_infinite_grid::{
     GridShadowCamera, InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings,
 };
 use bevy_mod_picking::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_polyline::PolylinePlugin;
+use bevy_tweening::TweeningPlugin;
 use bevy_web_asset::WebAssetPlugin;
+use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{well_known::WorldPos, ControlMsg};
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
 use traces::TracesPlugin;
@@ -84,6 +88,7 @@ impl Plugin for EditorPlugin {
                         }),
                         ..default()
                     })
+                    .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
                     .disable::<LogPlugin>()
                     .build(),
@@ -101,32 +106,31 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
-            .add_plugins(
-                DefaultPickingPlugins
-                    .build()
-                    .disable::<DebugPickingPlugin>()
-                    .disable::<DefaultHighlightingPlugin>(),
-            )
+            .add_plugins(DefaultPickingPlugins)
+            .add_plugins(big_space::FloatingOriginPlugin::<i128>::default())
+            .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
-            .add_plugins(PanOrbitCameraPlugin)
             .add_plugins(InfiniteGridPlugin)
             .add_plugins(PolylinePlugin)
             .add_plugins(TracesPlugin)
             .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
+            .add_plugins(TweeningPlugin)
             .add_systems(Startup, setup_main_camera)
             .add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
-            .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()))
-            .insert_resource(Msaa::Off);
+            .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()));
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
+
+        app.insert_resource(Msaa::default());
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -162,7 +166,8 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
     // });
     let mut camera = commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)),
+            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
+                .looking_at(Vec3::ZERO, Vec3::Y),
             camera: Camera {
                 hdr: true,
                 ..Default::default()
@@ -178,11 +183,20 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
         RenderLayers::default(),
         MainCamera,
+        FloatingOrigin,
+        GridCell::<i128>::default(),
+        EditorCam {
+            orbit_constraint: OrbitConstraint::Fixed {
+                up: Vec3::Y,
+                can_pass_tdc: false,
+            },
+            last_anchor_depth: 2.0,
+            ..Default::default()
+        },
     ));
 
     camera
         .insert(BloomSettings { ..default() })
-        .insert(PanOrbitCamera::default())
         .insert(GridShadowCamera);
 
     camera.insert(EnvironmentMapLight {
@@ -200,7 +214,7 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         //     ..Default::default()
         // });
         // NOTE: Crashes custom camera viewport
-        // .insert(TemporalAntiAliasBundle::default());
+        // camera.insert(TemporalAntiAliasBundle::default());
 
         commands.spawn(ScreenSpaceAmbientOcclusionSettings {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
@@ -365,15 +379,23 @@ fn make_entities_selectable(
     }
 }
 
-pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
-    query.iter_mut().for_each(|(mut transform, pos)| {
-        let WorldPos { pos, att } = pos;
-        *transform = bevy::prelude::Transform {
-            translation: Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
-            rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
-            ..Default::default()
-        }
-    });
+pub fn sync_pos(
+    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
+    floating_origin: Res<FloatingOriginSettings>,
+) {
+    query
+        .iter_mut()
+        .for_each(|(mut transform, mut grid_cell, pos)| {
+            let WorldPos { pos, att } = pos;
+            let (new_grid_cell, translation) =
+                floating_origin.translation_to_grid(DVec3::from_slice(pos.as_slice()));
+            *grid_cell = new_grid_cell;
+            *transform = bevy::prelude::Transform {
+                translation,
+                rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
+                ..Default::default()
+            }
+        });
 }
 
 pub fn sync_paused(paused: Res<ui::Paused>, mut event: EventWriter<ControlMsg>) {

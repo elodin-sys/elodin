@@ -27,6 +27,7 @@ use bevy::{
         Update,
     },
 };
+use big_space::GridCell;
 
 #[derive(bevy::prelude::Component, Debug)]
 pub struct ComponentValueMap(pub HashMap<ComponentId, ComponentValue<'static>>);
@@ -71,6 +72,7 @@ impl ColumnMsg<Bytes> {
                         color: Color::WHITE.into(),
                     },
                     entity_id,
+                    GridCell::<i128>::default(),
                     ComponentValueMap(HashMap::default()),
                 ));
                 entity_map.0.insert(entity_id, e.id());

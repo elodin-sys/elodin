@@ -266,6 +266,7 @@ Inertia = Annotated[SpatialInertia, Component("inertia", ComponentType.SpatialPo
 PbrAsset = Annotated[Handle, Component(241, ComponentType.U64, "pbr_asset", True)]
 EntityMetadataAsset = Annotated[Handle, Component(242, ComponentType.U64, "metadata_asset", True)]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
+GizmoAsset = Annotated[Handle, Component(2243, ComponentType.U64, "gizmo_asset", True)]
 
 class C:
     def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):

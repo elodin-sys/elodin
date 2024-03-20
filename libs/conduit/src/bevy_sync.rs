@@ -6,11 +6,12 @@ use crate::{
         Subscriptions,
     },
     client::MsgPair,
-    well_known::{EntityMetadata, Pbr, TraceAnchor, WorldPos},
+    well_known::{EntityMetadata, Gizmo, Pbr, TraceAnchor, WorldPos},
     EntityId,
 };
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
+use big_space::GridCell;
 use bytes::Bytes;
 use serde::de::DeserializeOwned;
 
@@ -36,6 +37,7 @@ impl Plugin for SyncPlugin {
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
+            .add_conduit_asset::<Gizmo>(Box::new(SyncPostcardAdapter::<Gizmo>::new(None)))
             .add_conduit_component::<TraceAnchor>()
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
@@ -83,6 +85,7 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
                 },
                 entity_id,
                 ComponentValueMap(HashMap::default()),
+                GridCell::<i128>::default(),
             ));
             entity_map.0.insert(entity_id, e.id());
             e

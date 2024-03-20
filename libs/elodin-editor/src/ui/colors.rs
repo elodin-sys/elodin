@@ -1,7 +1,7 @@
 use bevy_egui::egui::Color32;
 use conduit::well_known::Color;
 
-// pub const HYPER_RED: Color32 = Color32::from_rgb(0xEE, 0x3A, 0x43);
+//pub const HYPER_RED: Color32 = Color32::from_rgb(0xEE, 0x3A, 0x43);
 // pub const STONE_900: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
 pub const STONE_950: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
 #[allow(dead_code)]
@@ -35,4 +35,11 @@ impl EColor for Color {
         //     (255.0 * self.b) as u8,
         // )
     }
+}
+
+pub mod bevy {
+    use bevy::prelude::Color;
+    pub const RED: Color = Color::rgb(0.91, 0.29, 0.08);
+    pub const GREEN: Color = Color::rgb(0.53, 0.87, 0.62);
+    pub const BLUE: Color = Color::rgb(0.0, 0.78, 1.0);
 }

@@ -1,61 +1,40 @@
-use std::f32::consts;
-
+use bevy::ecs::entity::Entity;
+use bevy::math::primitives::Sphere;
+use bevy::pbr::AlphaMode;
 use bevy::{
     app::{App, Plugin, PostUpdate, Startup},
-    asset::{AssetServer, Assets, Handle},
+    asset::{Assets, Handle},
     core_pipeline::core_3d::{Camera3d, Camera3dBundle},
     ecs::{
         component::Component,
         query::{With, Without},
-        system::{Commands, Query, Res, ResMut, Resource},
+        system::{Commands, Query, Res, ResMut},
     },
-    math::{
-        primitives::{Cuboid, Rectangle},
-        Quat, UVec2, Vec2, Vec3,
-    },
+    hierarchy::BuildChildren,
+    math::{Mat3, Quat, UVec2, Vec2, Vec3},
     pbr::{PbrBundle, StandardMaterial},
     prelude::ClearColorConfig,
     render::{
         camera::{Camera, Viewport},
         color::Color,
         mesh::Mesh,
-        texture::Image,
     },
-    transform::components::Transform,
-    //ui::camera_config::UiCameraConfig,
+    transform::components::{GlobalTransform, Transform},
     utils::default,
     window::Window,
 };
+use bevy_tweening::{EaseFunction, Lens, Tween};
+use std::{f32::consts, time::Duration};
 
+use crate::{MainCamera, NAVIGATION_GIZMO_LAYER};
 use bevy_egui::EguiContexts;
 use bevy_mod_picking::prelude::*;
-use bevy_panorbit_camera::PanOrbitCamera;
-
-use crate::NAVIGATION_GIZMO_LAYER;
-
-#[derive(Resource)]
-pub struct SharedCameraState {
-    target_alpha: f32,
-    target_beta: f32,
-    // orthographic: bool,
-}
-
-impl Default for SharedCameraState {
-    fn default() -> Self {
-        Self {
-            target_alpha: 0.0,
-            target_beta: 0.0,
-            // orthographic: false,
-        }
-    }
-}
 
 pub struct NavigationGizmoPlugin;
 
 impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SharedCameraState>()
-            .add_systems(Startup, nav_gizmo)
+        app.add_systems(Startup, nav_gizmo)
             .add_systems(Startup, nav_gizmo_camera)
             .add_systems(PostUpdate, set_camera_viewport)
             .add_systems(PostUpdate, sync_nav_camera);
@@ -74,811 +53,213 @@ fn cube_color_highlight(
 ) {
     if let Ok(material_asset) = target_query.get(event.target) {
         if let Some(material) = materials.get_mut(material_asset) {
-            material.base_color = Color::TURQUOISE;
+            material.base_color *= 0.75;
         }
     }
 }
 
 fn cube_color_reset(
-    event: Listener<Pointer<Out>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    target_query: Query<&Handle<StandardMaterial>>,
-) {
-    if let Ok(material_asset) = target_query.get(event.target) {
-        if let Some(material) = materials.get_mut(material_asset) {
-            material.base_color = Color::WHITE;
+    reset_color: Color,
+) -> impl Fn(Listener<Pointer<Out>>, ResMut<Assets<StandardMaterial>>, Query<&Handle<StandardMaterial>>)
+{
+    move |event: Listener<Pointer<Out>>,
+          mut materials: ResMut<Assets<StandardMaterial>>,
+          target_query: Query<&Handle<StandardMaterial>>| {
+        if let Ok(material_asset) = target_query.get(event.target) {
+            if let Some(material) = materials.get_mut(material_asset) {
+                material.base_color = reset_color;
+            }
         }
     }
 }
 
-// NOTE: Reduces jumping
-fn get_closest_angle(current: f32, target: f32) -> f32 {
-    if current > (target - consts::PI) {
-        target
-    } else {
-        target - (consts::PI * 2.0)
-    }
-}
-
-struct NavGizmoMaterials {
-    cube_side_top: StandardMaterial,
-    cube_side_bottom: StandardMaterial,
-    cube_side_right: StandardMaterial,
-    cube_side_left: StandardMaterial,
-    cube_side_front: StandardMaterial,
-    cube_side_back: StandardMaterial,
-    cube_side_corner: StandardMaterial,
-    cube_side_edge: StandardMaterial,
-}
-
-impl NavGizmoMaterials {
-    pub fn new(asset_server: Res<AssetServer>) -> Self {
-        Self {
-            cube_side_top: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_top.png"),
-            ),
-            cube_side_bottom: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_bottom.png"),
-            ),
-            cube_side_right: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_right.png"),
-            ),
-            cube_side_left: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_left.png"),
-            ),
-            cube_side_front: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_front.png"),
-            ),
-            cube_side_back: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_back.png"),
-            ),
-            cube_side_corner: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_corner.png"),
-            ),
-            cube_side_edge: Self::material(
-                asset_server.load("embedded://elodin_editor/assets/textures/cube_side_edge.png"),
-            ),
-        }
-    }
-
-    fn material(texture: Handle<Image>) -> StandardMaterial {
-        StandardMaterial {
-            base_color_texture: Some(texture),
-            base_color: Color::WHITE,
-            unlit: true,
-            ..default()
-        }
-    }
-}
+#[derive(Component)]
+pub struct NavGizmo;
 
 pub fn nav_gizmo(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
 ) {
-    let nav_materials = NavGizmoMaterials::new(asset_server);
+    let sphere = meshes.add(Mesh::from(Sphere::new(0.15)));
 
-    let quad_mesh = meshes.add(Mesh::from(Rectangle::new(0.6, 0.6)));
-    let edge_mesh = meshes.add(Mesh::from(Cuboid::new(0.2, 0.2, 0.6)));
-    let corner_mesh = meshes.add(Mesh::from(Cuboid::new(0.2, 0.2, 0.2)));
+    let nav_gizmo = commands
+        .spawn((
+            NavGizmo,
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            On::<Pointer<Drag>>::run(drag_nav_gizmo),
+        ))
+        .id();
 
-    //--------------------------------------------------------------------------
+    let distance = 0.4;
 
-    // top-right edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.4, 0.4, 0.0),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 2.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-right edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.4, -0.4, 0.0),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 2.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // top-left edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(-0.4, 0.4, 0.0),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.5);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-left edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(-0.4, -0.4, 0.0),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.5);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    //--------------------------------------------------------------------------
-
-    // front-right edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.4, 0.0, 0.4)
-                .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 4.0);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // left-front edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(-0.4, 0.0, 0.4)
-                .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.75);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // right-back edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.4, 0.0, -0.4)
-                .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 0.75);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // back-left edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(-0.4, 0.0, -0.4)
-                .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.25);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    //--------------------------------------------------------------------------
-
-    // top-front edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.0, 0.4, 0.4)
-                .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, 0.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-front edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.0, -0.4, 0.4)
-                .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, 0.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // top-back edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.0, 0.4, -0.4)
-                .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, consts::PI);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-back edge
-    commands.spawn((
-        PbrBundle {
-            mesh: edge_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_edge.clone()),
-            transform: Transform::from_xyz(0.0, -0.4, -0.4)
-                .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, consts::PI);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    //--------------------------------------------------------------------------
-
-    // top-front-right corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(0.4, 0.4, 0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 4.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // top-left-right corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(-0.4, 0.4, 0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.75);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // top-right-back corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(0.4, 0.4, -0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 0.75);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // top-back-left corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(-0.4, 0.4, -0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.25);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 4.0);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-front-right corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(0.4, -0.4, 0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 4.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-left-right corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(-0.4, -0.4, 0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.75);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-right-back corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(0.4, -0.4, -0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 0.75);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom-back-left corner
-    commands.spawn((
-        PbrBundle {
-            mesh: corner_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_corner.clone()),
-            transform: Transform::from_xyz(-0.4, -0.4, -0.4),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.25);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.75);
-                }
-            },
-        ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    //--------------------------------------------------------------------------
-
-    // top
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_top),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0)
+    let edges = [
+        // top
+        (
+            crate::ui::colors::bevy::BLUE,
+            Transform::from_xyz(0.0, distance, 0.0)
                 .with_rotation(Quat::from_rotation_x(consts::PI * 1.5)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, 0.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI / 2.0);
-                }
-            },
+            side_clicked_cb(0.0, consts::PI / 2.0),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // bottom
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_bottom),
-            transform: Transform::from_xyz(0.0, -0.5, 0.0)
+        // bottom
+        (
+            crate::ui::colors::bevy::BLUE.with_a(0.2),
+            Transform::from_xyz(0.0, -distance, 0.0)
                 .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, 0.0);
-                    nav_orbit.target_beta =
-                        get_closest_angle(nav_orbit.target_beta, consts::PI * 1.5);
-                }
-            },
+            side_clicked_cb(0.0, consts::PI * 1.5),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // front
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_front),
-            transform: Transform::from_xyz(0.0, 0.0, 0.5),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, 0.0);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
+        // front
+        (
+            crate::ui::colors::bevy::RED,
+            Transform::from_xyz(0.0, 0.0, distance),
+            side_clicked_cb(0.0, 0.0),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // back
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_back),
-            transform: Transform::from_xyz(0.0, 0.0, -0.5)
+        // back
+        (
+            crate::ui::colors::bevy::RED.with_a(0.2),
+            Transform::from_xyz(0.0, 0.0, -distance)
                 .with_rotation(Quat::from_rotation_y(consts::PI)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha = get_closest_angle(nav_orbit.target_alpha, consts::PI);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
+            side_clicked_cb(consts::PI, 0.0),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // right
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_right),
-            transform: Transform::from_xyz(0.5, 0.0, 0.0)
+        // right
+        (
+            crate::ui::colors::bevy::GREEN,
+            Transform::from_xyz(distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI / 2.0);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
+            side_clicked_cb(consts::PI / 2.0, 0.0),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
-
-    // left
-    commands.spawn((
-        PbrBundle {
-            mesh: quad_mesh.clone(),
-            material: materials.add(nav_materials.cube_side_left),
-            transform: Transform::from_xyz(-0.5, 0.0, 0.0)
+        // left
+        (
+            crate::ui::colors::bevy::GREEN.with_a(0.2),
+            Transform::from_xyz(-distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI * 1.5)),
-            ..default()
-        },
-        On::<Pointer<Over>>::run(cube_color_highlight),
-        On::<Pointer<Out>>::run(cube_color_reset),
-        On::<Pointer<Click>>::run(
-            |click: Listener<Pointer<Click>>,
-             mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>| {
-                if click.button == PointerButton::Primary {
-                    let mut nav_orbit = nav_orbit_query.single_mut();
-                    nav_orbit.target_alpha =
-                        get_closest_angle(nav_orbit.target_alpha, consts::PI * 1.5);
-                    nav_orbit.target_beta = get_closest_angle(nav_orbit.target_beta, 0.0);
-                }
-            },
+            side_clicked_cb(consts::PI * 1.5, 0.0),
         ),
-        NAVIGATION_GIZMO_LAYER,
-    ));
+    ];
+
+    for (color, transform, cb) in edges {
+        let material = materials.add(StandardMaterial {
+            base_color: color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..Default::default()
+        });
+        commands
+            .spawn((
+                PbrBundle {
+                    mesh: sphere.clone(),
+                    material,
+                    transform,
+                    ..default()
+                },
+                On::<Pointer<Over>>::run(cube_color_highlight),
+                On::<Pointer<Out>>::run(cube_color_reset(color)),
+                On::<Pointer<Click>>::run(cb),
+                NAVIGATION_GIZMO_LAYER,
+            ))
+            .set_parent(nav_gizmo);
+    }
 }
 
 pub fn nav_gizmo_camera(mut commands: Commands) {
-    commands
-        .spawn((
-            Camera3dBundle {
-                transform: Transform::from_xyz(1.6, 1.6, 1.6).looking_at(Vec3::ZERO, Vec3::Y),
-                // TODO: Use with orthographic mode in main camera
-                // projection: OrthographicProjection {
-                //     scaling_mode: ScalingMode::FixedVertical(2.0),
-                //     ..default()
-                // }
-                // .into(),
-                camera: Camera {
-                    order: 1,
-                    hdr: true,
-                    // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
-                    clear_color: ClearColorConfig::None,
-                    ..Default::default()
-                },
-                camera_3d: Camera3d { ..default() },
-                ..default()
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
+            camera: Camera {
+                order: 1,
+                hdr: true,
+                // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
+                clear_color: ClearColorConfig::None,
+
+                ..Default::default()
             },
-            //UiCameraConfig { show_ui: false },
-            NAVIGATION_GIZMO_LAYER,
-            NavGizmoCamera,
-        ))
-        .insert(PanOrbitCamera {
-            pan_sensitivity: 0.0,
-            zoom_sensitivity: 0.0,
-            orbit_sensitivity: 8.0,
-            ..Default::default()
-        });
+            camera_3d: Camera3d { ..default() },
+            ..default()
+        },
+        //UiCameraConfig { show_ui: false },
+        NAVIGATION_GIZMO_LAYER,
+        NavGizmoCamera,
+    ));
+}
+
+#[derive(Component)]
+pub struct DraggedMarker;
+
+pub fn drag_nav_gizmo(
+    drag: Listener<Pointer<Drag>>,
+    mut query: Query<&mut Transform, With<MainCamera>>,
+    mut commands: Commands,
+) {
+    if drag.delta.length() > 0.1 {
+        commands.entity(drag.target).insert(DraggedMarker);
+    } else {
+        commands.entity(drag.target).remove::<DraggedMarker>();
+    }
+    let mut transform = query.single_mut();
+    let delta_x = drag.delta.x / 75.0 * std::f32::consts::PI;
+    let delta_y = drag.delta.y / 75.0 * std::f32::consts::PI;
+    let yaw = Quat::from_rotation_y(-delta_x);
+    let pitch = Quat::from_rotation_x(-delta_y);
+    set_orbit_rotation(Vec3::ZERO, yaw, pitch, transform.as_mut())
+}
+
+fn set_orbit_rotation(anchor: Vec3, yaw: Quat, pitch: Quat, transform: &mut Transform) {
+    let radius = (transform.translation - anchor).length();
+    transform.rotation = yaw * transform.rotation;
+    transform.rotation *= pitch;
+    let rot_matrix = Mat3::from_quat(transform.rotation);
+    transform.translation = anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, radius));
+}
+
+fn side_clicked_cb(
+    yaw: f32,
+    pitch: f32,
+) -> impl Fn(
+    Listener<Pointer<Click>>,
+    Query<(Entity, &Transform), With<MainCamera>>,
+    Query<&DraggedMarker>,
+    Commands,
+) {
+    move |click: Listener<Pointer<Click>>,
+          query: Query<(Entity, &Transform), With<MainCamera>>,
+          drag_query: Query<&DraggedMarker>,
+          mut commands: Commands| {
+        let (entity, old_transform) = query.single();
+        if drag_query.get(click.target).is_ok() {
+            return;
+        }
+        if click.button == PointerButton::Primary {
+            let mut new_transform = *old_transform;
+            let anchor = Vec3::ZERO;
+            let yaw = Quat::from_rotation_y(yaw);
+            let pitch = Quat::from_rotation_x(-pitch);
+            let radius = (new_transform.translation - anchor).length();
+            new_transform.rotation = yaw * pitch;
+            let tween = Tween::new(
+                EaseFunction::SineInOut,
+                Duration::from_millis(250),
+                OrbitLens {
+                    start: *old_transform,
+                    end: new_transform,
+                    radius,
+                    anchor,
+                },
+            );
+            commands
+                .entity(entity)
+                .insert(bevy_tweening::Animator::new(tween));
+        }
+    }
 }
 
 pub fn sync_nav_camera(
-    mut camera_state: ResMut<SharedCameraState>,
-    mut main_orbit_query: Query<&mut PanOrbitCamera, Without<NavGizmoCamera>>,
-    mut nav_orbit_query: Query<&mut PanOrbitCamera, With<NavGizmoCamera>>,
+    mut main_transform_query: Query<&Transform, (With<MainCamera>, Without<NavGizmo>)>,
+    mut nav_transform_query: Query<&mut Transform, With<NavGizmo>>,
 ) {
-    let mut main_orbit = main_orbit_query.single_mut();
-    let mut nav_orbit = nav_orbit_query.single_mut();
-
-    if main_orbit.target_alpha != camera_state.target_alpha
-        || main_orbit.target_beta != camera_state.target_beta
-    {
-        camera_state.target_alpha = main_orbit.target_alpha;
-        camera_state.target_beta = main_orbit.target_beta;
-
-        nav_orbit.target_alpha = camera_state.target_alpha;
-        nav_orbit.target_beta = camera_state.target_beta;
-    } else if nav_orbit.target_alpha != camera_state.target_alpha
-        || nav_orbit.target_beta != camera_state.target_beta
-    {
-        camera_state.target_alpha = nav_orbit.target_alpha;
-        camera_state.target_beta = nav_orbit.target_beta;
-
-        main_orbit.target_alpha = camera_state.target_alpha;
-        main_orbit.target_beta = camera_state.target_beta;
-    }
+    let main = main_transform_query.single_mut();
+    let mut nav = nav_transform_query.single_mut();
+    nav.rotation = main.rotation.conjugate();
 }
 
 pub fn set_camera_viewport(
@@ -917,4 +298,19 @@ pub fn set_camera_viewport(
         physical_size: UVec2::new(side_length as u32, side_length as u32),
         depth: 0.0..1.0,
     });
+}
+
+struct OrbitLens {
+    start: Transform,
+    end: Transform,
+    radius: f32,
+    anchor: Vec3,
+}
+
+impl Lens<Transform> for OrbitLens {
+    fn lerp(&mut self, target: &mut Transform, ratio: f32) {
+        target.rotation = self.start.rotation.slerp(self.end.rotation, ratio);
+        let rot_matrix = Mat3::from_quat(target.rotation);
+        target.translation = self.anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, self.radius));
+    }
 }
