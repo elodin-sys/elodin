@@ -208,10 +208,6 @@ pub trait AppExt {
     where
         C: Component + bevy::prelude::Component + std::fmt::Debug;
 
-    fn add_conduit_resource<C>(&mut self) -> &mut Self
-    where
-        C: Component + bevy::prelude::Resource + std::fmt::Debug;
-
     fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
@@ -249,22 +245,6 @@ impl AppExt for bevy::app::App {
         map.0.insert(C::component_id(), adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
-        self
-    }
-
-    fn add_conduit_resource<R>(&mut self) -> &mut Self
-    where
-        R: Component + bevy::prelude::Resource + std::fmt::Debug,
-    {
-        let mut map = self
-            .world
-            .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
-        map.0.insert(
-            R::component_id(),
-            Box::<StaticResourceAdapter<R>>::default(),
-        );
-
-        self.add_systems(Update, sync_resource::<R>);
         self
     }
 
@@ -406,35 +386,6 @@ impl Plugin for ConduitSubscribePlugin {
         app.add_event::<ControlMsg>();
         app.add_systems(Update, control_msg);
         app.add_systems(Update, recv_system);
-    }
-}
-
-pub fn sync_resource<T: bevy::prelude::Resource + Component + Debug>(
-    res: Res<T>,
-    subs: ResMut<Subscriptions>,
-) {
-    if !res.is_changed() {
-        return;
-    }
-    let component_id = T::component_id();
-    let Some(subs) = subs.get(&component_id) else {
-        return;
-    };
-    let Ok(col) = crate::ColumnPayload::try_from_value_iter(
-        0,
-        std::iter::once(ColumnValue {
-            entity_id: EntityId::RESOURCE,
-            value: res.component_value(),
-        }),
-    ) else {
-        warn!("error creating column payload packet");
-        return;
-    };
-    for sub in subs.iter() {
-        let _ = sub.tx.send(Packet {
-            stream_id: sub.stream_id,
-            payload: Payload::Column(col.clone()),
-        });
     }
 }
 
