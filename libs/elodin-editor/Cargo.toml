@@ -20,15 +20,13 @@ nalgebra = "0.32"
 bevy.version = "0.13"
 bevy.features = ["wayland", ]
 bevy_egui = "0.25"
+egui_tiles = "0.7"
 winit.version = "0.29"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_panorbit_camera.version = "0.16"
-bevy_panorbit_camera.features = ["bevy_egui"]
 bevy_atmosphere = "0.9"
 bevy_infinite_grid.git = "https://github.com/ThomasAlban/bevy_infinite_grid.git"
 bevy_mod_picking = { version = "0.18", default-features = false, features = [
-    "backend_egui",
     "backend_raycast",
 ] }
 bevy_polyline.git = "https://github.com/elodin-sys/bevy_polyline.git"
