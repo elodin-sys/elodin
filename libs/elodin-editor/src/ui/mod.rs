@@ -1,5 +1,6 @@
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
+    ecs::query::QueryData,
     prelude::*,
     render::camera::Viewport,
 };
@@ -22,6 +23,7 @@ use self::widgets::{hierarchy, inspector, timeline};
 pub mod colors;
 pub mod images;
 mod theme;
+mod tiles;
 mod utils;
 mod widgets;
 
@@ -39,6 +41,9 @@ pub struct HoveredEntity(pub Option<EntityPair>);
 
 #[derive(Resource, Default)]
 pub struct EntityFilter(pub String);
+
+#[derive(Component)]
+pub struct ViewportRect(pub Option<egui::Rect>);
 
 #[derive(Clone, Copy)]
 pub struct EntityPair {
@@ -72,10 +77,13 @@ impl Plugin for UiPlugin {
             .init_resource::<SelectedEntity>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
+            .init_resource::<tiles::TileState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
-            .add_systems(Update, render_viewport.after(render))
-            .add_systems(Update, set_camera_viewport.after(render_viewport));
+            .add_systems(Update, tiles::render_tiles.after(render))
+            .add_systems(Update, render_viewport_ui.after(render))
+            .add_systems(Update, set_camera_viewport.after(tiles::render_tiles))
+            .add_systems(PostStartup, tiles::setup_default_tiles);
     }
 }
 
@@ -259,7 +267,8 @@ pub fn render(
         });
 }
 
-pub fn render_viewport(
+#[allow(clippy::too_many_arguments)]
+pub fn render_viewport_ui(
     mut contexts: EguiContexts,
     window: Query<&Window>,
     entities_meta: Query<EntityMeta>,
@@ -334,46 +343,62 @@ pub fn render_viewport(
     }
 }
 
-pub fn set_camera_viewport(
+#[derive(QueryData)]
+#[query_data(mutable)]
+struct CameraViewportQuery {
+    entity: Entity,
+    camera: &'static mut Camera,
+    cam_transform: &'static mut Transform,
+    grid_cell: &'static mut GridCell<i128>,
+    viewport_rect: &'static ViewportRect,
+}
+
+fn set_camera_viewport(
     window: Query<&Window>,
     egui_settings: Res<bevy_egui::EguiSettings>,
-    mut contexts: EguiContexts,
-    mut main_camera_query: Query<
-        (Entity, &mut Camera, &mut Transform, &mut GridCell<i128>),
-        With<MainCamera>,
-    >,
+    mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
     selected_entity: ResMut<SelectedEntity>,
     entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
     mut commands: Commands,
 ) {
-    let available_rect = contexts.ctx_mut().available_rect();
+    for CameraViewportQueryItem {
+        entity,
+        mut camera,
+        mut cam_transform,
+        mut grid_cell,
+        viewport_rect,
+    } in main_camera_query.iter_mut()
+    {
+        let Some(available_rect) = viewport_rect.0 else {
+            camera.is_active = false;
+            continue;
+        };
+        camera.is_active = true;
+        let window = window.single();
+        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
+        let viewport_size = available_rect.size() * scale_factor;
+        if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
+            return;
+        }
+        camera.viewport = Some(Viewport {
+            physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
+            physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
+            depth: 0.0..1.0,
+        });
 
-    let window = window.single();
-    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
-    let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
-    let viewport_size = available_rect.size() * scale_factor;
-    if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
-        return;
-    }
-
-    let (entity, mut camera, mut cam_transform, mut grid_cell) = main_camera_query.single_mut();
-    camera.viewport = Some(Viewport {
-        physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
-        physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
-        depth: 0.0..1.0,
-    });
-
-    let mut entity = commands.entity(entity);
-    if selected_entity.is_changed() {
-        if let Some(entity_pair) = selected_entity.0 {
-            if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
-                entity.set_parent(entity_pair.bevy);
-                let rot_matrix = Mat3::from_quat(cam_transform.rotation);
-                cam_transform.translation = rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, 10.0));
-                *grid_cell = *entity_cell;
+        let mut entity = commands.entity(entity);
+        if selected_entity.is_changed() {
+            if let Some(entity_pair) = selected_entity.0 {
+                if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
+                    entity.set_parent(entity_pair.bevy);
+                    let rot_matrix = Mat3::from_quat(cam_transform.rotation);
+                    cam_transform.translation = rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, 10.0));
+                    *grid_cell = *entity_cell;
+                }
+            } else {
+                entity.remove_parent();
             }
-        } else {
-            entity.remove_parent();
         }
     }
 }
