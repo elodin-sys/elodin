@@ -25,7 +25,7 @@ impl History {
                 .zip(final_world.archetypes.values_mut())
             {
                 add_time(tick_df, time)?;
-                final_df.vstack(tick_df)?;
+                final_df.vstack_mut(tick_df)?;
             }
         }
         Ok(Some(final_world))
