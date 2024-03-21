@@ -400,5 +400,11 @@ fn set_camera_viewport(
                 entity.remove_parent();
             }
         }
+
+        if let Some(entity_pair) = selected_entity.0 {
+            if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
+                *grid_cell = *entity_cell;
+            }
+        }
     }
 }
