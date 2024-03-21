@@ -99,8 +99,10 @@ impl From<nox::SpatialMotion<f64>> for SpatialMotion {
 #[pymethods]
 impl SpatialMotion {
     #[new]
-    fn new(arr: PyObject) -> Self {
-        nox::SpatialMotion::from_op(Noxpr::jax(arr)).into()
+    fn new(angular: PyObject, linear: PyObject) -> Self {
+        let angular = Vector::from_op(Noxpr::jax(angular));
+        let linear = Vector::from_op(Noxpr::jax(linear));
+        nox::SpatialMotion::new(angular, linear).into()
     }
 
     #[staticmethod]
@@ -221,6 +223,10 @@ impl SpatialForce {
     fn shape(&self) -> PyObject {
         Python::with_gil(|py| PyTuple::new(py, [6]).into())
     }
+
+    fn __add__(&self, other: &SpatialForce) -> Self {
+        (self.inner.clone() + other.inner.clone()).into()
+    }
 }
 
 #[derive(Clone)]
@@ -281,6 +287,10 @@ impl Quaternion {
             Scalar::from_op(Noxpr::jax(angle)),
         )
         .into()
+    }
+
+    fn normalize(&self) -> Self {
+        self.inner.clone().normalize().into()
     }
 }
 
