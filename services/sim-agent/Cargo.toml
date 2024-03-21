@@ -64,6 +64,8 @@ nox = { path = "../../libs/nox" }
 nox-ecs = { path = "../../libs/nox-ecs" }
 atc-entity = { path = "../../libs/atc/entity" }
 tower = "0.4.13"
+crc = "3.0.1"
+gethostname = "0.4.3"
 
 sea-orm.version = "0.12"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]
