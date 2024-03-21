@@ -9,7 +9,6 @@ pub const INTERFACE_BACKGROUND_BLACK: Color32 = Color32::from_rgb(0x17, 0x16, 0x
 
 pub const WHITE: Color32 = Color32::WHITE;
 pub const CREMA: Color32 = Color32::from_rgb(255, 251, 240);
-pub const CREMA_60: Color32 = Color32::from_rgba_premultiplied(153, 150, 144, 153);
 
 pub const GREY_OPACITY_500: Color32 = Color32::from_rgb(0x99, 0x99, 0x99);
 
@@ -43,5 +42,6 @@ pub mod bevy {
     use bevy::prelude::Color;
     pub const RED: Color = Color::rgb(0.91, 0.29, 0.08);
     pub const GREEN: Color = Color::rgb(0.53, 0.87, 0.62);
-    pub const BLUE: Color = Color::rgb(0.0, 0.78, 1.0);
+    pub const BLUE: Color = Color::rgb(0.08, 0.38, 0.82);
+    pub const GREY_900: Color = Color::rgb(0.2, 0.2, 0.2);
 }

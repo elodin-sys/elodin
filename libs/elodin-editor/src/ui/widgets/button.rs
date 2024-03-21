@@ -32,6 +32,11 @@ impl ImageButton {
         self
     }
 
+    pub fn bg_color(mut self, background_color: Color32) -> Self {
+        self.background_color = background_color;
+        self
+    }
+
     fn render(&mut self, ui: &mut egui::Ui) -> Response {
         // Set widget size and allocate space
         let min_interact_size = ui.spacing().interact_size.y;

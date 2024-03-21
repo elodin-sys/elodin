@@ -22,14 +22,13 @@ use bevy::{
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
-use bevy_infinite_grid::GridShadowCamera;
 use bevy_mod_picking::prelude::*;
 use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use bevy_web_asset::WebAssetPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{well_known::WorldPos, ControlMsg};
-use plugins::navigation_gizmo::NavigationGizmoPlugin;
+use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
 use ui::{EntityMeta, EntityPair, HoveredEntity, SelectedEntity};
 
@@ -50,18 +49,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/frame_forward.png");
         embedded_asset!(app, "assets/icons/frame_back.png");
         embedded_asset!(app, "assets/icons/search.png");
-        embedded_asset!(app, "assets/textures/cube_side_top.png");
-        embedded_asset!(app, "assets/textures/cube_side_bottom.png");
-        embedded_asset!(app, "assets/textures/cube_side_front.png");
-        embedded_asset!(app, "assets/textures/cube_side_back.png");
-        embedded_asset!(app, "assets/textures/cube_side_right.png");
-        embedded_asset!(app, "assets/textures/cube_side_left.png");
-        embedded_asset!(app, "assets/textures/cube_side_corner.png");
-        embedded_asset!(app, "assets/textures/cube_side_edge.png");
+        embedded_asset!(app, "assets/icons/add.png");
+        embedded_asset!(app, "assets/icons/close.png");
     }
 }
-
-const NAVIGATION_GIZMO_LAYER: RenderLayers = RenderLayers::layer(1);
 
 pub struct EditorPlugin;
 
@@ -118,11 +109,12 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(TweeningPlugin)
             .add_systems(Startup, setup_main_camera)
-            .add_systems(Startup, setup_grid)
+            //.add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
+            .add_systems(Update, set_floating_origin)
             .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()));
 
         #[cfg(target_os = "macos")]
@@ -139,30 +131,66 @@ impl Plugin for EditorPlugin {
     }
 }
 
-fn setup_grid(_commands: Commands) {
-    // use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
-    // commands.spawn(InfiniteGridBundle {
-    //     settings: InfiniteGridSettings {
-    //         minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-    //         major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-    //         z_axis_color: Color::hex("#264FFF").unwrap(),
-    //         x_axis_color: Color::hex("#EE3A43").unwrap(),
-    //         shadow_color: None,
-    //         ..Default::default()
-    //     },
-    //     ..default()
-    // });
-}
+// fn setup_grid(mut commands: Commands) {
+//     commands.spawn(InfiniteGridBundle {
+//         settings: InfiniteGridSettings {
+//             minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+//             major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+//             z_axis_color: Color::hex("#264FFF").unwrap(),
+//             x_axis_color: Color::hex("#EE3A43").unwrap(),
+//             shadow_color: None,
+//             ..Default::default()
+//         },
+//         ..default()
+//     });
+// }
 
 #[derive(Component)]
 pub struct MainCamera;
 
-fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // return the id so it can be fetched below
-    // commands.insert_resource(AmbientLight {
-    //     color: Color::WHITE,
-    //     brightness: 0.15,
-    // });
+fn setup_main_camera(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+) {
+    spawn_main_camera(
+        &mut commands,
+        &asset_server,
+        &mut meshes,
+        &mut materials,
+        &mut render_layer_alloc,
+    );
+    commands.spawn((
+        FloatingOrigin,
+        GridCell::<i128>::default(),
+        Transform::IDENTITY,
+    ));
+}
+
+fn spawn_main_camera(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+) -> Entity {
+    // For adding features incompatible with wasm:
+    if cfg!(not(target_arch = "wasm32")) {
+        // .insert(ScreenSpaceAmbientOcclusionBundle {
+        //     settings: ScreenSpaceAmbientOcclusionSettings {
+        //         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+        //     },
+        //     ..Default::default()
+        // });
+        // NOTE: Crashes custom camera viewport
+        // camera.insert(TemporalAntiAliasBundle::default());
+
+        commands.spawn(ScreenSpaceAmbientOcclusionSettings {
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+        });
+    }
     let mut camera = commands.spawn((
         Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
@@ -182,7 +210,6 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
         RenderLayers::default(),
         MainCamera,
-        FloatingOrigin,
         GridCell::<i128>::default(),
         EditorCam {
             orbit_constraint: OrbitConstraint::Fixed {
@@ -194,9 +221,7 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
     ));
 
-    camera
-        .insert(BloomSettings { ..default() })
-        .insert(GridShadowCamera);
+    camera.insert(BloomSettings { ..default() });
 
     camera.insert(EnvironmentMapLight {
         diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
@@ -204,20 +229,23 @@ fn setup_main_camera(mut commands: Commands, asset_server: Res<AssetServer>) {
         intensity: 2000.0,
     });
 
-    // For adding features incompatible with wasm:
-    if cfg!(not(target_arch = "wasm32")) {
-        // .insert(ScreenSpaceAmbientOcclusionBundle {
-        //     settings: ScreenSpaceAmbientOcclusionSettings {
-        //         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
-        //     },
-        //     ..Default::default()
-        // });
-        // NOTE: Crashes custom camera viewport
-        // camera.insert(TemporalAntiAliasBundle::default());
+    let camera = camera.id();
 
-        commands.spawn(ScreenSpaceAmbientOcclusionSettings {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
-        });
+    spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
+    camera
+}
+
+#[allow(clippy::type_complexity)]
+fn set_floating_origin(
+    query: Query<(&Transform, &GridCell<i128>), (With<MainCamera>, Without<FloatingOrigin>)>,
+    mut floating_origin: Query<(&mut Transform, &mut GridCell<i128>), With<FloatingOrigin>>,
+) {
+    let Some((transform, grid_cell)) = query.iter().next() else {
+        return;
+    };
+    for (mut origin, mut cell) in floating_origin.iter_mut() {
+        *origin = *transform;
+        *cell = *grid_cell;
     }
 }
 

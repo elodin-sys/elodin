@@ -1,16 +1,53 @@
-use bevy_egui::egui::{self, FontData, FontDefinitions, FontFamily};
+use bevy_egui::egui::{
+    self, epaint::Shadow, Color32, FontData, FontDefinitions, FontFamily, Margin, Rounding, Stroke,
+};
 
-use super::colors;
+use super::colors::{self, with_opacity};
 
 pub fn set_theme(context: &mut egui::Context) {
     let mut style = (*context.style()).clone();
 
     style.spacing.item_spacing = egui::vec2(0., 0.);
     style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, colors::BORDER_GREY);
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::CREMA);
+    style.visuals.widgets.hovered.bg_stroke =
+        egui::Stroke::new(1.0, with_opacity(colors::CREMA, 0.6));
+    style.visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, colors::BORDER_GREY);
+
+    style.visuals.widgets.noninteractive.fg_stroke.color = colors::CREMA;
+    style.visuals.widgets.inactive.fg_stroke.color = colors::CREMA;
+    style.visuals.widgets.active.fg_stroke.color = colors::CREMA;
+
+    style.visuals.widgets.noninteractive.bg_fill = colors::STONE_950;
+    style.visuals.widgets.active.bg_fill = colors::STONE_950;
+    style.visuals.widgets.hovered.bg_fill = colors::STONE_950;
+    style.visuals.widgets.open.bg_fill = colors::STONE_950;
+    style.visuals.widgets.inactive.bg_fill = colors::STONE_950;
+
+    style.visuals.widgets.noninteractive.weak_bg_fill = colors::STONE_950;
+    style.visuals.widgets.active.weak_bg_fill = colors::STONE_950;
+    style.visuals.widgets.hovered.weak_bg_fill = colors::STONE_950;
+    style.visuals.widgets.open.weak_bg_fill = colors::STONE_950;
+    style.visuals.widgets.inactive.weak_bg_fill = colors::STONE_950;
+
+    style.visuals.menu_rounding = rounding_xxs();
+    style.visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(0x3d, 0x3d, 0x3d));
+    style.visuals.window_shadow = Shadow {
+        extrusion: 4.0,
+        color: colors::with_opacity(colors::BLACK, 0.25),
+    };
+    style.visuals.window_fill = colors::STONE_950;
+
+    style.spacing.menu_margin = Margin::same(8.0);
+    style.spacing.window_margin = Margin::same(8.0);
 
     context.set_fonts(configure_default_fonts());
 
     context.set_style(style);
+}
+
+fn rounding_xxs() -> Rounding {
+    Rounding::same(2.0)
 }
 
 fn configure_default_fonts() -> FontDefinitions {
