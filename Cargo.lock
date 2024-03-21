@@ -5985,6 +5985,7 @@ dependencies = [
  "postcard",
  "pyo3",
  "pyo3-asyncio",
+ "pyo3-polars",
  "thiserror",
  "tokio",
  "tracing",
@@ -7357,6 +7358,18 @@ dependencies = [
  "pyo3-build-config",
  "quote",
  "syn 2.0.53",
+]
+
+[[package]]
+name = "pyo3-polars"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6ab8ad08494161085fb0d2d9de82c7fde7398da1778ee7e7a5a596ff4201f5b"
+dependencies = [
+ "polars",
+ "polars-core",
+ "pyo3",
+ "thiserror",
 ]
 
 [[package]]

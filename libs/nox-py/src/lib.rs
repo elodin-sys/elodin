@@ -33,6 +33,7 @@ mod graph;
 mod spatial;
 
 pub use graph::*;
+use pyo3_polars::PyDataFrame;
 pub use spatial::*;
 
 #[pyclass]
@@ -149,6 +150,10 @@ impl ComponentId {
         } else {
             Err(Error::UnexpectedInput)
         }
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.0.to_string()
     }
 }
 
@@ -776,6 +781,12 @@ pub struct Exec {
 impl Exec {
     pub fn run(&mut self, client: &Client) -> Result<(), Error> {
         Python::with_gil(|_| self.exec.run(&client.client).map_err(Error::from))
+    }
+
+    pub fn history(&self) -> Result<PyDataFrame, Error> {
+        let polars_world = self.exec.history.compact_to_world()?.unwrap();
+        let df = polars_world.join_archetypes()?;
+        Ok(PyDataFrame(df))
     }
 
     fn column_array(

@@ -12,6 +12,8 @@
           python3Packages.jaxlib
           python3Packages.typing-extensions
           python3Packages.pytest
+          python3Packages.matplotlib
+          python3Packages.polars
           openssl
           clang
           protobuf
