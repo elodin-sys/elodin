@@ -47,6 +47,23 @@ pub struct ColumnMetadata {
 }
 
 impl PolarsWorld {
+    pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
+        let mut tables = self.archetypes.values();
+        let init = tables.next().cloned().unwrap_or_default();
+        let column_name = ENTITY_ID_COMPONENT.0.to_string();
+        let keys = [&column_name, "time"];
+        tables
+            .try_fold(init, |agg, df| {
+                agg.join(
+                    df,
+                    &keys,
+                    &keys,
+                    JoinArgs::new(JoinType::Outer { coalesce: true }),
+                )
+            })
+            .map_err(Error::from)
+    }
+
     pub fn write_to_dir(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
         let path = path.as_ref();
         std::fs::create_dir_all(path)?;
