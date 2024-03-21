@@ -22,9 +22,7 @@ use bevy::{
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
-use bevy_infinite_grid::{
-    GridShadowCamera, InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings,
-};
+use bevy_infinite_grid::GridShadowCamera;
 use bevy_mod_picking::prelude::*;
 use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
@@ -111,7 +109,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
-            .add_plugins(InfiniteGridPlugin)
+            //.add_plugins(InfiniteGridPlugin)
             .add_plugins(PolylinePlugin)
             .add_plugins(TracesPlugin)
             .add_plugins(NavigationGizmoPlugin)
@@ -141,18 +139,19 @@ impl Plugin for EditorPlugin {
     }
 }
 
-fn setup_grid(mut commands: Commands) {
-    commands.spawn(InfiniteGridBundle {
-        settings: InfiniteGridSettings {
-            minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-            major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-            z_axis_color: Color::hex("#264FFF").unwrap(),
-            x_axis_color: Color::hex("#EE3A43").unwrap(),
-            shadow_color: None,
-            ..Default::default()
-        },
-        ..default()
-    });
+fn setup_grid(_commands: Commands) {
+    // use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
+    // commands.spawn(InfiniteGridBundle {
+    //     settings: InfiniteGridSettings {
+    //         minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+    //         major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+    //         z_axis_color: Color::hex("#264FFF").unwrap(),
+    //         x_axis_color: Color::hex("#EE3A43").unwrap(),
+    //         shadow_color: None,
+    //         ..Default::default()
+    //     },
+    //     ..default()
+    // });
 }
 
 #[derive(Component)]
