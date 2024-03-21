@@ -3,6 +3,8 @@ import typing
 import elodin as el
 from jax import numpy as jnp
 from jax import random
+import matplotlib.pyplot as plt
+import polars as pl
 
 TIME_STEP = 1.0 / 120.0
 G = 6.6743e-11
@@ -60,16 +62,37 @@ def bounce(q: el.Query[el.WorldPos, el.WorldVel]) -> el.Query[el.WorldVel]:
     )
 
 
-w = el.WorldBuilder()
-w.spawn(Globals(seed=jnp.int64(1))).metadata(el.EntityMetadata("Globals"))
-w.spawn(
-    el.Body(
-        world_pos=el.WorldPos.from_linear(jnp.array([0.0, 6.0, 0.0])),
-        pbr=w.insert_asset(
-            el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
-        ),
-    )
-).metadata(el.EntityMetadata("Ball"))
-effectors = gravity.pipe(apply_wind)
-sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
-w.run(sys, TIME_STEP)
+def run(seed: int) -> pl.DataFrame:
+    w = el.WorldBuilder()
+    w.spawn(Globals(seed=jnp.int64(seed))).metadata(el.EntityMetadata("Globals"))
+    w.spawn(
+        el.Body(
+            world_pos=el.WorldPos.from_linear(jnp.array([0.0, 6.0, 0.0])),
+            pbr=w.insert_asset(
+                el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
+            ),
+        )
+    ).metadata(el.EntityMetadata("Ball"))
+    effectors = gravity.pipe(apply_wind)
+    sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
+    exec = w.build(sys)
+
+    client = el.Client.cpu()
+    for _ in range(1000):
+        exec.run(client)
+    return exec.history()
+
+
+# This is a bit awkward, support df["world_pos"]
+world_pos_id = str(el.Component.id(el.WorldPos))
+
+fig, ax = plt.subplots()
+
+for i in range(10, 20):
+    df = run(i)
+    df = df.sort("time").select(["time", world_pos_id]).drop_nulls()
+    height = df[world_pos_id].arr.get(5)
+    time = df["time"]
+    ax.plot(time, height)
+
+plt.show()
