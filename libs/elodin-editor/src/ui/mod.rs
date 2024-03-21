@@ -370,11 +370,21 @@ fn set_camera_viewport(
     } in main_camera_query.iter_mut()
     {
         let Some(available_rect) = viewport_rect.0 else {
+            camera.order = 0;
             camera.is_active = false;
+            camera.viewport = Some(Viewport {
+                physical_position: UVec2::new(0, 0),
+                physical_size: UVec2::new(1, 1),
+                depth: 0.0..1.0,
+            });
+
             continue;
         };
         camera.is_active = true;
-        let window = window.single();
+        camera.order = 1;
+        let Some(window) = window.iter().next() else {
+            continue;
+        };
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
