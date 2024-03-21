@@ -600,9 +600,15 @@ impl Component {
         py: Python<'_>,
         id: PyObject,
         ty: ComponentType,
-        name: Option<String>,
+        mut name: Option<String>,
         asset: Option<bool>,
     ) -> Result<Self, Error> {
+        if name.is_none() {
+            if let Ok(id) = id.extract::<String>(py) {
+                name = Some(id)
+            }
+        }
+
         let id = if let Ok(id) = id.extract::<ComponentId>(py) {
             id
         } else {
