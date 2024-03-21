@@ -1,6 +1,7 @@
 #!/bin/sh
 
-cid=${CID:-3}
+hostname_cksum="$(hostname | tr -d '\n' | cksum | cut -d " " -f1)"
+cid=${CID:-$hostname_cksum}
 qemu-system-x86_64 \
     -machine microvm,rtc=on \
     -bios vm/bios.bin \
