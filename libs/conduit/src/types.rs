@@ -23,6 +23,12 @@ use crate::query::MetadataStore;
 #[repr(transparent)]
 pub struct EntityId(pub u64);
 
+impl EntityId {
+    pub fn component_id() -> ComponentId {
+        ComponentId::new("entity_id")
+    }
+}
+
 impl From<u64> for EntityId {
     fn from(val: u64) -> Self {
         EntityId(val)

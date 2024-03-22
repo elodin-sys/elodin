@@ -1,4 +1,4 @@
-use crate::{Component, ComponentArray, Error, SystemParam};
+use crate::{Component, ComponentArray, ComponentExt, Error, SystemParam};
 use conduit::{ComponentId, ComponentType, EntityId};
 use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
 use smallvec::{smallvec, SmallVec};
