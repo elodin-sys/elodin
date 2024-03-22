@@ -86,7 +86,6 @@ impl ColumnMsg<Bytes> {
             }
 
             let Some(adapter) = component_map.0.get(&component_id) else {
-                warn!(?component_id, "unknown insert fn");
                 continue;
             };
 
@@ -263,6 +262,9 @@ impl AppExt for bevy::app::App {
 #[derive(Debug, Resource, Deref, DerefMut)]
 pub struct ConduitRx(pub flume::Receiver<MsgPair>);
 
+#[derive(Component)]
+pub struct Persistent;
+
 #[allow(clippy::too_many_arguments)]
 fn recv_system(
     rx: Res<ConduitRx>,
@@ -279,6 +281,8 @@ fn recv_system(
     mut tick_res: ResMut<Tick>,
     mut sim_peer: ResMut<SimPeer>,
     mut value_map: Query<&mut ComponentValueMap>,
+    children: Query<&Children>,
+    persistent_query: Query<&mut Parent, With<Persistent>>,
 ) {
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
@@ -286,6 +290,7 @@ fn recv_system(
             Msg::Control(ControlMsg::StartSim {
                 metadata_store: new_metadata_store,
                 time_step,
+                entity_ids,
             }) => {
                 tracing::debug!("received startsim, sending subscribe messages");
                 *metadata_store = new_metadata_store;
@@ -299,12 +304,27 @@ fn recv_system(
                 }
                 let _ = sim_peer.tx.insert(tx);
 
-                for (_, entity) in entity_map.iter() {
-                    if let Some(entity_commands) = commands.get_entity(*entity) {
-                        entity_commands.despawn_recursive();
+                for (_, &entity) in entity_map.0.iter() {
+                    if let Ok(children) = children.get(entity) {
+                        for child in children.iter() {
+                            if persistent_query.get(*child).is_err() {
+                                if let Some(entity) = commands.get_entity(*child) {
+                                    entity.despawn_recursive();
+                                }
+                            }
+                        }
                     }
                 }
-                entity_map.0 = HashMap::new();
+                entity_map.0.retain(|id, entity| {
+                    if entity_ids.contains(id) {
+                        true
+                    } else {
+                        if let Some(entity) = commands.get_entity(*entity) {
+                            entity.despawn_recursive();
+                        }
+                        false
+                    }
+                });
             }
             Msg::Control(ControlMsg::Subscribe { query }) => {
                 let subscription = Subscription {
