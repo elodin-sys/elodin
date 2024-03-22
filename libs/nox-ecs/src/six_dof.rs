@@ -8,10 +8,8 @@ use std::ops::{Add, Mul};
 use crate::ComponentArray;
 
 #[derive(Clone, Component)]
-#[nox(name = "world_vel")]
 pub struct WorldVel(pub SpatialMotion<f64>);
 #[derive(Clone, Component)]
-#[nox(name = "world_accel")]
 pub struct WorldAccel(pub SpatialMotion<f64>);
 
 #[derive(FromBuilder, ComponentGroup, IntoOp)]
@@ -60,10 +58,8 @@ impl Mul<DU> for f64 {
 }
 
 #[derive(Clone, Component)]
-#[nox(name = "force")]
 pub struct Force(pub SpatialForce<f64>);
 #[derive(Clone, Component)]
-#[nox(name = "inertia")]
 pub struct Inertia(pub SpatialInertia<f64>);
 
 fn calc_accel(q: Query<(Force, Inertia)>) -> Query<WorldAccel> {
