@@ -213,7 +213,6 @@ class FromArray(Protocol):
         ...
 
 
-
 class Archetype(Protocol):
     def archetype_id(self) -> int:
         return abs(hash(type(self).__name__))
@@ -267,6 +266,7 @@ PbrAsset = Annotated[Handle, Component(241, ComponentType.U64, "pbr_asset", True
 EntityMetadataAsset = Annotated[Handle, Component(242, ComponentType.U64, "metadata_asset", True)]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
 GizmoAsset = Annotated[Handle, Component(2243, ComponentType.U64, "gizmo_asset", True)]
+PanelAsset = Annotated[Handle, Component(2244, ComponentType.U64, "panel_asset", True)]
 
 class C:
     def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
@@ -306,14 +306,19 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
 
 
 class World(WorldBuilder):
-    def run(self, sys: System, time_step: Optional[float] = None, client: Optional[Client] = None):
+    def run(
+        self,
+        system: System,
+        time_step: Optional[float] = None,
+        client: Optional[Client] = None,
+    ):
         current_frame = inspect.currentframe()
         if current_frame is None:
             raise Exception("No current frame")
         frame = current_frame.f_back
         if frame is None:
             raise Exception("No previous frame")
-        addr = super().run(sys, time_step, client)
+        addr = super().run(system, time_step, client)
         locals = frame.f_locals
         if addr is not None:
             conduit_client = Conduit.tcp(addr)

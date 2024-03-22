@@ -139,9 +139,7 @@ impl<S: WorldStore> Default for World<S> {
 
 impl<S: WorldStore> World<S> {
     pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRefMut<'_, S>> {
-        let Some(id) = self.component_map.get(&C::component_id()) else {
-            return None;
-        };
+        let id = self.component_map.get(&C::component_id())?;
         let archetype = self.archetypes.get_mut(id)?;
         let column = archetype.columns.get_mut(&C::component_id())?;
         Some(ColumnRefMut {
@@ -167,9 +165,7 @@ impl<S: WorldStore> World<S> {
     }
 
     pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<ColumnRefMut<'_, S>> {
-        let Some(table_id) = self.component_map.get(&id) else {
-            return None;
-        };
+        let table_id = self.component_map.get(&id)?;
         let archetype = self.archetypes.get_mut(table_id)?;
         let column = archetype.columns.get_mut(&id)?;
         Some(ColumnRefMut {

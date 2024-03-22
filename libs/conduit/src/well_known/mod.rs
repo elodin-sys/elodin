@@ -11,9 +11,11 @@ mod bevy_conv;
 mod metadata;
 mod pbr;
 mod primitives;
+mod viewer;
 
 pub use metadata::*;
 pub use pbr::*;
+pub use viewer::*;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
