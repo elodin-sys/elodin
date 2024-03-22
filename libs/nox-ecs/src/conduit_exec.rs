@@ -113,11 +113,21 @@ impl ConduitExec {
             return Ok(());
         }
         tracing::debug!("received connect, sending metadata");
+        let entity_ids = self
+            .exec
+            .world
+            .host
+            .archetypes
+            .values()
+            .flat_map(|arch| arch.entity_map.keys())
+            .copied()
+            .collect();
         conn.send(Packet {
             stream_id: StreamId::CONTROL,
             payload: Payload::ControlMsg(ControlMsg::StartSim {
                 metadata_store: self.metadata_store.clone(),
                 time_step: self.exec.time_step(),
+                entity_ids,
             }),
         })?;
         self.connections.push(conn);
