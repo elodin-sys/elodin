@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use conduit::{Asset, AssetId};
+use conduit::{Asset, AssetId, ComponentId, ComponentValue};
 use nox::{FromBuilder, IntoOp, Noxpr};
 use serde::{Deserialize, Serialize};
 
@@ -44,10 +44,6 @@ impl<T> FromBuilder for Handle<T> {
 }
 
 impl<T: Asset> crate::Component for Handle<T> {
-    fn name() -> String {
-        format!("asset_handle_{}", T::ASSET_ID.0)
-    }
-
     fn component_type() -> conduit::ComponentType {
         conduit::ComponentType::u64()
     }
@@ -101,5 +97,20 @@ impl AssetStore {
     pub fn gen<C>(&self, handle: Handle<C>) -> Option<usize> {
         let val = self.data.get(handle.id as usize)?;
         Some(val.generation)
+    }
+}
+
+pub trait ErasedComponent: Send + Sync {
+    fn component_id(&self) -> ComponentId;
+    fn component_value(&self) -> ComponentValue<'_>;
+}
+
+impl<T: conduit::Component + Send + Sync> ErasedComponent for T {
+    fn component_id(&self) -> ComponentId {
+        T::component_id()
+    }
+
+    fn component_value(&self) -> ComponentValue<'_> {
+        conduit::Component::component_value(self)
     }
 }

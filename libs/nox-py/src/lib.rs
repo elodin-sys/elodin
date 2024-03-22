@@ -14,7 +14,7 @@ use conduit::well_known::GizmoType;
 use nox_ecs::{
     conduit, join_many,
     nox::{self, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
-    spawn_tcp_server, ArchetypeName, ComponentArray, ErasedSystem, HostColumn, HostStore,
+    spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore,
     SharedWorld, System, Table, World,
 };
 use nox_ecs::{
@@ -137,10 +137,11 @@ pub struct ComponentId {
 #[pymethods]
 impl ComponentId {
     #[new]
-    fn new(py: Python<'_>, inner: PyObject) -> Result<Self, Error> {
+    fn new(py: Python<'_>, inner: PyObject, ty: ComponentType) -> Result<Self, Error> {
         if let Ok(s) = inner.extract::<String>(py) {
+            let ty = conduit::ComponentType::from(ty);
             Ok(Self {
-                inner: conduit::ComponentId::new(&s),
+                inner: conduit::ComponentId::new(&format!("{s}:{ty}")),
             })
         } else if let Ok(s) = inner.extract::<u64>(py) {
             Ok(Self {
@@ -304,8 +305,8 @@ impl WorldBuilder {
         &mut self,
         archetype: &Archetype,
     ) -> Result<&mut Table<HostStore>, Error> {
-        let archetype_name = archetype.archetype_name;
-        match self.world.archetypes.entry(archetype_name) {
+        let archetype_id = archetype.archetype_id;
+        match self.world.archetypes.entry(archetype_id) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
                 let columns = archetype
@@ -333,11 +334,15 @@ impl WorldBuilder {
                     )
                     .collect::<Result<_, Error>>()?;
                 for id in &archetype.component_ids {
-                    self.world.component_map.insert(id.inner, archetype_name);
+                    self.world.component_map.insert(id.inner, archetype_id);
                 }
                 let table = Table {
                     columns,
-                    ..Default::default()
+                    entity_buffer: HostColumn::new(
+                        conduit::ComponentType::u64(),
+                        conduit::ComponentId::new("entity_id"),
+                    ),
+                    entity_map: BTreeMap::default(),
                 };
                 Ok(entry.insert(table))
             }
@@ -612,7 +617,7 @@ impl Component {
         let id = if let Ok(id) = id.extract::<ComponentId>(py) {
             id
         } else {
-            ComponentId::new(py, id)?
+            ComponentId::new(py, id, ty.clone())?
         };
         let metadata = name
             .into_iter()
@@ -700,15 +705,13 @@ pub struct Archetype<'py> {
     component_datas: Vec<Component>,
     component_ids: Vec<ComponentId>,
     arrays: Vec<&'py PyUntypedArray>,
-    archetype_name: ArchetypeName,
+    archetype_id: ArchetypeId,
 }
 
 impl<'s> FromPyObject<'s> for Archetype<'s> {
     fn extract(archetype: &'s PyAny) -> PyResult<Self> {
-        let archetype_name = archetype
-            .call_method0("archetype_name")?
-            .extract::<String>()?;
-        let archetype_name = ArchetypeName::from(archetype_name.as_str());
+        let archetype_id = archetype.call_method0("archetype_id")?.extract::<u64>()?;
+        let archetype_id = ArchetypeId::new(archetype_id.into());
         let component_datas = archetype
             .call_method0("component_data")?
             .extract::<Vec<Component>>()?;
@@ -722,7 +725,7 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
             component_datas,
             component_ids,
             arrays,
-            archetype_name,
+            archetype_id,
         })
     }
 }
