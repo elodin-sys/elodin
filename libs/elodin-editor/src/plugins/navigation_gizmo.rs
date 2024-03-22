@@ -126,7 +126,7 @@ pub fn spawn_gizmo(
     let edges = [
         // top
         (
-            crate::ui::colors::bevy::BLUE,
+            crate::ui::colors::bevy::GREEN,
             Transform::from_xyz(0.0, distance, 0.0)
                 .with_rotation(Quat::from_rotation_x(consts::PI * 1.5)),
             side_clicked_cb(0.0, consts::PI / 2.0),
@@ -140,7 +140,7 @@ pub fn spawn_gizmo(
         ),
         // front
         (
-            crate::ui::colors::bevy::RED,
+            crate::ui::colors::bevy::BLUE,
             Transform::from_xyz(0.0, 0.0, distance),
             side_clicked_cb(0.0, 0.0),
         ),
@@ -153,7 +153,7 @@ pub fn spawn_gizmo(
         ),
         // right
         (
-            crate::ui::colors::bevy::GREEN,
+            crate::ui::colors::bevy::RED,
             Transform::from_xyz(distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
             side_clicked_cb(consts::PI / 2.0, 0.0),

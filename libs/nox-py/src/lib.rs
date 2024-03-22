@@ -10,10 +10,10 @@ use std::{
 };
 
 use clap::Parser;
-use conduit::well_known::GizmoType;
+use conduit::{well_known::GizmoType, AssetId};
 use nox_ecs::{
     conduit, join_many,
-    nox::{self, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
+    nox::{self, nalgebra::Vector3, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
     spawn_tcp_server, ArchetypeId, ComponentArray, ErasedSystem, HostColumn, HostStore,
     SharedWorld, System, Table, World,
 };
@@ -21,7 +21,9 @@ use nox_ecs::{
     conduit::{Asset, TagValue},
     join_query,
 };
-use numpy::{ndarray::ArrayViewD, PyArray, PyArray1, PyReadonlyArray1, PyUntypedArray};
+use numpy::{
+    ndarray::ArrayViewD, PyArray, PyArray1, PyArrayLike1, PyReadonlyArray1, PyUntypedArray,
+};
 use pyo3::{
     exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
@@ -415,7 +417,7 @@ impl WorldBuilder {
         Self::default()
     }
 
-    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: Archetype<'_>) -> Result<Entity, Error> {
+    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: Spawnable<'_>) -> Result<Entity, Error> {
         let entity_id = EntityId {
             inner: conduit::EntityId(slf.world.entity_len),
         };
@@ -430,31 +432,67 @@ impl WorldBuilder {
 
     pub fn spawn_with_entity_id(
         &mut self,
-        archetype: Archetype,
+        spawnable: Spawnable,
         entity_id: EntityId,
     ) -> Result<EntityId, Error> {
-        let entity_id = entity_id.inner;
-        let table = self.get_or_insert_archetype(&archetype)?;
-        table
-            .entity_map
-            .insert(entity_id, table.entity_buffer.len());
-        table.entity_buffer.push(entity_id.0.constant());
-        for (arr, id) in archetype
-            .arrays
-            .iter()
-            .zip(archetype.component_ids.into_iter())
-        {
-            let col = table
-                .columns
-                .get_mut(&id.inner)
-                .ok_or(nox_ecs::Error::ComponentNotFound)?;
-            let ty = col.buffer.component_type();
-            let size = ty.primitive_ty.element_type().element_size_in_bytes();
-            let buf = unsafe { arr.buf(size) };
-            col.buffer.push_raw(buf);
+        match spawnable {
+            Spawnable::Archetype(archetype) => {
+                let entity_id = entity_id.inner;
+                let table = self.get_or_insert_archetype(&archetype)?;
+                table
+                    .entity_map
+                    .insert(entity_id, table.entity_buffer.len());
+                table.entity_buffer.push(entity_id.0.constant());
+                for (arr, id) in archetype
+                    .arrays
+                    .iter()
+                    .zip(archetype.component_ids.into_iter())
+                {
+                    let col = table
+                        .columns
+                        .get_mut(&id.inner)
+                        .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                    let ty = col.buffer.component_type();
+                    let size = ty.primitive_ty.element_type().element_size_in_bytes();
+                    let buf = unsafe { arr.buf(size) };
+                    col.buffer.push_raw(buf);
+                }
+                self.world.entity_len += 1;
+                Ok(EntityId { inner: entity_id })
+            }
+            Spawnable::Asset { id, bytes } => {
+                let inner = self.world.assets.insert_bytes(id, bytes.bytes);
+                let component_id = conduit::ComponentId(id.0);
+                let archetype = Archetype {
+                    component_datas: vec![Component {
+                        id: ComponentId {
+                            inner: component_id,
+                        },
+                        ty: Python::with_gil(ComponentType::u64),
+                        asset: true,
+                        metadata: Default::default(),
+                    }],
+                    component_ids: vec![ComponentId {
+                        inner: component_id,
+                    }],
+                    arrays: vec![],
+                    archetype_id: ArchetypeId::new(id.0 as u128),
+                };
+
+                let table = self.get_or_insert_archetype(&archetype)?;
+                table
+                    .entity_map
+                    .insert(entity_id.inner, table.entity_buffer.len());
+                table.entity_buffer.push(entity_id.inner.0.constant());
+                let col = table
+                    .columns
+                    .get_mut(&component_id)
+                    .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                col.buffer.push_raw(&inner.id.to_le_bytes());
+                self.world.entity_len += 1;
+                Ok(entity_id)
+            }
         }
-        self.world.entity_len += 1;
-        Ok(EntityId { inner: entity_id })
     }
 
     fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
@@ -701,6 +739,76 @@ impl Gizmo {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct Panel {
+    inner: conduit::well_known::Panel,
+}
+
+#[pymethods]
+impl Panel {
+    #[staticmethod]
+    pub fn viewport(
+        track_entity: Option<EntityId>,
+        track_rotation: Option<bool>,
+        fov: Option<f32>,
+        active: Option<bool>,
+        pos: Option<PyArrayLike1<f32>>,
+        looking_at: Option<PyArrayLike1<f32>>,
+    ) -> PyResult<Self> {
+        let pos = if let Some(arr) = pos {
+            let slice = arr.as_slice()?;
+            if slice.len() != 3 {
+                return Err(PyValueError::new_err("transform must be 3x1 array"));
+            }
+            Vector3::new(slice[0], slice[1], slice[2])
+        } else {
+            Vector3::new(5.0, 5.0, 10.0)
+        };
+        let track_rotation = track_rotation.unwrap_or(true);
+        let mut viewport = conduit::well_known::Viewport {
+            track_entity: track_entity.map(|x| x.inner),
+            fov: fov.unwrap_or(45.0),
+            active: active.unwrap_or_default(),
+            pos,
+            track_rotation,
+            ..Default::default()
+        };
+        if let Some(pos) = looking_at {
+            let pos = pos.as_slice()?;
+            if pos.len() != 3 {
+                return Err(PyValueError::new_err("transform must be 3x1 array"));
+            }
+            let pos = Vector3::new(pos[0], pos[1], pos[2]);
+            viewport = viewport.looking_at(pos);
+        }
+        Ok(Self {
+            inner: conduit::well_known::Panel::Viewport(viewport),
+        })
+    }
+
+    pub fn asset_id(&self) -> u64 {
+        self.inner.asset_id().0
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
+    }
+
+    #[getter]
+    pub fn __metadata__(&self, py: Python<'_>) -> Result<((Component,),), Error> {
+        Ok(((Component {
+            id: ComponentId {
+                inner: conduit::ComponentId(2244),
+            },
+            ty: ComponentType::u64(py),
+            asset: true,
+            metadata: Default::default(),
+        },),))
+    }
+}
+
 pub struct Archetype<'py> {
     component_datas: Vec<Component>,
     component_ids: Vec<ComponentId>,
@@ -727,6 +835,26 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
             arrays,
             archetype_id,
         })
+    }
+}
+
+pub enum Spawnable<'py> {
+    Archetype(Archetype<'py>),
+    Asset { id: AssetId, bytes: PyBufBytes },
+}
+
+impl<'py> FromPyObject<'py> for Spawnable<'py> {
+    fn extract(ob: &'py PyAny) -> PyResult<Self> {
+        if let Ok(archetype) = Archetype::extract(ob) {
+            Ok(Self::Archetype(archetype))
+        } else {
+            let id: u64 = ob.call_method0("asset_id")?.extract()?;
+            let bytes = ob.call_method0("bytes")?.extract()?;
+            Ok(Self::Asset {
+                id: AssetId(id),
+                bytes,
+            })
+        }
     }
 }
 
@@ -891,7 +1019,7 @@ impl Entity {
         self.id.clone()
     }
 
-    pub fn insert(&mut self, py: Python<'_>, archetype: Archetype<'_>) -> Result<Self, Error> {
+    pub fn insert(&mut self, py: Python<'_>, archetype: Spawnable<'_>) -> Result<Self, Error> {
         let mut world = self.world.borrow_mut(py);
         world.spawn_with_entity_id(archetype, self.id())?;
         Ok(self.clone())
@@ -902,6 +1030,10 @@ impl Entity {
         let metadata = world.world.insert_asset(metadata.inner);
         world.world.spawn_with_id(metadata, self.id.inner);
         self.clone()
+    }
+
+    pub fn name(&mut self, py: Python<'_>, name: String) -> Self {
+        self.metadata(py, EntityMetadata::new(name, None))
     }
 }
 
@@ -1276,6 +1408,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<conduit_client::Conduit>()?;
     m.add_class::<Gizmo>()?;
     m.add_class::<Color>()?;
+    m.add_class::<Panel>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     Ok(())
 }

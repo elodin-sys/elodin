@@ -22,6 +22,7 @@ zstd = "0.13.0"
 bevy.version = "0.13"
 flume = "0.11.0"
 notify = "6.1.1"
+notify-debouncer-mini = { version = "0.4.1", default-features = false }
 tracing-subscriber = "0.3"
 
 elodin-types.path = "../../libs/elodin-types/rust"
