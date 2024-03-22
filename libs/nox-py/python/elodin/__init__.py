@@ -1,16 +1,5 @@
 from .elodin import *
-from typing import (
-    Protocol,
-    Generic,
-    TypeVar,
-    Any,
-    Callable,
-    Annotated,
-    Type,
-    Union,
-    Optional,
-    Tuple,
-)
+from typing import Protocol, Generic, TypeVar, Any, Callable, Annotated, Type, Union, Optional, Tuple
 from typing_extensions import TypeVarTuple, Unpack
 from dataclasses import dataclass
 from jax.tree_util import tree_flatten, tree_unflatten
@@ -21,10 +10,9 @@ import numpy
 import code
 import readline
 import rlcompleter
-import re
 
 
-__doc__ = elodin.__doc__  # type: ignore
+__doc__ = elodin.__doc__ # type: ignore
 
 jax.config.update("jax_enable_x64", True)
 
@@ -33,9 +21,11 @@ Self = TypeVar("Self")
 
 class System(Protocol):
     @staticmethod
-    def call(builder: PipelineBuilder): ...
+    def call(builder: PipelineBuilder):
+        ...
 
-    def init(self, builder: PipelineBuilder) -> PipelineBuilder: ...
+    def init(self, builder: PipelineBuilder) -> PipelineBuilder:
+        ...
 
     def pipe(self, other: Any) -> Any:
         return Pipe(self, other)
@@ -90,25 +80,19 @@ Q = TypeVar("Q", bound="Query[Any]")
 
 A = TypeVarTuple("A")
 
-
 class Query(Generic[Unpack[A]]):
     bufs: list[jax.Array]
     component_data: list[Component]
     component_classes: list[type[Any]]
     inner: QueryInner
 
-    def __init__(
-        self,
-        inner: QueryInner,
-        component_data: list[Component],
-        component_classes: list[type[Any]],
-    ):
+    def __init__(self, inner: QueryInner, component_data: list[Component], component_classes: list[type[Any]]):
         self.bufs = inner.arrays()
         self.inner = inner
         self.component_data = component_data
         self.component_classes = component_classes
 
-    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> "Query[O]":
+    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> 'Query[O]':
         buf = jax.vmap(
             lambda b: f(
                 *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]
@@ -117,22 +101,14 @@ class Query(Generic[Unpack[A]]):
             out_axes=0,
         )(self.bufs)
         (bufs, _) = tree_flatten(buf)
-        component_data = out_tp.__metadata__[0]  # type: ignore
-        return Query(
-            self.inner.map(bufs[0], component_data.to_metadata()),
-            [component_data],
-            [out_tp],
-        )
+        component_data = out_tp.__metadata__[0] # type: ignore
+        return Query(self.inner.map(bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
-    def join(self, other: "Query[Unpack[A]]") -> "Query[Any]":
-        return Query(
-            self.inner.join_query(other.inner),
-            self.component_data + other.component_data,
-            self.component_classes + other.component_classes,
-        )
+    def join(self, other: 'Query[Unpack[A]]') -> 'Query[Any]':
+        return Query(self.inner.join_query(other.inner), self.component_data + other.component_data, self.component_classes + other.component_classes)
 
     @staticmethod
-    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> "Query[Any]":
+    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> 'Query[Any]':
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
@@ -142,9 +118,7 @@ class Query(Generic[Unpack[A]]):
             component_data.append(data)
             component_classes.append(t_arg)
             ids.append(Component.id(t_arg))
-        return Query(
-            QueryInner.from_builder(builder, ids), component_data, component_classes
-        )
+        return Query(QueryInner.from_builder(builder, ids), component_data, component_classes)
 
     @staticmethod
     def init_builder(new_tp: type[Any], builder: PipelineBuilder):
@@ -162,7 +136,6 @@ class Query(Generic[Unpack[A]]):
     def insert_into_builder(self, builder: PipelineBuilder):
         self.inner.insert_into_builder(builder)
 
-
 def from_array(cls, arr):
     if hasattr(cls, "__origin__"):
         cls = cls.__origin__
@@ -171,31 +144,20 @@ def from_array(cls, arr):
     else:
         return cls.from_array(arr)
 
-
 E = TypeVar("E")
-
-
 class GraphQuery(Generic[E, Unpack[A]]):
     bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
     component_data: list[Component]
     component_classes: list[type[Any]]
     inner: GraphQueryInner
-
-    def __init__(
-        self,
-        inner: GraphQueryInner,
-        component_data: list[Component],
-        component_classes: list[type[Any]],
-    ):
+    def __init__(self, inner: GraphQueryInner, component_data: list[Component], component_classes: list[type[Any]]):
         self.bufs = inner.arrays()
         self.inner = inner
         self.component_data = component_data
         self.component_classes = component_classes
 
     @staticmethod
-    def from_builder(
-        new_tp: type[Any], builder: PipelineBuilder
-    ) -> "GraphQuery[E, Any]":
+    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> 'GraphQuery[E, Any]':
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
@@ -207,42 +169,25 @@ class GraphQuery(Generic[E, Unpack[A]]):
             data = t_arg.__metadata__[0]
             component_data.append(data)
             ids.append(Component.id(t_arg))
-        return GraphQuery(
-            GraphQueryInner.from_builder(builder, edge_id, ids),
-            component_data,
-            component_classes,
-        )
-
+        return GraphQuery(GraphQueryInner.from_builder(builder, edge_id, ids), component_data, component_classes)
     @staticmethod
     def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
             buf = builder.init_var(Component.id(t_arg), component_data.ty)
-
-    def edge_fold(
-        self, out_tp: type[O], init_value: O, fn: Callable[..., O]
-    ) -> "Query[O]":
+    def edge_fold(self, out_tp: type[O], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
         out_bufs: list[jax.typing.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)
-        for i, (f, to) in self.bufs.items():
-
+        for (i, (f, to)) in self.bufs.items():
             def vmap_inner(a):
                 (f, to) = a
-
                 def scan_inner(xs, to):
                     xs = tree_unflatten(init_value_tree, xs)
-                    args = [
-                        from_array(data, x)
-                        for (x, data) in zip(f, self.component_classes)
-                    ] + [
-                        from_array(data, x)
-                        for (x, data) in zip(to, self.component_classes)
-                    ]
+                    args = [from_array(data, x) for (x, data) in zip(f, self.component_classes)] + [from_array(data, x) for (x, data) in zip(to, self.component_classes)]
                     o = fn(xs, *args)
-                    o_flat, _ = tree_flatten(o)
+                    o_flat,_ = tree_flatten(o)
                     return (o_flat, 0)
-
                 scan_out = jax.lax.scan(scan_inner, init_value_flat, to)[0]
                 return scan_out
 
@@ -251,34 +196,27 @@ class GraphQuery(Generic[E, Unpack[A]]):
             if len(out_bufs) == 0:
                 out_bufs = new_bufs
             else:
-                out_bufs = [
-                    jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)
-                ]
-            component_data = out_tp.__metadata__[0]  # type: ignore
-        return Query(
-            self.inner.map(out_bufs[0], component_data.to_metadata()),
-            [component_data],
-            [out_tp],
-        )
+                out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
+            component_data = out_tp.__metadata__[0] # type: ignore
+        return Query(self.inner.map(out_bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
 
 class SystemParam(Protocol):
     @staticmethod
-    def from_builder(builder: PipelineBuilder) -> Any: ...
+    def from_builder(builder: PipelineBuilder) -> Any:
+        ...
 
 
 class FromArray(Protocol):
     @staticmethod
-    def from_array(arr: jax.Array) -> Any: ...
+    def from_array(arr: jax.Array) -> Any:
+        ...
 
-
-snake_case_pattern = re.compile(r"(?<!^)(?=[A-Z])")
 
 
 class Archetype(Protocol):
-    @classmethod
-    def archetype_name(cls) -> str:
-        return snake_case_pattern.sub("_", cls.__name__).lower()
+    def archetype_id(self) -> int:
+        return abs(hash(type(self).__name__))
 
     def component_data(self) -> list[Component]:
         return [
@@ -310,55 +248,48 @@ jax.tree_util.register_pytree_node(
     SpatialInertia.flatten,
     SpatialInertia.unflatten,
 )
-jax.tree_util.register_pytree_node(Quaternion, Quaternion.flatten, Quaternion.unflatten)
-jax.tree_util.register_pytree_node(Handle, Handle.flatten, Handle.unflatten)
-jax.tree_util.register_pytree_node(Edge, Edge.flatten, Edge.unflatten)
+jax.tree_util.register_pytree_node(
+    Quaternion, Quaternion.flatten, Quaternion.unflatten
+)
+jax.tree_util.register_pytree_node(
+    Handle, Handle.flatten, Handle.unflatten
+)
+jax.tree_util.register_pytree_node(
+    Edge, Edge.flatten, Edge.unflatten
+)
 
-WorldPos = Annotated[
-    SpatialTransform, Component("world_pos", ComponentType.SpatialPosF64)
-]
-WorldVel = Annotated[
-    SpatialMotion, Component("world_vel", ComponentType.SpatialMotionF64)
-]
-WorldAccel = Annotated[
-    SpatialMotion, Component("world_accel", ComponentType.SpatialMotionF64)
-]
+WorldPos = Annotated[SpatialTransform, Component("world_pos", ComponentType.SpatialPosF64)]
+WorldVel = Annotated[SpatialMotion, Component("world_vel", ComponentType.SpatialMotionF64)]
+WorldAccel = Annotated[SpatialMotion, Component("world_accel", ComponentType.SpatialMotionF64)]
 Force = Annotated[SpatialForce, Component("force", ComponentType.SpatialMotionF64)]
 Inertia = Annotated[SpatialInertia, Component("inertia", ComponentType.SpatialPosF64)]
 PbrAsset = Annotated[Handle, Component(241, ComponentType.U64, "pbr_asset", True)]
-EntityMetadataAsset = Annotated[
-    Handle, Component(242, ComponentType.U64, "metadata_asset", True)
-]
+EntityMetadataAsset = Annotated[Handle, Component(242, ComponentType.U64, "metadata_asset", True)]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
 GizmoAsset = Annotated[Handle, Component(2243, ComponentType.U64, "gizmo_asset", True)]
-
 
 class C:
     def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
         if isinstance(tys, tuple) and isinstance(values, tuple):
-            self.data = [ty.__metadata__[0] for ty in tys]  # type: ignore
-            self.bufs = [numpy.asarray(tree_flatten(v)[0][0]) for v in values]
+            self.data = [ty.__metadata__[0] for ty in tys] # type: ignore
+            self.bufs = [ numpy.asarray(tree_flatten(v)[0][0]) for v in values]
         else:
-            self.data = [tys.__metadata__[0]]  # type: ignore
+            self.data = [tys.__metadata__[0]] # type: ignore
             self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
 
-    @classmethod
-    def archetype_name(cls) -> str:
-        return snake_case_pattern.sub("_", cls.__name__).lower()
-
+    def archetype_id(self) -> int:
+        return abs(hash(type(self).__name__))
     def arrays(self):
         return self.bufs
-
     def component_data(self):
         return self.data
-
 
 @dataclass
 class Body(Archetype):
     world_pos: WorldPos = WorldPos.zero()
     world_vel: WorldVel = WorldVel.zero()
     inertia: Inertia = Inertia.from_mass(1.0)
-    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))  # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
+    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0)) # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
     force: Force = Force.zero()
     world_accel: WorldAccel = WorldAccel.zero()
 
@@ -375,12 +306,7 @@ def build_expr(builder: PipelineBuilder, sys: System) -> Any:
 
 
 class World(WorldBuilder):
-    def run(
-        self,
-        sys: System,
-        time_step: Optional[float] = None,
-        client: Optional[Client] = None,
-    ):
+    def run(self, sys: System, time_step: Optional[float] = None, client: Optional[Client] = None):
         current_frame = inspect.currentframe()
         if current_frame is None:
             raise Exception("No current frame")
