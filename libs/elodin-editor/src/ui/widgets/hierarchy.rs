@@ -4,7 +4,7 @@ use conduit::well_known::EntityMetadata;
 
 use crate::ui::{
     colors::{self, EColor},
-    utils, EntityFilter, EntityMeta, EntityPair, SelectedEntity,
+    utils, EntityData, EntityFilter, EntityPair, SelectedObject,
 };
 
 pub fn header(
@@ -56,8 +56,8 @@ pub fn header(
 
 pub fn entity_list(
     ui: &mut egui::Ui,
-    entities: Query<EntityMeta>,
-    mut selected_entity: ResMut<SelectedEntity>,
+    entities: &Query<EntityData>,
+    selected_object: &mut ResMut<SelectedObject>,
     entity_filter: &str,
 ) -> egui::Response {
     egui::ScrollArea::both()
@@ -66,31 +66,31 @@ pub fn entity_list(
                 // TODO: Improve filter & sorting efficiency
                 let mut filtered_entities = entities
                     .iter()
-                    .filter(|(_, _, metadata)| {
+                    .filter(|(_, _, _, metadata)| {
                         metadata
                             .name
                             .to_lowercase()
                             .contains(&entity_filter.to_lowercase())
                     })
-                    .collect::<Vec<EntityMeta>>();
-                filtered_entities.sort_by(|(a, _, _), (b, _, _)| a.0.cmp(&b.0));
+                    .collect::<Vec<EntityData>>();
+                filtered_entities.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
 
-                for (entity_id, entity, metadata) in filtered_entities {
-                    let selected = selected_entity.0.is_some_and(|id| id.conduit == *entity_id);
+                for (entity_id, entity, _, metadata) in filtered_entities {
+                    let selected = selected_object.is_entity_selected(*entity_id);
                     let list_item = ui.add(list_item(selected, metadata));
 
                     if list_item.clicked() {
-                        if let Some(prev) = selected_entity.0 {
-                            selected_entity.0 = if prev.conduit == *entity_id {
-                                None
+                        if let SelectedObject::Entity(prev) = selected_object.as_ref() {
+                            **selected_object = if prev.conduit == *entity_id {
+                                SelectedObject::None
                             } else {
-                                Some(EntityPair {
+                                SelectedObject::Entity(EntityPair {
                                     bevy: entity,
                                     conduit: *entity_id,
                                 })
                             };
                         } else {
-                            selected_entity.0 = Some(EntityPair {
+                            **selected_object = SelectedObject::Entity(EntityPair {
                                 bevy: entity,
                                 conduit: *entity_id,
                             })

@@ -27,10 +27,10 @@ use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use bevy_web_asset::WebAssetPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use conduit::{well_known::WorldPos, ControlMsg};
+use conduit::{well_known::WorldPos, ControlMsg, EntityId};
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
-use ui::{EntityMeta, EntityPair, HoveredEntity, SelectedEntity};
+use ui::{EntityPair, HoveredEntity};
 
 mod plugins;
 pub(crate) mod traces;
@@ -371,9 +371,9 @@ pub struct EntityConfigured;
 
 fn make_entities_selectable(
     mut commands: Commands,
-    entities: Query<EntityMeta, Without<EntityConfigured>>,
+    entities: Query<(&EntityId, Entity), Without<EntityConfigured>>,
 ) {
-    for (entity_id, entity, _) in entities.iter() {
+    for (entity_id, entity) in entities.iter() {
         let entity_id = entity_id.to_owned();
         commands.entity(entity).insert((
             EntityConfigured,
@@ -389,17 +389,6 @@ fn make_entities_selectable(
                         bevy: entity,
                         conduit: entity_id,
                     })
-                },
-            ),
-            On::<Pointer<Click>>::run(
-                move |event: Listener<Pointer<Click>>,
-                      mut selected_entity: ResMut<SelectedEntity>| {
-                    if event.button == PointerButton::Primary {
-                        selected_entity.0 = Some(EntityPair {
-                            bevy: entity,
-                            conduit: entity_id,
-                        })
-                    }
                 },
             ),
         ));

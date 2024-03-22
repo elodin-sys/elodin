@@ -15,6 +15,7 @@ use conduit::{
     well_known::EntityMetadata,
     ControlMsg, EntityId,
 };
+use egui_tiles::TileId;
 
 use crate::MainCamera;
 
@@ -33,8 +34,38 @@ pub struct Paused(pub bool);
 #[derive(Resource, Default)]
 pub struct ShowStats(pub bool);
 
-#[derive(Resource, Default)]
-pub struct SelectedEntity(pub Option<EntityPair>);
+#[derive(Resource, Default, Debug)]
+pub enum SelectedObject {
+    #[default]
+    None,
+    Entity(EntityPair),
+    Viewport {
+        camera: Entity,
+        tile_id: TileId,
+    },
+    Graph {
+        tile_id: TileId,
+    },
+}
+
+impl SelectedObject {
+    pub fn is_entity_selected(&self, id: conduit::EntityId) -> bool {
+        matches!(self, SelectedObject::Entity(pair) if pair.conduit == id)
+    }
+
+    pub fn is_tile_selected(&self, tile_id: TileId) -> bool {
+        self.tile_id() == Some(tile_id)
+    }
+
+    pub fn tile_id(&self) -> Option<TileId> {
+        match self {
+            SelectedObject::None => None,
+            SelectedObject::Entity(_) => None,
+            SelectedObject::Viewport { tile_id, .. } => Some(*tile_id),
+            SelectedObject::Graph { tile_id } => Some(*tile_id),
+        }
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct HoveredEntity(pub Option<EntityPair>);
@@ -45,7 +76,7 @@ pub struct EntityFilter(pub String);
 #[derive(Component)]
 pub struct ViewportRect(pub Option<egui::Rect>);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct EntityPair {
     pub bevy: Entity,
     pub conduit: EntityId,
@@ -65,8 +96,24 @@ pub fn shortcuts(
     }
 }
 
-pub type EntityData<'a> = (&'a EntityId, Entity, &'a ComponentValueMap);
-pub type EntityMeta<'a> = (&'a EntityId, Entity, &'a EntityMetadata);
+pub type EntityData<'a> = (
+    &'a EntityId,
+    Entity,
+    &'a ComponentValueMap,
+    &'a EntityMetadata,
+);
+
+#[derive(QueryData)]
+#[query_data(mutable)]
+pub struct CameraQuery {
+    entity: Entity,
+    camera: &'static mut Camera,
+    projection: &'static mut Projection,
+    transform: &'static mut Transform,
+    global_transform: &'static mut GlobalTransform,
+    grid_cell: &'static mut GridCell<i128>,
+    parent: Option<&'static Parent>,
+}
 
 pub struct UiPlugin;
 
@@ -74,7 +121,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Paused>()
             .init_resource::<ShowStats>()
-            .init_resource::<SelectedEntity>()
+            .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
             .init_resource::<tiles::TileState>()
@@ -94,14 +141,16 @@ pub fn render(
     mut paused: ResMut<Paused>,
     mut tick: ResMut<Tick>,
     entity_filter: ResMut<EntityFilter>,
-    selected_entity: ResMut<SelectedEntity>,
+    mut selected_object: ResMut<SelectedObject>,
     max_tick: Res<MaxTick>,
     tick_time: Res<TimeStep>,
     entities: Query<EntityData>,
-    entities_meta: Query<EntityMeta>,
     window: Query<&Window>,
     images: Local<images::Images>,
     metadata_store: Res<MetadataStore>,
+    mut camera_query: Query<CameraQuery, With<MainCamera>>,
+    mut commands: Commands,
+    entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     let window = window.single();
     let width = window.resolution.width();
@@ -109,7 +158,7 @@ pub fn render(
 
     theme::set_theme(contexts.ctx_mut());
 
-    let is_loading = entities_meta.is_empty();
+    let is_loading = entities.is_empty();
 
     if is_loading {
         let logo_size = egui::vec2(48.0, 60.0);
@@ -131,14 +180,6 @@ pub fn render(
 
         return;
     }
-
-    let selected_entity_pair = selected_entity.0;
-
-    let selected_entity_full = selected_entity_pair.and_then(|eid| entities.get(eid.bevy).ok());
-    let selected_entity_meta = entities_meta
-        .iter()
-        .find(|(id, _, _)| selected_entity_pair.is_some_and(|eid| eid.conduit == **id))
-        .map(|(_, _, metadata)| metadata.to_owned());
 
     let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -178,7 +219,7 @@ pub fn render(
 
                 hierarchy::header(ui, entity_filter, search_icon, false);
 
-                hierarchy::entity_list(ui, entities_meta, selected_entity, &search_text);
+                hierarchy::entity_list(ui, &entities, &mut selected_object, &search_text);
             });
 
         egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
@@ -194,9 +235,12 @@ pub fn render(
             .show(contexts.ctx_mut(), |ui| {
                 inspector::inspector(
                     ui,
-                    selected_entity_meta,
-                    selected_entity_full,
+                    selected_object.as_ref(),
+                    &entities,
                     &metadata_store,
+                    &mut camera_query,
+                    &mut commands,
+                    &entity_transform_query,
                 );
             });
     } else {
@@ -222,7 +266,7 @@ pub fn render(
 
                         hierarchy::header(ui, entity_filter, search_icon, true);
 
-                        hierarchy::entity_list(ui, entities_meta, selected_entity, &search_text);
+                        hierarchy::entity_list(ui, &entities, &mut selected_object, &search_text);
 
                         ui.allocate_space(ui.available_size());
                     });
@@ -237,9 +281,12 @@ pub fn render(
                     .show_inside(ui, |ui| {
                         inspector::inspector(
                             ui,
-                            selected_entity_meta,
-                            selected_entity_full,
+                            selected_object.as_ref(),
+                            &entities,
                             &metadata_store,
+                            &mut camera_query,
+                            &mut commands,
+                            &entity_transform_query,
                         );
                     });
             });
@@ -271,7 +318,7 @@ pub fn render(
 pub fn render_viewport_ui(
     mut contexts: EguiContexts,
     window: Query<&Window>,
-    entities_meta: Query<EntityMeta>,
+    entities_meta: Query<EntityData>,
     show_stats: Res<ShowStats>,
     tick_time: Res<TimeStep>,
     diagnostics: Res<DiagnosticsStore>,
@@ -282,8 +329,8 @@ pub fn render_viewport_ui(
     let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
         entities_meta
             .iter()
-            .find(|(id, _, _)| hovered_entity_pair.conduit == **id)
-            .map(|(_, _, metadata)| metadata.to_owned())
+            .find(|(id, _, _, _)| hovered_entity_pair.conduit == **id)
+            .map(|(_, _, _, metadata)| metadata.to_owned())
     } else {
         None
     };
@@ -346,27 +393,23 @@ pub fn render_viewport_ui(
 #[derive(QueryData)]
 #[query_data(mutable)]
 struct CameraViewportQuery {
-    entity: Entity,
     camera: &'static mut Camera,
-    cam_transform: &'static mut Transform,
     grid_cell: &'static mut GridCell<i128>,
     viewport_rect: &'static ViewportRect,
+    parent: Option<&'static Parent>,
 }
 
 fn set_camera_viewport(
     window: Query<&Window>,
     egui_settings: Res<bevy_egui::EguiSettings>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
-    selected_entity: ResMut<SelectedEntity>,
     entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
-    mut commands: Commands,
 ) {
     for CameraViewportQueryItem {
-        entity,
         mut camera,
-        mut cam_transform,
         mut grid_cell,
         viewport_rect,
+        parent,
     } in main_camera_query.iter_mut()
     {
         let Some(available_rect) = viewport_rect.0 else {
@@ -397,22 +440,8 @@ fn set_camera_viewport(
             depth: 0.0..1.0,
         });
 
-        let mut entity = commands.entity(entity);
-        if selected_entity.is_changed() {
-            if let Some(entity_pair) = selected_entity.0 {
-                if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
-                    entity.set_parent(entity_pair.bevy);
-                    let rot_matrix = Mat3::from_quat(cam_transform.rotation);
-                    cam_transform.translation = rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, 10.0));
-                    *grid_cell = *entity_cell;
-                }
-            } else {
-                entity.remove_parent();
-            }
-        }
-
-        if let Some(entity_pair) = selected_entity.0 {
-            if let Ok(entity_cell) = entity_transform_query.get(entity_pair.bevy) {
+        if let Some(parent) = parent {
+            if let Ok(entity_cell) = entity_transform_query.get(parent.get()) {
                 *grid_cell = *entity_cell;
             }
         }
