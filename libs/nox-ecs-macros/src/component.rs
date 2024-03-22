@@ -1,4 +1,3 @@
-use convert_case::{Case, Casing};
 use darling::ast::{self};
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
@@ -26,7 +25,11 @@ pub fn component(input: TokenStream) -> TokenStream {
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0];
     let where_clause = &generics.where_clause;
-    let name = name.unwrap_or(ident.to_string().to_case(Case::Snake));
+    let name = if let Some(name) = name {
+        quote! { Some(#name) }
+    } else {
+        quote! { None }
+    };
     quote! {
         impl #crate_name::nox::IntoOp for #ident #generics #where_clause {
             fn into_op(self) -> #crate_name::nox::Noxpr {
@@ -51,9 +54,7 @@ pub fn component(input: TokenStream) -> TokenStream {
 
 
         impl #crate_name::Component for #ident #generics #where_clause {
-            fn name() -> String {
-                #name.to_string()
-            }
+            const NAME: Option<&'static str> = #name;
 
             fn component_type() -> #crate_name::conduit::ComponentType {
                 <#ty as #crate_name::Component>::component_type()
