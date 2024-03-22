@@ -8,7 +8,7 @@ use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
-use nox_ecs::{Component, Seed, WorldExec};
+use nox_ecs::{ComponentExt, Seed, WorldExec};
 use sea_orm::{prelude::*, TransactionTrait};
 use tracing::Instrument;
 
