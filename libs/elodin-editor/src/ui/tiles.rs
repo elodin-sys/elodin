@@ -6,7 +6,7 @@ use bevy_egui::{
 
 use egui_tiles::{Tile, TileId, Tiles};
 
-use super::{colors, images::Images, widgets::button::ImageButton, ViewportRect};
+use super::{colors, images::Images, widgets::button::ImageButton, SelectedObject, ViewportRect};
 use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, MainCamera};
 
 struct TabIcons {
@@ -63,9 +63,10 @@ impl Default for TileState {
     }
 }
 
-struct TreeBehavior {
+struct TreeBehavior<'a> {
     icons: TabIcons,
     tab_diffs: Vec<TabDiff>,
+    selected_object: &'a mut SelectedObject,
 }
 
 enum TabDiff {
@@ -74,7 +75,13 @@ enum TabDiff {
     Delete(TileId),
 }
 
-impl egui_tiles::Behavior<Pane> for TreeBehavior {
+enum TabState {
+    Active,
+    Selected,
+    Inactive,
+}
+
+impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         pane.title().into()
     }
@@ -98,6 +105,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         active: bool,
         is_being_dragged: bool,
     ) -> egui::Response {
+        let is_selected = self.selected_object.is_tile_selected(tile_id);
+        let tab_state = if is_selected {
+            TabState::Selected
+        } else if active {
+            TabState::Active
+        } else {
+            TabState::Inactive
+        };
         let text = self.tab_title_for_tile(tiles, tile_id);
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
@@ -119,18 +134,19 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
         );
 
         if ui.is_rect_visible(rect) && !is_being_dragged {
-            let bg_color = if active {
-                colors::BLACK
-            } else {
-                colors::STONE_950
+            let bg_color = match tab_state {
+                TabState::Active => colors::BLACK,
+                TabState::Selected => colors::CREMA,
+                TabState::Inactive => colors::STONE_950,
             };
-            ui.painter().rect(rect, 0.0, bg_color, Stroke::NONE);
 
-            let text_color = if active {
-                colors::CREMA
-            } else {
-                colors::with_opacity(colors::CREMA, 0.6)
+            let text_color = match tab_state {
+                TabState::Active => colors::CREMA,
+                TabState::Selected => colors::STONE_950,
+                TabState::Inactive => colors::with_opacity(colors::CREMA, 0.6),
             };
+
+            ui.painter().rect(rect, 0.0, bg_color, Stroke::NONE);
             ui.painter().galley(
                 egui::Align2::LEFT_CENTER
                     .align_size_within_rect(galley.size(), text_rect)
@@ -142,6 +158,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
             let close_response = ui.add(
                 ImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
+                    .image_tint(match tab_state {
+                        TabState::Active | TabState::Inactive => colors::CREMA,
+                        TabState::Selected => colors::BLACK,
+                    })
                     .bg_color(Color32::TRANSPARENT),
             );
             if close_response.clicked() {
@@ -154,12 +174,28 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
 
     fn on_tab_button(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        tiles: &Tiles<Pane>,
         tile_id: TileId,
         button_response: egui::Response,
     ) -> egui::Response {
         if button_response.middle_clicked() {
             self.tab_diffs.push(TabDiff::Delete(tile_id));
+        } else if button_response.clicked() {
+            let Some(tile) = tiles.get(tile_id) else {
+                return button_response;
+            };
+            match tile {
+                Tile::Pane(Pane::Graph) => {
+                    *self.selected_object = SelectedObject::Graph { tile_id };
+                }
+                Tile::Pane(Pane::Viewport(viewport)) => {
+                    let Some(camera) = viewport.camera else {
+                        return button_response;
+                    };
+                    *self.selected_object = SelectedObject::Viewport { tile_id, camera };
+                }
+                Tile::Container(_) => {}
+            }
         }
         button_response
     }
@@ -175,6 +211,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior {
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
             all_panes_must_have_tabs: true,
+            join_nested_linear_containers: true,
             ..Default::default()
         }
     }
@@ -258,6 +295,7 @@ pub fn render_tiles(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+    mut selected_object: ResMut<SelectedObject>,
 ) {
     let icons = TabIcons {
         add: contexts.add_image(images.icon_add.clone_weak()),
@@ -273,6 +311,7 @@ pub fn render_tiles(
             let mut behavior = TreeBehavior {
                 icons,
                 tab_diffs: vec![],
+                selected_object: selected_object.as_mut(),
             };
             ui_state.tree.ui(&mut behavior, ui);
             for diff in behavior.tab_diffs.drain(..) {

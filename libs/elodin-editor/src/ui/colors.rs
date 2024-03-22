@@ -18,6 +18,9 @@ pub const ORANGE_50: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
 
 pub const BORDER_GREY: Color32 = Color32::from_rgb(0x20, 0x20, 0x20); // white * 0.05
 
+pub const ONYX: Color32 = Color32::from_rgb(0x3d, 0x3d, 0x3d); // NOTE: this color does not have a name in figma
+pub const ONYX_8: Color32 = Color32::from_rgb(0x45, 0x45, 0x44);
+
 pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * opacity) as u8)
 }
