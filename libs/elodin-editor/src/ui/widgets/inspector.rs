@@ -10,6 +10,7 @@ use bevy::{
     render::camera::Projection,
 };
 use bevy_egui::egui::{self, Align};
+use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{
     bevy::ComponentValueMap, query::MetadataStore, well_known::EntityMetadata, ComponentId,
@@ -129,6 +130,35 @@ pub fn viewport_inspector(
             cam_entity.insert(cam.global_transform.compute_transform());
         }
     }
+
+    if selected_parent.is_some() {
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("TRACK ROTATION")
+                            .color(with_opacity(colors::CREMA, 0.6)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        let mut track_rotation = cam.no_propagate_rot.is_none();
+                        ui.checkbox(&mut track_rotation, "");
+
+                        if track_rotation != cam.no_propagate_rot.is_none() {
+                            if track_rotation {
+                                cam_entity.remove::<NoPropagateRot>();
+                            } else {
+                                cam_entity.insert(NoPropagateRot);
+                            }
+                        }
+                        // if ui.add(egui::DragValue::new(&mut fov).speed(0.1)).changed() {
+                        //     persp.fov = fov.to_radians();
+                        // }
+                    });
+                });
+            });
+    }
+
     if let Projection::Perspective(persp) = cam.projection.as_mut() {
         egui::Frame::none()
             .inner_margin(egui::Margin::symmetric(8.0, 8.0))

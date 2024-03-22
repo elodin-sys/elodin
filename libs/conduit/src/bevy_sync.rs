@@ -6,7 +6,7 @@ use crate::{
         Subscriptions,
     },
     client::MsgPair,
-    well_known::{EntityMetadata, Gizmo, Pbr, TraceAnchor, WorldPos},
+    well_known::{EntityMetadata, Gizmo, Panel, Pbr, TraceAnchor, WorldPos},
     EntityId,
 };
 use bevy::ecs::system::SystemId;
@@ -38,6 +38,7 @@ impl Plugin for SyncPlugin {
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
             .add_conduit_asset::<Gizmo>(Box::new(SyncPostcardAdapter::<Gizmo>::new(None)))
+            .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
             .add_conduit_component::<TraceAnchor>()
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),

@@ -1,12 +1,11 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 
 use super::Cli;
 use bevy::{prelude::*, utils::tracing};
 use conduit::{client::MsgPair, server::handle_socket};
-use notify::Watcher;
 use nox_ecs::{ConduitExec, WorldExec};
 
 #[derive(clap::Args, Clone)]
@@ -120,14 +119,17 @@ impl SimSupervisor {
     fn run(path: PathBuf) -> anyhow::Result<()> {
         let addr = "0.0.0.0:2240".parse::<SocketAddr>().unwrap();
         let (notify_tx, notify_rx) = flume::bounded(1);
-        let mut watcher =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let mut debouncer =
+            notify_debouncer_mini::new_debouncer(Duration::from_millis(500), move |res| {
                 if let Ok(event) = res {
                     tracing::debug!(?event, "received notify");
                     let _ = notify_tx.try_send(());
                 }
             })?;
-        watcher.watch(&path, notify::RecursiveMode::NonRecursive)?;
+
+        debouncer
+            .watcher()
+            .watch(&path, notify::RecursiveMode::NonRecursive)?;
 
         let (tx, rx) = flume::unbounded();
         let sim_runner = SimRunner::new(rx);

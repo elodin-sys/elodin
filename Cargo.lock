@@ -2071,8 +2071,7 @@ dependencies = [
 [[package]]
 name = "big_space"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4815577381d1aecb813f653f38b8f153a747e65f8b64d68754275b2f8bcf8408"
+source = "git+https://github.com/elodin-sys/big_space.git?branch=no_prop_rot#b8e7469f4475b4955a6c4527e32cdde65ecc21c8"
 dependencies = [
  "bevy",
 ]
@@ -3486,6 +3485,7 @@ dependencies = [
  "elodin-types",
  "flume",
  "notify",
+ "notify-debouncer-mini",
  "nox-ecs",
  "opener",
  "reqwest",
@@ -5896,6 +5896,16 @@ dependencies = [
  "mio",
  "walkdir",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "notify-debouncer-mini"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d40b221972a1fc5ef4d858a2f671fb34c75983eb385463dff3780eeff6a9d43"
+dependencies = [
+ "log",
+ "notify",
 ]
 
 [[package]]

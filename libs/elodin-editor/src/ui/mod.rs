@@ -113,6 +113,7 @@ pub struct CameraQuery {
     global_transform: &'static mut GlobalTransform,
     grid_cell: &'static mut GridCell<i128>,
     parent: Option<&'static Parent>,
+    no_propagate_rot: Option<&'static big_space::propagation::NoPropagateRot>,
 }
 
 pub struct UiPlugin;
@@ -130,7 +131,9 @@ impl Plugin for UiPlugin {
             .add_systems(Update, tiles::render_tiles.after(render))
             .add_systems(Update, render_viewport_ui.after(render))
             .add_systems(Update, set_camera_viewport.after(tiles::render_tiles))
-            .add_systems(PostStartup, tiles::setup_default_tiles);
+            .add_systems(Update, sync_camera_grid_cell.after(tiles::render_tiles))
+            .add_systems(Update, tiles::sync_viewports.after(render))
+            .add_systems(Update, tiles::setup_default_tiles.after(render));
     }
 }
 
@@ -157,29 +160,6 @@ pub fn render(
     let height = window.resolution.height();
 
     theme::set_theme(contexts.ctx_mut());
-
-    let is_loading = entities.is_empty();
-
-    if is_loading {
-        let logo_size = egui::vec2(48.0, 60.0);
-        let logo_image_id = contexts.add_image(images.logo.clone_weak());
-
-        egui::CentralPanel::default()
-            .frame(egui::Frame {
-                fill: colors::STONE_950,
-                ..Default::default()
-            })
-            .show(contexts.ctx_mut(), |ui| {
-                ui.painter().image(
-                    logo_image_id,
-                    egui::Rect::from_center_size(egui::pos2(width / 2.0, height / 2.0), logo_size),
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    colors::WHITE,
-                );
-            });
-
-        return;
-    }
 
     let timeline_icons = timeline::TimelineIcons {
         jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -394,22 +374,17 @@ pub fn render_viewport_ui(
 #[query_data(mutable)]
 struct CameraViewportQuery {
     camera: &'static mut Camera,
-    grid_cell: &'static mut GridCell<i128>,
     viewport_rect: &'static ViewportRect,
-    parent: Option<&'static Parent>,
 }
 
 fn set_camera_viewport(
     window: Query<&Window>,
     egui_settings: Res<bevy_egui::EguiSettings>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
-    entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
 ) {
     for CameraViewportQueryItem {
         mut camera,
-        mut grid_cell,
         viewport_rect,
-        parent,
     } in main_camera_query.iter_mut()
     {
         let Some(available_rect) = viewport_rect.0 else {
@@ -439,7 +414,14 @@ fn set_camera_viewport(
             physical_size: UVec2::new(viewport_size.x as u32, viewport_size.y as u32),
             depth: 0.0..1.0,
         });
+    }
+}
 
+fn sync_camera_grid_cell(
+    mut query: Query<(Option<&Parent>, &mut GridCell<i128>), With<MainCamera>>,
+    entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
+) {
+    for (parent, mut grid_cell) in query.iter_mut() {
         if let Some(parent) = parent {
             if let Ok(entity_cell) = entity_transform_query.get(parent.get()) {
                 *grid_cell = *entity_cell;

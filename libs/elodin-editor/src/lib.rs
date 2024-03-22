@@ -108,7 +108,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(TweeningPlugin)
-            .add_systems(Startup, setup_main_camera)
+            .add_systems(Startup, setup_floating_origin)
             //.add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Update, make_entities_selectable)
@@ -131,37 +131,10 @@ impl Plugin for EditorPlugin {
     }
 }
 
-// fn setup_grid(mut commands: Commands) {
-//     commands.spawn(InfiniteGridBundle {
-//         settings: InfiniteGridSettings {
-//             minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-//             major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-//             z_axis_color: Color::hex("#264FFF").unwrap(),
-//             x_axis_color: Color::hex("#EE3A43").unwrap(),
-//             shadow_color: None,
-//             ..Default::default()
-//         },
-//         ..default()
-//     });
-// }
-
 #[derive(Component)]
 pub struct MainCamera;
 
-fn setup_main_camera(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-) {
-    spawn_main_camera(
-        &mut commands,
-        &asset_server,
-        &mut meshes,
-        &mut materials,
-        &mut render_layer_alloc,
-    );
+fn setup_floating_origin(mut commands: Commands) {
     commands.spawn((
         FloatingOrigin,
         GridCell::<i128>::default(),
@@ -219,6 +192,7 @@ fn spawn_main_camera(
             last_anchor_depth: 2.0,
             ..Default::default()
         },
+        conduit::bevy::Persistent,
     ));
 
     camera.insert(BloomSettings { ..default() });
