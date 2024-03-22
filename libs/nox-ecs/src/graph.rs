@@ -47,10 +47,6 @@ impl FromBuilder for Edge {
 }
 
 impl Component for Edge {
-    fn name() -> String {
-        "edge".to_string()
-    }
-
     fn component_type() -> conduit::ComponentType {
         ComponentType {
             primitive_ty: conduit::PrimitiveTy::U64,
@@ -250,7 +246,7 @@ mod tests {
 
     use nox::{Scalar, ScalarExt};
 
-    use crate::{ComponentExt, IntoSystem};
+    use crate::IntoSystem;
 
     use super::*;
 

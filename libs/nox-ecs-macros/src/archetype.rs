@@ -1,4 +1,3 @@
-use convert_case::{Case, Casing};
 use darling::ast::{self};
 use darling::{FromDeriveInput, FromField};
 use proc_macro::TokenStream;
@@ -34,15 +33,10 @@ pub fn archetype(input: TokenStream) -> TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect::<Vec<_>>();
     let where_clause = &generics.where_clause;
-    let name = ident.to_string().to_case(Case::Snake);
     quote! {
         impl #crate_name::Archetype for #ident #generics #where_clause {
-            fn name() -> #crate_name::ArchetypeName {
-                #crate_name::ArchetypeName::from(#name)
-            }
-
             fn component_ids() -> Vec<#crate_name::conduit::ComponentId> {
-                use #crate_name::ComponentExt;
+                use #crate_name::Component;
                 vec![#( <#tys>::component_id(), )*]
             }
 

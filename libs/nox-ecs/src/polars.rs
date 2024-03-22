@@ -13,21 +13,23 @@ use std::collections::HashMap;
 use std::{collections::BTreeMap, fs::File, path::Path};
 
 use crate::{
-    ArchetypeName, AssetStore, Column, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table,
+    ArchetypeId, AssetStore, Column, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table,
     World, WorldStore,
 };
 
+const ENTITY_ID_COMPONENT: ComponentId = ComponentId::new("entity_id");
+
 #[derive(Debug, Clone)]
 pub struct PolarsWorld {
-    pub archetypes: ustr::UstrMap<DataFrame>,
+    pub archetypes: BTreeMap<ArchetypeId, DataFrame>,
     pub metadata: Metadata,
     pub assets: AssetStore,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Metadata {
-    pub archetypes: ustr::UstrMap<ArchetypeMetadata>,
-    pub component_map: HashMap<ComponentId, ArchetypeName>,
+    pub archetypes: BTreeMap<ArchetypeId, ArchetypeMetadata>,
+    pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub tick: u64,
     pub entity_len: u64,
 }
@@ -48,7 +50,7 @@ impl PolarsWorld {
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
         let mut tables = self.archetypes.values();
         let init = tables.next().cloned().unwrap_or_default();
-        let column_name = EntityId::component_id().0.to_string();
+        let column_name = ENTITY_ID_COMPONENT.0.to_string();
         let keys = [&column_name, "time"];
         tables
             .try_fold(init, |agg, df| {
@@ -67,8 +69,8 @@ impl PolarsWorld {
         std::fs::create_dir_all(path)?;
         let mut metadata = File::create(path.join("metadata.json"))?;
         serde_json::to_writer(&mut metadata, &self.metadata)?;
-        for (archetype_name, df) in &mut self.archetypes {
-            let path = path.join(format!("{}.parquet", archetype_name));
+        for (archetype_id, df) in &mut self.archetypes {
+            let path = path.join(format!("{}.parquet", archetype_id.to_raw()));
             let file = std::fs::File::create(&path)?;
             ParquetWriter::new(file)
                 .with_row_group_size(Some(1000))
@@ -82,14 +84,14 @@ impl PolarsWorld {
 
     pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let mut archetypes = HashMap::default();
+        let mut archetypes = BTreeMap::new();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: Metadata = serde_json::from_reader(&mut metadata)?;
-        for name in metadata.archetypes.keys() {
-            let path = path.join(format!("{}.parquet", name));
+        for id in metadata.archetypes.keys() {
+            let path = path.join(format!("{}.parquet", id.to_raw()));
             let file = File::open(&path)?;
             let df = polars::prelude::ParquetReader::new(file).finish()?;
-            archetypes.insert(*name, df);
+            archetypes.insert(*id, df);
         }
         let assets_buf = std::fs::read(path.join("assets.bin"))?;
         let assets = postcard::from_bytes(&assets_buf)?;
@@ -103,8 +105,8 @@ impl PolarsWorld {
 
 impl World<HostStore> {
     pub fn to_polars(&self) -> Result<PolarsWorld, Error> {
-        let mut archetypes = HashMap::default();
-        let mut archetype_metadata = HashMap::default();
+        let mut archetypes = BTreeMap::new();
+        let mut archetype_metadata = BTreeMap::new();
         for (id, table) in &self.archetypes {
             let (metadata, df) = table.to_polars()?;
             archetypes.insert(*id, df);
@@ -174,7 +176,7 @@ impl PartialEq for Table<HostStore> {
 
 impl Table<HostStore> {
     pub fn from_dataframe(df: DataFrame, metadata: ArchetypeMetadata) -> Result<Self, Error> {
-        let entity_id_string = EntityId::component_id().0.to_string();
+        let entity_id_string = ENTITY_ID_COMPONENT.0.to_string();
         let columns = metadata
             .columns
             .iter()
@@ -370,7 +372,7 @@ impl<'a> ColumnStore for &'a PolarsWorld {
     }
 
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
-        let entity_id_string = EntityId::component_id().0.to_string();
+        let entity_id_string = ENTITY_ID_COMPONENT.0.to_string();
         let archetype = self
             .metadata
             .component_map
@@ -417,7 +419,7 @@ impl ColumnRef for PolarsColumnRef<'_> {
 mod tests {
     use crate::{
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
-        Archetype, ComponentExt, WorldPos,
+        Component, WorldPos,
     };
     use conduit::well_known::{Material, Mesh, Pbr};
     use nox::{
@@ -456,7 +458,7 @@ mod tests {
             }),
         });
         let polars = world.to_polars().unwrap();
-        let df = polars.archetypes[&Body::name()].clone();
+        let df = polars.archetypes[&ArchetypeId::of::<Body>()].clone();
         let out = df
             .lazy()
             .select(&[col(&WorldPos::component_id().0.to_string())])

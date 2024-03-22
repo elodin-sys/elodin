@@ -10,6 +10,7 @@ use once_cell::sync::OnceCell;
 use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
+use std::any::TypeId;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -46,8 +47,6 @@ pub use query::*;
 
 pub use nox_ecs_macros::{Archetype, Component};
 
-pub type ArchetypeName = ustr::Ustr;
-
 // 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
@@ -55,16 +54,6 @@ pub struct Table<S: WorldStore> {
     pub columns: BTreeMap<ComponentId, Column<S>>,
     pub entity_buffer: S::EntityBuffer,
     pub entity_map: BTreeMap<EntityId, usize>,
-}
-
-impl Default for Table<HostStore> {
-    fn default() -> Self {
-        Self {
-            columns: Default::default(),
-            entity_buffer: HostColumn::entity_ids(),
-            entity_map: Default::default(),
-        }
-    }
 }
 
 impl Clone for Table<HostStore> {
@@ -117,8 +106,8 @@ where
 }
 
 pub struct World<S: WorldStore = HostStore> {
-    pub archetypes: ustr::UstrMap<Table<S>>,
-    pub component_map: HashMap<ComponentId, ArchetypeName>,
+    pub archetypes: HashMap<ArchetypeId, Table<S>>,
+    pub component_map: HashMap<ComponentId, ArchetypeId>,
     pub assets: AssetStore,
     pub tick: u64,
     pub entity_len: u64,
@@ -229,8 +218,8 @@ impl From<Entity<'_>> for EntityId {
 
 impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
-        let archetype_name = A::name();
-        self.archetypes.entry(archetype_name).or_insert_with(|| {
+        let archetype_id = ArchetypeId::type_id(TypeId::of::<A>());
+        self.archetypes.entry(archetype_id).or_insert_with(|| {
             let component_ids = A::component_ids();
             let columns = component_ids
                 .iter()
@@ -250,11 +239,12 @@ impl World<HostStore> {
                 })
                 .collect();
             for id in component_ids {
-                self.component_map.insert(id, archetype_name);
+                self.component_map.insert(id, archetype_id);
             }
             Table {
                 columns,
-                ..Default::default()
+                entity_buffer: HostColumn::new(ComponentType::u64(), ComponentId::new("entity_id")),
+                entity_map: BTreeMap::default(),
             }
         })
     }
@@ -334,6 +324,30 @@ impl World<HostStore> {
 
     pub fn builder(self) -> WorldBuilder {
         WorldBuilder::default().world(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ArchetypeId(u128);
+
+impl ArchetypeId {
+    pub fn new(id: u128) -> Self {
+        Self(id)
+    }
+
+    pub fn type_id(id: TypeId) -> Self {
+        // safety: TypeId is a single field struct with
+        // a u128 in it, so this is safe for now
+        let id = unsafe { std::mem::transmute(id) };
+        Self(id)
+    }
+
+    pub fn of<T: std::any::Any>() -> ArchetypeId {
+        Self::type_id(TypeId::of::<T>())
+    }
+
+    pub fn to_raw(self) -> u128 {
+        self.0
     }
 }
 
@@ -421,17 +435,12 @@ impl ColumnRefMut<'_, HostStore> {
 }
 
 pub trait Archetype {
-    fn name() -> ArchetypeName;
     fn component_ids() -> Vec<ComponentId>;
     fn component_tys() -> Vec<ComponentType>;
     fn insert_into_table(self, table: &mut Table<HostStore>);
 }
 
 impl<T: Component + 'static> Archetype for T {
-    fn name() -> ArchetypeName {
-        ArchetypeName::from(T::name().as_str())
-    }
-
     fn component_ids() -> Vec<ComponentId> {
         vec![T::component_id()]
     }
