@@ -13,8 +13,10 @@ use bevy_egui::egui::{self, Align};
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{
-    bevy::ComponentValueMap, query::MetadataStore, well_known::EntityMetadata, ComponentId,
-    ComponentValue, EntityId, TagValue,
+    bevy::ComponentValueMap,
+    query::MetadataStore,
+    well_known::{EntityMetadata, WorldPos},
+    Component, ComponentValue, EntityId, TagValue,
 };
 
 use crate::{
@@ -100,17 +102,12 @@ pub fn viewport_inspector(
                     let mut entities = entities_meta
                         .iter()
                         .filter(|(_, _, values, _)| {
-                            values
-                                .0
-                                .contains_key(&ComponentId::new("world_pos:f64:[7]"))
+                            values.0.contains_key(&WorldPos::component_id())
                         })
                         .collect::<Vec<_>>();
                     entities.sort_by(|a, b| a.0.cmp(b.0));
                     for (_, id, values, meta) in entities {
-                        if values
-                            .0
-                            .contains_key(&ComponentId::new("world_pos:f64:[7]"))
-                        {
+                        if values.0.contains_key(&WorldPos::component_id()) {
                             ui.selectable_value(&mut selected_parent, Some(id), meta.name.clone());
                         }
                     }
