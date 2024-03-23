@@ -112,11 +112,17 @@ let
     ];
     postBuild = "rm -rf $out/vm/{bios.bin.elf,lib,System.map}";
   };
+  mkfs = pkgs.buildEnv {
+    name = "mkfs";
+    paths = with pkgs; [ e2fsprogs ];
+    pathsToLink = [ "/bin" ];
+  };
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-sim-agent";
     tag = "latest";
     contents = with pkgs; [
+      mkfs
       cacert
       busybox
       vm

@@ -50,8 +50,7 @@ spec:
       volumes:
       - name: tmp
         emptyDir:
-          medium: Memory
-          sizeLimit: 500Mi
+          sizeLimit: 16Gi
       - name: config
         configMap:
           name: elo-sim-config

@@ -304,7 +304,7 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
             "volumes": [{
                 "name": "tmp",
                 "emptyDir": {
-                    "sizeLimit": "8Gi"
+                    "sizeLimit": "16Gi"
                 }
             }]
         }

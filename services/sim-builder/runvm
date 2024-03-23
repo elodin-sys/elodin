@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# prepare /tmp volume
+tmpvol="$(mktemp -d)/tmp.raw"
+qemu-img create -f raw "$tmpvol" 8G
+mkfs.ext4 -F "$tmpvol"
+
 hostname_cksum="$(hostname | tr -d '\n' | cksum | cut -d " " -f1)"
 cid=${CID:-$hostname_cksum}
 qemu-system-x86_64 \
@@ -8,6 +13,7 @@ qemu-system-x86_64 \
     -kernel vm/bzImage \
     -append 'console=ttyS0 quiet panic=-1 reboot=t root=/dev/vda init=/init raid=noautodetect ro' \
     -drive "file=vm/root.squashfs,format=raw,id=root,if=none,readonly=on" -device virtio-blk-device,drive=root \
+    -drive "file=$tmpvol,format=raw,id=tmp,if=none" -device virtio-blk-device,drive=tmp \
     -device "vhost-vsock-device,id=vsock_id,guest-cid=$cid" \
     -sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny \
     -cpu host \
