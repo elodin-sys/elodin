@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use bytemuck::Pod;
-use conduit::{ComponentId, ComponentType, ComponentValue};
+use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
@@ -29,6 +29,10 @@ impl HostColumn {
             asset: false,
             component_id,
         }
+    }
+
+    pub fn entity_ids() -> Self {
+        HostColumn::new(ComponentType::u64(), EntityId::component_id())
     }
 
     pub fn push<T: Component + 'static>(&mut self, val: T) {
