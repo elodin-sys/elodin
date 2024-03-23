@@ -62,7 +62,8 @@ def test_six_dof():
         )
     )
     client = Client.cpu()
-    exec = w.build(six_dof(1.0 / 60.0))
+    sys = six_dof(1.0 / 60.0)
+    exec = w.build(sys)
     exec.run(client)
     x = exec.column_array(Component.id(WorldPos))
     assert (x == [0, 0, 0, 1, 1.0 / 60.0, 0.0, 0.0]).all()
@@ -146,3 +147,14 @@ def test_seed():
     assert (x1 == [2000.0, 30000.0]).all()
     assert (y1 >= [500.0, 500.0]).all()
     assert (y1 <= [1000.0, 1000.0]).all()
+
+
+def test_archetype_name():
+    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
+
+    @dataclass
+    class TestArchetype(Archetype):
+        x: X
+
+    assert TestArchetype.archetype_name() == "test_archetype"
+    assert Body.archetype_name() == "body"
