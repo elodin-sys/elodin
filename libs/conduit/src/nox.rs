@@ -32,7 +32,7 @@ impl PrimitiveTy {
             PrimitiveTy::I16 => ElementType::S16,
             PrimitiveTy::I32 => ElementType::S32,
             PrimitiveTy::I64 => ElementType::S64,
-            PrimitiveTy::Bool => ElementType::U8,
+            PrimitiveTy::Bool => ElementType::Pred,
             PrimitiveTy::F32 => ElementType::F32,
             PrimitiveTy::F64 => ElementType::F64,
         }
