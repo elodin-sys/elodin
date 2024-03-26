@@ -195,7 +195,7 @@ defmodule ElodinDashboardWeb.UserAuth do
       case fetch_id_token(conn, config) do
         id_token when not is_nil(id_token) ->
           logout_url(config, [
-            {:id_token, id_token},
+            {:id_token_hint, id_token},
             {:client_id, client_id},
             {:post_logout_redirect_uri, post_logout_redirect_uri}
           ])
