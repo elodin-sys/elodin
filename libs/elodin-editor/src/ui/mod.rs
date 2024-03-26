@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::query::QueryData,
@@ -13,7 +15,7 @@ use conduit::{
     bevy::{ComponentValueMap, MaxTick, Received, Tick, TimeStep},
     query::MetadataStore,
     well_known::EntityMetadata,
-    ControlMsg, EntityId,
+    ComponentId, ControlMsg, EntityId, GraphId,
 };
 use egui_tiles::TileId;
 
@@ -25,8 +27,8 @@ pub mod colors;
 pub mod images;
 mod theme;
 mod tiles;
-mod utils;
-mod widgets;
+pub mod utils;
+pub mod widgets;
 
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
@@ -45,6 +47,8 @@ pub enum SelectedObject {
     },
     Graph {
         tile_id: TileId,
+        label: String,
+        graph_id: GraphId,
     },
 }
 
@@ -62,7 +66,7 @@ impl SelectedObject {
             SelectedObject::None => None,
             SelectedObject::Entity(_) => None,
             SelectedObject::Viewport { tile_id, .. } => Some(*tile_id),
-            SelectedObject::Graph { tile_id } => Some(*tile_id),
+            SelectedObject::Graph { tile_id, .. } => Some(*tile_id),
         }
     }
 }
@@ -125,6 +129,7 @@ impl Plugin for UiPlugin {
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
+            .init_resource::<GraphStates>()
             .init_resource::<tiles::TileState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
@@ -137,6 +142,94 @@ impl Plugin for UiPlugin {
     }
 }
 
+type GraphStateComponent = Vec<(usize, egui::Color32)>;
+type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
+type GraphState = BTreeMap<EntityId, GraphStateEntity>;
+
+#[derive(Resource, Default, Debug)]
+pub struct GraphStates {
+    // modal: Option<(GraphId, Option<EntityId>, Option<ComponentId>)>,
+    graphs: BTreeMap<GraphId, GraphState>,
+}
+
+impl GraphStates {
+    pub fn create_graph(&mut self) -> (GraphId, &GraphState) {
+        let graph_id = self
+            .graphs
+            .keys()
+            .max()
+            .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
+        self.graphs.insert(graph_id, BTreeMap::new());
+        (graph_id, self.graphs.get(&graph_id).unwrap())
+    }
+
+    pub fn get_or_create_graph(&mut self, graph_id: &GraphId) -> &GraphState {
+        if !self.graphs.contains_key(graph_id) {
+            self.graphs.insert(*graph_id, BTreeMap::new());
+        }
+
+        self.graphs.get(graph_id).unwrap()
+    }
+
+    pub fn add_component(
+        &mut self,
+        graph_id: &GraphId,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+        component_values: Vec<(usize, egui::Color32)>,
+    ) {
+        let mut graph = self
+            .graphs
+            .get(graph_id)
+            .map_or(BTreeMap::new(), |graph| graph.clone());
+
+        let mut components = graph
+            .get(entity_id)
+            .map_or(BTreeMap::new(), |ec| ec.clone());
+
+        components.insert(*component_id, component_values);
+        graph.insert(*entity_id, components);
+
+        self.graphs.insert(*graph_id, graph);
+    }
+
+    pub fn remove_component(
+        &mut self,
+        graph_id: &GraphId,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+    ) {
+        let mut graph = self
+            .graphs
+            .get(graph_id)
+            .map_or(BTreeMap::new(), |state| state.clone());
+
+        let mut components = graph
+            .get(entity_id)
+            .map_or(BTreeMap::new(), |ec| ec.clone());
+
+        components.remove(component_id);
+        graph.insert(*entity_id, components);
+
+        self.graphs.insert(*graph_id, graph);
+    }
+
+    pub fn contains_component(
+        &self,
+        graph_id: &GraphId,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+    ) -> bool {
+        if let Some(graph) = self.graphs.get(graph_id) {
+            if let Some(entity) = graph.get(entity_id) {
+                return entity.contains_key(component_id);
+            }
+        }
+
+        false
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     mut event: EventWriter<ControlMsg>,
@@ -145,6 +238,7 @@ pub fn render(
     mut tick: ResMut<Tick>,
     entity_filter: ResMut<EntityFilter>,
     mut selected_object: ResMut<SelectedObject>,
+    mut graph_states: ResMut<GraphStates>,
     max_tick: Res<MaxTick>,
     tick_time: Res<TimeStep>,
     entities: Query<EntityData>,
@@ -221,6 +315,7 @@ pub fn render(
                     &mut camera_query,
                     &mut commands,
                     &entity_transform_query,
+                    &mut graph_states,
                 );
             });
     } else {
@@ -267,6 +362,7 @@ pub fn render(
                             &mut camera_query,
                             &mut commands,
                             &entity_transform_query,
+                            &mut graph_states,
                         );
                     });
             });

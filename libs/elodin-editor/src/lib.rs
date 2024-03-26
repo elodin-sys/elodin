@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use bevy::{
     asset::{embedded_asset, AssetMetaCheck},
@@ -27,14 +27,18 @@ use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use bevy_web_asset::WebAssetPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use conduit::{well_known::WorldPos, ControlMsg, EntityId};
+use conduit::{
+    bevy::{ComponentValueMap, Tick},
+    well_known::WorldPos,
+    ComponentId, ControlMsg, EntityId,
+};
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
-use ui::{EntityPair, HoveredEntity};
+use ui::{utils, EntityPair, HoveredEntity};
 
 mod plugins;
 pub(crate) mod traces;
-mod ui;
+pub mod ui;
 
 struct EmbeddedAssetPlugin;
 
@@ -95,6 +99,7 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
+            .init_resource::<CollectedEntityData>()
             .add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::default())
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
@@ -111,6 +116,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_floating_origin)
             //.add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
+            .add_systems(PreUpdate, collect_entity_data)
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
@@ -127,6 +133,56 @@ impl Plugin for EditorPlugin {
         embedded_asset!(app, "./assets/specular.ktx2");
         if cfg!(not(target_arch = "wasm32")) {
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
+        }
+    }
+}
+
+#[derive(Resource, Default, Debug)]
+pub struct CollectedEntityData {
+    pub ticks: Vec<u64>,
+    pub data: BTreeMap<EntityId, BTreeMap<ComponentId, Vec<Vec<f64>>>>,
+}
+
+pub fn collect_entity_data(
+    mut collected_entity_data: ResMut<CollectedEntityData>,
+    tick: Res<Tick>,
+    current_entity_data: Query<(&EntityId, &ComponentValueMap)>,
+) {
+    let last_tick = collected_entity_data.ticks.last();
+
+    if last_tick.is_none() || last_tick.is_some_and(|t| tick.0 > *t) {
+        collected_entity_data.ticks.push(tick.0);
+
+        for (entity_id, component_value_map) in current_entity_data.iter() {
+            let mut entity_components = BTreeMap::new();
+
+            if let Some(entity) = collected_entity_data.data.get(entity_id) {
+                for (component_id, component_value) in &component_value_map.0 {
+                    if let Some(entity_component) = entity.get(component_id) {
+                        let mut collected_component_values = entity_component.clone();
+                        collected_component_values
+                            .push(utils::component_value_to_vec(component_value));
+
+                        entity_components.insert(*component_id, collected_component_values);
+                    } else {
+                        entity_components.insert(
+                            *component_id,
+                            vec![utils::component_value_to_vec(component_value)],
+                        );
+                    }
+                }
+            } else {
+                for (component_id, component_value) in &component_value_map.0 {
+                    entity_components.insert(
+                        *component_id,
+                        vec![utils::component_value_to_vec(component_value)],
+                    );
+                }
+            }
+
+            collected_entity_data
+                .data
+                .insert(*entity_id, entity_components);
         }
     }
 }

@@ -2,10 +2,9 @@ use bevy::{
     ecs::{
         entity::Entity,
         query::{With, Without},
-        system::{Commands, Query, Res},
+        system::{Commands, Query, Res, ResMut},
     },
     hierarchy::BuildChildren,
-    log::warn,
     math::{Mat3, Vec3},
     render::camera::Projection,
 };
@@ -16,13 +15,13 @@ use conduit::{
     bevy::ComponentValueMap,
     query::MetadataStore,
     well_known::{EntityMetadata, WorldPos},
-    Component, ComponentValue, EntityId, TagValue,
+    Component, EntityId, GraphId,
 };
 
 use crate::{
     ui::{
         colors::{self, with_opacity},
-        theme, utils, CameraQuery, CameraQueryItem, EntityData, SelectedObject,
+        theme, utils, CameraQuery, CameraQueryItem, EntityData, GraphStates, SelectedObject,
     },
     MainCamera,
 };
@@ -39,6 +38,7 @@ pub fn inspector(
     camera_query: &mut Query<CameraQuery, With<MainCamera>>,
     commands: &mut Commands,
     entity_transform_query: &Query<&GridCell<i128>, Without<MainCamera>>,
+    graph_states: &mut ResMut<GraphStates>,
 ) -> egui::Response {
     egui::ScrollArea::vertical()
         .show(ui, |ui| {
@@ -64,12 +64,85 @@ pub fn inspector(
                             };
                             viewport_inspector(ui, entities, cam, commands, entity_transform_query);
                         }
-                        SelectedObject::Graph { .. } => {}
+                        SelectedObject::Graph {
+                            label, graph_id, ..
+                        } => {
+                            graph_inspector(
+                                ui,
+                                graph_id,
+                                label,
+                                entities,
+                                graph_states,
+                                metadata_store,
+                            );
+                        }
                     })
                 })
         })
         .inner
         .response
+}
+
+pub fn graph_inspector(
+    ui: &mut egui::Ui,
+    graph_id: &GraphId,
+    label: &str,
+    entities_meta: &Query<EntityData>,
+    graph_states: &mut ResMut<GraphStates>,
+    metadata_store: &Res<MetadataStore>,
+) {
+    title_ui(ui, label);
+
+    egui::Frame::none()
+        .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                for (entity_id, _, components, metadata) in entities_meta {
+                    ui.label(metadata.name.to_string());
+
+                    for (component_id, component_value) in components.0.iter() {
+                        ui.horizontal(|ui| {
+                            let label = utils::get_component_label(metadata_store, component_id);
+                            ui.label(format!("  {label}"));
+
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                let component_enabled = graph_states.contains_component(
+                                    graph_id,
+                                    entity_id,
+                                    component_id,
+                                );
+                                let btn_label = if component_enabled { "on" } else { "off" };
+
+                                if ui.button(btn_label).clicked() {
+                                    if component_enabled {
+                                        graph_states.remove_component(
+                                            graph_id,
+                                            entity_id,
+                                            component_id,
+                                        );
+                                    } else {
+                                        let values = utils::component_value_to_vec(component_value)
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, _)| {
+                                                (index, colors::get_color_by_index(index))
+                                            })
+                                            .collect::<Vec<(usize, egui::Color32)>>();
+
+                                        graph_states.add_component(
+                                            graph_id,
+                                            entity_id,
+                                            component_id,
+                                            values,
+                                        );
+                                    }
+                                }
+                            });
+                        });
+                    }
+                }
+            });
+        });
 }
 
 pub fn viewport_inspector(
@@ -205,29 +278,13 @@ pub fn entity_inspector(
     let line_size = egui::vec2(ui.available_size().x, ui.spacing().interact_size.y * 1.4);
     ui.add(inspector_item_value("ID", entity_id.0, line_size));
 
-    for (id, value) in map.0.iter() {
-        match value {
-            ComponentValue::F64(arr_f64) => {
-                let name = if let Some(name) = metadata_store
-                    .get_metadata(id)
-                    .and_then(|m| m.tags.get("name"))
-                    .and_then(TagValue::as_str)
-                {
-                    name.to_string().to_uppercase()
-                } else {
-                    format!("ID[{}]", id.0)
-                };
+    for (id, component_value) in map.0.iter() {
+        let values = utils::component_value_to_vec(component_value);
+        let label = utils::get_component_label(metadata_store, id);
 
-                let values = arr_f64.iter().collect::<Vec<&f64>>();
+        ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
 
-                ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
-
-                inspector_item_multi(ui, name, values, LABEL_SPACING);
-            }
-            _ => {
-                warn!("Unimplemented ComponentValue");
-            }
-        }
+        inspector_item_multi(ui, label, values, LABEL_SPACING);
     }
 }
 
@@ -308,16 +365,35 @@ fn inspector_item_label_ui(ui: &mut egui::Ui, label: impl ToString) -> egui::Res
     egui::Frame::none()
         .outer_margin(egui::Margin::same(6.0))
         .show(ui, |ui| {
-            let desired_size = egui::vec2(ui.available_size().x, ui.spacing().interact_size.y);
+            ui.horizontal(|ui| {
+                let max_rect = ui.max_rect();
+                let label_width = max_rect.width() * 0.8;
 
-            ui.allocate_ui_with_layout(
-                desired_size,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let text = egui::RichText::new(label.to_string()).color(colors::ORANGE_50);
-                    ui.add(egui::Label::new(text));
-                },
-            )
+                ui.allocate_ui_at_rect(
+                    egui::Rect::from_min_size(
+                        max_rect.min,
+                        egui::vec2(label_width, ui.spacing().interact_size.y),
+                    ),
+                    |ui| {
+                        let text = egui::RichText::new(label.to_string()).color(colors::ORANGE_50);
+                        ui.add(egui::Label::new(text));
+                    },
+                );
+
+                ui.allocate_ui_at_rect(
+                    egui::Rect::from_min_size(
+                        max_rect.translate(egui::vec2(label_width, 0.0)).min,
+                        egui::vec2(max_rect.width() - label_width, ui.spacing().interact_size.y),
+                    ),
+                    |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("+").clicked() {
+                                println!("create a graph");
+                            }
+                        });
+                    },
+                );
+            })
         })
         .response
 }
@@ -329,7 +405,7 @@ pub fn inspector_item_label(label: impl ToString) -> impl egui::Widget {
 fn inspector_item_multi(
     ui: &mut egui::Ui,
     label: impl ToString,
-    values: Vec<&f64>,
+    values: Vec<f64>,
     label_spacing: f32,
 ) -> egui::Response {
     ui.vertical(|ui| {

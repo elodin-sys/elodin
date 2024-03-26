@@ -3519,6 +3519,7 @@ dependencies = [
  "egui_tiles",
  "flume",
  "futures-lite 2.3.0",
+ "itertools 0.12.1",
  "nalgebra",
  "objc",
  "postcard",

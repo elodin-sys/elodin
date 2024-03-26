@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use bevy::prelude::*;
 use bevy_egui::{
     egui::{self, vec2, Color32, Frame, Margin, RichText, Rounding, Stroke, Ui, Visuals},
@@ -5,11 +7,24 @@ use bevy_egui::{
 };
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::bevy::EntityMap;
+use conduit::{
+    bevy::{EntityMap, TimeStep},
+    query::MetadataStore,
+    well_known::EntityMetadata,
+    EntityId, GraphId,
+};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
-use super::{colors, images::Images, widgets::button::ImageButton, SelectedObject, ViewportRect};
-use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera};
+use super::{
+    colors,
+    images::Images,
+    widgets::{
+        button::ImageButton,
+        eplot::{EPlot, EPlotData},
+    },
+    GraphStates, SelectedObject, ViewportRect,
+};
+use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedEntityData};
 
 struct TabIcons {
     pub add: egui::TextureId,
@@ -49,14 +64,14 @@ impl TileState {
 
 enum Pane {
     Viewport(ViewportPane),
-    Graph,
+    Graph(GraphPane),
     Welcome,
 }
 
 impl Pane {
     fn title(&self) -> &str {
         match self {
-            Pane::Graph => "GRAPH",
+            Pane::Graph(pane) => &pane.label,
             Pane::Viewport(_) => "VIEWPORT",
             Pane::Welcome => "WELCOME",
         }
@@ -64,9 +79,28 @@ impl Pane {
 
     fn ui(&mut self, ui: &mut Ui) -> egui_tiles::UiResponse {
         match self {
-            Pane::Graph => {
-                ui.painter()
-                    .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
+            Pane::Graph(pane) => {
+                if let Some(plot_data) = &pane.plot_data {
+                    EPlot::new(plot_data.clone())
+                        .padding(egui::Margin {
+                            left: 20.0,
+                            right: 0.0,
+                            top: 0.0,
+                            bottom: 20.0,
+                        })
+                        .margin(egui::Margin {
+                            left: 80.0,
+                            right: 60.0,
+                            top: 40.0,
+                            bottom: 60.0,
+                        })
+                        .steps(6, 4)
+                        .render(ui);
+                } else {
+                    ui.painter()
+                        .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
+                }
+
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
@@ -113,6 +147,42 @@ impl ViewportPane {
     }
 }
 
+#[derive(Default)]
+struct GraphPane {
+    pub id: GraphId,
+    pub label: String,
+    pub plot_data: Option<EPlotData>,
+}
+
+impl GraphPane {
+    fn spawn(graph_id: GraphId) -> Self {
+        Self {
+            id: graph_id,
+            label: format!("GRAPH_{}", graph_id.0),
+            plot_data: None,
+        }
+    }
+
+    fn update(
+        &mut self,
+        collected_entity_data: &CollectedEntityData,
+        time_step: &TimeStep,
+        graph_states: &mut GraphStates,
+        entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
+        metadata_store: &MetadataStore,
+    ) {
+        let graph_state = graph_states.get_or_create_graph(&self.id);
+
+        self.plot_data = Some(EPlotData::new(
+            collected_entity_data,
+            time_step,
+            graph_state,
+            entity_metadata,
+            metadata_store,
+        ));
+    }
+}
+
 impl Default for TileState {
     fn default() -> Self {
         let panes = vec![];
@@ -127,11 +197,16 @@ struct TreeBehavior<'a> {
     icons: TabIcons,
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
+    graph_states: &'a mut GraphStates,
+    collected_entity_data: &'a CollectedEntityData,
+    time_step: &'a TimeStep,
+    entity_metadata: BTreeMap<&'a EntityId, &'a EntityMetadata>,
+    metadata_store: &'a MetadataStore,
 }
 
 enum TabDiff {
-    Add { parent: TileId, pane: Pane },
     AddViewport(TileId),
+    AddGraph(TileId),
     Delete(TileId),
 }
 
@@ -152,6 +227,16 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
+        if let Pane::Graph(graph_pane) = pane {
+            graph_pane.update(
+                self.collected_entity_data,
+                self.time_step,
+                self.graph_states,
+                self.entity_metadata.clone(),
+                self.metadata_store,
+            );
+        }
+
         pane.ui(ui)
     }
 
@@ -245,8 +330,12 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
                 return button_response;
             };
             match tile {
-                Tile::Pane(Pane::Graph) => {
-                    *self.selected_object = SelectedObject::Graph { tile_id };
+                Tile::Pane(Pane::Graph(graph)) => {
+                    *self.selected_object = SelectedObject::Graph {
+                        tile_id,
+                        label: graph.label.to_owned(),
+                        graph_id: graph.id,
+                    };
                 }
                 Tile::Pane(Pane::Welcome) => {
                     *self.selected_object = SelectedObject::None;
@@ -322,10 +411,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                self.tab_diffs.push(TabDiff::Add {
-                    parent: tile_id,
-                    pane: Pane::Graph,
-                });
+                self.tab_diffs.push(TabDiff::AddGraph(tile_id));
             }
         });
     }
@@ -347,6 +433,11 @@ pub fn render_tiles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut selected_object: ResMut<SelectedObject>,
+    collected_entity_data: Res<CollectedEntityData>,
+    time_step: Res<TimeStep>,
+    mut graph_states: ResMut<GraphStates>,
+    metadata_store: Res<MetadataStore>,
+    entity_metadata: Query<(&EntityId, &EntityMetadata)>,
 ) {
     let icons = TabIcons {
         add: contexts.add_image(images.icon_add.clone_weak()),
@@ -363,13 +454,17 @@ pub fn render_tiles(
                 icons,
                 tab_diffs: vec![],
                 selected_object: selected_object.as_mut(),
+                graph_states: graph_states.as_mut(),
+                collected_entity_data: collected_entity_data.as_ref(),
+                time_step: time_step.as_ref(),
+                metadata_store: metadata_store.as_ref(),
+                entity_metadata: entity_metadata
+                    .iter()
+                    .collect::<BTreeMap<&EntityId, &EntityMetadata>>(),
             };
             ui_state.tree.ui(&mut behavior, ui);
             for diff in behavior.tab_diffs.drain(..) {
                 match diff {
-                    TabDiff::Add { parent, pane } => {
-                        ui_state.insert_pane_with_parent(pane, parent, true);
-                    }
                     TabDiff::Delete(tab_id) => {
                         let Some(tile) = ui_state.tree.tiles.get(tab_id) else {
                             continue;
@@ -393,6 +488,11 @@ pub fn render_tiles(
                             &mut materials,
                             &mut render_layer_alloc,
                         ));
+                        ui_state.insert_pane_with_parent(pane, parent, true);
+                    }
+                    TabDiff::AddGraph(parent) => {
+                        let (graph_id, _) = graph_states.create_graph();
+                        let pane = Pane::Graph(GraphPane::spawn(graph_id));
                         ui_state.insert_pane_with_parent(pane, parent, true);
                     }
                 }

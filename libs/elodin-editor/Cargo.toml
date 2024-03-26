@@ -43,6 +43,7 @@ flume = "0.11"
 
 conduit.path = "../../libs/conduit"
 postcard.version = "1.0.8"
+itertools = "0.12.1"
 
 # python
 # pyo3.version = "0.20.0"
