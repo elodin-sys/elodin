@@ -4,17 +4,17 @@ use conduit::server::TcpServer;
 use config::SandboxConfig;
 use elodin_types::sandbox::{
     self,
-    build_sim_client::BuildSimClient,
+    sandbox_client::SandboxClient,
     sandbox_control_server::{SandboxControl, SandboxControlServer},
-    BuildReq, UpdateCodeReq, UpdateCodeResp,
+    BuildReq, FileTransferReq, UpdateCodeReq, UpdateCodeResp,
 };
 use nox::Client;
 use nox_ecs::{ConduitExec, WorldExec};
-use std::time::Duration;
+use std::{io::Seek, time::Duration};
 use std::{net::SocketAddr, thread, time::Instant};
+use tokio::io::AsyncWriteExt;
 use tonic::{
     async_trait,
-    codec::CompressionEncoding,
     transport::{Channel, Endpoint, Server, Uri},
     Response, Status,
 };
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
 #[derive(Clone)]
 struct ControlService {
     sim_builder_health: HealthClient<Channel>,
-    sim_builder: BuildSimClient<Channel>,
+    sim_builder: SandboxClient<Channel>,
     sim_runner: SimRunner,
     address: SocketAddr,
 }
@@ -76,9 +76,7 @@ struct ControlService {
 impl ControlService {
     fn new(sim_runner: SimRunner, address: SocketAddr, addr: Uri) -> anyhow::Result<Self> {
         let channel = builder_channel(addr);
-        let sim_builder = BuildSimClient::new(channel.clone())
-            .send_compressed(CompressionEncoding::Zstd)
-            .accept_compressed(CompressionEncoding::Zstd);
+        let sim_builder = SandboxClient::new(channel.clone());
         let sim_builder_health = HealthClient::new(channel);
         Ok(Self {
             sim_builder_health,
@@ -119,8 +117,8 @@ impl ControlService {
     async fn handle_update_code(&self, req: UpdateCodeReq) -> anyhow::Result<UpdateCodeResp> {
         let request = tonic::Request::new(BuildReq { code: req.code });
         tracing::debug!("sending code to sim builder");
-        let artifacts = match self.sim_builder.clone().build(request).await {
-            Ok(res) => res.into_inner().artifacts,
+        let artifacts_file_name = match self.sim_builder.clone().build(request).await {
+            Ok(res) => res.into_inner().artifacts_file,
             Err(err) => {
                 return Ok(UpdateCodeResp {
                     status: sandbox::Status::Error.into(),
@@ -129,8 +127,26 @@ impl ControlService {
             }
         };
 
-        tracing::debug!(len = artifacts.len(), "received artifacts");
-        let mut tar = tar::Archive::new(artifacts.as_slice());
+        tracing::debug!(file = %artifacts_file_name, "downloading artifacts");
+        let mut artifacts = tokio::fs::File::from_std(tempfile::tempfile()?);
+        let file_req = FileTransferReq {
+            name: artifacts_file_name,
+        };
+        let mut stream = self
+            .sim_builder
+            .clone()
+            .recv_file(file_req)
+            .await?
+            .into_inner();
+        while let Some(chunk) = stream.message().await? {
+            artifacts.write_all(&chunk.data).await?;
+        }
+        let mut artifacts = artifacts.into_std().await;
+        artifacts.rewind()?;
+
+        tracing::debug!("unpacking artifacts");
+        let buf = std::io::BufReader::new(artifacts);
+        let mut tar = tar::Archive::new(buf);
         let tmp_dir = tempfile::tempdir()?;
         tar.unpack(tmp_dir.path())?;
         let artifacts = tmp_dir.path().join("artifacts");

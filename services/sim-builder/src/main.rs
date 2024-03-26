@@ -1,11 +1,9 @@
 use tokio::task::JoinSet;
-use tonic::codec::CompressionEncoding;
 use tonic::transport::{server::Routes, Server};
 
 mod api;
 
-const MAX_CODE_SIZE: usize = 64 * 1024; // 64 KiB
-const MAX_ARTIFACTS_SIZE: usize = 256 * 1024; // 256 KiB
+const MAX_MESSAGE_SIZE: usize = 256 * 1024; // 256 KiB
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -15,13 +13,16 @@ async fn main() -> anyhow::Result<()> {
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
     api::Service::set_serving(&mut health_reporter).await;
 
-    let build_service = api::BuildSimServer::new(api::Service::default())
-        .send_compressed(CompressionEncoding::Zstd)
-        .accept_compressed(CompressionEncoding::Zstd)
-        .max_decoding_message_size(MAX_CODE_SIZE)
-        .max_encoding_message_size(MAX_ARTIFACTS_SIZE);
+    let build_service = api::SandboxServer::new(api::Service::default())
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE);
+
+    let reflection = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
+        .build()?;
 
     let routes = Routes::default()
+        .add_service(reflection)
         .add_service(health_service)
         .add_service(build_service);
 

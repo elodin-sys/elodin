@@ -1,5 +1,8 @@
-use elodin_types::sandbox::{build_sim_client::BuildSimClient, BuildReq};
-use tonic::codec::CompressionEncoding;
+use std::io::Seek;
+
+use elodin_types::sandbox::FileTransferReq;
+use elodin_types::sandbox::{sandbox_client::SandboxClient, BuildReq};
+use tokio::io::AsyncWriteExt;
 use tonic::transport::{Channel, Endpoint, Uri};
 
 const DEFAULT_CODE: &str = include_str!("code.py");
@@ -17,13 +20,31 @@ async fn main() -> anyhow::Result<()> {
         "http://[::1]:50051"
     };
     let channel = builder_channel(addr.parse().unwrap());
-    let mut client = BuildSimClient::new(channel)
-        .send_compressed(CompressionEncoding::Zstd)
-        .accept_compressed(CompressionEncoding::Zstd);
+    let mut client = SandboxClient::new(channel);
 
     let request = tonic::Request::new(BuildReq { code });
     let response = client.build(request).await?.into_inner();
-    println!("received artifacts ({} bytes)", response.artifacts.len());
+    println!("response: {:?}", response);
+    let mut artifacts = tokio::fs::File::from_std(tempfile::tempfile()?);
+    let file_req = FileTransferReq {
+        name: response.artifacts_file,
+    };
+    let mut stream = client.recv_file(file_req).await?.into_inner();
+    while let Some(chunk) = stream.message().await? {
+        artifacts.write_all(&chunk.data).await?;
+    }
+    let mut artifacts = artifacts.into_std().await;
+    artifacts.rewind()?;
+
+    let buf = std::io::BufReader::new(artifacts);
+    let mut tar = tar::Archive::new(buf);
+    let tmp_dir = tempfile::tempdir()?;
+    tar.unpack(tmp_dir.path())?;
+    let artifacts = tmp_dir.path().join("artifacts");
+
+    println!("extracted artifacts to: {:?}", artifacts);
+    std::mem::forget(tmp_dir); // don't delete the temp dir
+
     Ok(())
 }
 

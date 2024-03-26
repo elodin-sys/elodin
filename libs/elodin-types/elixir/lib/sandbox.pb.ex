@@ -37,7 +37,30 @@ defmodule Elodin.Types.Sandbox.BuildResp do
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
-  field :artifacts, 1, type: :bytes
+  field :artifacts_file, 1, type: :string, json_name: "artifactsFile"
+end
+
+defmodule Elodin.Types.Sandbox.FileChunk do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :name, 1, type: :string
+  field :data, 2, type: :bytes
+end
+
+defmodule Elodin.Types.Sandbox.FileTransferReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :name, 1, type: :string
+end
+
+defmodule Elodin.Types.Sandbox.FileTransferResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 end
 
 defmodule Elodin.Types.Sandbox.SandboxControl.Service do
@@ -56,16 +79,20 @@ defmodule Elodin.Types.Sandbox.SandboxControl.Stub do
   use GRPC.Stub, service: Elodin.Types.Sandbox.SandboxControl.Service
 end
 
-defmodule Elodin.Types.Sandbox.BuildSim.Service do
+defmodule Elodin.Types.Sandbox.Sandbox.Service do
   @moduledoc false
 
-  use GRPC.Service, name: "elodin.types.sandbox.BuildSim", protoc_gen_elixir_version: "0.12.0"
+  use GRPC.Service, name: "elodin.types.sandbox.Sandbox", protoc_gen_elixir_version: "0.12.0"
 
   rpc :Build, Elodin.Types.Sandbox.BuildReq, Elodin.Types.Sandbox.BuildResp
+
+  rpc :SendFile, stream(Elodin.Types.Sandbox.FileChunk), Elodin.Types.Sandbox.FileTransferResp
+
+  rpc :RecvFile, Elodin.Types.Sandbox.FileTransferReq, stream(Elodin.Types.Sandbox.FileChunk)
 end
 
-defmodule Elodin.Types.Sandbox.BuildSim.Stub do
+defmodule Elodin.Types.Sandbox.Sandbox.Stub do
   @moduledoc false
 
-  use GRPC.Stub, service: Elodin.Types.Sandbox.BuildSim.Service
+  use GRPC.Stub, service: Elodin.Types.Sandbox.Sandbox.Service
 end
