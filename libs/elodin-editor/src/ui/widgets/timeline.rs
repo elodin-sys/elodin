@@ -7,7 +7,7 @@ use conduit::{
     ControlMsg,
 };
 
-use crate::ui::{colors, Paused};
+use crate::ui::{colors, utils, Paused};
 
 use super::button::ImageButton;
 
@@ -322,7 +322,7 @@ impl<'a> Timeline<'a> {
 
                         // label
 
-                        let segment_label = time_label(segment_size * i, false);
+                        let segment_label = utils::time_label(segment_size * i, false);
                         let label_text = egui::RichText::new(segment_label).size(font_size);
 
                         column.put(column_rect, egui::Label::new(label_text).selectable(false));
@@ -366,17 +366,6 @@ impl<'a> Timeline<'a> {
         response.changed = value != old_value;
 
         response
-    }
-}
-
-fn time_label(time_in_seconds: usize, with_hours: bool) -> String {
-    let seconds = time_in_seconds % 60;
-    let minutes = (time_in_seconds / 60) % 60;
-    if with_hours {
-        let hours = (time_in_seconds / (60 * 60)) % 60;
-        format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}")
-    } else {
-        format!("{minutes:0>2}:{seconds:0>2}")
     }
 }
 
@@ -501,9 +490,11 @@ pub fn timeline_area(
                             egui::Frame::none()
                                 .inner_margin(egui::Margin::symmetric(0.0, 4.0))
                                 .show(col_ui, |ui| {
-                                    let text =
-                                        egui::RichText::new(time_label(current_time_sec, true))
-                                            .color(colors::WHITE);
+                                    let text = egui::RichText::new(utils::time_label(
+                                        current_time_sec,
+                                        true,
+                                    ))
+                                    .color(colors::WHITE);
 
                                     ui.add(egui::Label::new(text).selectable(false));
                                 });
