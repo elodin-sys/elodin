@@ -174,7 +174,10 @@ defmodule Elodin.Types.Api.ListMonteCarloRunsResp do
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
-  field :monte_carlo_runs, 1, repeated: true, type: Elodin.Types.Api.MonteCarloRun
+  field :monte_carlo_runs, 1,
+    repeated: true,
+    type: Elodin.Types.Api.MonteCarloRun,
+    json_name: "monteCarloRuns"
 end
 
 defmodule Elodin.Types.Api.CreateMonteCarloRunReq do
@@ -242,8 +245,25 @@ defmodule Elodin.Types.Api.MonteCarloBatch do
   field :batch_number, 2, type: :uint32, json_name: "batchNumber"
   field :samples, 3, type: :uint32
   field :failures, 4, type: :bytes
-  field :finished_time, 5, type: :uint64, json_name: "finishedTime"
+  field :finished_time, 5, proto3_optional: true, type: :uint64, json_name: "finishedTime"
   field :status, 6, type: Elodin.Types.Api.MonteCarloBatch.Status, enum: true
+end
+
+defmodule Elodin.Types.Api.GetSampleResultsReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :id, 1, type: :bytes
+  field :sample_number, 2, type: :uint32, json_name: "sampleNumber"
+end
+
+defmodule Elodin.Types.Api.GetSampleResultsResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :download_url, 1, type: :string, json_name: "downloadUrl"
 end
 
 defmodule Elodin.Types.Api.Api.Service do
@@ -267,7 +287,9 @@ defmodule Elodin.Types.Api.Api.Service do
 
   rpc :SandboxEvents, Elodin.Types.Api.GetSandboxReq, stream(Elodin.Types.Api.Sandbox)
 
-  rpc :ListMonteCarloRuns, Elodin.Types.Api.ListMonteCarloRunsReq, Elodin.Types.Api.ListMonteCarloRunsResp
+  rpc :ListMonteCarloRuns,
+      Elodin.Types.Api.ListMonteCarloRunsReq,
+      Elodin.Types.Api.ListMonteCarloRunsResp
 
   rpc :CreateMonteCarloRun,
       Elodin.Types.Api.CreateMonteCarloRunReq,
@@ -286,6 +308,10 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :MonteCarloBatchEvents,
       Elodin.Types.Api.GetMonteCarloRunReq,
       stream(Elodin.Types.Api.MonteCarloBatch)
+
+  rpc :GetSampleResults,
+      Elodin.Types.Api.GetSampleResultsReq,
+      Elodin.Types.Api.GetSampleResultsResp
 end
 
 defmodule Elodin.Types.Api.Api.Stub do

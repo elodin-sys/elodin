@@ -6,8 +6,10 @@ service SandboxControl {
     rpc UpdateCode(UpdateCodeReq) returns (UpdateCodeResp);
 }
 
-service BuildSim {
+service Sandbox {
     rpc Build(BuildReq) returns (BuildResp);
+    rpc SendFile(stream FileChunk) returns (FileTransferResp);
+    rpc RecvFile(FileTransferReq) returns (stream FileChunk);
 }
 
 message UpdateCodeReq {
@@ -28,5 +30,15 @@ message BuildReq {
 }
 
 message BuildResp {
-    bytes artifacts = 1;
+    string artifacts_file = 1;
 }
+
+message FileChunk {
+    string name = 1;
+    bytes data = 2;
+}
+
+message FileTransferReq {
+    string name = 1;
+}
+message FileTransferResp {}
