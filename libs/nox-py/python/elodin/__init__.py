@@ -32,25 +32,28 @@ Self = TypeVar("Self")
 
 
 class System(Protocol):
-    @staticmethod
-    def call(builder: PipelineBuilder): ...
+    def call(self, builder: PipelineBuilder):
+        ...
 
-    def init(self, builder: PipelineBuilder) -> PipelineBuilder: ...
+    def init(self, builder: PipelineBuilder):
+        ...
 
     def pipe(self, other: Any) -> Any:
         return Pipe(self, other)
 
+    def __or__(self, other: Any) -> Any:
+        return self.pipe(other)
 
 @dataclass
 class Pipe(System):
     a: System
     b: System
 
-    def init(self, builder):
+    def init(self, builder: PipelineBuilder):
         self.a.init(builder)
         self.b.init(builder)
 
-    def call(self, builder):
+    def call(self, builder: PipelineBuilder):
         self.a.call(builder)
         self.b.call(builder)
 
@@ -59,7 +62,7 @@ def system(func) -> System:
     class Inner(System):
         func: Callable[[Any], Any]
 
-        def init(self, builder):
+        def init(self, builder: PipelineBuilder):
             sig = inspect.signature(func)
             params = sig.parameters
             for _, p in params.items():
@@ -67,7 +70,7 @@ def system(func) -> System:
             if sig.return_annotation is not inspect._empty:
                 sig.return_annotation.init_builder(sig.return_annotation, builder)
 
-        def call(self, builder):
+        def call(self, builder: PipelineBuilder):
             sig = inspect.signature(func)
             params = sig.parameters
             args = [
@@ -87,6 +90,7 @@ O = TypeVar("O")
 T = TypeVar("T", bound="Union[jax.Array, FromArray]")
 Q = TypeVar("Q", bound="Query[Any]")
 
+S = TypeVarTuple("S")
 
 A = TypeVarTuple("A")
 
@@ -108,21 +112,30 @@ class Query(Generic[Unpack[A]]):
         self.component_data = component_data
         self.component_classes = component_classes
 
-    def map(self, out_tp: type[O], f: Callable[[*A], O]) -> "Query[O]":
+    def map(self, out_tps: Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]], f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], O]]) -> 'Query[Unpack[S]]':
+        out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (out_tps,) if not isinstance(out_tps, tuple)  else out_tps
         buf = jax.vmap(
             lambda b: f(
-                *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]
+                *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)] # type: ignore
             ),
             in_axes=0,
             out_axes=0,
         )(self.bufs)
         (bufs, _) = tree_flatten(buf)
-        component_data = out_tp.__metadata__[0]  # type: ignore
-        return Query(
-            self.inner.map(bufs[0], component_data.to_metadata()),
-            [component_data],
-            [out_tp],
-        )
+        inner = None
+        component_data = []
+        component_classes = []
+        for out_tp, buf in zip(out_tps_tuple , bufs):
+            this_inner = self.inner.map(buf, out_tp.__metadata__[0].to_metadata()) # type: ignore
+            if inner is None:
+                inner = this_inner
+            else:
+                inner = inner.join_query(this_inner)
+            component_data += [out_tp.__metadata__[0]] # type: ignore
+            component_classes += [out_tp]
+        if inner is None:
+            raise Exception("query returned no components")
+        return Query(inner, component_data, component_classes)
 
     def join(self, other: "Query[Unpack[A]]") -> "Query[Any]":
         return Query(
@@ -151,7 +164,7 @@ class Query(Generic[Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            buf = builder.init_var(Component.id(t_arg), component_data.ty)
+            builder.init_var(Component.id(t_arg), component_data.ty)
 
     def __getitem__(self, index: int) -> Any:
         if len(self.bufs) > 1:
@@ -218,15 +231,11 @@ class GraphQuery(Generic[E, Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            buf = builder.init_var(Component.id(t_arg), component_data.ty)
-
-    def edge_fold(
-        self, out_tp: type[O], init_value: O, fn: Callable[..., O]
-    ) -> "Query[O]":
+            builder.init_var(Component.id(t_arg), component_data.ty)
+    def edge_fold(self, out_tp: Annotated[Any, Component], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
         out_bufs: list[jax.typing.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)
-        for i, (f, to) in self.bufs.items():
-
+        for (_, (f, to)) in self.bufs.items():
             def vmap_inner(a):
                 (f, to) = a
 
@@ -251,15 +260,9 @@ class GraphQuery(Generic[E, Unpack[A]]):
             if len(out_bufs) == 0:
                 out_bufs = new_bufs
             else:
-                out_bufs = [
-                    jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)
-                ]
-            component_data = out_tp.__metadata__[0]  # type: ignore
-        return Query(
-            self.inner.map(out_bufs[0], component_data.to_metadata()),
-            [component_data],
-            [out_tp],
-        )
+                out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
+        component_data = out_tp.__metadata__[0] # type: ignore
+        return Query(self.inner.map(out_bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
 
 class SystemParam(Protocol):
@@ -356,12 +359,12 @@ class C:
 
 @dataclass
 class Body(Archetype):
-    world_pos: WorldPos = WorldPos.zero()
-    world_vel: WorldVel = WorldVel.zero()
-    inertia: Inertia = Inertia.from_mass(1.0)
-    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))  # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
-    force: Force = Force.zero()
-    world_accel: WorldAccel = WorldAccel.zero()
+    world_pos: WorldPos = SpatialTransform.zero()
+    world_vel: WorldVel = SpatialMotion.zero()
+    inertia: Inertia = SpatialInertia.from_mass(1.0)
+    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0)) # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
+    force: Force = SpatialForce.zero()
+    world_accel: WorldAccel = SpatialMotion.zero()
 
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
