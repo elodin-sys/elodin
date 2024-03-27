@@ -80,6 +80,8 @@ impl Pane {
     fn ui(&mut self, ui: &mut Ui) -> egui_tiles::UiResponse {
         match self {
             Pane::Graph(pane) => {
+                ui.painter()
+                    .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
                 if let Some(plot_data) = &pane.plot_data {
                     EPlot::new(plot_data.clone())
                         .padding(egui::Margin {
