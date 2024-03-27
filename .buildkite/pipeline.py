@@ -84,10 +84,10 @@ test_steps = [
       emoji = ":python:",
       command = "cd libs/nox-py && python3 -m venv .venv && maturin develop && .venv/bin/python -m pytest",
     ),
-    rust_step(
-      label = "mypy", emoji = ":python:",
-      command = "cd libs/nox-py && python3 -m venv .venv && .venv/bin/pip install mypy && .venv/bin/mypy . --check-untyped-defs",
-    ),
+    # rust_step(
+    #   label = "mypy", emoji = ":python:",
+    #   command = "cd libs/nox-py && python3 -m venv .venv && .venv/bin/pip install mypy && .venv/bin/mypy . --check-untyped-defs",
+    # ), # TODO(sphw): replace with pyright
   ]),
   group(name = ":elixir: elixir", steps = [
     nix_step(

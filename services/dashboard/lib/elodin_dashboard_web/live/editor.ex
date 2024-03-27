@@ -159,7 +159,7 @@ defmodule ElodinDashboardWeb.EditorLive do
         </.link>
       </:navbar_right>
 
-      <div class="flex flex-col overflow-auto h-full bg-black-primary">
+      <div class="flex flex-col overflow-auto h-full bg-black-primary w-full">
         <div class="flex w-full md:h-full flex-col-reverse md:flex-row">
           <div class="flex flex-col md:w-1/2 md:h-full">
             <div

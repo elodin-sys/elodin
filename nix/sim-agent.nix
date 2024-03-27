@@ -16,7 +16,8 @@ let
   mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
   protoFilter = path: _type: builtins.match ".*proto$" path != null;
   assetFilter = path: _type: builtins.match ".*assets.*$" path != null;
-  srcFilter = path: type: (pyFilter path type) || (mdFilter path type) || (protoFilter path type) || (assetFilter path type) || (craneLib.filterCargoSources path type);
+  cppFilter = path: _type: builtins.match ".*[h|(cpp)]$" path != null;
+  srcFilter = path: type: (pyFilter path type) || (mdFilter path type) || (protoFilter path type) || (assetFilter path type) || (cppFilter path type) || (craneLib.filterCargoSources path type);
   src = lib.cleanSourceWith {
     src = craneLib.path ./..;
     filter = srcFilter;
@@ -35,6 +36,8 @@ let
         pkg-config
         python3
         protobuf
+        openssl
+        openblasCompat
       ]
       ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
     XLA_EXTENSION_DIR = "${xla_ext}";
@@ -82,6 +85,7 @@ let
         busybox
         config.packages.sim-builder
         (python3.withPackages (ps: with ps; [(elodin ps)]))
+        openblasCompat
       ];
       closureInfo = pkgs.closureInfo { rootPaths = contents; };
       nativeBuildInputs = with pkgs; [ rsync zstd squashfsTools ];

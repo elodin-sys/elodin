@@ -28,6 +28,10 @@
           libxkbcommon
           fontconfig
           maturin
+          cmake
+          openblas
+          lapack
+          openssl
         ];
       doCheck = false;
     };
