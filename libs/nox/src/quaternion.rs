@@ -29,7 +29,27 @@ impl<T> FromOp for Quaternion<T, Op> {
     }
 }
 
+impl<T> std::fmt::Debug for Quaternion<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Quaternion").finish()
+    }
+}
+
 impl<T: Field> Quaternion<T> {
+    pub fn new(
+        w: impl Into<Scalar<T>>,
+        x: impl Into<Scalar<T>>,
+        y: impl Into<Scalar<T>>,
+        z: impl Into<Scalar<T>>,
+    ) -> Self {
+        let w = w.into().reshape::<Const<1>>();
+        let x = x.into().reshape::<Const<1>>();
+        let y = y.into().reshape::<Const<1>>();
+        let z = z.into().reshape::<Const<1>>();
+        let inner = Vector::from_arr([x, y, z, w]);
+        Quaternion(inner)
+    }
+
     pub fn identity() -> Self {
         let inner = T::zero()
             .broadcast::<Const<3>>()
@@ -42,7 +62,6 @@ impl<T: Field> Quaternion<T> {
         let axis = axis.normalize();
         let angle = angle.into();
         let half_angle = angle / (T::two());
-        let half_angle = half_angle.sin();
         let sin = half_angle.sin();
         let cos = half_angle.cos();
         let inner = (axis * sin).concat(cos.reshape::<Const<1>>());
@@ -254,5 +273,23 @@ mod tests {
             UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0) * vector![1.0, 2.0, 3.0];
 
         approx::assert_relative_eq!(out, correct_out, epsilon = 1.0e-6);
+    }
+
+    #[test]
+    fn test_quat_convention() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Quaternion<f32>, b: Quaternion<f32>| -> Quaternion<f32> { a * b })
+            .build()
+            .unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec
+            .run(
+                &client,
+                nalgebra::Quaternion::new(0.0, 1.0, 0.0, 0.0),
+                nalgebra::Quaternion::new(0.0, 0.0, 1.0, 0.0),
+            )
+            .unwrap()
+            .to_host();
+        assert_eq!(nalgebra::Quaternion::new(0.0, 0.0, 0.0, 1.0), out);
     }
 }

@@ -1,26 +1,278 @@
+from elodin.elodin import Quaternion
 import jax
 import jax.numpy as np
 from jax.numpy import linalg as la
 from dataclasses import dataclass
 import elodin as el
-from elodin import Annotated
+from typing import Annotated
 
-initial_angular_vel = np.array([-2.0, 3.0, 1.0])
+initial_angular_vel = np.array([2.0, 3.0, 4.0])
 rw_force_clamp = 0.2
 G = 6.6743e-11  #
 M = 5.972e24  # mass of the Earth
 earth_radius = 6378.1 * 1000
-altitude = 800 * 1000
+altitude = 200 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
 
+# sensors
+GyroOmega = Annotated[
+    jax.Array, el.Component("gyro_omega", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]
+
+MagReadingBody = Annotated[
+    jax.Array,
+    el.Component("mag_reading_body", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+MagReadingRef = Annotated[
+    jax.Array,
+    el.Component("mag_reading_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+StarReadingBody = Annotated[
+    jax.Array,
+    el.Component("star_reading_body", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+StarReadingRef = Annotated[
+    jax.Array,
+    el.Component("star_reading_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+
+@dataclass
+class Sensors(el.Archetype):
+    gyro_omega: GyroOmega
+    mag_reading_body: MagReadingBody
+    mag_reading_ref: MagReadingRef
+    star_reading_body: StarReadingBody
+    star_reading_ref: StarReadingRef
+
+
+@el.system
+def fake_magnetometer_ref(pos: el.Query[el.WorldPos]) -> el.Query[MagReadingRef]:
+    def imu_att_inner(pos):
+        key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
+        noise = 0.01 * jax.random.normal(key, shape=(4,))
+        return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
+            [1.0, 0.0, 0.0]
+        )
+
+    return pos.map(MagReadingRef, imu_att_inner)
+
+
+@el.system
+def fake_magnetometer_body(pos: el.Query[el.WorldPos]) -> el.Query[MagReadingBody]:
+    return pos.map(MagReadingBody, lambda _: np.array([1.0, 0.0, 0.0]))
+
+
+@el.system
+def fake_star_ref(pos: el.Query[el.WorldPos]) -> el.Query[StarReadingRef]:
+    def imu_att_inner(pos):
+        key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
+        noise = 0.01 * jax.random.normal(key, shape=(4,))
+        return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
+            [0.0, 0.0, 1.0]
+        )
+
+    return pos.map(StarReadingRef, imu_att_inner)
+
+
+@el.system
+def fake_star_body(pos: el.Query[el.WorldPos]) -> el.Query[StarReadingBody]:
+    return pos.map(StarReadingBody, lambda _: np.array([0.0, 0.0, 1.0]))
+
+
+@el.system
+def gyro_omega(pos: el.Query[el.WorldVel]) -> el.Query[GyroOmega]:
+    def gyro_omega_inner(vel):
+        key = jax.random.key(jax.lax.convert_element_type(vel.linear()[0], "int64"))
+        noise = 3.16e-7 * jax.random.normal(key, shape=(3,))
+        return vel.angular() + noise
+
+    return pos.map(GyroOmega, gyro_omega_inner)
+
+
+sensors = (
+    fake_magnetometer_body.pipe(fake_magnetometer_ref)
+    .pipe(fake_star_body)
+    .pipe(fake_star_ref)
+    .pipe(gyro_omega)
+)
+
+# attitude det - mekf
+# source: Optimal Estimation of Dynamic Systems, 2nd Edition - Chapter 7
+
+
+def calculate_covariance(
+    sigma_g: jax.Array, sigma_b: jax.Array, dt: float
+) -> jax.Array:
+    variance_g = np.diag(sigma_g * sigma_g * dt)
+    variance_b = np.diag(sigma_b * sigma_b * dt)
+    Q_00 = variance_g + variance_b * dt**2 / 3
+    Q_01 = variance_b * dt / 2
+    Q_10 = Q_01
+    Q_11 = variance_b
+    return np.block([[Q_00, Q_01], [Q_10, Q_11]])
+
+
+Q = calculate_covariance(
+    np.array([0.1, 0.1, 0.1]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
+)
+Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
+YQY = Y @ Q @ Y.T
+P = Annotated[
+    jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))
+]
+AttEst = Annotated[
+    el.Quaternion, el.Component("att_est", el.ComponentType.Quaternion)
+]  # q_hat
+AngVelEst = Annotated[
+    jax.Array, el.Component("ang_vel_est", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]  # omega_hat
+BiasEst = Annotated[
+    jax.Array, el.Component("bias_est", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]  # b_hat
+sensor_count = 2
+
+
+# returns q_hat
+def propogate_quaternion(q: Quaternion, omega: jax.Array, dt: float) -> Quaternion:
+    omega_norm = la.norm(omega)
+    c = np.cos(0.5 * omega_norm * dt)
+    s = np.sin(0.5 * omega_norm * dt) / omega_norm
+    omega_s = s * omega
+    [x, y, z] = omega_s
+    big_omega = np.array([[c, z, -y, x], [-z, c, x, y], [y, -x, c, z], [-x, -y, -z, c]])
+    o = big_omega @ q.vector()
+    return Quaternion(jax.lax.select(omega_norm > 1e-5, o, q.vector()))
+
+
+# returns q_hat
+def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
+    a = 0.5 * delta_alpha
+    qa = Quaternion(np.array([a[0], a[1], a[2], 0.0]))
+    q_hat = q + qa * q
+    return q_hat.normalize()
+
+
+def propogate_state_covariance(
+    big_p: jax.Array, omega: jax.Array, dt: float
+) -> jax.Array:
+    omega_norm = la.norm(omega)
+    s = np.sin(omega_norm * dt)
+    c = np.cos(omega_norm * dt)
+    p = s / omega_norm
+    q = (1 - c) / (omega_norm**2)
+    r = (omega_norm * dt - s) / (omega_norm**3)
+    omega_cross = skew_symmetric_cross(omega)
+    omega_cross_square = omega_cross @ omega_cross
+    phi_00 = np.eye(3) - omega_cross * p + omega_cross_square * q
+    phi_01 = omega_cross * q - np.eye(3) * dt - omega_cross_square * r
+    phi_10 = np.zeros((3, 3))
+    phi_11 = np.eye(3)
+    phi = np.block([[phi_00, phi_01], [phi_10, phi_11]])
+    # TODO(sphw): handle steady state eq 7.51b
+    return (phi @ big_p @ phi.T) + YQY
+
+
+def estimate_attitude(
+    q_hat: Quaternion,
+    b_hat: jax.Array,
+    omega: jax.Array,
+    big_p: jax.Array,
+    measured_bodys: jax.Array,
+    measured_references: jax.Array,
+    dt: float,
+    p: jax.Array,
+) -> tuple[Quaternion, jax.Array, jax.Array]:
+    q_hat = propogate_quaternion(q_hat, omega, dt)
+    p = propogate_state_covariance(p, omega, dt)
+    delta_x_hat = np.zeros(6)
+    var_r = np.eye(3) * 0.001
+    for i in range(0, sensor_count):
+        measured_reference = measured_references[i]
+        measured_body = measured_bodys[i]
+        body_r = q_hat @ measured_reference
+        H = np.block([skew_symmetric_cross(body_r), np.zeros((3, 3))])
+        H_trans = H.T
+        K = p @ H_trans @ la.inv(H @ p @ H_trans + var_r)
+        e = measured_body - body_r
+        delta_x_hat = delta_x_hat + K @ (e - H @ delta_x_hat)
+        p = (np.eye(6) - K @ H) @ p
+    delta_alpha = delta_x_hat[0:3]
+    delta_beta = delta_x_hat[3:6]
+    q_hat = update_quaternion(q_hat, delta_alpha)
+    b_hat = b_hat + delta_beta
+    return (q_hat, b_hat, p)
+
+
+def skew_symmetric_cross(a: jax.Array) -> jax.Array:
+    return np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+
+
+@el.system
+def kalman_filter(
+    query: el.Query[
+        GyroOmega,
+        MagReadingBody,
+        MagReadingRef,
+        StarReadingBody,
+        StarReadingRef,
+        AttEst,
+        BiasEst,
+        P,
+    ],
+) -> el.Query[AttEst, AngVelEst, BiasEst, P]:
+    def kalman_filter_inner(
+        omega, mag_body, mag_ref, star_body, star_ref, att_est, b_hat, p
+    ) -> tuple[AttEst, AngVelEst, BiasEst, P]:
+        q_hat, b_hat, big_p = estimate_attitude(
+            att_est,
+            b_hat,
+            omega,
+            p,
+            np.array([mag_body, star_body]),
+            np.array([mag_ref, star_ref]),
+            1 / 120.0,
+            p,
+        )
+        omega_hat = omega
+        return (q_hat, omega_hat, b_hat, big_p)
+
+    return query.map(
+        (
+            AttEst,
+            AngVelEst,
+            BiasEst,
+            P,
+        ),
+        kalman_filter_inner,
+    )
+
+
+@dataclass
+class KalmanFilter(el.Archetype):
+    p: P
+    att_est: AttEst
+    ang_vel_est: AngVelEst
+    bias_est: BiasEst
+
+
 # control system
 Goal = Annotated[el.Quaternion, el.Component("goal", el.ComponentType.Quaternion)]
+UserGoal = Annotated[
+    el.Quaternion, el.Component("rot_deg", el.ComponentType.Quaternion)
+]
 
 
 @dataclass
 class ControlInput(el.Archetype):
     goal: Goal
+
+
+@dataclass
+class UserInput(el.Archetype):
+    deg: UserGoal
 
 
 RWAxis = Annotated[
@@ -50,26 +302,26 @@ r = np.array([8.0, 8.0, 8.0])
 
 
 @el.system
-def earth_point(sensor: el.Query[el.WorldPos, Goal]) -> el.Query[Goal]:
-    def earth_point_inner(pos, _):
+def earth_point(sensor: el.Query[el.WorldPos, UserGoal]) -> el.Query[Goal]:
+    def earth_point_inner(pos, deg):
         linear = pos.linear()
         r = linear / la.norm(linear)
         body_axis = np.array([0.0, 0.0, -1.0])
         a = np.cross(body_axis, r)
         w = 1 + np.dot(body_axis, r)
-        return el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+        return deg * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
 
     return sensor.map(Goal, earth_point_inner)
 
 
 @el.system
 def control(
-    sensor: el.Query[el.WorldPos, el.WorldVel, Goal], rw: el.Query[RWAxis, RWForce]
+    sensor: el.Query[AttEst, AngVelEst, Goal], rw: el.Query[RWAxis, RWForce]
 ) -> el.Query[RWForce]:
     control_force = sensor.map(
         el.Force,
         lambda p, v, i: el.SpatialForce.from_torque(
-            -1.0 * v.angular() * d + -1.0 * (p.angular().vector() - i.vector())[:3] * k
+            -1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
         ),
     ).bufs[0][0]
     return rw.map(
@@ -153,7 +405,12 @@ sat = (
     .insert(
         ControlInput(
             el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0))
-        )
+        ),
+    )
+    .insert(UserInput(el.Quaternion(np.array([0.0, 1.0, 0.0, 0.0]))))
+    .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
+    .insert(
+        KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
     )
 )
 
@@ -195,7 +452,13 @@ w.spawn(
 
 exec = w.run(
     system=el.six_dof(
-        1 / 30.0, control.pipe(rw_effector).pipe(gravity_effector).pipe(earth_point)
+        1 / 120.0,
+        sensors
+        | kalman_filter
+        | control
+        | rw_effector
+        | gravity_effector
+        | earth_point,
     ),
     time_step=1.0 / 240.0,
 )

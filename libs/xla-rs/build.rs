@@ -45,6 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("-DLLVM_ON_UNIX=1")
         .flag("-DLLVM_VERSION_STRING=")
         .flag(&format!("-isystem{}", xla_dir.join("include").display()))
+        .file("./vendor/jaxlib/cpu/cpu_kernels.cc")
+        .file("./vendor/jaxlib/cpu/lapack_kernels.cc")
+        .include("./vendor")
         .build("src/lib.rs");
     println!("cargo:rerun-if-changed=src/executable.rs");
     println!("cargo:rerun-if-changed=src/literal.rs");
