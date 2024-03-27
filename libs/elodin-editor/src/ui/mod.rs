@@ -249,7 +249,9 @@ pub fn render(
     mut commands: Commands,
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
-    let window = window.single();
+    let Ok(window) = window.get_single() else {
+        return;
+    };
     let width = window.resolution.width();
     let height = window.resolution.height();
 
@@ -400,7 +402,9 @@ pub fn render_viewport_ui(
     diagnostics: Res<DiagnosticsStore>,
     hovered_entity: Res<HoveredEntity>,
 ) {
-    let window = window.single();
+    let Ok(window) = window.get_single() else {
+        return;
+    };
 
     let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
         entities_meta
