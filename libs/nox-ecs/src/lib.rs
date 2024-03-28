@@ -29,11 +29,11 @@ mod conduit_exec;
 mod dyn_array;
 mod host_column;
 mod integrator;
-mod polars;
 mod query;
 
 pub mod graph;
 pub mod history;
+pub mod polars;
 pub mod six_dof;
 
 pub use assets::*;
@@ -905,12 +905,9 @@ where
         let mut tick_exec = self.pipe.build(&mut self.world)?;
         tick_exec.metadata.time_step = self.time_step;
         let startup_exec = self.startup_sys.build(&mut self.world)?;
-        Ok(WorldExec {
-            world: SharedWorld::from_host(self.world),
-            tick_exec,
-            startup_exec: Some(startup_exec),
-            history: History::default(),
-        })
+        let world = SharedWorld::from_host(self.world);
+        let world_exec = WorldExec::new(world, tick_exec, Some(startup_exec));
+        Ok(world_exec)
     }
 }
 
@@ -1107,14 +1104,25 @@ pub struct WorldExec {
 }
 
 impl WorldExec {
+    pub fn new(world: SharedWorld, tick_exec: Exec, startup_exec: Option<Exec>) -> Self {
+        let mut history = History::default();
+        history.push_world(&world.host).unwrap();
+        Self {
+            world,
+            tick_exec,
+            startup_exec,
+            history: History::default(),
+        }
+    }
+
     pub fn run(&mut self, client: &Client) -> Result<(), Error> {
         if let Some(startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.world, client)?;
         }
         self.tick_exec.run(&mut self.world, client)?;
         self.world.copy_all_columns()?;
-        self.history.push_world(&self.world.host)?;
         self.world.host.tick += 1;
+        self.history.push_world(&self.world.host)?;
         Ok(())
     }
 
@@ -1200,12 +1208,8 @@ impl WorldExec {
         let polars_world = PolarsWorld::read_from_dir(dir.join("world"))?;
         let world = World::try_from(polars_world)?;
         let world = SharedWorld::from_host(world);
-        Ok(Self {
-            world,
-            tick_exec,
-            startup_exec,
-            history: History::default(),
-        })
+        let world_exec = WorldExec::new(world, tick_exec, startup_exec);
+        Ok(world_exec)
     }
 }
 

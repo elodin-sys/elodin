@@ -17,14 +17,14 @@ use crate::{
     World, WorldStore,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
     pub metadata: Metadata,
     pub assets: AssetStore,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Metadata {
     pub archetypes: ustr::UstrMap<ArchetypeMetadata>,
     pub component_map: HashMap<ComponentId, ArchetypeName>,
@@ -49,7 +49,10 @@ impl PolarsWorld {
         let mut tables = self.archetypes.values();
         let init = tables.next().cloned().unwrap_or_default();
         let column_name = EntityId::component_id().0.to_string();
-        let keys = [&column_name, "time"];
+        let mut keys = vec![&column_name, "time"];
+        if init.get_column_names().contains(&"sample_number") {
+            keys.push("sample_number");
+        }
         tables
             .try_fold(init, |agg, df| {
                 agg.join(
@@ -62,6 +65,47 @@ impl PolarsWorld {
             .map_err(Error::from)
     }
 
+    pub fn add_sample_number(&mut self, sample_number: usize) -> Result<(), Error> {
+        for df in self.archetypes.values_mut() {
+            let len = df
+                .get_columns()
+                .first()
+                .map(|s| s.len())
+                .unwrap_or_default();
+            let series: Series = std::iter::repeat(sample_number as u64).take(len).collect();
+            df.with_column(series.with_name("sample_number"))?;
+        }
+        Ok(())
+    }
+
+    pub fn add_time(&mut self) -> Result<(), Error> {
+        for df in self.archetypes.values_mut() {
+            let len = df
+                .get_columns()
+                .first()
+                .map(|s| s.len())
+                .unwrap_or_default();
+            let series: Series = std::iter::repeat(self.metadata.tick).take(len).collect();
+            df.with_column(series.with_name("time"))?;
+        }
+        Ok(())
+    }
+
+    pub fn vstack(&mut self, other: &Self) -> Result<(), Error> {
+        if self.archetypes.is_empty() {
+            *self = other.clone();
+            return Ok(());
+        }
+        for (archetype_name, df) in &mut self.archetypes {
+            let other_df = other
+                .archetypes
+                .get(archetype_name)
+                .ok_or(Error::ComponentNotFound)?;
+            df.vstack_mut(other_df)?;
+        }
+        Ok(())
+    }
+
     pub fn write_to_dir(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
         let path = path.as_ref();
         std::fs::create_dir_all(path)?;
@@ -70,9 +114,7 @@ impl PolarsWorld {
         for (archetype_name, df) in &mut self.archetypes {
             let path = path.join(format!("{}.parquet", archetype_name));
             let file = std::fs::File::create(&path)?;
-            ParquetWriter::new(file)
-                .with_row_group_size(Some(1000))
-                .finish(df)?;
+            ParquetWriter::new(file).finish(df)?;
         }
         let path = path.join("assets.bin");
         let file = std::fs::File::create(path)?;
@@ -316,7 +358,6 @@ fn tensor_array(ty: &ComponentType, inner: Box<dyn Array>) -> Box<dyn Array> {
 
 pub trait SeriesExt {
     fn to_bytes(&self) -> Vec<u8>;
-    unsafe fn to_array_data(&self) -> ArrayData;
 }
 
 impl SeriesExt for Series {
@@ -324,28 +365,28 @@ impl SeriesExt for Series {
         // safety: we ensure that we only use the
         // returned `ArrayData` while `Series` is in
         // scope, so this is safe
-        let data = unsafe { self.to_array_data() };
+        let data = unsafe { series_to_array_data(self) };
         let mut out = Vec::default();
         recurse_array_data(&data, &mut out);
         out
     }
+}
 
-    unsafe fn to_array_data(&self) -> ArrayData {
-        let array = self.to_arrow(0, false);
-        let field = self.field();
-        let field = field.to_arrow(false);
-        let schema = polars_arrow::ffi::export_field_to_c(&field);
-        // safety: these two types have identical layouts
-        // as they are both guarenteed to match the c-ffi layout
-        let schema = unsafe { std::mem::transmute(schema) };
-        let array = polars_arrow::ffi::export_array_to_c(array);
-        // safety: these two types have identical layouts
-        // as they are both guarenteed to match the c-ffi layout
-        let array: FFI_ArrowArray = unsafe { std::mem::transmute(array) };
-        // safety: this function requires the user ensure that `Series`
-        // is alive while `ArrayData` is accessible
-        unsafe { arrow::ffi::from_ffi(array, &schema) }.expect("polars arrow layout disagreement")
-    }
+unsafe fn series_to_array_data(series: &Series) -> ArrayData {
+    let array = series.to_arrow(0, false);
+    let field = series.field();
+    let field = field.to_arrow(false);
+    let schema = polars_arrow::ffi::export_field_to_c(&field);
+    // safety: these two types have identical layouts
+    // as they are both guarenteed to match the c-ffi layout
+    let schema = unsafe { std::mem::transmute(schema) };
+    let array = polars_arrow::ffi::export_array_to_c(array);
+    // safety: these two types have identical layouts
+    // as they are both guarenteed to match the c-ffi layout
+    let array: FFI_ArrowArray = unsafe { std::mem::transmute(array) };
+    // safety: this function requires the user ensure that `Series`
+    // is alive while `ArrayData` is accessible
+    unsafe { arrow::ffi::from_ffi(array, &schema) }.expect("polars arrow layout disagreement")
 }
 
 pub fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
