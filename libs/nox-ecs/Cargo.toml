@@ -10,6 +10,7 @@ default = ["tokio"]
 tokio = ["dep:tokio", "futures", "conduit/tokio"]
 
 [dependencies]
+# nox
 nox.path = "../nox"
 conduit.path = "../conduit"
 conduit.features = ["nox"]
@@ -20,6 +21,9 @@ smallvec.features = ["const_generics", "union"]
 bytemuck.version = "1.14"
 bytemuck.features = ["derive"]
 ndarray = "0.15.6"
+byteorder = "1.5.0"
+ustr = { version = "1.0.0", features = ["serde"] }
+once_cell = "1.19.0"
 
 # errors
 thiserror = "1"
@@ -56,9 +60,10 @@ serde_json = "1.0"
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]
 
-byteorder = "1.5.0"
-ustr = { version = "1.0.0", features = ["serde"] }
-once_cell = "1.19.0"
+# python
+pyo3.version = "0.20.0"
+pyo3.optional = true
+
 
 [dev-dependencies]
 tempfile = "3.10.0"

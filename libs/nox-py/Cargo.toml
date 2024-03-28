@@ -16,20 +16,25 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = { version = "0.20.0", features = ["abi3-py310"] }
-pyo3-asyncio = { version = "0.20", features = ["tokio-runtime"] }
+pyo3.version = "0.20.0"
+pyo3.features = ["abi3-py310"]
+pyo3-asyncio.version = "0.20"
+pyo3-asyncio.features = ["tokio-runtime"]
 pyo3-polars = "0.12.0"
 numpy.version = "0.20"
 
 # nox
 nox-ecs.path = "../nox-ecs"
 nox-ecs-macros.path = "../nox-ecs-macros"
+nox-ecs.features = ["pyo3"]
 parking_lot = "0.12.1"
 
 # types
-postcard = { version = "1.0", features = ["alloc"] }
+postcard.version = "1.0"
+postcard.features = ["alloc"]
 bytes = "1.0.5"
 
+# async
 conduit.path = "../conduit"
 conduit.features = ["tokio"]
 tokio.version = "1.34"
@@ -42,6 +47,13 @@ tracing-subscriber = "0.3"
 
 # errors
 thiserror = "1.0"
+anyhow = "1.0"
 
 # cli
 clap = { version = "4.4.18", features = ["derive"] }
+
+# live reload
+notify = "6.1.1"
+notify-debouncer-mini = { version = "0.4.1", default-features = false }
+flume = "0.11.0"
+tempfile = "3.10.0"
