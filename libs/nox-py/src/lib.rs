@@ -26,18 +26,23 @@ use numpy::{
     ndarray::ArrayViewD, PyArray, PyArray1, PyArrayLike1, PyReadonlyArray1, PyUntypedArray,
 };
 use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
+    exceptions::PyValueError,
     prelude::*,
     types::{PyBytes, PySequence, PyTuple},
 };
 
 mod conduit_client;
+mod error;
 mod graph;
+mod sim_runner;
 mod spatial;
 
+pub use error::*;
 pub use graph::*;
 use pyo3_polars::PyDataFrame;
+use sim_runner::SimSupervisor;
 pub use spatial::*;
+use tracing_subscriber::EnvFilter;
 
 #[pyclass]
 #[derive(Default)]
@@ -403,6 +408,8 @@ enum Args {
         addr: SocketAddr,
         #[arg(long)]
         no_repl: bool,
+        #[arg(long)]
+        watch: bool,
     },
 }
 
@@ -492,7 +499,7 @@ impl WorldBuilder {
     }
 
     fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
-        let asset = PyAsset::try_new(py, asset).unwrap();
+        let asset = PyAsset::try_new(py, asset)?;
         let inner = self
             .world
             .assets
@@ -507,8 +514,13 @@ impl WorldBuilder {
         time_step: Option<f64>,
         client: Option<&Client>,
     ) -> Result<Option<String>, Error> {
-        tracing_subscriber::fmt::init();
-        // skip `python3 <name of script>`
+        tracing_subscriber::fmt::fmt()
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive("info".parse().expect("invalid filter"))
+                    .from_env_lossy(),
+            )
+            .init();
 
         let pytesting = py
             .import("elodin")?
@@ -520,7 +532,10 @@ impl WorldBuilder {
             return Ok(None);
         }
 
-        let args = std::env::args_os().skip(2);
+        // skip `python3`
+        let mut args = std::env::args_os().skip(1);
+        let path = args.next().ok_or(Error::MissingArg("path".to_string()))?;
+        let path = PathBuf::from(path);
         let args = Args::parse_from(args);
         match args {
             Args::Build { dir } => {
@@ -529,19 +544,31 @@ impl WorldBuilder {
                 Ok(None)
             }
             Args::Repl { addr } => Ok(Some(addr.to_string())),
-            Args::Run { addr, no_repl } => {
-                let exec = self.build(py, sys, time_step)?.exec;
-                let client = match client {
-                    Some(c) => c.client.clone(),
-                    None => nox::Client::cpu()?,
-                };
-                if no_repl {
-                    spawn_tcp_server(addr, exec, &client, || py.check_signals().is_err())?;
+            Args::Run {
+                addr,
+                no_repl,
+                watch,
+            } => {
+                if !watch {
+                    let exec = self.build(py, sys, time_step)?.exec;
+                    let client = match client {
+                        Some(c) => c.client.clone(),
+                        None => nox::Client::cpu()?,
+                    };
+                    if no_repl {
+                        spawn_tcp_server(addr, exec, &client, || py.check_signals().is_err())?;
+                        Ok(None)
+                    } else {
+                        std::thread::spawn(move || {
+                            spawn_tcp_server(addr, exec, &client, || false).unwrap()
+                        });
+                        Ok(Some(addr.to_string()))
+                    }
+                } else if no_repl {
+                    SimSupervisor::run(path).unwrap();
                     Ok(None)
                 } else {
-                    std::thread::spawn(move || {
-                        spawn_tcp_server(addr, exec, &client, || false).unwrap()
-                    });
+                    let _ = SimSupervisor::spawn(path);
                     Ok(Some(addr.to_string()))
                 }
             }
@@ -881,9 +908,8 @@ impl System for PySystem {
         let builder = Python::with_gil(move |py| {
             let builder = PyCell::new(py, builder)?;
             self.sys.call_method1(py, "init", (builder.borrow_mut(),))?;
-            Ok::<_, Error>(builder.replace(PipelineBuilder::default()))
-        })
-        .unwrap();
+            Ok::<_, nox_ecs::Error>(builder.replace(PipelineBuilder::default()))
+        })?;
         *in_builder = builder.builder;
         Ok(())
     }
@@ -897,9 +923,8 @@ impl System for PySystem {
         let builder = Python::with_gil(move |py| {
             let builder = PyCell::new(py, builder)?;
             self.sys.call_method1(py, "call", (builder.borrow_mut(),))?;
-            Ok::<_, Error>(builder.replace(PipelineBuilder::default()))
-        })
-        .unwrap();
+            Ok::<_, nox_ecs::Error>(builder.replace(PipelineBuilder::default()))
+        })?;
         *in_builder = builder.builder;
         Ok(())
     }
@@ -1039,45 +1064,6 @@ impl Entity {
 
     pub fn name(&mut self, py: Python<'_>, name: String) -> Self {
         self.metadata(py, EntityMetadata::new(name, None))
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("{0}")]
-    Nox(#[from] nox::Error),
-    #[error("{0}")]
-    NoxEcs(#[from] nox_ecs::Error),
-    #[error("{0}")]
-    PyErr(#[from] PyErr),
-    #[error("hlo module was not PyBytes")]
-    HloModuleNotBytes,
-    #[error("unexpected input")]
-    UnexpectedInput,
-    #[error("unknown command: {0}")]
-    UnknownCommand(String),
-    #[error("{0}")]
-    MissingArg(String),
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("invalid time step: {0:?}")]
-    InvalidTimeStep(std::time::Duration),
-    #[error("conduit error {0}")]
-    Conduit(#[from] conduit::Error),
-}
-
-impl From<Error> for PyErr {
-    fn from(value: Error) -> Self {
-        match value {
-            Error::NoxEcs(nox_ecs::Error::ComponentNotFound) => {
-                PyValueError::new_err("component not found")
-            }
-            Error::NoxEcs(nox_ecs::Error::ValueSizeMismatch) => {
-                PyValueError::new_err("value size mismatch")
-            }
-            Error::PyErr(err) => err,
-            err => PyRuntimeError::new_err(err.to_string()),
-        }
     }
 }
 

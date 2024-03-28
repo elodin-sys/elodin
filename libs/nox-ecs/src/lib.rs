@@ -1396,6 +1396,9 @@ pub enum Error {
     Postcard(#[from] postcard::Error),
     #[error("world not found")]
     WorldNotFound,
+    #[cfg(feature = "pyo3")]
+    #[error("python error")]
+    PyO3(#[from] pyo3::PyErr),
 }
 
 impl From<nox::xla::Error> for Error {

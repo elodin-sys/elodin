@@ -1,12 +1,10 @@
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 use tokio::net::TcpStream;
 
 use super::Cli;
 use bevy::{prelude::*, utils::tracing};
 use conduit::{client::MsgPair, server::handle_socket};
-use nox_ecs::{ConduitExec, WorldExec};
 
 #[derive(clap::Args, Clone)]
 pub struct Args {
@@ -47,7 +45,8 @@ impl Cli {
             std::process::Command::new("python3")
                 .arg(path)
                 .arg("--")
-                .arg("repl")
+                .arg("run")
+                .arg("--watch")
                 .arg(addr.to_string())
                 .spawn()?;
         }
@@ -55,7 +54,6 @@ impl Cli {
         App::new()
             .add_plugins(EditorPlugin)
             .add_plugins(SimClient { addr, bevy_tx })
-            .add_plugins(SimSupervisor { path })
             .add_plugins(SyncPlugin {
                 plugin: sub,
                 subscriptions: Subscriptions::default(),
@@ -70,11 +68,6 @@ impl Cli {
 struct SimClient {
     addr: SocketAddr,
     bevy_tx: flume::Sender<MsgPair>,
-}
-
-#[derive(Clone)]
-struct SimSupervisor {
-    path: Option<PathBuf>,
 }
 
 impl Plugin for SimClient {
@@ -99,111 +92,5 @@ impl Plugin for SimClient {
                 }
             });
         });
-    }
-}
-
-impl Plugin for SimSupervisor {
-    fn build(&self, _: &mut App) {
-        let Some(path) = self.path.clone() else {
-            return;
-        };
-        std::thread::spawn(move || {
-            if let Err(err) = Self::run(path) {
-                tracing::error!(?err);
-            }
-        });
-    }
-}
-
-impl SimSupervisor {
-    fn run(path: PathBuf) -> anyhow::Result<()> {
-        let addr = "0.0.0.0:2240".parse::<SocketAddr>().unwrap();
-        let (notify_tx, notify_rx) = flume::bounded(1);
-        let mut debouncer =
-            notify_debouncer_mini::new_debouncer(Duration::from_millis(500), move |res| {
-                if let Ok(event) = res {
-                    tracing::debug!(?event, "received notify");
-                    let _ = notify_tx.try_send(());
-                }
-            })?;
-
-        debouncer
-            .watcher()
-            .watch(&path, notify::RecursiveMode::NonRecursive)?;
-
-        let (tx, rx) = flume::unbounded();
-        let sim_runner = SimRunner::new(rx);
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let server = conduit::server::TcpServer::bind(tx, addr).await.unwrap();
-                server.run().await
-            })
-            .unwrap();
-        });
-
-        loop {
-            let _ = sim_runner.try_update_sim(&path).inspect_err(eprint_err);
-            notify_rx.recv().unwrap();
-        }
-    }
-}
-
-fn eprint_err<E: std::fmt::Debug>(err: &E) {
-    eprintln!("{err:?}");
-}
-
-#[derive(Clone)]
-struct SimRunner {
-    exec_tx: flume::Sender<WorldExec>,
-}
-
-impl SimRunner {
-    fn new(server_rx: flume::Receiver<MsgPair>) -> Self {
-        let (exec_tx, exec_rx) = flume::bounded(1);
-        std::thread::spawn(move || -> anyhow::Result<()> {
-            let client = nox_ecs::nox::Client::cpu()?;
-            let exec: WorldExec = exec_rx.recv()?;
-            let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
-            loop {
-                let start = Instant::now();
-                if let Err(err) = conduit_exec.run(&client) {
-                    tracing::error!(?err, "failed to run conduit exec");
-                    return Err(err.into());
-                }
-                let sleep_time = conduit_exec.time_step().saturating_sub(start.elapsed());
-                std::thread::sleep(sleep_time);
-
-                if let Ok(exec) = exec_rx.try_recv() {
-                    tracing::info!("received new code, updating sim");
-                    let conns = conduit_exec.connections().to_vec();
-                    conduit_exec = ConduitExec::new(exec, server_rx.clone());
-                    for conn in conns {
-                        conduit_exec.add_connection(conn)?;
-                    }
-                }
-            }
-        });
-        Self { exec_tx }
-    }
-
-    fn try_update_sim(&self, path: &Path) -> anyhow::Result<()> {
-        let tmpdir = tempfile::tempdir()?;
-        let start = Instant::now();
-        let status = std::process::Command::new("python3")
-            .arg(path)
-            .arg("--")
-            .arg("build")
-            .arg("--dir")
-            .arg(tmpdir.path())
-            .spawn()?
-            .wait()?;
-        if !status.success() {
-            anyhow::bail!("failed to build sim: {}", status);
-        }
-        let exec = nox_ecs::WorldExec::read_from_dir(tmpdir.path())?;
-        tracing::info!(elapsed = ?start.elapsed(), "built sim");
-        self.exec_tx.send(exec)?;
-        Ok(())
     }
 }
