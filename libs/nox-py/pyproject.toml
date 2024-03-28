@@ -11,10 +11,11 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "jax",
-  "jaxlib",
-  "numpy",
-  "typing-extensions",
+    "jax",
+    "jaxlib",
+    "numpy",
+    "typing-extensions",
+    "polars",
 ]
 [project.optional-dependencies]
 tests = [
@@ -28,3 +29,6 @@ elodin = "elodin:run_cli"
 [tool.maturin]
 python-source = "python"
 features = ["pyo3/extension-module"]
+
+[project.entry-points.pytest11]
+elodin = "elodin"
