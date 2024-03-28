@@ -1,4 +1,5 @@
 from .elodin import *
+import types
 from typing import (
     Protocol,
     Generic,
@@ -218,6 +219,20 @@ class Query(Generic[Unpack[A]]):
 
     def insert_into_builder(self, builder: PipelineBuilder):
         self.inner.insert_into_builder(builder)
+
+
+def map(func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]]) -> System:
+    sig = inspect.signature(func)
+    tys = list(sig.parameters.values())
+    query = Query[*[ty.annotation for ty in tys]] # type: ignore
+    return_ty = sig.return_annotation
+    if isinstance(return_ty, types.GenericAlias):
+        return_ty = tuple(return_ty.__args__)
+    @system
+    def inner(q: query): # type: ignore
+        return q.map(return_ty, func)
+    return inner
+
 
 
 def from_array(cls, arr):
