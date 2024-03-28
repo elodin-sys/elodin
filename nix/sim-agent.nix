@@ -62,7 +62,7 @@ let
     version = wheelVersion;
     src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
     doCheck = false;
-    propagatedBuildInputs = with ps; [ jax jaxlib typing-extensions ];
+    propagatedBuildInputs = with ps; [ jax jaxlib typing-extensions numpy polars pytest ];
     pythonImportsCheck = [ wheelName ];
   };
 
@@ -84,7 +84,7 @@ let
       contents = with pkgs; [
         busybox
         config.packages.sim-builder
-        (python3.withPackages (ps: with ps; [(elodin ps)]))
+        (python3.withPackages (ps: with ps; [(elodin ps) pytest pytest-json-report]))
         openblasCompat
       ];
       closureInfo = pkgs.closureInfo { rootPaths = contents; };

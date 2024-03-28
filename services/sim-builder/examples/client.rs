@@ -1,11 +1,11 @@
 use std::io::Seek;
 
 use elodin_types::sandbox::FileTransferReq;
-use elodin_types::sandbox::{sandbox_client::SandboxClient, BuildReq};
+use elodin_types::sandbox::{sandbox_client::SandboxClient, *};
 use tokio::io::AsyncWriteExt;
 use tonic::transport::{Channel, Endpoint, Uri};
 
-const DEFAULT_CODE: &str = include_str!("code.py");
+const DEFAULT_CODE: &str = include_str!("test_code.py");
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     let channel = builder_channel(addr.parse().unwrap());
     let mut client = SandboxClient::new(channel);
 
-    let request = tonic::Request::new(BuildReq { code });
+    let request = tonic::Request::new(BuildReq { code: code.clone() });
     let response = client.build(request).await?.into_inner();
     println!("response: {:?}", response);
     let mut artifacts = tokio::fs::File::from_std(tempfile::tempfile()?);
@@ -44,6 +44,13 @@ async fn main() -> anyhow::Result<()> {
 
     println!("extracted artifacts to: {:?}", artifacts);
     std::mem::forget(tmp_dir); // don't delete the temp dir
+
+    let test_req = tonic::Request::new(TestReq {
+        code: code.clone(),
+        ..Default::default()
+    });
+    let test_res = client.test(test_req).await?.into_inner();
+    println!("received test results: {:?}", test_res);
 
     Ok(())
 }

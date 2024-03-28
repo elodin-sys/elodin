@@ -45,9 +45,9 @@ pub struct DownloadArgs {
     /// ID of the Monte Carlo run
     #[arg(short, long)]
     run_id: uuid::Uuid,
-    /// Number of the sample
+    /// Number of the batch
     #[arg(short, long)]
-    sample_number: u32,
+    batch_number: u32,
     /// Path to download the results to
     path: PathBuf,
 }
@@ -123,14 +123,14 @@ impl Cli {
     pub async fn download_results(&self, args: &DownloadArgs) -> anyhow::Result<()> {
         let DownloadArgs {
             run_id: id,
-            sample_number,
+            batch_number,
             path,
         } = args.clone();
         let mut client = self.client().await?;
         let sample = client
-            .get_sample_results(GetSampleResultsReq {
+            .get_monte_carlo_results(GetMonteCarloResultsReq {
                 id: id.as_bytes().to_vec(),
-                sample_number,
+                batch_number,
             })
             .await?
             .into_inner();
@@ -144,8 +144,8 @@ impl Cli {
         let mut tar = tar::Archive::new(zstd);
         tar.unpack(&path)?;
         println!(
-            "Copied results of sample {} to: {}",
-            sample_number,
+            "Downloaded batch {} results to: {}",
+            batch_number,
             path.display()
         );
         Ok(())
@@ -157,7 +157,6 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     if !file.is_file() {
         anyhow::bail!("Not a file: {}", file.display());
     }
-    let file_name = file.file_name().unwrap();
 
     let status = std::process::Command::new("python3")
         .arg(&file)
@@ -172,9 +171,7 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
         anyhow::bail!("Failed to prepare simulation artifacts: {}", status);
     }
 
-    // Copy the original file into the temporary directory for debugging purposes
-    // TODO(Akhil): Remove this once this actually works e2e
-    std::fs::copy(&file, tmp_dir.path().join(file_name))?;
+    std::fs::copy(&file, tmp_dir.path().join("sim_code.py"))?;
 
     let archive_file = tempfile::tempfile()?;
     let buf = std::io::BufWriter::new(archive_file);

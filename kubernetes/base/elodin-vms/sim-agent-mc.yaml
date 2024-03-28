@@ -4,6 +4,10 @@ metadata:
   name: sim-agent-mc
 spec:
   replicas: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 10%
   selector:
     matchLabels:
       app.kubernetes.io/name: sim-agent-mc
@@ -41,6 +45,26 @@ spec:
           requests:
             cpu: 0.5
             memory: 500Mi
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      - name: tester
+        image: elodin-infra/elo-sim-agent:latest
+        command:
+        - /vm/runvm
+        resources:
+          requests:
+            cpu: 1
+            memory: 1Gi
+          limits:
+            dev/kvm: 1
+            dev/vhost-vsock: 1
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

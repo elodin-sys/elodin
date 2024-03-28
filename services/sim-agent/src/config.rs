@@ -13,13 +13,8 @@ pub struct Config {
 pub struct SandboxConfig {
     pub control_addr: SocketAddr,
     pub sim_addr: SocketAddr,
-    #[serde(with = "http_serde::uri", default = "default_builder_addr")]
+    #[serde(with = "http_serde::uri", default = "default_vm_addr")]
     pub builder_addr: Uri,
-}
-
-fn default_builder_addr() -> Uri {
-    let addr = format!("vsock://{}:50051", cid());
-    addr.parse().unwrap()
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +24,13 @@ pub struct MonteCarloConfig {
     pub pod_name: String,
     pub sim_artifacts_bucket_name: String,
     pub sim_results_bucket_name: String,
+    #[serde(with = "http_serde::uri", default = "default_vm_addr")]
+    pub tester_addr: tonic::transport::Uri,
+}
+
+fn default_vm_addr() -> Uri {
+    let addr = format!("vsock://{}:50051", cid());
+    addr.parse().unwrap()
 }
 
 impl Config {
