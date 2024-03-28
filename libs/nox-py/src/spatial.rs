@@ -252,8 +252,8 @@ impl Quaternion {
         }
     }
 
-    fn vector(&self) -> PyObject {
-        self.inner.clone().into_op().to_jax().unwrap()
+    fn vector(&self) -> Result<PyObject, Error> {
+        self.inner.clone().into_op().to_jax().map_err(Error::from)
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
@@ -303,29 +303,15 @@ impl Quaternion {
     pub fn __mul__(&self, rhs: Self) -> Self {
         let quat: nox::Quaternion<f64> = self.inner.clone().mul(rhs.inner);
         Self { inner: quat }
-        //self.inner.clone().mul(rhs.inner).into()
     }
 
-    pub fn __add__(&self, rhs: PyObject) -> Self {
-        Python::with_gil(|py| {
-            if let Ok(rhs) = rhs.extract::<Quaternion>(py) {
-                self.inner.clone().add(rhs.inner).into()
-            } else {
-                dbg!(rhs
-                    .getattr(py, "shape")
-                    .unwrap()
-                    .call_method0(py, "__repr__")
-                    .unwrap()
-                    .extract::<String>(py)
-                    .unwrap());
-                todo!()
-            }
-        })
+    pub fn __add__(&self, rhs: &Quaternion) -> Self {
+        self.inner.clone().add(rhs.inner.clone()).into()
     }
 
-    pub fn __matmul__(&self, rhs: PyObject) -> PyObject {
+    pub fn __matmul__(&self, rhs: PyObject) -> Result<PyObject, Error> {
         let vec = Vector::from_op(Noxpr::jax(rhs));
-        self.inner.clone().mul(vec).into_op().to_jax().unwrap()
+        Ok(self.inner.clone().mul(vec).into_op().to_jax()?)
     }
 
     pub fn inverse(&self) -> Self {
