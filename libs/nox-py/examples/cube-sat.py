@@ -11,7 +11,7 @@ rw_force_clamp = 0.2
 G = 6.6743e-11  #
 M = 5.972e24  # mass of the Earth
 earth_radius = 6378.1 * 1000
-altitude = 200 * 1000
+altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
 
@@ -48,48 +48,39 @@ class Sensors(el.Archetype):
     star_reading_ref: StarReadingRef
 
 
-@el.system
-def fake_magnetometer_ref(pos: el.Query[el.WorldPos]) -> el.Query[MagReadingRef]:
-    def imu_att_inner(pos):
-        key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
-        noise = 0.01 * jax.random.normal(key, shape=(4,))
-        return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-            [1.0, 0.0, 0.0]
-        )
-
-    return pos.map(MagReadingRef, imu_att_inner)
+@el.map
+def fake_magnetometer_ref(pos: el.WorldPos) -> MagReadingRef:
+    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
+    noise = 0.01 * jax.random.normal(key, shape=(4,))
+    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
+        [1.0, 0.0, 0.0]
+    )
 
 
-@el.system
-def fake_magnetometer_body(pos: el.Query[el.WorldPos]) -> el.Query[MagReadingBody]:
-    return pos.map(MagReadingBody, lambda _: np.array([1.0, 0.0, 0.0]))
+@el.map
+def fake_magnetometer_body(_: el.WorldPos) -> MagReadingBody:
+    return np.array([1.0, 0.0, 0.0])
 
 
-@el.system
-def fake_star_ref(pos: el.Query[el.WorldPos]) -> el.Query[StarReadingRef]:
-    def imu_att_inner(pos):
-        key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
-        noise = 0.01 * jax.random.normal(key, shape=(4,))
-        return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-            [0.0, 0.0, 1.0]
-        )
-
-    return pos.map(StarReadingRef, imu_att_inner)
+@el.map
+def fake_star_ref(pos: el.WorldPos) -> StarReadingRef:
+    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
+    noise = 0.01 * jax.random.normal(key, shape=(4,))
+    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
+        [0.0, 0.0, 1.0]
+    )
 
 
-@el.system
-def fake_star_body(pos: el.Query[el.WorldPos]) -> el.Query[StarReadingBody]:
-    return pos.map(StarReadingBody, lambda _: np.array([0.0, 0.0, 1.0]))
+@el.map
+def fake_star_body(_: el.WorldPos) -> StarReadingBody:
+    return np.array([0.0, 0.0, 1.0])
 
 
-@el.system
-def gyro_omega(pos: el.Query[el.WorldVel]) -> el.Query[GyroOmega]:
-    def gyro_omega_inner(vel):
-        key = jax.random.key(jax.lax.convert_element_type(vel.linear()[0], "int64"))
-        noise = 3.16e-7 * jax.random.normal(key, shape=(3,))
-        return vel.angular() + noise
-
-    return pos.map(GyroOmega, gyro_omega_inner)
+@el.map
+def gyro_omega(vel: el.WorldVel) -> GyroOmega:
+    key = jax.random.key(jax.lax.convert_element_type(vel.linear()[0], "int64"))
+    noise = 3.16e-7 * jax.random.normal(key, shape=(3,))
+    return vel.angular() + noise
 
 
 sensors = (
@@ -179,11 +170,10 @@ def estimate_attitude(
     q_hat: Quaternion,
     b_hat: jax.Array,
     omega: jax.Array,
-    big_p: jax.Array,
+    p: jax.Array,
     measured_bodys: jax.Array,
     measured_references: jax.Array,
     dt: float,
-    p: jax.Array,
 ) -> tuple[Quaternion, jax.Array, jax.Array]:
     q_hat = propogate_quaternion(q_hat, omega, dt)
     p = propogate_state_covariance(p, omega, dt)
@@ -210,44 +200,28 @@ def skew_symmetric_cross(a: jax.Array) -> jax.Array:
     return np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
 
 
-@el.system
+@el.map
 def kalman_filter(
-    query: el.Query[
-        GyroOmega,
-        MagReadingBody,
-        MagReadingRef,
-        StarReadingBody,
-        StarReadingRef,
-        AttEst,
-        BiasEst,
-        P,
-    ],
-) -> el.Query[AttEst, AngVelEst, BiasEst, P]:
-    def kalman_filter_inner(
-        omega, mag_body, mag_ref, star_body, star_ref, att_est, b_hat, p
-    ) -> tuple[AttEst, AngVelEst, BiasEst, P]:
-        q_hat, b_hat, big_p = estimate_attitude(
-            att_est,
-            b_hat,
-            omega,
-            p,
-            np.array([mag_body, star_body]),
-            np.array([mag_ref, star_ref]),
-            1 / 120.0,
-            p,
-        )
-        omega_hat = omega
-        return (q_hat, omega_hat, b_hat, big_p)
-
-    return query.map(
-        (
-            AttEst,
-            AngVelEst,
-            BiasEst,
-            P,
-        ),
-        kalman_filter_inner,
+    omega: GyroOmega,
+    mag_body: MagReadingBody,
+    mag_ref: MagReadingRef,
+    star_body: StarReadingBody,
+    star_ref: StarReadingRef,
+    att_est: AttEst,
+    b_hat: BiasEst,
+    p: P,
+) -> tuple[AttEst, AngVelEst, BiasEst, P]:
+    q_hat, b_hat, big_p = estimate_attitude(
+        att_est,
+        b_hat,
+        omega,
+        p,
+        np.array([mag_body, star_body]),
+        np.array([mag_ref, star_ref]),
+        1 / 120.0,
     )
+    omega_hat = omega
+    return (q_hat, omega_hat, b_hat, big_p)
 
 
 @dataclass
@@ -301,17 +275,14 @@ r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
 
-@el.system
-def earth_point(sensor: el.Query[el.WorldPos, UserGoal]) -> el.Query[Goal]:
-    def earth_point_inner(pos, deg):
-        linear = pos.linear()
-        r = linear / la.norm(linear)
-        body_axis = np.array([0.0, 0.0, -1.0])
-        a = np.cross(body_axis, r)
-        w = 1 + np.dot(body_axis, r)
-        return deg * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
-
-    return sensor.map(Goal, earth_point_inner)
+@el.map
+def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
+    linear = pos.linear()
+    r = linear / la.norm(linear)
+    body_axis = np.array([0.0, 0.0, -1.0])
+    a = np.cross(body_axis, r)
+    w = 1 + np.dot(body_axis, r)
+    return deg * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
 
 
 @el.system
@@ -349,18 +320,18 @@ def rw_effector(
     return torque.map(el.Force, lambda _: el.SpatialForce.from_torque(force[:3]))
 
 
-@el.system
+@el.map
 def gravity_effector(
-    q: el.Query[Goal, el.Force, el.WorldPos, el.Inertia],
-) -> el.Query[el.Force]:
-    def gravity_inner(_, force, a_pos, a_inertia):
-        r = a_pos.linear()
-        m = a_inertia.mass()
-        norm = la.norm(r)
-        f = G * M * m * r / (norm * norm * norm)
-        return force + el.SpatialForce.from_linear(-f)
-
-    return q.map(el.Force, gravity_inner)
+    _: Goal,
+    force: el.Force,
+    a_pos: el.WorldPos,
+    a_inertia: el.Inertia,
+) -> el.Force:
+    r = a_pos.linear()
+    m = a_inertia.mass()
+    norm = la.norm(r)
+    f = G * M * m * r / (norm * norm * norm)
+    return force + el.SpatialForce.from_linear(-f)
 
 
 w = el.World()
