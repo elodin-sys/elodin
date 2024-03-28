@@ -26,7 +26,7 @@ service Api {
     rpc MonteCarloRunEvents(GetMonteCarloRunReq) returns (stream MonteCarloRun);
     rpc MonteCarloBatchEvents(GetMonteCarloRunReq) returns (stream MonteCarloBatch);
 
-    rpc GetSampleResults(GetSampleResultsReq) returns (GetSampleResultsResp);
+    rpc GetMonteCarloResults(GetMonteCarloResultsReq) returns (GetMonteCarloResultsResp);
 }
 
 message CurrentUserReq {}
@@ -167,11 +167,11 @@ message MonteCarloBatch {
 
 }
 
-message GetSampleResultsReq {
+message GetMonteCarloResultsReq {
     bytes id = 1;
-    uint32 sample_number = 2;
+    uint32 batch_number = 2;
 }
 
-message GetSampleResultsResp {
+message GetMonteCarloResultsResp {
     string download_url = 1;
 }

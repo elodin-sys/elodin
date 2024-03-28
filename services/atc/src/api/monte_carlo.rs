@@ -193,18 +193,18 @@ impl api::Api {
         Ok(Box::pin(stream))
     }
 
-    pub async fn get_sample_results(
+    pub async fn get_monte_carlo_results(
         &self,
-        req: GetSampleResultsReq,
+        req: GetMonteCarloResultsReq,
         api::CurrentUser { user, .. }: api::CurrentUser,
-    ) -> Result<GetSampleResultsResp, error::Error> {
+    ) -> Result<GetMonteCarloResultsResp, error::Error> {
         tracing::debug!(%user.id, "get sample results");
-        let GetSampleResultsReq { id, sample_number } = req;
+        let GetMonteCarloResultsReq { id, batch_number } = req;
         let id = Uuid::from_slice(&id).map_err(|_| error::Error::InvalidRequest)?;
         let download_url = self
             .sim_storage_client
-            .download_results_url(id, sample_number)
+            .download_results_url(id, batch_number)
             .await?;
-        Ok(GetSampleResultsResp { download_url })
+        Ok(GetMonteCarloResultsResp { download_url })
     }
 }

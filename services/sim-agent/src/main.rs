@@ -23,6 +23,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 
 mod config;
 mod headless;
+mod pytest;
 
 const WAIT_DURATION: Duration = Duration::from_millis(200);
 
@@ -254,7 +255,7 @@ impl SimRunner {
     }
 }
 
-fn builder_channel(addr: Uri) -> Channel {
+pub fn builder_channel(addr: Uri) -> Channel {
     let scheme = addr.scheme().map(|s| s.as_str());
     let use_vsock = scheme == Some("vsock");
     let endpoint = Endpoint::from(addr);

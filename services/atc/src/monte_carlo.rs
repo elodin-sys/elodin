@@ -60,9 +60,9 @@ impl SimStorageClient {
     pub async fn download_results_url(
         &self,
         id: uuid::Uuid,
-        sample_number: u32,
+        batch_number: u32,
     ) -> Result<String, Error> {
-        let object_name = format!("runs/{}/samples/{}.tar.zst", id, sample_number);
+        let object_name = format!("runs/{}/batches/{}.tar.zst", id, batch_number);
         let options = SignedURLOptions {
             method: SignedURLMethod::GET,
             ..Default::default()

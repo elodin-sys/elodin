@@ -14,6 +14,7 @@ use conduit::{well_known::GizmoType, AssetId};
 use nox_ecs::{
     conduit, join_many,
     nox::{self, nalgebra::Vector3, ArrayTy, Noxpr, NoxprNode, NoxprTy, ScalarExt},
+    polars::PolarsWorld,
     spawn_tcp_server, ArchetypeName, ComponentArray, ErasedSystem, HostColumn, HostStore,
     SharedWorld, System, Table, World,
 };
@@ -508,6 +509,17 @@ impl WorldBuilder {
     ) -> Result<Option<String>, Error> {
         tracing_subscriber::fmt::init();
         // skip `python3 <name of script>`
+
+        let pytesting = py
+            .import("elodin")?
+            .getattr("_called_from_test")
+            .unwrap()
+            .extract::<bool>()?;
+        // If executed by pytest, don't run the server
+        if pytesting {
+            return Ok(None);
+        }
+
         let args = std::env::args_os().skip(2);
         let args = Args::parse_from(args);
         match args {
@@ -582,24 +594,20 @@ def build_expr(builder, sys):
         let builder = builder.builder;
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
         let time_step = time_step.map(Duration::from_secs_f64);
-        let exec = nox_ecs::WorldExec {
-            world: SharedWorld {
-                host: builder.world,
-                ..Default::default()
-            },
-            tick_exec: nox_ecs::Exec {
-                exec: Default::default(),
-                metadata: nox_ecs::ExecMetadata {
-                    time_step,
-                    arg_ids: builder.param_ids,
-                    ret_ids,
-                },
-                hlo_module,
-            },
-            startup_exec: None,
-            history: nox_ecs::history::History::default(),
+        let world = SharedWorld {
+            host: builder.world,
+            ..Default::default()
         };
-
+        let tick_exec = nox_ecs::Exec {
+            exec: Default::default(),
+            metadata: nox_ecs::ExecMetadata {
+                time_step,
+                arg_ids: builder.param_ids,
+                ret_ids,
+            },
+            hlo_module,
+        };
+        let exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         Ok(Exec { exec })
     }
 }
@@ -909,7 +917,7 @@ impl Exec {
     }
 
     pub fn history(&self) -> Result<PyDataFrame, Error> {
-        let polars_world = self.exec.history.compact_to_world()?.unwrap();
+        let polars_world = self.exec.history.compact_to_world()?;
         let df = polars_world.join_archetypes()?;
         Ok(PyDataFrame(df))
     }
@@ -1377,6 +1385,13 @@ impl Metadata {
     }
 }
 
+#[pyfunction]
+pub fn read_batch_results(path: String) -> Result<PyDataFrame, Error> {
+    let world = PolarsWorld::read_from_dir(path)?;
+    let df = world.join_archetypes()?;
+    Ok(PyDataFrame(df))
+}
+
 #[pymodule]
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
@@ -1407,5 +1422,6 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
+    m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     Ok(())
 }

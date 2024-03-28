@@ -285,6 +285,9 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                     "name": "builder",
                     "image": image_name,
                     "command": ["/vm/runvm"],
+                    "env": [
+                        { "name": "SMP", "value": "1" },
+                    ],
                     "resources": {
                         "requests": {
                             "cpu": "0.5",

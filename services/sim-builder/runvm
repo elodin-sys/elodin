@@ -7,6 +7,8 @@ mkfs.ext4 -F "$tmpvol"
 
 hostname_cksum="$(hostname | tr -d '\n' | cksum | cut -d " " -f1)"
 cid=${CID:-$hostname_cksum}
+smp=${SMP:-$(nproc)}
+echo "cid: $cid, smp: $smp"
 qemu-system-x86_64 \
     -machine microvm,rtc=on \
     -bios vm/bios.bin \
@@ -17,6 +19,7 @@ qemu-system-x86_64 \
     -device "vhost-vsock-device,id=vsock_id,guest-cid=$cid" \
     -sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny \
     -cpu host \
+    -smp "$smp" \
     -m 1G \
     -accel kvm \
     -nographic \

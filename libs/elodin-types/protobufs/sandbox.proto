@@ -8,6 +8,7 @@ service SandboxControl {
 
 service Sandbox {
     rpc Build(BuildReq) returns (BuildResp);
+    rpc Test(TestReq) returns (TestResp);
     rpc SendFile(stream FileChunk) returns (FileTransferResp);
     rpc RecvFile(FileTransferReq) returns (stream FileChunk);
 }
@@ -31,6 +32,15 @@ message BuildReq {
 
 message BuildResp {
     string artifacts_file = 1;
+}
+
+message TestReq {
+    string code = 1;
+    string results_file = 2;
+}
+
+message TestResp {
+    string report = 1;
 }
 
 message FileChunk {

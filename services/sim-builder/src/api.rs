@@ -1,9 +1,8 @@
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::process::Stdio;
 use std::time::Instant;
 
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -28,17 +27,23 @@ impl Sandbox for Service {
     async fn build(&self, req: Request<BuildReq>) -> Result<Response<BuildResp>, Status> {
         let req = req.into_inner();
 
-        let span = tracing::Span::current();
-        let build_task = tokio::task::spawn_blocking(move || {
-            let _guard = span.enter();
-            build(req.code)
-        });
-        let artifacts_file = build_task.await.unwrap().map_err(|err| {
+        let artifacts_file = build(req.code).await.map_err(|err| {
             tracing::error!(?err, "failed to build code");
             Status::internal(err.to_string())
         })?;
 
         Ok(Response::new(BuildResp { artifacts_file }))
+    }
+
+    async fn test(&self, req: Request<TestReq>) -> Result<Response<TestResp>, Status> {
+        let req = req.into_inner();
+
+        let results = test(req.code, req.results_file).await.map_err(|err| {
+            tracing::error!(?err, "failed to test results");
+            Status::internal(err.to_string())
+        })?;
+
+        Ok(Response::new(results))
     }
 
     async fn send_file(
@@ -52,13 +57,14 @@ impl Sandbox for Service {
             .ok_or(Status::invalid_argument("empty stream"))?
             .clone()?;
         let path = std::env::temp_dir().join(req.name);
-        let mut file = tokio::fs::File::create(&path).await?;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk.data).await?;
-            tracing::debug!(len = chunk.data.len(), path = %path.display(), "wrote chunk to file");
+        let mut file = std::fs::File::create(&path)?;
+        while let Some(chunk) = stream.try_next().await? {
+            file.write_all(&chunk.data)?;
+            tracing::trace!(len = chunk.data.len(), path = %path.display(), "wrote chunk to file");
         }
-        tracing::info!(path = %path.display(), "received file");
+        file.sync_all()?;
+        let metadata = file.metadata()?;
+        tracing::debug!(size = metadata.len(), path = %path.display(), "received file");
         Ok(Response::new(FileTransferResp::default()))
     }
 
@@ -68,36 +74,35 @@ impl Sandbox for Service {
     ) -> Result<Response<Self::RecvFileStream>, Status> {
         let req = req.into_inner();
         let path = std::env::temp_dir().join(&req.name);
-        let file = tokio::fs::File::open(&path).await?;
+        let file = std::fs::File::open(&path)?;
+        let mut reader = std::io::BufReader::with_capacity(128 * 1024, file);
         let (tx, rx) = mpsc::channel::<Result<FileChunk, Status>>(1);
-        tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(file);
-            let mut buf = Vec::with_capacity(128 * 1024);
+        tokio::task::spawn_blocking(move || {
             loop {
-                buf.clear();
-                match reader.read_buf(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(len) => {
+                match reader.fill_buf() {
+                    Ok(buf) => {
+                        let len = buf.len();
+                        if buf.is_empty() {
+                            break;
+                        }
                         let chunk = FileChunk {
-                            data: buf.clone(),
+                            data: buf.to_vec(),
                             name: req.name.clone(),
                         };
-                        let _ = tx.send(Ok(chunk)).await;
-                        tracing::debug!(len, path = %path.display(), "sent chunk");
+                        let _ = tx.blocking_send(Ok(chunk));
+                        tracing::trace!(len, path = %path.display(), "sent chunk");
+                        reader.consume(len);
                     }
                     Err(err) => {
                         tracing::error!(?err, "failed to read file");
                         let err = Err(Status::internal(err.to_string()));
-                        let _ = tx.send(err).await;
+                        let _ = tx.blocking_send(err);
                         return;
                     }
-                }
-                if tx.is_closed() {
-                    break;
-                }
+                };
             }
             tracing::info!(path = %path.display(), "sent file");
-            if let Err(err) = tokio::fs::remove_file(&path).await {
+            if let Err(err) = std::fs::remove_file(&path) {
                 tracing::error!(?err, "failed to delete file");
             }
         });
@@ -105,7 +110,7 @@ impl Sandbox for Service {
     }
 }
 
-fn build(code: String) -> anyhow::Result<String> {
+async fn build(code: String) -> anyhow::Result<String> {
     tracing::debug!(len = code.len(), "building code");
     let mut code_file = tempfile::NamedTempFile::new()?;
     tracing::debug!(file = %code_file.path().display(), "writing code to temp file");
@@ -114,7 +119,7 @@ fn build(code: String) -> anyhow::Result<String> {
     let start = Instant::now();
     let artifact_dir = tempfile::tempdir()?;
     tracing::debug!(dir = %artifact_dir.path().display(), "building artifacts");
-    let output = std::process::Command::new("python3")
+    let output = tokio::process::Command::new("python3")
         .arg(code_file.path())
         .arg("--")
         .arg("build")
@@ -123,7 +128,8 @@ fn build(code: String) -> anyhow::Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?
-        .wait_with_output()?;
+        .wait_with_output()
+        .await?;
     if !output.status.success() {
         let status = output.status;
         let stderr = String::from_utf8(output.stderr).unwrap_or_default();
@@ -142,4 +148,47 @@ fn build(code: String) -> anyhow::Result<String> {
     artifacts.sync_all()?;
 
     Ok(file_name)
+}
+
+async fn test(code: String, results_file: String) -> anyhow::Result<TestResp> {
+    let tempdir = tempfile::tempdir()?;
+    let code_file = tempdir.path().join("test_code.py");
+    tracing::debug!(len = code.len(), file = %code_file.display(), "writing code to temp file");
+    std::fs::write(&code_file, code)?;
+
+    let report = tempdir.path().join("report.json");
+
+    let start = Instant::now();
+    let mut cmd = tokio::process::Command::new("pytest");
+
+    if !results_file.is_empty() {
+        let results_file_path = std::env::temp_dir().join(&results_file);
+        let results_file = std::fs::File::open(&results_file_path)?;
+        let metadata = results_file.metadata()?;
+        tracing::debug!(path = %results_file_path.display(), size = metadata.len(), "unpacking");
+        let mut tar = tar::Archive::new(results_file);
+        tar.unpack(tempdir.path())?;
+        let results = tempdir.path().join("results");
+        cmd.arg("--batch-results").arg(&results);
+    }
+
+    let status = cmd
+        .arg(&code_file)
+        .arg("--json-report")
+        .arg("--json-report-file")
+        .arg(&report)
+        .spawn()?
+        .wait()
+        .await?;
+    let report = std::fs::read_to_string(report)?;
+    tracing::debug!(elapsed = ?start.elapsed(), status = ?status.code(), "tested results");
+
+    if !results_file.is_empty() {
+        let results_file_path = std::env::temp_dir().join(&results_file);
+        if let Err(err) = std::fs::remove_file(results_file_path) {
+            tracing::error!(?err, "failed to delete results file");
+        }
+    }
+
+    Ok(TestResp { report })
 }
