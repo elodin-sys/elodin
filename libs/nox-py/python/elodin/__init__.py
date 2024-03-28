@@ -22,13 +22,57 @@ import code
 import readline
 import rlcompleter
 import re
+import polars as pl
+import pytest
 
 
 __doc__ = elodin.__doc__  # type: ignore
 
+_called_from_test = False
+_has_df_key = pytest.StashKey[str]()
+
 jax.config.update("jax_enable_x64", True)
 
 Self = TypeVar("Self")
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--batch-results",
+        action="store",
+        default="",
+        help="path to batch results directory",
+    )
+
+
+def pytest_configure(config):
+    global _called_from_test
+    _called_from_test = True
+
+
+def pytest_unconfigure(config):
+    global _called_from_test
+    _called_from_test = False
+
+
+def read_sample_results(path):
+    df = read_batch_results(path)
+    sample_numbers = df["sample_number"].unique().sort()
+    dfs = [df.filter(pl.col("sample_number") == s) for s in sample_numbers]
+    return dfs
+
+
+def sample_number(df):
+    sample_number = df["sample_number"][0]
+    return "sample_number=" + str(sample_number)
+
+
+def pytest_generate_tests(metafunc):
+    if "df" in metafunc.fixturenames and _has_df_key not in metafunc.definition.stash:
+        metafunc.definition.stash[_has_df_key] = True
+        path = metafunc.config.getoption("batch_results")
+        dfs = read_sample_results(path)
+        metafunc.parametrize("df", dfs, ids=sample_number)
 
 
 class System(Protocol):
