@@ -31,7 +31,6 @@ bevy_mod_picking = { version = "0.18", default-features = false, features = [
 ] }
 bevy_polyline.git = "https://github.com/elodin-sys/bevy_polyline.git"
 bevy_polyline.branch = "feature/bevy-0.13"
-bevy_web_asset.version = "0.8"
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot"
 bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam.git"
@@ -55,6 +54,10 @@ itertools = "0.12.1"
 # futures
 futures-lite = "2.0"
 
+reqwest = { version = "0.11", features = ["rustls-tls"], default-features = false }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

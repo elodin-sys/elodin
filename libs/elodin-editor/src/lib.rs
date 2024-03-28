@@ -25,7 +25,6 @@ use bevy_egui::EguiPlugin;
 use bevy_mod_picking::prelude::*;
 use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
-use bevy_web_asset::WebAssetPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
     bevy::{ComponentValueMap, Tick},
@@ -63,7 +62,7 @@ pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AssetMetaCheck::Never)
-            .add_plugins(WebAssetPlugin)
+            .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
