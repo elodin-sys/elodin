@@ -514,13 +514,13 @@ impl WorldBuilder {
         time_step: Option<f64>,
         client: Option<&Client>,
     ) -> Result<Option<String>, Error> {
-        tracing_subscriber::fmt::fmt()
+        let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
                 EnvFilter::builder()
                     .with_default_directive("info".parse().expect("invalid filter"))
                     .from_env_lossy(),
             )
-            .init();
+            .try_init();
 
         let pytesting = py
             .import("elodin")?
@@ -532,11 +532,17 @@ impl WorldBuilder {
             return Ok(None);
         }
 
-        // skip `python3`
-        let mut args = std::env::args_os().skip(1);
-        let path = args.next().ok_or(Error::MissingArg("path".to_string()))?;
-        let path = PathBuf::from(path);
-        let args = Args::parse_from(args);
+        let (args, path) = if let Ok(dir) = std::env::var("ELODIN_FORCE_BUILD_DIR") {
+            let dir = PathBuf::from(dir);
+            (Args::Build { dir }, PathBuf::new())
+        } else {
+            // skip `python3`
+            let mut args = std::env::args_os().skip(1);
+            let path = args.next().ok_or(Error::MissingArg("path".to_string()))?;
+            let path = PathBuf::from(path);
+            (Args::parse_from(args), path)
+        };
+
         match args {
             Args::Build { dir } => {
                 let exec = self.build(py, sys, time_step)?.exec;

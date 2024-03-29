@@ -1,11 +1,11 @@
 use conduit::well_known::Pbr;
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{Archetype, Component};
-use nox_ecs::{Handle, IntoSystem, Query, Rk4Ext, System, WorldPos};
+use nox_ecs::{Handle, IntoSystem, Query, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 
-use crate::ComponentArray;
+use crate::{semi_implicit_euler_with_dt, ComponentArray};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -57,6 +57,38 @@ impl Mul<DU> for f64 {
     }
 }
 
+impl Add<WorldVel> for WorldPos {
+    type Output = WorldPos;
+
+    fn add(self, v: WorldVel) -> Self::Output {
+        WorldPos(self.0 + v.0)
+    }
+}
+
+impl Add<WorldAccel> for WorldVel {
+    type Output = WorldVel;
+
+    fn add(self, v: WorldAccel) -> Self::Output {
+        WorldVel(self.0 + v.0)
+    }
+}
+
+impl Mul<WorldVel> for f64 {
+    type Output = WorldVel;
+
+    fn mul(self, rhs: WorldVel) -> Self::Output {
+        WorldVel(self * rhs.0)
+    }
+}
+
+impl Mul<WorldAccel> for f64 {
+    type Output = WorldAccel;
+
+    fn mul(self, rhs: WorldAccel) -> Self::Output {
+        WorldAccel(self * rhs.0)
+    }
+}
+
 #[derive(Clone, Component)]
 pub struct Force(pub SpatialForce<f64>);
 #[derive(Clone, Component)]
@@ -89,5 +121,6 @@ where
     clear_forces
         .pipe(effectors)
         .pipe(calc_accel)
-        .rk4_with_dt::<U, DU>(time_step)
+        .pipe(semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step))
+    //.rk4_with_dt::<U, DU>(time_step) // TODO(sphw): make this configurable
 }
