@@ -17,6 +17,7 @@ use std::fs::File;
 use std::iter::once;
 use std::path::Path;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -944,15 +945,12 @@ impl<S: System> SystemExt for S {
         let op = func.build("pipeline")?;
         let comp = op.build()?;
         *world = builder.world;
-        Ok(Exec {
-            metadata: ExecMetadata {
-                time_step: None,
-                arg_ids: builder.param_ids,
-                ret_ids,
-            },
-            exec: OnceCell::new(),
-            hlo_module: comp.to_hlo_module(),
-        })
+        let metadata = ExecMetadata {
+            time_step: None,
+            arg_ids: builder.param_ids,
+            ret_ids,
+        };
+        Ok(Exec::new(metadata, comp.to_hlo_module()))
     }
 }
 
@@ -965,13 +963,69 @@ pub struct ExecMetadata {
 
 #[derive(Clone)]
 pub struct Exec {
-    pub metadata: ExecMetadata,
-    pub hlo_module: HloModuleProto,
-    pub exec: OnceCell<PjRtLoadedExecutable>,
+    metadata: ExecMetadata,
+    hlo_module: HloModuleProto,
+    state: ExecState,
+}
+
+enum ExecState {
+    Uncompiled,
+    Compiling(JoinHandle<Result<PjRtLoadedExecutable, Error>>),
+    Compiled(PjRtLoadedExecutable),
+}
+
+impl Clone for ExecState {
+    fn clone(&self) -> Self {
+        match self {
+            ExecState::Uncompiled => ExecState::Uncompiled,
+            ExecState::Compiling(_) => ExecState::Uncompiled,
+            ExecState::Compiled(executable) => ExecState::Compiled(executable.clone()),
+        }
+    }
 }
 
 impl Exec {
-    fn run(&self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
+    pub fn new(metadata: ExecMetadata, hlo_module: HloModuleProto) -> Self {
+        Self {
+            metadata,
+            hlo_module,
+            state: ExecState::Uncompiled,
+        }
+    }
+
+    fn start_compiling(&mut self, client: &Client) {
+        if let ExecState::Uncompiled = self.state {
+            let comp = self.hlo_module.computation();
+            let client = client.clone();
+            let handle = std::thread::spawn(move || client.compile(&comp).map_err(Error::from));
+            self.state = ExecState::Compiling(handle);
+        }
+    }
+
+    fn compiled(&self) -> bool {
+        match &self.state {
+            ExecState::Uncompiled => false,
+            ExecState::Compiling(handle) => handle.is_finished(),
+            ExecState::Compiled(_) => true,
+        }
+    }
+
+    fn compile(&mut self, client: &Client) -> Result<&PjRtLoadedExecutable, Error> {
+        self.start_compiling(client);
+        self.state = match std::mem::replace(&mut self.state, ExecState::Uncompiled) {
+            ExecState::Compiling(handle) => {
+                let executable = handle.join().unwrap()?;
+                ExecState::Compiled(executable)
+            }
+            state => state,
+        };
+        match &self.state {
+            ExecState::Compiled(executable) => Ok(executable),
+            _ => unreachable!(),
+        }
+    }
+
+    fn run(&mut self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
         world.clear_cache();
         world.load_dirty_components(client)?;
         let client_world = world.copy_to_client(client)?;
@@ -982,13 +1036,7 @@ impl Exec {
                 .ok_or(Error::ComponentNotFound)?;
             buffers.push(&col.column.buffer);
         }
-        let exec = self.exec.get_or_try_init(|| {
-            let start = std::time::Instant::now();
-            let comp = self.hlo_module.computation();
-            let exec = client.compile(&comp)?;
-            tracing::debug!(duration = ?start.elapsed(), "compiled HLO");
-            Ok::<_, Error>(exec)
-        })?;
+        let exec = self.compile(client)?;
         let ret_bufs = exec.execute_buffers(buffers)?;
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
             let col = world
@@ -1016,11 +1064,7 @@ impl Exec {
         let metadata: ExecMetadata = serde_json::from_reader(&mut metadata)?;
         let hlo_module_data = std::fs::read(path.join("hlo.binpb"))?;
         let hlo_module = HloModuleProto::parse_binary(&hlo_module_data)?;
-        Ok(Self {
-            metadata,
-            hlo_module,
-            exec: OnceCell::default(),
-        })
+        Ok(Self::new(metadata, hlo_module))
     }
 }
 
@@ -1117,8 +1161,24 @@ impl WorldExec {
         }
     }
 
+    pub fn start_compiling(&mut self, client: &Client) {
+        self.tick_exec.start_compiling(client);
+        if let Some(startup_exec) = &mut self.startup_exec {
+            startup_exec.start_compiling(client);
+        }
+    }
+
+    pub fn compiled(&self) -> bool {
+        let startup_compiled = self
+            .startup_exec
+            .as_ref()
+            .map_or(true, |exec| exec.compiled());
+        let tick_compiled = self.tick_exec.compiled();
+        startup_compiled && tick_compiled
+    }
+
     pub fn run(&mut self, client: &Client) -> Result<(), Error> {
-        if let Some(startup_exec) = self.startup_exec.take() {
+        if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.world, client)?;
         }
         self.tick_exec.run(&mut self.world, client)?;

@@ -51,18 +51,22 @@ impl ConduitExec {
     }
 
     pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
-        if self.playing {
-            match &mut self.state {
-                State::Running => {
-                    self.exec.run(client)?;
-                }
-                State::Replaying { index } => {
-                    *index += 1;
-                    if *index >= self.exec.history.worlds.len() {
-                        self.state = State::Running;
+        if self.exec.compiled() {
+            if self.playing {
+                match &mut self.state {
+                    State::Running => {
+                        self.exec.run(client)?;
+                    }
+                    State::Replaying { index } => {
+                        *index += 1;
+                        if *index >= self.exec.history.worlds.len() {
+                            self.state = State::Running;
+                        }
                     }
                 }
             }
+        } else {
+            self.exec.start_compiling(client);
         }
         self.send();
         self.recv();
