@@ -45,8 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let sim_storage_client = monte_carlo::SimStorageClient::new(&config.monte_carlo).await?;
 
     if let Some(orca_config) = config.orca {
-        let pubsub = redis.get_tokio_connection().await?;
-        let pubsub = pubsub.into_pubsub();
+        let pubsub = redis.get_async_pubsub().await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
         let orca = Orca::new(orca_config, db.clone(), redis).await?;
         services.spawn(
@@ -56,18 +55,15 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(api_config) = config.api {
         let sandbox_events = {
-            let redis = redis.get_tokio_connection().await?;
-            let redis = redis.into_pubsub();
+            let redis = redis.get_async_pubsub().await?;
             atc_entity::events::subscribe(redis).await?
         };
         let monte_carlo_run_events = {
-            let redis = redis.get_tokio_connection().await?;
-            let redis = redis.into_pubsub();
+            let redis = redis.get_async_pubsub().await?;
             atc_entity::events::subscribe(redis).await?
         };
         let monte_carlo_batch_events = {
-            let redis = redis.get_tokio_connection().await?;
-            let redis = redis.into_pubsub();
+            let redis = redis.get_async_pubsub().await?;
             atc_entity::events::subscribe(redis).await?
         };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;

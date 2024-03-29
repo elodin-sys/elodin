@@ -75,7 +75,7 @@ kube = { version = "0.88", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.21", features = ["latest"] }
 
 # queue
-redis.version = "0.24"
+redis.version = "0.25"
 redis.features = ["tokio-comp", "streams", "r2d2"]
 redmq.path = "../../libs/redmq"
 

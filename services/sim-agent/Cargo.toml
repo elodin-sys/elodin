@@ -50,7 +50,7 @@ config.version = "0.14"
 config.features = ["toml"]
 
 # message queue
-redis.version = "0.24"
+redis.version = "0.25"
 redis.features = ["tokio-comp", "streams"]
 redmq.version = "0.1.0"
 redmq.path = "../../libs/redmq"

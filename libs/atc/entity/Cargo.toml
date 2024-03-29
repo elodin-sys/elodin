@@ -24,7 +24,7 @@ sea-orm = { version = "0.12", features = ["with-uuid", "with-chrono"] }
 chrono = "0.4"
 
 thiserror = "1.0.57"
-redis = { version = "0.24.0", features = ["streams", "aio", "tokio-comp"] }
+redis = { version = "0.25.0", features = ["streams", "aio", "tokio-comp"] }
 futures-util = "0.3.30"
 tokio = { version = "1.36.0", features = ["sync"] }
 postcard = { version = "1.0.8", features = ["alloc"] }
