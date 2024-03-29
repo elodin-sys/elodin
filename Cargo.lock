@@ -3193,6 +3193,7 @@ dependencies = [
  "cocoa",
  "conduit",
  "egui_tiles",
+ "fastrand",
  "flume",
  "futures-lite",
  "itertools 0.12.1",

@@ -37,6 +37,9 @@ bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam.git"
 bevy_editor_cam.branch = "bevy-0.13"
 bevy_tweening = "0.10"
 
+# rand
+fastrand.version = "2"
+
 # channel
 flume = "0.11"
 

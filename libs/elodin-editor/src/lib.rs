@@ -54,6 +54,7 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/search.png");
         embedded_asset!(app, "assets/icons/add.png");
         embedded_asset!(app, "assets/icons/close.png");
+        embedded_asset!(app, "assets/icons/chart.png");
     }
 }
 

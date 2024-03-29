@@ -21,7 +21,7 @@ use egui_tiles::TileId;
 
 use crate::MainCamera;
 
-use self::widgets::{hierarchy, inspector, timeline};
+use self::widgets::{hierarchy, inspector, modal::modal_graph, timeline};
 
 pub mod colors;
 pub mod images;
@@ -77,6 +77,9 @@ pub struct HoveredEntity(pub Option<EntityPair>);
 #[derive(Resource, Default)]
 pub struct EntityFilter(pub String);
 
+#[derive(Resource, Default)]
+pub struct InspectorAnchor(pub Option<egui::Pos2>);
+
 #[derive(Component)]
 pub struct ViewportRect(pub Option<egui::Rect>);
 
@@ -129,68 +132,126 @@ impl Plugin for UiPlugin {
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
-            .init_resource::<GraphStates>()
+            .init_resource::<GraphsState>()
+            .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
-            .add_systems(Update, tiles::render_tiles.after(render))
-            .add_systems(Update, render_viewport_ui.after(render))
+            .add_systems(Update, render_timeline.after(render))
+            .add_systems(Update, modal_update_graph.after(render))
+            .add_systems(Update, tiles::render_tiles.after(render_timeline))
+            .add_systems(Update, render_viewport_ui.after(render_timeline))
             .add_systems(Update, set_camera_viewport.after(tiles::render_tiles))
             .add_systems(Update, sync_camera_grid_cell.after(tiles::render_tiles))
-            .add_systems(Update, tiles::sync_viewports.after(render))
-            .add_systems(Update, tiles::setup_default_tiles.after(render));
+            .add_systems(Update, tiles::sync_viewports.after(render_timeline))
+            .add_systems(Update, tiles::setup_default_tiles.after(render_timeline));
     }
 }
 
-type GraphStateComponent = Vec<(usize, egui::Color32)>;
+pub fn modal_update_graph(
+    mut contexts: EguiContexts,
+    inspector_anchor: Res<InspectorAnchor>,
+    entities_meta: Query<EntityData>,
+    graph_states: ResMut<GraphsState>,
+    metadata_store: Res<MetadataStore>,
+    window: Query<&Window>,
+    images: Local<images::Images>,
+) {
+    let modal_size = egui::vec2(280.0, 480.0);
+
+    let modal_rect = if let Some(inspector_anchor) = inspector_anchor.0 {
+        egui::Rect::from_min_size(
+            egui::pos2(inspector_anchor.x - modal_size.x, inspector_anchor.y),
+            modal_size,
+        )
+    } else {
+        let window = window.single();
+        egui::Rect::from_center_size(
+            egui::pos2(
+                window.resolution.width() / 2.0,
+                window.resolution.height() / 2.0,
+            ),
+            modal_size,
+        )
+    };
+
+    if let Some(graph_id) = graph_states.modal_graph {
+        let close_icon = contexts.add_image(images.icon_close.clone_weak());
+
+        modal_graph(
+            contexts.ctx_mut(),
+            modal_rect,
+            close_icon,
+            entities_meta,
+            graph_states,
+            metadata_store,
+            graph_id,
+        );
+    }
+}
+
+type GraphStateComponent = Vec<(bool, egui::Color32)>;
 type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 type GraphState = BTreeMap<EntityId, GraphStateEntity>;
 
-#[derive(Resource, Default, Debug)]
-pub struct GraphStates {
-    // modal: Option<(GraphId, Option<EntityId>, Option<ComponentId>)>,
+#[derive(Resource, Default, Clone, Debug)]
+pub struct GraphsState {
+    modal_graph: Option<GraphId>,
+    modal_entity: Option<EntityId>,
+    modal_component: Option<ComponentId>,
     graphs: BTreeMap<GraphId, GraphState>,
 }
 
-impl GraphStates {
-    pub fn create_graph(&mut self) -> (GraphId, &GraphState) {
-        let graph_id = self
-            .graphs
-            .keys()
-            .max()
-            .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
-        self.graphs.insert(graph_id, BTreeMap::new());
-        (graph_id, self.graphs.get(&graph_id).unwrap())
-    }
+impl GraphsState {
+    pub fn get_or_create_graph(&mut self, graph_id: &Option<GraphId>) -> (GraphId, &GraphState) {
+        if let Some(graph_id) = graph_id {
+            if !self.graphs.contains_key(graph_id) {
+                self.graphs.insert(*graph_id, BTreeMap::new());
+            }
 
-    pub fn get_or_create_graph(&mut self, graph_id: &GraphId) -> &GraphState {
-        if !self.graphs.contains_key(graph_id) {
-            self.graphs.insert(*graph_id, BTreeMap::new());
+            (*graph_id, self.graphs.get(graph_id).unwrap())
+        } else {
+            let new_graph_id = self
+                .graphs
+                .keys()
+                .max()
+                .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
+            self.graphs.insert(new_graph_id, BTreeMap::new());
+
+            (new_graph_id, self.graphs.get(&new_graph_id).unwrap())
         }
-
-        self.graphs.get(graph_id).unwrap()
     }
 
-    pub fn add_component(
+    pub fn insert_component(
         &mut self,
         graph_id: &GraphId,
         entity_id: &EntityId,
         component_id: &ComponentId,
-        component_values: Vec<(usize, egui::Color32)>,
+        component_values: Vec<(bool, egui::Color32)>,
     ) {
         let mut graph = self
             .graphs
             .get(graph_id)
             .map_or(BTreeMap::new(), |graph| graph.clone());
 
-        let mut components = graph
+        let mut entity = graph
             .get(entity_id)
             .map_or(BTreeMap::new(), |ec| ec.clone());
 
-        components.insert(*component_id, component_values);
-        graph.insert(*entity_id, components);
+        entity.insert(*component_id, component_values);
+        graph.insert(*entity_id, entity);
 
         self.graphs.insert(*graph_id, graph);
+    }
+
+    pub fn remove_graph(&mut self, graph_id: &GraphId) {
+        self.graphs.remove(graph_id);
+
+        if self.modal_graph == Some(*graph_id) {
+            self.modal_graph = None;
+            self.modal_entity = None;
+            self.modal_component = None;
+        }
     }
 
     pub fn remove_component(
@@ -209,7 +270,12 @@ impl GraphStates {
             .map_or(BTreeMap::new(), |ec| ec.clone());
 
         components.remove(component_id);
-        graph.insert(*entity_id, components);
+
+        if components.is_empty() {
+            graph.remove(entity_id);
+        } else {
+            graph.insert(*entity_id, components);
+        }
 
         self.graphs.insert(*graph_id, graph);
     }
@@ -232,21 +298,18 @@ impl GraphStates {
 
 #[allow(clippy::too_many_arguments)]
 pub fn render(
-    mut event: EventWriter<ControlMsg>,
     mut contexts: EguiContexts,
-    mut paused: ResMut<Paused>,
-    mut tick: ResMut<Tick>,
     entity_filter: ResMut<EntityFilter>,
     mut selected_object: ResMut<SelectedObject>,
-    mut graph_states: ResMut<GraphStates>,
-    max_tick: Res<MaxTick>,
-    tick_time: Res<TimeStep>,
+    mut graphs_state: ResMut<GraphsState>,
+    mut tile_state: ResMut<tiles::TileState>,
     entities: Query<EntityData>,
     window: Query<&Window>,
     images: Local<images::Images>,
     metadata_store: Res<MetadataStore>,
     mut camera_query: Query<CameraQuery, With<MainCamera>>,
     mut commands: Commands,
+    mut inspector_anchor: ResMut<InspectorAnchor>,
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     let Ok(window) = window.get_single() else {
@@ -257,21 +320,13 @@ pub fn render(
 
     theme::set_theme(contexts.ctx_mut());
 
-    let timeline_icons = timeline::TimelineIcons {
-        jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
-        jump_to_end: contexts.add_image(images.icon_jump_to_end.clone_weak()),
-        frame_forward: contexts.add_image(images.icon_frame_forward.clone_weak()),
-        frame_back: contexts.add_image(images.icon_frame_back.clone_weak()),
-        play: contexts.add_image(images.icon_play.clone_weak()),
-        pause: contexts.add_image(images.icon_pause.clone_weak()),
-        handle: contexts.add_image(images.icon_scrub.clone_weak()),
-    };
-    let search_icon = contexts.add_image(images.icon_search.clone_weak());
+    let icon_search = contexts.add_image(images.icon_search.clone_weak());
+    let icon_chart = contexts.add_image(images.icon_chart.clone_weak());
 
     #[cfg(target_os = "macos")]
     egui::TopBottomPanel::top("titlebar")
         .frame(egui::Frame {
-            fill: colors::INTERFACE_BACKGROUND_BLACK,
+            fill: colors::PRIMARY_ONYX,
             stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
             ..Default::default()
         })
@@ -282,7 +337,7 @@ pub fn render(
         egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
             .resizable(true)
             .frame(egui::Frame {
-                fill: colors::STONE_950,
+                fill: colors::PRIMARY_SMOKE,
                 stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
                 inner_margin: Margin::same(4.0),
                 ..Default::default()
@@ -293,7 +348,7 @@ pub fn render(
             .show(contexts.ctx_mut(), |ui| {
                 let search_text = entity_filter.0.clone();
 
-                hierarchy::header(ui, entity_filter, search_icon, false);
+                hierarchy::header(ui, entity_filter, icon_search, false);
 
                 hierarchy::entity_list(ui, &entities, &mut selected_object, &search_text);
             });
@@ -301,7 +356,7 @@ pub fn render(
         egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
             .resizable(true)
             .frame(egui::Frame {
-                fill: colors::STONE_950,
+                fill: colors::PRIMARY_SMOKE,
                 stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
                 ..Default::default()
             })
@@ -309,6 +364,7 @@ pub fn render(
             .default_width(width * 0.25)
             .max_width(width * 0.35)
             .show(contexts.ctx_mut(), |ui| {
+                inspector_anchor.0 = Some(ui.max_rect().min);
                 inspector::inspector(
                     ui,
                     selected_object.as_ref(),
@@ -317,7 +373,9 @@ pub fn render(
                     &mut camera_query,
                     &mut commands,
                     &entity_transform_query,
-                    &mut graph_states,
+                    &mut graphs_state,
+                    &mut tile_state,
+                    icon_chart,
                 );
             });
     } else {
@@ -330,7 +388,7 @@ pub fn render(
                 let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
                     .resizable(true)
                     .frame(egui::Frame {
-                        fill: colors::STONE_950,
+                        fill: colors::PRIMARY_SMOKE,
                         stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
                         inner_margin: Margin::same(4.0),
                         ..Default::default()
@@ -341,7 +399,7 @@ pub fn render(
                     .show_inside(ui, |ui| {
                         let search_text = entity_filter.0.clone();
 
-                        hierarchy::header(ui, entity_filter, search_icon, true);
+                        hierarchy::header(ui, entity_filter, icon_search, true);
 
                         hierarchy::entity_list(ui, &entities, &mut selected_object, &search_text);
 
@@ -351,11 +409,12 @@ pub fn render(
                 egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
                     .resizable(false)
                     .frame(egui::Frame {
-                        fill: colors::STONE_950,
+                        fill: colors::PRIMARY_SMOKE,
                         ..Default::default()
                     })
                     .exact_width(width - outline.response.rect.width())
                     .show_inside(ui, |ui| {
+                        inspector_anchor.0 = None;
                         inspector::inspector(
                             ui,
                             selected_object.as_ref(),
@@ -364,17 +423,42 @@ pub fn render(
                             &mut camera_query,
                             &mut commands,
                             &entity_transform_query,
-                            &mut graph_states,
+                            &mut graphs_state,
+                            &mut tile_state,
+                            icon_chart,
                         );
                     });
             });
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_timeline(
+    mut event: EventWriter<ControlMsg>,
+    mut contexts: EguiContexts,
+    mut paused: ResMut<Paused>,
+    mut tick: ResMut<Tick>,
+    max_tick: Res<MaxTick>,
+    tick_time: Res<TimeStep>,
+    images: Local<images::Images>,
+) {
+    theme::set_theme(contexts.ctx_mut());
+
+    let timeline_icons = timeline::TimelineIcons {
+        jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
+        jump_to_end: contexts.add_image(images.icon_jump_to_end.clone_weak()),
+        frame_forward: contexts.add_image(images.icon_frame_forward.clone_weak()),
+        frame_back: contexts.add_image(images.icon_frame_back.clone_weak()),
+        play: contexts.add_image(images.icon_play.clone_weak()),
+        pause: contexts.add_image(images.icon_pause.clone_weak()),
+        handle: contexts.add_image(images.icon_scrub.clone_weak()),
+    };
 
     let sim_fps = 1.0 / tick_time.0.as_secs_f64();
 
     egui::TopBottomPanel::bottom("timeline")
         .frame(egui::Frame {
-            fill: colors::STONE_950,
+            fill: colors::PRIMARY_SMOKE,
             stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
             ..Default::default()
         })
@@ -428,7 +512,7 @@ pub fn render_viewport_ui(
                 .title_bar(false)
                 .resizable(false)
                 .frame(egui::Frame {
-                    fill: colors::with_opacity(colors::STONE_950, 0.5),
+                    fill: colors::with_opacity(colors::PRIMARY_SMOKE, 0.5),
                     stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
                     inner_margin: egui::Margin::symmetric(16.0, 8.0),
                     ..Default::default()
