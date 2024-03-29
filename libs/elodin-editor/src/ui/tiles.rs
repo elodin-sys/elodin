@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use bevy::prelude::*;
 use bevy_egui::{
@@ -18,11 +18,12 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 use super::{
     colors,
     images::Images,
+    utils::MarginSides,
     widgets::{
         button::ImageButton,
         eplot::{EPlot, EPlotData},
     },
-    GraphStates, SelectedObject, ViewportRect,
+    GraphsState, SelectedObject, ViewportRect,
 };
 use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedEntityData};
 
@@ -34,6 +35,8 @@ struct TabIcons {
 #[derive(Resource)]
 pub struct TileState {
     tree: egui_tiles::Tree<Pane>,
+    tab_diffs: Vec<TabDiff>,
+    graphs: HashMap<TileId, GraphId>,
 }
 
 impl TileState {
@@ -60,6 +63,13 @@ impl TileState {
         }
         Some(child)
     }
+
+    pub fn create_graph_tile(&mut self, graph_id: GraphId) {
+        if let Some(parent) = self.tree.root {
+            self.tab_diffs
+                .push(TabDiff::AddGraph(parent, Some(graph_id)));
+        }
+    }
 }
 
 enum Pane {
@@ -78,46 +88,38 @@ impl Pane {
     }
 
     fn ui(&mut self, ui: &mut Ui) -> egui_tiles::UiResponse {
+        let content_rect = ui.available_rect_before_wrap();
         match self {
             Pane::Graph(pane) => {
                 ui.painter()
-                    .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
+                    .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
                 if let Some(plot_data) = &pane.plot_data {
                     EPlot::new(plot_data.clone())
-                        .padding(egui::Margin {
-                            left: 20.0,
-                            right: 0.0,
-                            top: 0.0,
-                            bottom: 20.0,
-                        })
-                        .margin(egui::Margin {
-                            left: 80.0,
-                            right: 60.0,
-                            top: 40.0,
-                            bottom: 60.0,
-                        })
+                        .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
+                        .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
                         .steps(6, 4)
                         .render(ui);
-                } else {
-                    ui.painter()
-                        .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
                 }
 
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
-                pane.rect = Some(ui.max_rect());
+                pane.rect = Some(content_rect.shrink(1.0));
                 egui_tiles::UiResponse::None
             }
             Pane::Welcome => {
                 ui.painter()
-                    .rect(ui.max_rect(), 0.0, colors::BLACK, Stroke::NONE);
-                Frame::none().inner_margin(Margin::same(8.0)).fill(colors::BLACK).show(ui, |ui| {
-                    ui.vertical_centered_justified(|ui| {
-                        ui.heading("Welcome to the Elodin Editor!");
-                        ui.label("Get started by connecting to a simulator, and then adding a viewport or graph");
+                    .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
+                Frame::none()
+                    .inner_margin(Margin::same(8.0).top(content_rect.height() * 0.4))
+                    .show(ui, |ui| {
+                        ui.vertical_centered_justified(|ui| {
+                            ui.heading("Welcome to the Elodin Editor!");
+                            ui.add_space(ui.spacing().interact_size.y);
+                            ui.label("Get started by connecting to a simulator, and then adding a viewport or graph");
+                        });
                     });
-                });
+
                 egui_tiles::UiResponse::None
             }
         }
@@ -149,7 +151,7 @@ impl ViewportPane {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct GraphPane {
     pub id: GraphId,
     pub label: String,
@@ -169,11 +171,11 @@ impl GraphPane {
         &mut self,
         collected_entity_data: &CollectedEntityData,
         time_step: &TimeStep,
-        graph_states: &mut GraphStates,
+        graphs_state: &mut GraphsState,
         entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
         metadata_store: &MetadataStore,
     ) {
-        let graph_state = graph_states.get_or_create_graph(&self.id);
+        let (_, graph_state) = graphs_state.get_or_create_graph(&Some(self.id));
 
         self.plot_data = Some(EPlotData::new(
             collected_entity_data,
@@ -187,10 +189,10 @@ impl GraphPane {
 
 impl Default for TileState {
     fn default() -> Self {
-        let panes = vec![];
-
         Self {
-            tree: egui_tiles::Tree::new_tabs("tab_tree", panes),
+            tree: egui_tiles::Tree::new_tabs("tab_tree", vec![]),
+            tab_diffs: vec![],
+            graphs: HashMap::new(),
         }
     }
 }
@@ -199,16 +201,17 @@ struct TreeBehavior<'a> {
     icons: TabIcons,
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
-    graph_states: &'a mut GraphStates,
+    graphs_state: &'a mut GraphsState,
     collected_entity_data: &'a CollectedEntityData,
     time_step: &'a TimeStep,
     entity_metadata: BTreeMap<&'a EntityId, &'a EntityMetadata>,
     metadata_store: &'a MetadataStore,
 }
 
-enum TabDiff {
+#[derive(Clone)]
+pub enum TabDiff {
     AddViewport(TileId),
-    AddGraph(TileId),
+    AddGraph(TileId, Option<GraphId>),
     Delete(TileId),
 }
 
@@ -233,7 +236,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             graph_pane.update(
                 self.collected_entity_data,
                 self.time_step,
-                self.graph_states,
+                self.graphs_state,
                 self.entity_metadata.clone(),
                 self.metadata_store,
             );
@@ -274,26 +277,20 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             .translate(vec2(-3.0 * x_margin, 0.0));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
 
-        ui.painter().vline(
-            rect.right(),
-            rect.y_range(),
-            egui::Stroke::new(1.0, colors::BLACK),
-        );
-
         if ui.is_rect_visible(rect) && !is_being_dragged {
             let bg_color = match tab_state {
-                TabState::Active => colors::BLACK,
-                TabState::Selected => colors::CREMA,
-                TabState::Inactive => colors::STONE_950,
+                TabState::Active => colors::BLACK_BLACK_600,
+                TabState::Selected => colors::PRIMARY_CREAME,
+                TabState::Inactive => colors::PRIMARY_SMOKE,
             };
 
             let text_color = match tab_state {
-                TabState::Active => colors::CREMA,
-                TabState::Selected => colors::STONE_950,
-                TabState::Inactive => colors::with_opacity(colors::CREMA, 0.6),
+                TabState::Active => colors::PRIMARY_CREAME,
+                TabState::Selected => colors::PRIMARY_SMOKE,
+                TabState::Inactive => colors::with_opacity(colors::PRIMARY_CREAME, 0.6),
             };
 
-            ui.painter().rect(rect, 0.0, bg_color, Stroke::NONE);
+            ui.painter().rect_filled(rect, 0.0, bg_color);
             ui.painter().galley(
                 egui::Align2::LEFT_CENTER
                     .align_size_within_rect(galley.size(), text_rect)
@@ -306,14 +303,32 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
                 ImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
-                        TabState::Active | TabState::Inactive => colors::CREMA,
-                        TabState::Selected => colors::BLACK,
+                        TabState::Active | TabState::Inactive => colors::PRIMARY_CREAME,
+                        TabState::Selected => colors::BLACK_BLACK_600,
                     })
-                    .bg_color(Color32::TRANSPARENT),
+                    .bg_color(colors::TRANSPARENT),
             );
             if close_response.clicked() {
                 self.tab_diffs.push(TabDiff::Delete(tile_id));
             }
+
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom(),
+                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+            );
+
+            ui.painter().vline(
+                rect.left(),
+                rect.y_range(),
+                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+            );
+
+            ui.painter().vline(
+                rect.right(),
+                rect.y_range(),
+                egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+            );
         }
 
         self.on_tab_button(tiles, tile_id, response)
@@ -359,7 +374,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        colors::STONE_950
+        colors::PRIMARY_SMOKE
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
@@ -371,23 +386,23 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
     }
 
     fn drag_preview_stroke(&self, _visuals: &Visuals) -> Stroke {
-        Stroke::new(1.0, colors::ORANGE_50)
+        Stroke::new(1.0, colors::PRIMARY_CREAME)
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
-        colors::with_opacity(colors::CREMA, 0.6)
+        colors::with_opacity(colors::PRIMARY_CREAME, 0.6)
     }
 
     fn drag_ui(&mut self, tiles: &Tiles<Pane>, ui: &mut Ui, tile_id: TileId) {
         let mut frame = egui::Frame::popup(ui.style());
-        frame.fill = colors::CREMA;
+        frame.fill = colors::PRIMARY_CREAME;
         frame.rounding = Rounding::ZERO;
         frame.stroke = Stroke::NONE;
         frame.shadow = egui::epaint::Shadow::NONE;
         frame.show(ui, |ui| {
             let text = self.tab_title_for_tile(tiles, tile_id);
             let text = text.text();
-            ui.label(RichText::new(text).color(colors::STONE_950).size(11.0));
+            ui.label(RichText::new(text).color(colors::PRIMARY_SMOKE).size(11.0));
         });
     }
 
@@ -399,6 +414,13 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
     ) {
+        let top_bar_rect = ui.available_rect_before_wrap();
+        ui.painter().hline(
+            top_bar_rect.x_range(),
+            top_bar_rect.bottom(),
+            egui::Stroke::new(1.0, colors::BLACK_BLACK_600),
+        );
+
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
         ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
         ui.add_space(5.0);
@@ -410,10 +432,12 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             ui.style_mut().spacing.item_spacing = vec2(16.0, 8.0);
             if ui.button("VIEWPORT").clicked() {
                 self.tab_diffs.push(TabDiff::AddViewport(tile_id));
+                ui.close_menu();
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                self.tab_diffs.push(TabDiff::AddGraph(tile_id));
+                self.tab_diffs.push(TabDiff::AddGraph(tile_id, None));
+                ui.close_menu();
             }
         });
     }
@@ -437,7 +461,7 @@ pub fn render_tiles(
     mut selected_object: ResMut<SelectedObject>,
     collected_entity_data: Res<CollectedEntityData>,
     time_step: Res<TimeStep>,
-    mut graph_states: ResMut<GraphStates>,
+    mut graphs_state: ResMut<GraphsState>,
     metadata_store: Res<MetadataStore>,
     entity_metadata: Query<(&EntityId, &EntityMetadata)>,
 ) {
@@ -448,15 +472,15 @@ pub fn render_tiles(
 
     egui::CentralPanel::default()
         .frame(Frame {
-            fill: Color32::TRANSPARENT,
+            fill: colors::TRANSPARENT,
             ..Default::default()
         })
         .show(contexts.ctx_mut(), |ui| {
             let mut behavior = TreeBehavior {
                 icons,
-                tab_diffs: vec![],
+                tab_diffs: ui_state.tab_diffs.clone(),
                 selected_object: selected_object.as_mut(),
-                graph_states: graph_states.as_mut(),
+                graphs_state: graphs_state.as_mut(),
                 collected_entity_data: collected_entity_data.as_ref(),
                 time_step: time_step.as_ref(),
                 metadata_store: metadata_store.as_ref(),
@@ -464,11 +488,12 @@ pub fn render_tiles(
                     .iter()
                     .collect::<BTreeMap<&EntityId, &EntityMetadata>>(),
             };
+            ui_state.tab_diffs = vec![];
             ui_state.tree.ui(&mut behavior, ui);
             for diff in behavior.tab_diffs.drain(..) {
                 match diff {
-                    TabDiff::Delete(tab_id) => {
-                        let Some(tile) = ui_state.tree.tiles.get(tab_id) else {
+                    TabDiff::Delete(tile_id) => {
+                        let Some(tile) = ui_state.tree.tiles.get(tile_id) else {
                             continue;
                         };
 
@@ -479,7 +504,12 @@ pub fn render_tiles(
                         };
 
                         if ui_state.tree.tiles.len() > 1 {
-                            ui_state.tree.tiles.remove(tab_id);
+                            ui_state.tree.tiles.remove(tile_id);
+
+                            if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
+                                graphs_state.remove_graph(graph_id);
+                                ui_state.graphs.remove(&tile_id);
+                            }
                         }
                     }
                     TabDiff::AddViewport(parent) => {
@@ -492,10 +522,21 @@ pub fn render_tiles(
                         ));
                         ui_state.insert_pane_with_parent(pane, parent, true);
                     }
-                    TabDiff::AddGraph(parent) => {
-                        let (graph_id, _) = graph_states.create_graph();
-                        let pane = Pane::Graph(GraphPane::spawn(graph_id));
-                        ui_state.insert_pane_with_parent(pane, parent, true);
+                    TabDiff::AddGraph(parent, graph_id) => {
+                        let (graph_id, _) = graphs_state.get_or_create_graph(&graph_id);
+
+                        let graph = GraphPane::spawn(graph_id);
+                        let pane = Pane::Graph(graph.clone());
+
+                        if let Some(tile_id) = ui_state.insert_pane_with_parent(pane, parent, true)
+                        {
+                            *selected_object = SelectedObject::Graph {
+                                tile_id,
+                                label: graph.label.to_owned(),
+                                graph_id: graph.id,
+                            };
+                            ui_state.graphs.insert(tile_id, graph.id);
+                        }
                     }
                 }
             }

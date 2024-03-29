@@ -57,3 +57,62 @@ pub fn get_component_label(metadata_store: &MetadataStore, component_id: &Compon
         format!("ID[{}]", component_id.0)
     }
 }
+
+pub fn get_rects_from_relative_width(
+    rect: egui::Rect,
+    relative_width: f32,
+    height: f32,
+) -> (egui::Rect, egui::Rect) {
+    let first_rect_width = rect.width() * relative_width;
+
+    let first_rect = egui::Rect::from_min_size(rect.min, egui::vec2(first_rect_width, height));
+
+    let second_rect = egui::Rect::from_min_size(
+        rect.translate(egui::vec2(first_rect_width, 0.0)).min,
+        egui::vec2(rect.width() - first_rect_width, height),
+    );
+
+    (first_rect, second_rect)
+}
+
+pub trait Shrink4 {
+    fn shrink4(self, margin: egui::Margin) -> egui::Rect;
+}
+
+impl Shrink4 for egui::Rect {
+    fn shrink4(self, margin: egui::Margin) -> Self {
+        egui::Rect::from_min_max(
+            egui::pos2(self.min.x + margin.left, self.min.y + margin.top),
+            egui::pos2(self.max.x - margin.right, self.max.y - margin.bottom),
+        )
+    }
+}
+
+pub trait MarginSides {
+    fn left(self, left: f32) -> egui::Margin;
+    fn right(self, right: f32) -> egui::Margin;
+    fn top(self, top: f32) -> egui::Margin;
+    fn bottom(self, bottom: f32) -> egui::Margin;
+}
+
+impl MarginSides for egui::Margin {
+    fn left(mut self, left: f32) -> Self {
+        self.left = left;
+        self
+    }
+
+    fn right(mut self, right: f32) -> Self {
+        self.right = right;
+        self
+    }
+
+    fn top(mut self, top: f32) -> Self {
+        self.top = top;
+        self
+    }
+
+    fn bottom(mut self, bottom: f32) -> Self {
+        self.bottom = bottom;
+        self
+    }
+}

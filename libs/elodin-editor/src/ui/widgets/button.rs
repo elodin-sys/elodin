@@ -19,8 +19,8 @@ impl ImageButton {
         Self {
             image_id,
             image_tint: colors::WHITE,
-            image_tint_click: colors::GREY_OPACITY_500,
-            background_color: colors::STONE_950,
+            image_tint_click: colors::PRIMARY_ONYX_5,
+            background_color: colors::PRIMARY_SMOKE,
             width: 1.0,
             height: 1.0,
         }

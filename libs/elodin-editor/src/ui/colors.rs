@@ -1,32 +1,20 @@
 use bevy_egui::egui::Color32;
 use conduit::well_known::Color;
 
-//pub const HYPER_RED: Color32 = Color32::from_rgb(0xEE, 0x3A, 0x43);
-pub const BLACK: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
-pub const STONE_950: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
-#[allow(dead_code)]
-pub const INTERFACE_BACKGROUND_BLACK: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
-
 pub const WHITE: Color32 = Color32::WHITE;
-pub const CREMA: Color32 = Color32::from_rgb(255, 251, 240);
+pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;
 
-pub const GREY_OPACITY_500: Color32 = Color32::from_rgb(0x99, 0x99, 0x99);
+pub const PRIMARY_CREAME: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
+pub const PRIMARY_SMOKE: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
 
-// pub const NEUTRAL_900: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
-pub const GREEN_300: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
-pub const ORANGE_50: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
+pub const BLACK_BLACK_600: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);
 
 pub const BORDER_GREY: Color32 = Color32::from_rgb(0x20, 0x20, 0x20); // white * 0.05
 
-pub const ONYX: Color32 = Color32::from_rgb(0x3d, 0x3d, 0x3d); // NOTE: this color does not have a name in figma
-pub const ONYX_8: Color32 = Color32::from_rgb(0x45, 0x45, 0x44);
-
-// TODO: Colors used by EPlot, needs to be replaced and removed
-pub const EPLOT_STONE_950: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
-pub const EPLOT_ZINC_800: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
-pub const EPLOT_NEUTRAL_900: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
-pub const EPLOT_GREEN_300: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
-pub const EPLOT_ORANGE_50: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
+pub const PRIMARY_ONYX: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
+pub const PRIMARY_ONYX_5: Color32 = Color32::from_rgb(0x97, 0x96, 0x96);
+pub const PRIMARY_ONYX_8: Color32 = Color32::from_rgb(0x45, 0x45, 0x44);
+pub const PRIMARY_ONYX_9: Color32 = Color32::from_rgb(0x2E, 0x2D, 0x2C);
 
 pub const TURQUOISE_DEFAULT: Color32 = Color32::from_rgb(0x69, 0xB3, 0xBF);
 pub const SLATE_DEFAULT: Color32 = Color32::from_rgb(0x7F, 0x70, 0xFF);
@@ -36,6 +24,15 @@ pub const PEACH_DEFAULT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0xB3);
 pub const REDDISH_DEFAULT: Color32 = Color32::from_rgb(0xE9, 0x4B, 0x14);
 pub const HYPERBOLE_DEFAULT: Color32 = Color32::from_rgb(0x14, 0x5F, 0xCF);
 pub const MINT_DEFAULT: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
+
+pub const TURQUOISE_40: Color32 = Color32::from_rgba_premultiplied(0x69, 0xB3, 0xBF, 100);
+pub const SLATE_40: Color32 = Color32::from_rgba_premultiplied(0x7F, 0x70, 0xFF, 100);
+pub const PUMPKIN_40: Color32 = Color32::from_rgba_premultiplied(0xFF, 0x6F, 0x1E, 100);
+pub const YOLK_40: Color32 = Color32::from_rgba_premultiplied(0xFE, 0xC5, 0x04, 100);
+pub const PEACH_40: Color32 = Color32::from_rgba_premultiplied(0xFF, 0xD7, 0xB3, 100);
+pub const REDDISH_40: Color32 = Color32::from_rgba_premultiplied(0xE9, 0x4B, 0x14, 100);
+pub const HYPERBOLE_40: Color32 = Color32::from_rgba_premultiplied(0x14, 0x5F, 0xCF, 100);
+pub const MINT_40: Color32 = Color32::from_rgba_premultiplied(0x88, 0xDE, 0x9F, 100);
 
 pub fn get_color_by_index(index: usize) -> Color32 {
     let colors = [
@@ -47,9 +44,21 @@ pub fn get_color_by_index(index: usize) -> Color32 {
         REDDISH_DEFAULT,
         HYPERBOLE_DEFAULT,
         MINT_DEFAULT,
+        TURQUOISE_40,
+        SLATE_40,
+        PUMPKIN_40,
+        YOLK_40,
+        PEACH_40,
+        REDDISH_40,
+        HYPERBOLE_40,
+        MINT_40,
     ];
 
     *colors.get(index).unwrap_or(&WHITE)
+}
+
+pub fn get_random_color() -> Color32 {
+    get_color_by_index(fastrand::usize(0..=7))
 }
 
 pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
@@ -62,7 +71,7 @@ pub trait EColor {
 
 impl EColor for Color {
     fn into_color32(self) -> Color32 {
-        GREEN_300
+        MINT_DEFAULT
         // TODO: Enable when colors will be used
         // Color32::from_rgb(
         //     (255.0 * self.r) as u8,

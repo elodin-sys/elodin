@@ -85,7 +85,7 @@ impl<'a> Timeline<'a> {
             clamp_to_range: true,
             step: Some(1.0),
             handle_image_id: None,
-            handle_image_tint: colors::GREEN_300,
+            handle_image_tint: colors::MINT_DEFAULT,
             handle_aspect_ratio: 0.5,
             segments: 8,
             label_font_size: 10.0,

@@ -44,26 +44,28 @@ impl EPlotData {
             for (component_id, component_values) in components {
                 let mut chart_component_values = BTreeMap::new();
 
-                for (value_index, color) in component_values {
-                    let collected_component_values = collected_entity_data
-                        .data
-                        .get(&entity_id)
-                        .and_then(|e| e.get(&component_id));
+                for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                    if *enabled {
+                        let collected_component_values = collected_entity_data
+                            .data
+                            .get(&entity_id)
+                            .and_then(|e| e.get(&component_id));
 
-                    if let Some(collected_component_values) = collected_component_values {
-                        let collected_component_value = collected_component_values
-                            .iter()
-                            .map(|component_value| component_value[value_index])
-                            .collect::<Vec<f64>>();
+                        if let Some(collected_component_values) = collected_component_values {
+                            let collected_component_value = collected_component_values
+                                .iter()
+                                .map(|component_value| component_value[value_index])
+                                .collect::<Vec<f64>>();
 
-                        chart_component_values.insert(
-                            value_index,
-                            EPlotDataLine {
-                                label: format!("[{value_index}]"),
-                                values: collected_component_value,
-                                color,
-                            },
-                        );
+                            chart_component_values.insert(
+                                value_index,
+                                EPlotDataLine {
+                                    label: format!("[{value_index}]"),
+                                    values: collected_component_value,
+                                    color: *color,
+                                },
+                            );
+                        }
                     }
                 }
 
@@ -163,9 +165,9 @@ impl EPlot {
             notch_length: 20.0,
             axis_label_margin: 10.0,
 
-            fill_color: egui::Color32::TRANSPARENT,
-            text_color: colors::EPLOT_ORANGE_50,
-            border_stroke: egui::Stroke::new(1.0, colors::EPLOT_ZINC_800),
+            fill_color: colors::TRANSPARENT,
+            text_color: colors::PRIMARY_CREAME,
+            border_stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
 
             show_modal: true,
             show_legend: false,
@@ -325,7 +327,7 @@ impl EPlot {
         ui.painter().rect(
             pointer_rect,
             egui::Rounding::same(2.0),
-            colors::EPLOT_GREEN_300,
+            colors::MINT_DEFAULT,
             egui::Stroke::NONE,
         );
 
@@ -334,7 +336,7 @@ impl EPlot {
             egui::Align2::CENTER_CENTER,
             format!("{:.2}", pointer_plot_point.y),
             font_id,
-            colors::EPLOT_NEUTRAL_900,
+            colors::PRIMARY_ONYX,
         );
     }
 
@@ -348,14 +350,14 @@ impl EPlot {
         ui.painter().vline(
             closest_point.pos2.x,
             border_rect.min.y..=border_rect.max.y,
-            egui::Stroke::new(1.0, colors::EPLOT_ZINC_800),
+            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
 
         // NOTE: HLine is not attached to points
         ui.painter().hline(
             border_rect.min.x..=border_rect.max.x,
             pointer_pos.y,
-            egui::Stroke::new(1.0, colors::EPLOT_ZINC_800),
+            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
     }
 
@@ -372,10 +374,10 @@ impl EPlot {
 
         ui.allocate_ui_at_rect(modal_rect, |ui| {
             egui::Frame::none()
-                .fill(colors::EPLOT_STONE_950)
+                .fill(colors::PRIMARY_SMOKE)
                 .inner_margin(egui::Margin::same(10.0))
                 .outer_margin(egui::Margin::same(20.0))
-                .stroke(egui::Stroke::new(0.4, colors::EPLOT_ORANGE_50))
+                .stroke(egui::Stroke::new(0.4, colors::PRIMARY_CREAME))
                 .show(ui, |ui| {
                     let point_on_baseline = self
                         .plot_data
@@ -431,8 +433,8 @@ impl EPlot {
         ui.painter().rect(
             modal_rect,
             egui::Rounding::same(2.0),
-            colors::with_opacity(colors::EPLOT_STONE_950, 0.9),
-            egui::Stroke::new(0.4, colors::EPLOT_ORANGE_50),
+            colors::with_opacity(colors::PRIMARY_SMOKE, 0.9),
+            egui::Stroke::new(0.4, colors::PRIMARY_CREAME),
         );
 
         // ui.allocate_ui_at_rect(modal_rect, |ui| {
@@ -696,7 +698,7 @@ impl EPlotLine {
             ui.painter().circle(
                 closest_pos,
                 6.0,
-                colors::EPLOT_STONE_950,
+                colors::PRIMARY_SMOKE,
                 egui::Stroke::new(2.0, self.color),
             );
 

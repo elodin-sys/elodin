@@ -28,7 +28,7 @@ pub fn header(
                             search_icon,
                             [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
                         ))
-                        .tint(colors::with_opacity(colors::ORANGE_50, 0.4)),
+                        .tint(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
                     );
 
                     ui.add(egui::TextEdit::singleline(&mut entity_filter.0).frame(false));
@@ -44,7 +44,7 @@ pub fn header(
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new("ENTITIES")
-                                .color(colors::with_opacity(colors::ORANGE_50, 0.4)),
+                                .color(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
                         )
                         .wrap(false),
                     );
@@ -107,9 +107,17 @@ pub fn entity_list(
 
 fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui::Response {
     let image_tint = colors::WHITE;
-    let image_tint_click = colors::GREY_OPACITY_500;
-    let background_color = if on { colors::WHITE } else { colors::STONE_950 };
-    let text_color = if on { colors::STONE_950 } else { colors::WHITE };
+    let image_tint_click = colors::PRIMARY_ONYX_5;
+    let background_color = if on {
+        colors::WHITE
+    } else {
+        colors::PRIMARY_SMOKE
+    };
+    let text_color = if on {
+        colors::PRIMARY_SMOKE
+    } else {
+        colors::WHITE
+    };
 
     // Set widget size and allocate space
     let height_scale = 2.0;
