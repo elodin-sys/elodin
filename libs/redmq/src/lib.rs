@@ -14,9 +14,7 @@ pub use de::from_redis;
 pub use ser::to_redis;
 
 pub struct MsgQueue {
-    conn: redis::aio::MultiplexedConnection,
-    // xread doesn't work well with multiplexed connections
-    blocking_conn: redis::aio::Connection,
+    conn: redis::aio::ConnectionManager,
     group: String,
     consumer: String,
 }
@@ -67,8 +65,7 @@ impl MsgQueue {
         consumer: impl Into<String>,
     ) -> redis::RedisResult<Self> {
         Ok(Self {
-            conn: client.get_multiplexed_async_connection().await?,
-            blocking_conn: client.get_async_connection().await?,
+            conn: client.get_connection_manager().await?,
             group: group.into(),
             consumer: consumer.into(),
         })
@@ -111,7 +108,7 @@ impl MsgQueue {
     // TODO(Akhil): Remove after Redis supports auto group creation (https://github.com/redis/redis/pull/10747)
     async fn register(&mut self, topic: &str) -> redis::RedisResult<()> {
         let result: Result<(), _> = self
-            .blocking_conn
+            .conn
             .xgroup_create_mkstream(topic, &self.group, "0-0")
             .await;
         if let Err(err) = result {
@@ -152,7 +149,7 @@ impl MsgQueue {
                 .count(limit)
                 .group(&self.group, &self.consumer);
             let result = self
-                .blocking_conn
+                .conn
                 .xread_options::<_, _, StreamReadReply>(&[topic], &[id], &opts)
                 .await;
             let srr = match result {
@@ -208,9 +205,7 @@ impl MsgQueue {
 
             if !bad_ids.is_empty() {
                 // auto-ack bad messages
-                self.blocking_conn
-                    .xack(topic, &self.group, &bad_ids)
-                    .await?;
+                self.conn.xack(topic, &self.group, &bad_ids).await?;
             }
 
             if !entries.is_empty() {
