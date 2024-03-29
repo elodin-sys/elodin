@@ -15,6 +15,7 @@ cpp! {{
     #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
     #include "jaxlib/cpu/lapack_kernels.h"
     #include "xla/service/custom_call_target_registry.h"
+    #include "tsl/platform/cpu_info.h"
     using namespace xla;
 
     #pragma clang diagnostic ignored "-Wundefined-var-template"
@@ -390,12 +391,14 @@ impl PjRtClient {
     pub fn compile_with_options(
         &self,
         comp: &XlaComputation,
-        options: CompileOptions,
+        mut options: CompileOptions,
     ) -> Result<PjRtLoadedExecutable> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let exec = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", comp as "const XlaComputation*", options as "CompileOptions", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", comp as "const XlaComputation*", mut options as "CompileOptions", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
                 auto client = *self;
+                auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(tsl::Env::Default(), "", tsl::port::MaxParallelism());
+                options.executable_build_options.set_compile_thread_pool(thread_pool.get());
                 auto status = client->Compile(*comp, options);
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));

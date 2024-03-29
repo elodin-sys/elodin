@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use conduit::client::MsgPair;
 use nox_ecs::{ConduitExec, WorldExec};
+use pyo3::Python;
 use tracing::{debug, error, info, trace};
 
 pub struct SimSupervisor;
@@ -89,18 +90,10 @@ impl SimRunner {
         let tmpdir = tempfile::tempdir()?;
         let start = Instant::now();
         info!("building sim");
-        let status = std::process::Command::new("python3")
-            .arg(path)
-            .arg("--")
-            .arg("build")
-            .arg("--dir")
-            .arg(tmpdir.path())
-            .spawn()?
-            .wait()?;
-        if !status.success() {
-            error!(status = ?status.code(), "failed to build sim");
-            anyhow::bail!("");
-        }
+        let script = std::fs::read_to_string(path)?;
+        std::env::set_var("ELODIN_FORCE_BUILD_DIR", tmpdir.path());
+        Python::with_gil(|py| py.run(&script, None, None))?;
+
         let exec = nox_ecs::WorldExec::read_from_dir(tmpdir.path())?;
         info!(elapsed = ?start.elapsed(), "built sim");
         self.exec_tx.send(exec)?;
