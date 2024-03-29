@@ -63,7 +63,6 @@ impl HostColumn {
         let mut dims = self.component_type.shape.clone();
         dims.insert(0, self.len as i64);
         client
-            .0
             .copy_raw_host_buffer(
                 self.component_type.primitive_ty.element_type(),
                 &self.buf,
