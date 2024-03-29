@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import elodin as el
 from typing import Annotated
 
-initial_angular_vel = np.array([2.0, 3.0, 4.0])
-rw_force_clamp = 0.2
+initial_angular_vel = np.array([0.5, 0.7, 0.6])
+rw_force_clamp = 0.02
 G = 6.6743e-11  #
 M = 5.972e24  # mass of the Earth
 earth_radius = 6378.1 * 1000
