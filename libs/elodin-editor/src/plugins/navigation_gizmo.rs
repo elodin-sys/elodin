@@ -313,10 +313,12 @@ fn side_clicked_cb(
 
 pub fn sync_nav_camera(
     main_transform_query: Query<&Transform, (With<MainCamera>, Without<NavGizmoParent>)>,
-    mut nav_transform_query: Query<(&NavGizmoParent, &mut Transform), With<NavGizmo>>,
+    mut nav_transform_query: Query<(Entity, &NavGizmoParent, &mut Transform), With<NavGizmo>>,
+    mut commands: Commands,
 ) {
-    for (nav_gizmo, mut nav_transform) in nav_transform_query.iter_mut() {
+    for (entity, nav_gizmo, mut nav_transform) in nav_transform_query.iter_mut() {
         let Ok(main) = main_transform_query.get(nav_gizmo.main_camera) else {
+            commands.entity(entity).despawn_recursive();
             continue;
         };
         nav_transform.rotation = main.rotation.conjugate();
@@ -352,10 +354,15 @@ pub fn set_camera_viewport(
             (viewport_pos.x + viewport_size.x) - (side_length + margin),
             viewport_pos.y,
         );
+        let physical_size = if main.is_active {
+            UVec2::new(side_length as u32, side_length as u32)
+        } else {
+            UVec2::new(1, 1)
+        };
 
         nav_camera.viewport = Some(Viewport {
             physical_position: UVec2::new(nav_viewport_pos.x as u32, nav_viewport_pos.y as u32),
-            physical_size: UVec2::new(side_length as u32, side_length as u32),
+            physical_size,
             depth: 0.0..1.0,
         });
     }
