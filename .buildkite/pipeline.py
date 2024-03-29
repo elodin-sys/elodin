@@ -79,10 +79,9 @@ test_steps = [
     ),
   ]),
   group(name = ":python: python", steps = [
-    rust_step(
-      label = "maturin build",
-      emoji = ":python:",
-      command = "cd libs/nox-py && python3 -m venv .venv && maturin develop && .venv/bin/python -m pytest",
+    step(
+      label = ":python: pytest",
+      command = "nix build .#checks.x86_64-linux.pytest",
     ),
     # rust_step(
     #   label = "mypy", emoji = ":python:",

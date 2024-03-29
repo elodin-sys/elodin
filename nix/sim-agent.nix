@@ -141,4 +141,5 @@ in
 {
   packages.sim-agent-image = image;
   packages.sandbox-vm = vm;
+  packages.elodin-py = (elodin pkgs.python3Packages);
 }
