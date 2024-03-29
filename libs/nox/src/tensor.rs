@@ -1,3 +1,4 @@
+//! Provides the core functionality for manipulating tensors.
 use crate::{
     AsBuffer, Buffer, Field, FromOp, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector,
 };
@@ -10,6 +11,8 @@ use std::{
 };
 use xla::{ArrayElement, ElementType, NativeType};
 
+/// Represents a tensor with a specific type `T`, dimensionality `D`, and parameterization `P`.
+/// `P` dictates the underlying representation and operations available on the tensor.
 #[repr(transparent)]
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) inner: P::Inner,
@@ -27,12 +30,18 @@ where
     }
 }
 
+/// Trait for items that can be represented as tensors.
+/// Specifies the type of the item, its tensor representation, and dimensionality.
 pub trait TensorItem {
+    /// The type of the item that can be converted from an operation.
     type Item: FromOp;
+    /// The tensor type associated with the item.
     type Tensor<D>
     where
         D: TensorDim;
+    /// The dimensionality of the tensor.
     type Dim: TensorDim;
+    /// The element type of the tensor.
     const ELEM: ElementType;
 }
 
@@ -62,8 +71,11 @@ impl<T, D: TensorDim> FromOp for Tensor<T, D> {
     }
 }
 
+/// Trait for collapsing a tensor into a simpler form, typically by reducing its dimensionality.
 pub trait Collapse {
+    /// The output type after the collapse operation.
     type Out;
+    /// Collapses the tensor into a simpler form.
     fn collapse(self) -> Self::Out;
 }
 
@@ -139,8 +151,11 @@ impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
     }
 }
 
+/// Represents a dimensionality of a tensor. This trait is a marker for types that can specify tensor dimensions.
 pub trait TensorDim {}
+/// Represents non-scalar dimensions, i.e., dimensions other than `()`.
 pub trait NonScalarDim {}
+/// Represents constant dimensions, specified at compile-time.
 pub trait ConstDim {}
 
 pub type ScalarDim = ();
@@ -328,7 +343,9 @@ impl<T, D: TensorDim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
     }
 }
 
+/// Extension trait for tensors supporting fixed-size slicing operations.
 pub trait FixedSliceExt<T, D: TensorDim> {
+    /// Returns a tensor slice with dimensions specified by `ND`, starting at the given `offsets`.
     fn fixed_slice<ND: TensorDim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op>;
 }
 
@@ -389,10 +406,16 @@ impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
     }
 }
 
+/// Trait for mapping dimensions in tensor operations.
+/// Allows for transforming and replacing dimensions in tensor types.
 pub trait MapDim<D> {
+    /// The item associated with the dimension mapping.
     type Item: TensorDim;
+    /// The dimension resulting from the mapping.
     type MappedDim: TensorDim;
+    /// The type resulting from replacing the mapped dimension with a new dimension `Dim`.
     type ReplaceMappedDim<Dim: TensorDim>: TensorDim;
+    /// The index of the dimension being mapped.
     const MAPPED_DIM: usize;
 }
 
@@ -409,10 +432,12 @@ impl<D: TensorDim> MapDim<D> for Mapped {
     const MAPPED_DIM: usize = 0;
 }
 
+/// Trait for default dimension mapping in tensor operations.
 pub trait DefaultMap
 where
     Self: Sized,
 {
+    /// The default dimension mapping for the implementing type.
     type DefaultMapDim: MapDim<Self>;
 }
 
@@ -495,7 +520,9 @@ impl<const N: usize> DefaultMap for Const<N> {
     type DefaultMapDim = Mapped;
 }
 
+/// Trait representing the concatenation of dimensions.
 pub trait DimConcat<A, B> {
+    /// The resulting dimension type after concatenation.
     type Output;
 }
 
@@ -511,6 +538,7 @@ impl<A: NonScalarDim + NonTupleDim, B: NonScalarDim + NonTupleDim> DimConcat<A, 
     type Output = (A, B);
 }
 
+/// Represents types that are not tuples in dimension concatenation contexts.
 pub trait NonTupleDim {}
 
 impl NonTupleDim for ScalarDim {}
@@ -594,7 +622,9 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
     }
 }
 
+/// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
 pub trait BroadcastDim<D1, D2> {
+    /// The resulting dimension type after broadcasting.
     type Output: TensorDim;
 }
 
@@ -628,6 +658,7 @@ impl<D: TensorDim + NotConst1> BroadcastDim<ScalarDim, D> for ShapeConstraint {
     type Output = D;
 }
 
+/// Marker trait for types not equivalent to `Const<1>`, used in broadcasting logic.
 pub trait NotConst1 {}
 
 seq_macro::seq!(N in 2..99 {
@@ -640,9 +671,12 @@ impl<T: TensorItem, D: TensorDim> Tensor<T, D> {
     }
 }
 
+/// Trait for indexing into tensors, allowing for the extraction of sub-tensors or elements based on indices.
 pub trait TensorIndex<T, D: TensorDim> {
+    /// The output type resulting from the indexing operation.
     type Output;
 
+    /// Performs the indexing operation on a tensor, returning the result.
     fn index(self, tensor: Tensor<T, D>) -> Self::Output;
 }
 
