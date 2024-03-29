@@ -983,8 +983,10 @@ impl Exec {
             buffers.push(&col.column.buffer);
         }
         let exec = self.exec.get_or_try_init(|| {
+            let start = std::time::Instant::now();
             let comp = self.hlo_module.computation();
-            let exec = client.0.compile(&comp)?;
+            let exec = client.compile(&comp)?;
+            tracing::debug!(duration = ?start.elapsed(), "compiled HLO");
             Ok::<_, Error>(exec)
         })?;
         let ret_bufs = exec.execute_buffers(buffers)?;
