@@ -264,7 +264,7 @@ fn vm_pod(pod_name: &str, image_name: &str, runtime_class: Option<&str>) -> Pod 
                     "env": [
                         { "name": "ELODIN_SANDBOX.CONTROL_ADDR", "value": "[::]:50051" },
                         { "name": "ELODIN_SANDBOX.SIM_ADDR", "value": "[::]:3563" },
-                        { "name": "RUST_LOG", "value": "sim_agent=debug,info" }
+                        { "name": "RUST_LOG", "value": "sim_agent=debug,nox_ecs=debug,info" }
                     ],
                     "resources": {
                         "requests": {

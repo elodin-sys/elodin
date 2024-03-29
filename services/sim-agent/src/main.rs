@@ -117,6 +117,7 @@ impl ControlService {
 
     async fn handle_update_code(&self, req: UpdateCodeReq) -> anyhow::Result<UpdateCodeResp> {
         let request = tonic::Request::new(BuildReq { code: req.code });
+        let start = std::time::Instant::now();
         tracing::debug!("sending code to sim builder");
         let artifacts_file_name = match self.sim_builder.clone().build(request).await {
             Ok(res) => res.into_inner().artifacts_file,
@@ -128,7 +129,6 @@ impl ControlService {
             }
         };
 
-        tracing::debug!(file = %artifacts_file_name, "downloading artifacts");
         let mut artifacts = tokio::fs::File::from_std(tempfile::tempfile()?);
         let file_req = FileTransferReq {
             name: artifacts_file_name,
@@ -145,13 +145,13 @@ impl ControlService {
         let mut artifacts = artifacts.into_std().await;
         artifacts.rewind()?;
 
-        tracing::debug!("unpacking artifacts");
         let buf = std::io::BufReader::new(artifacts);
         let mut tar = tar::Archive::new(buf);
         let tmp_dir = tempfile::tempdir()?;
         tar.unpack(tmp_dir.path())?;
         let artifacts = tmp_dir.path().join("artifacts");
 
+        tracing::debug!(duration = ?start.elapsed(), path = %artifacts.display(), "received artifacts");
         let exec = match nox_ecs::WorldExec::read_from_dir(artifacts) {
             Ok(exec) => exec,
             Err(err) => {
@@ -200,8 +200,6 @@ impl SandboxControl for ControlService {
             Ok(resp) => {
                 if !resp.errors.is_empty() {
                     error!(err = ?resp.errors, "failed to update code");
-                } else {
-                    info!("updated code")
                 }
                 Ok(Response::new(resp))
             }
@@ -223,7 +221,8 @@ impl SimRunner {
     fn new(server_rx: flume::Receiver<MsgPair>) -> Self {
         let (exec_tx, exec_rx) = flume::bounded(1);
         std::thread::spawn(move || -> anyhow::Result<()> {
-            let client = Client::cpu()?;
+            let mut client = Client::cpu()?;
+            client.disable_optimizations();
             let exec: WorldExec = exec_rx.recv()?;
             let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
             loop {

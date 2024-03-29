@@ -76,7 +76,6 @@ where
             buf.extend(row.iter())
         }
         let inner = client
-            .0
             .copy_host_buffer(&buf, &[R as i64, C as i64])
             .unwrap();
         Matrix {
@@ -120,7 +119,6 @@ where
             buf.extend_from_slice(mat.as_slice());
         }
         let inner = client
-            .0
             .copy_host_buffer(&buf, &[N as i64, R as i64, C as i64])
             .unwrap();
         Tensor {
@@ -144,7 +142,6 @@ where
             buf.extend_from_slice(mat.as_slice());
         }
         let inner = client
-            .0
             .copy_host_buffer(&buf, &[N as i64, R as i64, C as i64])
             .unwrap();
         MaybeOwned::Owned(inner)

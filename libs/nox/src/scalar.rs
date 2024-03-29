@@ -64,7 +64,6 @@ where
 {
     fn as_buffer(&self, client: &crate::Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client
-            .0
             .copy_host_buffer(std::slice::from_ref(self), &[])
             .unwrap();
         MaybeOwned::Owned(inner)
