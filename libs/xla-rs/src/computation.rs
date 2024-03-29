@@ -81,3 +81,15 @@ impl XlaComputation {
         }
     }
 }
+
+cpp_class!(pub unsafe struct CompileOptions as "CompileOptions");
+impl CompileOptions {
+    pub fn disable_optimizations(&mut self) {
+        unsafe {
+            cpp!([self as "CompileOptions*"] {
+                self->executable_build_options.mutable_debug_options()->set_xla_llvm_disable_expensive_passes(true);
+                self->executable_build_options.mutable_debug_options()->set_xla_backend_optimization_level(0);
+            })
+        };
+    }
+}

@@ -581,6 +581,7 @@ impl WorldBuilder {
         sys: PyObject,
         time_step: Option<f64>,
     ) -> Result<Exec, Error> {
+        let start = std::time::Instant::now();
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
         let builder = PipelineBuilder { builder };
@@ -617,6 +618,7 @@ def build_expr(builder, sys):
         let comp_bytes = comp.as_bytes();
         let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        tracing::debug!(duration = ?start.elapsed(), "generated HLO");
         let builder = builder.replace(PipelineBuilder::default());
         let builder = builder.builder;
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();

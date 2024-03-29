@@ -44,7 +44,6 @@ where
 
     fn from_host(client: &Client, native: Self::HostTy) -> Self {
         let inner = client
-            .0
             .copy_host_buffer(native.as_slice(), &[R as i64])
             .unwrap();
         Vector {
@@ -61,7 +60,6 @@ where
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client
-            .0
             .copy_host_buffer(self.as_slice(), &[R as i64])
             .unwrap();
         MaybeOwned::Owned(inner)

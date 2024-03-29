@@ -1,5 +1,6 @@
 use crate::{
-    ArrayElement, Error, Literal, PjRtBuffer, PjRtLoadedExecutable, Result, Status, XlaComputation,
+    ArrayElement, CompileOptions, Error, Literal, PjRtBuffer, PjRtLoadedExecutable, Result, Status,
+    XlaComputation,
 };
 use cpp::{cpp, cpp_class};
 use std::pin::Pin;
@@ -386,12 +387,15 @@ impl PjRtClient {
         Ok(buffer)
     }
 
-    pub fn compile(&self, comp: &XlaComputation) -> Result<PjRtLoadedExecutable> {
+    pub fn compile_with_options(
+        &self,
+        comp: &XlaComputation,
+        options: CompileOptions,
+    ) -> Result<PjRtLoadedExecutable> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
         let exec = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", comp as "const XlaComputation*", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", comp as "const XlaComputation*", options as "CompileOptions", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
                 auto client = *self;
-                CompileOptions options;
                 auto status = client->Compile(*comp, options);
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));
@@ -410,6 +414,14 @@ impl PjRtClient {
             });
         }
         Ok(exec)
+    }
+
+    pub fn compile_with_default_options(
+        &self,
+        comp: &XlaComputation,
+    ) -> Result<PjRtLoadedExecutable> {
+        let options = CompileOptions::default();
+        self.compile_with_options(comp, options)
     }
 
     pub(crate) fn is_null(&self) -> bool {

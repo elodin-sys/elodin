@@ -30,7 +30,7 @@ fn test_compile() {
         .unwrap();
     let add = a.add(&b);
     let comp = builder.build(&add).unwrap();
-    client.compile(&comp).unwrap();
+    client.compile_with_default_options(&comp).unwrap();
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_exec() {
         .unwrap();
     let add = a.add(&b);
     let comp = builder.build(&add).unwrap();
-    let exec = client.compile(&comp).unwrap();
+    let exec = client.compile_with_default_options(&comp).unwrap();
     let mut args = BufferArgsRef::default();
     let a = client.copy_host_buffer(&[1.0f32], &[]).unwrap();
     let b = client.copy_host_buffer(&[2.0f32], &[]).unwrap();
@@ -73,7 +73,7 @@ fn add_op() -> Result<()> {
     let cst43 = builder.constant_vector(&[43f32; 2]);
     let sum = cst42 + cst43;
     let computation = sum.build()?;
-    let result = client.compile(&computation)?;
+    let result = client.compile_with_default_options(&computation)?;
     let result = result.execute_buffers(&BufferArgsRef::default())?;
     let result = result[0].to_literal_sync()?;
     assert_eq!(result.element_count(), 2);
@@ -92,7 +92,7 @@ fn tuple_op() -> Result<()> {
     let x = builder.parameter(0, Shape::array_with_type(f32::TY, vec![1]), "x")?;
     let y = builder.parameter(1, Shape::array_with_type(f32::TY, vec![2]), "x")?;
     let tuple = builder.tuple(&[x.as_ref(), y.as_ref()]).build()?;
-    let tuple = client.compile(&tuple)?;
+    let tuple = client.compile_with_default_options(&tuple)?;
     let x = crate::Literal::scalar(3.1f32);
     let y = crate::Literal::vector(&[4.2f32, 1.337f32]);
     let x = client.copy_literal(&x)?;

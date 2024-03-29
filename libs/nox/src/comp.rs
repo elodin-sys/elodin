@@ -13,7 +13,7 @@ impl<T: BufferForm, R> Comp<T, R> {
     }
 
     pub fn compile(&self, client: &Client) -> Result<Exec<T::BufferTy, R>, xla::Error> {
-        let exec = client.0.compile(&self.comp)?;
+        let exec = client.compile(&self.comp)?;
         Ok(Exec {
             exec,
             phantom: PhantomData,

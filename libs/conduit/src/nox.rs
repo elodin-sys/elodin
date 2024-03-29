@@ -14,7 +14,6 @@ impl ComponentValue<'_> {
         let element_ty = primitive_ty.element_type();
         let bytes = self.bytes().ok_or(nox::Error::OutOfBoundsAccess)?;
         client
-            .0
             .copy_raw_host_buffer(element_ty, bytes, &shape)
             .map_err(nox::Error::from)
     }

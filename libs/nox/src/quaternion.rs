@@ -159,7 +159,6 @@ where
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client
-            .0
             .copy_host_buffer(self.coords.as_slice(), &[4])
             .unwrap();
         MaybeOwned::Owned(inner)
