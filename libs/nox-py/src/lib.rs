@@ -633,15 +633,12 @@ def build_expr(builder, sys):
             host: builder.world,
             ..Default::default()
         };
-        let tick_exec = nox_ecs::Exec {
-            exec: Default::default(),
-            metadata: nox_ecs::ExecMetadata {
-                time_step,
-                arg_ids: builder.param_ids,
-                ret_ids,
-            },
-            hlo_module,
+        let metadata = nox_ecs::ExecMetadata {
+            time_step,
+            arg_ids: builder.param_ids,
+            ret_ids,
         };
+        let tick_exec = nox_ecs::Exec::new(metadata, hlo_module);
         let exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         Ok(Exec { exec })
     }
