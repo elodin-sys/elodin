@@ -57,7 +57,7 @@ itertools = "0.12.1"
 # futures
 futures-lite = "2.0"
 
-reqwest = { version = "0.11", features = ["rustls-tls"], default-features = false }
+reqwest = { version = "0.11", features = ["rustls-tls", "gzip"], default-features = false }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
