@@ -359,6 +359,7 @@ pub fn set_camera_viewport(
         } else {
             UVec2::new(1, 1)
         };
+        nav_camera.is_active = main.is_active;
 
         nav_camera.viewport = Some(Viewport {
             physical_position: UVec2::new(nav_viewport_pos.x as u32, nav_viewport_pos.y as u32),

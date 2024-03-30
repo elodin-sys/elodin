@@ -31,6 +31,7 @@ pub fn set_theme(context: &mut egui::Context) {
     style.visuals.widgets.inactive.weak_bg_fill = colors::PRIMARY_SMOKE;
 
     style.visuals.menu_rounding = rounding_xxs();
+    style.visuals.window_rounding = rounding_xxs();
     style.visuals.window_stroke = Stroke::new(1.0, colors::PRIMARY_ONYX_8);
     style.visuals.window_shadow = Shadow {
         extrusion: 4.0,
@@ -40,6 +41,8 @@ pub fn set_theme(context: &mut egui::Context) {
 
     style.spacing.menu_margin = Margin::same(8.0);
     style.spacing.window_margin = Margin::same(8.0);
+    style.visuals.selection.bg_fill = with_opacity(colors::YOLK_DEFAULT, 0.6);
+    style.visuals.selection.stroke.color = colors::YOLK_DEFAULT;
 
     context.set_fonts(configure_default_fonts());
 

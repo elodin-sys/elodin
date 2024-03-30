@@ -261,6 +261,135 @@ impl<'a> ComponentValue<'a> {
             ComponentValue::F64(b) => b.as_slice().map(bytemuck::cast_slice),
         }
     }
+
+    pub fn iter<'i>(&'i self) -> Box<dyn Iterator<Item = ElementValue> + 'i> {
+        match self {
+            ComponentValue::U8(u8) => Box::new(u8.iter().map(|&x| ElementValue::U8(x))),
+            ComponentValue::U16(u16) => Box::new(u16.iter().map(|&x| ElementValue::U16(x))),
+            ComponentValue::U32(u32) => Box::new(u32.iter().map(|&x| ElementValue::U32(x))),
+            ComponentValue::U64(u64) => Box::new(u64.iter().map(|&x| ElementValue::U64(x))),
+            ComponentValue::I8(i8) => Box::new(i8.iter().map(|&x| ElementValue::I8(x))),
+            ComponentValue::I16(i16) => Box::new(i16.iter().map(|&x| ElementValue::I16(x))),
+            ComponentValue::I32(i32) => Box::new(i32.iter().map(|&x| ElementValue::I32(x))),
+            ComponentValue::I64(i64) => Box::new(i64.iter().map(|&x| ElementValue::I64(x))),
+            ComponentValue::Bool(bool) => Box::new(bool.iter().map(|&x| ElementValue::Bool(x))),
+            ComponentValue::F32(f32) => Box::new(f32.iter().map(|&x| ElementValue::F32(x))),
+            ComponentValue::F64(f64) => Box::new(f64.iter().map(|&x| ElementValue::F64(x))),
+        }
+    }
+
+    pub fn iter_mut<'i>(&'i mut self) -> Box<dyn Iterator<Item = ElementValueMut<'i>> + 'i> {
+        match self {
+            ComponentValue::U8(u8) => Box::new(u8.iter_mut().map(ElementValueMut::U8)),
+            ComponentValue::U16(u16) => Box::new(u16.iter_mut().map(ElementValueMut::U16)),
+            ComponentValue::U32(u32) => Box::new(u32.iter_mut().map(ElementValueMut::U32)),
+            ComponentValue::U64(u64) => Box::new(u64.iter_mut().map(ElementValueMut::U64)),
+            ComponentValue::I8(i8) => Box::new(i8.iter_mut().map(ElementValueMut::I8)),
+            ComponentValue::I16(i16) => Box::new(i16.iter_mut().map(ElementValueMut::I16)),
+            ComponentValue::I32(i32) => Box::new(i32.iter_mut().map(ElementValueMut::I32)),
+            ComponentValue::I64(i64) => Box::new(i64.iter_mut().map(ElementValueMut::I64)),
+            ComponentValue::Bool(bool) => Box::new(bool.iter_mut().map(ElementValueMut::Bool)),
+            ComponentValue::F32(f32) => Box::new(f32.iter_mut().map(ElementValueMut::F32)),
+            ComponentValue::F64(f64) => Box::new(f64.iter_mut().map(ElementValueMut::F64)),
+        }
+    }
+
+    pub fn indexed_iter_mut<'i>(
+        &'i mut self,
+    ) -> Box<dyn Iterator<Item = (IxDyn, ElementValueMut<'i>)> + 'i> {
+        match self {
+            ComponentValue::U8(u8) => Box::new(
+                u8.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::U8(x))),
+            ),
+            ComponentValue::U16(u16) => Box::new(
+                u16.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::U16(x))),
+            ),
+            ComponentValue::U32(u32) => Box::new(
+                u32.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::U32(x))),
+            ),
+            ComponentValue::U64(u64) => Box::new(
+                u64.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::U64(x))),
+            ),
+            ComponentValue::I8(i8) => Box::new(
+                i8.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::I8(x))),
+            ),
+            ComponentValue::I16(i16) => Box::new(
+                i16.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::I16(x))),
+            ),
+            ComponentValue::I32(i32) => Box::new(
+                i32.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::I32(x))),
+            ),
+            ComponentValue::I64(i64) => Box::new(
+                i64.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::I64(x))),
+            ),
+            ComponentValue::Bool(bool) => Box::new(
+                bool.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::Bool(x))),
+            ),
+            ComponentValue::F32(f32) => Box::new(
+                f32.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::F32(x))),
+            ),
+            ComponentValue::F64(f64) => Box::new(
+                f64.indexed_iter_mut()
+                    .map(|(i, x)| (i, ElementValueMut::F64(x))),
+            ),
+        }
+    }
+}
+
+pub enum ElementValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    F64(f64),
+    F32(f32),
+    Bool(bool),
+}
+
+impl fmt::Display for ElementValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElementValue::U8(x) => write!(f, "{}", x),
+            ElementValue::U16(x) => write!(f, "{}", x),
+            ElementValue::U32(x) => write!(f, "{}", x),
+            ElementValue::U64(x) => write!(f, "{}", x),
+            ElementValue::I8(x) => write!(f, "{}", x),
+            ElementValue::I16(x) => write!(f, "{}", x),
+            ElementValue::I32(x) => write!(f, "{}", x),
+            ElementValue::I64(x) => write!(f, "{}", x),
+            ElementValue::F64(x) => write!(f, "{}", x),
+            ElementValue::F32(x) => write!(f, "{}", x),
+            ElementValue::Bool(x) => write!(f, "{}", x),
+        }
+    }
+}
+
+pub enum ElementValueMut<'a> {
+    U8(&'a mut u8),
+    U16(&'a mut u16),
+    U32(&'a mut u32),
+    U64(&'a mut u64),
+    I8(&'a mut i8),
+    I16(&'a mut i16),
+    I32(&'a mut i32),
+    I64(&'a mut i64),
+    F64(&'a mut f64),
+    F32(&'a mut f32),
+    Bool(&'a mut bool),
 }
 
 pub trait Component {
@@ -381,6 +510,7 @@ impl TagValue {
 pub struct MetadataPair(pub String, pub TagValue);
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub struct ColumnPayload<B = Bytes> {
     pub time: u64,
     pub len: u32,

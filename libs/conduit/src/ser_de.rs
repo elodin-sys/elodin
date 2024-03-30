@@ -85,7 +85,7 @@ impl ColumnPayload<Bytes> {
         let mut value_buf = BytesMut::default();
         let mut len = 0;
         for ColumnValue { entity_id, value } in iter {
-            entity_buf.put_u64(entity_id.0);
+            entity_buf.put_u64_le(entity_id.0);
             value_buf.put(value.bytes().ok_or(Error::InvalidAlignment)?);
             len += 1;
         }

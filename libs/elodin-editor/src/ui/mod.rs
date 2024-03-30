@@ -12,7 +12,7 @@ use bevy_egui::{
 };
 use big_space::GridCell;
 use conduit::{
-    bevy::{ComponentValueMap, MaxTick, Received, Tick, TimeStep},
+    bevy::{ColumnPayloadMsg, ComponentValueMap, MaxTick, Received, Tick, TimeStep},
     query::MetadataStore,
     well_known::EntityMetadata,
     ComponentId, ControlMsg, EntityId, GraphId,
@@ -104,6 +104,13 @@ pub fn shortcuts(
 }
 
 pub type EntityData<'a> = (
+    &'a EntityId,
+    Entity,
+    &'a mut ComponentValueMap,
+    &'a EntityMetadata,
+);
+
+pub type EntityDataReadOnly<'a> = (
     &'a EntityId,
     Entity,
     &'a ComponentValueMap,
@@ -303,7 +310,7 @@ pub fn render(
     mut selected_object: ResMut<SelectedObject>,
     mut graphs_state: ResMut<GraphsState>,
     mut tile_state: ResMut<tiles::TileState>,
-    entities: Query<EntityData>,
+    mut entities: Query<EntityData>,
     window: Query<&Window>,
     images: Local<images::Images>,
     metadata_store: Res<MetadataStore>,
@@ -311,6 +318,7 @@ pub fn render(
     mut commands: Commands,
     mut inspector_anchor: ResMut<InspectorAnchor>,
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
+    mut column_payload_writer: EventWriter<ColumnPayloadMsg>,
 ) {
     let Ok(window) = window.get_single() else {
         return;
@@ -368,7 +376,7 @@ pub fn render(
                 inspector::inspector(
                     ui,
                     selected_object.as_ref(),
-                    &entities,
+                    &mut entities,
                     &metadata_store,
                     &mut camera_query,
                     &mut commands,
@@ -376,6 +384,7 @@ pub fn render(
                     &mut graphs_state,
                     &mut tile_state,
                     icon_chart,
+                    &mut column_payload_writer,
                 );
             });
     } else {
@@ -418,7 +427,7 @@ pub fn render(
                         inspector::inspector(
                             ui,
                             selected_object.as_ref(),
-                            &entities,
+                            &mut entities,
                             &metadata_store,
                             &mut camera_query,
                             &mut commands,
@@ -426,6 +435,7 @@ pub fn render(
                             &mut graphs_state,
                             &mut tile_state,
                             icon_chart,
+                            &mut column_payload_writer,
                         );
                     });
             });
