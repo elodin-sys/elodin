@@ -21,3 +21,6 @@ pub use types::*;
 
 #[doc(hidden)]
 pub use const_fnv1a_hash;
+
+pub use bytes;
+pub use ndarray;
