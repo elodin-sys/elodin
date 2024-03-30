@@ -6,6 +6,8 @@ use crate::ser_de::ColumnValue;
 use crate::well_known::EntityMetadata;
 use crate::Asset;
 use crate::AssetId;
+use crate::ColumnPayload;
+use crate::ComponentType;
 use crate::Error;
 use crate::Metadata;
 use crate::{
@@ -404,8 +406,10 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(ConduitRx(self.rx.clone()));
         app.add_event::<SubscribeEvent>();
         app.add_event::<ControlMsg>();
+        app.add_event::<ColumnPayloadMsg>();
         app.add_systems(Update, control_msg);
         app.add_systems(Update, recv_system);
+        app.add_systems(PostUpdate, column_payload_msg);
     }
 }
 
@@ -568,6 +572,35 @@ pub fn control_msg(mut reader: EventReader<ControlMsg>, sim_peer: Res<SimPeer>) 
             });
         }
     }
+}
+
+pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: Res<SimPeer>) {
+    for msg in reader.read() {
+        if let Some(tx) = &sim_peer.tx {
+            let stream_id = StreamId::rand();
+            let packet: Packet<Payload<Bytes>> = Packet::metadata(
+                stream_id,
+                Metadata {
+                    component_id: msg.component_id,
+                    component_type: msg.component_type.clone(),
+                    tags: HashMap::new(),
+                },
+            );
+            let _ = tx.send(packet);
+
+            let _ = tx.send(Packet {
+                stream_id,
+                payload: Payload::Column(msg.payload.clone()),
+            });
+        }
+    }
+}
+
+#[derive(Event)]
+pub struct ColumnPayloadMsg {
+    pub component_id: ComponentId,
+    pub component_type: ComponentType,
+    pub payload: ColumnPayload<Bytes>,
 }
 
 #[derive(Event)]
