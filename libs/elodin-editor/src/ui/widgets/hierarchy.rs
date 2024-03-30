@@ -4,7 +4,7 @@ use conduit::well_known::EntityMetadata;
 
 use crate::ui::{
     colors::{self, EColor},
-    utils, EntityData, EntityFilter, EntityPair, SelectedObject,
+    utils, EntityData, EntityDataReadOnly, EntityFilter, EntityPair, SelectedObject,
 };
 
 pub fn header(
@@ -65,14 +65,14 @@ pub fn entity_list(
             ui.vertical(|ui| {
                 // TODO: Improve filter & sorting efficiency
                 let mut filtered_entities = entities
-                    .iter()
+                    .into_iter()
                     .filter(|(_, _, _, metadata)| {
                         metadata
                             .name
                             .to_lowercase()
                             .contains(&entity_filter.to_lowercase())
                     })
-                    .collect::<Vec<EntityData>>();
+                    .collect::<Vec<EntityDataReadOnly>>();
                 filtered_entities.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
 
                 for (entity_id, entity, _, metadata) in filtered_entities {
