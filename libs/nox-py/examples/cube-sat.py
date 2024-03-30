@@ -235,7 +235,7 @@ class KalmanFilter(el.Archetype):
 # control system
 Goal = Annotated[el.Quaternion, el.Component("goal", el.ComponentType.Quaternion)]
 UserGoal = Annotated[
-    el.Quaternion, el.Component("rot_deg", el.ComponentType.Quaternion)
+    jax.Array, el.Component("euler_input", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
 
 
@@ -274,6 +274,21 @@ q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
+def euler_to_quat(angles: jax.Array) -> el.Quaternion:
+    [roll, pitch, yaw] = np.deg2rad(angles)
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    return el.Quaternion(np.array([x,y,z,w]))
+
 
 @el.map
 def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
@@ -282,7 +297,7 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     body_axis = np.array([0.0, 0.0, -1.0])
     a = np.cross(body_axis, r)
     w = 1 + np.dot(body_axis, r)
-    return deg * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+    return euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
 
 
 @el.system
@@ -378,7 +393,7 @@ sat = (
             el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0))
         ),
     )
-    .insert(UserInput(el.Quaternion(np.array([0.0, 1.0, 0.0, 0.0]))))
+    .insert(UserInput(np.array([0.0, 0.0, 0.0])))
     .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
     .insert(
         KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
