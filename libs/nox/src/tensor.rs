@@ -33,15 +33,11 @@ where
 /// Trait for items that can be represented as tensors.
 /// Specifies the type of the item, its tensor representation, and dimensionality.
 pub trait TensorItem {
-    /// The type of the item that can be converted from an operation.
     type Item: FromOp;
-    /// The tensor type associated with the item.
     type Tensor<D>
     where
         D: TensorDim;
-    /// The dimensionality of the tensor.
     type Dim: TensorDim;
-    /// The element type of the tensor.
     const ELEM: ElementType;
 }
 
@@ -73,7 +69,6 @@ impl<T, D: TensorDim> FromOp for Tensor<T, D> {
 
 /// Trait for collapsing a tensor into a simpler form, typically by reducing its dimensionality.
 pub trait Collapse {
-    /// The output type after the collapse operation.
     type Out;
     /// Collapses the tensor into a simpler form.
     fn collapse(self) -> Self::Out;
@@ -409,13 +404,9 @@ impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
 /// Trait for mapping dimensions in tensor operations.
 /// Allows for transforming and replacing dimensions in tensor types.
 pub trait MapDim<D> {
-    /// The item associated with the dimension mapping.
     type Item: TensorDim;
-    /// The dimension resulting from the mapping.
     type MappedDim: TensorDim;
-    /// The type resulting from replacing the mapped dimension with a new dimension `Dim`.
     type ReplaceMappedDim<Dim: TensorDim>: TensorDim;
-    /// The index of the dimension being mapped.
     const MAPPED_DIM: usize;
 }
 
@@ -522,7 +513,6 @@ impl<const N: usize> DefaultMap for Const<N> {
 
 /// Trait representing the concatenation of dimensions.
 pub trait DimConcat<A, B> {
-    /// The resulting dimension type after concatenation.
     type Output;
 }
 
@@ -624,7 +614,6 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
 
 /// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
 pub trait BroadcastDim<D1, D2> {
-    /// The resulting dimension type after broadcasting.
     type Output: TensorDim;
 }
 
@@ -673,7 +662,6 @@ impl<T: TensorItem, D: TensorDim> Tensor<T, D> {
 
 /// Trait for indexing into tensors, allowing for the extraction of sub-tensors or elements based on indices.
 pub trait TensorIndex<T, D: TensorDim> {
-    /// The output type resulting from the indexing operation.
     type Output;
 
     /// Performs the indexing operation on a tensor, returning the result.
