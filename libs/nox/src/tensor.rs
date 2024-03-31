@@ -11,8 +11,7 @@ use std::{
 };
 use xla::{ArrayElement, ElementType, NativeType};
 
-/// Represents a tensor with a specific type `T`, dimensionality `D`, and parameterization `P`.
-/// `P` dictates the underlying representation and operations available on the tensor.
+/// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
 pub struct Tensor<T, D: TensorDim, P: Param = Op> {
     pub(crate) inner: P::Inner,
