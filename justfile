@@ -49,3 +49,37 @@ sync-open-source:
 [confirm("Are you sure you want to force push to elodin-sys/elodin?")]
 force-push-open-source: sync-open-source
   cd ../elodin; git push --force
+
+auto-tag:
+  #!/usr/bin/env sh
+  if git tag --points-at HEAD | grep -q .; then
+    echo "HEAD already has a tag"; exit 0
+  fi
+  current_tag=$(git describe --tags --abbrev=0)
+  new_tag=$(echo $current_tag | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+  git tag -a $new_tag -m "Elodin v$new_tag"
+  git push origin $new_tag
+
+[confirm("Are you sure you want to tag the current commit and deploy to prod?")]
+release: auto-tag
+  #!/usr/bin/env sh
+  tag=$(git tag --points-at HEAD | sed 's/^v//')
+  just re-tag-images $(git rev-parse HEAD) $tag
+  mkdir -p kubernetes/deploy
+  cat << EOF > kubernetes/deploy/kustomization.yaml
+  apiVersion: kustomize.config.k8s.io/v1beta1
+  kind: Kustomization
+  resources:
+  - ../overlays/prod
+  images:
+  - name: elodin-infra/elo-atc
+    newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64
+    newTag: $tag
+  - name: elodin-infra/elo-dashboard
+    newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
+    newTag: $tag
+  - name: elodin-infra/elo-sim-agent
+    newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
+    newTag: $tag
+  EOF
+  kubectl kustomize kubernetes/deploy | kubectl --cluster gke_elodin-prod_us-central1_elodin-prod-gke apply -f -
