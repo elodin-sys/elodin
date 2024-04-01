@@ -13,7 +13,7 @@ let
     inherit src;
     doCheck = false;
     cargoExtraArgs = "--package=${crateName.pname}";
-    nativeBuildInputs = with pkgs; [ protobuf ];
+    nativeBuildInputs = with pkgs; [ protobuf python3 ];
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs // {

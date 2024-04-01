@@ -5553,7 +5553,6 @@ dependencies = [
  "parking_lot",
  "postcard",
  "pyo3",
- "pyo3-asyncio",
  "pyo3-polars",
  "tempfile",
  "thiserror",
@@ -6899,19 +6898,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pyo3-asyncio"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ea6b68e93db3622f3bb3bf363246cf948ed5375afe7abff98ccbdd50b184995"
-dependencies = [
- "futures",
- "once_cell",
- "pin-project-lite",
- "pyo3",
- "tokio",
-]
-
-[[package]]
 name = "pyo3-build-config"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8096,10 +8082,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "elodin-types",
+ "pyo3",
  "tar",
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tokio-vsock",
  "tonic",
  "tonic-health",

@@ -1,7 +1,7 @@
 use std::io::{BufRead, Write};
-use std::process::Stdio;
 use std::time::Instant;
 
+use anyhow::Context;
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -29,7 +29,7 @@ impl Sandbox for Service {
 
         let artifacts_file = build(req.code).await.map_err(|err| {
             tracing::error!(?err, "failed to build code");
-            Status::internal(err.to_string())
+            Status::internal(format!("{err:#}"))
         })?;
 
         Ok(Response::new(BuildResp { artifacts_file }))
@@ -40,7 +40,7 @@ impl Sandbox for Service {
 
         let results = test(req.code, req.results_file).await.map_err(|err| {
             tracing::error!(?err, "failed to test results");
-            Status::internal(err.to_string())
+            Status::internal(format!("{err:#}"))
         })?;
 
         Ok(Response::new(results))
@@ -112,30 +112,11 @@ impl Sandbox for Service {
 
 async fn build(code: String) -> anyhow::Result<String> {
     tracing::debug!(len = code.len(), "building code");
-    let mut code_file = tempfile::NamedTempFile::new()?;
-    tracing::debug!(file = %code_file.path().display(), "writing code to temp file");
-    code_file.write_all(code.as_bytes())?;
-
     let start = Instant::now();
     let artifact_dir = tempfile::tempdir()?;
     tracing::debug!(dir = %artifact_dir.path().display(), "building artifacts");
-    let output = tokio::process::Command::new("python3")
-        .arg(code_file.path())
-        .arg("--")
-        .arg("build")
-        .arg("--dir")
-        .arg(artifact_dir.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?
-        .wait_with_output()
-        .await?;
-    if !output.status.success() {
-        let status = output.status;
-        let stderr = String::from_utf8(output.stderr).unwrap_or_default();
-        let stdout = String::from_utf8(output.stdout).unwrap_or_default();
-        anyhow::bail!("python command failed: {} {} {}", status, stderr, stdout);
-    }
+    std::env::set_var("ELODIN_FORCE_BUILD_DIR", artifact_dir.path());
+    pyo3::Python::with_gil(|py| py.run(&code, None, None)).context("python command failed")?;
     tracing::debug!(elapsed = ?start.elapsed(), "built artifacts");
 
     let file_name = format!("{}.tar", uuid::Uuid::now_v7());

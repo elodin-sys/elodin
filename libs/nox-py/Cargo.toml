@@ -18,8 +18,6 @@ crate-type = ["cdylib", "rlib"]
 # python
 pyo3.version = "0.20.0"
 pyo3.features = ["abi3-py310"]
-pyo3-asyncio.version = "0.20"
-pyo3-asyncio.features = ["tokio-runtime"]
 pyo3-polars = "0.12.0"
 numpy.version = "0.20"
 
