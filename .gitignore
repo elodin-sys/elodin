@@ -10,7 +10,7 @@ result-bin
 node_modules
 
 # kubernetes
-
+kubernetes/deploy
 out.yaml
 out-with-envs.yaml
 
