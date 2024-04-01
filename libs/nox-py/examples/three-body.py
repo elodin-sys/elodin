@@ -1,81 +1,96 @@
 from jax import numpy as np
 from jax.numpy import linalg as la
-from elodin import *
+import elodin as el
 
 TIME_STEP = 1.0 / 120.0
 
-GravityEdge = Annotated[Edge, Component("gravity_edge", ComponentType.Edge)]
+GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
 G = 6.6743e-11
 
 
-@dataclass
-class GravityConstraint(Archetype):
+@el.dataclass
+class GravityConstraint(el.Archetype):
     a: GravityEdge
 
-    def __init__(self, a: EntityId, b: EntityId):
-        self.a = Edge(a, b)
+    def __init__(self, a: el.EntityId, b: el.EntityId):
+        self.a = el.Edge(a, b)
 
 
-@system
-def gravity(q: GraphQuery[GravityEdge, WorldPos, Inertia]) -> Query[Force]:
+@el.system
+def gravity(
+    q: el.GraphQuery[GravityEdge, el.WorldPos, el.Inertia],
+) -> el.Query[el.Force]:
     def gravity_inner(force, a_pos, a_inertia, b_pos, b_inertia):
         r = a_pos.linear() - b_pos.linear()
         m = a_inertia.mass()
         M = b_inertia.mass()
         norm = la.norm(r)
         f = G * M * m * r / (norm * norm * norm)
-        return Force.from_linear(force.force() - f)
+        return el.SpatialForce.from_linear(force.force() - f)
 
-    return q.edge_fold(
-        Force, Force(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])), gravity_inner
-    )
+    return q.edge_fold(el.Force, el.SpatialForce.zero(), gravity_inner)
 
 
-w = World()
+w = el.World()
 a = (
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
-            world_vel=WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
-            inertia=Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(Pbr(Mesh.sphere(0.2), Material.color(25.3, 18.4, 1.0))),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
+            world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
+            inertia=el.Inertia.from_mass(1.0 / G),
+            pbr=w.insert_asset(
+                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
+            ),
         )
     )
-    .metadata(EntityMetadata("A"))
+    .name("A")
     .id()
 )
 b = (
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
-            world_vel=WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
-            inertia=Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(Pbr(Mesh.sphere(0.2), Material.color(10.0, 0.0, 10.0))),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
+            world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
+            inertia=el.Inertia.from_mass(1.0 / G),
+            pbr=w.insert_asset(
+                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
+            ),
         )
     )
-    .metadata(EntityMetadata("B"))
+    .name("B")
     .id()
 )
 c = (
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
-            world_vel=WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
-            inertia=Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(Pbr(Mesh.sphere(0.2), Material.color(0.0, 10.0, 10.0))),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
+            world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
+            inertia=el.Inertia.from_mass(1.0 / G),
+            pbr=w.insert_asset(
+                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
+            ),
         )
     )
-    .metadata(EntityMetadata("C"))
+    .name("C")
     .id()
 )
-w.spawn(GravityConstraint(a, b)).metadata(EntityMetadata("A -> B"))
-w.spawn(GravityConstraint(a, c)).metadata(EntityMetadata("A -> C"))
+w.spawn(GravityConstraint(a, b)).name("A -> B")
+w.spawn(GravityConstraint(a, c)).name("A -> C")
 
-w.spawn(GravityConstraint(b, c)).metadata(EntityMetadata("B -> C"))
-w.spawn(GravityConstraint(b, a)).metadata(EntityMetadata("B -> A"))
+w.spawn(GravityConstraint(b, c)).name("B -> C")
+w.spawn(GravityConstraint(b, a)).name("B -> A")
 
-w.spawn(GravityConstraint(c, a)).metadata(EntityMetadata("C -> A"))
-w.spawn(GravityConstraint(c, b)).metadata(EntityMetadata("C -> B"))
+w.spawn(GravityConstraint(c, a)).name("C -> A")
+w.spawn(GravityConstraint(c, b)).name("C -> B")
 
-sys = six_dof(TIME_STEP, gravity)
+w.spawn(
+    el.Panel.viewport(
+        track_rotation=False,
+        active=True,
+        pos=[0.0, 0.0, 5.0],
+        looking_at=[0.0, 0.0, 0.0],
+    )
+).name("Viewport 1")
+
+sys = el.six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)
