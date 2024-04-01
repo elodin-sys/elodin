@@ -18,6 +18,8 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 tempfile = "3.10.1"
 tar = "0.4.40"
 uuid = { version = "1.6.1", features = ["v7"] }
+pyo3 = { version = "0.20.0", features = ["auto-initialize"] }
+tokio-util = "0.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "44321de", features = ["tonic-conn"] }
