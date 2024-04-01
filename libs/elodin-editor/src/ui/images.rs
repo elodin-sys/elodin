@@ -15,6 +15,7 @@ pub struct Images {
     pub icon_frame_back: Handle<Image>,
     pub icon_search: Handle<Image>,
     pub icon_add: Handle<Image>,
+    pub icon_subtract: Handle<Image>,
     pub icon_close: Handle<Image>,
     pub icon_chart: Handle<Image>,
 }
@@ -37,6 +38,7 @@ impl FromWorld for Images {
                 .load("embedded://elodin_editor/assets/icons/frame_back.png"),
             icon_search: asset_server.load("embedded://elodin_editor/assets/icons/search.png"),
             icon_add: asset_server.load("embedded://elodin_editor/assets/icons/add.png"),
+            icon_subtract: asset_server.load("embedded://elodin_editor/assets/icons/subtract.png"),
             icon_close: asset_server.load("embedded://elodin_editor/assets/icons/close.png"),
             icon_chart: asset_server.load("embedded://elodin_editor/assets/icons/chart.png"),
         }

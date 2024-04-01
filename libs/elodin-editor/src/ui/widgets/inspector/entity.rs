@@ -19,17 +19,11 @@ use crate::ui::{
     colors::{self, with_opacity},
     tiles,
     utils::{self, MarginSides},
-    widgets::{button::ImageButton, label::ELabel},
+    widgets::label,
     GraphsState,
 };
 
 const SEPARATOR_SPACING: f32 = 32.0;
-const LABEL_SPACING: f32 = 8.0;
-
-#[derive(Default)]
-pub struct ItemActions {
-    create_graph: bool,
-}
 
 #[allow(clippy::too_many_arguments)]
 pub fn inspector(
@@ -44,9 +38,9 @@ pub fn inspector(
     column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
 ) {
     ui.add(
-        ELabel::new(&metadata.name)
+        label::ELabel::new(&metadata.name)
             .padding(egui::Margin::same(0.0).bottom(24.0))
-            .bottom_stroke(ELabel::DEFAULT_STROKE)
+            .bottom_stroke(label::ELabel::DEFAULT_STROKE)
             .margin(egui::Margin::same(0.0).bottom(26.0)),
     );
 
@@ -78,16 +72,9 @@ pub fn inspector(
 
         ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
 
-        let mut item_actions = ItemActions::default();
+        let mut create_graph = false;
 
-        let res = inspector_item_multi(
-            ui,
-            &label,
-            component_value,
-            LABEL_SPACING,
-            icon_chart,
-            &mut item_actions,
-        );
+        let res = inspector_item_multi(ui, &label, component_value, icon_chart, &mut create_graph);
         if res.changed() {
             if let Ok(payload) = ColumnPayload::try_from_value_iter(
                 0,
@@ -104,7 +91,7 @@ pub fn inspector(
             }
         }
 
-        if item_actions.create_graph {
+        if create_graph {
             let (graph_id, _) = graphs_state.get_or_create_graph(&None);
             let component_values = component_value
                 .iter()
@@ -176,64 +163,21 @@ pub fn inspector_item_value<'a>(
     move |ui: &mut egui::Ui| inspector_item_value_ui(ui, label, value, size)
 }
 
-fn inspector_item_label_ui(
-    ui: &mut egui::Ui,
-    label: &str,
-    icon_chart: egui::TextureId,
-    item_actions: &mut ItemActions,
-) -> egui::Response {
-    egui::Frame::none()
-        .outer_margin(egui::Margin::same(1.0))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
-                    ui.max_rect(),
-                    0.8,
-                    ui.spacing().interact_size.y,
-                );
-
-                ui.allocate_ui_at_rect(label_rect, |ui| {
-                    let text = egui::RichText::new(label.to_string()).color(colors::PRIMARY_CREAME);
-                    ui.add(egui::Label::new(text));
-                });
-
-                ui.allocate_ui_at_rect(btn_rect, |ui| {
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let create_graph_btn = ui.add(
-                            ImageButton::new(icon_chart)
-                                .scale(1.1, 1.1)
-                                .image_tint(colors::PRIMARY_CREAME)
-                                .bg_color(colors::TRANSPARENT),
-                        );
-
-                        item_actions.create_graph = create_graph_btn.clicked();
-                    });
-                });
-            })
-        })
-        .response
-}
-
-pub fn inspector_item_label<'a>(
-    label: &'a str,
-    icon_chart: egui::TextureId,
-    item_actions: &'a mut ItemActions,
-) -> impl egui::Widget + 'a {
-    move |ui: &mut egui::Ui| inspector_item_label_ui(ui, label, icon_chart, item_actions)
-}
-
 fn inspector_item_multi(
     ui: &mut egui::Ui,
     label: &str,
     values: &mut ComponentValue,
-    label_spacing: f32,
     icon_chart: egui::TextureId,
-    item_actions: &mut ItemActions,
+    create_graph: &mut bool,
 ) -> egui::Response {
     let resp = ui.vertical(|ui| {
-        ui.add(inspector_item_label(label, icon_chart, item_actions));
-
-        ui.add_space(label_spacing);
+        *create_graph = label::label_with_button(
+            ui,
+            icon_chart,
+            label,
+            colors::PRIMARY_CREAME,
+            egui::Margin::symmetric(0.0, 4.0).bottom(12.0),
+        );
 
         let item_spacing = egui::vec2(8.0, 8.0);
 

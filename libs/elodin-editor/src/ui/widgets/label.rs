@@ -4,6 +4,8 @@ use crate::ui::{
 };
 use bevy_egui::egui;
 
+use super::button::EImageButton;
+
 #[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
 pub struct ELabel {
     label: String,
@@ -107,4 +109,44 @@ impl egui::Widget for ELabel {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         self.render(ui)
     }
+}
+
+pub fn label_with_button(
+    ui: &mut egui::Ui,
+    btn_icon: egui::TextureId,
+    label: impl ToString,
+    color: egui::Color32,
+    margin: egui::Margin,
+) -> bool {
+    let mut clicked = false;
+
+    egui::Frame::none().inner_margin(margin).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
+                ui.max_rect(),
+                0.8,
+                ui.spacing().interact_size.y,
+            );
+
+            ui.allocate_ui_at_rect(label_rect, |ui| {
+                let text = egui::RichText::new(label.to_string()).color(color);
+                ui.add(egui::Label::new(text));
+            });
+
+            ui.allocate_ui_at_rect(btn_rect, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let add_entity_btn = ui.add(
+                        EImageButton::new(btn_icon)
+                            .scale(1.2, 1.2)
+                            .image_tint(color)
+                            .bg_color(colors::TRANSPARENT),
+                    );
+
+                    clicked = add_entity_btn.clicked();
+                });
+            });
+        });
+    });
+
+    clicked
 }
