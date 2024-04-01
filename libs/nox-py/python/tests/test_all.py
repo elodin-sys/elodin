@@ -19,9 +19,9 @@ def test_basic_system():
     def bar(q: Query[X, Y]) -> Query[X]:
         return q.map(X, lambda x, y: x * y)
 
-    @system
-    def baz(q: Query[X, E]) -> Query[X]:
-        return q.map(X, lambda x, e: x + e)
+    @map
+    def baz(x: X, e: E) -> X:
+        return x + e
 
     @dataclass
     class Test(Archetype):
