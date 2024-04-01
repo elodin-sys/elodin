@@ -16,6 +16,12 @@ pub mod entity;
 pub mod graph;
 pub mod viewport;
 
+pub struct InspectorIcons {
+    pub chart: egui::TextureId,
+    pub add: egui::TextureId,
+    pub subtract: egui::TextureId,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn inspector(
     ui: &mut egui::Ui,
@@ -27,7 +33,7 @@ pub fn inspector(
     entity_transform_query: &Query<&GridCell<i128>, Without<MainCamera>>,
     graphs_state: &mut ResMut<GraphsState>,
     tile_state: &mut ResMut<tiles::TileState>,
-    icon_chart: egui::TextureId,
+    icons: InspectorIcons,
     column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
 ) -> egui::Response {
     egui::ScrollArea::vertical()
@@ -54,7 +60,7 @@ pub fn inspector(
                                 metadata_store,
                                 graphs_state,
                                 tile_state,
-                                icon_chart,
+                                icons.chart,
                                 column_payload_writer,
                             );
                         }
@@ -81,6 +87,7 @@ pub fn inspector(
                                 entities,
                                 graphs_state,
                                 metadata_store,
+                                icons,
                             );
                         }
                     })

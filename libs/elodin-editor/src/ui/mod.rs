@@ -329,7 +329,11 @@ pub fn render(
     theme::set_theme(contexts.ctx_mut());
 
     let icon_search = contexts.add_image(images.icon_search.clone_weak());
-    let icon_chart = contexts.add_image(images.icon_chart.clone_weak());
+    let inspector_icons = inspector::InspectorIcons {
+        chart: contexts.add_image(images.icon_chart.clone_weak()),
+        add: contexts.add_image(images.icon_add.clone_weak()),
+        subtract: contexts.add_image(images.icon_subtract.clone_weak()),
+    };
 
     #[cfg(target_os = "macos")]
     egui::TopBottomPanel::top("titlebar")
@@ -383,7 +387,7 @@ pub fn render(
                     &entity_transform_query,
                     &mut graphs_state,
                     &mut tile_state,
-                    icon_chart,
+                    inspector_icons,
                     &mut column_payload_writer,
                 );
             });
@@ -434,7 +438,7 @@ pub fn render(
                             &entity_transform_query,
                             &mut graphs_state,
                             &mut tile_state,
-                            icon_chart,
+                            inspector_icons,
                             &mut column_payload_writer,
                         );
                     });

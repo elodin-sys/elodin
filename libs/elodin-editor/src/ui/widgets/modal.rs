@@ -3,12 +3,16 @@ use bevy_egui::egui;
 use conduit::{query::MetadataStore, GraphId};
 
 use crate::ui::{
-    colors, theme,
+    colors::{self, with_opacity},
+    theme,
     utils::{self, MarginSides},
     EntityData, GraphsState,
 };
 
-use super::{button::ImageButton, label::ELabel};
+use super::{
+    button::EButton,
+    label::{self, ELabel},
+};
 
 pub fn modal_graph(
     ctx: &egui::Context,
@@ -31,43 +35,18 @@ pub fn modal_graph(
         })
         .fixed_rect(rect)
         .show(ctx, |ui| {
-            egui::Frame::none()
-                .inner_margin(egui::Margin::same(8.0))
-                .outer_margin(egui::Margin::same(0.0).bottom(16.0))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
-                            ui.max_rect(),
-                            0.8,
-                            ui.spacing().interact_size.y,
-                        );
-
-                        ui.allocate_ui_at_rect(label_rect, |ui| {
-                            ui.add(egui::Label::new(
-                                egui::RichText::new("Add Component".to_string())
-                                    .color(colors::PRIMARY_CREAME),
-                            ));
-                        });
-
-                        ui.allocate_ui_at_rect(btn_rect, |ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let btn_close = ImageButton::new(close_icon)
-                                        .scale(1.3, 1.3)
-                                        .image_tint(colors::PRIMARY_CREAME)
-                                        .bg_color(colors::TRANSPARENT);
-
-                                    if ui.add(btn_close).clicked() {
-                                        graph_states.modal_graph = None;
-                                        graph_states.modal_entity = None;
-                                        graph_states.modal_component = None;
-                                    }
-                                },
-                            );
-                        });
-                    });
-                });
+            let title_margin = egui::Margin::same(8.0).bottom(16.0);
+            if label::label_with_button(
+                ui,
+                close_icon,
+                "Add Component",
+                colors::PRIMARY_CREAME,
+                title_margin,
+            ) {
+                graph_states.modal_graph = None;
+                graph_states.modal_entity = None;
+                graph_states.modal_component = None;
+            }
 
             ui.add(egui::Separator::default().spacing(0.0));
 
@@ -147,8 +126,19 @@ pub fn modal_graph(
                 });
 
                 if let Some((component_id, component)) = selected_component {
-                    theme::configure_combo_box(ui.style_mut());
-                    if ui.button("ADD COMPONENT".to_string()).clicked() {
+                    ui.add_space(16.0);
+
+                    let add_component_btn = ui.add(
+                        EButton::new("ADD COMPONENT")
+                            .color(colors::MINT_DEFAULT)
+                            .bg_color(with_opacity(colors::MINT_DEFAULT, 0.05))
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                with_opacity(colors::MINT_DEFAULT, 0.4),
+                            )),
+                    );
+
+                    if add_component_btn.clicked() {
                         let values = utils::component_value_to_vec(component)
                             .iter()
                             .enumerate()

@@ -9,7 +9,7 @@ use conduit::{
 
 use crate::ui::{colors, utils, Paused};
 
-use super::button::ImageButton;
+use super::button::EImageButton;
 
 // ----------------------------------------------------------------------------
 
@@ -431,8 +431,9 @@ pub fn timeline_area(
 
                         col_ui.style_mut().spacing.item_spacing.x = btn_spacing;
 
-                        let jump_to_start_btn = col_ui
-                            .add(ImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale));
+                        let jump_to_start_btn = col_ui.add(
+                            EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
+                        );
 
                         if jump_to_start_btn.clicked() {
                             tick.0 = 0;
@@ -440,7 +441,7 @@ pub fn timeline_area(
                         }
 
                         let frame_back_btn = col_ui
-                            .add(ImageButton::new(icons.frame_back).scale(btn_scale, btn_scale));
+                            .add(EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale));
 
                         if frame_back_btn.clicked() && tick.0 > 0 {
                             tick.0 -= 1;
@@ -449,22 +450,23 @@ pub fn timeline_area(
 
                         if paused.0 {
                             let play_btn = col_ui
-                                .add(ImageButton::new(icons.play).scale(btn_scale, btn_scale));
+                                .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                             if play_btn.clicked() {
                                 paused.0 = false;
                             }
                         } else {
                             let pause_btn = col_ui
-                                .add(ImageButton::new(icons.pause).scale(btn_scale, btn_scale));
+                                .add(EImageButton::new(icons.pause).scale(btn_scale, btn_scale));
 
                             if pause_btn.clicked() {
                                 paused.0 = true;
                             }
                         }
 
-                        let frame_forward_btn = col_ui
-                            .add(ImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale));
+                        let frame_forward_btn = col_ui.add(
+                            EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
+                        );
 
                         if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
                             tick.0 += 1;
@@ -472,7 +474,7 @@ pub fn timeline_area(
                         }
 
                         let jump_to_end_btn = col_ui
-                            .add(ImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale));
+                            .add(EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale));
 
                         if jump_to_end_btn.clicked() {
                             tick.0 = max_tick.0 - 1;

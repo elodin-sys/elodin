@@ -20,7 +20,7 @@ use super::{
     images::Images,
     utils::MarginSides,
     widgets::{
-        button::ImageButton,
+        button::EImageButton,
         eplot::{EPlot, EPlotData},
     },
     GraphsState, SelectedObject, ViewportRect,
@@ -162,7 +162,7 @@ impl GraphPane {
     fn spawn(graph_id: GraphId) -> Self {
         Self {
             id: graph_id,
-            label: format!("GRAPH_{}", graph_id.0),
+            label: format!("Graph {}", graph_id.0),
             plot_data: None,
         }
     }
@@ -300,7 +300,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             );
             ui.add_space(-3.0 * x_margin);
             let close_response = ui.add(
-                ImageButton::new(self.icons.close)
+                EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
                         TabState::Active | TabState::Inactive => colors::PRIMARY_CREAME,
@@ -424,7 +424,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
         ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
         ui.add_space(5.0);
-        let mut resp = ui.add(ImageButton::new(self.icons.add).scale(1.4, 1.4));
+        let mut resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
             resp.clicked = [false, true, false, false, false];
         }
