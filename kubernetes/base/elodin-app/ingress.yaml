@@ -2,9 +2,8 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: elodin
-  annotations:
-    'kubernetes.io/ingress.class': traefik
 spec:
+  ingressClassName: traefik
   defaultBackend:
     service:
       name: elo-dashboard
