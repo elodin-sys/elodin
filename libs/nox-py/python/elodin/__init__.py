@@ -224,7 +224,7 @@ class Query(Generic[Unpack[A]]):
 def map(func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]]) -> System:
     sig = inspect.signature(func)
     tys = list(sig.parameters.values())
-    query = Query[Unpack[[ty.annotation for ty in tys]]] # type: ignore
+    query = Query[*[ty.annotation for ty in tys]] # type: ignore
     return_ty = sig.return_annotation
     if isinstance(return_ty, types.GenericAlias):
         return_ty = tuple(return_ty.__args__)
