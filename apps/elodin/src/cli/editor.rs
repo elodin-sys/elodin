@@ -1,4 +1,5 @@
-use std::net::SocketAddr;
+use core::fmt;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use tokio::net::TcpStream;
 
@@ -6,9 +7,12 @@ use super::Cli;
 use bevy::{prelude::*, utils::tracing};
 use conduit::{client::MsgPair, server::handle_socket};
 
-#[derive(clap::Args, Clone)]
+const DEFAULT_SIM: Simulator =
+    Simulator::Addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2240)));
+
+#[derive(clap::Args, Clone, Default)]
 pub struct Args {
-    #[clap(name = "addr/path")]
+    #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,
 }
 
@@ -16,6 +20,21 @@ pub struct Args {
 enum Simulator {
     Addr(SocketAddr),
     File(PathBuf),
+}
+
+impl Default for Simulator {
+    fn default() -> Self {
+        DEFAULT_SIM
+    }
+}
+
+impl fmt::Display for Simulator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Addr(addr) => write!(f, "{}", addr),
+            Self::File(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 impl std::str::FromStr for Simulator {
