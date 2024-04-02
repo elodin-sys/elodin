@@ -24,17 +24,10 @@
     "name": "Dashboard",
     "url": "https://app.elodin.systems"
   },
-  "anchors": [
-    {
-      "name": "Discord",
-      "icon": "discord",
-      "url": "https://discord.gg/agvGJaZXy5"
-    }
-  ],
   "navigation": [
     {
       "group": "Get Started",
-      "pages": ["introduction", "tutorial/3-body"]
+      "pages": ["quickstart", "tutorial/3-body"]
     },
     {
       "group": "The Tao of Elodin",
@@ -50,7 +43,8 @@
   },
   "footerSocials": {
     "github": "https://github.com/elodin-sys",
-    "linkedin": "https://www.linkedin.com/company/elodin-systems-inc"
+    "linkedin": "https://www.linkedin.com/company/elodin-systems-inc",
+    "discord": "https://elodin.app/discord"
   },
   "integrations": {
     "intercom": "fcvzwxgc"
