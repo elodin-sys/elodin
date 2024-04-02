@@ -1,7 +1,9 @@
 use crate::MainCamera;
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
 use bevy::render::view::RenderLayers;
+use bevy_editor_cam::controller::component::EditorCam;
 use bevy_egui::EguiContexts;
 use bevy_mod_picking::prelude::*;
 use bevy_tweening::lens::TransformScaleLens;
@@ -233,13 +235,13 @@ pub struct DraggedMarker;
 pub fn drag_nav_gizmo(
     drag: Listener<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
-    mut query: Query<&mut Transform, With<MainCamera>>,
+    mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     mut commands: Commands,
 ) {
     let Ok(nav_gizmo) = nav_gizmo.get(drag.target) else {
         return;
     };
-    let Ok(mut transform) = query.get_mut(nav_gizmo.main_camera) else {
+    let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
     if drag.delta.length() > 0.1 {
@@ -247,19 +249,20 @@ pub fn drag_nav_gizmo(
     } else {
         commands.entity(drag.target).remove::<DraggedMarker>();
     }
-    let delta_x = drag.delta.x / 75.0 * std::f32::consts::PI;
-    let delta_y = drag.delta.y / 75.0 * std::f32::consts::PI;
-    let yaw = Quat::from_rotation_y(-delta_x);
-    let pitch = Quat::from_rotation_x(-delta_y);
-    set_orbit_rotation(Vec3::ZERO, yaw, pitch, transform.as_mut())
-}
-
-fn set_orbit_rotation(anchor: Vec3, yaw: Quat, pitch: Quat, transform: &mut Transform) {
-    let radius = (transform.translation - anchor).length();
-    transform.rotation = yaw * transform.rotation;
-    transform.rotation *= pitch;
-    let rot_matrix = Mat3::from_quat(transform.rotation);
-    transform.translation = anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, radius));
+    let delta = drag.delta
+        * cam
+            .physical_viewport_size()
+            .unwrap_or_else(|| UVec2::new(256, 256))
+            .as_vec2()
+        / 75.0;
+    let anchor = transform
+        .compute_matrix()
+        .as_dmat4()
+        .inverse()
+        .transform_point3(DVec3::ZERO);
+    editor_cam.end_move();
+    editor_cam.start_orbit(Some(anchor));
+    editor_cam.send_screenspace_input(delta);
 }
 
 fn side_clicked_cb(
