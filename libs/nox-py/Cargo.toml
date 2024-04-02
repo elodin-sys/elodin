@@ -1,6 +1,6 @@
 [package]
 name = "nox-py"
-version = "0.1.8"
+version.workspace = true
 edition = "2021"
 readme = "README.md"
 
