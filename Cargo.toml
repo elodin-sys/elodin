@@ -19,6 +19,10 @@ members = [
     "apps/elodin",
 ]
 
+[workspace.package]
+version = "0.3.13"
+repository = "https://github.com/elodin-sys/paracosm"
+
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
@@ -34,6 +38,7 @@ pr-run-mode = "plan"
 allow-dirty = ["ci"]
 precise-builds = true
 unix-archive = ".tar.gz"
+auto-includes = false
 
 [workspace.metadata.dist.github-custom-runners]
 x86_64-unknown-linux-gnu = "ubuntu-22.04"

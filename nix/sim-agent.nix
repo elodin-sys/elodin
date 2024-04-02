@@ -48,7 +48,7 @@ let
   });
 
   wheelName = "elodin";
-  wheelVersion = (craneLib.crateNameFromCargoToml { cargoToml = ../libs/nox-py/Cargo.toml; }).version;
+  wheelVersion = (craneLib.crateNameFromCargoToml { cargoToml = ../Cargo.toml; }).version;
   wheelSuffix = "cp310-abi3-linux_${arch}";
   wheel = craneLib.buildPackage (commonArgs // {
     inherit cargoArtifacts;

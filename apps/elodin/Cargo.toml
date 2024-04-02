@@ -1,6 +1,7 @@
 [package]
 name = "elodin"
-version = "0.1.0"
+version.workspace = true
+repository.workspace = true
 edition = "2021"
 
 [dependencies]
