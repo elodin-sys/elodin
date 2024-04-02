@@ -24,9 +24,48 @@ Download the Elodin Client:
 [elodin-windows]: https://storage.googleapis.com/elodin-releases/v0.3.13/elodin-x86_64-pc-windows-msvc.zip
 [elodin-windows-sha256]: https://storage.googleapis.com/elodin-releases/v0.3.13/elodin-x86_64-pc-windows-msvc.zip.sha256
 
-## Tutorials
+## Start Simulating
 
-Try out these tutorials to learn how to use our sandbox.
+1. Download the [three-body.py] example code from our Github repo: [elodin-sys/elodin].
+2. Launch the simulation server and enter a Python REPL.
+    <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
+    ```sh
+    python three-body.py -- run --watch
+    ```
+3. Launch the Elodin Client (3D viewer and component inspector).
+    <Note>`elodin.exe` on Windows</Note>
+    <Note>`elodin --help` for more information</Note>
+    ```sh
+    elodin
+    ```
+
+[elodin-sys/elodin]: https://github.com/elodin-sys/elodin
+[three-body.py]: https://raw.githubusercontent.com/elodin-sys/elodin/main/libs/nox-py/examples/three-body.py
+
+## Perform Analysis
+
+To analyze simulation data, use the `Exec` API to run the simulation for some number of ticks and collect the historical component data as a [Polars DataFrame].
+The DataFrame can then be used to generate plots or perform other methods of data analysis.
+
+Run the [ball-plot.py] example code to see this in action.
+
+<Note>
+The `ball-plot.py` example depends on `matplotlib`. Install it using `pip`:
+```sh
+pip install matplotlib
+```
+</Note>
+
+```sh
+python ball-plot.py
+```
+
+[Polars Dataframe]: https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe
+[ball-plot.py]: https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/examples/ball-plot.py
+
+## Next Steps
+
+Try out these tutorials to learn how to build simulations using the `elodin` library.
 
 <CardGroup cols={1}>
   {/* <Card
