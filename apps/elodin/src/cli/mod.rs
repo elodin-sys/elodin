@@ -10,7 +10,7 @@ pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
     url: String,
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -19,6 +19,7 @@ enum Commands {
     Login,
     /// Manage your Monte Carlo runs
     MonteCarlo(monte_carlo::Args),
+    /// Launch the Elodin editor (default)
     Editor(editor::Args),
 }
 
@@ -34,9 +35,10 @@ impl Cli {
             .build()
             .expect("tokio runtime failed to start");
         let res = match &self.command {
-            Commands::Login => rt.block_on(self.login()),
-            Commands::MonteCarlo(args) => rt.block_on(self.monte_carlo(args)),
-            Commands::Editor(args) => self.editor(args.clone()),
+            Some(Commands::Login) => rt.block_on(self.login()),
+            Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
+            Some(Commands::Editor(args)) => self.editor(args.clone()),
+            None => self.editor(editor::Args::default()),
         };
         if let Err(err) = res {
             eprintln!("Error: {:#}", err);
