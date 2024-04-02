@@ -2,6 +2,7 @@
 name = "sim-builder"
 version = "0.1.0"
 edition = "2021"
+metadata.dist.dist = false
 
 [dependencies]
 elodin-types = { version = "0.1.0", path = "../../libs/elodin-types/rust" }
