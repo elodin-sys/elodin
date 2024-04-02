@@ -35,7 +35,7 @@
     },
     {
       "group": "Updates",
-      "pages": ["updates/roadmap", "updates/2023-01-25-v010", "updates/archive"]
+      "pages": ["updates/changelog"]
     }
   ],
   "feedback": {
