@@ -10,7 +10,7 @@ use polars_arrow::{
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::{collections::BTreeMap, fs::File, path::Path};
+use std::{fs::File, path::Path};
 
 use crate::{
     ArchetypeName, AssetStore, Column, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table,
@@ -35,7 +35,6 @@ pub struct Metadata {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ArchetypeMetadata {
     pub columns: Vec<ColumnMetadata>,
-    pub entity_map: BTreeMap<EntityId, usize>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -239,11 +238,16 @@ impl Table<HostStore> {
             .column(&entity_id_string)
             .map_err(|_| Error::ComponentNotFound)?;
         let entity_buffer = HostColumn::from_series(column, ComponentType::u64(), false)?;
+        let entity_map = entity_buffer
+            .iter::<u64>()
+            .enumerate()
+            .map(|(offset, entity_id)| (EntityId::from(entity_id), offset))
+            .collect();
 
         Ok(Self {
             columns,
             entity_buffer,
-            entity_map: metadata.entity_map,
+            entity_map,
         })
     }
 
@@ -256,10 +260,7 @@ impl Table<HostStore> {
                 asset: c.buffer.asset,
             })
             .collect();
-        let metadata = ArchetypeMetadata {
-            columns,
-            entity_map: self.entity_map.clone(),
-        };
+        let metadata = ArchetypeMetadata { columns };
 
         Ok((
             metadata,
