@@ -1,12 +1,35 @@
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
-
+use clap::Parser;
 use conduit::client::MsgPair;
 use nox_ecs::{ConduitExec, WorldExec};
 use pyo3::Python;
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 use tracing::{debug, error, info, trace};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub enum Args {
+    Build {
+        #[arg(long)]
+        dir: PathBuf,
+    },
+    Repl {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+    },
+    Run {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+        #[arg(long)]
+        no_repl: bool,
+        #[arg(long)]
+        watch: bool,
+    },
+}
 
 pub struct SimSupervisor;
 
