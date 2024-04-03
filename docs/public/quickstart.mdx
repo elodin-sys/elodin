@@ -63,6 +63,24 @@ python ball-plot.py
 [Polars Dataframe]: https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe
 [ball-plot.py]: https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/examples/ball-plot.py
 
+## Monte Carlo
+
+Run Monte Carlo simulations to explore the state space.
+
+1. Create an account at https://app.elodin.systems to receive 60 free minutes of hosted simulation time (per month).
+2. Authorize `elodin` to access the Monte Carlo platform.
+    ```sh
+    elodin login
+    ```
+3. Download the [ball.py] example, which includes random sampling and asserts.
+4. Start a 300 sample Monte Carlo run with a maximum sim duration of 15s.
+    <Note>Add `--open` to automatically open the dashboard url in the browser.</Note>
+    ```sh
+    elodin monte-carlo run --name ball ball.py --max-duration 15 --samples 300
+    ```
+
+[ball.py]: https://raw.githubusercontent.com/elodin-sys/elodin/main/libs/nox-py/examples/ball.py
+
 ## Next Steps
 
 Try out these tutorials to learn how to build simulations using the `elodin` library.
