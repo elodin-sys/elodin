@@ -1,7 +1,6 @@
 use super::*;
 
 use nox_ecs::{graph::GraphQuery, nox::IntoOp};
-
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 #[pyclass]
