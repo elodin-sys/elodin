@@ -32,7 +32,7 @@ macro_rules! impl_primitive {
                 let ComponentValue::$prim_ty(arr) = value else {
                     return None;
                 };
-                let arr = arr.into_dimensionality::<ndarray::Ix1>().ok()?;
+                let arr = arr.into_dimensionality::<ndarray::Ix0>().ok()?;
                 let arr = arr.as_slice()?;
                 arr.get(0).copied()
             }
