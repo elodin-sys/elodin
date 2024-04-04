@@ -87,6 +87,7 @@ impl Component {
         let inner = Arc::new(conduit::Metadata {
             component_id: self.id.inner,
             component_type: self.ty.clone().into(),
+            asset: self.asset,
             tags: self.metadata.clone(),
         });
         Metadata { inner }

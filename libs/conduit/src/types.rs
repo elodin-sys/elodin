@@ -394,6 +394,8 @@ pub enum ElementValueMut<'a> {
 
 pub trait Component {
     const NAME: &'static str;
+    const ASSET: bool;
+
     fn component_id() -> ComponentId {
         ComponentId::new(Self::NAME)
     }
@@ -402,6 +404,14 @@ pub trait Component {
     fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
     where
         Self: Sized;
+    fn metadata() -> Metadata {
+        Metadata {
+            component_id: Self::component_id(),
+            component_type: Self::component_type(),
+            tags: HashMap::new(),
+            asset: Self::ASSET,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -487,6 +497,7 @@ pub struct Metadata {
     pub component_id: ComponentId,
     pub component_type: ComponentType,
     pub tags: HashMap<String, TagValue>,
+    pub asset: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]

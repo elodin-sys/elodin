@@ -93,9 +93,9 @@ impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E
 
     fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
         let col = builder.world.column::<E>().unwrap();
-        let ty = &col.column.buffer.component_type;
-        let buf = &mut &col.column.buffer.buf[..];
-        let len = col.column.buffer.len;
+        let ty = &col.column.metadata.component_type;
+        let buf = &mut &col.column.buf[..];
+        let len = col.column.len;
         let edges = (0..len)
             .map(move |_| {
                 let (size, value) = ty.parse_value(buf).unwrap();

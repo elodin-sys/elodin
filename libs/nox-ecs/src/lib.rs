@@ -53,7 +53,7 @@ pub type ArchetypeName = ustr::Ustr;
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
 pub struct Table<S: WorldStore> {
-    pub columns: BTreeMap<ComponentId, Column<S>>,
+    pub columns: BTreeMap<ComponentId, S::Column>,
     pub entity_buffer: S::EntityBuffer,
 }
 
@@ -90,31 +90,6 @@ where
         f.debug_struct("Table")
             .field("columns", &self.columns)
             .field("entity_buffer", &self.entity_buffer)
-            .finish()
-    }
-}
-
-pub struct Column<S: WorldStore> {
-    pub buffer: S::Column,
-    pub metadata: Metadata,
-}
-
-impl Clone for Column<HostStore> {
-    fn clone(&self) -> Self {
-        Self {
-            buffer: self.buffer.clone(),
-            metadata: self.metadata.clone(),
-        }
-    }
-}
-
-impl<S: WorldStore> std::fmt::Debug for Column<S>
-where
-    S::Column: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Column")
-            .field("buffer", &self.buffer)
             .finish()
     }
 }
@@ -227,26 +202,12 @@ impl World<HostStore> {
     pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table<HostStore> {
         let archetype_name = A::name();
         self.archetypes.entry(archetype_name).or_insert_with(|| {
-            let component_ids = A::component_ids();
-            let columns = component_ids
-                .iter()
-                .zip(A::component_tys().iter())
-                .map(|(id, ty)| {
-                    (
-                        *id,
-                        Column {
-                            buffer: HostColumn::new(ty.clone(), *id),
-                            metadata: Metadata {
-                                component_id: *id,
-                                component_type: ty.clone(),
-                                tags: HashMap::new(),
-                            },
-                        },
-                    )
-                })
-                .collect();
-            for id in component_ids {
-                self.component_map.insert(id, archetype_name);
+            let columns = A::components()
+                .into_iter()
+                .map(|metadata| (metadata.component_id, HostColumn::new(metadata)))
+                .collect::<BTreeMap<_, _>>();
+            for id in columns.keys() {
+                self.component_map.insert(*id, archetype_name);
             }
             Table {
                 columns,
@@ -280,15 +241,7 @@ impl World<HostStore> {
                 let columns = table
                     .columns
                     .iter()
-                    .map(|(id, column)| {
-                        Ok((
-                            *id,
-                            Column {
-                                buffer: column.buffer.copy_to_client(client)?,
-                                metadata: column.metadata.clone(),
-                            },
-                        ))
-                    })
+                    .map(|(id, column)| Ok((*id, column.copy_to_client(client)?)))
                     .collect::<Result<BTreeMap<_, _>, Error>>()?;
                 let table = Table {
                     columns,
@@ -315,12 +268,8 @@ impl World<HostStore> {
         let client_column = client_world
             .column_by_id(id)
             .ok_or(Error::ComponentNotFound)?;
-        let literal = client_column.column.buffer.to_literal_sync()?;
-        host_column
-            .column
-            .buffer
-            .buf
-            .copy_from_slice(literal.raw_buf());
+        let literal = client_column.column.to_literal_sync()?;
+        host_column.column.buf.copy_from_slice(literal.raw_buf());
         Ok(())
     }
 
@@ -357,7 +306,7 @@ impl WorldStore for HostStore {
 }
 
 pub struct HostColumnRef<'a, S: WorldStore = HostStore> {
-    pub column: &'a Column<S>,
+    pub column: &'a S::Column,
     pub entities: &'a S::EntityBuffer,
 }
 
@@ -366,35 +315,35 @@ impl HostColumnRef<'_> {
         self.entities
             .iter::<u64>()
             .map(EntityId)
-            .zip(self.column.buffer.values_iter())
+            .zip(self.column.values_iter())
     }
 
     pub fn typed_iter<T: conduit::Component>(&self) -> impl Iterator<Item = (EntityId, T)> + '_ {
         self.entities
             .iter::<u64>()
             .map(EntityId)
-            .zip(self.column.buffer.iter())
+            .zip(self.column.iter())
     }
 
     pub fn typed_buf<T: AnyBitPattern>(&self) -> Option<&[T]> {
-        bytemuck::try_cast_slice(self.column.buffer.buf.as_slice()).ok()
+        bytemuck::try_cast_slice(self.column.buf.as_slice()).ok()
     }
 
     pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
-        self.column.buffer.ndarray()
+        self.column.ndarray()
     }
 }
 
 pub struct ColumnRefMut<'a, S: WorldStore = HostStore> {
-    pub column: &'a mut Column<S>,
+    pub column: &'a mut S::Column,
     pub entities: &'a mut S::EntityBuffer,
 }
 
 impl ColumnRefMut<'_, HostStore> {
     pub fn update(&mut self, offset: usize, value: ComponentValue<'_>) -> Result<(), Error> {
-        let size = self.column.buffer.component_type.size();
+        let size = self.column.metadata.component_type.size();
         let offset = offset * size;
-        let out = &mut self.column.buffer.buf[offset..offset + size];
+        let out = &mut self.column.buf[offset..offset + size];
         if let Some(bytes) = value.bytes() {
             if bytes.len() != out.len() {
                 return Err(Error::ValueSizeMismatch);
@@ -408,18 +357,17 @@ impl ColumnRefMut<'_, HostStore> {
         self.entities
             .iter::<u64>()
             .map(EntityId)
-            .zip(self.column.buffer.values_iter())
+            .zip(self.column.values_iter())
     }
 
     pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
-        self.column.buffer.typed_buf_mut()
+        self.column.typed_buf_mut()
     }
 }
 
 pub trait Archetype {
     fn name() -> ArchetypeName;
-    fn component_ids() -> Vec<ComponentId>;
-    fn component_tys() -> Vec<ComponentType>;
+    fn components() -> Vec<Metadata>;
     fn insert_into_table(self, table: &mut Table<HostStore>);
 }
 
@@ -428,30 +376,13 @@ impl<T: Component + 'static> Archetype for T {
         ArchetypeName::from(T::name().as_str())
     }
 
-    fn component_ids() -> Vec<ComponentId> {
-        vec![T::component_id()]
+    fn components() -> Vec<Metadata> {
+        vec![T::metadata()]
     }
 
     fn insert_into_table(self, table: &mut Table<HostStore>) {
         let col = table.columns.get_mut(&T::component_id()).unwrap();
-        col.buffer.push(self);
-    }
-
-    fn component_tys() -> Vec<ComponentType> {
-        vec![T::component_type()]
-    }
-}
-
-impl<S: WorldStore> Column<S> {
-    pub fn new(buffer: S::Column, metadata: Metadata) -> Self {
-        Self { buffer, metadata }
-    }
-}
-
-impl Column<ClientStore> {
-    fn copy_from_host(&mut self, host: &Column<HostStore>, client: &Client) -> Result<(), Error> {
-        self.buffer = host.buffer.copy_to_client(client)?;
-        Ok(())
+        col.push(self);
     }
 }
 
@@ -530,7 +461,7 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
             .world
             .column_mut::<T>()
             .ok_or(Error::ComponentNotFound)?;
-        let len = column.column.buffer.len();
+        let len = column.column.len();
         let mut ty: ArrayTy = T::component_type().into();
         ty.shape.insert(0, len as i64);
         let op = Noxpr::parameter(
@@ -1033,7 +964,7 @@ impl Exec {
             let col = client_world
                 .column_by_id(*id)
                 .ok_or(Error::ComponentNotFound)?;
-            buffers.push(&col.column.buffer);
+            buffers.push(col.column);
         }
         let exec = self.compile(client)?;
         let ret_bufs = exec.execute_buffers(buffers)?;
@@ -1043,7 +974,7 @@ impl Exec {
                 .get_mut()
                 .and_then(|c| c.column_by_id_mut(*comp_id))
                 .ok_or(Error::ComponentNotFound)?;
-            col.column.buffer = buf;
+            *col.column = buf;
         }
         Ok(())
     }
@@ -1111,9 +1042,7 @@ impl SharedWorld {
                 .host
                 .column_by_id_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
-            client_column
-                .column
-                .copy_from_host(host_column.column, client)?;
+            *client_column.column = host_column.column.copy_to_client(client)?;
         }
         Ok(())
     }
@@ -1132,9 +1061,9 @@ impl SharedWorld {
                 .values_mut()
                 .zip(client_table.columns.values_mut())
             {
-                let literal = client.buffer.to_literal_sync()?;
-                host.buffer.buf.copy_from_slice(literal.raw_buf());
-                self.loaded_components.insert(host.buffer.component_id);
+                let literal = client.to_literal_sync()?;
+                host.buf.copy_from_slice(literal.raw_buf());
+                self.loaded_components.insert(host.metadata.component_id);
             }
         }
         Ok(())
@@ -1409,7 +1338,7 @@ pub trait ColumnRef {
 
 impl ColumnRef for HostColumnRef<'_> {
     fn len(&self) -> usize {
-        self.column.buffer.len
+        self.column.len
     }
 
     fn entity_buf(&self) -> Cow<'_, [u8]> {
@@ -1417,11 +1346,11 @@ impl ColumnRef for HostColumnRef<'_> {
     }
 
     fn value_buf(&self) -> Cow<'_, [u8]> {
-        Cow::Borrowed(&self.column.buffer.buf)
+        Cow::Borrowed(&self.column.buf)
     }
 
     fn is_asset(&self) -> bool {
-        self.column.buffer.asset
+        self.column.metadata.asset
     }
 }
 

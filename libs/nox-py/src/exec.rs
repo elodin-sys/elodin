@@ -29,7 +29,6 @@ impl Exec {
         let column = this.exec.column(id.inner)?;
         let dyn_array = column
             .column
-            .buffer
             .dyn_ndarray()
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
         fn untyped_pyarray<'py, T: numpy::Element + 'static>(

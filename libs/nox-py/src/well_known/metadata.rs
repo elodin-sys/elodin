@@ -3,7 +3,7 @@ use crate::*;
 use std::sync::Arc;
 
 use nox_ecs::conduit;
-use nox_ecs::conduit::{Asset, TagValue};
+use nox_ecs::conduit::Asset;
 
 use crate::{Color, PyBufBytes};
 
@@ -40,20 +40,4 @@ impl EntityMetadata {
 #[derive(Clone)]
 pub struct Metadata {
     pub inner: Arc<conduit::Metadata>,
-}
-
-#[pymethods]
-impl Metadata {
-    #[new]
-    pub fn new(component_id: ComponentId, ty: ComponentType, name: Option<String>) -> Self {
-        let inner = Arc::new(conduit::Metadata {
-            component_id: component_id.inner,
-            component_type: ty.into(),
-            tags: name
-                .into_iter()
-                .map(|n| ("name".to_string(), TagValue::String(n)))
-                .collect(),
-        });
-        Metadata { inner }
-    }
 }
