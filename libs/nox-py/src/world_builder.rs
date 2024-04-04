@@ -90,9 +90,6 @@ impl WorldBuilder {
             Spawnable::Archetype(archetype) => {
                 let entity_id = entity_id.inner;
                 let table = self.get_or_insert_archetype(&archetype)?;
-                table
-                    .entity_map
-                    .insert(entity_id, table.entity_buffer.len());
                 table.entity_buffer.push(entity_id.0.constant());
                 for (arr, id) in archetype
                     .arrays
@@ -131,9 +128,6 @@ impl WorldBuilder {
                 };
 
                 let table = self.get_or_insert_archetype(&archetype)?;
-                table
-                    .entity_map
-                    .insert(entity_id.inner, table.entity_buffer.len());
                 table.entity_buffer.push(entity_id.inner.0.constant());
                 let col = table
                     .columns
