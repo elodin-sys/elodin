@@ -3,8 +3,7 @@ use bytes::Bytes;
 use conduit::{
     client::{Msg, MsgPair},
     query::{MetadataStore, QueryId},
-    ser_de::ColumnValue,
-    ColumnPayload, ComponentId, ControlMsg, EntityId, Metadata, Packet, Payload, StreamId,
+    ColumnPayload, ComponentId, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
 use tracing::warn;
 
@@ -123,8 +122,7 @@ impl ConduitExec {
             .host
             .archetypes
             .values()
-            .flat_map(|arch| arch.entity_map.keys())
-            .copied()
+            .flat_map(|arch| arch.entity_ids())
             .collect();
         conn.send(Packet {
             stream_id: StreamId::CONTROL,
@@ -180,35 +178,31 @@ impl ConduitExec {
                 }
             }
             Msg::Control(_) => {}
-            Msg::Column(col) => {
-                for res in col.iter() {
-                    let Ok(value) = res else {
-                        tracing::warn!("error processing column value");
-                        continue;
-                    };
-                    if let Err(err) = self.process_column_value(&col.metadata, value) {
+            Msg::Column(new_col) => {
+                // NOTE: the entity ids in `new_col` can be a subset of the ones in `col`,
+                // but the order must be the same
+                let mut col_ref = self.exec.column_mut(new_col.metadata.component_id)?;
+                let mut col = col_ref.iter();
+                let updates = new_col
+                    .iter()
+                    .filter_map(|res| {
+                        let value = res
+                            .inspect_err(|err| {
+                                tracing::warn!(?err, "error processing column value")
+                            })
+                            .ok()?;
+                        // `col` is only ever scanned once because the iterator state is preserved across calls to `position`
+                        let offset = col.position(|(entity_id, _)| entity_id == value.entity_id)?;
+                        Some((offset, value.value))
+                    })
+                    .collect::<Vec<_>>();
+                drop(col);
+                for (offset, value) in updates {
+                    if let Err(err) = col_ref.update(offset, value) {
                         tracing::warn!(?err, "error processing column value");
                     }
                 }
             }
-        }
-        Ok(())
-    }
-
-    fn process_column_value(
-        &mut self,
-        metadata: &Metadata,
-        column_value: ColumnValue<'_>,
-    ) -> Result<(), Error> {
-        let mut col = self.exec.column_mut(metadata.component_id)?;
-        let Some(out) = col.entity_buf(column_value.entity_id) else {
-            return Err(Error::EntityNotFound);
-        };
-        if let Some(bytes) = column_value.value.bytes() {
-            if bytes.len() != out.len() {
-                return Err(Error::ValueSizeMismatch);
-            }
-            out.copy_from_slice(bytes);
         }
         Ok(())
     }
