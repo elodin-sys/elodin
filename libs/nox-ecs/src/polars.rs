@@ -207,9 +207,7 @@ where
 
 impl PartialEq for Table<HostStore> {
     fn eq(&self, other: &Self) -> bool {
-        self.columns == other.columns
-            && self.entity_buffer == other.entity_buffer
-            && self.entity_map == other.entity_map
+        self.columns == other.columns && self.entity_buffer == other.entity_buffer
     }
 }
 
@@ -238,16 +236,10 @@ impl Table<HostStore> {
             .column(&entity_id_string)
             .map_err(|_| Error::ComponentNotFound)?;
         let entity_buffer = HostColumn::from_series(column, ComponentType::u64(), false)?;
-        let entity_map = entity_buffer
-            .iter::<u64>()
-            .enumerate()
-            .map(|(offset, entity_id)| (EntityId::from(entity_id), offset))
-            .collect();
 
         Ok(Self {
             columns,
             entity_buffer,
-            entity_map,
         })
     }
 
