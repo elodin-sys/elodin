@@ -81,7 +81,7 @@ impl PipelineBuilder {
                 buffer: Noxpr::jax(arg),
                 phantom_data: PhantomData,
                 len,
-                entity_map: column.entity_map.clone(),
+                entity_map: column.entities.entity_map(),
             };
             vars.insert(*id, array.into());
         }
