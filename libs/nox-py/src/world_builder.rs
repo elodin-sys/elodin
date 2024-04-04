@@ -35,15 +35,13 @@ impl WorldBuilder {
                              metadata,
                              ..
                          }| {
-                            let mut col = nox_ecs::Column::<HostStore>::new(
-                                HostColumn::new(ty.clone().into(), id.inner),
-                                conduit::Metadata {
-                                    component_id: id.inner,
-                                    component_type: ty.clone().into(),
-                                    tags: metadata.clone(),
-                                },
-                            );
-                            col.buffer.asset = *asset;
+                            let metadata = conduit::Metadata {
+                                component_id: id.inner,
+                                component_type: ty.clone().into(),
+                                asset: *asset,
+                                tags: metadata.clone(),
+                            };
+                            let col = HostColumn::new(metadata);
                             Ok((id.inner, col))
                         },
                     )
@@ -100,10 +98,10 @@ impl WorldBuilder {
                         .columns
                         .get_mut(&id.inner)
                         .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                    let ty = col.buffer.component_type();
+                    let ty = col.component_type();
                     let size = ty.primitive_ty.element_type().element_size_in_bytes();
                     let buf = unsafe { arr.buf(size) };
-                    col.buffer.push_raw(buf);
+                    col.push_raw(buf);
                 }
                 self.world.entity_len += 1;
                 Ok(EntityId { inner: entity_id })
@@ -133,7 +131,7 @@ impl WorldBuilder {
                     .columns
                     .get_mut(&component_id)
                     .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                col.buffer.push_raw(&inner.id.to_le_bytes());
+                col.push_raw(&inner.id.to_le_bytes());
                 self.world.entity_len += 1;
                 Ok(entity_id)
             }
