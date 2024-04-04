@@ -233,11 +233,7 @@ impl AppExt for bevy::app::App {
         let mut metadata = self
             .world
             .get_resource_or_insert_with(MetadataStore::default);
-        metadata.push(Metadata {
-            component_id: C::component_id(),
-            component_type: C::component_type(),
-            tags: HashMap::default(),
-        });
+        metadata.push(C::metadata());
 
         let mut map = self
             .world
@@ -583,6 +579,7 @@ pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: R
                 Metadata {
                     component_id: msg.component_id,
                     component_type: msg.component_type.clone(),
+                    asset: false,
                     tags: HashMap::new(),
                 },
             );

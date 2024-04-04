@@ -1,4 +1,4 @@
-use conduit::{ComponentId, ComponentType, PrimitiveTy};
+use conduit::{ComponentId, ComponentType, Metadata, PrimitiveTy};
 use nox::xla::{ArrayElement, ElementType, NativeType};
 use nox::{IntoOp, Scalar, ScalarExt, Tensor, TensorDim, XlaDim};
 
@@ -16,6 +16,15 @@ pub trait Component: IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self> {
 pub trait ComponentExt: Component {
     fn component_id() -> ComponentId {
         ComponentId::new(&Self::name())
+    }
+
+    fn metadata() -> Metadata {
+        Metadata {
+            component_id: Self::component_id(),
+            component_type: Self::component_type(),
+            asset: Self::is_asset(),
+            tags: Default::default(),
+        }
     }
 }
 

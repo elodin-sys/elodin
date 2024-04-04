@@ -20,9 +20,9 @@ impl GraphQueryInner {
         use bytes::Buf;
         use nox_ecs::graph::EdgeComponent;
         let col = builder.builder.world.column_by_id(edge_id.inner).unwrap();
-        let ty = &col.column.buffer.component_type;
-        let buf = &mut &col.column.buffer.buf[..];
-        let len = col.column.buffer.len;
+        let ty = &col.column.metadata.component_type;
+        let buf = &mut &col.column.buf[..];
+        let len = col.column.len;
         let edges = (0..len)
             .map(move |_| {
                 let (size, value) = ty.parse_value(buf).unwrap();
