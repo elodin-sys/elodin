@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{collections::BTreeMap, ops::Deref};
 
 use bytemuck::Pod;
 use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
@@ -33,6 +33,17 @@ impl HostColumn {
 
     pub fn entity_ids() -> Self {
         HostColumn::new(ComponentType::u64(), EntityId::component_id())
+    }
+
+    pub fn entity_map(&self) -> BTreeMap<EntityId, usize> {
+        if self.component_id != EntityId::component_id() {
+            return BTreeMap::default();
+        }
+        self.iter::<u64>()
+            .map(EntityId)
+            .enumerate()
+            .map(|(offset, id)| (id, offset))
+            .collect()
     }
 
     pub fn push<T: Component + 'static>(&mut self, val: T) {

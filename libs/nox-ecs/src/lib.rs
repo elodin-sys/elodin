@@ -55,7 +55,6 @@ pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120
 pub struct Table<S: WorldStore> {
     pub columns: BTreeMap<ComponentId, Column<S>>,
     pub entity_buffer: S::EntityBuffer,
-    pub entity_map: BTreeMap<EntityId, usize>,
 }
 
 impl Default for Table<HostStore> {
@@ -63,7 +62,6 @@ impl Default for Table<HostStore> {
         Self {
             columns: Default::default(),
             entity_buffer: HostColumn::entity_ids(),
-            entity_map: Default::default(),
         }
     }
 }
@@ -73,8 +71,13 @@ impl Clone for Table<HostStore> {
         Self {
             columns: self.columns.clone(),
             entity_buffer: self.entity_buffer.clone(),
-            entity_map: self.entity_map.clone(),
         }
+    }
+}
+
+impl Table<HostStore> {
+    pub fn entity_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.entity_buffer.iter::<u64>().map(EntityId)
     }
 }
 
@@ -87,7 +90,6 @@ where
         f.debug_struct("Table")
             .field("columns", &self.columns)
             .field("entity_buffer", &self.entity_buffer)
-            .field("entity_map", &self.entity_map)
             .finish()
     }
 }
@@ -157,7 +159,6 @@ impl<S: WorldStore> World<S> {
         Some(ColumnRefMut {
             column,
             entities: &mut archetype.entity_buffer,
-            entity_map: &mut archetype.entity_map,
         })
     }
 
@@ -172,7 +173,6 @@ impl<S: WorldStore> World<S> {
         Some(HostColumnRef {
             column,
             entities: &archetype.entity_buffer,
-            entity_map: &archetype.entity_map,
         })
     }
 
@@ -183,7 +183,6 @@ impl<S: WorldStore> World<S> {
         Some(ColumnRefMut {
             column,
             entities: &mut archetype.entity_buffer,
-            entity_map: &mut archetype.entity_map,
         })
     }
 
@@ -268,9 +267,6 @@ impl World<HostStore> {
     pub fn spawn_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
         use nox::ScalarExt;
         let table = self.get_or_insert_archetype::<A>();
-        table
-            .entity_map
-            .insert(entity_id, table.entity_buffer.len());
         table.entity_buffer.push(entity_id.0.constant());
         archetype.insert_into_table(table);
         self.entity_len += 1;
@@ -297,7 +293,6 @@ impl World<HostStore> {
                 let table = Table {
                     columns,
                     entity_buffer: table.entity_buffer.copy_to_client(client)?,
-                    entity_map: table.entity_map.clone(),
                 };
                 Ok((*id, table))
             })
@@ -364,7 +359,6 @@ impl WorldStore for HostStore {
 pub struct HostColumnRef<'a, S: WorldStore = HostStore> {
     pub column: &'a Column<S>,
     pub entities: &'a S::EntityBuffer,
-    pub entity_map: &'a BTreeMap<EntityId, usize>,
 }
 
 impl HostColumnRef<'_> {
@@ -394,15 +388,20 @@ impl HostColumnRef<'_> {
 pub struct ColumnRefMut<'a, S: WorldStore = HostStore> {
     pub column: &'a mut Column<S>,
     pub entities: &'a mut S::EntityBuffer,
-    pub entity_map: &'a mut BTreeMap<EntityId, usize>,
 }
 
 impl ColumnRefMut<'_, HostStore> {
-    pub fn entity_buf(&mut self, entity_id: EntityId) -> Option<&mut [u8]> {
-        let offset = self.entity_map.get(&entity_id)?;
+    pub fn update(&mut self, offset: usize, value: ComponentValue<'_>) -> Result<(), Error> {
         let size = self.column.buffer.component_type.size();
-        let offset = *offset * size;
-        self.column.buffer.buf.get_mut(offset..offset + size)
+        let offset = offset * size;
+        let out = &mut self.column.buffer.buf[offset..offset + size];
+        if let Some(bytes) = value.bytes() {
+            if bytes.len() != out.len() {
+                return Err(Error::ValueSizeMismatch);
+            }
+            out.copy_from_slice(bytes);
+        }
+        Ok(())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (EntityId, ComponentValue<'_>)> {
@@ -549,7 +548,7 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
             buffer: op,
             phantom_data: PhantomData,
             len,
-            entity_map: column.entity_map.clone(),
+            entity_map: column.entities.entity_map(),
         };
         builder.vars.insert(id, array.into());
         Ok(())
