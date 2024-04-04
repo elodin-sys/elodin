@@ -1,7 +1,10 @@
-use std::{collections::BTreeMap, ops::Deref};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
+};
 
 use bytemuck::Pod;
-use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
+use conduit::{ComponentType, ComponentValue, EntityId, Metadata};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
@@ -15,28 +18,30 @@ use crate::{Component, DynArrayView, Error};
 pub struct HostColumn {
     pub buf: Vec<u8>,
     pub len: usize,
-    pub component_type: ComponentType,
-    pub component_id: ComponentId,
-    pub asset: bool,
+    pub metadata: Metadata,
 }
 
 impl HostColumn {
-    pub fn new(component_type: ComponentType, component_id: ComponentId) -> Self {
+    pub fn new(metadata: Metadata) -> Self {
         HostColumn {
             buf: vec![],
-            component_type,
             len: 0,
-            asset: false,
-            component_id,
+            metadata,
         }
     }
 
     pub fn entity_ids() -> Self {
-        HostColumn::new(ComponentType::u64(), EntityId::component_id())
+        let metadata = Metadata {
+            component_id: EntityId::component_id(),
+            component_type: ComponentType::u64(),
+            asset: false,
+            tags: HashMap::default(),
+        };
+        HostColumn::new(metadata)
     }
 
     pub fn entity_map(&self) -> BTreeMap<EntityId, usize> {
-        if self.component_id != EntityId::component_id() {
+        if self.metadata.component_id != EntityId::component_id() {
             return BTreeMap::default();
         }
         self.iter::<u64>()
@@ -47,12 +52,11 @@ impl HostColumn {
     }
 
     pub fn push<T: Component + 'static>(&mut self, val: T) {
-        assert_eq!(self.component_type, T::component_type());
+        assert_eq!(self.metadata.component_type, T::component_type());
         let op = val.into_op();
         let NoxprNode::Constant(c) = op.deref() else {
             panic!("push into host column must be constant expr");
         };
-        self.asset = T::is_asset();
         self.push_raw(c.data.raw_buf());
     }
 
@@ -71,11 +75,11 @@ impl HostColumn {
     }
 
     pub fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
-        let mut dims = self.component_type.shape.clone();
+        let mut dims = self.metadata.component_type.shape.clone();
         dims.insert(0, self.len as i64);
         client
             .copy_raw_host_buffer(
-                self.component_type.primitive_ty.element_type(),
+                self.metadata.component_type.primitive_ty.element_type(),
                 &self.buf,
                 &dims[..],
             )
@@ -86,20 +90,20 @@ impl HostColumn {
         let mut buf_offset = 0;
         std::iter::from_fn(move || {
             let buf = self.buf.get(buf_offset..)?;
-            let (offset, value) = self.component_type.parse_value(buf).ok()?;
+            let (offset, value) = self.metadata.component_type.parse_value(buf).ok()?;
             buf_offset += offset;
             Some(value)
         })
     }
 
     pub fn iter<T: conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
-        assert_eq!(self.component_type, T::component_type());
+        assert_eq!(self.metadata.component_type, T::component_type());
         self.values_iter()
             .filter_map(|v| T::from_component_value(v))
     }
 
     pub fn component_type(&self) -> ComponentType {
-        self.component_type.clone()
+        self.metadata.component_type.clone()
     }
 
     pub fn raw_buf(&self) -> &[u8] {
@@ -107,28 +111,28 @@ impl HostColumn {
     }
 
     pub fn typed_buf<T: ArrayElement + Pod>(&self) -> Option<&[T]> {
-        if self.component_type.primitive_ty.element_type() != T::TY {
+        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
             return None;
         }
         bytemuck::try_cast_slice(self.buf.as_slice()).ok()
     }
 
     pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
-        if self.component_type.primitive_ty.element_type() != T::TY {
+        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
             return None;
         }
         bytemuck::try_cast_slice_mut(self.buf.as_mut_slice()).ok()
     }
 
     pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
-        let comp_shape = self.component_type.shape.iter().map(|n| *n as _);
+        let comp_shape = self.metadata.component_type.shape.iter().map(|n| *n as _);
         let shape: SmallVec<[usize; 4]> = std::iter::once(self.len).chain(comp_shape).collect();
         let buf = self.typed_buf::<T>()?;
         ndarray::ArrayViewD::from_shape(&shape[..], buf).ok()
     }
 
     pub fn dyn_ndarray(&self) -> Option<DynArrayView<'_>> {
-        let elem_type = self.component_type.primitive_ty.element_type();
+        let elem_type = self.metadata.component_type.primitive_ty.element_type();
         match elem_type {
             nox::xla::ElementType::Pred => {
                 todo!()

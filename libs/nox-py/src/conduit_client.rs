@@ -107,6 +107,7 @@ async fn send_inner(
             Metadata {
                 component_id: data.id.inner,
                 component_type: ty.clone(),
+                asset: data.asset,
                 tags: HashMap::new(),
             },
         );

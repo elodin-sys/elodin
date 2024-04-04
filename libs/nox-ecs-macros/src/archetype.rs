@@ -41,14 +41,9 @@ pub fn archetype(input: TokenStream) -> TokenStream {
                 #crate_name::ArchetypeName::from(#name)
             }
 
-            fn component_ids() -> Vec<#crate_name::conduit::ComponentId> {
+            fn components() -> Vec<#crate_name::conduit::Metadata> {
                 use #crate_name::ComponentExt;
-                vec![#( <#tys>::component_id(), )*]
-            }
-
-            fn component_tys() -> Vec<#crate_name::conduit::ComponentType> {
-                use #crate_name::Component;
-                vec![#( <#tys>::component_type(), )*]
+                vec![#( <#tys>::metadata(), )*]
             }
 
             fn insert_into_table(self, table: &mut #crate_name::Table<#crate_name::HostStore>) {
