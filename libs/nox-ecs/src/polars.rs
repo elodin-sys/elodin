@@ -13,8 +13,7 @@ use std::collections::HashMap;
 use std::{fs::File, path::Path};
 
 use crate::{
-    ArchetypeName, AssetStore, Column, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table,
-    World, WorldStore,
+    ArchetypeName, AssetStore, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table, World,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -34,13 +33,7 @@ pub struct Metadata {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ArchetypeMetadata {
-    pub columns: Vec<ColumnMetadata>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ColumnMetadata {
-    pub metadata: conduit::Metadata,
-    pub asset: bool,
+    pub columns: Vec<conduit::Metadata>,
 }
 
 impl PolarsWorld {
@@ -196,15 +189,6 @@ impl TryFrom<PolarsWorld> for World<HostStore> {
     }
 }
 
-impl<W: WorldStore> PartialEq for Column<W>
-where
-    W::Column: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.buffer == other.buffer
-    }
-}
-
 impl PartialEq for Table<HostStore> {
     fn eq(&self, other: &Self) -> bool {
         self.columns == other.columns && self.entity_buffer == other.entity_buffer
@@ -216,26 +200,18 @@ impl Table<HostStore> {
         let entity_id_string = EntityId::component_id().0.to_string();
         let columns = metadata
             .columns
-            .iter()
+            .into_iter()
             .zip(df.iter().filter(|s| s.name() != entity_id_string))
             .map(|(metadata, series)| {
-                let asset = metadata.asset;
-                let buffer = HostColumn::from_series(
-                    series,
-                    metadata.metadata.component_type.clone(),
-                    asset,
-                )?;
-                let column = Column {
-                    buffer,
-                    metadata: metadata.metadata.clone(),
-                };
-                Ok((metadata.metadata.component_id, column))
+                let component_id = metadata.component_id;
+                let column = HostColumn::from_series(series, metadata)?;
+                Ok((component_id, column))
             })
             .collect::<Result<_, Error>>()?;
         let column = df
             .column(&entity_id_string)
             .map_err(|_| Error::ComponentNotFound)?;
-        let entity_buffer = HostColumn::from_series(column, ComponentType::u64(), false)?;
+        let entity_buffer = HostColumn::from_series(column, HostColumn::entity_ids().metadata)?;
 
         Ok(Self {
             columns,
@@ -244,21 +220,13 @@ impl Table<HostStore> {
     }
 
     pub fn to_polars(&self) -> Result<(ArchetypeMetadata, DataFrame), Error> {
-        let columns = self
-            .columns
-            .values()
-            .map(|c| ColumnMetadata {
-                metadata: c.metadata.clone(),
-                asset: c.buffer.asset,
-            })
-            .collect();
+        let columns = self.columns.values().map(|c| c.metadata.clone()).collect();
         let metadata = ArchetypeMetadata { columns };
 
         Ok((
             metadata,
             self.columns
                 .values()
-                .map(|c| &c.buffer)
                 .chain(std::iter::once(&self.entity_buffer))
                 .map(HostColumn::to_series)
                 .collect::<Result<DataFrame, Error>>()?,
@@ -267,42 +235,28 @@ impl Table<HostStore> {
 }
 
 impl HostColumn {
-    pub fn from_series(
-        series: &Series,
-        component_type: ComponentType,
-        asset: bool,
-    ) -> Result<Self, Error> {
+    pub fn from_series(series: &Series, metadata: conduit::Metadata) -> Result<Self, Error> {
         let buf = series.to_bytes();
         let len = series.len();
-        let component_id: u64 = series
-            .name()
-            .parse()
-            .map_err(|_| Error::InvalidComponentId)?;
-        let component_id = ComponentId(component_id);
-        Ok(Self {
-            buf,
-            len,
-            component_id,
-            component_type,
-            asset,
-        })
+        Ok(Self { buf, len, metadata })
     }
 
     pub fn to_series(&self) -> Result<Series, Error> {
-        let array = match self.component_type.primitive_ty {
-            PrimitiveTy::F64 => tensor_array(&self.component_type, self.prim_array::<f64>()),
-            PrimitiveTy::F32 => tensor_array(&self.component_type, self.prim_array::<f32>()),
-            PrimitiveTy::U64 => tensor_array(&self.component_type, self.prim_array::<u64>()),
-            PrimitiveTy::U32 => tensor_array(&self.component_type, self.prim_array::<u32>()),
-            PrimitiveTy::U16 => tensor_array(&self.component_type, self.prim_array::<u16>()),
-            PrimitiveTy::U8 => tensor_array(&self.component_type, self.prim_array::<u8>()),
-            PrimitiveTy::I64 => tensor_array(&self.component_type, self.prim_array::<i64>()),
-            PrimitiveTy::I32 => tensor_array(&self.component_type, self.prim_array::<i32>()),
-            PrimitiveTy::I16 => tensor_array(&self.component_type, self.prim_array::<i16>()),
-            PrimitiveTy::I8 => tensor_array(&self.component_type, self.prim_array::<i8>()),
+        let component_type = &self.metadata.component_type;
+        let array = match component_type.primitive_ty {
+            PrimitiveTy::F64 => tensor_array(component_type, self.prim_array::<f64>()),
+            PrimitiveTy::F32 => tensor_array(component_type, self.prim_array::<f32>()),
+            PrimitiveTy::U64 => tensor_array(component_type, self.prim_array::<u64>()),
+            PrimitiveTy::U32 => tensor_array(component_type, self.prim_array::<u32>()),
+            PrimitiveTy::U16 => tensor_array(component_type, self.prim_array::<u16>()),
+            PrimitiveTy::U8 => tensor_array(component_type, self.prim_array::<u8>()),
+            PrimitiveTy::I64 => tensor_array(component_type, self.prim_array::<i64>()),
+            PrimitiveTy::I32 => tensor_array(component_type, self.prim_array::<i32>()),
+            PrimitiveTy::I16 => tensor_array(component_type, self.prim_array::<i16>()),
+            PrimitiveTy::I8 => tensor_array(component_type, self.prim_array::<i8>()),
             PrimitiveTy::Bool => todo!(),
         };
-        Series::from_arrow(&self.component_id.0.to_string(), array).map_err(Error::from)
+        Series::from_arrow(&self.metadata.component_id.0.to_string(), array).map_err(Error::from)
     }
 
     fn prim_array<T: polars_arrow::types::NativeType + nox::xla::ArrayElement>(
