@@ -4,7 +4,7 @@ use crate::{api, error};
 use atc_entity::{batches, mc_run};
 use elodin_types::{api::*, Run, RUN_TOPIC};
 use futures::StreamExt;
-use sea_orm::prelude::*;
+use sea_orm::{prelude::*, QueryOrder};
 
 impl api::Api {
     pub async fn list_monte_carlo_runs(
@@ -132,6 +132,7 @@ impl api::Api {
             .ok_or(error::Error::NotFound)?;
         let batches = atc_entity::Batches::find()
             .filter(batches::Column::RunId.eq(id))
+            .order_by_asc(batches::Column::BatchNumber)
             .all(&self.db)
             .await?;
         let batches = batches.into_iter().map(|b| b.into()).collect();
