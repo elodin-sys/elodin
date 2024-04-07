@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
 use conduit::bevy_sync::SyncPlugin;
@@ -20,6 +21,10 @@ fn main() {
             subscriptions: Subscriptions::default(),
         })
         .add_systems(PostStartup, hide_loader.pipe(handle_error))
+        .add_systems(
+            PostStartup,
+            show_canvas.pipe(handle_error).after(hide_loader),
+        )
         .run();
 }
 
@@ -31,16 +36,23 @@ fn hide_loader() -> anyhow::Result<()> {
     let spinner = document
         .get_element_by_id("editor-spinner")
         .ok_or_else(|| anyhow!("missing editor spinner div"))?;
-    let canvas = document
-        .get_element_by_id("editor")
-        .ok_or_else(|| anyhow!("missing editor canvas div"))?;
     spinner
         .set_attribute("style", "display: none;")
         .map_err(|e| anyhow!("set attr err {:?}", e))?;
+    Ok(())
+}
+
+fn show_canvas() -> anyhow::Result<()> {
+    let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| anyhow!("document missing"))?;
+    let canvas = document
+        .get_element_by_id("editor")
+        .ok_or_else(|| anyhow!("missing editor canvas div"))?;
     canvas
         .set_attribute("style", "display: block; width: 100%; height: 100%;")
-        .map_err(|e| anyhow!("set attr err {:?}", e))?;
-    Ok(())
+        .map_err(|e| anyhow!("set attr err {:?}", e))
 }
 
 fn handle_error(In(result): In<anyhow::Result<()>>) {

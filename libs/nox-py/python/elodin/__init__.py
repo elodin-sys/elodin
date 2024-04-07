@@ -458,3 +458,17 @@ class World(WorldBuilder):
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
+
+    def serve(
+        self,
+        system: System,
+        addr: Optional[str] = None,
+        time_step: Optional[float] = None,
+        client: Optional[Client] = None,
+    ):
+        super().serve(system, false, addr, time_step, client)
+
+    def view(self, system: System, time_step: Optional[float] = None, client: Optional[Client] = None) -> Any:
+        from IPython.display import IFrame, display
+        addr = super().serve(system, True, time_step, client, None)
+        return IFrame(f"http://{addr}", width=960, height=540)
