@@ -7,3 +7,4 @@ build:
   wasm-bindgen --out-dir {{out_dir}} --target web {{target_dir}}/editor-web.wasm
   mkdir -p ../../services/dashboard/priv/static/assets/wasm/
   cp {{out_dir}}/* ../../services/dashboard/priv/static/assets/wasm/
+  cp {{out_dir}}/* ../../libs/nox-py/assets
