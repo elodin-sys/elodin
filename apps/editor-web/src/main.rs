@@ -1,8 +1,12 @@
 use anyhow::anyhow;
+use bevy::app::Update;
+use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::schedule::IntoSystemConfigs;
+use bevy::ecs::system::Res;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
 use conduit::bevy_sync::SyncPlugin;
+use elodin_editor::ui::FullscreenState;
 use elodin_editor::EditorPlugin;
 use tracing::error;
 
@@ -25,6 +29,7 @@ fn main() {
             PostStartup,
             show_canvas.pipe(handle_error).after(hide_loader),
         )
+        .add_systems(Update, fullscreen.pipe(handle_error))
         .run();
 }
 
@@ -53,6 +58,44 @@ fn show_canvas() -> anyhow::Result<()> {
     canvas
         .set_attribute("style", "display: block; width: 100%; height: 100%;")
         .map_err(|e| anyhow!("set attr err {:?}", e))
+}
+
+fn fullscreen(fullscreen: Res<FullscreenState>) -> anyhow::Result<()> {
+    if !fullscreen.is_changed() {
+        return Ok(());
+    }
+    let window = web_sys::window().ok_or_else(|| anyhow!("window missing"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| anyhow!("document missing"))?;
+    let canvas = document
+        .get_element_by_id("editor")
+        .ok_or_else(|| anyhow!("missing editor canvas div"))?;
+    let container = document
+        .get_element_by_id("editor-container")
+        .ok_or_else(|| anyhow!("missing editor container div"))?;
+
+    if fullscreen.0 {
+        canvas
+            .set_attribute(
+                "style",
+                "position: fixed; display: block; width: 100%; height: 100%; top: 0; left: 0; z-index: 1000;",
+            )
+            .map_err(|e| anyhow!("set attr err {:?}", e))
+    } else {
+        canvas
+            .set_attribute(
+                "style",
+                "display: block; width: 100%; height: 100%; position: relative; top: 0; left: 0;",
+            )
+            .map_err(|e| anyhow!("set attr err {:?}", e))?;
+        canvas
+            .set_attribute("width", &container.scroll_width().to_string())
+            .map_err(|e| anyhow!("set attr err {:?}", e))?;
+        canvas
+            .set_attribute("height", &container.scroll_height().to_string())
+            .map_err(|e| anyhow!("set attr err {:?}", e))
+    }
 }
 
 fn handle_error(In(result): In<anyhow::Result<()>>) {

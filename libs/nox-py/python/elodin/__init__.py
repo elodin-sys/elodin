@@ -466,7 +466,7 @@ class World(WorldBuilder):
         time_step: Optional[float] = None,
         client: Optional[Client] = None,
     ):
-        super().serve(system, false, addr, time_step, client)
+        super().serve(system, False, time_step, client, addr)
 
     def view(self, system: System, time_step: Optional[float] = None, client: Optional[Client] = None) -> Any:
         from IPython.display import IFrame, display

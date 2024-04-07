@@ -146,6 +146,7 @@ impl Plugin for UiPlugin {
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
             .init_resource::<SidebarState>()
+            .init_resource::<FullscreenState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
             .add_systems(Update, render_timeline.after(render))
@@ -322,6 +323,9 @@ impl Default for SidebarState {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct FullscreenState(pub bool);
+
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     mut contexts: EguiContexts,
@@ -339,6 +343,7 @@ pub fn render(
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
     mut column_payload_writer: EventWriter<ColumnPayloadMsg>,
     mut sidebar_state: ResMut<SidebarState>,
+    mut fullscreen_state: ResMut<FullscreenState>,
 ) {
     let Ok(window) = window.get_single() else {
         return;
@@ -351,6 +356,8 @@ pub fn render(
     let icon_search = contexts.add_image(images.icon_search.clone_weak());
     let icon_side_bar_right = contexts.add_image(images.icon_side_bar_right.clone_weak());
     let icon_side_bar_left = contexts.add_image(images.icon_side_bar_left.clone_weak());
+    let icon_fullscreen = contexts.add_image(images.icon_fullscreen.clone_weak());
+    let icon_exit_fullscreen = contexts.add_image(images.icon_exit_fullscreen.clone_weak());
     let inspector_icons = inspector::InspectorIcons {
         chart: contexts.add_image(images.icon_chart.clone_weak()),
         add: contexts.add_image(images.icon_add.clone_weak()),
@@ -373,16 +380,30 @@ pub fn render(
                 stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
                 ..Default::default()
             }
-            .inner_margin(
-                Margin::same(titlebar_margin)
-                    .left(traffic_light_offset + 16.0)
-                    .right(16.0),
-            ),
+            .inner_margin(Margin::same(titlebar_margin).left(16.0).right(16.0)),
         )
         .resizable(false)
         .show(contexts.ctx_mut(), |ui| {
             ui.set_height(titlebar_height - titlebar_margin * 2.0);
             ui.horizontal_centered(|ui| {
+                ui.add_space(traffic_light_offset);
+                if cfg!(target_family = "wasm") {
+                    if ui
+                        .add(
+                            EImageButton::new(if fullscreen_state.bypass_change_detection().0 {
+                                icon_exit_fullscreen
+                            } else {
+                                icon_fullscreen
+                            })
+                            .scale(titlebar_scale, titlebar_scale)
+                            .bg_color(Color32::TRANSPARENT),
+                        )
+                        .clicked()
+                    {
+                        fullscreen_state.0 = !fullscreen_state.0;
+                    }
+                    ui.add_space(8.0);
+                }
                 if ui
                     .add(
                         EImageButton::new(icon_side_bar_left)
