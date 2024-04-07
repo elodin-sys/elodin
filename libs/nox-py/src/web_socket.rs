@@ -17,7 +17,7 @@ pub fn spawn_ws_server(
     socket_addr: std::net::SocketAddr,
     exec: WorldExec,
     client: &nox::Client,
-    cancel_token: tokio_util::sync::CancellationToken,
+    cancel_token: Option<tokio_util::sync::CancellationToken>,
     check_canceled: impl Fn() -> bool,
     addr_tx: flume::Sender<SocketAddr>,
 ) -> Result<(), Error> {
@@ -43,7 +43,13 @@ pub fn spawn_ws_server(
             let listener = tokio::net::TcpListener::bind(&socket_addr).await.unwrap();
             let _ = addr_tx.send(listener.local_addr().unwrap());
             axum::serve(listener, app.into_make_service())
-                .with_graceful_shutdown(async move { axum_token.cancelled().await })
+                .with_graceful_shutdown(async move {
+                    if let Some(axum_token) = axum_token {
+                        axum_token.cancelled().await
+                    } else {
+                        std::future::pending().await
+                    }
+                })
                 .await
         })
         .unwrap();
@@ -64,7 +70,7 @@ pub fn spawn_ws_server(
 #[derive(Clone)]
 pub struct WSContext {
     socket: flume::Sender<MsgPair>,
-    cancel_token: tokio_util::sync::CancellationToken,
+    cancel_token: Option<tokio_util::sync::CancellationToken>,
 }
 
 async fn sim_socket(ws: WebSocketUpgrade, State(context): State<WSContext>) -> impl IntoResponse {
@@ -87,7 +93,9 @@ async fn sim_socket(ws: WebSocketUpgrade, State(context): State<WSContext>) -> i
         let ws_tx = Box::pin(ws_tx);
 
         if let Err(_) = handle_stream_sink(context.socket.clone(), ws_tx, ws_rx).await {
-            context.cancel_token.cancel();
+            if let Some(cancel_token) = context.cancel_token.as_ref() {
+                cancel_token.cancel();
+            }
         }
     })
 }

@@ -436,7 +436,7 @@ w.spawn(
 ).name("Earth")
 
 
-exec = w.serve(
+exec = w.run(
     system=el.six_dof(
         1 / 120.0,
         sensors
