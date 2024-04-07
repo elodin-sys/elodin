@@ -18,6 +18,8 @@ pub struct Images {
     pub icon_subtract: Handle<Image>,
     pub icon_close: Handle<Image>,
     pub icon_chart: Handle<Image>,
+    pub icon_side_bar_left: Handle<Image>,
+    pub icon_side_bar_right: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -41,6 +43,10 @@ impl FromWorld for Images {
             icon_subtract: asset_server.load("embedded://elodin_editor/assets/icons/subtract.png"),
             icon_close: asset_server.load("embedded://elodin_editor/assets/icons/close.png"),
             icon_chart: asset_server.load("embedded://elodin_editor/assets/icons/chart.png"),
+            icon_side_bar_left: asset_server
+                .load("embedded://elodin_editor/assets/icons/left-side-bar.png"),
+            icon_side_bar_right: asset_server
+                .load("embedded://elodin_editor/assets/icons/right-side-bar.png"),
         }
     }
 }

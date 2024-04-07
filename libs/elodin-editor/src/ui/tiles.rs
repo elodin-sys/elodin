@@ -306,7 +306,8 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
                         TabState::Active | TabState::Inactive => colors::PRIMARY_CREAME,
                         TabState::Selected => colors::BLACK_BLACK_600,
                     })
-                    .bg_color(colors::TRANSPARENT),
+                    .bg_color(colors::TRANSPARENT)
+                    .hovered_bg_color(colors::TRANSPARENT),
             );
             if close_response.clicked() {
                 self.tab_diffs.push(TabDiff::Delete(tile_id));
