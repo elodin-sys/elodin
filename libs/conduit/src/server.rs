@@ -1,8 +1,11 @@
-use bytes::Bytes;
+use std::io;
+
+use bytes::{Bytes, BytesMut};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{info_span, Instrument};
 
 use crate::{
-    client::{Msg, MsgPair, ReaderClient, WriterClient},
+    client::{AsyncClient, Msg, MsgPair},
     ControlMsg, Error, Packet, Payload,
 };
 
@@ -39,6 +42,19 @@ pub async fn handle_socket(
     tx_socket: impl tokio::io::AsyncWrite + Unpin,
     rx_socket: impl tokio::io::AsyncRead + Unpin,
 ) -> Result<(), crate::Error> {
+    handle_stream_sink(
+        incoming_tx,
+        FramedWrite::new(tx_socket, LengthDelimitedCodec::new()),
+        FramedRead::new(rx_socket, LengthDelimitedCodec::new()),
+    )
+    .await
+}
+
+pub async fn handle_stream_sink(
+    incoming_tx: flume::Sender<MsgPair>,
+    tx_socket: impl futures::Sink<Bytes, Error = io::Error> + Unpin,
+    rx_socket: impl futures::stream::Stream<Item = Result<BytesMut, io::Error>> + Unpin,
+) -> Result<(), crate::Error> {
     let (outgoing_tx, outgoing_rx) = flume::unbounded::<Packet<Payload<Bytes>>>();
 
     let init_msg = Msg::<Bytes>::Control(ControlMsg::Connect);
@@ -49,7 +65,7 @@ pub async fn handle_socket(
     incoming_tx.send_async(init_msg_pair).await?;
 
     let rx = async move {
-        let mut rx_client = ReaderClient::from_read_half(rx_socket);
+        let mut rx_client = AsyncClient::new(rx_socket);
         loop {
             let msg = match rx_client.recv().await {
                 Ok(m) => m,
@@ -69,7 +85,7 @@ pub async fn handle_socket(
         }
     };
     let tx = async move {
-        let mut tx_client = WriterClient::from_write_half(tx_socket);
+        let mut tx_client = AsyncClient::new(tx_socket);
         while let Ok(packet) = outgoing_rx.recv_async().await {
             tx_client.send(packet).await?;
         }
