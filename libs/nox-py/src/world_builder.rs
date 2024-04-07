@@ -185,19 +185,18 @@ impl WorldBuilder {
                     addr.parse().unwrap(),
                     exec,
                     &client,
-                    cancel_token.clone(),
+                    Some(cancel_token.clone()),
                     || cancel_token.is_cancelled(),
                     tx,
                 )
                 .unwrap();
             });
         } else {
-            let cancel_token = CancellationToken::new();
             spawn_ws_server(
                 addr.parse().unwrap(),
                 exec,
                 &client,
-                cancel_token,
+                None,
                 || py.check_signals().is_err(),
                 tx,
             )?;

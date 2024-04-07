@@ -46,9 +46,9 @@ class WorldBuilder:
         self,
         system: Any,
         daemon: bool = False,
-        addr: Optional[str] = None,
         time_step: Optional[float] = None,
         client: Optional[Client] = None,
+        addr: Optional[str] = None,
     ): ...
 
     def build(self, sys: Any, time_step: Optional[float] = None) -> Exec: ...
