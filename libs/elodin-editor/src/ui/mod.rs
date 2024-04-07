@@ -21,7 +21,10 @@ use egui_tiles::TileId;
 
 use crate::MainCamera;
 
-use self::widgets::{hierarchy, inspector, modal::modal_graph, timeline};
+use self::{
+    utils::MarginSides,
+    widgets::{button::EImageButton, hierarchy, inspector, modal::modal_graph, timeline},
+};
 
 pub mod colors;
 pub mod images;
@@ -142,6 +145,7 @@ impl Plugin for UiPlugin {
             .init_resource::<GraphsState>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
+            .init_resource::<SidebarState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render)
             .add_systems(Update, render_timeline.after(render))
@@ -303,6 +307,21 @@ impl GraphsState {
     }
 }
 
+#[derive(Resource)]
+pub struct SidebarState {
+    pub left_open: bool,
+    pub right_open: bool,
+}
+
+impl Default for SidebarState {
+    fn default() -> Self {
+        Self {
+            left_open: true,
+            right_open: true,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     mut contexts: EguiContexts,
@@ -319,6 +338,7 @@ pub fn render(
     mut inspector_anchor: ResMut<InspectorAnchor>,
     entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
     mut column_payload_writer: EventWriter<ColumnPayloadMsg>,
+    mut sidebar_state: ResMut<SidebarState>,
 ) {
     let Ok(window) = window.get_single() else {
         return;
@@ -329,21 +349,65 @@ pub fn render(
     theme::set_theme(contexts.ctx_mut());
 
     let icon_search = contexts.add_image(images.icon_search.clone_weak());
+    let icon_side_bar_right = contexts.add_image(images.icon_side_bar_right.clone_weak());
+    let icon_side_bar_left = contexts.add_image(images.icon_side_bar_left.clone_weak());
     let inspector_icons = inspector::InspectorIcons {
         chart: contexts.add_image(images.icon_chart.clone_weak()),
         add: contexts.add_image(images.icon_add.clone_weak()),
         subtract: contexts.add_image(images.icon_subtract.clone_weak()),
     };
 
-    #[cfg(target_os = "macos")]
+    let titlebar_height = if cfg!(target_os = "macos") {
+        52.0
+    } else {
+        16.0
+    };
+    let traffic_light_offset = if cfg!(target_os = "macos") { 72.0 } else { 0.0 };
+    let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
+    let titlebar_margin = if cfg!(target_os = "macos") { 8.0 } else { 4.0 };
+
     egui::TopBottomPanel::top("titlebar")
-        .frame(egui::Frame {
-            fill: colors::PRIMARY_ONYX,
-            stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
-            ..Default::default()
-        })
+        .frame(
+            egui::Frame {
+                fill: colors::PRIMARY_ONYX,
+                stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
+                ..Default::default()
+            }
+            .inner_margin(
+                Margin::same(titlebar_margin)
+                    .left(traffic_light_offset + 16.0)
+                    .right(16.0),
+            ),
+        )
         .resizable(false)
-        .show(contexts.ctx_mut(), |ui| ui.set_height(48.0));
+        .show(contexts.ctx_mut(), |ui| {
+            ui.set_height(titlebar_height - titlebar_margin * 2.0);
+            ui.horizontal_centered(|ui| {
+                if ui
+                    .add(
+                        EImageButton::new(icon_side_bar_left)
+                            .scale(titlebar_scale, titlebar_scale)
+                            .bg_color(Color32::TRANSPARENT),
+                    )
+                    .clicked()
+                {
+                    sidebar_state.left_open = !sidebar_state.left_open;
+                };
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            EImageButton::new(icon_side_bar_right)
+                                .scale(titlebar_scale, titlebar_scale)
+                                .bg_color(Color32::TRANSPARENT),
+                        )
+                        .clicked()
+                    {
+                        sidebar_state.right_open = !sidebar_state.right_open;
+                    };
+                });
+            });
+        });
 
     if width * 0.75 > height {
         egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
@@ -357,7 +421,7 @@ pub fn render(
             .min_width(width * 0.15)
             .default_width(width * 0.20)
             .max_width(width * 0.35)
-            .show(contexts.ctx_mut(), |ui| {
+            .show_animated(contexts.ctx_mut(), sidebar_state.left_open, |ui| {
                 let search_text = entity_filter.0.clone();
 
                 hierarchy::header(ui, entity_filter, icon_search, false);
@@ -375,7 +439,7 @@ pub fn render(
             .min_width(width * 0.15)
             .default_width(width * 0.25)
             .max_width(width * 0.35)
-            .show(contexts.ctx_mut(), |ui| {
+            .show_animated(contexts.ctx_mut(), sidebar_state.right_open, |ui| {
                 inspector_anchor.0 = Some(ui.max_rect().min);
                 inspector::inspector(
                     ui,
@@ -409,7 +473,7 @@ pub fn render(
                     .min_width(width * 0.25)
                     .default_width(width * 0.4)
                     .max_width(width * 0.75)
-                    .show_inside(ui, |ui| {
+                    .show_animated_inside(ui, sidebar_state.left_open, |ui| {
                         let search_text = entity_filter.0.clone();
 
                         hierarchy::header(ui, entity_filter, icon_search, true);
@@ -418,15 +482,15 @@ pub fn render(
 
                         ui.allocate_space(ui.available_size());
                     });
-
+                let outline_width = outline.map(|o| o.response.rect.width()).unwrap_or(0.0);
                 egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
                     .resizable(false)
                     .frame(egui::Frame {
                         fill: colors::PRIMARY_SMOKE,
                         ..Default::default()
                     })
-                    .exact_width(width - outline.response.rect.width())
-                    .show_inside(ui, |ui| {
+                    .exact_width(width - outline_width)
+                    .show_animated_inside(ui, sidebar_state.right_open, |ui| {
                         inspector_anchor.0 = None;
                         inspector::inspector(
                             ui,

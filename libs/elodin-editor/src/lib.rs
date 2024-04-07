@@ -56,6 +56,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/subtract.png");
         embedded_asset!(app, "assets/icons/close.png");
         embedded_asset!(app, "assets/icons/chart.png");
+        embedded_asset!(app, "assets/icons/left-side-bar.png");
+        embedded_asset!(app, "assets/icons/right-side-bar.png");
     }
 }
 

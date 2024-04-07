@@ -1,4 +1,4 @@
-use bevy_egui::egui;
+use bevy_egui::egui::{self, Stroke};
 
 use crate::ui::{colors, utils::Shrink4};
 
@@ -7,7 +7,8 @@ pub struct EImageButton {
     image_id: egui::TextureId,
     image_tint: egui::Color32,
     image_tint_click: egui::Color32,
-    background_color: egui::Color32,
+    bg_color: egui::Color32,
+    hovered_bg_color: egui::Color32,
     /// Multiplier for `ui.spacing().interact_size.y`
     width: f32,
     /// Multiplier for `ui.spacing().interact_size.y`
@@ -20,9 +21,10 @@ impl EImageButton {
             image_id,
             image_tint: colors::WHITE,
             image_tint_click: colors::PRIMARY_ONYX_5,
-            background_color: colors::PRIMARY_SMOKE,
+            bg_color: colors::PRIMARY_SMOKE,
             width: 1.0,
             height: 1.0,
+            hovered_bg_color: colors::PRIMARY_ONYX_9,
         }
     }
 
@@ -32,8 +34,13 @@ impl EImageButton {
         self
     }
 
-    pub fn bg_color(mut self, background_color: egui::Color32) -> Self {
-        self.background_color = background_color;
+    pub fn bg_color(mut self, bg_color: egui::Color32) -> Self {
+        self.bg_color = bg_color;
+        self
+    }
+
+    pub fn hovered_bg_color(mut self, bg_color: egui::Color32) -> Self {
+        self.hovered_bg_color = bg_color;
         self
     }
 
@@ -59,13 +66,15 @@ impl EImageButton {
 
             let visuals = ui.style().interact(&response);
 
+            let bg_color = if response.hovered() || response.clicked() {
+                self.hovered_bg_color
+            } else {
+                self.bg_color
+            };
+
             // Background
-            ui.painter().rect(
-                rect,
-                visuals.rounding,
-                self.background_color,
-                visuals.bg_stroke,
-            );
+            ui.painter()
+                .rect(rect, egui::Rounding::same(3.0), bg_color, Stroke::NONE);
 
             // Icon
             let default_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
