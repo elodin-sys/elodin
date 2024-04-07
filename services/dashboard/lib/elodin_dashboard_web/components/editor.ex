@@ -16,7 +16,7 @@ defmodule ElodinDashboardWeb.EditorComponents do
     <div
       phx-hook="EditorWasmHook"
       id="editor-container"
-      class="bg-black-secondary h-full flex items-center justify-center"
+      class="bg-black-secondary h-full w-full flex items-center justify-center"
       data-ws-url={@url}
       phx-update="ignore"
     >

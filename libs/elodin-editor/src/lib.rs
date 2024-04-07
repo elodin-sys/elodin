@@ -35,6 +35,8 @@ use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerA
 use traces::TracesPlugin;
 use ui::{utils, EntityPair, HoveredEntity};
 
+use crate::plugins::editor_cam_touch;
+
 mod plugins;
 pub(crate) mod traces;
 pub mod ui;
@@ -58,6 +60,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/chart.png");
         embedded_asset!(app, "assets/icons/left-side-bar.png");
         embedded_asset!(app, "assets/icons/right-side-bar.png");
+        embedded_asset!(app, "assets/icons/fullscreen.png");
+        embedded_asset!(app, "assets/icons/exit-fullscreen.png");
     }
 }
 
@@ -80,6 +84,8 @@ impl Plugin for EditorPlugin {
                                 min_height: 400.,
                                 ..Default::default()
                             },
+
+                            prevent_default_event_handling: true,
                             ..default()
                         }),
                         ..default()
@@ -116,6 +122,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(TweeningPlugin)
+            .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_systems(Startup, setup_floating_origin)
             //.add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
