@@ -42,6 +42,15 @@ class WorldBuilder:
         time_step: Optional[float] = None,
         client: Optional[Client] = None,
     ): ...
+    def serve(
+        self,
+        system: Any,
+        daemon: bool = False,
+        addr: Optional[str] = None,
+        time_step: Optional[float] = None,
+        client: Optional[Client] = None,
+    ): ...
+
     def build(self, sys: Any, time_step: Optional[float] = None) -> Exec: ...
 
 class EntityId:

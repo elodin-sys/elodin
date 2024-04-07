@@ -29,6 +29,9 @@ mod system;
 mod well_known;
 mod world_builder;
 
+#[cfg(feature = "server")]
+mod web_socket;
+
 pub use archetype::*;
 pub use asset::*;
 pub use component::*;

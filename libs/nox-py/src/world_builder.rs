@@ -147,6 +147,64 @@ impl WorldBuilder {
         Ok(Handle { inner })
     }
 
+    #[cfg(feature = "server")]
+    pub fn serve(
+        &mut self,
+        py: Python<'_>,
+        sys: PyObject,
+        daemon: Option<bool>,
+        time_step: Option<f64>,
+        client: Option<&Client>,
+        addr: Option<&str>,
+    ) -> Result<String, Error> {
+        use self::web_socket::spawn_ws_server;
+        use tokio_util::sync::CancellationToken;
+
+        let addr = addr.unwrap_or("127.0.0.1:0").to_string();
+        let daemon = daemon.unwrap_or(false);
+        let _ = tracing_subscriber::fmt::fmt()
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive("info".parse().expect("invalid filter"))
+                    .from_env_lossy(),
+            )
+            .try_init();
+
+        let exec = self.build(py, sys, time_step)?.exec;
+
+        let client = match client {
+            Some(c) => c.client.clone(),
+            None => nox::Client::cpu()?,
+        };
+
+        let (tx, rx) = flume::unbounded();
+        if daemon {
+            let cancel_token = CancellationToken::new();
+            std::thread::spawn(move || {
+                spawn_ws_server(
+                    addr.parse().unwrap(),
+                    exec,
+                    &client,
+                    cancel_token.clone(),
+                    || cancel_token.is_cancelled(),
+                    tx,
+                )
+                .unwrap();
+            });
+        } else {
+            let cancel_token = CancellationToken::new();
+            spawn_ws_server(
+                addr.parse().unwrap(),
+                exec,
+                &client,
+                cancel_token,
+                || py.check_signals().is_err(),
+                tx,
+            )?;
+        }
+        Ok(rx.recv().unwrap().to_string())
+    }
+
     pub fn run(
         &mut self,
         py: Python<'_>,
