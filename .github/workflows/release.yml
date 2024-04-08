@@ -193,12 +193,74 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+
+  linux-wheel:
+    runs-on: "ubuntu-20.04"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl libssl-dev \
+            protobuf-compiler \
+            g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 \
+            libwayland-dev libxkbcommon-dev libopenblas-dev
+      - name: Install Python dependencies
+        run: |
+          pip install patchelf jax jaxlib typing_extensions
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist -m libs/nox-py/Cargo.toml
+          manylinux: auto
+          container: off
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-linux-wheel
+          path: dist
+
+  macos-wheel:
+    runs-on: "macos-latest"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Python dependencies
+        run: |
+          pip install jax jaxlib typing_extensions
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: aarch64
+          args: --release --out dist -m libs/nox-py/Cargo.toml
+          container: off
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-macos-wheel
+          path: dist
+
   # Determines if we should publish/announce
   host:
     needs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
+      - linux-wheel
+      - macos-wheel
     # Only run if we're "publishing", and only if local and global didn't fail (skipped is fine)
     if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
