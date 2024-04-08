@@ -85,6 +85,10 @@ impl SpatialTransform {
     fn shape(&self) -> PyObject {
         Python::with_gil(|py| PyTuple::new(py, [7]).into())
     }
+
+    fn __add__(&self, other: &SpatialTransform) -> Self {
+        (self.inner.clone() + other.inner.clone()).into()
+    }
 }
 
 #[pyclass]
