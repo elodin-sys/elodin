@@ -6,6 +6,8 @@ use nox_ecs::{
     nox::{self, ScalarExt},
     spawn_tcp_server, ArchetypeName, HostColumn, HostStore, SharedWorld, Table, World,
 };
+use pyo3::exceptions::PySystemExit;
+use pyo3::types::PyDict;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{collections::hash_map::Entry, path::PathBuf, time::Duration};
 
@@ -229,16 +231,13 @@ impl WorldBuilder {
             return Ok(None);
         }
 
-        let (args, path) = if let Ok(dir) = std::env::var("ELODIN_FORCE_BUILD_DIR") {
-            let dir = PathBuf::from(dir);
-            (Args::Build { dir }, PathBuf::new())
-        } else {
-            // skip `python3`
-            let mut args = std::env::args_os().skip(1);
-            let path = args.next().ok_or(Error::MissingArg("path".to_string()))?;
-            let path = PathBuf::from(path);
-            (Args::parse_from(args), path)
-        };
+        let args = py
+            .import("sys")?
+            .getattr("argv")?
+            .extract::<Vec<String>>()?;
+        let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
+        let path = PathBuf::from(path);
+        let args = Args::parse_from(args);
 
         match args {
             Args::Build { dir } => {
@@ -274,6 +273,30 @@ impl WorldBuilder {
                     let _ = SimSupervisor::spawn(path);
                     Ok(Some(addr.to_string()))
                 }
+            }
+            Args::Test {
+                batch_results,
+                json_report_file,
+            } => {
+                let locals = PyDict::new(py);
+                locals.set_item("path", path)?;
+                locals.set_item("json_report_file", json_report_file)?;
+                locals.set_item("batch_results", batch_results)?;
+                let py_code = "import pytest
+import sys
+args = [path, '--json-report', '--json-report-file', json_report_file]
+if batch_results:
+  args.extend(['--batch-results', batch_results])
+retcode = pytest.main(args)";
+                py.run(py_code, None, Some(locals))?;
+                let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
+                // exit code 1: tests ran but some failed
+                // exit code 5: no tests found
+                if retcode != 0 && retcode != 1 && retcode != 5 {
+                    let err = PySystemExit::new_err(retcode);
+                    return Err(Error::PyErr(err));
+                }
+                Ok(None)
             }
         }
     }
