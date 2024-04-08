@@ -63,7 +63,6 @@ impl Cli {
         if let Some(path) = &path {
             std::process::Command::new("python3")
                 .arg(path)
-                .arg("--")
                 .arg("run")
                 .arg("--watch")
                 .arg(addr.to_string())
