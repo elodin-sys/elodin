@@ -43,8 +43,8 @@ spec:
           mountPath: /etc/elodin
         resources:
           requests:
-            cpu: 0.5
-            memory: 500Mi
+            cpu: 1
+            memory: 1Gi
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

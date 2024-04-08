@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use anyhow::Context;
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
+use pyo3::exceptions::PySystemExit;
+use pyo3::types::PyDict;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -115,8 +117,13 @@ async fn build(code: String) -> anyhow::Result<String> {
     let start = Instant::now();
     let artifact_dir = tempfile::tempdir()?;
     tracing::debug!(dir = %artifact_dir.path().display(), "building artifacts");
-    std::env::set_var("ELODIN_FORCE_BUILD_DIR", artifact_dir.path());
-    pyo3::Python::with_gil(|py| py.run(&code, None, None)).context("python command failed")?;
+    let build_dir_str = artifact_dir.path().to_string_lossy().to_string();
+    let args = vec!["code.py", "build", "--dir", &build_dir_str];
+    pyo3::Python::with_gil(|py| {
+        py.import("sys")?.setattr("argv", args)?;
+        py.run(&code, None, None)
+    })
+    .context("python command failed")?;
     tracing::debug!(elapsed = ?start.elapsed(), "built artifacts");
 
     let file_name = format!("{}.tar", uuid::Uuid::now_v7());
@@ -133,36 +140,58 @@ async fn build(code: String) -> anyhow::Result<String> {
 
 async fn test(code: String, results_file: String) -> anyhow::Result<TestResp> {
     let tempdir = tempfile::tempdir()?;
-    let code_file = tempdir.path().join("test_code.py");
+    let hash = blake3::hash(code.as_bytes()).to_hex();
+    let code_file = std::env::temp_dir().join(format!("test_code_{}.py", hash));
     tracing::debug!(len = code.len(), file = %code_file.display(), "writing code to temp file");
-    std::fs::write(&code_file, code)?;
+    std::fs::write(&code_file, &code)?;
 
     let report = tempdir.path().join("report.json");
-
     let start = Instant::now();
-    let mut cmd = tokio::process::Command::new("pytest");
 
-    if !results_file.is_empty() {
+    let batch_results = if results_file.is_empty() {
+        None
+    } else {
         let results_file_path = std::env::temp_dir().join(&results_file);
         let results_file = std::fs::File::open(&results_file_path)?;
         let metadata = results_file.metadata()?;
         tracing::debug!(path = %results_file_path.display(), size = metadata.len(), "unpacking");
         let mut tar = tar::Archive::new(results_file);
         tar.unpack(tempdir.path())?;
-        let results = tempdir.path().join("results");
-        cmd.arg("--batch-results").arg(&results);
-    }
+        let results_path = tempdir.path().join("results");
+        Some(results_path)
+    };
 
-    let status = cmd
-        .arg(&code_file)
-        .arg("--json-report")
-        .arg("--json-report-file")
-        .arg(&report)
-        .spawn()?
-        .wait()
-        .await?;
+    let json_report_file = report.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        pyo3::Python::with_gil(|py| {
+            let locals = PyDict::new(py);
+            locals.set_item("path", code_file)?;
+            locals.set_item("json_report_file", json_report_file)?;
+            locals.set_item("batch_results", batch_results)?;
+            let py_code = "import pytest
+import sys
+args = [path, '--json-report', '--json-report-file', json_report_file]
+if batch_results:
+  args.extend(['--batch-results', batch_results])
+retcode = pytest.main(args)";
+            py.run(py_code, None, Some(locals))?;
+            let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
+            // exit code 1: tests ran but some failed
+            // exit code 5: no tests found
+            if retcode != 0 && retcode != 1 && retcode != 5 {
+                let err = PySystemExit::new_err(retcode);
+                return Err(err);
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    if let Err(err) = result {
+        tracing::warn!(?err, "failed to run pytest");
+    }
     let report = std::fs::read_to_string(report)?;
-    tracing::debug!(elapsed = ?start.elapsed(), status = ?status.code(), "tested results");
+    tracing::debug!(elapsed = ?start.elapsed(), "tested results");
 
     if !results_file.is_empty() {
         let results_file_path = std::env::temp_dir().join(&results_file);

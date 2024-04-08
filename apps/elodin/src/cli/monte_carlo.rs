@@ -160,7 +160,6 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
 
     let status = std::process::Command::new("python3")
         .arg(&file)
-        .arg("--")
         .arg("build")
         .arg("--dir")
         .arg(tmp_dir.path())

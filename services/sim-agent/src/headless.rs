@@ -106,7 +106,7 @@ impl Runner {
             let finish_time = chrono::Utc::now();
             let runtime = (finish_time - start_time).to_std().unwrap();
             let failed_count = failed.iter().filter(|b| *b).count();
-            tracing::info!(failed_count, ?runtime, "simulated batch");
+            tracing::info!(failed_count, ?runtime, "processed batch");
 
             let results_model = atc_entity::batches::ActiveModel {
                 run_id: sea_orm::Unchanged(run.id),

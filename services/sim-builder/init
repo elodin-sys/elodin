@@ -3,6 +3,7 @@
 mount -n -t proc none /proc
 mount -n -t sysfs none /sys
 mount -n -t ext4 -o nofail /dev/vdb /tmp
+export PYTHONPYCACHEPREFIX="/tmp/__pycache__"
 export RUST_LOG="sim_builder=debug,info"
 setsid /bin/sim-builder
 # setsid sh -c 'sh </dev/ttyS0 >/dev/ttyS0 2>&1'
