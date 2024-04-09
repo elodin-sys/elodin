@@ -257,6 +257,7 @@ class Panel:
         active: bool = False,
         pos: Union[List[float], jax.Array, None] = None,
         looking_at: Union[List[float], jax.Array, None] = None,
+        show_grid: bool = False,
     ) -> Panel: ...
 
 def six_dof(time_step: float, sys: Any = None) -> Any: ...

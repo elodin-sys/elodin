@@ -23,6 +23,7 @@ impl Panel {
         active: Option<bool>,
         pos: Option<PyArrayLike1<f32>>,
         looking_at: Option<PyArrayLike1<f32>>,
+        show_grid: Option<bool>,
     ) -> PyResult<Self> {
         let pos = if let Some(arr) = pos {
             let slice = arr.as_slice()?;
@@ -40,6 +41,7 @@ impl Panel {
             active: active.unwrap_or_default(),
             pos,
             track_rotation,
+            show_grid: show_grid.unwrap_or_default(),
             ..Default::default()
         };
         if let Some(pos) = looking_at {
