@@ -250,10 +250,12 @@ fn spawn_main_camera(
         .spawn((
             bevy_infinite_grid::InfiniteGridBundle {
                 settings: bevy_infinite_grid::InfiniteGridSettings {
-                    minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+                    minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.02),
                     major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
                     z_axis_color: Color::hex("#264FFF").unwrap(),
                     x_axis_color: Color::hex("#EE3A43").unwrap(),
+                    fadeout_distance: 50_000.0,
+                    scale: 0.1,
                     ..Default::default()
                 },
                 visibility: grid_visibility,
