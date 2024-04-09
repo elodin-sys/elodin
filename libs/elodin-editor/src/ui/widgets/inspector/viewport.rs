@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use bevy::{
     ecs::{
         entity::Entity,
@@ -6,9 +7,10 @@ use bevy::{
     },
     hierarchy::BuildChildren,
     math::{Mat3, Vec3},
-    render::camera::Projection,
+    render::{camera::Projection, view::Visibility},
 };
 use bevy_egui::egui::{self, Align};
+use bevy_infinite_grid::InfiniteGrid;
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{well_known::WorldPos, Component};
@@ -21,7 +23,7 @@ use crate::{
         widgets::label::ELabel,
         CameraQueryItem, EntityData,
     },
-    MainCamera,
+    GridHandle, MainCamera,
 };
 
 pub fn inspector(
@@ -30,6 +32,7 @@ pub fn inspector(
     mut cam: CameraQueryItem<'_>,
     commands: &mut Commands,
     entity_transform_query: &Query<&GridCell<i128>, Without<MainCamera>>,
+    grid_visibility: &mut Query<&mut Visibility, With<InfiniteGrid>>,
 ) {
     ui.add(
         ELabel::new("Viewport")
@@ -138,6 +141,29 @@ pub fn inspector(
                 {
                     persp.fov = fov.to_radians();
                 }
+            });
+    }
+
+    if let Some(&GridHandle { grid }) = cam.grid_handle {
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("SHOW GRID")
+                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        let mut visibility = grid_visibility.get_mut(grid).unwrap();
+                        let mut visible = *visibility == Visibility::Visible;
+                        ui.checkbox(&mut visible, "");
+                        if visible {
+                            *visibility = Visibility::Visible;
+                        } else {
+                            *visibility = Visibility::Hidden;
+                        }
+                    });
+                });
             });
     }
 }

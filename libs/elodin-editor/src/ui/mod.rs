@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use bevy::ecs::system::SystemParam;
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::query::QueryData,
@@ -10,6 +11,7 @@ use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
     EguiContexts,
 };
+use bevy_infinite_grid::InfiniteGrid;
 use big_space::GridCell;
 use conduit::{
     bevy::{ColumnPayloadMsg, ComponentValueMap, MaxTick, Received, Tick, TimeStep},
@@ -19,7 +21,7 @@ use conduit::{
 };
 use egui_tiles::TileId;
 
-use crate::MainCamera;
+use crate::{GridHandle, MainCamera};
 
 use self::{
     utils::MarginSides,
@@ -130,6 +132,7 @@ pub struct CameraQuery {
     global_transform: &'static mut GlobalTransform,
     grid_cell: &'static mut GridCell<i128>,
     parent: Option<&'static Parent>,
+    grid_handle: Option<&'static GridHandle>,
     no_propagate_rot: Option<&'static big_space::propagation::NoPropagateRot>,
 }
 
@@ -326,25 +329,47 @@ impl Default for SidebarState {
 #[derive(Resource, Default)]
 pub struct FullscreenState(pub bool);
 
-#[allow(clippy::too_many_arguments)]
-pub fn render(
-    mut contexts: EguiContexts,
-    entity_filter: ResMut<EntityFilter>,
-    mut selected_object: ResMut<SelectedObject>,
-    mut graphs_state: ResMut<GraphsState>,
-    mut tile_state: ResMut<tiles::TileState>,
-    mut entities: Query<EntityData>,
-    window: Query<&Window>,
-    images: Local<images::Images>,
-    metadata_store: Res<MetadataStore>,
-    mut camera_query: Query<CameraQuery, With<MainCamera>>,
-    mut commands: Commands,
-    mut inspector_anchor: ResMut<InspectorAnchor>,
-    entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
-    mut column_payload_writer: EventWriter<ColumnPayloadMsg>,
-    mut sidebar_state: ResMut<SidebarState>,
-    mut fullscreen_state: ResMut<FullscreenState>,
-) {
+#[derive(SystemParam)]
+pub struct RenderArgs<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    entity_filter: ResMut<'w, EntityFilter>,
+    selected_object: ResMut<'w, SelectedObject>,
+    graphs_state: ResMut<'w, GraphsState>,
+    tile_state: ResMut<'w, tiles::TileState>,
+    entities: Query<'w, 's, EntityData<'static>>,
+    window: Query<'w, 's, &'static Window>,
+    images: Local<'s, images::Images>,
+    metadata_store: Res<'w, MetadataStore>,
+    camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
+    commands: Commands<'w, 's>,
+    inspector_anchor: ResMut<'w, InspectorAnchor>,
+    entity_transform_query: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
+    column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
+    sidebar_state: ResMut<'w, SidebarState>,
+    fullscreen_state: ResMut<'w, FullscreenState>,
+    grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
+}
+
+pub fn render(args: RenderArgs) {
+    let RenderArgs {
+        mut contexts,
+        entity_filter,
+        mut selected_object,
+        mut graphs_state,
+        mut tile_state,
+        mut entities,
+        window,
+        images,
+        metadata_store,
+        mut camera_query,
+        mut commands,
+        mut inspector_anchor,
+        entity_transform_query,
+        mut column_payload_writer,
+        mut sidebar_state,
+        mut fullscreen_state,
+        mut grid_visibility,
+    } = args;
     let Ok(window) = window.get_single() else {
         return;
     };
@@ -474,6 +499,7 @@ pub fn render(
                     &mut tile_state,
                     inspector_icons,
                     &mut column_payload_writer,
+                    &mut grid_visibility,
                 );
             });
     } else {
@@ -525,6 +551,7 @@ pub fn render(
                             &mut tile_state,
                             inspector_icons,
                             &mut column_payload_writer,
+                            &mut grid_visibility,
                         );
                     });
             });

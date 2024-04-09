@@ -28,7 +28,7 @@ use bevy_tweening::TweeningPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
     bevy::{ComponentValueMap, Tick},
-    well_known::WorldPos,
+    well_known::{Viewport, WorldPos},
     ComponentId, ControlMsg, EntityId,
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
@@ -114,7 +114,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
-            //.add_plugins(InfiniteGridPlugin)
+            .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(PolylinePlugin)
             .add_plugins(TracesPlugin)
             .add_plugins(NavigationGizmoPlugin)
@@ -124,7 +124,6 @@ impl Plugin for EditorPlugin {
             .add_plugins(TweeningPlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_systems(Startup, setup_floating_origin)
-            //.add_systems(Startup, setup_grid)
             .add_systems(Startup, setup_window_icon)
             .add_systems(PreUpdate, collect_entity_data)
             .add_systems(Update, make_entities_selectable)
@@ -200,6 +199,11 @@ pub fn collect_entity_data(
 #[derive(Component)]
 pub struct MainCamera;
 
+#[derive(Component)]
+pub struct GridHandle {
+    pub grid: Entity,
+}
+
 fn setup_floating_origin(mut commands: Commands) {
     commands.spawn((
         FloatingOrigin,
@@ -214,6 +218,7 @@ fn spawn_main_camera(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+    viewport: &Viewport,
 ) -> Entity {
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
@@ -230,6 +235,33 @@ fn spawn_main_camera(
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
         });
     }
+    let mut main_camera_layers = RenderLayers::default();
+    let mut grid_layers = RenderLayers::none();
+    if let Some(grid_layer) = render_layer_alloc.alloc() {
+        main_camera_layers = main_camera_layers.with(grid_layer as u8);
+        grid_layers = grid_layers.with(grid_layer as u8);
+    }
+    let grid_visibility = if viewport.show_grid {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    let grid_id = commands
+        .spawn((
+            bevy_infinite_grid::InfiniteGridBundle {
+                settings: bevy_infinite_grid::InfiniteGridSettings {
+                    minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+                    major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
+                    z_axis_color: Color::hex("#264FFF").unwrap(),
+                    x_axis_color: Color::hex("#EE3A43").unwrap(),
+                    ..Default::default()
+                },
+                visibility: grid_visibility,
+                ..Default::default()
+            },
+            grid_layers,
+        ))
+        .id();
     let mut camera = commands.spawn((
         Camera3dBundle {
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
@@ -247,7 +279,7 @@ fn spawn_main_camera(
             ..default()
         },
         // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
-        RenderLayers::default(),
+        main_camera_layers,
         MainCamera,
         GridCell::<i128>::default(),
         EditorCam {
@@ -259,6 +291,7 @@ fn spawn_main_camera(
             ..Default::default()
         },
         conduit::bevy::Persistent,
+        GridHandle { grid: grid_id },
     ));
 
     camera.insert(BloomSettings { ..default() });
