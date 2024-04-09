@@ -77,6 +77,7 @@ w.spawn(
         active=True,
         pos=[6.0, 3.0, 6.0],
         looking_at=[0.0, 1.0, 0.0],
+        show_grid=True,
     )
 ).name("Viewport")
 effectors = gravity.pipe(apply_wind)
