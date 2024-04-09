@@ -9,9 +9,6 @@ from typing import cast
 from jax.numpy import linalg as la
 
 TIME_STEP = 1.0 / 120.0
-G = 6.6743e-11
-R = 6.378e6
-M = 5.972e24
 
 Wind = typing.Annotated[
     el.SpatialMotion, el.Component("wind", el.ComponentType.SpatialMotionF64)
@@ -47,32 +44,24 @@ def apply_wind(
     )
 
 
-@el.system
-def gravity(q: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
-    def gravity_inner(force, inertia):
-        m = inertia.mass()
-        f = G * M * m / R**2
-        return el.Force.from_linear(force.force() + jnp.array([0.0, -f, 0.0]))
-
-    return q.map(el.Force, gravity_inner)
+@el.map
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.Force.from_linear(jnp.array([0.0, inertia.mass() * -9.81, 0.0]))
 
 
-@el.system
-def bounce(q: el.Query[el.WorldPos, el.WorldVel]) -> el.Query[el.WorldVel]:
-    return q.map(
-        el.WorldVel,
-        lambda p, v: jax.lax.cond(
-            jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
-            lambda _: el.WorldVel.from_linear(
-                v.linear() * jnp.array([1.0, -1.0, 1.0]) * 0.85
-            ),
-            lambda _: v,
-            operand=None,
+@el.map
+def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
+    return jax.lax.cond(
+        jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
+        lambda _: el.WorldVel.from_linear(
+            v.linear() * jnp.array([1.0, -1.0, 1.0]) * 0.85
         ),
+        lambda _: v,
+        operand=None,
     )
 
 
-w = el.WorldBuilder()
+w = el.World()
 w.spawn(Globals(seed=jnp.int64(0))).metadata(el.EntityMetadata("Globals"))
 w.spawn(
     el.Body(
@@ -81,7 +70,15 @@ w.spawn(
             el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
         ),
     )
-).metadata(el.EntityMetadata("Ball"))
+).name("Ball")
+w.spawn(
+    el.Panel.viewport(
+        track_rotation=False,
+        active=True,
+        pos=[6.0, 3.0, 6.0],
+        looking_at=[0.0, 1.0, 0.0],
+    )
+).name("Viewport")
 effectors = gravity.pipe(apply_wind)
 sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
 w.run(sys)
