@@ -174,6 +174,7 @@ impl GraphPane {
         graphs_state: &mut GraphsState,
         entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
         metadata_store: &MetadataStore,
+        max_length: usize,
     ) {
         let (_, graph_state) = graphs_state.get_or_create_graph(&Some(self.id));
 
@@ -183,6 +184,7 @@ impl GraphPane {
             graph_state,
             entity_metadata,
             metadata_store,
+            max_length,
         ));
     }
 }
@@ -233,12 +235,15 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
         if let Pane::Graph(graph_pane) = pane {
+            let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
+
             graph_pane.update(
                 self.collected_entity_data,
                 self.time_step,
                 self.graphs_state,
                 self.entity_metadata.clone(),
                 self.metadata_store,
+                width_in_px.ceil() as usize,
             );
         }
 
