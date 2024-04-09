@@ -28,6 +28,16 @@ pub struct EPlotData {
     pub entities: BTreeMap<EntityId, EPlotDataEntity>,
 }
 
+fn avg_f64_from_iter(values: impl Iterator<Item = f64>) -> f64 {
+    let mut sum = 0.0;
+    let mut num = 0.0;
+    for value in values {
+        sum += value;
+        num += 1.0;
+    }
+    sum / num
+}
+
 impl EPlotData {
     pub fn new(
         collected_entity_data: &CollectedEntityData,
@@ -35,8 +45,16 @@ impl EPlotData {
         graph_state: &GraphState,
         entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
         metadata_store: &MetadataStore,
+        max_length: usize,
     ) -> Self {
         let mut chart_entities = BTreeMap::new();
+
+        let ticks_len = collected_entity_data.ticks.len();
+        let chunk_size = if ticks_len > max_length {
+            ticks_len / max_length
+        } else {
+            1
+        };
 
         for (entity_id, components) in graph_state.clone() {
             let mut chart_components = BTreeMap::new();
@@ -55,6 +73,9 @@ impl EPlotData {
                             let collected_component_value = collected_component_values
                                 .iter()
                                 .map(|component_value| component_value[value_index])
+                                .chunks(chunk_size)
+                                .into_iter()
+                                .map(avg_f64_from_iter)
                                 .collect::<Vec<f64>>();
 
                             chart_component_values.insert(
@@ -96,6 +117,9 @@ impl EPlotData {
             .ticks
             .iter()
             .map(|t| (*t as f64) * tick_time)
+            .chunks(chunk_size)
+            .into_iter()
+            .map(avg_f64_from_iter)
             .collect::<Vec<f64>>();
 
         Self {
