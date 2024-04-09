@@ -73,7 +73,7 @@ impl Default for RenderLayerAlloc {
 }
 
 impl RenderLayerAlloc {
-    fn alloc(&mut self) -> Option<u32> {
+    pub fn alloc(&mut self) -> Option<u32> {
         let bits = self.0;
         let mut mask = 1;
         for i in 0..32 {

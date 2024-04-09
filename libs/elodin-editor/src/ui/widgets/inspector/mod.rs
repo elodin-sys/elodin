@@ -1,9 +1,13 @@
-use bevy::ecs::{
-    event::EventWriter,
-    query::{With, Without},
-    system::{Commands, Query, Res, ResMut},
+use bevy::{
+    ecs::{
+        event::EventWriter,
+        query::{With, Without},
+        system::{Commands, Query, Res, ResMut},
+    },
+    render::view::Visibility,
 };
 use bevy_egui::egui;
+use bevy_infinite_grid::InfiniteGrid;
 use big_space::GridCell;
 use conduit::{bevy::ColumnPayloadMsg, query::MetadataStore};
 
@@ -35,6 +39,7 @@ pub fn inspector(
     tile_state: &mut ResMut<tiles::TileState>,
     icons: InspectorIcons,
     column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
+    grid_visibility: &mut Query<&mut Visibility, With<InfiniteGrid>>,
 ) -> egui::Response {
     egui::ScrollArea::vertical()
         .show(ui, |ui| {
@@ -75,6 +80,7 @@ pub fn inspector(
                                 cam,
                                 commands,
                                 entity_transform_query,
+                                grid_visibility,
                             );
                         }
                         SelectedObject::Graph {

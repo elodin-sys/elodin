@@ -18,6 +18,7 @@ pub struct Viewport {
     pub active: bool,
     pub pos: Vector3<f32>,
     pub rotation: Quaternion<f32>,
+    pub show_grid: bool,
 }
 
 impl Viewport {
@@ -37,6 +38,7 @@ impl Default for Viewport {
             pos: Vector3::new(5.0, 5.0, 10.0),
             rotation: Quaternion::identity(),
             track_rotation: true,
+            show_grid: false,
         }
     }
 }

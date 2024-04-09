@@ -10,7 +10,7 @@ use big_space::GridCell;
 use conduit::{
     bevy::{EntityMap, TimeStep},
     query::MetadataStore,
-    well_known::EntityMetadata,
+    well_known::{EntityMetadata, Viewport},
     EntityId, GraphId,
 };
 use egui_tiles::{Container, Tile, TileId, Tiles};
@@ -139,6 +139,7 @@ impl ViewportPane {
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
         render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+        viewport: &Viewport,
     ) -> Self {
         let camera = Some(spawn_main_camera(
             commands,
@@ -146,6 +147,7 @@ impl ViewportPane {
             meshes,
             materials,
             render_layer_alloc,
+            viewport,
         ));
         Self { camera, rect: None }
     }
@@ -525,6 +527,7 @@ pub fn render_tiles(
                             &mut meshes,
                             &mut materials,
                             &mut render_layer_alloc,
+                            &Viewport::default(),
                         ));
                         ui_state.insert_pane_with_parent(pane, parent, true);
                     }
@@ -591,6 +594,7 @@ pub fn sync_viewports(
                     &mut meshes,
                     &mut materials,
                     &mut render_layer_alloc,
+                    viewport,
                 );
                 let camera = pane.camera.expect("no camera spawned for viewport");
                 let mut camera = commands.entity(camera);
