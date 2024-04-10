@@ -9,6 +9,7 @@ use crate::{
     FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, Scalar, ToHost, Vector,
 };
 
+/// Quaternion is representation of spatial orientation or rotation in 3D space.
 pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
 
 impl<T> Clone for Quaternion<T> {
@@ -50,6 +51,7 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
+    /// Create a unit quaternion with no rotation.
     pub fn identity() -> Self {
         let inner = T::zero()
             .broadcast::<Const<3>>()
@@ -57,6 +59,7 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
+    /// Create a quaternion from an axis and an angle.
     pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
         let axis = axis.into();
         let axis = axis.normalize();
@@ -78,11 +81,13 @@ impl<T: Field> Quaternion<T> {
         Quaternion(Vector::from_arr([-i, -j, -k, w]))
     }
 
+    /// Compute the inverse of the quaternion.
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
 
+    /// Normalize to a unit quaternion.
     pub fn normalize(&self) -> Self {
         Quaternion(self.0.clone() / self.0.norm())
     }

@@ -10,6 +10,7 @@ use std::ops::{Add, Mul};
 use xla::ArrayElement;
 use xla::NativeType;
 
+/// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialTransform<T> {
     pub inner: Vector<T, 7>,
@@ -23,23 +24,28 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
         SpatialTransform { inner }
     }
 
+    /// Create a spatial transform from a quaternion
     pub fn from_angular(angular: impl Into<Quaternion<T>>) -> Self {
         let zero = T::zero().broadcast::<Const<3>>();
         SpatialTransform::new(angular, zero)
     }
 
+    /// Create a spatial transform from a linear vector
     pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
         SpatialTransform::new(Quaternion::identity(), linear)
     }
 
+    /// Create a spatial transform from an axis and angle
     pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
         Self::from_angular(Quaternion::from_axis_angle(axis, angle))
     }
 
+    /// Get the angular part of the spatial transform as a quaternion
     pub fn angular(&self) -> Quaternion<T> {
         Quaternion(self.inner.fixed_slice(&[0]))
     }
 
+    /// Get the linear part of the spatial transform as a vector with shape (3,)
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[4])
     }
@@ -61,6 +67,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform
     }
 }
 
+/// A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialForce<T> {
     pub inner: Vector<T, 6>,
@@ -74,6 +81,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
         SpatialForce { inner }
     }
 
+    /// Create a spatial force from a linear force vector
     pub fn from_linear(force: impl Into<Vector<T, 3>>) -> Self {
         let force = force.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -81,6 +89,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
         SpatialForce { inner }
     }
 
+    /// Create a spatial force from a torque vector
     pub fn from_torque(torque: impl Into<Vector<T, 3>>) -> Self {
         let torque = torque.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -88,10 +97,12 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
         SpatialForce { inner }
     }
 
+    /// Get the torque part of the spatial force as a vector with shape (3,)
     pub fn torque(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
 
+    /// Get the linear force part of the spatial force as a vector with shape (3,)
     pub fn force(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[3])
     }
@@ -174,6 +185,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul<SpatialMotion<T>>
     }
 }
 
+/// A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialMotion<T> {
     pub inner: Vector<T, 6>,
@@ -187,6 +199,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
+    /// Create a spatial motion from a linear vector
     pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
         let linear = linear.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -194,6 +207,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
+    /// Create a spatial motion from an angular vector
     pub fn from_angular(angular: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -201,10 +215,12 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
+    /// Get the angular part of the spatial motion as a vector with shape (3,)
     pub fn angular(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
 
+    /// Get the linear part of the spatial motion as a vector with shape (3,)
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[3])
     }
