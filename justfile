@@ -83,3 +83,11 @@ release: auto-tag
     newTag: $tag
   EOF
   kubectl kustomize kubernetes/deploy | kubectl --cluster gke_elodin-prod_us-central1_elodin-prod-gke apply -f -
+
+promote tag:
+  #!/usr/bin/env sh
+  dir=$(mktemp -d)
+  gh release download {{tag}} --pattern 'elodin-*' --dir $dir
+  gsutil -m cp -r "$dir/*" "gs://elodin-releases/{{tag}}/"
+  gsutil -m cp -r "gs://elodin-releases/{{tag}}/*" "gs://elodin-releases/latest/"
+  twine upload "$dir/*.whl"
