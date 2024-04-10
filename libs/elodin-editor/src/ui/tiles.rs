@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy_egui::{
@@ -7,25 +7,17 @@ use bevy_egui::{
 };
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::{
-    bevy::{EntityMap, TimeStep},
-    query::MetadataStore,
-    well_known::{EntityMetadata, Viewport},
-    EntityId, GraphId,
-};
+use conduit::{bevy::EntityMap, well_known::Viewport, GraphId};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
 use super::{
     colors,
     images::Images,
     utils::MarginSides,
-    widgets::{
-        button::EImageButton,
-        eplot::{EPlot, EPlotData},
-    },
-    GraphsState, SelectedObject, ViewportRect,
+    widgets::{button::EImageButton, eplot::EPlot},
+    GraphState, GraphsState, SelectedObject, ViewportRect,
 };
-use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedEntityData};
+use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedGraphData};
 
 struct TabIcons {
     pub add: egui::TextureId,
@@ -93,13 +85,13 @@ impl Pane {
             Pane::Graph(pane) => {
                 ui.painter()
                     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
-                if let Some(plot_data) = &pane.plot_data {
-                    EPlot::new(plot_data.clone())
-                        .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
-                        .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
-                        .steps(6, 4)
-                        .render(ui);
-                }
+
+                EPlot::new()
+                    .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
+                    .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
+                    .steps(6, 4)
+                    .calculate_lines(ui, &pane.collected_graph_data, &pane.graph_state)
+                    .render(ui);
 
                 egui_tiles::UiResponse::None
             }
@@ -153,11 +145,11 @@ impl ViewportPane {
     }
 }
 
-#[derive(Default, Clone)]
 struct GraphPane {
     pub id: GraphId,
     pub label: String,
-    pub plot_data: Option<EPlotData>,
+    pub collected_graph_data: CollectedGraphData,
+    pub graph_state: GraphState,
 }
 
 impl GraphPane {
@@ -165,29 +157,20 @@ impl GraphPane {
         Self {
             id: graph_id,
             label: format!("Graph {}", graph_id.0),
-            plot_data: None,
+            collected_graph_data: CollectedGraphData::default(),
+            graph_state: GraphState::default(),
         }
     }
 
     fn update(
         &mut self,
-        collected_entity_data: &CollectedEntityData,
-        time_step: &TimeStep,
+        collected_graph_data: &CollectedGraphData,
         graphs_state: &mut GraphsState,
-        entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
-        metadata_store: &MetadataStore,
-        max_length: usize,
     ) {
         let (_, graph_state) = graphs_state.get_or_create_graph(&Some(self.id));
 
-        self.plot_data = Some(EPlotData::new(
-            collected_entity_data,
-            time_step,
-            graph_state,
-            entity_metadata,
-            metadata_store,
-            max_length,
-        ));
+        self.graph_state = graph_state.clone();
+        self.collected_graph_data = collected_graph_data.clone();
     }
 }
 
@@ -206,10 +189,7 @@ struct TreeBehavior<'a> {
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
     graphs_state: &'a mut GraphsState,
-    collected_entity_data: &'a CollectedEntityData,
-    time_step: &'a TimeStep,
-    entity_metadata: BTreeMap<&'a EntityId, &'a EntityMetadata>,
-    metadata_store: &'a MetadataStore,
+    collected_graph_data: &'a CollectedGraphData,
 }
 
 #[derive(Clone)]
@@ -237,16 +217,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
         if let Pane::Graph(graph_pane) = pane {
-            let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
-
-            graph_pane.update(
-                self.collected_entity_data,
-                self.time_step,
-                self.graphs_state,
-                self.entity_metadata.clone(),
-                self.metadata_store,
-                width_in_px.ceil() as usize,
-            );
+            graph_pane.update(self.collected_graph_data, self.graphs_state);
         }
 
         pane.ui(ui)
@@ -467,11 +438,8 @@ pub fn render_tiles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut selected_object: ResMut<SelectedObject>,
-    collected_entity_data: Res<CollectedEntityData>,
-    time_step: Res<TimeStep>,
+    collected_graph_data: Res<CollectedGraphData>,
     mut graphs_state: ResMut<GraphsState>,
-    metadata_store: Res<MetadataStore>,
-    entity_metadata: Query<(&EntityId, &EntityMetadata)>,
 ) {
     let icons = TabIcons {
         add: contexts.add_image(images.icon_add.clone_weak()),
@@ -489,12 +457,7 @@ pub fn render_tiles(
                 tab_diffs: ui_state.tab_diffs.clone(),
                 selected_object: selected_object.as_mut(),
                 graphs_state: graphs_state.as_mut(),
-                collected_entity_data: collected_entity_data.as_ref(),
-                time_step: time_step.as_ref(),
-                metadata_store: metadata_store.as_ref(),
-                entity_metadata: entity_metadata
-                    .iter()
-                    .collect::<BTreeMap<&EntityId, &EntityMetadata>>(),
+                collected_graph_data: collected_graph_data.as_ref(),
             };
             ui_state.tab_diffs = vec![];
             ui_state.tree.ui(&mut behavior, ui);
@@ -535,16 +498,18 @@ pub fn render_tiles(
                         let (graph_id, _) = graphs_state.get_or_create_graph(&graph_id);
 
                         let graph = GraphPane::spawn(graph_id);
-                        let pane = Pane::Graph(graph.clone());
+                        let graph_id = graph.id;
+                        let graph_label = graph.label.clone();
+                        let pane = Pane::Graph(graph);
 
                         if let Some(tile_id) = ui_state.insert_pane_with_parent(pane, parent, true)
                         {
                             *selected_object = SelectedObject::Graph {
                                 tile_id,
-                                label: graph.label.to_owned(),
-                                graph_id: graph.id,
+                                label: graph_label,
+                                graph_id,
                             };
-                            ui_state.graphs.insert(tile_id, graph.id);
+                            ui_state.graphs.insert(tile_id, graph_id);
                         }
                     }
                 }
