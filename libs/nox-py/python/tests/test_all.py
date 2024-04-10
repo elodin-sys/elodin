@@ -158,3 +158,17 @@ def test_archetype_name():
 
     assert TestArchetype.archetype_name() == "test_archetype"
     assert Body.archetype_name() == "body"
+
+
+def test_spatial_vector_algebra():
+    @map
+    def double_vec(v: WorldVel) -> WorldVel:
+        return v + v
+
+    client = Client.cpu()
+    w = WorldBuilder()
+    w.spawn(Body(world_vel=WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
+    exec = w.build(double_vec)
+    exec.run(client)
+    v = exec.column_array(Component.id(WorldVel))
+    assert (v[0][3:] == [2.0, 0.0, 0.0]).all()
