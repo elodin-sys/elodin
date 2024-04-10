@@ -158,6 +158,10 @@ impl SpatialMotion {
     fn shape(&self) -> PyObject {
         Python::with_gil(|py| PyTuple::new(py, [6]).into())
     }
+
+    fn __add__(&self, other: &SpatialMotion) -> Self {
+        (self.inner.clone() + other.inner.clone()).into()
+    }
 }
 
 #[pyclass]
