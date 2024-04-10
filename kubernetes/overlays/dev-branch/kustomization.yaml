@@ -109,6 +109,18 @@ secretGenerator:
   files:
   - sim-gcs-key.json
 
+replacements:
+- source:
+    kind: Deployment
+    name: sim-agent-mc
+    fieldPath: spec.template.spec.containers.[name=sim-agent-mc].image
+  targets:
+  - select:
+      kind: Deployment
+      name: elo-atc
+    fieldPaths:
+    - spec.template.spec.containers.[name=elo-atc].env.[name=ELODIN_ORCA.IMAGE_NAME].value
+
 images:
 - name: elodin-infra/elo-atc
   newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64

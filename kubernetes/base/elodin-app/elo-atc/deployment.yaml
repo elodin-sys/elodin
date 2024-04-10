@@ -24,6 +24,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: ELODIN_ORCA.IMAGE_NAME
+          value: elodin-infra/elo-sim-agent:latest
         - name: RUST_LOG
           value: info,atc=debug,redmq=debug
         volumeMounts:
