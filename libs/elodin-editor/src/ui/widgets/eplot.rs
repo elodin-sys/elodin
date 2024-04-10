@@ -1,19 +1,68 @@
 use bevy_egui::egui::{self, epaint::util::FloatOrd};
-use conduit::{
-    bevy::TimeStep, query::MetadataStore, well_known::EntityMetadata, ComponentId, EntityId,
-};
+use conduit::{ComponentId, ComponentValue};
 use itertools::{Itertools, MinMaxResult};
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
 use crate::{
     ui::{colors, utils, GraphState},
-    CollectedEntityData,
+    CollectedGraphData,
 };
+
+#[derive(Debug, Clone)]
+pub struct EPlotDataLine {
+    pub label: String,
+    pub values: Vec<f64>,
+    pub min: f64,
+    pub max: f64,
+}
 
 #[derive(Clone, Debug)]
 pub struct EPlotDataComponent {
     pub label: String,
     pub lines: BTreeMap<usize, EPlotDataLine>,
+}
+
+impl EPlotDataComponent {
+    pub fn new(component_label: impl ToString, component_value: &ComponentValue) -> Self {
+        let entity_component_value_lines = utils::component_value_to_vec(component_value)
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                (
+                    index,
+                    EPlotDataLine {
+                        label: format!("[{index}]"),
+                        values: vec![*value],
+                        min: *value,
+                        max: *value,
+                    },
+                )
+            })
+            .collect::<BTreeMap<usize, EPlotDataLine>>();
+
+        Self {
+            label: component_label.to_string(),
+            lines: entity_component_value_lines,
+        }
+    }
+
+    pub fn add_values(&mut self, component_value: &ComponentValue) -> Self {
+        let entity_component_value = utils::component_value_to_vec(component_value);
+
+        self.lines.iter_mut().for_each(|(index, line)| {
+            let new_value = entity_component_value[*index];
+            line.values.push(new_value);
+
+            if line.min > new_value {
+                line.min = new_value;
+            }
+            if line.max < new_value {
+                line.max = new_value;
+            }
+        });
+
+        self.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -22,116 +71,16 @@ pub struct EPlotDataEntity {
     pub components: BTreeMap<ComponentId, EPlotDataComponent>,
 }
 
-#[derive(Clone, Default, Debug)]
-pub struct EPlotData {
-    pub baseline: Vec<f64>,
-    pub entities: BTreeMap<EntityId, EPlotDataEntity>,
-}
-
-fn avg_f64_from_iter(values: impl Iterator<Item = f64>) -> f64 {
-    let mut sum = 0.0;
-    let mut num = 0.0;
-    for value in values {
-        sum += value;
-        num += 1.0;
-    }
-    sum / num
-}
-
-impl EPlotData {
-    pub fn new(
-        collected_entity_data: &CollectedEntityData,
-        time_step: &TimeStep,
-        graph_state: &GraphState,
-        entity_metadata: BTreeMap<&EntityId, &EntityMetadata>,
-        metadata_store: &MetadataStore,
-        max_length: usize,
-    ) -> Self {
-        let mut chart_entities = BTreeMap::new();
-
-        let ticks_len = collected_entity_data.ticks.len();
-        let chunk_size = if ticks_len > max_length {
-            ticks_len / max_length
-        } else {
-            1
-        };
-
-        for (entity_id, components) in graph_state.clone() {
-            let mut chart_components = BTreeMap::new();
-
-            for (component_id, component_values) in components {
-                let mut chart_component_values = BTreeMap::new();
-
-                for (value_index, (enabled, color)) in component_values.iter().enumerate() {
-                    if *enabled {
-                        let collected_component_values = collected_entity_data
-                            .data
-                            .get(&entity_id)
-                            .and_then(|e| e.get(&component_id));
-
-                        if let Some(collected_component_values) = collected_component_values {
-                            let collected_component_value = collected_component_values
-                                .iter()
-                                .map(|component_value| component_value[value_index])
-                                .chunks(chunk_size)
-                                .into_iter()
-                                .map(avg_f64_from_iter)
-                                .collect::<Vec<f64>>();
-
-                            chart_component_values.insert(
-                                value_index,
-                                EPlotDataLine {
-                                    label: format!("[{value_index}]"),
-                                    values: collected_component_value,
-                                    color: *color,
-                                },
-                            );
-                        }
-                    }
-                }
-
-                chart_components.insert(
-                    component_id,
-                    EPlotDataComponent {
-                        label: utils::get_component_label(metadata_store, &component_id),
-                        lines: chart_component_values,
-                    },
-                );
-            }
-
-            chart_entities.insert(
-                entity_id,
-                EPlotDataEntity {
-                    label: entity_metadata
-                        .get(&entity_id)
-                        .map_or(format!("E[{}]", entity_id.0), |metadata| {
-                            metadata.name.to_owned()
-                        }),
-                    components: chart_components,
-                },
-            );
-        }
-
-        let tick_time = time_step.0.as_secs_f64();
-        let baseline = collected_entity_data
-            .ticks
-            .iter()
-            .map(|t| (*t as f64) * tick_time)
-            .chunks(chunk_size)
-            .into_iter()
-            .map(avg_f64_from_iter)
-            .collect::<Vec<f64>>();
-
-        Self {
-            baseline,
-            entities: chart_entities,
-        }
-    }
-}
+type EPlotComponentGroup = Vec<(String, Vec<EPlotLine>)>;
+type EPlotEntityGroup = Vec<(String, EPlotComponentGroup)>;
 
 #[derive(Debug)]
 pub struct EPlot {
-    plot_data: EPlotData,
+    baseline: Vec<f64>,
+    lines: EPlotEntityGroup,
+    bounds: EPlotBounds,
+    rect: egui::Rect,
+    inner_rect: egui::Rect,
 
     invert_x: bool,
     invert_y: bool,
@@ -167,17 +116,20 @@ fn range_y_from_rect(rect: &egui::Rect, invert: bool) -> RangeInclusive<f32> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct EPlotDataLine {
-    pub label: String,
-    pub values: Vec<f64>,
-    pub color: egui::Color32,
+impl Default for EPlot {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EPlot {
-    pub fn new(plot_data: EPlotData) -> Self {
+    pub fn new() -> Self {
         Self {
-            plot_data,
+            baseline: Vec::new(),
+            lines: Vec::new(),
+            bounds: EPlotBounds::default(),
+            rect: egui::Rect::ZERO,
+            inner_rect: egui::Rect::ZERO,
 
             invert_x: false,
             invert_y: true,
@@ -196,6 +148,104 @@ impl EPlot {
             show_modal: true,
             show_legend: false,
         }
+    }
+
+    /// Calculate bounds and point positions based on the current UI allocation
+    /// Should be run last, right before render
+    pub fn calculate_lines(
+        mut self,
+        ui: &egui::Ui,
+        collected_graph_data: &CollectedGraphData,
+        graph_state: &GraphState,
+    ) -> Self {
+        self.rect = ui.max_rect();
+        self.inner_rect = self.get_inner_rect(self.rect);
+
+        // calc max_length
+
+        fn avg_f64_from_iter<'a>(values: impl Iterator<Item = &'a f64>) -> f64 {
+            let mut sum = 0.0;
+            let mut num = 0.0;
+            for value in values {
+                sum += value;
+                num += 1.0;
+            }
+            sum / num
+        }
+
+        let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
+        let max_length = width_in_px.ceil() as usize;
+        let ticks_len = collected_graph_data.baseline.len();
+        let chunk_size = if ticks_len > max_length {
+            ticks_len / max_length
+        } else {
+            1
+        };
+
+        // calc chunked baseline
+
+        self.baseline = collected_graph_data
+            .baseline
+            .iter()
+            .chunks(chunk_size)
+            .into_iter()
+            .map(avg_f64_from_iter)
+            .collect::<Vec<f64>>();
+
+        // calc bounds
+
+        let mut minmax_lines = vec![];
+
+        for (entity_id, components) in graph_state {
+            if let Some(entity) = collected_graph_data.entities.get(entity_id) {
+                for (component_id, component_values) in components {
+                    if let Some(component) = entity.components.get(component_id) {
+                        for (value_index, (enabled, _)) in component_values.iter().enumerate() {
+                            if *enabled {
+                                if let Some(line) = component.lines.get(&value_index) {
+                                    minmax_lines.push(vec![line.min, line.max]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.bounds = EPlotBounds::from_lines(&self.baseline, &minmax_lines);
+
+        // calc lines
+
+        for (entity_id, components) in graph_state {
+            if let Some(entity) = collected_graph_data.entities.get(entity_id) {
+                let mut component_group = Vec::new();
+
+                for (component_id, component_values) in components {
+                    if let Some(component) = entity.components.get(component_id) {
+                        let mut component_group_lines = Vec::new();
+
+                        for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                            if *enabled {
+                                if let Some(line) = component.lines.get(&value_index) {
+                                    let value_chunks = line.values.iter().chunks(chunk_size);
+                                    let values = value_chunks.into_iter().map(avg_f64_from_iter);
+
+                                    let label = format!("[{value_index}]");
+                                    component_group_lines
+                                        .push(EPlotLine::from_values(&self, values, label, *color));
+                                }
+                            }
+                        }
+
+                        component_group.push((component.label.to_owned(), component_group_lines));
+                    }
+                }
+
+                self.lines.push((entity.label.to_owned(), component_group));
+            }
+        }
+
+        self
     }
 
     pub fn invert(mut self, x: bool, y: bool) -> Self {
@@ -235,28 +285,14 @@ impl EPlot {
         self
     }
 
-    fn draw_x_axis(
-        &self,
-        ui: &mut egui::Ui,
-        inner_rect: egui::Rect,
-        bounds: &EPlotBounds,
-        font_id: &egui::FontId,
-    ) {
-        let step_size = bounds.width() / self.steps_x as f64;
+    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
+        let step_size = self.bounds.width() / self.steps_x as f64;
         let steps_x = (0..=self.steps_x)
-            .map(|i| bounds.min_x + (i as f64) * step_size)
+            .map(|i| self.bounds.min_x + (i as f64) * step_size)
             .collect::<Vec<f64>>();
 
         for x_step in steps_x {
-            let x_position = EPlotPoint::from_plot(
-                x_step,
-                bounds.min_y,
-                bounds,
-                &inner_rect,
-                self.invert_x,
-                self.invert_y,
-            )
-            .pos2;
+            let x_position = EPlotPoint::from_plot_point(self, x_step, self.bounds.min_y).pos2;
 
             ui.painter().line_segment(
                 [
@@ -283,28 +319,14 @@ impl EPlot {
         }
     }
 
-    fn draw_y_axis(
-        &self,
-        ui: &mut egui::Ui,
-        inner_rect: egui::Rect,
-        bounds: &EPlotBounds,
-        font_id: &egui::FontId,
-    ) {
-        let step_size = bounds.height() / self.steps_y as f64;
+    fn draw_y_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
+        let step_size = self.bounds.height() / self.steps_y as f64;
         let steps_y = (0..=self.steps_y)
-            .map(|i| bounds.min_y + (i as f64) * step_size)
+            .map(|i| self.bounds.min_y + (i as f64) * step_size)
             .collect::<Vec<f64>>();
 
         for y_step in steps_y {
-            let y_position = EPlotPoint::from_plot(
-                bounds.min_x,
-                y_step,
-                bounds,
-                &inner_rect,
-                self.invert_x,
-                self.invert_y,
-            )
-            .pos2;
+            let y_position = EPlotPoint::from_plot_point(self, self.bounds.min_x, y_step).pos2;
 
             ui.painter().line_segment(
                 [
@@ -385,14 +407,8 @@ impl EPlot {
         );
     }
 
-    fn draw_modal(
-        &self,
-        ui: &mut egui::Ui,
-        closest_point: &EPlotPoint,
-        pointer_pos: egui::Pos2,
-        inner_rect: egui::Rect,
-    ) {
-        let inner_rect_size = inner_rect.size();
+    fn draw_modal(&self, ui: &mut egui::Ui, closest_point: &EPlotPoint, pointer_pos: egui::Pos2) {
+        let inner_rect_size = self.inner_rect.size();
         let modal_min_size = egui::vec2(200.0, inner_rect_size.y);
         let modal_rect = egui::Rect::from_min_size(pointer_pos, modal_min_size);
 
@@ -404,7 +420,6 @@ impl EPlot {
                 .stroke(egui::Stroke::new(0.4, colors::PRIMARY_CREAME))
                 .show(ui, |ui| {
                     let point_on_baseline = self
-                        .plot_data
                         .baseline
                         .iter()
                         .find_position(|x| **x == closest_point.x);
@@ -414,22 +429,22 @@ impl EPlot {
 
                         ui.label(time_text);
 
-                        for entity_data in self.plot_data.entities.values() {
+                        for (entity_label, component_group) in &self.lines {
                             ui.separator();
-                            ui.label(entity_data.label.to_owned());
+                            ui.label(entity_label);
 
-                            for component_data in entity_data.components.values() {
+                            for (component_label, component_lines) in component_group {
                                 ui.separator();
-                                ui.label(component_data.label.to_owned());
+                                ui.label(component_label);
                                 ui.separator();
 
-                                for line in component_data.lines.values() {
+                                for line in component_lines {
                                     ui.horizontal(|ui| {
                                         ui.add(egui::Label::new(
                                             egui::RichText::new(line.label.to_owned())
                                                 .color(line.color),
                                         ));
-                                        ui.label(format!("   {:.2}", line.values[index]));
+                                        ui.label(format!("   {:.2}", line.values[index].y));
                                     });
                                 }
                             }
@@ -439,18 +454,18 @@ impl EPlot {
         });
     }
 
-    fn draw_legend(&self, ui: &mut egui::Ui, inner_rect: egui::Rect) {
+    fn draw_legend(&self, ui: &mut egui::Ui) {
         let legend_size = egui::vec2(200.0, 50.0);
         let legend_margin = 10.0;
 
         let modal_rect = egui::Rect::from_min_max(
             egui::pos2(
-                inner_rect.max.x - (legend_size.x + legend_margin),
-                inner_rect.max.y - (legend_size.y + legend_margin),
+                self.inner_rect.max.x - (legend_size.x + legend_margin),
+                self.inner_rect.max.y - (legend_size.y + legend_margin),
             ),
             egui::pos2(
-                inner_rect.max.x - legend_margin,
-                inner_rect.max.y - legend_margin,
+                self.inner_rect.max.x - legend_margin,
+                self.inner_rect.max.y - legend_margin,
             ),
         );
 
@@ -496,47 +511,21 @@ impl EPlot {
     }
 
     pub fn render(&self, ui: &mut egui::Ui) {
-        let rect = ui.max_rect();
-        let _response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+        let _response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
 
-        let inner_rect = self.get_inner_rect(rect);
-        let border_rect = self.get_border_rect(rect);
+        let border_rect = self.get_border_rect(self.rect);
 
         // Style
 
         let style = ui.style();
         let font_id = egui::TextStyle::Button.resolve(style);
 
-        // setup lines
-
-        let mut lines = vec![];
-        for entity_data in self.plot_data.entities.values() {
-            for component_data in entity_data.components.values() {
-                for line in component_data.lines.values() {
-                    lines.push(line.clone());
-                }
-            }
-        }
-
-        let plot_lines_values = lines
-            .iter()
-            .map(|data_line| data_line.values.clone())
-            .collect::<Vec<Vec<f64>>>();
-        let bounds = EPlotBounds::from_lines(&self.plot_data.baseline, &plot_lines_values);
-
-        let lines = lines
-            .iter()
-            .map(|data_line| {
-                EPlotLine::from_data(self, data_line.clone(), bounds.clone(), &inner_rect)
-            })
-            .collect::<Vec<EPlotLine>>();
-
         // Draw inner container
 
-        if lines.is_empty() {
+        if self.lines.is_empty() {
             ui.painter().text(
-                rect.center(),
+                self.rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "NO DATA POINTS SELECTED",
                 font_id.clone(),
@@ -547,7 +536,7 @@ impl EPlot {
         }
 
         ui.painter()
-            .rect_filled(inner_rect, egui::Rounding::ZERO, self.fill_color);
+            .rect_filled(self.inner_rect, egui::Rounding::ZERO, self.fill_color);
 
         // Draw borders
 
@@ -559,17 +548,21 @@ impl EPlot {
 
         // Draw axis
 
-        self.draw_x_axis(ui, inner_rect, &bounds, &font_id);
-        self.draw_y_axis(ui, inner_rect, &bounds, &font_id);
+        self.draw_x_axis(ui, &font_id);
+        self.draw_y_axis(ui, &font_id);
 
         // Draw lines
 
-        for line in &lines {
-            line.draw(ui);
+        for (_entity_label, component_group) in &self.lines {
+            for (_component_label, component_group_lines) in component_group {
+                for line in component_group_lines {
+                    line.draw(ui);
 
-            if let Some(pointer_pos) = pointer_pos {
-                if border_rect.contains(pointer_pos) {
-                    line.draw_highlight(ui, &pointer_pos);
+                    if let Some(pointer_pos) = pointer_pos {
+                        if border_rect.contains(pointer_pos) {
+                            line.draw_highlight(ui, &pointer_pos);
+                        }
+                    }
                 }
             }
         }
@@ -577,24 +570,18 @@ impl EPlot {
         // Draw cursor
 
         if let Some(pointer_pos) = pointer_pos {
-            if inner_rect.contains(pointer_pos) {
-                let pointer_plot_point = EPlotPoint::from_pos2(
-                    pointer_pos,
-                    &bounds,
-                    &inner_rect,
-                    self.invert_x,
-                    self.invert_y,
-                );
+            if self.inner_rect.contains(pointer_pos) {
+                let pointer_plot_point = EPlotPoint::from_plot_pos2(self, pointer_pos);
 
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
             }
 
             if border_rect.contains(pointer_pos) {
-                if let Some(closest_point) = lines[0].closest_by_x(&pointer_pos) {
+                if let Some(closest_point) = self.lines[0].1[0].1[0].closest_by_x(&pointer_pos) {
                     self.draw_cursor(ui, pointer_pos, &closest_point, border_rect);
 
                     if self.show_modal {
-                        self.draw_modal(ui, &closest_point, pointer_pos, inner_rect);
+                        self.draw_modal(ui, &closest_point, pointer_pos);
                     }
                 }
             }
@@ -603,12 +590,12 @@ impl EPlot {
         // Draw legend
 
         if self.show_legend {
-            self.draw_legend(ui, inner_rect);
+            self.draw_legend(ui);
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EPlotBounds {
     min_x: f64,
     min_y: f64,
@@ -666,30 +653,33 @@ impl EPlotBounds {
 #[derive(Debug, Clone)]
 pub struct EPlotLine {
     values: Vec<EPlotPoint>,
+    label: String,
     color: egui::Color32,
 }
 
 impl EPlotLine {
-    pub fn new(values: Vec<EPlotPoint>, color: egui::Color32) -> Self {
-        Self { values, color }
+    pub fn new(values: Vec<EPlotPoint>, label: String, color: egui::Color32) -> Self {
+        Self {
+            values,
+            label,
+            color,
+        }
     }
 
-    pub fn from_data(
+    pub fn from_values(
         plot: &EPlot,
-        data: EPlotDataLine,
-        bounds: EPlotBounds,
-        rect: &egui::Rect,
+        values: impl Iterator<Item = f64>,
+        label: String,
+        color: egui::Color32,
     ) -> Self {
         Self::new(
-            plot.plot_data
-                .baseline
+            plot.baseline
                 .iter()
-                .zip(data.values)
-                .map(|(x, y)| {
-                    EPlotPoint::from_plot(*x, y, &bounds, rect, plot.invert_x, plot.invert_y)
-                })
+                .zip(values)
+                .map(|(x, y)| EPlotPoint::from_plot_point(plot, *x, y))
                 .collect::<Vec<EPlotPoint>>(),
-            data.color,
+            label,
+            color,
         )
     }
 
@@ -751,57 +741,37 @@ impl EPlotPoint {
         Self { x, y, pos2 }
     }
 
-    pub fn from_pos2(
-        pos: egui::Pos2,
-        bounds: &EPlotBounds,
-        rect: &egui::Rect,
-        invert_x: bool,
-        invert_y: bool,
-    ) -> Self {
+    pub fn from_plot_pos2(plot: &EPlot, pos: egui::Pos2) -> Self {
         Self::new(
             egui::remap(
                 pos.x,
-                range_x_from_rect(rect, invert_x),
-                bounds.range_x_f32(),
+                range_x_from_rect(&plot.inner_rect, plot.invert_x),
+                plot.bounds.range_x_f32(),
             ) as f64,
             egui::remap(
                 pos.y,
-                range_y_from_rect(rect, invert_y),
-                bounds.range_y_f32(),
+                range_y_from_rect(&plot.inner_rect, plot.invert_y),
+                plot.bounds.range_y_f32(),
             ) as f64,
             pos,
         )
     }
 
-    pub fn from_plot(
-        x: f64,
-        y: f64,
-        bounds: &EPlotBounds,
-        rect: &egui::Rect,
-        invert_x: bool,
-        invert_y: bool,
-    ) -> Self {
-        Self::new(x, y, Self::pos2(x, y, rect, bounds, invert_x, invert_y))
+    pub fn from_plot_point(plot: &EPlot, x: f64, y: f64) -> Self {
+        Self::new(x, y, Self::pos2(plot, x, y))
     }
 
-    fn pos2(
-        x: f64,
-        y: f64,
-        rect: &egui::Rect,
-        bounds: &EPlotBounds,
-        invert_x: bool,
-        invert_y: bool,
-    ) -> egui::Pos2 {
+    fn pos2(plot: &EPlot, x: f64, y: f64) -> egui::Pos2 {
         egui::pos2(
             egui::remap(
                 x as f32,
-                bounds.range_x_f32(),
-                range_x_from_rect(rect, invert_x),
+                plot.bounds.range_x_f32(),
+                range_x_from_rect(&plot.inner_rect, plot.invert_x),
             ),
             egui::remap(
                 y as f32,
-                bounds.range_y_f32(),
-                range_y_from_rect(rect, invert_y),
+                plot.bounds.range_y_f32(),
+                range_y_from_rect(&plot.inner_rect, plot.invert_y),
             ),
         )
     }
