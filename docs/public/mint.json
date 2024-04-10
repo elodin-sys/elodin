@@ -30,6 +30,10 @@
       "pages": ["quickstart", "tutorial/3-body"]
     },
     {
+      "group": "SDK",
+      "pages": ["sdk/python-api"]
+    },
+    {
       "group": "The Tao of Elodin",
       "pages": ["tao/what", "tao/ecs", "tao/monte-carlo", "tao/data-flow"]
     },

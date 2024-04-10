@@ -1,0 +1,98 @@
+---
+title: Python API
+icon: python
+---
+
+## Primitives
+
+### _class_ `elodin.Quaternion`
+
+Unit quaternions are used to represent spatial orientations and rotations of bodies in 3D space.
+
+- `Quaternion.identity()` -> [elodin.Quaternion]
+
+    Create a unit quaternion with no rotation.
+
+- `Quaternion.from_axis_angle()` -> [elodin.Quaternion]
+
+    Create a quaternion from an axis and an angle. 
+
+- `inverse()` -> [elodin.Quaternion]
+
+    Compute the inverse of the quaternion.
+
+- `normalize()` -> [elodin.Quaternion]
+
+    Normalize to a unit quaternion.
+
+
+## Spatial Vector Algebra
+
+Elodin uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom. You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
+
+### _class_ `elodin.SpatialTransform`
+
+A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
+
+- `SpatialTransform.from_linear(linear)` -> [elodin.SpatialTransform]
+
+    Create a spatial transform from a linear vector.
+
+- `SpatialTransform.from_angular(quaternion)` -> [elodin.SpatialTransform]
+
+    Create a spatial transform from a quaternion.
+
+- `linear()` -> [jax.Array]
+
+    Get the linear part of the spatial transform as a vector with shape (3,).
+
+- `angular()` -> [elodin.Quaternion]
+
+    Get the angular part of the spatial transform as a quaternion.
+
+### _class_ `elodin.SpatialMotion`
+
+A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
+
+- `SpatialMotion.from_linear(linear)` -> [elodin.SpatialMotion]
+
+    Create a spatial motion from a linear vector.
+
+- `SpatialMotion.from_angular(angular)` -> [elodin.SpatialMotion]
+
+    Create a spatial motion from an angular vector.
+
+- `linear()` -> [jax.Array]
+
+    Get the linear part of the spatial motion as a vector with shape (3,).
+
+- `angular()` -> [jax.Array]
+
+    Get the angular part of the spatial motion as a vector with shape (3,).
+
+### _class_ `elodin.SpatialForce`
+
+A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
+
+- `SpatialForce.from_linear(linear)` -> [elodin.SpatialForce]
+
+    Create a spatial force from a linear force vector.
+
+- `SpatialForce.from_torque(angular)` -> [elodin.SpatialForce]
+
+    Create a spatial force from a torque vector.
+
+- `force()` -> [jax.Array]
+
+    Get the linear force part of the spatial force as a vector with shape (3,).
+
+- `torque()` -> [jax.Array]
+
+    Get the torque part of the spatial force as a vector with shape (3,).
+
+[elodin.Quaternion]: #class-elodin-quaternion
+[elodin.SpatialTransform]: #class-elodin-spatialtransform
+[elodin.SpatialMotion]: #class-elodin-spatialmotion
+[elodin.SpatialForce]: #class-elodin-spatialforce
+[jax.Array]: https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array
+[jax.typing.ArrayLike]: https://jax.readthedocs.io/en/latest/_autosummary/jax.typing.ArrayLike.html#jax.typing.ArrayLike
