@@ -256,6 +256,7 @@ fn spawn_main_camera(
                     x_axis_color: Color::hex("#EE3A43").unwrap(),
                     fadeout_distance: 50_000.0,
                     scale: 0.1,
+                    shadow_color: None,
                     ..Default::default()
                 },
                 visibility: grid_visibility,
