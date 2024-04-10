@@ -13,6 +13,7 @@ use crate::Metadata;
 use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -263,25 +264,48 @@ pub struct ConduitRx(pub flume::Receiver<MsgPair>);
 #[derive(Component)]
 pub struct Persistent;
 
-#[allow(clippy::too_many_arguments)]
-fn recv_system(
-    rx: Res<ConduitRx>,
-    mut entity_map: ResMut<EntityMap>,
-    component_map: Res<ComponentMap>,
-    asset_map: Res<AssetMap>,
-    mut commands: Commands,
-    mut subscriptions: ResMut<Subscriptions>,
-    mut exit: EventWriter<AppExit>,
-    mut subscribe_event: EventWriter<SubscribeEvent>,
-    mut metadata_store: ResMut<MetadataStore>,
-    mut max_tick_res: ResMut<MaxTick>,
-    mut time_step_res: ResMut<TimeStep>,
-    mut tick_res: ResMut<Tick>,
-    mut sim_peer: ResMut<SimPeer>,
-    mut value_map: Query<&mut ComponentValueMap>,
-    children: Query<&Children>,
-    persistent_query: Query<&mut Parent, With<Persistent>>,
-) {
+#[derive(SystemParam)]
+pub struct RecvSystemArgs<'w, 's> {
+    rx: Res<'w, ConduitRx>,
+    entity_map: ResMut<'w, EntityMap>,
+    event: EventWriter<'w, ControlMsg>,
+    commands: Commands<'w, 's>,
+    value_map: Query<'w, 's, &'static mut ComponentValueMap>,
+    metadata_store: ResMut<'w, MetadataStore>,
+    time_step_res: ResMut<'w, TimeStep>,
+    sim_peer: ResMut<'w, SimPeer>,
+    subscriptions: ResMut<'w, Subscriptions>,
+    subscribe_event: EventWriter<'w, SubscribeEvent>,
+    persistent_query: Query<'w, 's, &'static mut Parent, With<Persistent>>,
+    component_map: Res<'w, ComponentMap>,
+    children: Query<'w, 's, &'static Children>,
+    asset_map: Res<'w, AssetMap>,
+    exit: EventWriter<'w, AppExit>,
+    max_tick_res: ResMut<'w, MaxTick>,
+    tick_res: ResMut<'w, Tick>,
+}
+
+fn recv_system(args: RecvSystemArgs) {
+    let RecvSystemArgs {
+        rx,
+        mut entity_map,
+        mut event,
+        mut commands,
+        mut value_map,
+        mut metadata_store,
+        mut time_step_res,
+        mut sim_peer,
+        mut subscriptions,
+        mut subscribe_event,
+        persistent_query,
+        component_map,
+        children,
+        asset_map,
+        mut exit,
+        mut max_tick_res,
+        mut tick_res,
+    } = args;
+
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
         match msg {
@@ -353,7 +377,7 @@ fn recv_system(
                     warn!(?id, "unknown asset type");
                     continue;
                 };
-                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes);
+                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes.clone());
             }
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
@@ -361,6 +385,8 @@ fn recv_system(
             Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
                 max_tick_res.0 = max_tick;
                 tick_res.0 = tick;
+
+                event.send(ControlMsg::Tick { tick, max_tick });
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
