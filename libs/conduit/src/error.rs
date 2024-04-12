@@ -1,8 +1,12 @@
+#[cfg(feature = "std")]
 use thiserror::Error;
+#[cfg(not(feature = "std"))]
+use thiserror_no_std::Error;
 
 use crate::StreamId;
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(feature = "std")]
     #[error("io {0}")]
     Io(#[from] std::io::Error),
     #[error("entity and component iters length must match")]
@@ -45,6 +49,7 @@ impl From<try_buf::ErrorKind> for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T> From<flume::SendError<T>> for Error {
     fn from(_: flume::SendError<T>) -> Self {
         Self::SendError
