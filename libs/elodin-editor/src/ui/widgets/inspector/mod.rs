@@ -2,7 +2,8 @@ use bevy::{
     ecs::{
         event::EventWriter,
         query::{With, Without},
-        system::{Commands, Query, Res, ResMut},
+        system::{Commands, Query, Res, ResMut, SystemParam, SystemState},
+        world::World,
     },
     render::view::Visibility,
 };
@@ -12,9 +13,14 @@ use big_space::GridCell;
 use conduit::{bevy::ColumnPayloadMsg, query::MetadataStore};
 
 use crate::{
-    ui::{colors, tiles, CameraQuery, EntityData, GraphsState, SelectedObject},
+    ui::{
+        colors, tiles, CameraQuery, EntityData, GraphsState, InspectorAnchor, SelectedObject,
+        SidebarState,
+    },
     MainCamera,
 };
+
+use super::{RootWidgetSystem, WidgetSystem, WidgetSystemExt};
 
 pub mod entity;
 pub mod graph;
@@ -26,23 +32,134 @@ pub struct InspectorIcons {
     pub subtract: egui::TextureId,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn inspector(
-    ui: &mut egui::Ui,
-    selected_object: &SelectedObject,
-    entities: &mut Query<EntityData>,
-    metadata_store: &Res<MetadataStore>,
-    camera_query: &mut Query<CameraQuery, With<MainCamera>>,
-    commands: &mut Commands,
-    entity_transform_query: &Query<&GridCell<i128>, Without<MainCamera>>,
-    graphs_state: &mut ResMut<GraphsState>,
-    tile_state: &mut ResMut<tiles::TileState>,
-    icons: InspectorIcons,
-    column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
-    grid_visibility: &mut Query<&mut Visibility, With<InfiniteGrid>>,
-) -> egui::Response {
-    egui::ScrollArea::vertical()
-        .show(ui, |ui| {
+fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
+    ui.with_layout(
+        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        |ui| {
+            let text = egui::RichText::new("SELECT AN ENTITY OR TABLE TO INSPECT")
+                .color(colors::with_opacity(colors::WHITE, 0.1));
+            ui.add(egui::Label::new(text));
+        },
+    )
+    .response
+}
+
+pub fn empty_inspector() -> impl egui::Widget {
+    move |ui: &mut egui::Ui| empty_inspector_ui(ui)
+}
+
+#[derive(SystemParam)]
+pub struct Inspector<'w> {
+    sidebar_state: ResMut<'w, SidebarState>,
+}
+
+impl WidgetSystem for Inspector<'_> {
+    type Args = (InspectorIcons, f32);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+
+        let (icons, width) = args;
+        let sidebar_state = state_mut.sidebar_state;
+
+        egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
+            .resizable(false)
+            .frame(egui::Frame {
+                fill: colors::PRIMARY_SMOKE,
+                ..Default::default()
+            })
+            .exact_width(width)
+            .show_animated_inside(ui, sidebar_state.right_open, |ui| {
+                ui.add_widget_with::<InspectorContent>(world, "inspector_content", (icons, false));
+            });
+    }
+}
+
+impl RootWidgetSystem for Inspector<'_> {
+    type Args = (InspectorIcons, f32);
+    type Output = ();
+
+    fn ctx_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ctx: &mut egui::Context,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+
+        let (icons, width) = args;
+        let sidebar_state = state_mut.sidebar_state;
+
+        egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
+            .resizable(true)
+            .frame(egui::Frame {
+                fill: colors::PRIMARY_SMOKE,
+                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                ..Default::default()
+            })
+            .min_width(width * 0.15)
+            .default_width(width * 0.25)
+            .max_width(width * 0.35)
+            .show_animated(ctx, sidebar_state.right_open, |ui| {
+                ui.add_widget_with::<InspectorContent>(world, "inspector_content", (icons, true));
+            });
+    }
+}
+
+#[derive(SystemParam)]
+pub struct InspectorContent<'w, 's> {
+    entities: Query<'w, 's, EntityData<'static>>,
+    graphs_state: ResMut<'w, GraphsState>,
+    tile_state: ResMut<'w, tiles::TileState>,
+    metadata_store: Res<'w, MetadataStore>,
+    commands: Commands<'w, 's>,
+    camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
+    selected_object: ResMut<'w, SelectedObject>,
+    entity_transform_query: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
+    column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
+    grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
+    inspector_anchor: ResMut<'w, InspectorAnchor>,
+}
+
+impl WidgetSystem for InspectorContent<'_, '_> {
+    type Args = (InspectorIcons, bool);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+
+        let (icons, is_side_panel) = args;
+
+        let mut entities = state_mut.entities;
+        let mut graphs_state = state_mut.graphs_state;
+        let mut tile_state = state_mut.tile_state;
+        let metadata_store = state_mut.metadata_store;
+        let mut commands = state_mut.commands;
+        let mut camera_query = state_mut.camera_query;
+        let selected_object = state_mut.selected_object.as_ref();
+        let entity_transform_query = state_mut.entity_transform_query;
+        let mut column_payload_writer = state_mut.column_payload_writer;
+        let mut grid_visibility = state_mut.grid_visibility;
+        let mut inspector_anchor = state_mut.inspector_anchor;
+
+        inspector_anchor.0 = if is_side_panel {
+            Some(ui.max_rect().min)
+        } else {
+            None
+        };
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Frame::none()
                 .fill(colors::PRIMARY_SMOKE)
                 .inner_margin(16.0)
@@ -62,11 +179,11 @@ pub fn inspector(
                                 metadata,
                                 *entity_id,
                                 map.as_mut(),
-                                metadata_store,
-                                graphs_state,
-                                tile_state,
+                                &metadata_store,
+                                &mut graphs_state,
+                                &mut tile_state,
                                 icons.chart,
-                                column_payload_writer,
+                                &mut column_payload_writer,
                             );
                         }
                         SelectedObject::Viewport { camera, .. } => {
@@ -76,11 +193,11 @@ pub fn inspector(
                             };
                             viewport::inspector(
                                 ui,
-                                entities,
+                                &entities,
                                 cam,
-                                commands,
-                                entity_transform_query,
-                                grid_visibility,
+                                &mut commands,
+                                &entity_transform_query,
+                                &mut grid_visibility,
                             );
                         }
                         SelectedObject::Graph {
@@ -90,31 +207,14 @@ pub fn inspector(
                                 ui,
                                 graph_id,
                                 label,
-                                entities,
-                                graphs_state,
-                                metadata_store,
+                                &entities,
+                                &mut graphs_state,
+                                &metadata_store,
                                 icons,
                             );
                         }
                     })
                 })
-        })
-        .inner
-        .response
-}
-
-fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
-    ui.with_layout(
-        egui::Layout::centered_and_justified(egui::Direction::TopDown),
-        |ui| {
-            let text = egui::RichText::new("SELECT AN ENTITY OR TABLE TO INSPECT")
-                .color(colors::with_opacity(colors::WHITE, 0.1));
-            ui.add(egui::Label::new(text));
-        },
-    )
-    .response
-}
-
-pub fn empty_inspector() -> impl egui::Widget {
-    move |ui: &mut egui::Ui| empty_inspector_ui(ui)
+        });
+    }
 }

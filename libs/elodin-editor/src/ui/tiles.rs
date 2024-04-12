@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use bevy::prelude::*;
+use bevy::{
+    ecs::system::{SystemParam, SystemState},
+    prelude::*,
+};
 use bevy_egui::{
     egui::{self, vec2, Color32, Frame, Margin, RichText, Rounding, Stroke, Ui, Visuals},
     EguiContexts,
@@ -12,9 +15,9 @@ use egui_tiles::{Container, Tile, TileId, Tiles};
 
 use super::{
     colors,
-    images::Images,
+    images::{self},
     utils::MarginSides,
-    widgets::{button::EImageButton, eplot::EPlot},
+    widgets::{button::EImageButton, eplot::EPlot, RootWidgetSystem},
     GraphState, GraphsState, SelectedObject, ViewportRect,
 };
 use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedGraphData};
@@ -427,112 +430,139 @@ pub fn setup_default_tiles(mut tile_state: ResMut<TileState>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn render_tiles(
-    mut contexts: EguiContexts,
-    mut ui_state: ResMut<TileState>,
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    images: Local<Images>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-    mut selected_object: ResMut<SelectedObject>,
-    collected_graph_data: Res<CollectedGraphData>,
-    mut graphs_state: ResMut<GraphsState>,
-) {
-    let icons = TabIcons {
-        add: contexts.add_image(images.icon_add.clone_weak()),
-        close: contexts.add_image(images.icon_close.clone_weak()),
-    };
+#[derive(SystemParam)]
+pub struct TileLayout<'w, 's> {
+    contexts: EguiContexts<'w, 's>,
+    images: Local<'s, images::Images>,
+    commands: Commands<'w, 's>,
+    graphs_state: ResMut<'w, GraphsState>,
+    selected_object: ResMut<'w, SelectedObject>,
+    ui_state: ResMut<'w, TileState>,
+    asset_server: Res<'w, AssetServer>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    collected_graph_data: Res<'w, CollectedGraphData>,
+}
 
-    egui::CentralPanel::default()
-        .frame(Frame {
-            fill: colors::TRANSPARENT,
-            ..Default::default()
-        })
-        .show(contexts.ctx_mut(), |ui| {
-            let mut behavior = TreeBehavior {
-                icons,
-                tab_diffs: ui_state.tab_diffs.clone(),
-                selected_object: selected_object.as_mut(),
-                graphs_state: graphs_state.as_mut(),
-                collected_graph_data: collected_graph_data.as_ref(),
-            };
-            ui_state.tab_diffs = vec![];
-            ui_state.tree.ui(&mut behavior, ui);
-            for diff in behavior.tab_diffs.drain(..) {
-                match diff {
-                    TabDiff::Delete(tile_id) => {
-                        let Some(tile) = ui_state.tree.tiles.get(tile_id) else {
-                            continue;
-                        };
+impl RootWidgetSystem for TileLayout<'_, '_> {
+    type Args = ();
+    type Output = ();
 
-                        if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
-                            if let Some(camera) = viewport.camera {
-                                commands.entity(camera).despawn(); // TODO(sphw): garbage collect old nav-gizmos
-                            }
-                        };
+    fn ctx_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ctx: &mut egui::Context,
+        _args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
 
-                        if ui_state.tree.tiles.len() > 1 {
-                            ui_state.tree.tiles.remove(tile_id);
+        let mut contexts = state_mut.contexts;
+        let mut ui_state = state_mut.ui_state;
+        let mut commands = state_mut.commands;
+        let asset_server = state_mut.asset_server;
+        let images = state_mut.images;
+        let mut meshes = state_mut.meshes;
+        let mut materials = state_mut.materials;
+        let mut render_layer_alloc = state_mut.render_layer_alloc;
+        let mut selected_object = state_mut.selected_object;
+        let collected_graph_data = state_mut.collected_graph_data;
+        let mut graphs_state = state_mut.graphs_state;
 
-                            if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
-                                graphs_state.remove_graph(graph_id);
-                                ui_state.graphs.remove(&tile_id);
-                            }
-                        }
-                    }
-                    TabDiff::AddViewport(parent) => {
-                        let pane = Pane::Viewport(ViewportPane::spawn(
-                            &mut commands,
-                            &asset_server,
-                            &mut meshes,
-                            &mut materials,
-                            &mut render_layer_alloc,
-                            &Viewport::default(),
-                        ));
-                        ui_state.insert_pane_with_parent(pane, parent, true);
-                    }
-                    TabDiff::AddGraph(parent, graph_id) => {
-                        let (graph_id, _) = graphs_state.get_or_create_graph(&graph_id);
+        let icons = TabIcons {
+            add: contexts.add_image(images.icon_add.clone_weak()),
+            close: contexts.add_image(images.icon_close.clone_weak()),
+        };
 
-                        let graph = GraphPane::spawn(graph_id);
-                        let graph_id = graph.id;
-                        let graph_label = graph.label.clone();
-                        let pane = Pane::Graph(graph);
-
-                        if let Some(tile_id) = ui_state.insert_pane_with_parent(pane, parent, true)
-                        {
-                            *selected_object = SelectedObject::Graph {
-                                tile_id,
-                                label: graph_label,
-                                graph_id,
+        egui::CentralPanel::default()
+            .frame(Frame {
+                fill: colors::TRANSPARENT,
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                let mut behavior = TreeBehavior {
+                    icons,
+                    tab_diffs: ui_state.tab_diffs.clone(),
+                    selected_object: selected_object.as_mut(),
+                    graphs_state: graphs_state.as_mut(),
+                    collected_graph_data: collected_graph_data.as_ref(),
+                };
+                ui_state.tab_diffs = vec![];
+                ui_state.tree.ui(&mut behavior, ui);
+                for diff in behavior.tab_diffs.drain(..) {
+                    match diff {
+                        TabDiff::Delete(tile_id) => {
+                            let Some(tile) = ui_state.tree.tiles.get(tile_id) else {
+                                continue;
                             };
-                            ui_state.graphs.insert(tile_id, graph_id);
+
+                            if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
+                                if let Some(camera) = viewport.camera {
+                                    commands.entity(camera).despawn(); // TODO(sphw): garbage collect old nav-gizmos
+                                }
+                            };
+
+                            if ui_state.tree.tiles.len() > 1 {
+                                ui_state.tree.tiles.remove(tile_id);
+
+                                if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
+                                    graphs_state.remove_graph(graph_id);
+                                    ui_state.graphs.remove(&tile_id);
+                                }
+                            }
+                        }
+                        TabDiff::AddViewport(parent) => {
+                            let pane = Pane::Viewport(ViewportPane::spawn(
+                                &mut commands,
+                                &asset_server,
+                                &mut meshes,
+                                &mut materials,
+                                &mut render_layer_alloc,
+                                &Viewport::default(),
+                            ));
+                            ui_state.insert_pane_with_parent(pane, parent, true);
+                        }
+                        TabDiff::AddGraph(parent, graph_id) => {
+                            let (graph_id, _) = graphs_state.get_or_create_graph(&graph_id);
+
+                            let graph = GraphPane::spawn(graph_id);
+                            let graph_id = graph.id;
+                            let graph_label = graph.label.clone();
+                            let pane = Pane::Graph(graph);
+
+                            if let Some(tile_id) =
+                                ui_state.insert_pane_with_parent(pane, parent, true)
+                            {
+                                *selected_object = SelectedObject::Graph {
+                                    tile_id,
+                                    label: graph_label,
+                                    graph_id,
+                                };
+                                ui_state.graphs.insert(tile_id, graph_id);
+                            }
                         }
                     }
                 }
-            }
-            let tiles = ui_state.tree.tiles.iter();
-            let active_tiles = ui_state.tree.active_tiles();
-            for (tile_id, tile) in tiles {
-                let egui_tiles::Tile::Pane(pane) = tile else {
-                    continue;
-                };
-                let Pane::Viewport(viewport) = pane else {
-                    continue;
-                };
-                let Some(cam) = viewport.camera else { continue };
-                if active_tiles.contains(tile_id) {
-                    if let Some(mut cam) = commands.get_entity(cam) {
-                        cam.insert(ViewportRect(viewport.rect));
+                let tiles = ui_state.tree.tiles.iter();
+                let active_tiles = ui_state.tree.active_tiles();
+                for (tile_id, tile) in tiles {
+                    let egui_tiles::Tile::Pane(pane) = tile else {
+                        continue;
+                    };
+                    let Pane::Viewport(viewport) = pane else {
+                        continue;
+                    };
+                    let Some(cam) = viewport.camera else { continue };
+                    if active_tiles.contains(tile_id) {
+                        if let Some(mut cam) = commands.get_entity(cam) {
+                            cam.insert(ViewportRect(viewport.rect));
+                        }
+                    } else if let Some(mut cam) = commands.get_entity(cam) {
+                        cam.insert(ViewportRect(None));
                     }
-                } else if let Some(mut cam) = commands.get_entity(cam) {
-                    cam.insert(ViewportRect(None));
                 }
-            }
-        });
+            });
+    }
 }
 
 #[derive(Component)]
