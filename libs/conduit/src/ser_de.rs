@@ -4,7 +4,7 @@ use crate::{
 };
 use bytemuck::CheckedBitPattern;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::mem::size_of;
+use core::mem::size_of;
 use try_buf::TryBuf;
 
 impl<B: Buf> Packet<B> {
@@ -76,6 +76,7 @@ impl<B: Buf + Slice> ColumnPayload<B> {
     }
 }
 
+#[cfg(feature = "std")]
 impl ColumnPayload<Bytes> {
     pub fn try_from_value_iter<'a>(
         time: u64,
@@ -126,9 +127,30 @@ impl ControlMsg {
     }
 
     pub fn write(&self, buf: impl BufMut) -> Result<(), Error> {
-        let writer = buf.writer();
-        postcard::to_io(self, writer)?;
+        postcard::serialize_with_flavor(self, BufMutFlavor { buf })?;
         Ok(())
+    }
+}
+
+struct BufMutFlavor<B> {
+    buf: B,
+}
+
+impl<B: BufMut> postcard::ser_flavors::Flavor for BufMutFlavor<B> {
+    type Output = B;
+
+    fn try_push(&mut self, data: u8) -> postcard::Result<()> {
+        self.buf.put_u8(data);
+        Ok(())
+    }
+
+    fn try_extend(&mut self, data: &[u8]) -> postcard::Result<()> {
+        self.buf.put_slice(data);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(self.buf)
     }
 }
 
@@ -146,6 +168,7 @@ impl<'a> Slice for &'a [u8] {
     }
 }
 
+#[cfg(feature = "std")]
 impl Slice for Bytes {
     fn try_get_slice(&mut self, len: usize) -> Option<Self>
     where
@@ -173,7 +196,11 @@ impl ComponentType {
     pub fn parse_value<'a>(&self, buf: &'a [u8]) -> Result<(usize, ComponentValue<'a>), Error> {
         let size = self.size();
         let buf = buf.get(..size).ok_or(Error::EOF)?;
-        let comp_shape = self.shape.iter().map(|n| *n as _).collect::<Vec<_>>();
+        let comp_shape = self
+            .shape
+            .iter()
+            .map(|n| *n as _)
+            .collect::<alloc::vec::Vec<_>>();
         let shape = ndarray::IxDyn(&comp_shape);
         fn cow_array<T: CheckedBitPattern>(
             buf: &[u8],
