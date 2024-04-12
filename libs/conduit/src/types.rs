@@ -1,32 +1,20 @@
 use bytes::Bytes;
+use core::{fmt, hash::Hash, mem::size_of};
 use ndarray::{CowArray, IxDyn};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    hash::Hash,
-    mem::size_of,
-    time::Duration,
-};
 
+#[cfg(feature = "std")]
 use crate::query::MetadataStore;
+#[cfg(feature = "std")]
+type HashSet<T> = std::collections::HashSet<T>;
+#[cfg(feature = "std")]
+type HashMap<K, V> = std::collections::HashMap<K, V>;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    bevy::prelude::Component,
-)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct EntityId(pub u64);
 
 impl EntityId {
@@ -80,6 +68,7 @@ pub struct StreamId(pub u32);
 impl StreamId {
     pub const CONTROL: StreamId = StreamId(0);
 
+    #[cfg(feature = "rand")]
     pub fn rand() -> Self {
         StreamId(fastrand::u32(1..))
     }
@@ -262,6 +251,7 @@ impl<'a> ComponentValue<'a> {
         }
     }
 
+    #[cfg(feature = "std")]
     pub fn iter<'i>(&'i self) -> Box<dyn Iterator<Item = ElementValue> + 'i> {
         match self {
             ComponentValue::U8(u8) => Box::new(u8.iter().map(|&x| ElementValue::U8(x))),
@@ -278,6 +268,7 @@ impl<'a> ComponentValue<'a> {
         }
     }
 
+    #[cfg(feature = "std")]
     pub fn iter_mut<'i>(&'i mut self) -> Box<dyn Iterator<Item = ElementValueMut<'i>> + 'i> {
         match self {
             ComponentValue::U8(u8) => Box::new(u8.iter_mut().map(ElementValueMut::U8)),
@@ -294,6 +285,7 @@ impl<'a> ComponentValue<'a> {
         }
     }
 
+    #[cfg(feature = "std")]
     pub fn indexed_iter_mut<'i>(
         &'i mut self,
     ) -> Box<dyn Iterator<Item = (IxDyn, ElementValueMut<'i>)> + 'i> {
@@ -404,6 +396,7 @@ pub trait Component {
     fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
     where
         Self: Sized;
+    #[cfg(feature = "std")]
     fn metadata() -> Metadata {
         Metadata {
             component_id: Self::component_id(),
@@ -427,6 +420,7 @@ pub enum Payload<B> {
 }
 
 impl<T> Packet<Payload<T>> {
+    #[cfg(feature = "std")]
     pub fn metadata(stream_id: StreamId, metadata: Metadata) -> Self {
         let payload = Payload::ControlMsg(ControlMsg::Metadata {
             stream_id,
@@ -443,18 +437,6 @@ impl<T> Packet<Payload<T>> {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub enum ControlMsg {
     Connect,
-    StartSim {
-        metadata_store: MetadataStore,
-        time_step: Duration,
-        entity_ids: HashSet<EntityId>,
-    },
-    Subscribe {
-        query: Query,
-    },
-    Metadata {
-        stream_id: StreamId,
-        metadata: Metadata,
-    },
     Asset {
         id: AssetId,
         entity_id: EntityId,
@@ -467,9 +449,25 @@ pub enum ControlMsg {
         max_tick: u64,
     },
     Exit,
+    #[cfg(feature = "std")]
+    Subscribe {
+        query: Query,
+    },
+    #[cfg(feature = "std")]
+    Metadata {
+        stream_id: StreamId,
+        metadata: Metadata,
+    },
+    #[cfg(feature = "std")]
+    StartSim {
+        metadata_store: MetadataStore,
+        time_step: std::time::Duration,
+        entity_ids: HashSet<EntityId>,
+    },
 }
 
 impl ControlMsg {
+    #[cfg(feature = "std")]
     pub fn sub_component_id(id: ComponentId) -> Self {
         ControlMsg::Subscribe {
             query: Query::ComponentId(id),
@@ -477,6 +475,7 @@ impl ControlMsg {
     }
 }
 
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum Query {
     All,
@@ -486,12 +485,14 @@ pub enum Query {
     And(Vec<Query>),
 }
 
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum MetadataQuery {
     And(Vec<MetadataQuery>),
     Equals(MetadataPair),
 }
 
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
     pub component_id: ComponentId,
@@ -500,6 +501,7 @@ pub struct Metadata {
     pub asset: bool,
 }
 
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum TagValue {
     Unit,
@@ -508,6 +510,7 @@ pub enum TagValue {
     Bytes(Vec<u8>),
 }
 
+#[cfg(feature = "std")]
 impl TagValue {
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -517,6 +520,7 @@ impl TagValue {
     }
 }
 
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct MetadataPair(pub String, pub TagValue);
 
