@@ -16,14 +16,14 @@ EulerAngles = ty.Annotated[
     el.Component("euler_angles", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
-MotorThrust = ty.Annotated[
-    jax.Array,
-    el.Component("motor", el.ComponentType.F64),
-]
-
 AngleOfAttack = ty.Annotated[
     jax.Array,
     el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+Time = ty.Annotated[
+    jax.Array,
+    el.Component("time", el.ComponentType.F64),
 ]
 
 
@@ -53,9 +53,9 @@ def quat_to_euler(q: el.Quaternion) -> jax.Array:
 
 @el.dataclass
 class Rocket(el.Archetype):
-    motor_thrust: MotorThrust
     euler_pos: EulerAngles
     angle_of_attack: AngleOfAttack
+    time: Time
     wind: Wind = el.SpatialMotion.zero()
 
 
@@ -121,14 +121,79 @@ def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
 
 
 @el.map
-def apply_thrust(m: MotorThrust, p: el.WorldPos, f: el.Force) -> el.Force:
-    thrust = p.angular() @ thrust_vector_body_frame * m
-    return f + el.Force.from_linear(thrust)
+def update_euler_angles(p: el.WorldPos) -> EulerAngles:
+    return quat_to_euler(p.angular())
 
 
 @el.map
-def update_euler_angles(p: el.WorldPos) -> EulerAngles:
-    return quat_to_euler(p.angular())
+def tick_time(t: Time) -> Time:
+    return t + TIME_STEP
+
+
+def thrust_curve() -> jax.Array:
+    thrust_curve = """
+    0.01 642.879
+    0.87 519.675
+    1.73 47.188
+    2.59 47.188
+    3.45 47.188
+    4.31 47.188
+    5.17 47.188
+    6.03 47.188
+    6.89 47.188
+    7.75 47.188
+    8.61 47.188
+    9.47 47.188
+    10.33 47.188
+    11.19 47.188
+    12.05 47.188
+    12.91 47.188
+    13.77 47.188
+    14.63 47.188
+    15.49 47.188
+    16.35 47.188
+    17.21 47.188
+    18.07 47.188
+    18.93 47.188
+    19.79 47.188
+    20.65 47.188
+    21.51 47.188
+    22.37 47.188
+    23.23 47.188
+    24.09 47.188
+    24.95 47.188
+    25.81 47.188
+    26.67 47.188
+    27.53 47.188
+    28.39 47.188
+    29.25 47.188
+    30.11 47.188
+    30.97 47.188
+    31.83 47.188
+    32.69 47.188
+    33.55 47.188
+    34.41 47.188
+    35.27 47.188
+    36.13 47.188
+    36.99 47.188
+    37.85 47.188
+    38.71 47.188
+    39.57 47.188
+    40.43 47.188
+    41.29 47.188
+    42.15 0
+    """
+    return jnp.array(
+        [[float(y) for y in x.split()] for x in thrust_curve.strip().split("\n")]
+    ).transpose()
+
+
+@el.map
+def apply_thrust(t: Time, p: el.WorldPos, f: el.Force) -> el.Force:
+    tc = thrust_curve()
+    f_t = jnp.interp(t, tc[0], tc[1])
+    thrust = p.angular() @ thrust_vector_body_frame * f_t
+    return f + el.Force.from_linear(thrust)
 
 
 w = el.World()
@@ -148,9 +213,9 @@ rocket = (
     .name("Rocket")
     .insert(
         Rocket(
-            motor_thrust=jnp.float64(400.0),
             euler_pos=jnp.array([0.0, 0.0, 0.0]),
             angle_of_attack=jnp.array([0.0, 0.0, 0.0]),
+            time=jnp.float64(0.0),
             wind=el.SpatialMotion.zero(),
         )
     )
@@ -182,5 +247,5 @@ effectors = (
     | apply_wind
     | update_euler_angles
 )
-sys = el.six_dof(TIME_STEP, effectors)
+sys = tick_time | el.six_dof(TIME_STEP, effectors)
 w.run(sys)
