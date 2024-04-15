@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -10,6 +11,7 @@ use nox_ecs::{
     ErasedSystem, System,
 };
 use numpy::PyUntypedArray;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use tracing_subscriber::EnvFilter;
@@ -108,14 +110,42 @@ impl Client {
     }
 }
 
+#[pyclass]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Integrator {
+    Rk4,
+    SemiImplicit,
+}
+
+impl FromStr for Integrator {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "rk4" => Ok(Integrator::Rk4),
+            "semi-implicit" => Ok(Integrator::SemiImplicit),
+            _ => Err(Error::PyErr(PyValueError::new_err("unknown integrator"))),
+        }
+    }
+}
+
+impl From<Integrator> for nox_ecs::Integrator {
+    fn from(integrator: Integrator) -> Self {
+        match integrator {
+            Integrator::Rk4 => nox_ecs::Integrator::Rk4,
+            Integrator::SemiImplicit => nox_ecs::Integrator::SemiImplicit,
+        }
+    }
+}
+
 #[pyfunction]
-pub fn six_dof(time_step: f64, sys: Option<PyObject>) -> RustSystem {
+#[pyo3(signature = (time_step, sys = None, integrator = Integrator::Rk4))]
+pub fn six_dof(time_step: f64, sys: Option<PyObject>, integrator: Integrator) -> RustSystem {
+    let integrator = integrator.into();
     let sys: Arc<dyn System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
-        let sys = nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step);
-        Arc::new(ErasedSystem::new(sys))
+        nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step, integrator)
     } else {
-        let sys = nox_ecs::six_dof::six_dof(|| (), time_step);
-        Arc::new(ErasedSystem::new(sys))
+        nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
     };
     RustSystem { inner: sys }
 }
@@ -164,6 +194,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Gizmo>()?;
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
+    m.add_class::<Integrator>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
