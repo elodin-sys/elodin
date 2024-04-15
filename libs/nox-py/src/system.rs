@@ -1,7 +1,9 @@
 use crate::*;
 
-use nox_ecs::System;
+use nox_ecs::{IntoSystem, System};
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct PySystem {
     pub sys: PyObject,
 }
@@ -43,8 +45,9 @@ impl System for PySystem {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct RustSystem {
-    pub inner: Box<dyn System<Arg = (), Ret = ()> + Send + Sync>,
+    pub inner: Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>,
 }
 
 #[pymethods]
@@ -56,5 +59,28 @@ impl RustSystem {
     fn call(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.inner.add_to_builder(&mut builder.builder)?;
         Ok(())
+    }
+    fn pipe(&self, sys: PyObject) -> RustSystem {
+        let pipe = nox_ecs::Pipe::new(self.clone().into_system(), PySystem { sys });
+        RustSystem {
+            inner: Arc::new(ErasedSystem::new(pipe)),
+        }
+    }
+    fn __or__(&self, sys: PyObject) -> RustSystem {
+        self.pipe(sys)
+    }
+}
+
+impl System for RustSystem {
+    type Arg = ();
+
+    type Ret = ();
+
+    fn init_builder(&self, builder: &mut nox_ecs::PipelineBuilder) -> Result<(), nox_ecs::Error> {
+        self.inner.init_builder(builder)
+    }
+
+    fn add_to_builder(&self, builder: &mut nox_ecs::PipelineBuilder) -> Result<(), nox_ecs::Error> {
+        self.inner.add_to_builder(builder)
     }
 }
