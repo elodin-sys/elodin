@@ -609,6 +609,19 @@ impl<Sys: System> System for Arc<Sys> {
     }
 }
 
+impl System for Arc<dyn System<Arg = (), Ret = ()> + Send + Sync> {
+    type Arg = ();
+    type Ret = ();
+
+    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.as_ref().add_to_builder(builder)
+    }
+
+    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
+        self.as_ref().init_builder(builder)
+    }
+}
+
 pub struct SystemFn<M, F> {
     func: F,
     phantom_data: PhantomData<M>,

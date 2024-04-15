@@ -1,8 +1,7 @@
 use conduit::well_known::{Material, Mesh, Pbr};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
-use nox_ecs::World;
-use nox_ecs::{six_dof::*, spawn_tcp_server, Query, WorldPos};
+use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldPos};
 
 fn earth_gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     pos.map(|_, _, _| {
@@ -42,7 +41,7 @@ fn main() {
     let time_step = 1.0 / 60.0;
     let exec = world
         .builder()
-        .tick_pipeline(six_dof(|| earth_gravity, time_step))
+        .tick_pipeline(six_dof(|| earth_gravity, time_step, Integrator::Rk4))
         .time_step(std::time::Duration::from_secs_f64(time_step))
         .build()
         .unwrap();
