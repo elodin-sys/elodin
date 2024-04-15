@@ -5,7 +5,7 @@ use std::{collections::HashMap, ops::Deref, sync::Arc};
 use nox_ecs::conduit;
 use nox_ecs::conduit::TagValue;
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::types::{PyBytes, PySequence};
+use pyo3::types::PySequence;
 
 use crate::Metadata;
 
@@ -21,36 +21,58 @@ pub struct Component {
     pub metadata: HashMap<String, TagValue>,
 }
 
+impl From<Component> for conduit::Metadata {
+    fn from(c: Component) -> Self {
+        conduit::Metadata {
+            component_id: c.id.inner,
+            component_type: c.ty.into(),
+            asset: c.asset,
+            tags: c.metadata,
+        }
+    }
+}
+
 #[pymethods]
 impl Component {
     #[new]
+    #[pyo3(signature = (id, ty, asset = false, metadata = HashMap::default()))]
     pub fn new(
         py: Python<'_>,
         id: PyObject,
         ty: ComponentType,
-        mut name: Option<String>,
-        asset: Option<bool>,
+        asset: bool,
+        metadata: HashMap<String, PyObject>,
     ) -> Result<Self, Error> {
-        if name.is_none() {
-            if let Ok(id) = id.extract::<String>(py) {
-                name = Some(id)
-            }
-        }
+        let name = id
+            .extract::<String>(py)
+            .ok()
+            .into_iter()
+            .map(|n| ("name".to_string(), TagValue::String(n)));
+        let metadata = metadata
+            .into_iter()
+            .map(|(k, v)| {
+                let value = if let Ok(s) = v.extract::<String>(py) {
+                    TagValue::String(s)
+                } else if let Ok(f) = v.extract::<bool>(py) {
+                    TagValue::Bool(f)
+                } else {
+                    TagValue::Unit
+                };
+                (k, value)
+            })
+            .chain(name)
+            .collect();
 
         let id = if let Ok(id) = id.extract::<ComponentId>(py) {
             id
         } else {
             ComponentId::new(py, id)?
         };
-        let metadata = name
-            .into_iter()
-            .map(|n| ("name".to_string(), TagValue::String(n)))
-            .collect();
         Ok(Self {
             id,
             ty,
             metadata,
-            asset: asset.unwrap_or_default(),
+            asset,
         })
     }
 
@@ -64,32 +86,8 @@ impl Component {
         Ok(component.id)
     }
 
-    pub fn tag(&mut self, key: String, value: &PyAny) -> Result<(), Error> {
-        let value = if let Ok(s) = value.extract::<String>() {
-            TagValue::String(s)
-        } else if let Ok(f) = value.extract::<bool>() {
-            TagValue::Bool(f)
-        } else if let Ok(u) = value.extract::<String>() {
-            TagValue::String(u)
-        } else if let Ok(b) = value
-            .call_method0("bytes")
-            .and_then(|x| x.extract::<&PyBytes>())
-        {
-            TagValue::Bytes(b.as_bytes().to_vec())
-        } else {
-            return Err(Error::UnexpectedInput);
-        };
-        self.metadata.insert(key, value);
-        Ok(())
-    }
-
     pub fn to_metadata(&self) -> Metadata {
-        let inner = Arc::new(conduit::Metadata {
-            component_id: self.id.inner,
-            component_type: self.ty.clone().into(),
-            asset: self.asset,
-            tags: self.metadata.clone(),
-        });
+        let inner = Arc::new(self.clone().into());
         Metadata { inner }
     }
 }

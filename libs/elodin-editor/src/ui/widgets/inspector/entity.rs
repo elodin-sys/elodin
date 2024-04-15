@@ -69,12 +69,24 @@ pub fn inspector(
 
     for (component_id, component_value) in map.0.iter_mut() {
         let label = utils::get_component_label(metadata_store, component_id);
+        let element_names = metadata_store
+            .get_metadata(component_id)
+            .and_then(|m| m.tags.get("element_names"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
 
         ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
 
         let mut create_graph = false;
 
-        let res = inspector_item_multi(ui, &label, component_value, icon_chart, &mut create_graph);
+        let res = inspector_item_multi(
+            ui,
+            &label,
+            element_names,
+            component_value,
+            icon_chart,
+            &mut create_graph,
+        );
         if res.changed() {
             if let Ok(payload) = ColumnPayload::try_from_value_iter(
                 0,
@@ -166,10 +178,16 @@ pub fn inspector_item_value<'a>(
 fn inspector_item_multi(
     ui: &mut egui::Ui,
     label: &str,
+    element_names: &str,
     values: &mut ComponentValue,
     icon_chart: egui::TextureId,
     create_graph: &mut bool,
 ) -> egui::Response {
+    let element_names = element_names
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(Option::Some)
+        .chain(std::iter::repeat(None));
     let resp = ui.vertical(|ui| {
         *create_graph = label::label_with_button(
             ui,
@@ -194,11 +212,15 @@ fn inspector_item_multi(
 
         ui.horizontal_wrapped(|ui| {
             ui.style_mut().spacing.item_spacing = item_spacing;
-            values
-                .indexed_iter_mut()
-                .fold(None, |res: Option<egui::Response>, (i, value)| {
-                    let i = DimIndexFormat(i);
-                    let label = format!("{i}");
+            values.indexed_iter_mut().zip(element_names).fold(
+                None,
+                |res: Option<egui::Response>, ((dim_i, value), element_name)| {
+                    let label = element_name
+                        .map(|name| name.to_string())
+                        .unwrap_or_else(|| {
+                            let dim_i = DimIndexFormat(dim_i);
+                            format!("{dim_i}")
+                        });
 
                     let new_res = ui.add(inspector_item_value(&label, value, desired_size));
                     if let Some(res) = res {
@@ -206,7 +228,8 @@ fn inspector_item_multi(
                     } else {
                         Some(new_res)
                     }
-                })
+                },
+            )
         })
     });
     if let Some(inner_resp) = resp.inner.inner {

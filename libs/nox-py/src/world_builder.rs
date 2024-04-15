@@ -29,25 +29,9 @@ impl WorldBuilder {
                 let columns = archetype
                     .component_datas
                     .iter()
-                    .map(
-                        |Component {
-                             id,
-                             ty,
-                             asset,
-                             metadata,
-                             ..
-                         }| {
-                            let metadata = conduit::Metadata {
-                                component_id: id.inner,
-                                component_type: ty.clone().into(),
-                                asset: *asset,
-                                tags: metadata.clone(),
-                            };
-                            let col = HostColumn::new(metadata);
-                            Ok((id.inner, col))
-                        },
-                    )
-                    .collect::<Result<_, Error>>()?;
+                    .cloned()
+                    .map(|c| (c.id.inner, HostColumn::new(c.into())))
+                    .collect();
                 for id in &archetype.component_ids {
                     self.world.component_map.insert(id.inner, archetype_name);
                 }
