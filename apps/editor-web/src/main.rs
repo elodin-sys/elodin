@@ -19,7 +19,7 @@ fn main() {
     let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
     web_sock::spawn_wasm(url, bevy_tx).unwrap();
     App::new()
-        .add_plugins(EditorPlugin)
+        .add_plugins(EditorPlugin::default())
         .add_plugins(SyncPlugin {
             plugin: sub,
             subscriptions: Subscriptions::default(),

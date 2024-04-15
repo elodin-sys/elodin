@@ -15,7 +15,7 @@ use bevy::{
         camera::{Exposure, PhysicalCameraParameters},
         view::RenderLayers,
     },
-    window::{PresentMode, WindowTheme},
+    window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
     DefaultPlugins,
 };
@@ -70,7 +70,18 @@ impl Plugin for EmbeddedAssetPlugin {
     }
 }
 
-pub struct EditorPlugin;
+#[derive(Default)]
+pub struct EditorPlugin {
+    window_resolution: WindowResolution,
+}
+
+impl EditorPlugin {
+    pub fn new(width: f32, height: f32) -> Self {
+        Self {
+            window_resolution: WindowResolution::new(width, height),
+        }
+    }
+}
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
@@ -84,6 +95,7 @@ impl Plugin for EditorPlugin {
                             title: "Elodin Editor".into(),
                             present_mode: PresentMode::AutoVsync,
                             canvas: Some("#editor".to_string()),
+                            resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
                                 min_width: 400.,
                                 min_height: 400.,

@@ -103,8 +103,8 @@ impl RootWidgetSystem for Inspector<'_> {
                 stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
                 ..Default::default()
             })
-            .min_width(width * 0.15)
-            .default_width(width * 0.25)
+            .min_width(width.min(1280.) * 0.15)
+            .default_width(width.min(1280.) * 0.25)
             .max_width(width * 0.35)
             .show_animated(ctx, sidebar_state.right_open, |ui| {
                 ui.add_widget_with::<InspectorContent>(world, "inspector_content", (icons, true));

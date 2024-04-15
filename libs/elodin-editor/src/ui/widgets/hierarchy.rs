@@ -80,8 +80,8 @@ impl RootWidgetSystem for Hierarchy<'_> {
                 inner_margin: egui::Margin::same(4.0),
                 ..Default::default()
             })
-            .min_width(width * 0.15)
-            .default_width(width * 0.20)
+            .min_width(width.min(1280.) * 0.15)
+            .default_width(width.min(1280.) * 0.20)
             .max_width(width * 0.35)
             .show_animated(ctx, sidebar_state.left_open, |ui| {
                 ui.add_widget_with::<HierarchyContent>(

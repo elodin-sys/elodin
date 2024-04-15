@@ -1,4 +1,7 @@
+use anyhow::Context;
+use bevy::window::WindowResized;
 use core::fmt;
+use std::io::{Read, Seek, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use tokio::net::TcpStream;
@@ -21,6 +24,9 @@ enum Simulator {
     Addr(SocketAddr),
     File(PathBuf),
 }
+
+#[derive(Resource)]
+struct WindowStateFile(std::fs::File);
 
 impl Default for Simulator {
     fn default() -> Self {
@@ -69,16 +75,63 @@ impl Cli {
                 .spawn()?;
         }
 
+        let mut window_state_file = self.window_state_file()?;
+        let mut window_state = String::new();
+        window_state_file.read_to_string(&mut window_state)?;
+        let editor_plugin = if let [width, height] = window_state
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            let width = width.parse::<f32>()?;
+            let height = height.parse::<f32>()?;
+            EditorPlugin::new(width, height)
+        } else {
+            EditorPlugin::default()
+        };
+
         App::new()
-            .add_plugins(EditorPlugin)
+            .insert_resource(WindowStateFile(window_state_file))
+            .add_plugins(editor_plugin)
             .add_plugins(SimClient { addr, bevy_tx })
             .add_plugins(SyncPlugin {
                 plugin: sub,
                 subscriptions: Subscriptions::default(),
             })
+            .add_systems(Update, on_window_resize)
             .run();
 
         Ok(())
+    }
+
+    fn window_state_file(&self) -> anyhow::Result<std::fs::File> {
+        let dirs = self.dirs().context("failed to get data directory")?;
+        let data_dir = dirs.data_dir();
+        std::fs::create_dir_all(data_dir).context("failed to create data directory")?;
+        let window_state_path = data_dir.join(".window-state");
+        std::fs::File::options()
+            .write(true)
+            .read(true)
+            .create(true)
+            .truncate(false)
+            .open(window_state_path)
+            .context("failed to open window state file")
+    }
+}
+
+fn on_window_resize(
+    mut window_state_file: ResMut<WindowStateFile>,
+    mut resize_reader: EventReader<WindowResized>,
+) {
+    if let Some(e) = resize_reader.read().last() {
+        let window_state = format!("{:.1} {:.1}\n", e.width, e.height);
+        if let Err(err) = window_state_file.0.rewind() {
+            tracing::warn!(?err, "failed to rewind window state file");
+            return;
+        }
+        if let Err(err) = window_state_file.0.write_all(window_state.as_bytes()) {
+            tracing::warn!(?err, "failed to write window state");
+        }
     }
 }
 
