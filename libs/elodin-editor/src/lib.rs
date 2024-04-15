@@ -113,7 +113,6 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
-            .init_resource::<CollectedEntityData>()
             .init_resource::<CollectedGraphData>()
             .add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::default())
@@ -152,12 +151,6 @@ impl Plugin for EditorPlugin {
     }
 }
 
-#[derive(Resource, Default, Debug)]
-pub struct CollectedEntityData {
-    pub ticks: Vec<u64>,
-    pub data: BTreeMap<EntityId, BTreeMap<ComponentId, Vec<Vec<f64>>>>,
-}
-
 #[derive(Resource, Default, Clone)]
 pub struct CollectedGraphData {
     pub baseline: Vec<f64>,
@@ -177,57 +170,69 @@ pub fn collect_entity_data(
         .collect::<BTreeMap<&EntityId, &EntityMetadata>>();
 
     for msg in reader.read() {
-        if let ControlMsg::Tick { tick, max_tick: _ } = msg {
-            let tick_time = time_step.0.as_secs_f64();
-            let tick = (*tick as f64) * tick_time;
-            let last_tick = collected_graph_data.baseline.last();
+        match msg {
+            ControlMsg::StartSim { .. } => {
+                collected_graph_data.baseline.clear();
+                collected_graph_data.entities.clear();
+            }
+            ControlMsg::Tick { tick, max_tick: _ } => {
+                let tick_time = time_step.0.as_secs_f64();
+                let tick = (*tick as f64) * tick_time;
+                let last_tick = collected_graph_data.baseline.last();
 
-            if last_tick.is_none() || last_tick.is_some_and(|t| tick > *t) {
-                collected_graph_data.baseline.push(tick);
+                if last_tick.is_none() || last_tick.is_some_and(|t| tick > *t) {
+                    collected_graph_data.baseline.push(tick);
 
-                for (entity_id, component_value_map) in current_entity_data.iter() {
-                    let mut entity_components: BTreeMap<ComponentId, EPlotDataComponent> =
-                        BTreeMap::new();
+                    for (entity_id, component_value_map) in current_entity_data.iter() {
+                        let mut entity_components: BTreeMap<ComponentId, EPlotDataComponent> =
+                            BTreeMap::new();
 
-                    if let Some(entity) = collected_graph_data.entities.get_mut(entity_id) {
-                        for (component_id, component_value) in &component_value_map.0 {
-                            let component_label =
-                                utils::get_component_label(metadata_store.as_ref(), component_id);
+                        if let Some(entity) = collected_graph_data.entities.get_mut(entity_id) {
+                            for (component_id, component_value) in &component_value_map.0 {
+                                let component_label = utils::get_component_label(
+                                    metadata_store.as_ref(),
+                                    component_id,
+                                );
 
-                            let entity_component = entity.components.get_mut(component_id);
-                            let component_data = if let Some(entity_component) = entity_component {
-                                entity_component.add_values(component_value)
-                            } else {
-                                EPlotDataComponent::new(component_label, component_value)
-                            };
+                                let entity_component = entity.components.get_mut(component_id);
+                                let component_data =
+                                    if let Some(entity_component) = entity_component {
+                                        entity_component.add_values(component_value)
+                                    } else {
+                                        EPlotDataComponent::new(component_label, component_value)
+                                    };
 
-                            entity_components.insert(*component_id, component_data);
+                                entity_components.insert(*component_id, component_data);
+                            }
+                        } else {
+                            for (component_id, component_value) in &component_value_map.0 {
+                                let component_label = utils::get_component_label(
+                                    metadata_store.as_ref(),
+                                    component_id,
+                                );
+
+                                entity_components.insert(
+                                    *component_id,
+                                    EPlotDataComponent::new(component_label, component_value),
+                                );
+                            }
                         }
-                    } else {
-                        for (component_id, component_value) in &component_value_map.0 {
-                            let component_label =
-                                utils::get_component_label(metadata_store.as_ref(), component_id);
 
-                            entity_components.insert(
-                                *component_id,
-                                EPlotDataComponent::new(component_label, component_value),
-                            );
-                        }
+                        collected_graph_data.entities.insert(
+                            *entity_id,
+                            EPlotDataEntity {
+                                label: entity_metadata
+                                    .get(&entity_id)
+                                    .map_or(format!("E[{}]", entity_id.0), |metadata| {
+                                        metadata.name.to_owned()
+                                    }),
+                                components: entity_components,
+                            },
+                        );
                     }
-
-                    collected_graph_data.entities.insert(
-                        *entity_id,
-                        EPlotDataEntity {
-                            label: entity_metadata
-                                .get(&entity_id)
-                                .map_or(format!("E[{}]", entity_id.0), |metadata| {
-                                    metadata.name.to_owned()
-                                }),
-                            components: entity_components,
-                        },
-                    );
                 }
             }
+            _ => {}
         }
     }
 }
