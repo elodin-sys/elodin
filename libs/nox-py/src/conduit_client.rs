@@ -1,7 +1,7 @@
 use bytes::Bytes;
-use conduit::{client::AsyncClient, ColumnPayload, Metadata, Packet, Payload, StreamId};
+use conduit::{client::AsyncClient, ColumnPayload, Packet, Payload, StreamId};
 use pyo3::prelude::*;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 
 use crate::{Archetype, Component, EntityId, Error, PyUntypedArrayExt};
@@ -101,16 +101,7 @@ async fn send_inner(
 ) -> Result<(), conduit::Error> {
     let stream_id = StreamId::rand();
     for (data, value_buf) in component_datas.iter().zip(arrays.iter()) {
-        let ty: conduit::ComponentType = data.ty.clone().into();
-        let packet: Packet<Payload<Bytes>> = Packet::metadata(
-            stream_id,
-            Metadata {
-                component_id: data.id.inner,
-                component_type: ty.clone(),
-                asset: data.asset,
-                tags: HashMap::new(),
-            },
-        );
+        let packet: Packet<Payload<Bytes>> = Packet::metadata(stream_id, data.clone().into());
         client.send(packet).await?;
 
         client
