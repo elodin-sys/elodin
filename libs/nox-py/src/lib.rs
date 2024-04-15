@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use conduit::well_known::GizmoType;
@@ -109,14 +110,22 @@ impl Client {
 
 #[pyfunction]
 pub fn six_dof(time_step: f64, sys: Option<PyObject>) -> RustSystem {
-    let sys: Box<dyn System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
+    let sys: Arc<dyn System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
         let sys = nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step);
-        Box::new(ErasedSystem::new(sys))
+        Arc::new(ErasedSystem::new(sys))
     } else {
         let sys = nox_ecs::six_dof::six_dof(|| (), time_step);
-        Box::new(ErasedSystem::new(sys))
+        Arc::new(ErasedSystem::new(sys))
     };
     RustSystem { inner: sys }
+}
+
+#[pyfunction]
+pub fn advance_time(time_step: f64) -> RustSystem {
+    let sys = nox_ecs::six_dof::advance_time(time_step);
+    RustSystem {
+        inner: Arc::new(ErasedSystem::new(sys)),
+    }
 }
 
 #[pyfunction]
@@ -156,6 +165,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
+    m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     Ok(())
 }

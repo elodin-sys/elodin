@@ -21,11 +21,6 @@ AngleOfAttack = ty.Annotated[
     el.Component("angle_of_attack", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
-Time = ty.Annotated[
-    jax.Array,
-    el.Component("time", el.ComponentType.F64),
-]
-
 
 def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     [roll, pitch, yaw] = jnp.deg2rad(angles)
@@ -55,7 +50,7 @@ def quat_to_euler(q: el.Quaternion) -> jax.Array:
 class Rocket(el.Archetype):
     euler_pos: EulerAngles
     angle_of_attack: AngleOfAttack
-    time: Time
+    time: el.Time
     wind: Wind = el.SpatialMotion.zero()
 
 
@@ -125,11 +120,6 @@ def update_euler_angles(p: el.WorldPos) -> EulerAngles:
     return quat_to_euler(p.angular())
 
 
-@el.map
-def tick_time(t: Time) -> Time:
-    return t + TIME_STEP
-
-
 def thrust_curve() -> jax.Array:
     thrust_curve = """
     0.01 642.879
@@ -189,7 +179,7 @@ def thrust_curve() -> jax.Array:
 
 
 @el.map
-def apply_thrust(t: Time, p: el.WorldPos, f: el.Force) -> el.Force:
+def apply_thrust(t: el.Time, p: el.WorldPos, f: el.Force) -> el.Force:
     tc = thrust_curve()
     f_t = jnp.interp(t, tc[0], tc[1])
     thrust = p.angular() @ thrust_vector_body_frame * f_t
@@ -247,5 +237,5 @@ effectors = (
     | apply_wind
     | update_euler_angles
 )
-sys = tick_time | el.six_dof(TIME_STEP, effectors)
+sys = el.advance_time(TIME_STEP) | el.six_dof(TIME_STEP, effectors)
 w.run(sys)

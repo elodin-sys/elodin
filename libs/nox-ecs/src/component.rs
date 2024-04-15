@@ -102,9 +102,18 @@ pub struct WorldPos(pub nox::SpatialTransform<f64>);
 #[derive(Component)]
 pub struct Seed(pub Scalar<u64>);
 
+#[derive(Component)]
+pub struct Time(pub Scalar<f64>);
+
 impl Seed {
     pub fn zero() -> Self {
         Seed(0u64.constant())
+    }
+}
+
+impl Time {
+    pub fn zero() -> Self {
+        Time(0f64.constant())
     }
 }
 
