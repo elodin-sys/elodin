@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, ops::DerefMut};
+use std::{marker::PhantomData, ops::DerefMut};
 
 use crate::{
     bevy::{
@@ -85,7 +85,7 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
                     color: Color::WHITE.into(),
                 },
                 entity_id,
-                ComponentValueMap(HashMap::default()),
+                ComponentValueMap::default(),
                 GridCell::<i128>::default(),
             ));
             entity_map.0.insert(entity_id, e.id());

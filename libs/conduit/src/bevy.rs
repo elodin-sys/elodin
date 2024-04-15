@@ -16,7 +16,7 @@ use crate::{
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bytes::Bytes;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -32,8 +32,8 @@ use bevy::{
 };
 use big_space::GridCell;
 
-#[derive(bevy::prelude::Component, Debug)]
-pub struct ComponentValueMap(pub HashMap<ComponentId, ComponentValue<'static>>);
+#[derive(bevy::prelude::Component, Debug, Default)]
+pub struct ComponentValueMap(pub BTreeMap<ComponentId, ComponentValue<'static>>);
 
 #[derive(bevy::prelude::Component)]
 pub struct Received;
@@ -76,7 +76,7 @@ impl ColumnMsg<Bytes> {
                     },
                     entity_id,
                     GridCell::<i128>::default(),
-                    ComponentValueMap(HashMap::default()),
+                    ComponentValueMap::default(),
                 ));
                 entity_map.0.insert(entity_id, e.id());
                 e.id()
