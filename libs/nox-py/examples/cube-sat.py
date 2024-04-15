@@ -445,6 +445,7 @@ exec = w.run(
         | rw_effector
         | gravity_effector
         | earth_point,
+        el.Integrator.SemiImplicit,
     ),
     time_step=1.0 / 240.0,
 )

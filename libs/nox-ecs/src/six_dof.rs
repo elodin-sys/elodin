@@ -4,8 +4,9 @@ use nox_ecs::{Archetype, Component};
 use nox_ecs::{Handle, IntoSystem, Query, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
+use std::sync::Arc;
 
-use crate::{semi_implicit_euler_with_dt, ComponentArray, Time};
+use crate::{semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, Rk4Ext, Time};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -120,14 +121,25 @@ pub fn advance_time(time_step: f64) -> impl System {
     increment_time.into_system()
 }
 
-pub fn six_dof<Sys, M, A, R>(effectors: impl FnOnce() -> Sys, time_step: f64) -> impl System
+pub fn six_dof<Sys, M, A, R>(
+    effectors: impl FnOnce() -> Sys,
+    time_step: f64,
+    integrator: Integrator,
+) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
 where
-    Sys: IntoSystem<M, A, R>,
+    M: 'static,
+    A: 'static,
+    R: 'static,
+    Sys: IntoSystem<M, A, R> + 'static,
+    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
-    let effectors = effectors();
-    clear_forces
-        .pipe(effectors)
-        .pipe(calc_accel)
-        .pipe(semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step))
-    //.rk4_with_dt::<U, DU>(time_step) // TODO(sphw): make this configurable
+    let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
+    match integrator {
+        Integrator::Rk4 => Arc::new(ErasedSystem::new(sys.rk4_with_dt::<U, DU>(time_step))),
+        Integrator::SemiImplicit => {
+            let integrate =
+                semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
+            Arc::new(ErasedSystem::new(sys.pipe(integrate)))
+        }
+    }
 }
