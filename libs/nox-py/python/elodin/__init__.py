@@ -392,6 +392,7 @@ EntityMetadataAsset = Annotated[
     Handle, Component(242, ComponentType.U64, "metadata_asset", True)
 ]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
+Time = Annotated[jax.Array, Component("time", ComponentType.F64)]
 GizmoAsset = Annotated[Handle, Component(2243, ComponentType.U64, "gizmo_asset", True)]
 PanelAsset = Annotated[Handle, Component(2244, ComponentType.U64, "panel_asset", True)]
 
