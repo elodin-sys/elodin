@@ -228,8 +228,8 @@ class Component:
         self,
         id: Union[ComponentId, str, int],
         ty: ComponentType,
-        name: Optional[str] = None,
         asset: bool = False,
+        metadata: map[str, str | bool] = {},
     ): ...
     def to_metadata(self) -> Metadata: ...
     @staticmethod

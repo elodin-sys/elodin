@@ -377,24 +377,52 @@ jax.tree_util.register_pytree_node(Handle, Handle.flatten, Handle.unflatten)
 jax.tree_util.register_pytree_node(Edge, Edge.flatten, Edge.unflatten)
 
 WorldPos = Annotated[
-    SpatialTransform, Component("world_pos", ComponentType.SpatialPosF64)
+    SpatialTransform,
+    Component(
+        "world_pos",
+        ComponentType.SpatialPosF64,
+        metadata={"element_names": "q0,q1,q2,q3,x,y,z"},
+    ),
 ]
 WorldVel = Annotated[
-    SpatialMotion, Component("world_vel", ComponentType.SpatialMotionF64)
+    SpatialMotion,
+    Component(
+        "world_vel",
+        ComponentType.SpatialMotionF64,
+        metadata={"element_names": "ωx,ωy,ωz,x,y,z"},
+    ),
 ]
 WorldAccel = Annotated[
-    SpatialMotion, Component("world_accel", ComponentType.SpatialMotionF64)
+    SpatialMotion,
+    Component(
+        "world_accel",
+        ComponentType.SpatialMotionF64,
+        metadata={"element_names": "αx,αy,αz,x,y,z"},
+    ),
 ]
-Force = Annotated[SpatialForce, Component("force", ComponentType.SpatialMotionF64)]
+Force = Annotated[
+    SpatialForce,
+    Component(
+        "force",
+        ComponentType.SpatialMotionF64,
+        metadata={"element_names": "τx,τy,τz,x,y,z"},
+    ),
+]
 Inertia = Annotated[SpatialInertia, Component("inertia", ComponentType.SpatialPosF64)]
-PbrAsset = Annotated[Handle, Component(241, ComponentType.U64, "pbr_asset", True)]
-EntityMetadataAsset = Annotated[
-    Handle, Component(242, ComponentType.U64, "metadata_asset", True)
-]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
 Time = Annotated[jax.Array, Component("time", ComponentType.F64)]
-GizmoAsset = Annotated[Handle, Component(2243, ComponentType.U64, "gizmo_asset", True)]
-PanelAsset = Annotated[Handle, Component(2244, ComponentType.U64, "panel_asset", True)]
+PbrAsset = Annotated[
+    Handle, Component(241, ComponentType.U64, True, metadata={"name": "pbr_asset"})
+]
+EntityMetadataAsset = Annotated[
+    Handle, Component(242, ComponentType.U64, True, metadata={"name": "metadata_asset"})
+]
+GizmoAsset = Annotated[
+    Handle, Component(2243, ComponentType.U64, True, metadata={"name": "gizmo_asset"})
+]
+PanelAsset = Annotated[
+    Handle, Component(2244, ComponentType.U64, True, metadata={"name": "panel_asset"})
+]
 
 
 class C:
