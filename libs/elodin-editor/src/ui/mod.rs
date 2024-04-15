@@ -585,7 +585,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             let sim_fps = 1.0 / tick_time.0.as_secs_f64();
 
             let viewport_left_top = ctx.available_rect().left_top();
-            let viewport_margins = egui::vec2(16.0, 16.0);
+            let viewport_margins = egui::vec2(16.0, 40.0);
 
             egui::Window::new("stats")
                 .title_bar(false)
@@ -596,7 +596,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     let render_fps_str = diagnostics
                         .get(&FrameTimeDiagnosticsPlugin::FPS)
                         .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
-                        .map_or(" N/A".to_string(), |value| format!("{value:>4.0}"));
+                        .map_or(" N/A".to_string(), |value| format!("{value:>6.2}"));
 
                     ui.add(Label::new(
                         RichText::new(format!("FPS [VIEW]: {render_fps_str}"))
@@ -604,7 +604,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     ));
 
                     ui.add(Label::new(
-                        RichText::new(format!("FPS [SIM]: {sim_fps:>4.0}")).color(Color32::WHITE),
+                        RichText::new(format!("FPS [SIM]:  {sim_fps:>6.2}")).color(Color32::WHITE),
                     ));
                 });
         }
