@@ -308,6 +308,9 @@ fn recv_system(args: RecvSystemArgs) {
 
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
+        if let Msg::Control(ctrl_msg) = &msg {
+            event.send(ctrl_msg.clone());
+        }
         match msg {
             Msg::Control(ControlMsg::StartSim {
                 metadata_store: new_metadata_store,
@@ -347,6 +350,9 @@ fn recv_system(args: RecvSystemArgs) {
                         false
                     }
                 });
+                value_map.iter_mut().for_each(|mut map| {
+                    map.0.clear();
+                });
             }
             Msg::Control(ControlMsg::Subscribe { query }) => {
                 let subscription = Subscription {
@@ -377,7 +383,7 @@ fn recv_system(args: RecvSystemArgs) {
                     warn!(?id, "unknown asset type");
                     continue;
                 };
-                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes.clone());
+                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes);
             }
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
@@ -385,8 +391,6 @@ fn recv_system(args: RecvSystemArgs) {
             Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
                 max_tick_res.0 = max_tick;
                 tick_res.0 = tick;
-
-                event.send(ControlMsg::Tick { tick, max_tick });
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
