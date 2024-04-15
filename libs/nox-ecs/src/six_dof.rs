@@ -5,7 +5,7 @@ use nox_ecs::{Handle, IntoSystem, Query, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 
-use crate::{semi_implicit_euler_with_dt, ComponentArray};
+use crate::{semi_implicit_euler_with_dt, ComponentArray, Time};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -111,6 +111,13 @@ pub struct Body {
     pub force: Force,
     pub mass: Inertia,
     pub pbr: Handle<Pbr>,
+}
+
+pub fn advance_time(time_step: f64) -> impl System {
+    let increment_time = move |query: ComponentArray<Time>| -> ComponentArray<Time> {
+        query.map(|time: Time| Time(time.0 + time_step)).unwrap()
+    };
+    increment_time.into_system()
 }
 
 pub fn six_dof<Sys, M, A, R>(effectors: impl FnOnce() -> Sys, time_step: f64) -> impl System

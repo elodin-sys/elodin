@@ -762,6 +762,12 @@ pub struct Pipe<A: System, B: System> {
     b: B,
 }
 
+impl<A: System, B: System> Pipe<A, B> {
+    pub fn new(a: A, b: B) -> Self {
+        Self { a, b }
+    }
+}
+
 impl<A: System, B: System> System for Pipe<A, B> {
     type Arg = (A::Arg, B::Arg);
     type Ret = (A::Ret, B::Ret);
