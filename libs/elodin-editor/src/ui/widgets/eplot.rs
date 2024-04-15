@@ -577,7 +577,13 @@ impl EPlot {
             }
 
             if border_rect.contains(pointer_pos) {
-                if let Some(closest_point) = self.lines[0].1[0].1[0].closest_by_x(&pointer_pos) {
+                if let Some(closest_point) = self
+                    .lines
+                    .first()
+                    .and_then(|l| l.1.first())
+                    .and_then(|l| l.1.first())
+                    .and_then(|l| l.closest_by_x(&pointer_pos))
+                {
                     self.draw_cursor(ui, pointer_pos, &closest_point, border_rect);
 
                     if self.show_modal {
