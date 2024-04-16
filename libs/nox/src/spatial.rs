@@ -73,7 +73,7 @@ pub struct SpatialForce<T> {
     pub inner: Vector<T, 6>,
 }
 
-impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialForce<T> {
+impl<T: Field> SpatialForce<T> {
     pub fn new(torque: impl Into<Vector<T, 3>>, force: impl Into<Vector<T, 3>>) -> Self {
         let torque = torque.into();
         let force = force.into();
@@ -191,7 +191,7 @@ pub struct SpatialMotion<T> {
     pub inner: Vector<T, 6>,
 }
 
-impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialMotion<T> {
+impl<T: Field> SpatialMotion<T> {
     pub fn new(angular: impl Into<Vector<T, 3>>, linear: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
         let linear = linear.into();
@@ -305,6 +305,30 @@ impl<T: Field> Add<SpatialTransform<T>> for SpatialTransform<T> {
         SpatialTransform {
             inner: self.inner + rhs.inner,
         }
+    }
+}
+
+impl<T: Field> Mul<SpatialMotion<T>> for Quaternion<T> {
+    type Output = SpatialMotion<T>;
+
+    fn mul(self, rhs: SpatialMotion<T>) -> Self::Output {
+        SpatialMotion::new(self.clone() * rhs.angular(), self * rhs.linear())
+    }
+}
+
+impl<T: Field> Mul<SpatialTransform<T>> for Quaternion<T> {
+    type Output = SpatialTransform<T>;
+
+    fn mul(self, rhs: SpatialTransform<T>) -> Self::Output {
+        SpatialTransform::new(self.clone() * rhs.angular(), self * rhs.linear())
+    }
+}
+
+impl<T: Field> Mul<SpatialForce<T>> for Quaternion<T> {
+    type Output = SpatialForce<T>;
+
+    fn mul(self, rhs: SpatialForce<T>) -> Self::Output {
+        SpatialForce::new(self.clone() * rhs.torque(), self * rhs.force())
     }
 }
 
