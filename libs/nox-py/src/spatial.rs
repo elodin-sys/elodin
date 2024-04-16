@@ -6,6 +6,7 @@ use pyo3::{prelude::*, types::PyTuple};
 use crate::Error;
 
 #[pyclass]
+#[derive(Clone)]
 pub struct SpatialTransform {
     inner: nox::SpatialTransform<f64>,
 }
@@ -92,6 +93,7 @@ impl SpatialTransform {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct SpatialMotion {
     inner: nox::SpatialMotion<f64>,
 }
@@ -165,6 +167,7 @@ impl SpatialMotion {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct SpatialForce {
     inner: nox::SpatialForce<f64>,
 }
@@ -317,9 +320,18 @@ impl Quaternion {
         self.inner.clone().add(rhs.inner.clone()).into()
     }
 
-    pub fn __matmul__(&self, rhs: PyObject) -> Result<PyObject, Error> {
-        let vec = Vector::from_op(Noxpr::jax(rhs));
-        Ok(self.inner.clone().mul(vec).into_op().to_jax()?)
+    pub fn __matmul__(&self, py: Python<'_>, rhs: PyObject) -> Result<PyObject, Error> {
+        let noxpr = if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
+            self.inner.clone().mul(s.inner).into_op()
+        } else if let Ok(s) = rhs.extract::<SpatialMotion>(py) {
+            self.inner.clone().mul(s.inner).into_op()
+        } else if let Ok(s) = rhs.extract::<SpatialForce>(py) {
+            self.inner.clone().mul(s.inner).into_op()
+        } else {
+            let vec = Vector::from_op(Noxpr::jax(rhs));
+            self.inner.clone().mul(vec).into_op()
+        };
+        Ok(noxpr.to_jax()?)
     }
 
     pub fn inverse(&self) -> Self {
