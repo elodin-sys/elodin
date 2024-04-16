@@ -59,7 +59,7 @@ auto-tag:
   new_tag=$(echo $current_tag | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
   git tag -a $new_tag -m "Elodin $new_tag"
   git push origin $new_tag
-  just re-tag-images $(git rev-parse HEAD) $tag
+  just re-tag-images $(git rev-parse HEAD) $new_tag
 
 [confirm("Are you sure you want to deploy to prod?")]
 release tag:
