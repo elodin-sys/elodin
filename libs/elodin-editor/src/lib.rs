@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, ops::Range, time::Duration};
 
 use bevy::{
     asset::{embedded_asset, AssetMetaCheck},
@@ -27,10 +27,10 @@ use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
-    bevy::{ComponentValueMap, TimeStep},
+    bevy::ComponentValueMap,
     query::MetadataStore,
     well_known::{EntityMetadata, Viewport, WorldPos},
-    ComponentId, ControlMsg, EntityId,
+    ControlMsg, EntityId,
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
@@ -165,7 +165,7 @@ impl Plugin for EditorPlugin {
 
 #[derive(Resource, Default, Clone)]
 pub struct CollectedGraphData {
-    pub baseline: Vec<f64>,
+    pub tick_range: Range<u64>,
     pub entities: BTreeMap<EntityId, EPlotDataEntity>,
 }
 
@@ -175,7 +175,6 @@ pub fn collect_entity_data(
     current_entity_data: Query<(&EntityId, &ComponentValueMap)>,
     metadata_store: Res<MetadataStore>,
     entity_metadata: Query<(&EntityId, &EntityMetadata)>,
-    time_step: Res<TimeStep>,
 ) {
     let entity_metadata = entity_metadata
         .iter()
@@ -184,63 +183,36 @@ pub fn collect_entity_data(
     for msg in reader.read() {
         match msg {
             ControlMsg::StartSim { .. } => {
-                collected_graph_data.baseline.clear();
                 collected_graph_data.entities.clear();
             }
             ControlMsg::Tick { tick, max_tick: _ } => {
-                let tick_time = time_step.0.as_secs_f64();
-                let tick = (*tick as f64) * tick_time;
-                let last_tick = collected_graph_data.baseline.last();
+                let last_tick = collected_graph_data.tick_range.end;
 
-                if last_tick.is_none() || last_tick.is_some_and(|t| tick > *t) {
-                    collected_graph_data.baseline.push(tick);
+                if last_tick == 0 || last_tick < *tick {
+                    collected_graph_data.tick_range.end = *tick;
 
                     for (entity_id, component_value_map) in current_entity_data.iter() {
-                        let mut entity_components: BTreeMap<ComponentId, EPlotDataComponent> =
-                            BTreeMap::new();
-
-                        if let Some(entity) = collected_graph_data.entities.get_mut(entity_id) {
-                            for (component_id, component_value) in &component_value_map.0 {
-                                let component_label = utils::get_component_label(
-                                    metadata_store.as_ref(),
-                                    component_id,
-                                );
-
-                                let entity_component = entity.components.get_mut(component_id);
-                                let component_data =
-                                    if let Some(entity_component) = entity_component {
-                                        entity_component.add_values(component_value)
-                                    } else {
-                                        EPlotDataComponent::new(component_label, component_value)
-                                    };
-
-                                entity_components.insert(*component_id, component_data);
-                            }
-                        } else {
-                            for (component_id, component_value) in &component_value_map.0 {
-                                let component_label = utils::get_component_label(
-                                    metadata_store.as_ref(),
-                                    component_id,
-                                );
-
-                                entity_components.insert(
-                                    *component_id,
-                                    EPlotDataComponent::new(component_label, component_value),
-                                );
-                            }
-                        }
-
-                        collected_graph_data.entities.insert(
-                            *entity_id,
-                            EPlotDataEntity {
+                        let entity = collected_graph_data
+                            .entities
+                            .entry(*entity_id)
+                            .or_insert_with(|| EPlotDataEntity {
                                 label: entity_metadata
                                     .get(&entity_id)
                                     .map_or(format!("E[{}]", entity_id.0), |metadata| {
                                         metadata.name.to_owned()
                                     }),
-                                components: entity_components,
-                            },
-                        );
+                                components: Default::default(),
+                            });
+                        for (component_id, component_value) in &component_value_map.0 {
+                            let component_label =
+                                utils::get_component_label(metadata_store.as_ref(), component_id);
+
+                            let entity_component = entity
+                                .components
+                                .entry(*component_id)
+                                .or_insert_with(|| EPlotDataComponent::new(component_label));
+                            entity_component.add_values(component_value);
+                        }
                     }
                 }
             }
