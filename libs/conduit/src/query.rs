@@ -28,6 +28,13 @@ impl MetadataStore {
             .get(component_id)
             .and_then(|&index| self.metadata.get(index))
     }
+
+    pub fn get_element_names(&self, component_id: &ComponentId) -> &str {
+        self.get_metadata(component_id)
+            .and_then(|m| m.tags.get("element_names"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+    }
 }
 
 impl Query {

@@ -72,11 +72,13 @@ pub fn inspector(
                 let mut new_component_values = Vec::new();
                 let mut replace_component = false;
 
+                let element_names = metadata_store.get_element_names(component_id);
                 component_value(
                     ui,
                     &mut new_component_values,
                     &mut replace_component,
                     component_values,
+                    element_names,
                 );
 
                 if replace_component {
@@ -97,10 +99,22 @@ fn component_value(
     new_component_values: &mut Vec<(bool, egui::Color32)>,
     replace_component: &mut bool,
     component_values: &[(bool, egui::Color32)],
+    element_names: &str,
 ) {
+    let element_names = element_names
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(Option::Some)
+        .chain(std::iter::repeat(None));
     ui.horizontal_wrapped(|ui| {
-        for (index, (enabled, color)) in component_values.iter().enumerate() {
-            let label = format!("[{index}]");
+        for (index, ((enabled, color), element_name)) in
+            component_values.iter().zip(element_names).enumerate()
+        {
+            ui.style_mut().override_font_id =
+                Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+            let label = element_name
+                .map(|name| name.to_string())
+                .unwrap_or_else(|| format!("[{index}]"));
             let value_toggle =
                 ui.add(ECheckboxButton::new(label.to_string(), *enabled).on_color(*color));
 
