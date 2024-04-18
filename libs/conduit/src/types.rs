@@ -338,6 +338,7 @@ impl<'a> ComponentValue<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub enum ElementValue {
     U8(u8),
     U16(u16),
@@ -350,6 +351,30 @@ pub enum ElementValue {
     F64(f64),
     F32(f32),
     Bool(bool),
+}
+
+impl ElementValue {
+    pub fn as_f64(&self) -> f64 {
+        match *self {
+            ElementValue::U8(x) => x as f64,
+            ElementValue::U16(x) => x as f64,
+            ElementValue::U32(x) => x as f64,
+            ElementValue::U64(x) => x as f64,
+            ElementValue::I8(x) => x as f64,
+            ElementValue::I16(x) => x as f64,
+            ElementValue::I32(x) => x as f64,
+            ElementValue::I64(x) => x as f64,
+            ElementValue::F64(x) => x,
+            ElementValue::F32(x) => x as f64,
+            ElementValue::Bool(x) => {
+                if x {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for ElementValue {

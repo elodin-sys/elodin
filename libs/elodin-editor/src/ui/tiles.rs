@@ -18,7 +18,7 @@ use super::{
     images::{self},
     utils::MarginSides,
     widgets::{button::EImageButton, eplot::EPlot, RootWidgetSystem},
-    GraphState, GraphsState, SelectedObject, ViewportRect,
+    GraphsState, SelectedObject, ViewportRect,
 };
 use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedGraphData};
 
@@ -82,18 +82,24 @@ impl Pane {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui) -> egui_tiles::UiResponse {
+    fn ui(
+        &mut self,
+        ui: &mut Ui,
+        collected_graph_data: &CollectedGraphData,
+        graphs_state: &mut GraphsState,
+    ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
             Pane::Graph(pane) => {
                 ui.painter()
                     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
+                let (_, graph_state) = graphs_state.get_or_create_graph(&Some(pane.id));
                 EPlot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
                     .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
                     .steps(6, 4)
-                    .calculate_lines(ui, &pane.collected_graph_data, &pane.graph_state)
+                    .calculate_lines(ui, collected_graph_data, graph_state)
                     .render(ui);
 
                 egui_tiles::UiResponse::None
@@ -151,8 +157,6 @@ impl ViewportPane {
 struct GraphPane {
     pub id: GraphId,
     pub label: String,
-    pub collected_graph_data: CollectedGraphData,
-    pub graph_state: GraphState,
 }
 
 impl GraphPane {
@@ -160,20 +164,7 @@ impl GraphPane {
         Self {
             id: graph_id,
             label: format!("Graph {}", graph_id.0),
-            collected_graph_data: CollectedGraphData::default(),
-            graph_state: GraphState::default(),
         }
-    }
-
-    fn update(
-        &mut self,
-        collected_graph_data: &CollectedGraphData,
-        graphs_state: &mut GraphsState,
-    ) {
-        let (_, graph_state) = graphs_state.get_or_create_graph(&Some(self.id));
-
-        self.graph_state = graph_state.clone();
-        self.collected_graph_data = collected_graph_data.clone();
     }
 }
 
@@ -219,11 +210,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        if let Pane::Graph(graph_pane) = pane {
-            graph_pane.update(self.collected_graph_data, self.graphs_state);
-        }
-
-        pane.ui(ui)
+        pane.ui(ui, self.collected_graph_data, self.graphs_state)
     }
 
     #[allow(clippy::fn_params_excessive_bools)]

@@ -1,7 +1,10 @@
 use bevy_egui::egui::{self, epaint::util::FloatOrd};
 use conduit::{ComponentId, ComponentValue};
 use itertools::{Itertools, MinMaxResult};
-use std::{collections::BTreeMap, ops::RangeInclusive};
+use std::{
+    collections::BTreeMap,
+    ops::{Range, RangeInclusive},
+};
 
 use crate::{
     ui::{colors, utils, GraphState},
@@ -23,45 +26,30 @@ pub struct EPlotDataComponent {
 }
 
 impl EPlotDataComponent {
-    pub fn new(component_label: impl ToString, component_value: &ComponentValue) -> Self {
-        let entity_component_value_lines = utils::component_value_to_vec(component_value)
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                (
-                    index,
-                    EPlotDataLine {
-                        label: format!("[{index}]"),
-                        values: vec![*value],
-                        min: *value,
-                        max: *value,
-                    },
-                )
-            })
-            .collect::<BTreeMap<usize, EPlotDataLine>>();
-
+    pub fn new(component_label: impl ToString) -> Self {
         Self {
             label: component_label.to_string(),
-            lines: entity_component_value_lines,
+            lines: BTreeMap::new(),
         }
     }
 
-    pub fn add_values(&mut self, component_value: &ComponentValue) -> Self {
-        let entity_component_value = utils::component_value_to_vec(component_value);
-
-        self.lines.iter_mut().for_each(|(index, line)| {
-            let new_value = entity_component_value[*index];
+    pub fn add_values(&mut self, component_value: &ComponentValue) {
+        for (i, new_value) in component_value.iter().enumerate() {
+            let new_value = new_value.as_f64();
+            let line = self.lines.entry(i).or_insert_with(|| EPlotDataLine {
+                label: format!("[{i}]"),
+                values: Vec::new(),
+                min: new_value,
+                max: new_value,
+            });
             line.values.push(new_value);
-
             if line.min > new_value {
                 line.min = new_value;
             }
             if line.max < new_value {
                 line.max = new_value;
             }
-        });
-
-        self.clone()
+        }
     }
 }
 
@@ -76,7 +64,7 @@ type EPlotEntityGroup = Vec<(String, EPlotComponentGroup)>;
 
 #[derive(Debug)]
 pub struct EPlot {
-    baseline: Vec<f64>,
+    tick_range: Range<u64>,
     lines: EPlotEntityGroup,
     bounds: EPlotBounds,
     rect: egui::Rect,
@@ -125,7 +113,7 @@ impl Default for EPlot {
 impl EPlot {
     pub fn new() -> Self {
         Self {
-            baseline: Vec::new(),
+            tick_range: Range::default(),
             lines: Vec::new(),
             bounds: EPlotBounds::default(),
             rect: egui::Rect::ZERO,
@@ -163,34 +151,19 @@ impl EPlot {
 
         // calc max_length
 
-        fn avg_f64_from_iter<'a>(values: impl Iterator<Item = &'a f64>) -> f64 {
-            let mut sum = 0.0;
-            let mut num = 0.0;
-            for value in values {
-                sum += value;
-                num += 1.0;
-            }
-            sum / num
-        }
-
         let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
         let max_length = width_in_px.ceil() as usize;
-        let ticks_len = collected_graph_data.baseline.len();
+        let ticks_len = collected_graph_data
+            .tick_range
+            .start
+            .saturating_sub(collected_graph_data.tick_range.end) as usize;
         let chunk_size = if ticks_len > max_length {
             ticks_len / max_length
         } else {
             1
         };
 
-        // calc chunked baseline
-
-        self.baseline = collected_graph_data
-            .baseline
-            .iter()
-            .chunks(chunk_size)
-            .into_iter()
-            .map(avg_f64_from_iter)
-            .collect::<Vec<f64>>();
+        self.tick_range = collected_graph_data.tick_range.clone();
 
         // calc bounds
 
@@ -212,7 +185,7 @@ impl EPlot {
             }
         }
 
-        self.bounds = EPlotBounds::from_lines(&self.baseline, &minmax_lines);
+        self.bounds = EPlotBounds::from_lines(&self.tick_range, &minmax_lines);
 
         // calc lines
 
@@ -227,12 +200,15 @@ impl EPlot {
                         for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                             if *enabled {
                                 if let Some(line) = component.lines.get(&value_index) {
-                                    let value_chunks = line.values.iter().chunks(chunk_size);
-                                    let values = value_chunks.into_iter().map(avg_f64_from_iter);
+                                    let value_chunks = line.values.chunks_exact(chunk_size);
+                                    let values = value_chunks.into_iter().map(|values| {
+                                        values.iter().sum::<f64>() / values.len() as f64
+                                    });
 
                                     let label = format!("[{value_index}]");
-                                    component_group_lines
-                                        .push(EPlotLine::from_values(&self, values, label, *color));
+                                    component_group_lines.push(EPlotLine::from_values(
+                                        &self, chunk_size, values, label, *color,
+                                    ));
                                 }
                             }
                         }
@@ -420,12 +396,12 @@ impl EPlot {
                 .stroke(egui::Stroke::new(0.4, colors::PRIMARY_CREAME))
                 .show(ui, |ui| {
                     let point_on_baseline = self
-                        .baseline
-                        .iter()
-                        .find_position(|x| **x == closest_point.x);
+                        .tick_range
+                        .clone()
+                        .find_position(|x| *x as f64 == closest_point.x);
 
                     if let Some((index, value)) = point_on_baseline {
-                        let time_text = utils::time_label_ms(*value);
+                        let time_text = utils::time_label_ms(value as f64);
 
                         ui.label(time_text);
 
@@ -619,14 +595,8 @@ impl EPlotBounds {
         }
     }
 
-    pub fn from_lines(baseline: &[f64], lines: &[Vec<f64>]) -> Self {
-        let minmax_x = baseline.iter().minmax();
-
-        let (min_x, max_x) = match minmax_x {
-            MinMaxResult::MinMax(min_x, max_x) => (*min_x, *max_x),
-            MinMaxResult::OneElement(x) => (*x, *x),
-            _ => (0.0, 0.0),
-        };
+    pub fn from_lines(baseline: &Range<u64>, lines: &[Vec<f64>]) -> Self {
+        let (min_x, max_x) = (baseline.end as f64, baseline.start as f64);
 
         let minmax_y = lines.iter().flatten().minmax();
 
@@ -674,15 +644,18 @@ impl EPlotLine {
 
     pub fn from_values(
         plot: &EPlot,
+        chunk_size: usize,
         values: impl Iterator<Item = f64>,
         label: String,
         color: egui::Color32,
     ) -> Self {
         Self::new(
-            plot.baseline
-                .iter()
+            plot.tick_range
+                .clone()
+                .rev()
+                .step_by(chunk_size)
                 .zip(values)
-                .map(|(x, y)| EPlotPoint::from_plot_point(plot, *x, y))
+                .map(|(x, y)| EPlotPoint::from_plot_point(plot, x as f64, y))
                 .collect::<Vec<EPlotPoint>>(),
             label,
             color,
