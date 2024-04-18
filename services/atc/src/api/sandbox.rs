@@ -1,8 +1,8 @@
 use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
 use crate::{error::Error, sandbox::update_sandbox_code};
 use atc_entity::{
-    events::DbExt,
-    sandbox::{self},
+    events::{DbExt, EntityExt},
+    sandbox,
     user::{EntityType, Permission, Verb},
     vm,
 };
@@ -13,8 +13,8 @@ use axum::{
 use chrono::Utc;
 use elodin_types::api::{
     api_server, BootSandboxReq, BootSandboxResp, CreateSandboxReq, CreateSandboxResp,
-    GetSandboxReq, ListSandboxesReq, ListSandboxesResp, Page, Sandbox, UpdateSandboxReq,
-    UpdateSandboxResp,
+    DeleteSandboxReq, GetSandboxReq, ListSandboxesReq, ListSandboxesResp, Page, Sandbox,
+    UpdateSandboxReq, UpdateSandboxResp,
 };
 use enumflags2::BitFlag;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
@@ -272,6 +272,43 @@ impl Api {
         .await?;
 
         Ok(BootSandboxResp {})
+    }
+
+    pub async fn delete_sandbox(
+        &self,
+        req: DeleteSandboxReq,
+        CurrentUser { user, .. }: CurrentUser,
+        txn: &DatabaseTransaction,
+    ) -> Result<Sandbox, Error> {
+        let mut redis = self.redis.clone();
+        let id = req.id()?;
+
+        if !user
+            .permissions
+            .has_perm(&id, EntityType::Sandbox, Verb::Delete.into())
+        {
+            return Err(Error::Unauthorized);
+        }
+
+        let delete_result = match sandbox::Entity::delete_with_event(id, txn, &mut redis).await {
+            Ok(model) => model,
+            Err(err) => {
+                return Err(err.into());
+            }
+        };
+
+        if let Some(vm_id) = delete_result.vm_id {
+            match vm::Entity::delete_with_event(vm_id, txn, &mut redis).await {
+                Ok(_)
+                | Err(atc_entity::events::Error::NotFound)
+                | Err(atc_entity::events::Error::Db(sea_orm::DbErr::RecordNotFound(_))) => {}
+                Err(err) => {
+                    return Err(err.into());
+                }
+            }
+        }
+
+        Ok(delete_result.into())
     }
 
     pub async fn sandbox_events(

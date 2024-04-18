@@ -216,6 +216,13 @@ impl api_server::Api for Api {
         optional_current_user_route_txn!(self, req, Self::get_sandbox)
     }
 
+    async fn delete_sandbox(
+        &self,
+        req: tonic::Request<DeleteSandboxReq>,
+    ) -> Result<Response<Sandbox>, Status> {
+        current_user_route_txn!(self, req, Self::delete_sandbox)
+    }
+
     type SandboxEventsStream = Pin<Box<dyn Stream<Item = Result<Sandbox, Status>> + Send + Sync>>;
     async fn sandbox_events(
         &self,

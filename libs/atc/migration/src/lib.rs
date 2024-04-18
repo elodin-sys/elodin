@@ -10,6 +10,7 @@ mod m20240301_223247_add_anon_sandbox;
 mod m20240307_235204_add_run_start;
 mod m20240308_002847_add_batches;
 mod m20240311_190106_add_batch_state;
+mod m20240402_101606_change_vms_sandbox_id_fk_on_delete;
 
 pub struct Migrator;
 
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240307_235204_add_run_start::Migration),
             Box::new(m20240308_002847_add_batches::Migration),
             Box::new(m20240311_190106_add_batch_state::Migration),
+            Box::new(m20240402_101606_change_vms_sandbox_id_fk_on_delete::Migration),
         ]
     }
 }

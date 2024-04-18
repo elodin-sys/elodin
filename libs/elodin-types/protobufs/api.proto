@@ -14,6 +14,7 @@ service Api {
     rpc CreateSandbox(CreateSandboxReq) returns (CreateSandboxResp);
     rpc UpdateSandbox(UpdateSandboxReq) returns (UpdateSandboxResp);
     rpc BootSandbox(BootSandboxReq) returns (BootSandboxResp);
+    rpc DeleteSandbox(DeleteSandboxReq) returns (Sandbox);
 
     rpc SandboxEvents(GetSandboxReq) returns (stream Sandbox);
 
@@ -108,6 +109,9 @@ message GetSandboxReq {
     bytes id = 1;
 }
 
+message DeleteSandboxReq {
+    bytes id = 1;
+}
 
 message ListMonteCarloRunsReq {}
 
