@@ -69,11 +69,7 @@ pub fn inspector(
 
     for (component_id, component_value) in map.0.iter_mut() {
         let label = utils::get_component_label(metadata_store, component_id);
-        let element_names = metadata_store
-            .get_metadata(component_id)
-            .and_then(|m| m.tags.get("element_names"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+        let element_names = metadata_store.get_element_names(component_id);
 
         ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
 

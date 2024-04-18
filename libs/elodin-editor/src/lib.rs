@@ -206,11 +206,15 @@ pub fn collect_entity_data(
                         for (component_id, component_value) in &component_value_map.0 {
                             let component_label =
                                 utils::get_component_label(metadata_store.as_ref(), component_id);
+                            let element_names = metadata_store.get_element_names(component_id);
 
-                            let entity_component = entity
-                                .components
-                                .entry(*component_id)
-                                .or_insert_with(|| EPlotDataComponent::new(component_label));
+                            let entity_component =
+                                entity.components.entry(*component_id).or_insert_with(|| {
+                                    EPlotDataComponent::new(
+                                        component_label,
+                                        element_names.to_string(),
+                                    )
+                                });
                             entity_component.add_values(component_value);
                         }
                     }

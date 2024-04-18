@@ -130,7 +130,7 @@ impl ECheckboxButton {
     }
 
     fn render(&mut self, ui: &mut egui::Ui) -> egui::Response {
-        let font_id = egui::TextStyle::Button.resolve(ui.style());
+        let font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
         // Set widget size and allocate space
         let galley =

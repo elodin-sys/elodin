@@ -1,4 +1,4 @@
-use bevy_egui::egui::{self, epaint::util::FloatOrd};
+use bevy_egui::egui::{self, epaint::util::FloatOrd, Align, Layout};
 use conduit::{ComponentId, ComponentValue};
 use itertools::{Itertools, MinMaxResult};
 use std::{
@@ -22,22 +22,31 @@ pub struct EPlotDataLine {
 #[derive(Clone, Debug)]
 pub struct EPlotDataComponent {
     pub label: String,
+    pub element_names: String,
     pub lines: BTreeMap<usize, EPlotDataLine>,
 }
 
 impl EPlotDataComponent {
-    pub fn new(component_label: impl ToString) -> Self {
+    pub fn new(component_label: impl ToString, element_names: String) -> Self {
         Self {
             label: component_label.to_string(),
+            element_names,
             lines: BTreeMap::new(),
         }
     }
 
     pub fn add_values(&mut self, component_value: &ComponentValue) {
-        for (i, new_value) in component_value.iter().enumerate() {
+        let element_names = self
+            .element_names
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(Option::Some)
+            .chain(std::iter::repeat(None));
+        for (i, (new_value, name)) in component_value.iter().zip(element_names).enumerate() {
             let new_value = new_value.as_f64();
+            let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
             let line = self.lines.entry(i).or_insert_with(|| EPlotDataLine {
-                label: format!("[{i}]"),
+                label,
                 values: Vec::new(),
                 min: new_value,
                 max: new_value,
@@ -196,7 +205,6 @@ impl EPlot {
                 for (component_id, component_values) in components {
                     if let Some(component) = entity.components.get(component_id) {
                         let mut component_group_lines = Vec::new();
-
                         for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                             if *enabled {
                                 if let Some(line) = component.lines.get(&value_index) {
@@ -205,9 +213,12 @@ impl EPlot {
                                         values.iter().sum::<f64>() / values.len() as f64
                                     });
 
-                                    let label = format!("[{value_index}]");
                                     component_group_lines.push(EPlotLine::from_values(
-                                        &self, chunk_size, values, label, *color,
+                                        &self,
+                                        chunk_size,
+                                        values,
+                                        line.label.clone(),
+                                        *color,
                                     ));
                                 }
                             }
@@ -416,11 +427,25 @@ impl EPlot {
 
                                 for line in component_lines {
                                     ui.horizontal(|ui| {
-                                        ui.add(egui::Label::new(
-                                            egui::RichText::new(line.label.to_owned())
-                                                .color(line.color),
-                                        ));
-                                        ui.label(format!("   {:.2}", line.values[index].y));
+                                        ui.with_layout(
+                                            Layout::top_down_justified(Align::LEFT),
+                                            |ui| {
+                                                ui.style_mut().override_font_id = Some(
+                                                    egui::TextStyle::Monospace
+                                                        .resolve(ui.style_mut()),
+                                                );
+                                                ui.vertical(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(line.label.to_owned())
+                                                            .color(line.color),
+                                                    )
+                                                })
+                                            },
+                                        );
+                                        ui.with_layout(
+                                            Layout::top_down_justified(Align::RIGHT),
+                                            |ui| ui.label(format!("{:.2}", line.values[index].y)),
+                                        )
                                     });
                                 }
                             }
