@@ -21,6 +21,12 @@ pub mod api {
         }
     }
 
+    impl DeleteSandboxReq {
+        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
+            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
+        }
+    }
+
     impl Page {
         pub fn last_id(&self) -> Result<uuid::Uuid, ValidationError> {
             uuid::Uuid::from_slice(&self.last_id).map_err(|_| ValidationError)

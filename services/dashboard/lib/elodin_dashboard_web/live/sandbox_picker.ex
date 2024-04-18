@@ -1,5 +1,6 @@
 defmodule ElodinDashboardWeb.SandboxPickerLive do
   use ElodinDashboardWeb, :live_view
+  import Logger
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
   alias ElodinDashboard.NameGen
@@ -57,8 +58,23 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
          |> put_flash(:info, "Successfully created sandbox #{name}")
          |> redirect(to: ~p"/sandbox/#{id}")}
 
-      err ->
+      {:error, err} ->
         {:noreply, socket |> put_flash(:error, "Error creating sandbox: #{err}")}
+    end
+  end
+
+  def handle_event("delete", %{"id" => id}, socket) do
+    token = socket.assigns[:current_user]["token"]
+
+    case Atc.delete_sandbox(%Api.DeleteSandboxReq{id: UUID.string_to_binary!(id)}, token) do
+      {:ok, sandbox} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Successfully deleted sandbox #{sandbox.name}")
+         |> redirect(to: ~p"/")}
+
+      {:error, err} ->
+        {:noreply, socket |> put_flash(:error, "Error deleting sandbox: #{err}")}
     end
   end
 
@@ -125,6 +141,8 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
               name={sandbox.name}
               img="/images/white-bg.svg"
               href={~p"/sandbox/#{sandbox.id}"}
+              id={sandbox.id}
+              delete_button={true}
             />
           </div>
         </div>

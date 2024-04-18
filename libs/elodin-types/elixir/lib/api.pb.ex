@@ -163,6 +163,14 @@ defmodule Elodin.Types.Api.GetSandboxReq do
   field :id, 1, type: :bytes
 end
 
+defmodule Elodin.Types.Api.DeleteSandboxReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :id, 1, type: :bytes
+end
+
 defmodule Elodin.Types.Api.ListMonteCarloRunsReq do
   @moduledoc false
 
@@ -276,6 +284,8 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :CurrentUser, Elodin.Types.Api.CurrentUserReq, Elodin.Types.Api.CurrentUserResp
 
   rpc :GetSandbox, Elodin.Types.Api.GetSandboxReq, Elodin.Types.Api.Sandbox
+
+  rpc :DeleteSandbox, Elodin.Types.Api.DeleteSandboxReq, Elodin.Types.Api.Sandbox
 
   rpc :ListSandboxes, Elodin.Types.Api.ListSandboxesReq, Elodin.Types.Api.ListSandboxesResp
 

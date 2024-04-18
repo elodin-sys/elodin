@@ -13,6 +13,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      animation: {
+        sliding: 'sliding 0.5s ease 1',
+      },
       colors: {
         "hyper-blue": "#1E43E2",
         "hyper-blue-dim": "#1736b5",
@@ -64,7 +67,11 @@ module.exports = {
           "20": "rgba(255, 255, 255, 0.2)",
           "10": "rgba(255, 255, 255, 0.1)"
         },
-        "sep-black": "#202020"
+        "sep-black": "#202020",
+        "primary-onyx": {
+          "9": "rgba(46, 45, 44, 1)",
+        },
+        "primary-smoke": "rgba(13, 13, 13, 1)",
       },
       spacing: {
         'elo-xxs': "4px",

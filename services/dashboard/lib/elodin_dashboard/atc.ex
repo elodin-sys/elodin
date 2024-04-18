@@ -100,6 +100,15 @@ defmodule ElodinDashboard.AtcAgent do
     end)
   end
 
+  def delete_sandbox(pid, request, token) do
+    ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
+      channel
+      |> Elodin.Types.Api.Api.Stub.delete_sandbox(request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
+
   def list_sandboxes(pid, request, token) do
     ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
       channel
@@ -194,6 +203,16 @@ defmodule ElodinDashboard.Atc do
       :atc,
       fn pid ->
         ElodinDashboard.AtcAgent.get_sandbox(pid, request, token)
+      end,
+      @timeout
+    )
+  end
+
+  def delete_sandbox(request, token) do
+    :poolboy.transaction(
+      :atc,
+      fn pid ->
+        ElodinDashboard.AtcAgent.delete_sandbox(pid, request, token)
       end,
       @timeout
     )
