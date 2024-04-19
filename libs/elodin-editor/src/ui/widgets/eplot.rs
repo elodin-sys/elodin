@@ -402,64 +402,71 @@ impl EPlot {
     }
 
     fn draw_modal(&self, ui: &mut egui::Ui, closest_point: &EPlotPoint, pointer_pos: egui::Pos2) {
-        let inner_rect_size = self.inner_rect.size();
-        let modal_min_size = egui::vec2(200.0, inner_rect_size.y);
-        let modal_rect = egui::Rect::from_min_size(pointer_pos, modal_min_size);
+        let modal_width = 200.0;
+        let margin = 20.0;
 
-        ui.allocate_ui_at_rect(modal_rect, |ui| {
-            egui::Frame::none()
-                .fill(colors::PRIMARY_SMOKE)
-                .inner_margin(egui::Margin::same(10.0))
-                .outer_margin(egui::Margin::same(20.0))
-                .stroke(egui::Stroke::new(0.4, colors::PRIMARY_CREAME))
-                .show(ui, |ui| {
-                    let point_on_baseline = self
-                        .tick_range
-                        .clone()
-                        .find_position(|x| *x as f64 == closest_point.x);
+        let anchor_left = closest_point.pos2.x + modal_width + margin < self.rect.right();
 
-                    if let Some((index, value)) = point_on_baseline {
-                        let time_text = utils::time_label_ms(value as f64);
+        let (pivot, fixed_pos) = if anchor_left {
+            (
+                egui::Align2::LEFT_TOP,
+                egui::pos2(pointer_pos.x + margin, pointer_pos.y + margin),
+            )
+        } else {
+            (
+                egui::Align2::RIGHT_TOP,
+                egui::pos2(pointer_pos.x - margin, pointer_pos.y + margin),
+            )
+        };
 
-                        ui.label(time_text);
+        egui::Window::new("plot_modal")
+            .pivot(pivot)
+            .title_bar(false)
+            .resizable(false)
+            .fixed_pos(fixed_pos)
+            .fixed_size(egui::vec2(modal_width, self.inner_rect.height() / 2.0))
+            .show(ui.ctx(), |ui| {
+                let point_on_baseline = self
+                    .tick_range
+                    .clone()
+                    .find_position(|x| *x as f64 == closest_point.x);
 
-                        for (entity_label, component_group) in &self.lines {
+                if let Some((index, value)) = point_on_baseline {
+                    let time_text = utils::time_label_ms(value as f64);
+
+                    ui.label(time_text);
+
+                    for (entity_label, component_group) in &self.lines {
+                        ui.separator();
+                        ui.label(entity_label);
+
+                        for (component_label, component_lines) in component_group {
                             ui.separator();
-                            ui.label(entity_label);
+                            ui.label(component_label);
+                            ui.separator();
 
-                            for (component_label, component_lines) in component_group {
-                                ui.separator();
-                                ui.label(component_label);
-                                ui.separator();
-
-                                for line in component_lines {
-                                    ui.horizontal(|ui| {
-                                        ui.with_layout(
-                                            Layout::top_down_justified(Align::LEFT),
-                                            |ui| {
-                                                ui.style_mut().override_font_id = Some(
-                                                    egui::TextStyle::Monospace
-                                                        .resolve(ui.style_mut()),
-                                                );
-                                                ui.vertical(|ui| {
-                                                    ui.label(
-                                                        egui::RichText::new(line.label.to_owned())
-                                                            .color(line.color),
-                                                    )
-                                                })
-                                            },
+                            for line in component_lines {
+                                ui.horizontal(|ui| {
+                                    ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
+                                        ui.style_mut().override_font_id = Some(
+                                            egui::TextStyle::Monospace.resolve(ui.style_mut()),
                                         );
-                                        ui.with_layout(
-                                            Layout::top_down_justified(Align::RIGHT),
-                                            |ui| ui.label(format!("{:.2}", line.values[index].y)),
-                                        )
+                                        ui.vertical(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(line.label.to_owned())
+                                                    .color(line.color),
+                                            )
+                                        })
                                     });
-                                }
+                                    ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                                        ui.label(format!("{:.2}", line.values[index].y))
+                                    })
+                                });
                             }
                         }
                     }
-                });
-        });
+                }
+            });
     }
 
     fn draw_legend(&self, ui: &mut egui::Ui) {
@@ -561,16 +568,10 @@ impl EPlot {
 
         // Draw lines
 
-        for (_entity_label, component_group) in &self.lines {
-            for (_component_label, component_group_lines) in component_group {
+        for (_, component_group) in &self.lines {
+            for (_, component_group_lines) in component_group {
                 for line in component_group_lines {
                     line.draw(ui);
-
-                    if let Some(pointer_pos) = pointer_pos {
-                        if border_rect.contains(pointer_pos) {
-                            line.draw_highlight(ui, &pointer_pos);
-                        }
-                    }
                 }
             }
         }
@@ -593,6 +594,18 @@ impl EPlot {
                     .and_then(|l| l.closest_by_x(&pointer_pos))
                 {
                     self.draw_cursor(ui, pointer_pos, &closest_point, border_rect);
+
+                    // Draw highlight circles on lines
+
+                    for (_, component_group) in &self.lines {
+                        for (_, component_group_lines) in component_group {
+                            for line in component_group_lines {
+                                if border_rect.contains(pointer_pos) {
+                                    line.draw_highlight(ui, &pointer_pos);
+                                }
+                            }
+                        }
+                    }
 
                     if self.show_modal {
                         self.draw_modal(ui, &closest_point, pointer_pos);
