@@ -10,7 +10,11 @@ use bevy_egui::{
 };
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::{bevy::EntityMap, well_known::Viewport, GraphId};
+use conduit::{
+    bevy::{EntityMap, TimeStep},
+    well_known::Viewport,
+    GraphId,
+};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
 use super::{
@@ -85,6 +89,7 @@ impl Pane {
     fn ui(
         &mut self,
         ui: &mut Ui,
+        time_step: f64,
         collected_graph_data: &CollectedGraphData,
         graphs_state: &mut GraphsState,
     ) -> egui_tiles::UiResponse {
@@ -99,6 +104,7 @@ impl Pane {
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
                     .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
                     .steps(6, 4)
+                    .time_step(time_step)
                     .calculate_lines(ui, collected_graph_data, graph_state)
                     .render(ui);
 
@@ -184,6 +190,7 @@ struct TreeBehavior<'a> {
     selected_object: &'a mut SelectedObject,
     graphs_state: &'a mut GraphsState,
     collected_graph_data: &'a CollectedGraphData,
+    time_step: f64,
 }
 
 #[derive(Clone)]
@@ -210,7 +217,12 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(ui, self.collected_graph_data, self.graphs_state)
+        pane.ui(
+            ui,
+            self.time_step,
+            self.collected_graph_data,
+            self.graphs_state,
+        )
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -430,6 +442,7 @@ pub struct TileLayout<'w, 's> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     collected_graph_data: Res<'w, CollectedGraphData>,
+    time_step: Res<'w, TimeStep>,
 }
 
 impl RootWidgetSystem for TileLayout<'_, '_> {
@@ -473,6 +486,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     selected_object: selected_object.as_mut(),
                     graphs_state: graphs_state.as_mut(),
                     collected_graph_data: collected_graph_data.as_ref(),
+                    time_step: state_mut.time_step.0.as_secs_f64(),
                 };
                 ui_state.tab_diffs = vec![];
                 ui_state.tree.ui(&mut behavior, ui);

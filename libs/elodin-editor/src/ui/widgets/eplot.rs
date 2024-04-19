@@ -74,6 +74,7 @@ type EPlotEntityGroup = Vec<(String, EPlotComponentGroup)>;
 #[derive(Debug)]
 pub struct EPlot {
     tick_range: Range<u64>,
+    time_step: f64,
     lines: EPlotEntityGroup,
     bounds: EPlotBounds,
     rect: egui::Rect,
@@ -123,6 +124,7 @@ impl EPlot {
     pub fn new() -> Self {
         Self {
             tick_range: Range::default(),
+            time_step: 0.0,
             lines: Vec::new(),
             bounds: EPlotBounds::default(),
             rect: egui::Rect::ZERO,
@@ -235,6 +237,11 @@ impl EPlot {
         self
     }
 
+    pub fn time_step(mut self, step: f64) -> Self {
+        self.time_step = step;
+        self
+    }
+
     pub fn invert(mut self, x: bool, y: bool) -> Self {
         self.invert_x = x;
         self.invert_y = y;
@@ -299,7 +306,7 @@ impl EPlot {
                         + (self.padding.bottom + self.notch_length + self.axis_label_margin),
                 ),
                 egui::Align2::CENTER_TOP,
-                utils::time_label_ms(x_step),
+                utils::time_label_ms(x_step * self.time_step),
                 font_id.clone(),
                 self.text_color,
             );
@@ -621,7 +628,7 @@ impl EPlotBounds {
     }
 
     pub fn from_lines(baseline: &Range<u64>, lines: &[Vec<f64>]) -> Self {
-        let (min_x, max_x) = (baseline.end as f64, baseline.start as f64);
+        let (min_x, max_x) = (baseline.start as f64, baseline.end as f64);
 
         let minmax_y = lines.iter().flatten().minmax();
 
@@ -677,7 +684,6 @@ impl EPlotLine {
         Self::new(
             plot.tick_range
                 .clone()
-                .rev()
                 .step_by(chunk_size)
                 .zip(values)
                 .map(|(x, y)| EPlotPoint::from_plot_point(plot, x as f64, y))

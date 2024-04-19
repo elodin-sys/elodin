@@ -184,6 +184,7 @@ pub fn collect_entity_data(
         match msg {
             ControlMsg::StartSim { .. } => {
                 collected_graph_data.entities.clear();
+                collected_graph_data.tick_range = 0..0;
             }
             ControlMsg::Tick { tick, max_tick: _ } => {
                 let last_tick = collected_graph_data.tick_range.end;
