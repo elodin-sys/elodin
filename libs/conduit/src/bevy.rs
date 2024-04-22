@@ -74,6 +74,7 @@ impl ColumnMsg<Bytes> {
                         color: Color::WHITE.into(),
                     },
                     entity_id,
+                    Transform::default(),
                     GridCell::<i128>::default(),
                     ComponentValueMap::default(),
                 ));

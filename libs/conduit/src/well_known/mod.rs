@@ -8,11 +8,13 @@ use crate::{ComponentType, ComponentValue, PrimitiveTy};
 #[cfg(feature = "bevy")]
 mod bevy_conv;
 
+mod camera;
 mod metadata;
 mod pbr;
 mod primitives;
 mod viewer;
 
+pub use camera::*;
 pub use metadata::*;
 pub use pbr::*;
 pub use viewer::*;

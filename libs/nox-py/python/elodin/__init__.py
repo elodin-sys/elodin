@@ -430,6 +430,7 @@ GizmoAsset = Annotated[
 PanelAsset = Annotated[
     Handle, Component(2244, ComponentType.U64, True, metadata={"name": "panel_asset", "priority": -1})
 ]
+Camera = Annotated[jax.Array, Component("camera", ComponentType(PrimitiveType.U64, (1,)),),]
 
 
 class C:
