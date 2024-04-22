@@ -1,5 +1,5 @@
 use bevy_egui::egui;
-use conduit::{query::MetadataStore, ComponentId, ComponentValue, TagValue};
+use conduit::ComponentValue;
 
 pub fn get_galley_layout_job(
     text: impl ToString,
@@ -43,18 +43,6 @@ pub fn component_value_to_vec(component_value: &ComponentValue) -> Vec<f64> {
     match component_value {
         ComponentValue::F64(arr) => arr.iter().cloned().collect::<Vec<f64>>(),
         _ => vec![],
-    }
-}
-
-pub fn get_component_label(metadata_store: &MetadataStore, component_id: &ComponentId) -> String {
-    if let Some(name) = metadata_store
-        .get_metadata(component_id)
-        .and_then(|m| m.tags.get("name"))
-        .and_then(TagValue::as_str)
-    {
-        name.to_string().to_uppercase()
-    } else {
-        format!("ID[{}]", component_id.0)
     }
 }
 

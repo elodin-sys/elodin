@@ -35,7 +35,6 @@ use conduit::{
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
 use ui::{
-    utils,
     widgets::eplot::{EPlotDataComponent, EPlotDataEntity},
     EntityPair, HoveredEntity,
 };
@@ -205,9 +204,11 @@ pub fn collect_entity_data(
                                 components: Default::default(),
                             });
                         for (component_id, component_value) in &component_value_map.0 {
-                            let component_label =
-                                utils::get_component_label(metadata_store.as_ref(), component_id);
-                            let element_names = metadata_store.get_element_names(component_id);
+                            let Some(metadata) = metadata_store.get_metadata(component_id) else {
+                                continue;
+                            };
+                            let component_label = metadata.component_name();
+                            let element_names = metadata.element_names();
 
                             let entity_component =
                                 entity.components.entry(*component_id).or_insert_with(|| {
