@@ -41,6 +41,7 @@ let
       ]
       ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
     XLA_EXTENSION_DIR = "${xla_ext}";
+    cargoExtraArgs = "--package=sim-agent --package=nox-py";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs // {

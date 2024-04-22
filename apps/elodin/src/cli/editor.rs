@@ -97,6 +97,7 @@ impl Cli {
             .add_plugins(SyncPlugin {
                 plugin: sub,
                 subscriptions: Subscriptions::default(),
+                enable_pbr: true,
             })
             .add_systems(Update, on_window_resize)
             .run();
