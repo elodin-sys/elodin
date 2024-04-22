@@ -18,7 +18,7 @@ use conduit::{
 use crate::ui::{
     colors::{self, with_opacity},
     tiles,
-    utils::MarginSides,
+    utils::{format_num, MarginSides},
     widgets::label,
     GraphsState,
 };
@@ -260,56 +260,5 @@ impl Display for DimIndexFormat {
             }
         }
         Ok(())
-    }
-}
-
-fn format_num(mut num: f64) -> String {
-    let width: usize = 8;
-    // need 2 characters for the sign and the decimal point
-    let digit_width = width - 2;
-    let digits = num.abs().log10().ceil() as usize + 1;
-    let precision = digit_width.saturating_sub(digits).min(3).max(1);
-    // round to the nearest multiple of 10^(-precision)
-    num = (num * 10.0_f64.powi(precision as i32)).round() / 10.0_f64.powi(precision as i32);
-    // -0.0 is wierd, just make it 0.0
-    if num == -0.0 {
-        num = 0.0;
-    }
-    let use_scientific = num.abs() >= 1e5;
-    if use_scientific {
-        format!("{:.2e}", num)
-    } else {
-        format!("{:.*}", precision, num)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::format_num;
-
-    #[test]
-    fn test_format_num() {
-        assert_eq!(format_num(0.0), "0.000");
-        assert_eq!(format_num(1.0), "1.000");
-        assert_eq!(format_num(9.999), "9.999");
-        assert_eq!(format_num(9.9999), "10.000");
-        assert_eq!(format_num(99.999), "99.999");
-        assert_eq!(format_num(999.99), "999.99");
-        assert_eq!(format_num(9999.9), "9999.9");
-        assert_eq!(format_num(99999.9), "99999.9");
-        assert_eq!(format_num(99999.99), "1.00e5");
-        assert_eq!(format_num(100000.0), "1.00e5");
-
-        // test negatives:
-        assert_eq!(format_num(-0.0), "0.000");
-        assert_eq!(format_num(-1.0), "-1.000");
-        assert_eq!(format_num(-9.999), "-9.999");
-        assert_eq!(format_num(-9.9999), "-10.000");
-        assert_eq!(format_num(-99.999), "-99.999");
-        assert_eq!(format_num(-999.99), "-999.99");
-        assert_eq!(format_num(-9999.9), "-9999.9");
-        assert_eq!(format_num(-99999.9), "-99999.9");
-        assert_eq!(format_num(-99999.99), "-1.00e5");
-        assert_eq!(format_num(-100000.0), "-1.00e5");
     }
 }

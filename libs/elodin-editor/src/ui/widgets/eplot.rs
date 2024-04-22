@@ -7,7 +7,11 @@ use std::{
 };
 
 use crate::{
-    ui::{colors, utils, GraphState},
+    ui::{
+        colors,
+        utils::{self, format_num},
+        GraphState,
+    },
     CollectedGraphData,
 };
 
@@ -137,7 +141,7 @@ impl EPlot {
 
             padding: egui::Margin::same(20.0),
             margin: egui::Margin::same(60.0),
-            notch_length: 20.0,
+            notch_length: 10.0,
             axis_label_margin: 10.0,
 
             fill_color: colors::TRANSPARENT,
@@ -339,7 +343,7 @@ impl EPlot {
                     y_position.y,
                 ),
                 egui::Align2::RIGHT_CENTER,
-                format!("{:.2}", y_step),
+                format_num(y_step),
                 font_id.clone(),
                 self.text_color,
             );
@@ -353,7 +357,7 @@ impl EPlot {
         border_rect: egui::Rect,
         font_id: egui::FontId,
     ) {
-        let label_size = egui::vec2(50.0, 20.0);
+        let label_size = egui::vec2(70.0, 20.0);
         let label_margin = 4.0;
 
         let pointer_rect = egui::Rect::from_center_size(
@@ -374,7 +378,7 @@ impl EPlot {
         ui.painter().text(
             pointer_rect.center(),
             egui::Align2::CENTER_CENTER,
-            format!("{:.2}", pointer_plot_point.y),
+            format_num(pointer_plot_point.y),
             font_id,
             colors::PRIMARY_ONYX,
         );
