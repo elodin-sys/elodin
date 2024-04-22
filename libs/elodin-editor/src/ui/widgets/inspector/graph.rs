@@ -5,7 +5,7 @@ use conduit::{query::MetadataStore, GraphId};
 
 use crate::ui::{
     colors::{self, with_opacity},
-    utils::{self, MarginSides},
+    utils::MarginSides,
     widgets::{button::ECheckboxButton, label::label_with_button},
     EntityData, GraphsState,
 };
@@ -57,7 +57,12 @@ pub fn inspector(
             }
 
             for (component_id, component_values) in components {
-                let component_label = utils::get_component_label(metadata_store, component_id);
+                let Some(metadata) = metadata_store.get_metadata(component_id) else {
+                    continue;
+                };
+                let component_label = metadata.component_name();
+                let element_names = metadata.element_names();
+
                 let component_label_margin = egui::Margin::symmetric(0.0, 18.0);
                 if label_with_button(
                     ui,
@@ -72,7 +77,6 @@ pub fn inspector(
                 let mut new_component_values = Vec::new();
                 let mut replace_component = false;
 
-                let element_names = metadata_store.get_element_names(component_id);
                 component_value(
                     ui,
                     &mut new_component_values,

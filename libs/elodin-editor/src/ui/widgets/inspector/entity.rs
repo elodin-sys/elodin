@@ -18,7 +18,7 @@ use conduit::{
 use crate::ui::{
     colors::{self, with_opacity},
     tiles,
-    utils::{self, MarginSides},
+    utils::MarginSides,
     widgets::label,
     GraphsState,
 };
@@ -67,9 +67,23 @@ pub fn inspector(
             });
         });
 
-    for (component_id, component_value) in map.0.iter_mut() {
-        let label = utils::get_component_label(metadata_store, component_id);
-        let element_names = metadata_store.get_element_names(component_id);
+    let mut components = map
+        .0
+        .keys()
+        .filter_map(|id| {
+            let metadata = metadata_store.get_metadata(id)?;
+            let priority = metadata.priority();
+            Some((*id, priority, metadata))
+        })
+        .filter(|(_, _, metadata)| !metadata.asset)
+        .filter(|(_, priority, _)| *priority >= 0)
+        .collect::<Vec<_>>();
+    components.sort_by_key(|(id, priority, _)| (*priority, *id));
+
+    for (component_id, _, metadata) in components.into_iter().rev() {
+        let component_value = map.0.get_mut(&component_id).unwrap();
+        let label = metadata.component_name();
+        let element_names = metadata.element_names();
 
         ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
 
@@ -92,7 +106,7 @@ pub fn inspector(
                 }),
             ) {
                 column_payload_writer.send(ColumnPayloadMsg {
-                    component_id: *component_id,
+                    component_id,
                     component_type: component_value.ty(),
                     payload,
                 });
@@ -107,7 +121,7 @@ pub fn inspector(
                 .map(|_| (true, colors::get_random_color()))
                 .collect::<Vec<(bool, egui::Color32)>>();
 
-            graphs_state.insert_component(&graph_id, &entity_id, component_id, component_values);
+            graphs_state.insert_component(&graph_id, &entity_id, &component_id, component_values);
 
             tile_state.create_graph_tile(graph_id);
         }

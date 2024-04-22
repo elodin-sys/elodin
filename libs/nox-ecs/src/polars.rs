@@ -211,7 +211,7 @@ impl Table<HostStore> {
         let column = df
             .column(&entity_id_string)
             .map_err(|_| Error::ComponentNotFound)?;
-        let entity_buffer = HostColumn::from_series(column, HostColumn::entity_ids().metadata)?;
+        let entity_buffer = HostColumn::from_series(column, EntityId::metadata())?;
 
         Ok(Self {
             columns,

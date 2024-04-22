@@ -381,7 +381,7 @@ WorldPos = Annotated[
     Component(
         "world_pos",
         ComponentType.SpatialPosF64,
-        metadata={"element_names": "q0,q1,q2,q3,x,y,z"},
+        metadata={"element_names": "q0,q1,q2,q3,x,y,z", "priority": 5},
     ),
 ]
 WorldVel = Annotated[
@@ -389,7 +389,7 @@ WorldVel = Annotated[
     Component(
         "world_vel",
         ComponentType.SpatialMotionF64,
-        metadata={"element_names": "ωx,ωy,ωz,x,y,z"},
+        metadata={"element_names": "ωx,ωy,ωz,x,y,z", "priority": 5},
     ),
 ]
 WorldAccel = Annotated[
@@ -397,7 +397,7 @@ WorldAccel = Annotated[
     Component(
         "world_accel",
         ComponentType.SpatialMotionF64,
-        metadata={"element_names": "αx,αy,αz,x,y,z"},
+        metadata={"element_names": "αx,αy,αz,x,y,z", "priority": 5},
     ),
 ]
 Force = Annotated[
@@ -405,23 +405,30 @@ Force = Annotated[
     Component(
         "force",
         ComponentType.SpatialMotionF64,
-        metadata={"element_names": "τx,τy,τz,x,y,z"},
+        metadata={"element_names": "τx,τy,τz,x,y,z", "priority": 5},
     ),
 ]
-Inertia = Annotated[SpatialInertia, Component("inertia", ComponentType.SpatialPosF64)]
-Seed = Annotated[jax.Array, Component("seed", ComponentType.U64)]
-Time = Annotated[jax.Array, Component("time", ComponentType.F64)]
+Inertia = Annotated[
+    SpatialInertia,
+    Component("inertia", ComponentType.SpatialPosF64, metadata={"priority": 5}),
+]
+Seed = Annotated[
+    jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})
+]
+Time = Annotated[
+    jax.Array, Component("time", ComponentType.F64, metadata={"priority": 5})
+]
 PbrAsset = Annotated[
-    Handle, Component(241, ComponentType.U64, True, metadata={"name": "pbr_asset"})
+    Handle, Component(241, ComponentType.U64, True, metadata={"name": "pbr_asset", "priority": -1})
 ]
 EntityMetadataAsset = Annotated[
-    Handle, Component(242, ComponentType.U64, True, metadata={"name": "metadata_asset"})
+    Handle, Component(242, ComponentType.U64, True, metadata={"name": "metadata_asset", "priority": -1})
 ]
 GizmoAsset = Annotated[
-    Handle, Component(2243, ComponentType.U64, True, metadata={"name": "gizmo_asset"})
+    Handle, Component(2243, ComponentType.U64, True, metadata={"name": "gizmo_asset", "priority": -1})
 ]
 PanelAsset = Annotated[
-    Handle, Component(2244, ComponentType.U64, True, metadata={"name": "panel_asset"})
+    Handle, Component(2244, ComponentType.U64, True, metadata={"name": "panel_asset", "priority": -1})
 ]
 
 

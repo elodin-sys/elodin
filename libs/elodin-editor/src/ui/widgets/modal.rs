@@ -182,9 +182,9 @@ impl WidgetSystem for ModalUpdateGraphContent<'_, '_> {
             });
 
             let selected_component_label = selected_component
-                .map_or("NONE".to_string(), |(component_id, _)| {
-                    utils::get_component_label(&metadata_store, component_id)
-                });
+                .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
+                .map(|m| m.component_name())
+                .unwrap_or_else(|| "NONE".to_string());
 
             ui.scope(|ui| {
                 theme::configure_combo_box(ui.style_mut());
@@ -197,10 +197,13 @@ impl WidgetSystem for ModalUpdateGraphContent<'_, '_> {
                         ui.selectable_value(&mut graph_states.modal_component, None, "NONE");
 
                         for (component_id, _) in components.0.iter() {
+                            let Some(metadata) = metadata_store.get_metadata(component_id) else {
+                                continue;
+                            };
                             ui.selectable_value(
                                 &mut graph_states.modal_component,
                                 Some(*component_id),
-                                utils::get_component_label(&metadata_store, component_id),
+                                metadata.component_name(),
                             );
                         }
                     });
