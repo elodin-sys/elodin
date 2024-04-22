@@ -1,8 +1,11 @@
 //! Provides the core functionality for manipulating tensors.
+use crate::local_backend::{ArrayBufUnit, ArrayDim};
 use crate::{
-    AsBuffer, Buffer, Field, FromOp, IntoOp, Noxpr, NoxprScalarExt, Op, Param, Scalar, Vector,
+    AsBuffer, Buffer, Dim, DimGet, Field, FromOp, GetDim, IntoOp, MatMul, Noxpr, NoxprScalarExt,
+    Op, Repr, Scalar, Vector,
 };
-use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Scalar as NalgebraScalar};
+use core::mem::MaybeUninit;
+use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
 use simba::scalar::ClosedNeg;
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -13,14 +16,14 @@ use xla::{ArrayElement, ElementType, NativeType};
 
 /// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
-pub struct Tensor<T, D: TensorDim, P: Param = Op> {
-    pub(crate) inner: P::Inner,
+pub struct Tensor<T: TensorItem, D: Dim, R: Repr = Op> {
+    pub(crate) inner: R::Inner<T::Elem, D>,
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
-impl<T, D: TensorDim, P: Param> std::fmt::Debug for Tensor<T, D, P>
+impl<T: TensorItem, D: Dim, P: Repr> std::fmt::Debug for Tensor<T, D, P>
 where
-    P::Inner: std::fmt::Debug,
+    P::Inner<T::Elem, D>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tensor")
@@ -29,35 +32,53 @@ where
     }
 }
 
-/// Trait for items that can be represented as tensors.
-/// Specifies the type of the item, its tensor representation, and dimensionality.
+/// Trait for items that can be contained in Tensors (i.e the `T`, in `Tensor<T>`)
+///
+/// This trait allows `Tensor` to be used like a higher-order container (like a special `Vec` or slice).
+/// In most use cases you only use `Tensor` to hold basic primitives like `f64`, but you can also have a tensor of [`Quaternion`] or even of
+/// another `Tensor`.
 pub trait TensorItem {
+    /// The type used when mapping across the `Tensor`.
+    /// For example, if you have a `Tensor<f64>` you will get a `Scalar<f64>` when mapping over the tensor
     type Item: FromOp;
+
+    /// A helper type that allows you to get a new Tensor with this `TensorItem`, and the specified dimension
     type Tensor<D>
     where
-        D: TensorDim;
-    type Dim: TensorDim;
+        D: Dim;
+
+    /// The dimension of the underyling item. For example `f64` will be `ScalarDim`
+    type Dim: Dim;
+
+    /// The `ElemenetType` for the underyling element. This is always a primitive (f64, f32, etc).
     const ELEM: ElementType;
+
+    /// The primitive element that will be stored in actual memory
+    type Elem: Copy;
 }
 
-impl<T: NativeType + ArrayElement> TensorItem for T {
+impl<T: NativeType + ArrayElement + Copy> TensorItem for T {
     type Item = Scalar<T>;
-    type Tensor<D> = Tensor<T, D> where D: TensorDim;
+    type Tensor<D> = Tensor<T, D> where D: Dim;
     type Dim = ();
 
     const ELEM: ElementType = T::TY;
+
+    type Elem = T;
 }
 
-impl<T: TensorItem, D: TensorDim> TensorItem for Tensor<T, D, Op> {
+impl<T: TensorItem, D: Dim> TensorItem for Tensor<T, D, Op> {
     type Item = T::Item; // NOTE: this bound might be wrong
 
     type Dim = D;
-    type Tensor<TD: TensorDim> = Tensor<T, TD>;
+    type Tensor<TD: Dim> = Tensor<T, TD>;
 
     const ELEM: ElementType = T::ELEM;
+
+    type Elem = T::Elem;
 }
 
-impl<T, D: TensorDim> FromOp for Tensor<T, D> {
+impl<T: TensorItem, D: Dim> FromOp for Tensor<T, D> {
     fn from_op(inner: Noxpr) -> Self {
         Tensor {
             inner,
@@ -84,11 +105,11 @@ where
     }
 }
 
-impl<T: TensorItem, InnerDim: TensorDim, D: TensorDim + NonScalarDim> Collapse
+impl<T: TensorItem, InnerDim: Dim, D: Dim + NonScalarDim> Collapse
     for Tensor<Tensor<T, InnerDim>, D, Op>
 where
     (D, InnerDim): DimConcat<D, InnerDim>,
-    <(D, InnerDim) as DimConcat<D, InnerDim>>::Output: TensorDim,
+    <(D, InnerDim) as DimConcat<D, InnerDim>>::Output: Dim,
 {
     type Out = Tensor<T, ConcatDims<D, InnerDim>>;
     fn collapse(self) -> Self::Out {
@@ -99,7 +120,7 @@ where
     }
 }
 
-impl<T, D: TensorDim> Clone for Tensor<T, D, Op> {
+impl<T: TensorItem, D: Dim> Clone for Tensor<T, D, Op> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -108,7 +129,7 @@ impl<T, D: TensorDim> Clone for Tensor<T, D, Op> {
     }
 }
 
-impl<T, D: TensorDim> Tensor<T, D, Op> {
+impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
     pub(crate) fn from_op(inner: Noxpr) -> Self {
         Self {
             inner,
@@ -133,13 +154,13 @@ impl<T, D: TensorDim> Tensor<T, D, Op> {
     }
 }
 
-impl<T: Field, D: TensorDim + XlaDim> Tensor<T, D, Op> {
+impl<T: Field, D: Dim> Tensor<T, D, Op> {
     pub fn zeros() -> Self {
         T::zero().broadcast()
     }
 }
 
-impl<T, D: TensorDim> IntoOp for Tensor<T, D, Op> {
+impl<T: TensorItem, D: Dim> IntoOp for Tensor<T, D, Op> {
     fn into_op(self) -> Noxpr {
         self.inner
     }
@@ -159,10 +180,14 @@ impl NonScalarDim for nalgebra::Dyn {}
 impl<const N: usize> TensorDim for nalgebra::Const<N> {}
 impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
-impl<T: TensorDim> DimDiv<T, T> for ShapeConstraint {}
-
 pub trait XlaDim {
     fn shape() -> SmallVec<[i64; 4]>;
+}
+
+impl XlaDim for Dyn {
+    fn shape() -> SmallVec<[i64; 4]> {
+        todo!()
+    }
 }
 
 impl ConstDim for ScalarDim {}
@@ -225,90 +250,104 @@ impl_tensor_dim!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_tensor_dim!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_tensor_dim!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
-pub trait DimAdd<D1: TensorDim, D2: TensorDim> {}
-pub trait DimSub<D1: TensorDim, D2: TensorDim> {}
-
-pub trait DimMul<D1: TensorDim, D2: TensorDim> {}
-pub trait DimDiv<D1: TensorDim, D2: TensorDim> {}
-
-impl<D: TensorDim> DimAdd<D, D> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimAdd<ScalarDim, D> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimAdd<D, ScalarDim> for ShapeConstraint {}
-
-impl<D: TensorDim> DimSub<D, D> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimSub<ScalarDim, D> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimSub<D, ScalarDim> for ShapeConstraint {}
-
-impl<D: NonScalarDim + TensorDim> DimDiv<D, ScalarDim> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimMul<D, ScalarDim> for ShapeConstraint {}
-impl<D: NonScalarDim + TensorDim> DimMul<ScalarDim, D> for ShapeConstraint {}
-
-impl<D: TensorDim> DimMul<D, D> for ShapeConstraint {}
-
 macro_rules! impl_op {
-    ($op: tt, $op_fn:tt, $constraint: tt, $inner: tt, $($t_bound:tt),+) => {
-        impl<T, D1: TensorDim, D2: TensorDim> $op<Tensor<T, D2>>
-            for Tensor<T, D1>
+    ($op: tt, $op_fn:tt, $inner: tt, $($t_bound:tt),+) => {
+        impl<T, D1: Dim, D2: Dim, R: Repr> $op<Tensor<T, D2, R>>
+            for Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
+            $(T::Elem: $t_bound,)+
+            T: Copy + $op<Output = T>,
+            T::Elem: $op<Output = T::Elem>,
+            D1: Dim + ArrayDim,
+            D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
+            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
+            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
+                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
-            type Output = Tensor<T, BroadcastedDim<D1, D2>>;
+            type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
-            fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
+            fn $op_fn(self, rhs: Tensor<T, D2, R>) -> Self::Output {
+                let inner = R::$op_fn::<T::Elem, D1, D2>(&self.inner, &rhs.inner);
+                Tensor { inner, phantom: PhantomData }
             }
         }
 
-        impl<'a, T, D1: TensorDim, D2: TensorDim> $op<&'a Tensor<T, D2>>
-            for Tensor<T, D1>
+        impl<'a, T, D1: Dim, D2: Dim, R: Repr> $op<&'a Tensor<T, D2, R>>
+            for Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
+            $(T::Elem: $t_bound,)+
+            T: Copy + $op<Output = T>,
+            T::Elem: $op<Output = T::Elem>,
+            D1: Dim + ArrayDim,
+            D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
+            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
+            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
+                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
-            type Output = Tensor<T, BroadcastedDim<D1, D2>>;
+            type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
-            fn $op_fn(self, rhs: &'a Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
+            fn $op_fn(self, rhs: &'a Tensor<T, D2, R>) -> Self::Output {
+                let inner = R::$op_fn::<T::Elem, D1, D2>(&self.inner, &rhs.inner);
+                Tensor { inner, phantom: PhantomData }
             }
         }
 
-        impl<'a, T, D1: TensorDim, D2: TensorDim> $op<Tensor<T, D2>>
-            for &'a Tensor<T, D1>
+    impl<'a, 'b, T, D1: Dim, D2: Dim, R: Repr> $op<&'a Tensor<T, D2, R>>
+            for &'b Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
+            $(T::Elem: $t_bound,)+
+            T: Copy + $op<Output = T>,
+            T::Elem: $op<Output = T::Elem>,
+            D1: Dim + ArrayDim,
+            D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
+            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
+            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
+                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
-            type Output = Tensor<T, BroadcastedDim<D1, D2>>;
+            type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
-            fn $op_fn(self, rhs: Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op(self.inner.clone() $inner rhs.inner.clone())
+            fn $op_fn(self, rhs: &'a Tensor<T, D2, R>) -> Self::Output {
+                let inner = R::$op_fn::<T::Elem, D1, D2>(&self.inner, &rhs.inner);
+                Tensor { inner, phantom: PhantomData }
             }
         }
 
-
-        impl<'a, 'b, T, D1: TensorDim, D2: TensorDim> $op<&'b Tensor<T, D2>>
-            for &'a Tensor<T, D1>
+    impl<'a, T, D1: Dim, D2: Dim, R: Repr> $op<Tensor<T, D2, R>>
+            for &'a Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
+            $(T::Elem: $t_bound,)+
+            T: Copy + $op<Output = T>,
+            T::Elem: $op<Output = T::Elem>,
+            D1: Dim + ArrayDim,
+            D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
+            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
+            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
+                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
-            type Output = Tensor<T, BroadcastedDim<D1, D2>>;
+            type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
-            fn $op_fn(self, rhs: &'b Tensor<T, D2>) -> Self::Output {
-                Tensor::from_op((self.inner.clone() $inner rhs.inner.clone()))
+            fn $op_fn(self, rhs: Tensor<T, D2, R>) -> Self::Output {
+                let inner = R::$op_fn::<T::Elem, D1, D2>(&self.inner, &rhs.inner);
+                Tensor { inner, phantom: PhantomData }
             }
         }
-
     };
 }
 
-impl_op! {Add, add, DimAdd, +, Field}
-impl_op! {Mul, mul, DimMul, *, Field}
-impl_op! {Div, div, DimDiv, /, Field}
-impl_op! {Sub, sub, DimSub, -, Field}
+impl_op! {Add, add,  +, Field}
+impl_op! {Mul, mul, *, Field}
+impl_op! {Div, div, /, Field}
+impl_op! {Sub, sub, -, Field}
 
-impl<T: Field, D: TensorDim> Neg for Tensor<T, D> {
+impl<T: Field, D: Dim> Neg for Tensor<T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -316,7 +355,7 @@ impl<T: Field, D: TensorDim> Neg for Tensor<T, D> {
     }
 }
 
-impl<'a, T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for &'a Tensor<T, D> {
+impl<'a, T: TensorItem + NalgebraScalar + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D> {
     type Output = Tensor<T, D>;
 
     fn neg(self) -> Self::Output {
@@ -324,8 +363,8 @@ impl<'a, T: NalgebraScalar + ClosedNeg, D: TensorDim> Neg for &'a Tensor<T, D> {
     }
 }
 
-impl<T, D: TensorDim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
-    fn fixed_slice<ND: TensorDim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op> {
+impl<T: TensorItem, D: Dim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
+    fn fixed_slice<ND: Dim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op> {
         let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
         let new_offsets = offsets
             .iter()
@@ -338,16 +377,12 @@ impl<T, D: TensorDim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
 }
 
 /// Extension trait for tensors supporting fixed-size slicing operations.
-pub trait FixedSliceExt<T, D: TensorDim> {
+pub trait FixedSliceExt<T: TensorItem, D: Dim> {
     /// Returns a tensor slice with dimensions specified by `ND`, starting at the given `offsets`.
-    fn fixed_slice<ND: TensorDim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op>;
+    fn fixed_slice<ND: Dim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op>;
 }
 
-impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: TensorDim> Mul<T>
-    for Tensor<T, D1>
-where
-    ShapeConstraint: DimMul<D1, ScalarDim>,
-{
+impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: Dim> Mul<T> for Tensor<T, D1> {
     type Output = Tensor<T, D1>;
 
     fn mul(self, rhs: T) -> Self::Output {
@@ -355,10 +390,8 @@ where
     }
 }
 
-impl<'a, T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: TensorDim> Mul<T>
+impl<'a, T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: Dim> Mul<T>
     for &'a Tensor<T, D1>
-where
-    ShapeConstraint: DimMul<D1, ScalarDim>,
 {
     type Output = Tensor<T, D1>;
 
@@ -369,7 +402,7 @@ where
 
 macro_rules! impl_prim {
     ($ty:tt) => {
-        impl<D: TensorDim> Mul<Tensor<$ty, D>> for $ty {
+        impl<D: Dim> Mul<Tensor<$ty, D>> for $ty {
             type Output = Tensor<$ty, D>;
 
             fn mul(self, rhs: Tensor<$ty, D>) -> Self::Output {
@@ -377,7 +410,7 @@ macro_rules! impl_prim {
             }
         }
 
-        impl<'a, D: TensorDim> Mul<&'a Tensor<$ty, D>> for $ty {
+        impl<'a, D: Dim> Mul<&'a Tensor<$ty, D>> for $ty {
             type Output = Tensor<$ty, D>;
 
             fn mul(self, rhs: &Tensor<$ty, D>) -> Self::Output {
@@ -394,7 +427,7 @@ impl_prim!(u32);
 impl_prim!(i64);
 impl_prim!(i32);
 
-impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
+impl<T: TensorItem, D: Dim> AsBuffer for Tensor<T, D, Buffer> {
     fn as_buffer(&self) -> &xla::PjRtBuffer {
         &self.inner
     }
@@ -403,43 +436,57 @@ impl<T, D: TensorDim> AsBuffer for Tensor<T, D, Buffer> {
 /// Trait for mapping dimensions in tensor operations.
 /// Allows for transforming and replacing dimensions in tensor types.
 pub trait MapDim<D> {
-    type Item: TensorDim;
-    type MappedDim: TensorDim;
-    type ReplaceMappedDim<Dim: TensorDim>: TensorDim;
+    type Item: Dim;
+    type MappedDim: Dim;
+    type ReplaceMappedDim<ReplaceDim: Dim>;
     const MAPPED_DIM: usize;
 }
 
-type MappedDim<T, D> = <T as MapDim<D>>::MappedDim;
-type ReplaceMappedDim<T, D, R> = <T as MapDim<D>>::ReplaceMappedDim<R>;
+pub type MappedDim<T, D> = <T as MapDim<D>>::MappedDim;
+pub type ReplaceMappedDim<T, D, R> = <T as MapDim<D>>::ReplaceMappedDim<R>;
 
 pub struct Mapped;
 
-impl<D: TensorDim> MapDim<D> for Mapped {
+impl<D: Dim> MapDim<D> for Mapped {
     type Item = ();
     type MappedDim = D;
-    type ReplaceMappedDim<Dim: TensorDim> = Dim;
+    type ReplaceMappedDim<ReplaceDim: Dim> = ReplaceDim;
 
     const MAPPED_DIM: usize = 0;
 }
 
-/// Trait for default dimension mapping in tensor operations.
+/// Trait that defines the default mapped dimension for use with `.map`
 pub trait DefaultMap
 where
     Self: Sized,
 {
-    /// The default dimension mapping for the implementing type.
+    /// The default dimension to be mapped, usually the first dim.
     type DefaultMapDim: MapDim<Self>;
 }
 
 pub type DefaultMappedDim<D> = <<D as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim;
 
+impl DefaultMap for ScalarDim {
+    type DefaultMapDim = Const<1>;
+}
+
+impl MapDim<ScalarDim> for Const<1> {
+    type Item = ();
+    type MappedDim = Const<1>;
+    type ReplaceMappedDim<ReplaceDim: Dim> = ReplaceDim;
+
+    const MAPPED_DIM: usize = 0;
+}
+
 macro_rules! impl_map {
     ($num:literal; $($ty:tt),+) => {
 
+        #[allow(unused_parens)]
          impl<M, $($ty,)*> DefaultMap for (M, $($ty,)*)
          where
-             M: TensorDim,
-             $($ty: TensorDim, )*
+             M: Dim,
+            $($ty: Dim, )*
+            ($($ty),*): Dim,
          {
              type DefaultMapDim = (Mapped, $($ty,)* );
          }
@@ -452,28 +499,29 @@ macro_rules! impl_map {
         #[allow(unused_parens)]
         impl<M, $($ty,)*> MapDim<(M, $($ty,)*)> for (Mapped, $($ty,)*)
         where
-            M: TensorDim,
-            $($ty: TensorDim, )*
+            M: Dim,
+            $($ty: Dim, )*
+            ($($ty),*): Dim,
         {
             type Item = ($($ty),*);
             type MappedDim = M;
-            type ReplaceMappedDim<Dim: TensorDim> = (Dim, $($ty),*);
+            type ReplaceMappedDim<ReplaceDim: Dim> = (ReplaceDim, $($ty),*);
 
             const MAPPED_DIM: usize = 0;
         }
 
         impl<$($ty,)* A> DimConcat<($($ty,)*), A> for (($($ty,)*), A)
         where
-            $($ty: TensorDim, )*
-            A: TensorDim + NonTupleDim
+            $($ty: Dim, )*
+            A: Dim + NonTupleDim
         {
             type Output = ($($ty),*, A);
         }
 
         impl<$($ty,)* A> DimConcat<A, ($($ty,)*)> for (A, ($($ty,)*))
         where
-            $($ty: TensorDim, )*
-            A: TensorDim + NonTupleDim
+            $($ty: Dim, )*
+            A: Dim + NonTupleDim
         {
             type Output = (A,$($ty),*);
         }
@@ -485,13 +533,15 @@ macro_rules! impl_map_inner {
         impl<$($ty,)* $($trail_ty,)* M> MapDim<
             ($($ty,)* Mapped, $($trail_ty,)*)
             > for ($($ty,)* M, $($trail_ty,)*)
-              where $($ty: TensorDim, )*
-              $($trail_ty: TensorDim, )*
-            M: TensorDim
+              where $($ty: Dim, )*
+              $($trail_ty: Dim, )*
+            M: Dim,
+            (T1, TT1): Dim,
+            ($($ty),*, $($trail_ty),*): Dim,
         {
             type Item = ($($ty),*, $($trail_ty),*);
             type MappedDim = M;
-            type ReplaceMappedDim<Dim: TensorDim> = ($($ty),*, Dim, $($trail_ty),*);
+            type ReplaceMappedDim<ReplaceDim: Dim> = ($($ty),*, ReplaceDim, $($trail_ty),*);
 
             const MAPPED_DIM: usize = $num;
         }
@@ -527,7 +577,7 @@ impl<A: NonScalarDim + NonTupleDim, B: NonScalarDim + NonTupleDim> DimConcat<A, 
     type Output = (A, B);
 }
 
-/// Represents types that are not tuples in dimension concatenation contexts.
+/// Trait implemented by all non-tuple dimensions, used by the [`DimConcat`] trait
 pub trait NonTupleDim {}
 
 impl NonTupleDim for ScalarDim {}
@@ -539,10 +589,10 @@ impl<const N: usize> NonTupleDim for Const<N> {}
 
 pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 
-impl<T, D: TensorDim> Tensor<T, D> {
+impl<T: TensorItem, D: Dim> Tensor<T, D> {
     pub fn reshape<ND>(self) -> Tensor<T, ND>
     where
-        ND: TensorDim + XlaDim,
+        ND: Dim + XlaDim,
     {
         Tensor {
             inner: self.inner.reshape(ND::shape()),
@@ -550,9 +600,9 @@ impl<T, D: TensorDim> Tensor<T, D> {
         }
     }
 
-    pub fn broadcast<ND: TensorDim>(self) -> Tensor<T, ND>
+    pub fn broadcast<ND: Dim>(self) -> Tensor<T, ND>
     where
-        ND: TensorDim + XlaDim,
+        ND: Dim + XlaDim,
     {
         let inner = self.inner.broadcast(ND::shape());
         Tensor {
@@ -562,11 +612,11 @@ impl<T, D: TensorDim> Tensor<T, D> {
     }
 }
 
-type AddDim<A, B> = <A as nalgebra::DimAdd<B>>::Output;
+pub type AddDim<A, B> = <A as nalgebra::DimAdd<B>>::Output;
 
 #[allow(clippy::type_complexity)]
-impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
-    pub fn concat<OD: TensorDim + DefaultMap>(
+impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
+    pub fn concat<OD: Dim + DefaultMap>(
         &self,
         other: Tensor<T, OD>,
     ) -> Tensor<
@@ -578,8 +628,10 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
         DefaultMappedDim<OD>: nalgebra::Dim,
         OD::DefaultMapDim: MapDim<D>,
         D::DefaultMapDim: MapDim<OD>,
-        AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>: TensorDim,
+        AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>: Dim,
         <<OD as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim: nalgebra::Dim,
+        ReplaceMappedDim<OD::DefaultMapDim, D, AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>>:
+            Dim,
     {
         let inner = Noxpr::concat_in_dim(
             vec![self.inner.clone(), other.inner.clone()],
@@ -591,14 +643,15 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
         }
     }
 
-    pub fn concat_with_dim<OD: TensorDim, MDim: MapDim<D> + MapDim<OD>>(
+    pub fn concat_with_dim<OD: Dim, MDim: MapDim<D> + MapDim<OD>>(
         &self,
         other: Tensor<T, OD>,
     ) -> Tensor<T, ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>>
     where
         MappedDim<MDim, D>: nalgebra::DimAdd<MappedDim<MDim, OD>> + nalgebra::Dim,
         MappedDim<MDim, OD>: nalgebra::Dim,
-        AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>: TensorDim,
+        AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>: Dim,
+        ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>: Dim,
     {
         let inner = Noxpr::concat_in_dim(
             vec![self.inner.clone(), other.inner.clone()],
@@ -613,37 +666,163 @@ impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
 
 /// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
 pub trait BroadcastDim<D1, D2> {
-    type Output: TensorDim;
+    type Output: Dim;
 }
 
 pub type BroadcastedDim<D1, D2> = <ShapeConstraint as BroadcastDim<D1, D2>>::Output;
 
-impl<D: TensorDim> BroadcastDim<D, D> for ShapeConstraint {
-    type Output = D;
+impl<const A: usize> BroadcastDim<Const<A>, Const<A>> for ShapeConstraint {
+    type Output = Const<A>;
 }
 
-impl<D: TensorDim + NotConst1> BroadcastDim<D, Const<1>> for ShapeConstraint {
-    type Output = D;
+impl BroadcastDim<ScalarDim, ScalarDim> for ShapeConstraint {
+    type Output = ScalarDim;
 }
 
-impl<D: TensorDim + NotConst1> BroadcastDim<Const<1>, D> for ShapeConstraint {
-    type Output = D;
-}
-
-impl<D: TensorDim + NotConst1> BroadcastDim<D, nalgebra::Dyn> for ShapeConstraint {
+impl BroadcastDim<nalgebra::Dyn, nalgebra::Dyn> for ShapeConstraint {
     type Output = nalgebra::Dyn;
 }
 
-impl<D: TensorDim + NotConst1> BroadcastDim<nalgebra::Dyn, D> for ShapeConstraint {
+impl<D: Dim + NotConst1> BroadcastDim<D, Const<1>> for ShapeConstraint {
+    type Output = D;
+}
+
+impl<D: Dim + NotConst1> BroadcastDim<Const<1>, D> for ShapeConstraint {
+    type Output = D;
+}
+
+pub trait NotDyn {}
+impl<const N: usize> NotDyn for Const<N> {}
+impl NotDyn for ScalarDim {}
+
+impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<D, nalgebra::Dyn> for ShapeConstraint {
     type Output = nalgebra::Dyn;
 }
 
-impl<D: TensorDim + NotConst1> BroadcastDim<D, ScalarDim> for ShapeConstraint {
+impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<nalgebra::Dyn, D> for ShapeConstraint {
+    type Output = nalgebra::Dyn;
+}
+
+impl<D: Dim + NonScalarDim> BroadcastDim<D, ScalarDim> for ShapeConstraint {
     type Output = D;
 }
 
-impl<D: TensorDim + NotConst1> BroadcastDim<ScalarDim, D> for ShapeConstraint {
+impl<D: Dim + NonScalarDim> BroadcastDim<ScalarDim, D> for ShapeConstraint {
     type Output = D;
+}
+
+impl<const A1: usize, const A2: usize, const B1: usize, const B2: usize>
+    BroadcastDim<(Const<A1>, Const<A2>), (Const<B1>, Const<B2>)> for ShapeConstraint
+where
+    ShapeConstraint: BroadcastDim<Const<A1>, Const<B1>>,
+    ShapeConstraint: BroadcastDim<Const<A2>, Const<B2>>,
+    (
+        BroadcastedDim<Const<A1>, Const<B1>>,
+        BroadcastedDim<Const<A2>, Const<B2>>,
+    ): Dim,
+{
+    type Output = (
+        BroadcastedDim<Const<A1>, Const<B1>>,
+        BroadcastedDim<Const<A2>, Const<B2>>,
+    );
+}
+
+impl<
+        const A1: usize,
+        const A2: usize,
+        const A3: usize,
+        const B1: usize,
+        const B2: usize,
+        const B3: usize,
+    > BroadcastDim<(Const<A1>, Const<A2>, Const<A3>), (Const<B1>, Const<B2>, Const<B3>)>
+    for ShapeConstraint
+where
+    ShapeConstraint: BroadcastDim<Const<A1>, Const<B1>>,
+    ShapeConstraint: BroadcastDim<Const<A2>, Const<B2>>,
+    ShapeConstraint: BroadcastDim<Const<A3>, Const<B3>>,
+    (
+        BroadcastedDim<Const<A1>, Const<B1>>,
+        BroadcastedDim<Const<A2>, Const<B2>>,
+        BroadcastedDim<Const<A3>, Const<B3>>,
+    ): Dim,
+{
+    type Output = (
+        BroadcastedDim<Const<A1>, Const<B1>>,
+        BroadcastedDim<Const<A2>, Const<B2>>,
+        BroadcastedDim<Const<A3>, Const<B3>>,
+    );
+}
+
+impl<const A2: usize, const B1: usize, const B2: usize>
+    BroadcastDim<(Dyn, Const<A2>), (Const<B1>, Const<B2>)> for ShapeConstraint
+where
+    ShapeConstraint: BroadcastDim<Const<A2>, Const<B2>>,
+    (Dyn, BroadcastedDim<Const<A2>, Const<B2>>): Dim,
+{
+    type Output = (Dyn, BroadcastedDim<Const<A2>, Const<B2>>);
+}
+
+pub trait DotDim<D1, D2> {
+    type Output: Dim;
+}
+
+impl<const N: usize> DotDim<Const<N>, Const<N>> for ShapeConstraint {
+    type Output = ScalarDim;
+}
+
+impl<D1: TensorDim + NonScalarDim, D2: TensorDim + NonScalarDim, D3: TensorDim + NonScalarDim>
+    DotDim<(D1, D2), (D2, D3)> for ShapeConstraint
+where
+    (D1, D3): Dim,
+{
+    type Output = (D1, D3);
+}
+
+impl<D2: TensorDim + NonScalarDim, D3: TensorDim + NonScalarDim> DotDim<(D2, D3), D3>
+    for ShapeConstraint
+where
+    D2: Dim,
+{
+    type Output = D2;
+}
+
+impl DotDim<Dyn, Dyn> for ShapeConstraint {
+    type Output = Dyn;
+}
+pub type DottedDim<D1, D2> = <ShapeConstraint as DotDim<D1, D2>>::Output;
+
+impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
+    pub fn dot<D2>(
+        &self,
+        right: &Tensor<T, D2, R>,
+    ) -> Tensor<T, <ShapeConstraint as DotDim<D1, D2>>::Output, R>
+    where
+        T: MatMul + Copy,
+        D1: Dim + ArrayDim,
+        D2: Dim + ArrayDim,
+        ShapeConstraint: DotDim<D1, D2>,
+        <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
+        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
+            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
+    {
+        Tensor {
+            inner: R::dot::<T, D1, D2>(&self.inner, &right.inner),
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Tensor<T, GetDim<D1>, R>
+    where
+        ShapeConstraint: DimGet<D1>,
+        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T>>:
+            ArrayBufUnit<T, Init = <GetDim<D1> as ArrayDim>::Buf<T>>,
+    {
+        let inner = R::get::<T, D1>(&self.inner, index);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
 }
 
 /// Marker trait for types not equivalent to `Const<1>`, used in broadcasting logic.
@@ -653,24 +832,25 @@ seq_macro::seq!(N in 2..99 {
     impl NotConst1 for Const<N> {}
 });
 
-impl<T: TensorItem, D: TensorDim> Tensor<T, D> {
+impl<T: TensorItem, D: Dim> Tensor<T, D> {
     pub fn index<I: TensorIndex<T, D>>(&self, index: I) -> I::Output {
         index.index(self.clone())
     }
 }
 
 /// Trait for indexing into tensors, allowing for the extraction of sub-tensors or elements based on indices.
-pub trait TensorIndex<T, D: TensorDim> {
+pub trait TensorIndex<T: TensorItem, D: Dim> {
     type Output;
 
     /// Performs the indexing operation on a tensor, returning the result.
     fn index(self, tensor: Tensor<T, D>) -> Self::Output;
 }
 
-impl<T: TensorItem, D: TensorDim + DefaultMap, IT: ArrayElement, const N: usize> TensorIndex<T, D>
+impl<T: TensorItem, D: Dim + DefaultMap, IT: TensorItem, const N: usize> TensorIndex<T, D>
     for Vector<IT, N>
 where
-    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: XlaDim,
+    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: Dim,
+    ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>: Dim,
 {
     type Output = Tensor<T, ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>>;
 

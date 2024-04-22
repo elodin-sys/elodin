@@ -1,11 +1,13 @@
-use crate::{ArrayTy, Field, FixedSliceExt};
-use nalgebra::{ArrayStorage, Const, Scalar as NalgebraScalar};
+use nalgebra::{ArrayStorage, Const, DimMul, Scalar as NalgebraScalar, ToTypenum};
 use num_traits::Zero;
 use smallvec::smallvec;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem::MaybeUninit};
 use xla::{ArrayElement, NativeType};
 
-use crate::{Buffer, BufferArg, Client, FromHost, MaybeOwned, Noxpr, Op, Scalar, Tensor, ToHost};
+use crate::{
+    ArrayBufUnit, ArrayDim, ArrayTy, Buffer, BufferArg, Client, ConcatManyDim, Dim, Field,
+    FromHost, MaybeOwned, Noxpr, Op, Repr, Scalar, Tensor, TensorItem, ToHost,
+};
 
 pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
 
@@ -53,7 +55,7 @@ where
     }
 }
 
-impl<T, const R: usize> BufferArg<Vector<T, R, Buffer>>
+impl<T: TensorItem, const R: usize> BufferArg<Vector<T, R, Buffer>>
     for nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>
 where
     T: NativeType + Field + ArrayElement,
@@ -66,37 +68,34 @@ where
     }
 }
 
-impl<T, const R: usize> Vector<T, R, Op> {
-    pub fn from_arr(arr: [Vector<T, 1, Op>; R]) -> Self {
-        let nodes = arr.map(|v| v.inner).to_vec();
-        let inner = Noxpr::concat_in_dim(nodes, 0);
+impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+    pub fn from_arr(arr: [&Scalar<T, R>; N]) -> Self
+    where
+        Const<N>: Dim,
+        Const<N>: ToTypenum,
+        Const<1>: DimMul<Const<N>, Output = Const<N>>,
+        <Const<1> as DimMul<Const<N>>>::Output: Dim,
+        <ConcatManyDim<Const<1>, N> as ArrayDim>::Buf<MaybeUninit<T>>:
+            ArrayBufUnit<T, Init = <ConcatManyDim<Const<1>, N> as ArrayDim>::Buf<T>>,
+    {
+        let args = arr.map(|v| &v.inner);
+        let inner = R::concat_many(args);
+        //let nodes = arr.map(|v| v.inner).to_vec();
+        //let inner = Noxpr::concat_in_dim(nodes, 0);
         Vector {
             inner,
             phantom: PhantomData,
         }
     }
+}
 
-    pub fn dot(&self, other: &Self) -> Scalar<T> {
-        Scalar {
-            inner: self.inner.clone().dot(&other.inner),
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn norm_squared(&self) -> Scalar<T> {
-        self.dot(self)
-    }
-
-    pub fn norm(&self) -> Scalar<T> {
-        self.dot(self).sqrt()
-    }
-
-    pub fn parts(&self) -> [Vector<T, 1>; R] {
+impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+    pub fn parts(&self) -> [Scalar<T, R>; N] {
         let mut i = 0;
-        [0; R].map(|_| {
-            let slice = self.fixed_slice(&[i]);
+        [0; N].map(|_| {
+            let elem = self.get(i);
             i += 1;
-            slice
+            elem
         })
     }
 }
@@ -108,7 +107,17 @@ impl<T: Field> Vector<T, 3, Op> {
         let x = &ay * &bz - &az * &by;
         let y = &az * &bx - &ax * &bz;
         let z = &ax * &by - &ay * &bx;
-        Vector::from_arr([x, y, z])
+        Vector::from_arr([&x, &y, &z])
+    }
+}
+
+impl<T: Field, const N: usize> Vector<T, N, Op> {
+    pub fn norm_squared(&self) -> Scalar<T> {
+        self.dot(self)
+    }
+
+    pub fn norm(&self) -> Scalar<T> {
+        self.dot(self).sqrt()
     }
 
     pub fn normalize(&self) -> Self {
@@ -127,15 +136,12 @@ mod tests {
     #[test]
     fn test_vector_from_arr() {
         let client = Client::cpu().unwrap();
-        fn from_arr(a: Vector<f32, 1>, b: Vector<f32, 1>, c: Vector<f32, 1>) -> Vector<f32, 3> {
-            Vector::from_arr([a, b, c])
+        fn from_arr(a: Scalar<f32>, b: Scalar<f32>, c: Scalar<f32>) -> Vector<f32, 3> {
+            Vector::from_arr([&a, &b, &c])
         }
         let comp = from_arr.build().unwrap();
         let exec = comp.compile(&client).unwrap();
-        let out = exec
-            .run(&client, vector![1.0f32], vector![2.0], vector![3.0])
-            .unwrap()
-            .to_host();
+        let out = exec.run(&client, 1.0f32, 2.0, 3.0).unwrap().to_host();
         assert_eq!(out, vector![1.0, 2.0, 3.0]);
     }
 
