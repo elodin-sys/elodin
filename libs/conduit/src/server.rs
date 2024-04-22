@@ -62,7 +62,7 @@ pub async fn handle_stream_sink(
         msg: init_msg,
         tx: outgoing_tx.downgrade(),
     };
-    incoming_tx.send_async(init_msg_pair).await?;
+    incoming_tx.send_async(init_msg_pair).await.unwrap();
 
     let rx = async move {
         let mut rx_client = AsyncClient::new(rx_socket);
