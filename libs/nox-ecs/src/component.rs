@@ -1,6 +1,6 @@
 use conduit::{ComponentId, ComponentType, Metadata, PrimitiveTy};
 use nox::xla::{ArrayElement, ElementType, NativeType};
-use nox::{IntoOp, Scalar, ScalarExt, Tensor, TensorDim, XlaDim};
+use nox::{Dim, IntoOp, Scalar, ScalarExt, Tensor};
 
 use nox_ecs_macros::Component;
 use smallvec::smallvec;
@@ -35,7 +35,7 @@ pub fn is_valid_name(s: &str) -> bool {
 
 impl<C: Component> ComponentExt for C {}
 
-impl<T: ArrayElement + NativeType, D: TensorDim + XlaDim> Component for Tensor<T, D> {
+impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
     fn name() -> String {
         format!("tensor_{}", T::PRIMITIVE_TY)
     }

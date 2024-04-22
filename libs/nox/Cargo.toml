@@ -11,6 +11,7 @@ jax = ["pyo3", "numpy", "bytemuck"]
 
 [dependencies]
 nalgebra = "0.32"
+ndarray = "0.15"
 num-traits = "0.2.15"
 simba = "0.8.1"
 boxcar = "0.2"
@@ -21,6 +22,7 @@ smallvec.features = ["const_generics", "union"]
 itertools = "0.12.0"
 seq-macro = "0.3.5"
 fn-traits = "0.1.2"
+matrixmultiply = "0.3"
 
 # xla-rs - a wrapper around raw xla
 xla.path = "../xla-rs"

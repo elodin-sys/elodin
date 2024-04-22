@@ -36,7 +36,7 @@ where
     }
 }
 
-impl<T: ArrayElement, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
+impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
     pub fn constant(self) -> Matrix<T, R, C, Op> {
         let inner = Noxpr::constant(
             self.inner,
@@ -53,7 +53,7 @@ impl<T: ArrayElement, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
     }
 }
 
-pub trait MatrixExt<T, const R: usize, const C: usize> {
+pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize> {
     fn constant(&self) -> Matrix<T, R, C, Op>;
     fn literal(&self) -> Matrix<T, R, C, Literal>;
     fn buffer(&self, client: &Client) -> Matrix<T, R, C, Buffer>;
@@ -148,26 +148,26 @@ where
     }
 }
 
-pub trait Dot<Rhs = Self> {
-    type Output;
+// pub trait Dot<Rhs = Self> {
+//     type Output;
 
-    fn dot(self, rhs: Rhs) -> Self::Output;
-}
+//     fn dot(self, rhs: Rhs) -> Self::Output;
+// }
 
-impl<T, const R: usize, const C: usize> Dot for Matrix<T, R, C, Op>
-where
-    T: NativeType + NalgebraScalar + ArrayElement,
-{
-    type Output = Matrix<T, R, C, Op>;
+// impl<T, const R: usize, const C: usize> Dot for Matrix<T, R, C, Op>
+// where
+//     T: NativeType + NalgebraScalar + ArrayElement,
+// {
+//     type Output = Matrix<T, R, C, Op>;
 
-    fn dot(self, rhs: Self) -> Self::Output {
-        let inner = Noxpr::dot(self.inner, &rhs.inner);
-        Matrix {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
+//     fn dot(self, rhs: Self) -> Self::Output {
+//         let inner = Noxpr::dot(self.inner, &rhs.inner);
+//         Matrix {
+//             inner,
+//             phantom: PhantomData,
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
