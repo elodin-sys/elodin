@@ -102,7 +102,7 @@ impl Pane {
                 let (_, graph_state) = graphs_state.get_or_create_graph(&Some(pane.id));
                 EPlot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
-                    .margin(egui::Margin::same(60.0).left(80.0).top(40.0))
+                    .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
                     .steps(6, 4)
                     .time_step(time_step)
                     .calculate_lines(ui, collected_graph_data, graph_state)
