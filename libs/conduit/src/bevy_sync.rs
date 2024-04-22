@@ -6,7 +6,7 @@ use crate::{
         Subscriptions,
     },
     client::MsgPair,
-    well_known::{EntityMetadata, Gizmo, Panel, Pbr, TraceAnchor, WorldPos},
+    well_known::{self, EntityMetadata, Gizmo, Panel, Pbr, TraceAnchor, WorldPos},
     EntityId,
 };
 use bevy::ecs::system::SystemId;
@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 pub struct SyncPlugin {
     pub plugin: ConduitSubscribePlugin,
     pub subscriptions: Subscriptions,
+    pub enable_pbr: bool,
 }
 
 impl SyncPlugin {
@@ -25,6 +26,7 @@ impl SyncPlugin {
         Self {
             plugin: ConduitSubscribePlugin::new(rx),
             subscriptions: Subscriptions::default(),
+            enable_pbr: true,
         }
     }
 }
@@ -37,13 +39,16 @@ impl Plugin for SyncPlugin {
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
+            .add_conduit_component::<well_known::Camera>()
             .add_conduit_asset::<Gizmo>(Box::new(SyncPostcardAdapter::<Gizmo>::new(None)))
             .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
             .add_conduit_component::<TraceAnchor>()
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
             ))
-            .add_conduit_asset::<Pbr>(Box::new(SyncPostcardAdapter::<Pbr>::new(Some(sync_pbr))));
+            .add_conduit_asset::<Pbr>(Box::new(SyncPostcardAdapter::<Pbr>::new(
+                self.enable_pbr.then_some(sync_pbr),
+            )));
     }
 }
 
@@ -86,6 +91,7 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
                 },
                 entity_id,
                 ComponentValueMap::default(),
+                Transform::default(),
                 GridCell::<i128>::default(),
             ));
             entity_map.0.insert(entity_id, e.id());

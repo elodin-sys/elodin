@@ -23,6 +23,7 @@ fn main() {
         .add_plugins(SyncPlugin {
             plugin: sub,
             subscriptions: Subscriptions::default(),
+            enable_pbr: true,
         })
         .add_systems(PostStartup, hide_loader.pipe(handle_error))
         .add_systems(

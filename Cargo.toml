@@ -17,6 +17,7 @@ members = [
     "services/sim-agent",
     "services/sim-builder",
     "apps/elodin",
+    "libs/unreal-plugin"
 ]
 
 [workspace.package]
