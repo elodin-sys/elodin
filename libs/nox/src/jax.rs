@@ -7,10 +7,7 @@ use smallvec::SmallVec;
 use std::{collections::HashMap, ops::Deref};
 use xla::{ArrayElement, ElementType, Literal};
 
-use crate::{
-    BinaryOp, CompFn, Error, Field, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode, Scalar, Tensor,
-    TensorItem,
-};
+use crate::{BinaryOp, CompFn, Error, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode};
 
 impl Noxpr {
     pub fn to_jax(&self) -> Result<PyObject, Error> {
@@ -342,55 +339,6 @@ pub fn call_comp_fn<T, R: IntoOp>(
         tracer.cache.insert(arg_id, py_arg.clone());
     }
     tracer.visit(&func.inner)
-}
-
-pub struct JaxDynField;
-
-impl TensorItem for JaxDynField {
-    type Item = Scalar<JaxDynField>;
-
-    type Tensor<D> = Tensor<JaxDynField, D>
-    where
-        D: crate::TensorDim;
-
-    type Dim = ();
-
-    const ELEM: ElementType = ElementType::F32;
-}
-
-impl Field for JaxDynField {
-    fn zero() -> Scalar<Self>
-    where
-        Self: Sized,
-    {
-        scalar(0.0, "float32")
-    }
-
-    fn one() -> Scalar<Self>
-    where
-        Self: Sized,
-    {
-        scalar(1.0, "float32")
-    }
-
-    fn two() -> Scalar<Self>
-    where
-        Self: Sized,
-    {
-        scalar(2.0, "float32")
-    }
-}
-
-fn scalar(f: f32, dtype: &str) -> Scalar<JaxDynField> {
-    let inner = Python::with_gil(|py| {
-        let jax = py.import("jax").unwrap();
-        let obj = jax.call_method1("numpy.array", (f, dtype)).unwrap().into();
-        Noxpr::jax(obj)
-    });
-    crate::Scalar {
-        inner,
-        phantom: std::marker::PhantomData,
-    }
 }
 
 #[cfg(test)]

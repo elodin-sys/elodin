@@ -47,8 +47,9 @@ pub fn from_builder(input: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let generic_idents = generics.type_params().map(|p| &p.ident);
     quote! {
-          impl #generics #crate_name::FromBuilder for #ident #generics #where_clause {
+          impl #generics #crate_name::FromBuilder for #ident<#(#generic_idents,)*> #where_clause {
             type Item<'a> = Self;
 
             fn from_builder(builder: &#crate_name::Builder) -> Self::Item<'_> {
