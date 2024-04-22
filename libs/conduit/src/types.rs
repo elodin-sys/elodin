@@ -21,6 +21,18 @@ impl EntityId {
     pub fn component_id() -> ComponentId {
         ComponentId::new("entity_id")
     }
+
+    #[cfg(feature = "std")]
+    pub fn metadata() -> Metadata {
+        let mut metadata = Metadata {
+            component_id: EntityId::component_id(),
+            component_type: ComponentType::u64(),
+            asset: false,
+            tags: HashMap::default(),
+        };
+        metadata.set_priority(-1);
+        metadata
+    }
 }
 
 impl From<u64> for EntityId {
@@ -527,10 +539,45 @@ pub struct Metadata {
 }
 
 #[cfg(feature = "std")]
+impl Metadata {
+    pub fn priority(&self) -> i64 {
+        self.tags
+            .get("priority")
+            .and_then(|v| match v {
+                TagValue::Int(v) => Some(*v),
+                _ => None,
+            })
+            .unwrap_or(10)
+    }
+
+    pub fn set_priority(&mut self, priority: i64) {
+        self.tags
+            .insert("priority".to_string(), TagValue::Int(priority));
+    }
+
+    pub fn element_names(&self) -> &str {
+        self.tags
+            .get("element_names")
+            .and_then(TagValue::as_str)
+            .unwrap_or_default()
+    }
+
+    pub fn component_name(&self) -> String {
+        self.tags
+            .get("name")
+            .and_then(TagValue::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("ID[{}]", self.component_id.0))
+            .to_uppercase()
+    }
+}
+
+#[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum TagValue {
     Unit,
     Bool(bool),
+    Int(i64),
     String(String),
     Bytes(Vec<u8>),
 }

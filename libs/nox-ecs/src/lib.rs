@@ -61,7 +61,7 @@ impl Default for Table<HostStore> {
     fn default() -> Self {
         Self {
             columns: Default::default(),
-            entity_buffer: HostColumn::entity_ids(),
+            entity_buffer: HostColumn::new(EntityId::metadata()),
         }
     }
 }

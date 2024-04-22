@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::Deref,
-};
+use std::{collections::BTreeMap, ops::Deref};
 
 use bytemuck::Pod;
 use conduit::{ComponentType, ComponentValue, EntityId, Metadata};
@@ -28,16 +25,6 @@ impl HostColumn {
             len: 0,
             metadata,
         }
-    }
-
-    pub fn entity_ids() -> Self {
-        let metadata = Metadata {
-            component_id: EntityId::component_id(),
-            component_type: ComponentType::u64(),
-            asset: false,
-            tags: HashMap::default(),
-        };
-        HostColumn::new(metadata)
     }
 
     pub fn entity_map(&self) -> BTreeMap<EntityId, usize> {

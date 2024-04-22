@@ -9,7 +9,6 @@ use crate::AssetId;
 use crate::ColumnPayload;
 use crate::ComponentType;
 use crate::Error;
-use crate::Metadata;
 use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
@@ -604,17 +603,6 @@ pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: R
     for msg in reader.read() {
         if let Some(tx) = &sim_peer.tx {
             let stream_id = StreamId::rand();
-            let packet: Packet<Payload<Bytes>> = Packet::metadata(
-                stream_id,
-                Metadata {
-                    component_id: msg.component_id,
-                    component_type: msg.component_type.clone(),
-                    asset: false,
-                    tags: HashMap::new(),
-                },
-            );
-            let _ = tx.send(packet);
-
             let _ = tx.send(Packet {
                 stream_id,
                 payload: Payload::Column(msg.payload.clone()),

@@ -55,6 +55,8 @@ impl Component {
                     TagValue::String(s)
                 } else if let Ok(f) = v.extract::<bool>(py) {
                     TagValue::Bool(f)
+                } else if let Ok(v) = v.extract::<i64>(py) {
+                    TagValue::Int(v)
                 } else {
                     TagValue::Unit
                 };
