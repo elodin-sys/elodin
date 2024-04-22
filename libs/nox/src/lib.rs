@@ -1,3 +1,4 @@
+#![recursion_limit = "1024"]
 #![allow(clippy::arc_with_non_send_sync)]
 
 mod builder;
@@ -8,6 +9,7 @@ mod constant;
 mod error;
 mod exec;
 mod fields;
+mod local_backend;
 mod matrix;
 mod noxpr;
 mod param;
@@ -29,6 +31,7 @@ pub use constant::*;
 pub use error::*;
 pub use exec::*;
 pub use fields::*;
+pub use local_backend::*;
 pub use matrix::*;
 pub use noxpr::*;
 pub use param::*;

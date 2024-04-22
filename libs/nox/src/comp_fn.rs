@@ -1,6 +1,5 @@
 use crate::{
-    ArrayTy, Builder, Comp, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorDim, TensorItem,
-    XlaDim,
+    ArrayTy, Builder, Comp, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem, XlaDim,
 };
 use std::{any, marker::PhantomData};
 
@@ -61,9 +60,9 @@ impl<'b> FromBuilder for &'b Builder {
     }
 }
 
-impl<T: TensorItem, D: XlaDim + TensorDim> FromBuilder for Tensor<T, D, Op>
+impl<T: TensorItem, D: Dim> FromBuilder for Tensor<T, D, Op>
 where
-    T::Dim: XlaDim,
+    T::Dim: Dim,
 {
     type Item<'a> = Self;
 
