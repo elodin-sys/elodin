@@ -58,8 +58,9 @@ pub fn into_op(input: TokenStream) -> TokenStream {
             #crate_name::Noxpr::tuple(vec![#( #fields )*])
         }
     };
+    let generic_idents = generics.type_params().map(|p| &p.ident);
     quote! {
-        impl #generics #crate_name::IntoOp for #ident #generics #where_clause {
+        impl #generics #crate_name::IntoOp for #ident<#(#generic_idents,)*> #where_clause {
             fn into_op(self) -> #crate_name::Noxpr {
                 #fields
             }

@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, ops::Deref};
 
-use crate::{Buffer, Client, Noxpr, Op, Tensor, TensorDim};
+use crate::{Buffer, Client, Dim, Noxpr, Op, Tensor, TensorItem};
 
 pub trait FromHost {
     type HostTy;
@@ -50,7 +50,7 @@ pub trait BufferArg<BufferTy> {
     fn replace_buffer(&mut self, _new_buffer: xla::PjRtBuffer) {}
 }
 
-impl<T, R: TensorDim> FromPjrtBuffer for Tensor<T, R, Buffer> {
+impl<T: TensorItem, R: Dim> FromPjrtBuffer for Tensor<T, R, Buffer> {
     fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
         let inner = pjrt.into_iter().next().unwrap();
         Tensor {
@@ -68,15 +68,15 @@ impl FromPjrtBuffer for () {
     fn from_pjrt(_pjrt: Vec<xla::PjRtBuffer>) -> Self {}
 }
 
-impl<T, R: TensorDim> BufferForm for Tensor<T, R, Op> {
+impl<T: TensorItem, R: Dim> BufferForm for Tensor<T, R, Op> {
     type BufferTy = Tensor<T, R, Buffer>;
 }
 
-impl<'a, T, R: TensorDim> BufferForm for &'a mut Tensor<T, R, Op> {
+impl<'a, T: TensorItem, R: Dim> BufferForm for &'a mut Tensor<T, R, Op> {
     type BufferTy = &'a mut Tensor<T, R, Buffer>;
 }
 
-impl<'a, T, R: TensorDim> BufferArg<Self> for &'a mut Tensor<T, R, Buffer> {
+impl<'a, T: TensorItem, R: Dim> BufferArg<Self> for &'a mut Tensor<T, R, Buffer> {
     fn is_mut_borrowed() -> bool {
         true
     }

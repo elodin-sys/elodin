@@ -6,31 +6,32 @@ use xla::{ArrayElement, NativeType};
 
 use crate::{
     AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FixedSliceExt, FromBuilder,
-    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Param, Scalar, ToHost, Vector,
+    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Repr, Scalar, TensorItem,
+    ToHost, Vector,
 };
 
 /// Quaternion is representation of spatial orientation or rotation in 3D space.
-pub struct Quaternion<T, P: Param = Op>(pub Vector<T, 4, P>);
+pub struct Quaternion<T: TensorItem, P: Repr = Op>(pub Vector<T, 4, P>);
 
-impl<T> Clone for Quaternion<T> {
+impl<T: TensorItem> Clone for Quaternion<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<T> FromPjrtBuffer for Quaternion<T, Buffer> {
+impl<T: TensorItem> FromPjrtBuffer for Quaternion<T, Buffer> {
     fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
         Self(Vector::from_pjrt(pjrt))
     }
 }
 
-impl<T> FromOp for Quaternion<T, Op> {
+impl<T: TensorItem> FromOp for Quaternion<T, Op> {
     fn from_op(op: Noxpr) -> Self {
         Self(Vector::from_op(op))
     }
 }
 
-impl<T> std::fmt::Debug for Quaternion<T> {
+impl<T: TensorItem> std::fmt::Debug for Quaternion<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Quaternion").finish()
     }
@@ -43,11 +44,11 @@ impl<T: Field> Quaternion<T> {
         y: impl Into<Scalar<T>>,
         z: impl Into<Scalar<T>>,
     ) -> Self {
-        let w = w.into().reshape::<Const<1>>();
-        let x = x.into().reshape::<Const<1>>();
-        let y = y.into().reshape::<Const<1>>();
-        let z = z.into().reshape::<Const<1>>();
-        let inner = Vector::from_arr([x, y, z, w]);
+        let w = w.into();
+        let x = x.into();
+        let y = y.into();
+        let z = z.into();
+        let inner = Vector::from_arr([&x, &y, &z, &w]);
         Quaternion(inner)
     }
 
@@ -71,14 +72,14 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
-    fn parts(&self) -> [Vector<T, 1>; 4] {
+    fn parts(&self) -> [Scalar<T>; 4] {
         let Quaternion(v) = self;
         v.parts()
     }
 
     pub fn conjugate(&self) -> Self {
         let [i, j, k, w] = self.parts();
-        Quaternion(Vector::from_arr([-i, -j, -k, w]))
+        Quaternion(Vector::from_arr([&-i, &-j, &-k, &w]))
     }
 
     /// Compute the inverse of the quaternion.
@@ -104,7 +105,7 @@ impl<T: Field> Mul for Quaternion<T> {
         let k = l_w * r_k + l_i * r_j - l_j * r_i + l_k * r_w;
         let w = l_w * r_w - l_i * r_i - l_j * r_j - l_k * r_k;
 
-        Quaternion(Vector::from_arr([i, j, k, w]))
+        Quaternion(Vector::from_arr([&i, &j, &k, &w]))
     }
 }
 
@@ -127,13 +128,13 @@ impl<T: Field> Add for Quaternion<T> {
     }
 }
 
-impl<T> IntoOp for Quaternion<T> {
+impl<T: TensorItem> IntoOp for Quaternion<T> {
     fn into_op(self) -> Noxpr {
         self.0.into_op()
     }
 }
 
-impl<T> AsBuffer for Quaternion<T, Buffer> {
+impl<T: TensorItem> AsBuffer for Quaternion<T, Buffer> {
     fn as_buffer(&self) -> &xla::PjRtBuffer {
         &self.0.inner
     }
@@ -186,7 +187,7 @@ where
     }
 }
 
-impl<T> BufferForm for Quaternion<T, Op> {
+impl<T: TensorItem> BufferForm for Quaternion<T, Op> {
     type BufferTy = Quaternion<T, Buffer>;
 }
 

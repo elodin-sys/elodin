@@ -45,8 +45,9 @@ pub fn from_op(input: TokenStream) -> TokenStream {
     }
     let field_ident = &fields.fields[0].ident;
     let field_ty = &fields.fields[0].ty;
+    let generic_idents = generics.type_params().map(|p| &p.ident);
     quote! {
-        impl #generics #crate_name::FromOp for #ident #generics #where_clause {
+        impl #generics #crate_name::FromOp for #ident<#(#generic_idents,)*> #where_clause {
             fn from_op(noxpr: #crate_name::Noxpr) -> Self {
                 use #crate_name::FromOp;
                 Self {

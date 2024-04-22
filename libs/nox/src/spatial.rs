@@ -12,7 +12,7 @@ use xla::NativeType;
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
-pub struct SpatialTransform<T> {
+pub struct SpatialTransform<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
@@ -69,7 +69,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform
 
 /// A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
-pub struct SpatialForce<T> {
+pub struct SpatialForce<T: TensorItem> {
     pub inner: Vector<T, 6>,
 }
 
@@ -125,7 +125,7 @@ impl<T: Field> Add for SpatialForce<T> {
 }
 
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
-pub struct SpatialInertia<T> {
+pub struct SpatialInertia<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
@@ -187,7 +187,7 @@ impl<T: TensorItem + ArrayElement + NativeType + Field> Mul<SpatialMotion<T>>
 
 /// A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
-pub struct SpatialMotion<T> {
+pub struct SpatialMotion<T: TensorItem> {
     pub inner: Vector<T, 6>,
 }
 

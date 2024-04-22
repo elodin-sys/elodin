@@ -12,8 +12,7 @@ use smallvec::{smallvec, SmallVec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaOp, XlaOpRef};
 
 use crate::{
-    CompFn, DefaultMap, DefaultMappedDim, Error, FromOp, IntoOp, MapDim, Tensor, TensorDim,
-    TensorItem,
+    CompFn, DefaultMap, DefaultMappedDim, Dim, Error, FromOp, IntoOp, MapDim, Tensor, TensorItem,
 };
 
 #[derive(Debug)]
@@ -488,7 +487,12 @@ impl Noxpr {
         Self::new(NoxprNode::Tuple(nodes))
     }
 
-    pub fn concat_in_dim(nodes: Vec<Noxpr>, dimension: usize) -> Self {
+    pub fn concat_in_dim(mut nodes: Vec<Noxpr>, dimension: usize) -> Self {
+        for node in &mut nodes {
+            if node.shape().map(|s| s.is_empty()).unwrap_or_default() {
+                *node = node.clone().reshape(smallvec![1]);
+            }
+        }
         Self::new(NoxprNode::Concat(Concat { nodes, dimension }))
     }
 
@@ -1652,7 +1656,7 @@ impl Noxpr {
     }
 }
 
-impl<T: TensorItem, D: TensorDim + DefaultMap> Tensor<T, D, crate::Op> {
+impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     pub fn vmap<O: TensorItem + IntoOp>(
         &self,
         func: impl CompFn<(T::Tensor<<D::DefaultMapDim as MapDim<D>>::Item>,), O>,
@@ -2700,7 +2704,7 @@ impl PrettyPrintTracer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Client, Collapse, CompFn, Dot, Matrix, Scalar, Tensor, ToHost, Vector};
+    use crate::{Client, Collapse, CompFn, Matrix, Scalar, Tensor, ToHost, Vector};
     use nalgebra::{matrix, vector, Const};
     use smallvec::smallvec;
 
@@ -2810,7 +2814,7 @@ mod tests {
         fn add_one(
             mat: Tensor<f32, (Const<2>, Const<2>, Const<2>)>,
         ) -> Tensor<f32, (Const<2>, Const<2>, Const<2>)> {
-            mat.vmap(|x: Matrix<f32, 2, 2>| x.clone().dot(x))
+            mat.vmap(|x: Matrix<f32, 2, 2>| x.clone().dot(&x))
                 .unwrap()
                 .collapse()
         }

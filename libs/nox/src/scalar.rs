@@ -1,3 +1,4 @@
+use crate::TensorItem;
 use crate::{
     Buffer, BufferArg, Literal, MaybeOwned, NoxprScalarExt, Op, ScalarDim, Tensor, ToHost,
 };
@@ -31,8 +32,12 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
 }
 
 pub trait ScalarExt: Sized {
-    fn literal(self) -> Scalar<Self, Literal>;
-    fn constant(self) -> Scalar<Self, Op>;
+    fn literal(self) -> Scalar<Self, Literal>
+    where
+        Self: TensorItem;
+    fn constant(self) -> Scalar<Self, Op>
+    where
+        Self: TensorItem;
 }
 
 impl<T> ScalarExt for T
