@@ -9,6 +9,7 @@ use crate::AssetId;
 use crate::ColumnPayload;
 use crate::ComponentType;
 use crate::Error;
+use crate::Metadata;
 use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
@@ -490,7 +491,7 @@ pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
 
         let _ = event.subscription.tx.send(Packet {
             stream_id: StreamId::CONTROL,
-            payload: Payload::ControlMsg(ControlMsg::Metadata {
+            payload: Payload::ControlMsg(ControlMsg::OpenStream {
                 stream_id: event.subscription.stream_id,
                 metadata: metadata.clone(),
             }),
@@ -603,6 +604,15 @@ pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: R
     for msg in reader.read() {
         if let Some(tx) = &sim_peer.tx {
             let stream_id = StreamId::rand();
+            let _ = tx.send(Packet::start_stream(
+                stream_id,
+                Metadata {
+                    name: msg.component_name.clone(),
+                    component_type: msg.component_type.clone(),
+                    tags: HashMap::default(),
+                    asset: false,
+                },
+            ));
             let _ = tx.send(Packet {
                 stream_id,
                 payload: Payload::Column(msg.payload.clone()),
@@ -613,7 +623,7 @@ pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: R
 
 #[derive(Event)]
 pub struct ColumnPayloadMsg {
-    pub component_id: ComponentId,
+    pub component_name: String,
     pub component_type: ComponentType,
     pub payload: ColumnPayload<Bytes>,
 }

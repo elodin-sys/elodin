@@ -14,12 +14,12 @@ pub struct Demux {
 impl Demux {
     pub fn handle<B: Buf + Slice>(&mut self, packet: Packet<Payload<B>>) -> Result<Msg<B>, Error> {
         match packet.payload {
-            Payload::ControlMsg(ControlMsg::Metadata {
+            Payload::ControlMsg(ControlMsg::OpenStream {
                 stream_id,
                 metadata,
             }) => {
                 self.streams.insert(stream_id, Arc::new(metadata.clone()));
-                Ok(Msg::Control(ControlMsg::Metadata {
+                Ok(Msg::Control(ControlMsg::OpenStream {
                     stream_id,
                     metadata,
                 }))

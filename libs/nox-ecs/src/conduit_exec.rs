@@ -158,7 +158,7 @@ impl ConduitExec {
                 };
                 tx.send(Packet {
                     stream_id: StreamId::CONTROL,
-                    payload: Payload::ControlMsg(ControlMsg::Metadata {
+                    payload: Payload::ControlMsg(ControlMsg::OpenStream {
                         stream_id,
                         metadata: metadata.clone(),
                     }),

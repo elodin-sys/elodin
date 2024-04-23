@@ -466,8 +466,8 @@ pub enum Payload<B> {
 
 impl<T> Packet<Payload<T>> {
     #[cfg(feature = "std")]
-    pub fn metadata(stream_id: StreamId, metadata: Metadata) -> Self {
-        let payload = Payload::ControlMsg(ControlMsg::Metadata {
+    pub fn start_stream(stream_id: StreamId, metadata: Metadata) -> Self {
+        let payload = Payload::ControlMsg(ControlMsg::OpenStream {
             stream_id,
             metadata,
         });
@@ -499,7 +499,7 @@ pub enum ControlMsg {
         query: Query,
     },
     #[cfg(feature = "std")]
-    Metadata {
+    OpenStream {
         stream_id: StreamId,
         metadata: Metadata,
     },
@@ -574,13 +574,8 @@ impl Metadata {
             .unwrap_or_default()
     }
 
-    pub fn component_name(&self) -> String {
-        self.tags
-            .get("name")
-            .and_then(TagValue::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| self.name.clone())
-            .to_uppercase()
+    pub fn component_name(&self) -> &str {
+        &self.name
     }
 }
 
