@@ -436,7 +436,8 @@ impl EPlot {
                     .find_position(|x| *x as f64 == closest_point.x);
 
                 if let Some((index, value)) = point_on_baseline {
-                    let time_text = utils::time_label_ms(value as f64);
+                    let time = self.time_step * value as f64;
+                    let time_text = utils::time_label_ms(time);
 
                     ui.label(time_text);
 
