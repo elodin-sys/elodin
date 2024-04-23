@@ -27,6 +27,7 @@ pub struct EPlotDataLine {
 pub struct EPlotDataComponent {
     pub label: String,
     pub element_names: String,
+    pub next_tick: u64,
     pub lines: BTreeMap<usize, EPlotDataLine>,
 }
 
@@ -35,11 +36,16 @@ impl EPlotDataComponent {
         Self {
             label: component_label.to_string(),
             element_names,
+            next_tick: 0,
             lines: BTreeMap::new(),
         }
     }
 
-    pub fn add_values(&mut self, component_value: &ComponentValue) {
+    pub fn add_values(&mut self, component_value: &ComponentValue, tick: u64) {
+        if tick < self.next_tick {
+            return;
+        }
+        self.next_tick += 1;
         let element_names = self
             .element_names
             .split(',')
