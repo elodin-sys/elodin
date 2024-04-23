@@ -191,7 +191,7 @@ pub fn collect_entity_data(
                 }
             }
             Msg::Column(col) => {
-                let component_id = col.metadata.component_id;
+                let component_id = col.metadata.component_id();
                 let Some(component_metadata) = metadata_store.get_metadata(&component_id) else {
                     return;
                 };
