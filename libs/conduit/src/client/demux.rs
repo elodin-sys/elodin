@@ -39,13 +39,15 @@ impl Demux {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub enum Msg<B = Bytes> {
     Control(ControlMsg),
     Column(ColumnMsg<B>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Event))]
 pub struct ColumnMsg<B> {
     pub metadata: Arc<Metadata>,
     pub payload: ColumnPayload<B>,

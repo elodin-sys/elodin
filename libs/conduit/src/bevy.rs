@@ -48,7 +48,7 @@ pub struct TimeStep(pub Duration);
 
 impl ColumnMsg<Bytes> {
     pub fn load_into_bevy(
-        self,
+        &self,
         entity_map: &mut EntityMap,
         component_map: &ComponentMap,
         commands: &mut Commands,
@@ -194,7 +194,7 @@ pub trait AssetAdapter {
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
-        value: Bytes,
+        value: &[u8],
     );
 }
 
@@ -268,7 +268,7 @@ pub struct Persistent;
 pub struct RecvSystemArgs<'w, 's> {
     rx: Res<'w, ConduitRx>,
     entity_map: ResMut<'w, EntityMap>,
-    event: EventWriter<'w, ControlMsg>,
+    event: EventWriter<'w, Msg>,
     commands: Commands<'w, 's>,
     value_map: Query<'w, 's, &'static mut ComponentValueMap>,
     metadata_store: ResMut<'w, MetadataStore>,
@@ -308,18 +308,15 @@ fn recv_system(args: RecvSystemArgs) {
 
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
         let Some(tx) = tx.upgrade() else { continue };
-        if let Msg::Control(ctrl_msg) = &msg {
-            event.send(ctrl_msg.clone());
-        }
-        match msg {
+        match &msg {
             Msg::Control(ControlMsg::StartSim {
                 metadata_store: new_metadata_store,
                 time_step,
                 entity_ids,
             }) => {
                 tracing::debug!("received startsim, sending subscribe messages");
-                *metadata_store = new_metadata_store;
-                *time_step_res = TimeStep(time_step);
+                *metadata_store = new_metadata_store.clone();
+                *time_step_res = TimeStep(*time_step);
                 for id in metadata_store.component_index.keys() {
                     let packet = Packet {
                         stream_id: StreamId::CONTROL,
@@ -379,18 +376,18 @@ fn recv_system(args: RecvSystemArgs) {
                 bytes,
                 entity_id,
             }) => {
-                let Some(adapter) = asset_map.0.get(&id) else {
+                let Some(adapter) = asset_map.0.get(id) else {
                     warn!(?id, "unknown asset type");
                     continue;
                 };
-                adapter.insert(&mut commands, entity_map.as_mut(), entity_id, bytes);
+                adapter.insert(&mut commands, entity_map.as_mut(), *entity_id, bytes);
             }
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
             }
             Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
-                max_tick_res.0 = max_tick;
-                tick_res.0 = tick;
+                max_tick_res.0 = *max_tick;
+                tick_res.0 = *tick;
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
@@ -402,6 +399,7 @@ fn recv_system(args: RecvSystemArgs) {
                 );
             }
         }
+        event.send(msg);
     }
 }
 
@@ -432,6 +430,7 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(ConduitRx(self.rx.clone()));
         app.add_event::<SubscribeEvent>();
         app.add_event::<ControlMsg>();
+        app.add_event::<Msg>();
         app.add_event::<ColumnPayloadMsg>();
         app.add_systems(Update, control_msg);
         app.add_systems(Update, recv_system);
