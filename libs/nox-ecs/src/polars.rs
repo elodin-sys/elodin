@@ -20,6 +20,7 @@ use crate::{
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
     pub component_map: HashMap<ComponentId, ArchetypeName>,
+    pub component_names: HashMap<ComponentId, String>,
     pub metadata: Metadata,
     pub assets: AssetStore,
 }
@@ -45,6 +46,18 @@ impl Metadata {
                     .columns
                     .iter()
                     .map(move |metadata| (metadata.component_id(), *name))
+            })
+            .collect()
+    }
+
+    fn component_names(&self) -> HashMap<ComponentId, String> {
+        self.archetypes
+            .iter()
+            .flat_map(|(_, metadata)| {
+                metadata
+                    .columns
+                    .iter()
+                    .map(move |metadata| (metadata.component_id(), metadata.name.clone()))
             })
             .collect()
     }
@@ -143,6 +156,7 @@ impl PolarsWorld {
         Ok(Self {
             archetypes,
             component_map: metadata.component_map(),
+            component_names: metadata.component_names(),
             metadata,
             assets,
         })
@@ -168,6 +182,7 @@ impl World<HostStore> {
         Ok(PolarsWorld {
             archetypes,
             component_map: metadata.component_map(),
+            component_names: metadata.component_names(),
             metadata,
             assets: self.assets.clone(),
         })
@@ -381,9 +396,10 @@ impl<'a> ColumnStore for &'a PolarsWorld {
             .archetypes
             .get(archetype)
             .ok_or(Error::ComponentNotFound)?;
+        let component_name = self.component_names.get(&id).unwrap();
         Ok(PolarsColumnRef {
             entity_series: table.column(EntityId::NAME)?,
-            buf: table.column(&id.0.to_string())?, // TODO(sphw): add a map to metadata between component id and series offset
+            buf: table.column(component_name)?, // TODO(sphw): add a map to metadata between component id and series offset
         })
     }
 
