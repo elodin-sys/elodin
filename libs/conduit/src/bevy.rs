@@ -54,7 +54,7 @@ impl ColumnMsg<Bytes> {
         commands: &mut Commands,
         value_map: &mut Query<&mut ComponentValueMap>,
     ) {
-        let component_id = self.metadata.component_id;
+        let component_id = self.metadata.component_id();
 
         for res in self.iter() {
             let Ok(ColumnValue { entity_id, value }) = res else {

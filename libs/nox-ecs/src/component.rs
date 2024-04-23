@@ -20,7 +20,7 @@ pub trait ComponentExt: Component {
 
     fn metadata() -> Metadata {
         Metadata {
-            component_id: Self::component_id(),
+            name: Self::name(),
             component_type: Self::component_type(),
             asset: Self::is_asset(),
             tags: Default::default(),
