@@ -67,7 +67,7 @@ pub fn inspector(
                 if label_with_button(
                     ui,
                     icons.subtract,
-                    &component_label,
+                    component_label,
                     with_opacity(colors::PRIMARY_CREAME, 0.3),
                     component_label_margin,
                 ) {

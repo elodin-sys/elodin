@@ -184,7 +184,7 @@ impl WidgetSystem for ModalUpdateGraphContent<'_, '_> {
             let selected_component_label = selected_component
                 .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
                 .map(|m| m.component_name())
-                .unwrap_or_else(|| "NONE".to_string());
+                .unwrap_or_else(|| "NONE");
 
             ui.scope(|ui| {
                 theme::configure_combo_box(ui.style_mut());

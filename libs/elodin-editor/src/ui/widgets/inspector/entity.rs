@@ -91,7 +91,7 @@ pub fn inspector(
 
         let res = inspector_item_multi(
             ui,
-            &label,
+            label,
             element_names,
             component_value,
             icon_chart,
@@ -106,7 +106,7 @@ pub fn inspector(
                 }),
             ) {
                 column_payload_writer.send(ColumnPayloadMsg {
-                    component_id,
+                    component_name: metadata.component_name().to_string(),
                     component_type: component_value.ty(),
                     payload,
                 });

@@ -216,10 +216,7 @@ pub fn collect_entity_data(
                         .components
                         .entry(component_id)
                         .or_insert_with(|| {
-                            EPlotDataComponent::new(
-                                component_label.clone(),
-                                element_names.to_string(),
-                            )
+                            EPlotDataComponent::new(component_label, element_names.to_string())
                         })
                         .add_values(&value, col.payload.time);
                 }
