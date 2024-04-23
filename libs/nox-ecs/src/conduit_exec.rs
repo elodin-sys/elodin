@@ -181,7 +181,7 @@ impl ConduitExec {
             Msg::Column(new_col) => {
                 // NOTE: the entity ids in `new_col` can be a subset of the ones in `col`,
                 // but the order must be the same
-                let mut col_ref = self.exec.column_mut(new_col.metadata.component_id)?;
+                let mut col_ref = self.exec.column_mut(new_col.metadata.component_id())?;
                 let mut col = col_ref.iter();
                 let updates = new_col
                     .iter()

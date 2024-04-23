@@ -2,6 +2,7 @@ use crate::*;
 
 use std::{marker::PhantomData, sync::Arc};
 
+use conduit::ComponentId;
 use nox_ecs::join_query;
 use nox_ecs::{join_many, nox::Noxpr};
 
@@ -17,18 +18,18 @@ impl QueryInner {
     #[staticmethod]
     pub fn from_builder(
         builder: &mut PipelineBuilder,
-        component_ids: Vec<ComponentId>,
+        component_names: Vec<String>,
     ) -> Result<QueryInner, Error> {
+        let component_ids = component_names
+            .iter()
+            .map(|name| ComponentId::new(name))
+            .collect::<Vec<_>>();
         let metadata = component_ids
             .iter()
             .map(|id| {
-                builder
-                    .builder
-                    .world
-                    .column_by_id(id.inner)
-                    .map(|c| Metadata {
-                        inner: Arc::new(c.column.metadata.clone()),
-                    })
+                builder.builder.world.column_by_id(*id).map(|c| Metadata {
+                    inner: Arc::new(c.column.metadata.clone()),
+                })
             })
             .collect::<Option<Vec<_>>>()
             .ok_or(Error::NoxEcs(nox_ecs::Error::ComponentNotFound))?;
@@ -39,7 +40,7 @@ impl QueryInner {
                 builder
                     .builder
                     .vars
-                    .get(&id.inner)
+                    .get(&id)
                     .ok_or(nox_ecs::Error::ComponentNotFound)
             })
             .try_fold(None, |mut query, a| {
@@ -81,7 +82,7 @@ impl QueryInner {
     pub fn insert_into_builder(&self, builder: &mut PipelineBuilder) {
         self.query.insert_into_builder_erased(
             &mut builder.builder,
-            self.metadata.iter().map(|m| m.inner.component_id),
+            self.metadata.iter().map(|m| m.inner.component_id()),
         );
     }
 

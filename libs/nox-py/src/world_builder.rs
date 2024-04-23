@@ -4,7 +4,7 @@ use clap::Parser;
 use nox_ecs::{
     conduit,
     nox::{self, ScalarExt},
-    spawn_tcp_server, ArchetypeName, HostColumn, HostStore, SharedWorld, Table, World,
+    spawn_tcp_server, HostColumn, HostStore, SharedWorld, Table, World,
 };
 use pyo3::exceptions::PySystemExit;
 use pyo3::types::PyDict;
@@ -30,10 +30,13 @@ impl WorldBuilder {
                     .component_datas
                     .iter()
                     .cloned()
-                    .map(|c| (c.id.inner, HostColumn::new(c.into())))
+                    .map(|c| (ComponentId::new(&c.name), HostColumn::new(c.into())))
                     .collect();
-                for id in &archetype.component_ids {
-                    self.world.component_map.insert(id.inner, archetype_name);
+                for component in &archetype.component_datas {
+                    let component_id = ComponentId::new(&component.name);
+                    self.world
+                        .component_map
+                        .insert(component_id, archetype_name);
                 }
                 let table = Table {
                     columns,
@@ -75,14 +78,10 @@ impl WorldBuilder {
                 let entity_id = entity_id.inner;
                 let table = self.get_or_insert_archetype(&archetype)?;
                 table.entity_buffer.push(entity_id.0.constant());
-                for (arr, id) in archetype
-                    .arrays
-                    .iter()
-                    .zip(archetype.component_ids.into_iter())
-                {
+                for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
                     let col = table
                         .columns
-                        .get_mut(&id.inner)
+                        .get_mut(&ComponentId::new(&component.name))
                         .ok_or(nox_ecs::Error::ComponentNotFound)?;
                     let ty = col.component_type();
                     let size = ty.primitive_ty.element_type().element_size_in_bytes();
@@ -94,28 +93,23 @@ impl WorldBuilder {
             }
             Spawnable::Asset { id, bytes } => {
                 let inner = self.world.assets.insert_bytes(id, bytes.bytes);
-                let component_id = conduit::ComponentId(id.0);
+                let component_name = id.component_name();
                 let archetype = Archetype {
                     component_datas: vec![Component {
-                        id: ComponentId {
-                            inner: component_id,
-                        },
+                        name: component_name.clone(),
                         ty: Python::with_gil(ComponentType::u64),
                         asset: true,
                         metadata: Default::default(),
                     }],
-                    component_ids: vec![ComponentId {
-                        inner: component_id,
-                    }],
                     arrays: vec![],
-                    archetype_name: ArchetypeName::from(format!("asset_handle_{}", id.0).as_str()),
+                    archetype_name: component_name.as_str().into(),
                 };
 
                 let table = self.get_or_insert_archetype(&archetype)?;
                 table.entity_buffer.push(entity_id.inner.0.constant());
                 let col = table
                     .columns
-                    .get_mut(&component_id)
+                    .get_mut(&ComponentId::new(&component_name))
                     .ok_or(nox_ecs::Error::ComponentNotFound)?;
                 col.push_raw(&inner.id.to_le_bytes());
                 self.world.entity_len += 1;
