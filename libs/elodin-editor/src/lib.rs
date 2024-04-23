@@ -27,8 +27,9 @@ use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
-    bevy::ComponentValueMap,
+    client::Msg,
     query::MetadataStore,
+    ser_de::ColumnValue,
     well_known::{EntityMetadata, Viewport, WorldPos},
     ControlMsg, EntityId,
 };
@@ -170,8 +171,7 @@ pub struct CollectedGraphData {
 
 pub fn collect_entity_data(
     mut collected_graph_data: ResMut<CollectedGraphData>,
-    mut reader: EventReader<ControlMsg>,
-    current_entity_data: Query<(&EntityId, &ComponentValueMap)>,
+    mut reader: EventReader<Msg>,
     metadata_store: Res<MetadataStore>,
     entity_metadata: Query<(&EntityId, &EntityMetadata)>,
 ) {
@@ -181,45 +181,47 @@ pub fn collect_entity_data(
 
     for msg in reader.read() {
         match msg {
-            ControlMsg::StartSim { .. } => {
+            Msg::Control(ControlMsg::StartSim { .. }) => {
                 collected_graph_data.entities.clear();
                 collected_graph_data.tick_range = 0..0;
             }
-            ControlMsg::Tick { tick, max_tick: _ } => {
-                let last_tick = collected_graph_data.tick_range.end;
-
-                if last_tick == 0 || last_tick < *tick {
+            Msg::Control(ControlMsg::Tick { tick, max_tick: _ }) => {
+                if collected_graph_data.tick_range.end < *tick {
                     collected_graph_data.tick_range.end = *tick;
-
-                    for (entity_id, component_value_map) in current_entity_data.iter() {
-                        let entity = collected_graph_data
-                            .entities
-                            .entry(*entity_id)
-                            .or_insert_with(|| EPlotDataEntity {
-                                label: entity_metadata
-                                    .get(&entity_id)
-                                    .map_or(format!("E[{}]", entity_id.0), |metadata| {
-                                        metadata.name.to_owned()
-                                    }),
-                                components: Default::default(),
-                            });
-                        for (component_id, component_value) in &component_value_map.0 {
-                            let Some(metadata) = metadata_store.get_metadata(component_id) else {
-                                continue;
-                            };
-                            let component_label = metadata.component_name();
-                            let element_names = metadata.element_names();
-
-                            let entity_component =
-                                entity.components.entry(*component_id).or_insert_with(|| {
-                                    EPlotDataComponent::new(
-                                        component_label,
-                                        element_names.to_string(),
-                                    )
-                                });
-                            entity_component.add_values(component_value);
-                        }
-                    }
+                }
+            }
+            Msg::Column(col) => {
+                let component_id = col.metadata.component_id;
+                let Some(component_metadata) = metadata_store.get_metadata(&component_id) else {
+                    return;
+                };
+                let component_label = component_metadata.component_name();
+                let element_names = component_metadata.element_names();
+                for res in col.iter() {
+                    let Ok(ColumnValue { entity_id, value }) = res else {
+                        warn!("error parsing column value");
+                        continue;
+                    };
+                    collected_graph_data
+                        .entities
+                        .entry(entity_id)
+                        .or_insert_with(|| EPlotDataEntity {
+                            label: entity_metadata
+                                .get(&entity_id)
+                                .map_or(format!("E[{}]", entity_id.0), |metadata| {
+                                    metadata.name.to_owned()
+                                }),
+                            components: Default::default(),
+                        })
+                        .components
+                        .entry(component_id)
+                        .or_insert_with(|| {
+                            EPlotDataComponent::new(
+                                component_label.clone(),
+                                element_names.to_string(),
+                            )
+                        })
+                        .add_values(&value, col.payload.time);
                 }
             }
             _ => {}
