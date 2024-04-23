@@ -7,9 +7,17 @@ use numpy::PyUntypedArray;
 
 pub struct Archetype<'py> {
     pub component_datas: Vec<Component>,
-    pub component_ids: Vec<ComponentId>,
     pub arrays: Vec<&'py PyUntypedArray>,
     pub archetype_name: ArchetypeName,
+}
+
+impl Archetype<'_> {
+    pub fn component_names(&self) -> Vec<String> {
+        self.component_datas
+            .iter()
+            .map(|data| data.name.clone())
+            .collect::<Vec<_>>()
+    }
 }
 
 impl<'s> FromPyObject<'s> for Archetype<'s> {
@@ -21,15 +29,10 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
         let component_datas = archetype
             .call_method0("component_data")?
             .extract::<Vec<Component>>()?;
-        let component_ids = component_datas
-            .iter()
-            .map(|data| data.id)
-            .collect::<Vec<_>>();
         let arrays = archetype.call_method0("arrays")?;
         let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
         Ok(Self {
             component_datas,
-            component_ids,
             arrays,
             archetype_name,
         })

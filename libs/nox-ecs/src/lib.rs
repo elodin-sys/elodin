@@ -204,7 +204,7 @@ impl World<HostStore> {
         self.archetypes.entry(archetype_name).or_insert_with(|| {
             let columns = A::components()
                 .into_iter()
-                .map(|metadata| (metadata.component_id, HostColumn::new(metadata)))
+                .map(|metadata| (metadata.component_id(), HostColumn::new(metadata)))
                 .collect::<BTreeMap<_, _>>();
             for id in columns.keys() {
                 self.component_map.insert(*id, archetype_name);
@@ -1082,7 +1082,7 @@ impl SharedWorld {
             {
                 let literal = client.to_literal_sync()?;
                 host.buf.copy_from_slice(literal.raw_buf());
-                self.loaded_components.insert(host.metadata.component_id);
+                self.loaded_components.insert(host.metadata.component_id());
             }
         }
         Ok(())
@@ -1588,8 +1588,8 @@ mod tests {
             .unwrap();
         let tempdir = tempfile::tempdir().unwrap();
         let tempdir = tempdir.path();
-        exec.write_to_dir(&tempdir).unwrap();
-        let mut exec = WorldExec::read_from_dir(&tempdir).unwrap();
+        exec.write_to_dir(tempdir).unwrap();
+        let mut exec = WorldExec::read_from_dir(tempdir).unwrap();
         exec.run(&client).unwrap();
         let c = exec.column(A::component_id()).unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);

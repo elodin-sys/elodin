@@ -13,7 +13,7 @@ use crate::Metadata;
 #[pyclass]
 pub struct Component {
     #[pyo3(set)]
-    pub id: ComponentId,
+    pub name: String,
     #[pyo3(get, set)]
     pub ty: ComponentType,
     #[pyo3(get, set)]
@@ -24,7 +24,7 @@ pub struct Component {
 impl From<Component> for conduit::Metadata {
     fn from(c: Component) -> Self {
         conduit::Metadata {
-            component_id: c.id.inner,
+            name: c.name,
             component_type: c.ty.into(),
             asset: c.asset,
             tags: c.metadata,
@@ -35,19 +35,14 @@ impl From<Component> for conduit::Metadata {
 #[pymethods]
 impl Component {
     #[new]
-    #[pyo3(signature = (id, ty, asset = false, metadata = HashMap::default()))]
+    #[pyo3(signature = (name, ty, asset = false, metadata = HashMap::default()))]
     pub fn new(
         py: Python<'_>,
-        id: PyObject,
+        name: String,
         ty: ComponentType,
         asset: bool,
         metadata: HashMap<String, PyObject>,
     ) -> Result<Self, Error> {
-        let name = id
-            .extract::<String>(py)
-            .ok()
-            .into_iter()
-            .map(|n| ("name".to_string(), TagValue::String(n)));
         let metadata = metadata
             .into_iter()
             .map(|(k, v)| {
@@ -62,16 +57,10 @@ impl Component {
                 };
                 (k, value)
             })
-            .chain(name)
             .collect();
 
-        let id = if let Ok(id) = id.extract::<ComponentId>(py) {
-            id
-        } else {
-            ComponentId::new(py, id)?
-        };
         Ok(Self {
-            id,
+            name,
             ty,
             metadata,
             asset,
@@ -79,46 +68,23 @@ impl Component {
     }
 
     #[staticmethod]
-    pub fn id(py: Python<'_>, component: PyObject) -> Result<ComponentId, Error> {
+    pub fn id(py: Python<'_>, component: PyObject) -> Result<String, Error> {
+        Self::name(py, component)
+    }
+
+    #[staticmethod]
+    pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
         let metadata_attr = component.getattr(py, "__metadata__")?;
         let metadata = metadata_attr
             .downcast::<PySequence>(py)
             .map_err(PyErr::from)?;
         let component = metadata.get_item(0)?.extract::<Self>()?;
-        Ok(component.id)
+        Ok(component.name)
     }
 
     pub fn to_metadata(&self) -> Metadata {
         let inner = Arc::new(self.clone().into());
         Metadata { inner }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-#[pyclass]
-pub struct ComponentId {
-    pub inner: conduit::ComponentId,
-}
-
-#[pymethods]
-impl ComponentId {
-    #[new]
-    fn new(py: Python<'_>, inner: PyObject) -> Result<Self, Error> {
-        if let Ok(s) = inner.extract::<String>(py) {
-            Ok(Self {
-                inner: conduit::ComponentId::new(&s),
-            })
-        } else if let Ok(s) = inner.extract::<u64>(py) {
-            Ok(Self {
-                inner: conduit::ComponentId(s),
-            })
-        } else {
-            Err(Error::UnexpectedInput)
-        }
-    }
-
-    fn __str__(&self) -> String {
-        self.inner.0.to_string()
     }
 }
 
