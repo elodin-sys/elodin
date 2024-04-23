@@ -54,7 +54,7 @@ defmodule ElodinDashboard.MixProject do
       {:ssl_verify_fun, "~> 1.1"},
       {:certifi, "~> 2.4"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:live_monaco_editor, "~> 0.1.7"},
+      {:live_monaco_editor, "~> 0.1"},
       {:grpc, "~> 0.7"},
       {:protobuf, "~> 0.12.0"},
       {:poolboy, "~> 1.5.1"},
