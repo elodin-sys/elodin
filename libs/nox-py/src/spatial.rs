@@ -392,6 +392,14 @@ impl SpatialInertia {
         Ok(self.inner.mass().into_op().to_jax()?)
     }
 
+    fn inertia_diag(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.inertia_diag().into_op().to_jax()?)
+    }
+
+    fn asarray(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.clone().into_op().to_jax()?)
+    }
+
     #[getter]
     fn shape(&self) -> PyObject {
         Python::with_gil(|py| PyTuple::new(py, [7]).into())
