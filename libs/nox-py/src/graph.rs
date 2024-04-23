@@ -1,5 +1,6 @@
 use super::*;
 
+use conduit::ComponentId;
 use nox_ecs::{graph::GraphQuery, nox::IntoOp};
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -14,12 +15,16 @@ impl GraphQueryInner {
     #[staticmethod]
     fn from_builder(
         builder: &mut PipelineBuilder,
-        edge_id: ComponentId,
-        component_ids: Vec<ComponentId>,
+        edge_name: String,
+        component_names: Vec<String>,
     ) -> Result<GraphQueryInner, Error> {
         use bytes::Buf;
         use nox_ecs::graph::EdgeComponent;
-        let col = builder.builder.world.column_by_id(edge_id.inner).unwrap();
+        let col = builder
+            .builder
+            .world
+            .column_by_id(ComponentId::new(&edge_name))
+            .unwrap();
         let ty = &col.column.metadata.component_type;
         let buf = &mut &col.column.buf[..];
         let len = col.column.len;
@@ -30,7 +35,7 @@ impl GraphQueryInner {
                 nox_ecs::graph::Edge::from_value(value).unwrap()
             })
             .collect();
-        let query = QueryInner::from_builder(builder, component_ids)?;
+        let query = QueryInner::from_builder(builder, component_names)?;
         let g_query = query.query;
         let query = GraphQuery::from_queries(edges, g_query)?;
         Ok(GraphQueryInner { query })

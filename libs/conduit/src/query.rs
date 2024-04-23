@@ -12,14 +12,13 @@ pub struct MetadataStore {
 
 impl MetadataStore {
     pub fn push(&mut self, metadata: Metadata) {
+        let component_id = metadata.component_id();
         for (key, tag) in &metadata.tags {
-            self.metadata_index.insert(
-                MetadataPair(key.clone(), tag.clone()),
-                metadata.component_id,
-            );
+            self.metadata_index
+                .insert(MetadataPair(key.clone(), tag.clone()), component_id);
         }
         self.component_index
-            .insert(metadata.component_id, self.metadata.len());
+            .insert(component_id, self.metadata.len());
         self.metadata.push(metadata);
     }
 
@@ -36,7 +35,7 @@ impl Query {
             Query::All => store
                 .metadata
                 .iter()
-                .map(|m| QueryId::Component(m.component_id))
+                .map(|m| QueryId::Component(m.component_id()))
                 .collect(),
             Query::Metadata(q) => q.execute(store),
             Query::ComponentId(id) => smallvec![QueryId::Component(*id)],

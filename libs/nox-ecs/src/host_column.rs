@@ -28,7 +28,7 @@ impl HostColumn {
     }
 
     pub fn entity_map(&self) -> BTreeMap<EntityId, usize> {
-        if self.metadata.component_id != EntityId::component_id() {
+        if self.metadata.name != EntityId::NAME {
             return BTreeMap::default();
         }
         self.iter::<u64>()

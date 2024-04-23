@@ -68,10 +68,9 @@ impl Panel {
 
     #[getter]
     pub fn __metadata__(&self, py: Python<'_>) -> Result<((Component,),), Error> {
+        let name = conduit::well_known::Panel::ASSET_ID.component_name();
         Ok(((Component {
-            id: ComponentId {
-                inner: conduit::ComponentId(2244),
-            },
+            name,
             ty: ComponentType::u64(py),
             asset: true,
             metadata: Default::default(),
