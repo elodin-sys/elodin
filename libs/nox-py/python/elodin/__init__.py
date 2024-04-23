@@ -199,7 +199,7 @@ class Query(Generic[Unpack[A]]):
             data = t_arg.__metadata__[0]
             component_data.append(data)
             component_classes.append(t_arg)
-            ids.append(Component.id(t_arg))
+            ids.append(Component.name(t_arg))
         return Query(
             QueryInner.from_builder(builder, ids), component_data, component_classes
         )
@@ -209,7 +209,7 @@ class Query(Generic[Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            builder.init_var(Component.id(t_arg), component_data.ty)
+            builder.init_var(Component.name(t_arg), component_data.ty)
 
     def __getitem__(self, index: int) -> Any:
         if len(self.bufs) > 1:
@@ -273,12 +273,12 @@ class GraphQuery(Generic[E, Unpack[A]]):
         component_data = []
         component_classes = []
         edge_ty = t_args[0]
-        edge_id = Component.id(edge_ty)
+        edge_id = Component.name(edge_ty)
         for t_arg in t_args[1:]:
             component_classes.append(t_arg)
             data = t_arg.__metadata__[0]
             component_data.append(data)
-            ids.append(Component.id(t_arg))
+            ids.append(Component.name(t_arg))
         return GraphQuery(
             GraphQueryInner.from_builder(builder, edge_id, ids),
             component_data,
@@ -290,7 +290,7 @@ class GraphQuery(Generic[E, Unpack[A]]):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
-            builder.init_var(Component.id(t_arg), component_data.ty)
+            builder.init_var(Component.name(t_arg), component_data.ty)
     def edge_fold(self, out_tp: Annotated[Any, Component], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
         out_bufs: list[jax.typing.ArrayLike] = []
         init_value_flat, init_value_tree = tree_flatten(init_value)
@@ -419,16 +419,16 @@ Time = Annotated[
     jax.Array, Component("time", ComponentType.F64, metadata={"priority": 5})
 ]
 PbrAsset = Annotated[
-    Handle, Component(241, ComponentType.U64, True, metadata={"name": "pbr_asset", "priority": -1})
+    Handle, Component("asset_handle_241", ComponentType.U64, True, metadata={"priority": -1})
 ]
 EntityMetadataAsset = Annotated[
-    Handle, Component(242, ComponentType.U64, True, metadata={"name": "metadata_asset", "priority": -1})
+    Handle, Component("asset_handle_242", ComponentType.U64, True, metadata={"priority": -1})
 ]
 GizmoAsset = Annotated[
-    Handle, Component(2243, ComponentType.U64, True, metadata={"name": "gizmo_asset", "priority": -1})
+    Handle, Component("asset_handle_2243", ComponentType.U64, True, metadata={"priority": -1})
 ]
 PanelAsset = Annotated[
-    Handle, Component(2244, ComponentType.U64, True, metadata={"name": "panel_asset", "priority": -1})
+    Handle, Component("asset_handle_2244", ComponentType.U64, True, metadata={"priority": -1})
 ]
 Camera = Annotated[jax.Array, Component("camera", ComponentType(PrimitiveType.U64, (1,)),),]
 

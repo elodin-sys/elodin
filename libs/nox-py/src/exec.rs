@@ -1,5 +1,6 @@
 use crate::*;
 
+use conduit::ComponentId;
 use numpy::{ndarray::ArrayViewD, PyArray, PyUntypedArray};
 
 use pyo3_polars::PyDataFrame;
@@ -23,10 +24,10 @@ impl Exec {
 
     fn column_array(
         this_cell: &PyCell<Self>,
-        id: ComponentId,
+        name: String,
     ) -> Result<&'_ numpy::PyUntypedArray, Error> {
         let mut this = this_cell.borrow_mut();
-        let column = this.exec.column(id.inner)?;
+        let column = this.exec.column(ComponentId::new(&name))?;
         let dyn_array = column
             .column
             .dyn_ndarray()

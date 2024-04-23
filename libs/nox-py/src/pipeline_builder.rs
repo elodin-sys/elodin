@@ -2,6 +2,7 @@ use crate::*;
 
 use std::{marker::PhantomData, ops::Deref};
 
+use conduit::ComponentId;
 use nox_ecs::{
     conduit,
     nox::{self, ArrayTy, Noxpr, NoxprNode, NoxprTy},
@@ -18,8 +19,8 @@ pub struct PipelineBuilder {
 
 #[pymethods]
 impl PipelineBuilder {
-    pub fn init_var(&mut self, id: ComponentId, ty: ComponentType) -> Result<(), Error> {
-        let id = id.inner;
+    pub fn init_var(&mut self, name: String, ty: ComponentType) -> Result<(), Error> {
+        let id = ComponentId::new(&name);
         if self.builder.param_ids.contains(&id) {
             return Ok(());
         }

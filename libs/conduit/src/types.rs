@@ -18,14 +18,12 @@ type HashMap<K, V> = std::collections::HashMap<K, V>;
 pub struct EntityId(pub u64);
 
 impl EntityId {
-    pub fn component_id() -> ComponentId {
-        ComponentId::new("entity_id")
-    }
+    pub const NAME: &'static str = "entity_id";
 
     #[cfg(feature = "std")]
     pub fn metadata() -> Metadata {
         let mut metadata = Metadata {
-            component_id: EntityId::component_id(),
+            name: Self::NAME.to_string(),
             component_type: ComponentType::u64(),
             asset: false,
             tags: HashMap::default(),
@@ -72,6 +70,16 @@ impl From<u64> for GraphId {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct AssetId(pub u64);
+
+impl AssetId {
+    pub fn component_name(&self) -> String {
+        format!("asset_handle_{}", self.0)
+    }
+
+    pub fn component_id(&self) -> ComponentId {
+        ComponentId::new(&self.component_name())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -436,7 +444,7 @@ pub trait Component {
     #[cfg(feature = "std")]
     fn metadata() -> Metadata {
         Metadata {
-            component_id: Self::component_id(),
+            name: Self::NAME.to_string(),
             component_type: Self::component_type(),
             tags: HashMap::new(),
             asset: Self::ASSET,
@@ -532,7 +540,7 @@ pub enum MetadataQuery {
 #[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
-    pub component_id: ComponentId,
+    pub name: String,
     pub component_type: ComponentType,
     pub tags: HashMap<String, TagValue>,
     pub asset: bool,
@@ -540,6 +548,10 @@ pub struct Metadata {
 
 #[cfg(feature = "std")]
 impl Metadata {
+    pub fn component_id(&self) -> ComponentId {
+        ComponentId::new(&self.name)
+    }
+
     pub fn priority(&self) -> i64 {
         self.tags
             .get("priority")
@@ -567,7 +579,7 @@ impl Metadata {
             .get("name")
             .and_then(TagValue::as_str)
             .map(str::to_string)
-            .unwrap_or_else(|| format!("ID[{}]", self.component_id.0))
+            .unwrap_or_else(|| self.name.clone())
             .to_uppercase()
     }
 }

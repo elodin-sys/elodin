@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use conduit::well_known::GizmoType;
+use conduit::ComponentId;
 use nox_ecs::conduit::Asset;
 use nox_ecs::{
     conduit,
@@ -73,10 +74,10 @@ pub struct Gizmo {
 #[pymethods]
 impl Gizmo {
     #[staticmethod]
-    fn vector(id: ComponentId, offset: usize, color: Color) -> Self {
+    fn vector(name: String, offset: usize, color: Color) -> Self {
         Self {
             inner: conduit::well_known::Gizmo {
-                id: id.inner,
+                id: ComponentId::new(&name),
                 ty: GizmoType::Vector {
                     range: offset..offset + 3,
                     color: color.inner,
@@ -168,7 +169,6 @@ pub fn read_batch_results(path: String) -> Result<PyDataFrame, Error> {
 #[pymodule]
 pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
-    m.add_class::<ComponentId>()?;
     m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;
     m.add_class::<EntityId>()?;
