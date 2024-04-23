@@ -12,7 +12,6 @@ use crate::{
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use big_space::GridCell;
-use bytes::Bytes;
 use serde::de::DeserializeOwned;
 
 pub struct SyncPlugin {
@@ -72,9 +71,9 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
-        value: Bytes,
+        value: &[u8],
     ) {
-        let Ok(comp) = postcard::from_bytes::<T>(&value) else {
+        let Ok(comp) = postcard::from_bytes::<T>(value) else {
             warn!("failed to deserialize material");
             return;
         };
