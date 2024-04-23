@@ -101,7 +101,7 @@ async fn send_inner(
 ) -> Result<(), conduit::Error> {
     let stream_id = StreamId::rand();
     for (data, value_buf) in component_datas.iter().zip(arrays.iter()) {
-        let packet: Packet<Payload<Bytes>> = Packet::metadata(stream_id, data.clone().into());
+        let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.clone().into());
         client.send(packet).await?;
 
         client
