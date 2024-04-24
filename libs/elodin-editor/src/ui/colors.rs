@@ -53,12 +53,7 @@ pub fn get_color_by_index(index: usize) -> Color32 {
         HYPERBOLE_40,
         MINT_40,
     ];
-
-    *colors.get(index).unwrap_or(&WHITE)
-}
-
-pub fn get_random_color() -> Color32 {
-    get_color_by_index(fastrand::usize(0..=7))
+    colors[index % colors.len()]
 }
 
 pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {

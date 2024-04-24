@@ -115,13 +115,9 @@ pub fn inspector(
 
         if create_graph {
             let (graph_id, _) = graphs_state.get_or_create_graph(&None);
-            let component_values = component_value
-                .iter()
-                .enumerate()
-                .map(|_| (true, colors::get_random_color()))
-                .collect::<Vec<(bool, egui::Color32)>>();
-
-            graphs_state.insert_component(&graph_id, &entity_id, &component_id, component_values);
+            let values =
+                GraphsState::default_component_values(&entity_id, &component_id, component_value);
+            graphs_state.insert_component(&graph_id, &entity_id, &component_id, values);
 
             tile_state.create_graph_tile(graph_id);
         }
