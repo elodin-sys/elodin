@@ -13,6 +13,7 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
+use conduit::ComponentValue;
 use conduit::{
     bevy::{ComponentValueMap, Received, TimeStep},
     well_known::EntityMetadata,
@@ -193,6 +194,19 @@ impl GraphsState {
 
             (new_graph_id, self.graphs.get(&new_graph_id).unwrap())
         }
+    }
+
+    pub fn default_component_values(
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+        component_value: &ComponentValue,
+    ) -> GraphStateComponent {
+        component_value
+            .iter()
+            .enumerate()
+            .map(|(i, _)| (entity_id.0 + component_id.0) as usize + i)
+            .map(|i| (true, colors::get_color_by_index(i)))
+            .collect::<Vec<(bool, egui::Color32)>>()
     }
 
     pub fn insert_component(

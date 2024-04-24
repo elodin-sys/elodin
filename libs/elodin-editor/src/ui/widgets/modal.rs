@@ -11,7 +11,7 @@ use conduit::{query::MetadataStore, GraphId};
 use crate::ui::{
     colors::{self, with_opacity},
     images, theme,
-    utils::{self, MarginSides},
+    utils::MarginSides,
     EntityData, GraphsState, InspectorAnchor,
 };
 
@@ -223,12 +223,8 @@ impl WidgetSystem for ModalUpdateGraphContent<'_, '_> {
                 );
 
                 if add_component_btn.clicked() {
-                    let values = utils::component_value_to_vec(component)
-                        .iter()
-                        .enumerate()
-                        .map(|_| (true, colors::get_random_color()))
-                        .collect::<Vec<(bool, egui::Color32)>>();
-
+                    let values =
+                        GraphsState::default_component_values(entity_id, component_id, component);
                     graph_states.insert_component(&graph_id, entity_id, component_id, values);
 
                     graph_states.modal_graph = None;
