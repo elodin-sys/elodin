@@ -67,17 +67,20 @@ class Camera(el.Archetype):
     time: el.Time
 
 world = el.World()
-world.spawn(
+drone = world.spawn(
     el.Body(
         world_pos=el.SpatialTransform.from_linear(points[0]),
         #world_vel=el.SpatialMotion.from_linear(jnp.array([120.0, 10.0, 50.0])),
         pbr=world.insert_asset(
-            el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
+            el.Pbr.from_url(
+                "https://storage.googleapis.com/elodin-marketing/models/drone.glb"
+            )
         ),
     )
 ).insert(Camera(np.array([0]), np.array(0.0))).name("Drone")
 world.spawn(
     el.Panel.viewport(
+        track_entity=drone.id(),
         track_rotation=False,
         active=True,
         show_grid=True,
