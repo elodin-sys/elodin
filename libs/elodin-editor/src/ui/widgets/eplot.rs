@@ -84,7 +84,7 @@ type EPlotEntityGroup = Vec<(String, EPlotComponentGroup)>;
 #[derive(Debug)]
 pub struct EPlot {
     tick_range: Range<u64>,
-    time_step: f64,
+    time_step: std::time::Duration,
     lines: EPlotEntityGroup,
     bounds: EPlotBounds,
     rect: egui::Rect,
@@ -134,7 +134,7 @@ impl EPlot {
     pub fn new() -> Self {
         Self {
             tick_range: Range::default(),
-            time_step: 0.0,
+            time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
             lines: Vec::new(),
             bounds: EPlotBounds::default(),
             rect: egui::Rect::ZERO,
@@ -247,7 +247,7 @@ impl EPlot {
         self
     }
 
-    pub fn time_step(mut self, step: f64) -> Self {
+    pub fn time_step(mut self, step: std::time::Duration) -> Self {
         self.time_step = step;
         self
     }
@@ -291,8 +291,11 @@ impl EPlot {
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
         let step_size = self.bounds.width() / self.steps_x as f64;
+        let min_step_size = 1.0 / self.time_step.as_secs_f64();
+        let step_size = (step_size / min_step_size).ceil() * min_step_size;
         let steps_x = (0..=self.steps_x)
             .map(|i| self.bounds.min_x + (i as f64) * step_size)
+            .filter(|x| *x <= self.bounds.max_x)
             .collect::<Vec<f64>>();
 
         for x_step in steps_x {
@@ -309,6 +312,7 @@ impl EPlot {
                 self.border_stroke,
             );
 
+            let time = (self.time_step.as_secs_f64() * x_step).round() as usize;
             ui.painter().text(
                 egui::pos2(
                     x_position.x,
@@ -316,7 +320,7 @@ impl EPlot {
                         + (self.padding.bottom + self.notch_length + self.axis_label_margin),
                 ),
                 egui::Align2::CENTER_TOP,
-                utils::time_label_ms(x_step * self.time_step),
+                utils::time_label(time, false),
                 font_id.clone(),
                 self.text_color,
             );
@@ -442,8 +446,8 @@ impl EPlot {
                     .find_position(|x| *x as f64 == closest_point.x);
 
                 if let Some((index, value)) = point_on_baseline {
-                    let time = self.time_step * value as f64;
-                    let time_text = utils::time_label_ms(time);
+                    let time = self.time_step * value as u32;
+                    let time_text = utils::time_label_ms(time.as_secs_f64());
 
                     ui.label(time_text);
 

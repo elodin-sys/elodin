@@ -89,7 +89,7 @@ impl Pane {
     fn ui(
         &mut self,
         ui: &mut Ui,
-        time_step: f64,
+        time_step: std::time::Duration,
         collected_graph_data: &CollectedGraphData,
         graphs_state: &mut GraphsState,
     ) -> egui_tiles::UiResponse {
@@ -103,7 +103,7 @@ impl Pane {
                 EPlot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
                     .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
-                    .steps(6, 4)
+                    .steps(7, 4)
                     .time_step(time_step)
                     .calculate_lines(ui, collected_graph_data, graph_state)
                     .render(ui);
@@ -190,7 +190,7 @@ struct TreeBehavior<'a> {
     selected_object: &'a mut SelectedObject,
     graphs_state: &'a mut GraphsState,
     collected_graph_data: &'a CollectedGraphData,
-    time_step: f64,
+    time_step: std::time::Duration,
 }
 
 #[derive(Clone)]
@@ -486,7 +486,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     selected_object: selected_object.as_mut(),
                     graphs_state: graphs_state.as_mut(),
                     collected_graph_data: collected_graph_data.as_ref(),
-                    time_step: state_mut.time_step.0.as_secs_f64(),
+                    time_step: state_mut.time_step.0,
                 };
                 ui_state.tab_diffs = vec![];
                 ui_state.tree.ui(&mut behavior, ui);
