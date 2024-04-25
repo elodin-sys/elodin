@@ -246,43 +246,30 @@ def from_array(cls, arr):
 
 E = TypeVar("E")
 
+class RevEdge: ...
 
-class GraphQuery(Generic[E, Unpack[A]]):
+class GraphQuery(Generic[E]):
     bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
-    component_data: list[Component]
-    component_classes: list[type[Any]]
     inner: GraphQueryInner
 
     def __init__(
         self,
         inner: GraphQueryInner,
-        component_data: list[Component],
-        component_classes: list[type[Any]],
     ):
-        self.bufs = inner.arrays()
         self.inner = inner
-        self.component_data = component_data
-        self.component_classes = component_classes
 
     @staticmethod
     def from_builder(
         new_tp: type[Any], builder: PipelineBuilder
     ) -> "GraphQuery[E, Any]":
         t_args = typing.get_args(new_tp)
-        ids = []
-        component_data = []
-        component_classes = []
         edge_ty = t_args[0]
         edge_id = Component.name(edge_ty)
-        for t_arg in t_args[1:]:
-            component_classes.append(t_arg)
-            data = t_arg.__metadata__[0]
-            component_data.append(data)
-            ids.append(Component.name(t_arg))
+        reverse = False
+        if len(edge_ty.__metadata__) > 1 and edge_ty.__metadata__[1] is RevEdge:
+            reverse = True
         return GraphQuery(
-            GraphQueryInner.from_builder(builder, edge_id, ids),
-            component_data,
-            component_classes,
+            GraphQueryInner.from_builder(builder, edge_id, reverse),
         )
 
     @staticmethod
@@ -291,10 +278,11 @@ class GraphQuery(Generic[E, Unpack[A]]):
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
             builder.init_var(Component.name(t_arg), component_data.ty)
-    def edge_fold(self, out_tp: Annotated[Any, Component], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
+    def edge_fold(self, from_query: Query[Any], to_query: Query[Any], out_tp: Annotated[Any, Component], init_value: O, fn: Callable[..., O]) -> 'Query[O]':
         out_bufs: list[jax.typing.ArrayLike] = []
+        bufs = self.inner.arrays(from_query.inner, to_query.inner)
         init_value_flat, init_value_tree = tree_flatten(init_value)
-        for (_, (f, to)) in self.bufs.items():
+        for (_, (f, to)) in bufs.items():
             def vmap_inner(a):
                 (f, to) = a
 
@@ -302,10 +290,10 @@ class GraphQuery(Generic[E, Unpack[A]]):
                     xs = tree_unflatten(init_value_tree, xs)
                     args = [
                         from_array(data, x)
-                        for (x, data) in zip(f, self.component_classes)
+                        for (x, data) in zip(f, from_query.component_classes)
                     ] + [
                         from_array(data, x)
-                        for (x, data) in zip(to, self.component_classes)
+                        for (x, data) in zip(to, to_query.component_classes)
                     ]
                     o = fn(xs, *args)
                     o_flat, _ = tree_flatten(o)
@@ -321,7 +309,7 @@ class GraphQuery(Generic[E, Unpack[A]]):
             else:
                 out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
         component_data = out_tp.__metadata__[0] # type: ignore
-        return Query(self.inner.map(out_bufs[0], component_data.to_metadata()), [component_data], [out_tp])
+        return Query(self.inner.map(from_query.inner, to_query.inner, out_bufs[0], component_data.to_metadata()), [component_data], [out_tp])
 
 
 class SystemParam(Protocol):

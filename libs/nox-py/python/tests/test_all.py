@@ -82,8 +82,8 @@ def test_graph():
         edge: E
 
     @system
-    def fold_test(graph: GraphQuery[E, X]) -> Query[X]:
-        return graph.edge_fold(X, np.array(5.0), lambda x, a, b: x + a + b)
+    def fold_test(graph: GraphQuery[E], x: Query[X]) -> Query[X]:
+        return graph.edge_fold(x, x, X, np.array(5.0), lambda x, a, b: x + a + b)
 
     w = WorldBuilder()
     a = w.spawn(Test(np.array([1.0], dtype="float64")))

@@ -18,7 +18,8 @@ class GravityConstraint(el.Archetype):
 
 @el.system
 def gravity(
-    q: el.GraphQuery[GravityEdge, el.WorldPos, el.Inertia],
+    graph: el.GraphQuery[GravityEdge],
+    query: el.Query[el.WorldPos, el.Inertia],
 ) -> el.Query[el.Force]:
     def gravity_inner(force, a_pos, a_inertia, b_pos, b_inertia):
         r = a_pos.linear() - b_pos.linear()
@@ -28,7 +29,7 @@ def gravity(
         f = G * M * m * r / (norm * norm * norm)
         return el.SpatialForce.from_linear(force.force() - f)
 
-    return q.edge_fold(el.Force, el.SpatialForce.zero(), gravity_inner)
+    return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
 
 
 w = el.World()
