@@ -135,18 +135,62 @@ pub fn label_with_button(
 
             ui.allocate_ui_at_rect(btn_rect, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let add_entity_btn = ui.add(
+                    let btn = ui.add(
                         EImageButton::new(btn_icon)
                             .scale(1.2, 1.2)
                             .image_tint(color)
                             .bg_color(colors::TRANSPARENT),
                     );
 
-                    clicked = add_entity_btn.clicked();
+                    clicked = btn.clicked();
                 });
             });
         });
     });
 
     clicked
+}
+
+pub fn label_with_n_buttons(
+    ui: &mut egui::Ui,
+    btn_icons: &[egui::TextureId],
+    label: impl ToString,
+    color: egui::Color32,
+    margin: egui::Margin,
+) -> i8 {
+    let mut btn_clicked = -1;
+
+    egui::Frame::none().inner_margin(margin).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
+                ui.max_rect(),
+                0.8,
+                ui.spacing().interact_size.y,
+            );
+
+            ui.allocate_ui_at_rect(label_rect, |ui| {
+                let text = egui::RichText::new(label.to_string()).color(color);
+                ui.add(egui::Label::new(text));
+            });
+
+            ui.allocate_ui_at_rect(btn_rect, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (i, btn_icon) in btn_icons.iter().enumerate() {
+                        let btn = ui.add(
+                            EImageButton::new(*btn_icon)
+                                .scale(1.2, 1.2)
+                                .image_tint(color)
+                                .bg_color(colors::TRANSPARENT),
+                        );
+
+                        if btn.clicked() {
+                            btn_clicked = i as i8;
+                        }
+                    }
+                });
+            });
+        });
+    });
+
+    btn_clicked
 }

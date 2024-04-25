@@ -15,6 +15,8 @@ use crate::{
     CollectedGraphData,
 };
 
+use super::timeline::tagged_range::TaggedRange;
+
 #[derive(Debug, Clone)]
 pub struct EPlotDataLine {
     pub label: String,
@@ -166,6 +168,7 @@ impl EPlot {
         ui: &egui::Ui,
         collected_graph_data: &CollectedGraphData,
         graph_state: &GraphState,
+        tagged_range: Option<&TaggedRange>,
     ) -> Self {
         self.rect = ui.max_rect();
         self.inner_rect = self.get_inner_rect(self.rect);
@@ -184,13 +187,18 @@ impl EPlot {
             1
         };
 
-        self.tick_range = collected_graph_data.tick_range.clone();
+        if let Some(tagged_range) = tagged_range {
+            let (a, b) = tagged_range.values;
+            self.tick_range = if a > b { b..a } else { a..b };
+        } else {
+            self.tick_range = collected_graph_data.tick_range.clone();
+        }
 
         // calc bounds
 
         let mut minmax_lines = vec![];
 
-        for (entity_id, components) in graph_state {
+        for (entity_id, components) in &graph_state.entities {
             if let Some(entity) = collected_graph_data.entities.get(entity_id) {
                 for (component_id, component_values) in components {
                     if let Some(component) = entity.components.get(component_id) {
@@ -210,7 +218,10 @@ impl EPlot {
 
         // calc lines
 
-        for (entity_id, components) in graph_state {
+        let range_start = self.tick_range.start as usize;
+        let range_end = self.tick_range.end as usize;
+
+        for (entity_id, components) in &graph_state.entities {
             if let Some(entity) = collected_graph_data.entities.get(entity_id) {
                 let mut component_group = Vec::new();
 
@@ -220,7 +231,8 @@ impl EPlot {
                         for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                             if *enabled {
                                 if let Some(line) = component.lines.get(&value_index) {
-                                    let value_chunks = line.values.chunks_exact(chunk_size);
+                                    let value_chunks = line.values[range_start..range_end]
+                                        .chunks_exact(chunk_size);
                                     let values = value_chunks.into_iter().map(|values| {
                                         values.iter().sum::<f64>() / values.len() as f64
                                     });
@@ -622,7 +634,7 @@ impl EPlot {
                         }
                     }
 
-                    if self.show_modal {
+                    if self.show_modal && ui.ui_contains_pointer() {
                         self.draw_modal(ui, &closest_point, pointer_pos);
                     }
                 }

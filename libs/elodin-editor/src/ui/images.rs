@@ -22,6 +22,8 @@ pub struct Images {
     pub icon_side_bar_right: Handle<Image>,
     pub icon_fullscreen: Handle<Image>,
     pub icon_exit_fullscreen: Handle<Image>,
+    pub icon_setting: Handle<Image>,
+    pub icon_lightning: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -53,6 +55,9 @@ impl FromWorld for Images {
                 .load("embedded://elodin_editor/assets/icons/fullscreen.png"),
             icon_exit_fullscreen: asset_server
                 .load("embedded://elodin_editor/assets/icons/exit-fullscreen.png"),
+            icon_setting: asset_server.load("embedded://elodin_editor/assets/icons/setting.png"),
+            icon_lightning: asset_server
+                .load("embedded://elodin_editor/assets/icons/lightning.png"),
         }
     }
 }

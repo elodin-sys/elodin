@@ -77,6 +77,14 @@ fn configure_default_fonts() -> FontDefinitions {
     fonts
 }
 
+pub fn configure_text_edit(style: &mut Style) {
+    style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, colors::PRIMARY_CREAME);
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, colors::PRIMARY_CREAME);
+    style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, colors::PRIMARY_CREAME);
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, colors::PRIMARY_ONYX_8);
+    style.visuals.widgets.hovered.bg_fill = colors::PRIMARY_CREAME;
+}
+
 pub fn configure_combo_box(style: &mut Style) {
     style.spacing.item_spacing = [16.0, 16.0].into();
     style.spacing.button_padding = [16.0, 16.0].into();

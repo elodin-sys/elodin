@@ -6,15 +6,21 @@ use bevy::ecs::{
     system::{Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use bevy_egui::egui::{self, emath, epaint::PathShape};
+use bevy_egui::egui;
 use conduit::{
-    bevy::{MaxTick, Tick, TimeStep},
+    bevy::{MaxTick, Tick},
     ControlMsg,
 };
 
-use crate::ui::{colors, utils, Paused};
+use crate::ui::{
+    colors, utils,
+    widgets::{button::EImageButton, WidgetSystem},
+    Paused,
+};
 
-use super::{button::EImageButton, WidgetSystem};
+use super::{
+    get_position_range, get_segment_size, position_from_value, value_from_position, TimelineArgs,
+};
 
 // ----------------------------------------------------------------------------
 
@@ -68,7 +74,10 @@ impl<'a> Timeline<'a> {
     ///         .fps(frames_per_second),
     /// );
     /// ```
-    pub fn new<Num: emath::Numeric>(value: &'a mut Num, active_range: RangeInclusive<Num>) -> Self {
+    pub fn new<Num: egui::emath::Numeric>(
+        value: &'a mut Num,
+        active_range: RangeInclusive<Num>,
+    ) -> Self {
         let range_f64 = active_range.start().to_f64()..=active_range.end().to_f64();
         let timeline = Self::from_get_set(range_f64, move |v: Option<f64>| {
             if let Some(v) = v {
@@ -132,18 +141,6 @@ impl<'a> Timeline<'a> {
         self
     }
 
-    fn get_visual_end(&self) -> f64 {
-        let offset = 0.1;
-        let min_end = self.fps * (self.segments as f64);
-        let active_range_end = *self.active_range.end();
-
-        if active_range_end > min_end {
-            active_range_end + (active_range_end * offset)
-        } else {
-            min_end + (min_end * offset)
-        }
-    }
-
     fn get_value(&mut self) -> f64 {
         let value = get(&mut self.get_set_value);
         if self.clamp_to_range {
@@ -170,51 +167,38 @@ impl<'a> Timeline<'a> {
     fn range(&self) -> RangeInclusive<f64> {
         self.active_range.clone()
     }
-
-    /// Returns a `value` based on the `position` in the timeline
-    ///
-    /// # Arguments
-    ///
-    /// * `position` - A mouse position
-    /// * `position_range` - A range of the timeline on the screen
-    fn value_from_position(&self, position: f32, position_range: egui::Rangef) -> f64 {
-        let normalized = emath::remap_clamp(position, position_range, 0.0..=1.0) as f64;
-        emath::lerp(self.range(), normalized.clamp(0.0, 1.0))
-    }
-
-    fn position_from_value(&self, value: f64, position_range: egui::Rangef) -> f32 {
-        let normalized = emath::remap_clamp(value, self.range(), 0.0..=1.0);
-        emath::lerp(position_range, normalized as f32)
-    }
 }
 
 impl<'a> Timeline<'a> {
     fn allocate_slider_space(&self, ui: &mut egui::Ui) -> egui::Response {
-        ui.allocate_response(emath::vec2(self.width, self.height), egui::Sense::drag())
+        ui.allocate_response(
+            egui::emath::vec2(self.width, self.height),
+            egui::Sense::drag(),
+        )
     }
 
     fn render(&mut self, ui: &mut egui::Ui, response: &egui::Response) {
         let rect = response.rect;
 
-        let visual_end = self.get_visual_end();
+        let active_range_start = self.active_range.start();
+        let active_range_end = self.active_range.end();
         let visual_segments = self.segments + 1;
-        // NOTE: Active zone starts in a center of the first segment and ends in a the center of the last one
-        let offset = (rect.width() / visual_segments as f32) / 2.0;
-
-        let total_time_sec = (visual_end / self.fps).ceil();
-        let segment_size = (total_time_sec / self.segments as f64).ceil();
-        let total_timeline_frames = (segment_size * self.segments as f64) * self.fps;
-
-        let not_sim_offset = (total_timeline_frames - self.active_range.end())
-            / (total_timeline_frames - self.active_range.start());
-        let position_range = Timeline::position_range(&rect, offset, not_sim_offset as f32);
+        let segment_size = get_segment_size(self.fps, self.segments as f64, *active_range_end);
+        let position_range = get_position_range(
+            rect.x_range(),
+            self.fps,
+            self.segments as f64,
+            segment_size as f64,
+            *active_range_start,
+            *active_range_end,
+        );
 
         if let Some(pointer_position_2d) = response.interact_pointer_pos() {
             let position = pointer_position_2d.x;
             let aim_radius = ui.input(|i| i.aim_radius());
-            let new_value = emath::smart_aim::best_in_range_f64(
-                self.value_from_position(position - aim_radius, position_range),
-                self.value_from_position(position + aim_radius, position_range),
+            let new_value = egui::emath::smart_aim::best_in_range_f64(
+                value_from_position(position - aim_radius, self.range(), position_range),
+                value_from_position(position + aim_radius, self.range(), position_range),
             );
 
             self.set_value(new_value);
@@ -242,21 +226,17 @@ impl<'a> Timeline<'a> {
             } else {
                 ui.put(
                     rect,
-                    self.rail_ui(
-                        visual_segments as usize,
-                        segment_size as usize,
-                        self.label_font_size,
-                    ),
+                    self.rail_ui(visual_segments.into(), segment_size, self.label_font_size),
                 );
             }
 
-            let position_1d = self.position_from_value(value, position_range);
+            let position_1d = position_from_value(value, self.range(), position_range);
             let center = Timeline::pointer_center(position_1d, &rect);
 
             // Trailing fill
 
             let max_value = self.active_range.end();
-            let max_position_1d = self.position_from_value(*max_value, position_range);
+            let max_position_1d = position_from_value(*max_value, self.range(), position_range);
             let max_center = Timeline::pointer_center(max_position_1d, &rect);
 
             if self.trailing_fill {
@@ -305,16 +285,7 @@ impl<'a> Timeline<'a> {
     }
 
     fn pointer_center(position_1d: f32, rail_rect: &egui::Rect) -> egui::Pos2 {
-        emath::pos2(position_1d, rail_rect.center().y)
-    }
-
-    fn position_range(rect: &egui::Rect, offset: f32, end_offset_portion: f32) -> egui::Rangef {
-        let full = rect.x_range().shrink(offset);
-
-        egui::Rangef {
-            min: full.min,
-            max: full.max - ((full.max - full.min) * end_offset_portion),
-        }
+        egui::emath::pos2(position_1d, rail_rect.center().y)
     }
 
     fn rail_ui(&self, segments: usize, segment_size: usize, font_size: f32) -> impl egui::Widget {
@@ -337,15 +308,15 @@ impl<'a> Timeline<'a> {
                         let col_center_btm = column_rect.center_bottom();
                         let col_center_top = column_rect.center_top();
 
-                        let top_point = emath::pos2(
+                        let top_point = egui::emath::pos2(
                             col_center_btm.x,
                             col_center_btm.y - ((col_center_btm.y - col_center_top.y) / 5.0),
                         );
 
-                        column.painter().add(PathShape::line(
-                            vec![col_center_btm, top_point],
+                        column.painter().line_segment(
+                            [col_center_btm, top_point],
                             column.style().visuals.widgets.noninteractive.bg_stroke,
-                        ));
+                        );
                     }
                 });
             })
@@ -397,11 +368,10 @@ pub struct TimelineWithControls<'w> {
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, Tick>,
     max_tick: Res<'w, MaxTick>,
-    tick_time: Res<'w, TimeStep>,
 }
 
 impl WidgetSystem for TimelineWithControls<'_> {
-    type Args = TimelineIcons;
+    type Args = (TimelineIcons, TimelineArgs);
     type Output = ();
 
     fn ui_system(
@@ -412,18 +382,14 @@ impl WidgetSystem for TimelineWithControls<'_> {
     ) {
         let state_mut = state.get_mut(world);
 
-        let icons = args;
+        let (icons, timeline_args) = args;
 
         let mut paused = state_mut.paused;
         let max_tick = state_mut.max_tick;
         let mut tick = state_mut.tick;
         let mut event = state_mut.event;
-        let tick_time = state_mut.tick_time;
-
-        let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
 
         let handle_icon = icons.handle;
-        let available_width = ui.available_width();
 
         ui.vertical(|ui| {
             let mut tick_changed = false;
@@ -517,7 +483,8 @@ impl WidgetSystem for TimelineWithControls<'_> {
                             egui::Layout::right_to_left(egui::Align::Center),
                             |col_ui| {
                                 let current_time_sec =
-                                    (tick.0 as f64 / frames_per_second).floor() as usize;
+                                    (tick.0 as f64 / timeline_args.frames_per_second).floor()
+                                        as usize;
 
                                 egui::Frame::none()
                                     .inner_margin(egui::Margin::symmetric(0.0, 4.0))
@@ -537,17 +504,19 @@ impl WidgetSystem for TimelineWithControls<'_> {
 
             ui.add(egui::Separator::default().spacing(0.0));
 
-            let segment_count = (available_width / 100.0) as u8;
             ui.horizontal(|ui| {
                 let response = ui
                     .add(
-                        Timeline::new(&mut tick.bypass_change_detection().0, 0..=max_tick.0)
-                            .width(available_width)
-                            .height(32.0)
-                            .handle_image_id(handle_icon)
-                            .handle_aspect_ratio(12.0 / 30.0)
-                            .segments(segment_count)
-                            .fps(frames_per_second),
+                        Timeline::new(
+                            &mut tick.bypass_change_detection().0,
+                            timeline_args.active_range,
+                        )
+                        .width(timeline_args.available_width)
+                        .height(32.0)
+                        .handle_image_id(handle_icon)
+                        .handle_aspect_ratio(12.0 / 30.0)
+                        .segments(timeline_args.segment_count)
+                        .fps(timeline_args.frames_per_second),
                     )
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 tick_changed |= response.changed();

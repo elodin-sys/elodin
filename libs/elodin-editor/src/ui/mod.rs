@@ -13,6 +13,7 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
+use conduit::bevy::MaxTick;
 use conduit::ComponentValue;
 use conduit::{
     bevy::{ComponentValueMap, Received, TimeStep},
@@ -25,12 +26,14 @@ use crate::{GridHandle, MainCamera};
 
 use self::widgets::hierarchy::Hierarchy;
 use self::widgets::inspector::Inspector;
-use self::widgets::modal::ModalUpdateGraph;
-use self::widgets::timeline::TimelineWithControls;
+use self::widgets::modal::ModalWithSettings;
+use self::widgets::timeline::tagged_range::{TaggedRangeId, TaggedRangesPanel};
+use self::widgets::timeline::TimelineArgs;
+use self::widgets::timeline::{tagged_range::TaggedRanges, timeline_widget};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{
     utils::MarginSides,
-    widgets::{button::EImageButton, inspector, timeline},
+    widgets::{button::EImageButton, inspector},
 };
 
 pub mod colors;
@@ -155,6 +158,8 @@ impl Plugin for UiPlugin {
             .init_resource::<tiles::TileState>()
             .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
+            .init_resource::<TaggedRanges>()
+            .init_resource::<SettingModalState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, tiles::sync_viewports.after(render_layout))
@@ -164,35 +169,45 @@ impl Plugin for UiPlugin {
     }
 }
 
-type GraphStateComponent = Vec<(bool, egui::Color32)>;
-type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
-type GraphState = BTreeMap<EntityId, GraphStateEntity>;
+#[derive(Clone, Debug)]
+pub enum SettingModal {
+    Graph(GraphId, Option<EntityId>, Option<ComponentId>),
+    GraphRename(GraphId, String),
+    RangeEdit(TaggedRangeId, String, egui::Color32),
+}
 
 #[derive(Resource, Default, Clone, Debug)]
-pub struct GraphsState {
-    modal_graph: Option<GraphId>,
-    modal_entity: Option<EntityId>,
-    modal_component: Option<ComponentId>,
-    graphs: BTreeMap<GraphId, GraphState>,
+pub struct SettingModalState(pub Option<SettingModal>);
+
+type GraphStateComponent = Vec<(bool, egui::Color32)>;
+type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
+
+#[derive(Default, Clone, Debug)]
+pub struct GraphState {
+    entities: BTreeMap<EntityId, GraphStateEntity>,
+    range_id: Option<TaggedRangeId>,
 }
+
+#[derive(Resource, Default, Clone, Debug)]
+pub struct GraphsState(BTreeMap<GraphId, GraphState>);
 
 impl GraphsState {
     pub fn get_or_create_graph(&mut self, graph_id: &Option<GraphId>) -> (GraphId, &GraphState) {
         if let Some(graph_id) = graph_id {
-            if !self.graphs.contains_key(graph_id) {
-                self.graphs.insert(*graph_id, BTreeMap::new());
+            if !self.0.contains_key(graph_id) {
+                self.0.insert(*graph_id, GraphState::default());
             }
 
-            (*graph_id, self.graphs.get(graph_id).unwrap())
+            (*graph_id, self.0.get(graph_id).unwrap())
         } else {
             let new_graph_id = self
-                .graphs
+                .0
                 .keys()
                 .max()
                 .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
-            self.graphs.insert(new_graph_id, BTreeMap::new());
+            self.0.insert(new_graph_id, GraphState::default());
 
-            (new_graph_id, self.graphs.get(&new_graph_id).unwrap())
+            (new_graph_id, self.0.get(&new_graph_id).unwrap())
         }
     }
 
@@ -205,7 +220,7 @@ impl GraphsState {
             .iter()
             .enumerate()
             .map(|(i, _)| (entity_id.0 + component_id.0) as usize + i)
-            .map(|i| (true, colors::get_color_by_index(i)))
+            .map(|i| (true, colors::get_color_by_index_all(i)))
             .collect::<Vec<(bool, egui::Color32)>>()
     }
 
@@ -217,28 +232,23 @@ impl GraphsState {
         component_values: Vec<(bool, egui::Color32)>,
     ) {
         let mut graph = self
-            .graphs
+            .0
             .get(graph_id)
-            .map_or(BTreeMap::new(), |graph| graph.clone());
+            .map_or(GraphState::default(), |graph| graph.clone());
 
         let mut entity = graph
+            .entities
             .get(entity_id)
             .map_or(BTreeMap::new(), |ec| ec.clone());
 
         entity.insert(*component_id, component_values);
-        graph.insert(*entity_id, entity);
+        graph.entities.insert(*entity_id, entity);
 
-        self.graphs.insert(*graph_id, graph);
+        self.0.insert(*graph_id, graph);
     }
 
     pub fn remove_graph(&mut self, graph_id: &GraphId) {
-        self.graphs.remove(graph_id);
-
-        if self.modal_graph == Some(*graph_id) {
-            self.modal_graph = None;
-            self.modal_entity = None;
-            self.modal_component = None;
-        }
+        self.0.remove(graph_id);
     }
 
     pub fn remove_component(
@@ -248,23 +258,28 @@ impl GraphsState {
         component_id: &ComponentId,
     ) {
         let mut graph = self
-            .graphs
+            .0
             .get(graph_id)
-            .map_or(BTreeMap::new(), |state| state.clone());
+            .map_or(GraphState::default(), |state| state.clone());
 
         let mut components = graph
+            .entities
             .get(entity_id)
             .map_or(BTreeMap::new(), |ec| ec.clone());
 
         components.remove(component_id);
 
         if components.is_empty() {
-            graph.remove(entity_id);
+            graph.entities.remove(entity_id);
         } else {
-            graph.insert(*entity_id, components);
+            graph.entities.insert(*entity_id, components);
         }
 
-        self.graphs.insert(*graph_id, graph);
+        self.0.insert(*graph_id, graph);
+    }
+
+    pub fn contains_graph(&self, graph_id: &GraphId) -> bool {
+        self.0.contains_key(graph_id)
     }
 
     pub fn contains_component(
@@ -273,8 +288,8 @@ impl GraphsState {
         entity_id: &EntityId,
         component_id: &ComponentId,
     ) -> bool {
-        if let Some(graph) = self.graphs.get(graph_id) {
-            if let Some(entity) = graph.get(entity_id) {
+        if let Some(graph) = self.0.get(graph_id) {
+            if let Some(entity) = graph.entities.get(entity_id) {
                 return entity.contains_key(component_id);
             }
         }
@@ -443,6 +458,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             chart: contexts.add_image(images.icon_chart.clone_weak()),
             add: contexts.add_image(images.icon_add.clone_weak()),
             subtract: contexts.add_image(images.icon_subtract.clone_weak()),
+            setting: contexts.add_image(images.icon_setting.clone_weak()),
         };
 
         let titlebar_icons = TitlebarIcons {
@@ -483,6 +499,9 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 pub struct TimelinePanel<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
+    max_tick: Res<'w, MaxTick>,
+    tick_time: Res<'w, TimeStep>,
+    tagged_ranges: Res<'w, TaggedRanges>,
 }
 
 impl RootWidgetSystem for TimelinePanel<'_, '_> {
@@ -498,10 +517,17 @@ impl RootWidgetSystem for TimelinePanel<'_, '_> {
         let state_mut = state.get_mut(world);
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
+        let max_tick = state_mut.max_tick;
+        let tick_time = state_mut.tick_time;
+
+        let ranges_not_empty = state_mut.tagged_ranges.is_not_empty();
+
+        let active_range = 0..=max_tick.0;
+        let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
 
         theme::set_theme(ctx);
 
-        let timeline_icons = timeline::TimelineIcons {
+        let timeline_icons = timeline_widget::TimelineIcons {
             jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
             jump_to_end: contexts.add_image(images.icon_jump_to_end.clone_weak()),
             frame_forward: contexts.add_image(images.icon_frame_forward.clone_weak()),
@@ -519,11 +545,27 @@ impl RootWidgetSystem for TimelinePanel<'_, '_> {
             })
             .resizable(false)
             .show(ctx, |ui| {
-                ui.add_widget_with::<TimelineWithControls>(
+                let available_width = ui.available_width();
+                let timeline_args = TimelineArgs {
+                    available_width,
+                    segment_count: (available_width / 100.0) as u8,
+                    frames_per_second,
+                    active_range,
+                };
+
+                ui.add_widget_with::<timeline_widget::TimelineWithControls>(
                     world,
                     "timeline_with_controls",
-                    timeline_icons,
+                    (timeline_icons, timeline_args.clone()),
                 );
+
+                if ranges_not_empty {
+                    ui.add_widget_with::<TaggedRangesPanel>(
+                        world,
+                        "tagged_ranges_panel",
+                        timeline_args,
+                    );
+                }
             });
     }
 }
@@ -634,7 +676,7 @@ pub fn render_layout(world: &mut World) {
 
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
-    world.add_root_widget::<ModalUpdateGraph>("modal_graph");
+    world.add_root_widget::<ModalWithSettings>("modal_graph");
 }
 
 #[derive(QueryData)]
