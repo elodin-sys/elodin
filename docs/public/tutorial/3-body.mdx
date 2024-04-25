@@ -37,10 +37,10 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
             def __init__(self, a: el.EntityId, b: el.EntityId):
                 self.a = el.Edge(a, b)
 
-
         @el.system
         def gravity(
-            q: el.GraphQuery[GravityEdge, el.WorldPos, el.Inertia],
+            graph: el.GraphQuery[GravityEdge],
+            query: el.Query[el.WorldPos, el.Inertia],
         ) -> el.Query[el.Force]:
             def gravity_inner(force, a_pos, a_inertia, b_pos, b_inertia):
                 r = a_pos.linear() - b_pos.linear()
@@ -50,7 +50,7 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
                 f = G * M * m * r / (norm * norm * norm)
                 return el.SpatialForce.from_linear(force.force() - f)
 
-            return q.edge_fold(el.Force, el.SpatialForce.zero(), gravity_inner)
+            return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
         ```
     </Step>
     <Step title="Add 1st & 2nd Body">

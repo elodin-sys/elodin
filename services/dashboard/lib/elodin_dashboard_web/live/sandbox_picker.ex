@@ -112,6 +112,13 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
             <.sandbox_card
+              name="Constellation"
+              img="/images/constellation-bg.svg"
+              path={~p"/sandbox/new/constellation"}
+              j
+              phx_click={show_template_new("constellation")}
+            />
+            <.sandbox_card
               name="Rocket"
               img="/images/rocket-bg.svg"
               path={~p"/sandbox/new/rocket"}
