@@ -10,17 +10,22 @@ use bevy::{
 use bevy_egui::egui;
 use bevy_infinite_grid::InfiniteGrid;
 use big_space::GridCell;
-use conduit::{bevy::ColumnPayloadMsg, query::MetadataStore};
+use conduit::{
+    bevy::{ColumnPayloadMsg, MaxTick},
+    query::MetadataStore,
+};
 
 use crate::{
     ui::{
         colors, tiles, CameraQuery, EntityData, GraphsState, InspectorAnchor, SelectedObject,
-        SidebarState,
+        SettingModalState, SidebarState,
     },
     MainCamera,
 };
 
-use super::{RootWidgetSystem, WidgetSystem, WidgetSystemExt};
+use super::{
+    timeline::tagged_range::TaggedRanges, RootWidgetSystem, WidgetSystem, WidgetSystemExt,
+};
 
 pub mod entity;
 pub mod graph;
@@ -30,6 +35,7 @@ pub struct InspectorIcons {
     pub chart: egui::TextureId,
     pub add: egui::TextureId,
     pub subtract: egui::TextureId,
+    pub setting: egui::TextureId,
 }
 
 fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
@@ -116,6 +122,9 @@ impl RootWidgetSystem for Inspector<'_> {
 pub struct InspectorContent<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     graphs_state: ResMut<'w, GraphsState>,
+    setting_modal_state: ResMut<'w, SettingModalState>,
+    tagged_ranges: ResMut<'w, TaggedRanges>,
+    max_tick: Res<'w, MaxTick>,
     tile_state: ResMut<'w, tiles::TileState>,
     metadata_store: Res<'w, MetadataStore>,
     commands: Commands<'w, 's>,
@@ -143,6 +152,9 @@ impl WidgetSystem for InspectorContent<'_, '_> {
 
         let mut entities = state_mut.entities;
         let mut graphs_state = state_mut.graphs_state;
+        let mut setting_modal_state = state_mut.setting_modal_state;
+        let mut tagged_ranges = state_mut.tagged_ranges;
+        let max_tick = state_mut.max_tick;
         let mut tile_state = state_mut.tile_state;
         let metadata_store = state_mut.metadata_store;
         let mut commands = state_mut.commands;
@@ -209,6 +221,9 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                 label,
                                 &entities,
                                 &mut graphs_state,
+                                &mut setting_modal_state,
+                                &mut tagged_ranges,
+                                max_tick,
                                 &metadata_store,
                                 icons,
                             );

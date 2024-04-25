@@ -34,7 +34,21 @@ pub const REDDISH_40: Color32 = Color32::from_rgba_premultiplied(0xE9, 0x4B, 0x1
 pub const HYPERBOLE_40: Color32 = Color32::from_rgba_premultiplied(0x14, 0x5F, 0xCF, 100);
 pub const MINT_40: Color32 = Color32::from_rgba_premultiplied(0x88, 0xDE, 0x9F, 100);
 
-pub fn get_color_by_index(index: usize) -> Color32 {
+pub fn get_color_by_index_solid(index: usize) -> Color32 {
+    let colors = [
+        TURQUOISE_DEFAULT,
+        SLATE_DEFAULT,
+        PUMPKIN_DEFAULT,
+        YOLK_DEFAULT,
+        PEACH_DEFAULT,
+        REDDISH_DEFAULT,
+        HYPERBOLE_DEFAULT,
+        MINT_DEFAULT,
+    ];
+    colors[index % colors.len()]
+}
+
+pub fn get_color_by_index_all(index: usize) -> Color32 {
     let colors = [
         TURQUOISE_DEFAULT,
         SLATE_DEFAULT,

@@ -18,10 +18,11 @@ use conduit::{
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
 use super::{
-    colors,
-    images::{self},
+    colors, images,
     utils::MarginSides,
-    widgets::{button::EImageButton, eplot::EPlot, RootWidgetSystem},
+    widgets::{
+        button::EImageButton, eplot::EPlot, timeline::tagged_range::TaggedRanges, RootWidgetSystem,
+    },
     GraphsState, SelectedObject, ViewportRect,
 };
 use crate::{plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, CollectedGraphData};
@@ -92,6 +93,7 @@ impl Pane {
         time_step: std::time::Duration,
         collected_graph_data: &CollectedGraphData,
         graphs_state: &mut GraphsState,
+        tagged_ranges: &TaggedRanges,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -100,12 +102,18 @@ impl Pane {
                     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
                 let (_, graph_state) = graphs_state.get_or_create_graph(&Some(pane.id));
+
+                let tagged_range = graph_state
+                    .range_id
+                    .as_ref()
+                    .and_then(|rid| tagged_ranges.0.get(rid));
+
                 EPlot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
                     .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
                     .steps(7, 4)
                     .time_step(time_step)
-                    .calculate_lines(ui, collected_graph_data, graph_state)
+                    .calculate_lines(ui, collected_graph_data, graph_state, tagged_range)
                     .render(ui);
 
                 egui_tiles::UiResponse::None
@@ -189,6 +197,7 @@ struct TreeBehavior<'a> {
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
     graphs_state: &'a mut GraphsState,
+    tagged_ranges: &'a TaggedRanges,
     collected_graph_data: &'a CollectedGraphData,
     time_step: std::time::Duration,
 }
@@ -222,6 +231,7 @@ impl<'a> egui_tiles::Behavior<Pane> for TreeBehavior<'a> {
             self.time_step,
             self.collected_graph_data,
             self.graphs_state,
+            self.tagged_ranges,
         )
     }
 
@@ -435,6 +445,7 @@ pub struct TileLayout<'w, 's> {
     images: Local<'s, images::Images>,
     commands: Commands<'w, 's>,
     graphs_state: ResMut<'w, GraphsState>,
+    tagged_ranges: Res<'w, TaggedRanges>,
     selected_object: ResMut<'w, SelectedObject>,
     ui_state: ResMut<'w, TileState>,
     asset_server: Res<'w, AssetServer>,
@@ -468,6 +479,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
         let mut selected_object = state_mut.selected_object;
         let collected_graph_data = state_mut.collected_graph_data;
         let mut graphs_state = state_mut.graphs_state;
+        let tagged_ranges = state_mut.tagged_ranges;
 
         let icons = TabIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
@@ -485,6 +497,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     tab_diffs: ui_state.tab_diffs.clone(),
                     selected_object: selected_object.as_mut(),
                     graphs_state: graphs_state.as_mut(),
+                    tagged_ranges: tagged_ranges.as_ref(),
                     collected_graph_data: collected_graph_data.as_ref(),
                     time_step: state_mut.time_step.0,
                 };

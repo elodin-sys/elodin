@@ -67,6 +67,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/right-side-bar.png");
         embedded_asset!(app, "assets/icons/fullscreen.png");
         embedded_asset!(app, "assets/icons/exit-fullscreen.png");
+        embedded_asset!(app, "assets/icons/setting.png");
+        embedded_asset!(app, "assets/icons/lightning.png");
     }
 }
 
