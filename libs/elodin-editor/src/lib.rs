@@ -127,7 +127,7 @@ impl Plugin for EditorPlugin {
             })
             .init_resource::<CollectedGraphData>()
             .add_plugins(DefaultPickingPlugins)
-            .add_plugins(big_space::FloatingOriginPlugin::<i128>::default())
+            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
