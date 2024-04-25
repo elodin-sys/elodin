@@ -131,6 +131,9 @@ impl Api {
             Some("rocket") => {
                 include_str!("../../../../libs/nox-py/examples/rocket.py").to_string()
             }
+            Some("constellation") => {
+                include_str!("../../../../libs/nox-py/examples/constellation.py").to_string()
+            }
             Some(_) | None => req.code,
         };
         let mut redis = self.redis.clone();
