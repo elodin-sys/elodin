@@ -1,13 +1,16 @@
 use super::*;
 
 use conduit::ComponentId;
-use nox_ecs::{graph::GraphQuery, nox::IntoOp};
+use nox_ecs::{
+    graph::{exprs_from_edges_queries, GraphQuery},
+    nox::IntoOp,
+};
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 #[pyclass]
 #[derive(Clone)]
 pub struct GraphQueryInner {
-    query: nox_ecs::graph::GraphQuery<(), ()>,
+    query: nox_ecs::graph::GraphQuery<()>,
 }
 
 #[pymethods]
@@ -16,7 +19,7 @@ impl GraphQueryInner {
     fn from_builder(
         builder: &mut PipelineBuilder,
         edge_name: String,
-        component_names: Vec<String>,
+        reverse: bool,
     ) -> Result<GraphQueryInner, Error> {
         use bytes::Buf;
         use nox_ecs::graph::EdgeComponent;
@@ -32,18 +35,31 @@ impl GraphQueryInner {
             .map(move |_| {
                 let (size, value) = ty.parse_value(buf).unwrap();
                 buf.advance(size);
-                nox_ecs::graph::Edge::from_value(value).unwrap()
+                let edge = nox_ecs::graph::Edge::from_value(value).unwrap();
+                if reverse {
+                    edge.reverse()
+                } else {
+                    edge
+                }
             })
             .collect();
-        let query = QueryInner::from_builder(builder, component_names)?;
-        let g_query = query.query;
-        let query = GraphQuery::from_queries(edges, g_query)?;
-        Ok(GraphQueryInner { query })
+        Ok(GraphQueryInner {
+            query: GraphQuery {
+                edges,
+                phantom_data: PhantomData,
+            },
+        })
     }
 
-    fn arrays(&self, py: Python<'_>) -> Result<PyObject, Error> {
+    fn arrays(
+        &self,
+        py: Python<'_>,
+        from_query: QueryInner,
+        to_query: QueryInner,
+    ) -> Result<PyObject, Error> {
         let dict = PyDict::new(py);
-        for (len, (a, b)) in self.query.exprs.iter() {
+        let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
+        for (len, (a, b)) in exprs.iter() {
             let a_list = PyList::empty(py);
             let b_list = PyList::empty(py);
             for x in &a.exprs {
@@ -58,10 +74,17 @@ impl GraphQueryInner {
         Ok(dict.into())
     }
 
-    fn map(&self, new_buf: PyObject, metadata: Metadata) -> QueryInner {
+    fn map(
+        &self,
+        from_query: QueryInner,
+        to_query: QueryInner,
+        new_buf: PyObject,
+        metadata: Metadata,
+    ) -> QueryInner {
         let mut entity_map = BTreeMap::new();
         let mut len = 0;
-        for (_, (from, _to)) in self.query.exprs.iter() {
+        let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
+        for (_, (from, _to)) in exprs.iter() {
             for (id, index) in from.entity_map.iter() {
                 entity_map.insert(*id, index + len);
             }

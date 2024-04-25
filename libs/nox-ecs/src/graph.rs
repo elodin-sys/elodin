@@ -3,13 +3,12 @@ use conduit::{ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{Component, ComponentArray, ComponentGroup, Error, Query, SystemParam};
+use crate::{Component, ComponentArray, ComponentGroup, Query, SystemParam};
 
 #[derive(Clone)]
-pub struct GraphQuery<E, G> {
+pub struct GraphQuery<E> {
     pub edges: Vec<Edge>,
-    pub exprs: BTreeMap<usize, (Query<G>, Query<G>)>,
-    phantom_data: PhantomData<(E, G)>,
+    pub phantom_data: PhantomData<E>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,6 +22,13 @@ impl Edge {
         let from = from.into();
         let to = to.into();
         Self { from, to }
+    }
+
+    pub fn reverse(&self) -> Self {
+        Self {
+            from: self.to,
+            to: self.from,
+        }
     }
 }
 
@@ -84,11 +90,11 @@ impl EdgeComponent for Edge {
     }
 }
 
-impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E, G> {
+impl<E: EdgeComponent + 'static> SystemParam for GraphQuery<E> {
     type Item = Self;
 
-    fn init(builder: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
-        Query::<G>::init(builder)
+    fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+        Ok(())
     }
 
     fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
@@ -104,19 +110,8 @@ impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E
             })
             .collect::<Option<Vec<_>>>()
             .unwrap();
-        let g_query = Query::<G>::from_builder(builder);
-        let GraphQuery { edges, exprs, .. } =
-            GraphQuery::from_queries(edges, g_query.transmute()).unwrap();
-        let exprs = exprs
-            .into_iter()
-            .map(|(id, edge)| {
-                let (from, to) = edge;
-                (id, (from.transmute(), to.transmute()))
-            })
-            .collect();
         GraphQuery {
             edges,
-            exprs,
             phantom_data: PhantomData,
         }
     }
@@ -124,66 +119,67 @@ impl<E: EdgeComponent + 'static, G: ComponentGroup> SystemParam for GraphQuery<E
     fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
 }
 
-impl GraphQuery<(), ()> {
-    pub fn from_queries(edges: Vec<Edge>, g_query: Query<()>) -> Result<GraphQuery<(), ()>, Error> {
-        let mut from_map = BTreeMap::new();
-        for edge in &edges {
-            let vec: &mut Vec<EntityId> = from_map.entry(edge.from).or_default();
-            vec.push(edge.to);
-        }
-        let mut exprs: BTreeMap<usize, (Query<()>, Query<()>)> = BTreeMap::new();
-        for (from_id, ids) in from_map {
-            let from = g_query.filter(&[from_id]);
-            let mut to = g_query.filter(&ids);
-            match exprs.entry(ids.len()) {
-                std::collections::btree_map::Entry::Occupied(mut o) => {
-                    let (o_from, o_to) = o.get_mut();
-                    for (a, b) in o_from.exprs.iter_mut().zip(from.exprs.iter()) {
-                        *a = Noxpr::concat_in_dim(vec![a.clone(), b.clone()], 0);
-                    }
-                    o_from.len += from.len;
-                    for (a, b) in o_to.exprs.iter_mut().zip(to.exprs.iter()) {
-                        let mut b_shape = b.shape().unwrap();
-                        b_shape.insert(0, 1);
-                        let b = b.clone().reshape(b_shape);
-                        *a = Noxpr::concat_in_dim(vec![a.clone(), b], 0);
-                    }
-                    o_from.entity_map.insert(from_id, o_from.entity_map.len());
-                    o_to.entity_map.extend(to.entity_map);
-                    o_to.len += to.len;
+pub fn exprs_from_edges_queries<A, B>(
+    edges: &[Edge],
+    f_query: Query<A>,
+    t_query: Query<B>,
+) -> BTreeMap<usize, (Query<A>, Query<B>)> {
+    let mut from_map = BTreeMap::new();
+    for edge in edges {
+        let vec: &mut Vec<EntityId> = from_map.entry(edge.from).or_default();
+        vec.push(edge.to);
+    }
+    let mut exprs: BTreeMap<usize, (Query<A>, Query<B>)> = BTreeMap::new();
+    for (from_id, ids) in from_map {
+        let from = f_query.filter(&[from_id]);
+        let mut to = t_query.filter(&ids);
+        match exprs.entry(ids.len()) {
+            std::collections::btree_map::Entry::Occupied(mut o) => {
+                let (o_from, o_to) = o.get_mut();
+                for (a, b) in o_from.exprs.iter_mut().zip(from.exprs.iter()) {
+                    *a = Noxpr::concat_in_dim(vec![a.clone(), b.clone()], 0);
                 }
-                std::collections::btree_map::Entry::Vacant(s) => {
-                    for b in to.exprs.iter_mut() {
-                        let mut b_shape = b.shape().unwrap();
-                        b_shape.insert(0, 1);
+                o_from.len += from.len;
+                for (a, b) in o_to.exprs.iter_mut().zip(to.exprs.iter()) {
+                    let mut b_shape = b.shape().unwrap();
+                    b_shape.insert(0, 1);
+                    let b = b.clone().reshape(b_shape);
+                    *a = Noxpr::concat_in_dim(vec![a.clone(), b], 0);
+                }
+                o_from.entity_map.insert(from_id, o_from.entity_map.len());
+                o_to.entity_map.extend(to.entity_map);
+                o_to.len += to.len;
+            }
+            std::collections::btree_map::Entry::Vacant(s) => {
+                for b in to.exprs.iter_mut() {
+                    let mut b_shape = b.shape().unwrap();
+                    b_shape.insert(0, 1);
 
-                        *b = b.clone().reshape(b_shape);
-                    }
-                    //from.entity_map = std::iter::once((from_id, 0)).collect();
-                    s.insert((from, to));
+                    *b = b.clone().reshape(b_shape);
                 }
+                //from.entity_map = std::iter::once((from_id, 0)).collect();
+                s.insert((from, to));
             }
         }
-        Ok(GraphQuery {
-            edges,
-            phantom_data: PhantomData,
-            exprs,
-        })
     }
+    exprs
 }
 
-impl<E: EdgeComponent, G: ComponentGroup> GraphQuery<E, G> {
+impl<E: EdgeComponent> GraphQuery<E> {
     /// Folds over each edge of a graph, using the `from` EntityId
     /// to form th resulting `ComponentArray`
-    pub fn edge_fold<I: ComponentGroup + IntoOp>(
+    pub fn edge_fold<I: ComponentGroup + IntoOp, F: ComponentGroup, T: ComponentGroup>(
         &self,
+        from_query: &Query<F>,
+        to_query: &Query<T>,
         init: I,
-        func: impl CompFn<(I, (G::Params, G::Params)), I>,
+        func: impl CompFn<(I, (F::Params, T::Params)), I>,
     ) -> ComponentArray<I> {
         let scan_func = func.build_expr().unwrap();
         let init_op = init.into_op();
         let mut output_array: Option<ComponentArray<I>> = None;
-        for (len, (from, to)) in self.exprs.iter() {
+        let exprs = exprs_from_edges_queries(&self.edges, from_query.clone(), to_query.clone());
+        for (len, (from, to)) in exprs.iter() {
             let axis = std::iter::repeat(0)
                 .take(from.exprs.len() + to.exprs.len())
                 .collect::<Vec<_>>();
@@ -259,8 +255,10 @@ mod tests {
         #[derive(Component)]
         struct A(Scalar<f64>);
 
-        fn fold_system(a: GraphQuery<Edge, A>) -> ComponentArray<A> {
-            a.edge_fold(A(5.0.constant()), |acc: A, (_, b): (A, A)| A(acc.0 + b.0))
+        fn fold_system(g: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
+            g.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+                A(acc.0 + b.0)
+            })
         }
 
         let mut world = fold_system.world();
@@ -289,8 +287,10 @@ mod tests {
         #[derive(Component)]
         struct A(Scalar<f64>);
 
-        fn fold_system(a: GraphQuery<Edge, A>) -> ComponentArray<A> {
-            a.edge_fold(A(5.0.constant()), |acc: A, (_, b): (A, A)| A(acc.0 + b.0))
+        fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
+            query.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+                A(acc.0 + b.0)
+            })
         }
 
         let mut world = fold_system.world();
@@ -315,8 +315,10 @@ mod tests {
         #[derive(Component)]
         struct A(Scalar<f64>);
 
-        fn fold_system(a: GraphQuery<Edge, A>) -> ComponentArray<A> {
-            a.edge_fold(A(5.0.constant()), |acc: A, (_, b): (A, A)| A(acc.0 + b.0))
+        fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
+            query.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+                A(acc.0 + b.0)
+            })
         }
         // NOTE: this loops 5000 times because that was the only way to repro
         // a very specific failure case caused by an old impl of `NoxprId`

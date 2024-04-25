@@ -339,6 +339,7 @@ def actuator_allocator(
     )
 
 
+
 # effectors
 
 
@@ -351,7 +352,6 @@ class ReactionWheel(el.Archetype):
     rw_force: RWForce
     axis: RWAxis
 
-
 @el.system
 def rw_effector(
     rw_force: el.GraphQuery[RWEdge],
@@ -359,7 +359,6 @@ def rw_effector(
     rw_query: el.Query[RWForce]
 ) -> el.Query[el.Force]:
     return rw_force.edge_fold(force_query, rw_query, el.Force, el.SpatialForce.zero(), lambda f, _, force: f + force)
-
 
 @el.map
 def gravity_effector(
@@ -377,64 +376,80 @@ def gravity_effector(
 
 w = el.World()
 
-b = el.Body(
-    world_pos=el.SpatialTransform.from_linear(np.array([1.0, 0.0, 0.0]) * radius),
-    world_vel=el.SpatialMotion(
-        initial_angular_vel, np.array([0.0, 0.0, -1.0]) * velocity
-    ),
-    inertia=el.SpatialInertia(12.0, j),
-    pbr=w.insert_asset(
-        el.Pbr.from_url(
-            "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
+def spawn_sat(x, y, w: el.World):
+    sat_num = x + y * 100
+    rand_key = jax.random.key(sat_num)
+    rw_1 = w.spawn(
+        ReactionWheel(
+            rw_force=el.SpatialForce.zero(),
+            axis=np.array([1.0, 0.0, 0.0]),
         )
-    ),
-    # Credit to the OreSat program https://www.oresat.org for the model above
-)
-rw_1 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([1.0, 0.0, 0.0]),
-    )
-).name("Reaction Wheel 1")
+    ).name(f"Sat {sat_num} Reaction Wheel 1")
 
 
-rw_2 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([0.0, 1.0, 0.0]),
-    )
-).name("Reaction Wheel 2")
+    rw_2 = w.spawn(
+        ReactionWheel(
+            rw_force=el.SpatialForce.zero(),
+            axis=np.array([0.0, 1.0, 0.0]),
+        )
+    ).name(f"Sat {sat_num} Reaction Wheel 2")
 
-rw_3 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([0.0, 0.0, 1.0]),
-    )
-).name("Reaction Wheel 3")
+    rw_3 = w.spawn(
+        ReactionWheel(
+            rw_force=el.SpatialForce.zero(),
+            axis=np.array([0.0, 0.0, 1.0]),
+        )
+    ).name(f"Sat {sat_num} Reaction Wheel 3")
 
-sat = (
-    w.spawn(b)
-    .metadata(el.EntityMetadata("OreSat"))
-    .insert(
-        ControlInput(
-            el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
-            el.SpatialForce.zero(),
+    rot_x = el.Quaternion.from_axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x))
+    rot_y = el.Quaternion.from_axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y))
+    rot = rot_x * rot_y
+
+    b = el.Body(
+        world_pos=el.SpatialTransform.from_linear(rot @ np.array([1.0, 0.0, 0.0]) * radius),
+        world_vel=el.SpatialMotion(
+            jax.random.normal(rand_key, shape=(3,)) * 3.0, rot @ np.array([0.0, 0.0, -1.0]) * velocity
         ),
+        inertia=el.SpatialInertia(12.0, j),
+        pbr=w.insert_asset(
+            el.Pbr.from_url(
+                "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
+            )
+        ),
+        # Credit to the OreSat program https://www.oresat.org for the model above
     )
-    .insert(UserInput(np.array([0.0, 0.0, 0.0])))
-    .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
-    .insert(
-        KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
-    )
-)
 
-w.spawn(RWRel(el.Edge(sat.id(), rw_1.id()))).name("Sat -> RW 1")
-w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name("Sat -> RW 2")
-w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name("Sat -> RW 3")
+    sat = (
+        w.spawn(b)
+        .metadata(el.EntityMetadata(f"OreSat {sat_num}"))
+        .insert(
+            ControlInput(
+                el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
+                el.SpatialForce.zero(),
+            ),
+        )
+        .insert(UserInput(np.array([0.0, 0.0, 0.0])))
+        .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
+        .insert(
+            KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
+        )
+    )
+
+    w.spawn(RWRel(el.Edge(sat.id(), rw_1.id()))).name(f"Sat {sat_num}  -> RW 1")
+    w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name(f"Sat {sat_num} -> RW 2")
+    w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name(f"Sat {sat_num} -> RW 3")
+    return sat.id()
+
+
+sat = spawn_sat(0, 0, w)
+for x in range(-3, 3):
+    for y in range(-3, 3):
+        spawn_sat(x, y, w)
+
 
 w.spawn(
     el.Panel.viewport(
-        track_entity=sat.id(),
+        track_entity=sat,
         track_rotation=False,
         active=True,
         pos=[7.0, 0.0, 0.0],
@@ -444,13 +459,14 @@ w.spawn(
 
 w.spawn(
     el.Panel.viewport(
-        track_entity=sat.id(),
+        track_entity=sat,
         track_rotation=False,
         pos=[7.0, -3.0, 0.0],
         fov=20.0,
         looking_at=[0.0, 0.0, 0.0],
     )
 ).name("Viewport 1")
+
 
 w.spawn(
     el.Body(
