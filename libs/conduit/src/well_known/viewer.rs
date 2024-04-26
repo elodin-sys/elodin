@@ -1,12 +1,22 @@
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId, EntityId};
+use crate::{Asset, AssetId, ComponentId, EntityId};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Panel {
     Viewport(Viewport),
+    VSplit(Split),
+    HSplit(Split),
+    Graph(Graph),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Split {
+    pub panels: Vec<Panel>,
+    pub active: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -49,4 +59,22 @@ impl Asset for Panel {
     fn asset_id(&self) -> AssetId {
         Self::ASSET_ID
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Graph {
+    pub entities: Vec<GraphEntity>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GraphEntity {
+    pub entity_id: EntityId,
+    pub components: Vec<GraphComponent>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GraphComponent {
+    pub component_id: ComponentId,
+    pub indexes: Vec<usize>,
 }

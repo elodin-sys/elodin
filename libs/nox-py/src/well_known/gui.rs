@@ -1,5 +1,6 @@
 use crate::*;
 
+use conduit::well_known::{Graph, Split};
 use nox_ecs::conduit::Asset;
 use nox_ecs::{conduit, nox::nalgebra::Vector3};
 use numpy::PyArrayLike1;
@@ -75,5 +76,100 @@ impl Panel {
             asset: true,
             metadata: Default::default(),
         },),))
+    }
+
+    #[staticmethod]
+    pub fn vsplit(panels: Vec<Panel>, active: Option<bool>) -> Self {
+        let active = active.unwrap_or_default();
+        Self {
+            inner: conduit::well_known::Panel::VSplit(Split {
+                panels: panels.into_iter().map(|x| x.inner).collect(),
+                active,
+            }),
+        }
+    }
+
+    #[staticmethod]
+    pub fn hsplit(panels: Vec<Panel>, active: Option<bool>) -> Self {
+        let active = active.unwrap_or_default();
+        Self {
+            inner: conduit::well_known::Panel::HSplit(Split {
+                panels: panels.into_iter().map(|x| x.inner).collect(),
+                active,
+            }),
+        }
+    }
+
+    #[staticmethod]
+    pub fn graph(entities: Vec<GraphEntity>) -> PyResult<Self> {
+        let entities = entities
+            .into_iter()
+            .map(|x| conduit::well_known::GraphEntity {
+                entity_id: x.entity.inner,
+                components: x
+                    .components
+                    .into_iter()
+                    .map(|x| conduit::well_known::GraphComponent {
+                        component_id: x.component_id,
+                        indexes: x.indexes,
+                    })
+                    .collect(),
+            })
+            .collect();
+        Ok(Self {
+            inner: conduit::well_known::Panel::Graph(Graph { entities }),
+        })
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct GraphEntity {
+    pub entity: EntityId,
+    pub components: Vec<GraphComponent>,
+}
+
+#[pymethods]
+impl GraphEntity {
+    #[new]
+    pub fn new(py: Python<'_>, entity: EntityId, objs: Vec<PyObject>) -> Self {
+        let mut components = vec![];
+        for obj in &objs {
+            if let Ok(obj) = obj.extract::<GraphComponent>(py) {
+                components.push(obj)
+            } else if let Ok(indexer) = obj.extract::<ShapeIndexer>(py) {
+                components.push(GraphComponent::from_shape_indexer(&indexer))
+            } else if let Ok(indexer) = obj.extract::<Vec<ShapeIndexer>>(py) {
+                components.extend(indexer.iter().map(GraphComponent::from_shape_indexer))
+            }
+        }
+        Self { entity, components }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct GraphComponent {
+    pub component_id: ComponentId,
+    pub indexes: Vec<usize>,
+}
+
+#[pymethods]
+impl GraphComponent {
+    #[new]
+    pub fn new(component_name: &str, indexes: Vec<usize>) -> Self {
+        Self {
+            component_id: ComponentId::new(component_name),
+            indexes,
+        }
+    }
+}
+
+impl GraphComponent {
+    fn from_shape_indexer(indexer: &ShapeIndexer) -> Self {
+        Self {
+            component_id: ComponentId::new(&indexer.component_name),
+            indexes: indexer.indexes(),
+        }
     }
 }
