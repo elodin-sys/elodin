@@ -282,6 +282,7 @@ q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
+
 def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     [roll, pitch, yaw] = np.deg2rad(angles)
     cr = np.cos(roll * 0.5)
@@ -295,7 +296,7 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     x = sr * cp * cy - cr * sp * sy
     y = cr * sp * cy + sr * cp * sy
     z = cr * cp * sy - sr * sp * cy
-    return el.Quaternion(np.array([x,y,z,w]))
+    return el.Quaternion(np.array([x, y, z, w]))
 
 
 @el.map
@@ -305,7 +306,9 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     body_axis = np.array([0.0, 0.0, -1.0])
     a = np.cross(body_axis, r)
     w = 1 + np.dot(body_axis, r)
-    return euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+    return (
+        euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+    )
 
 
 @el.system
@@ -433,24 +436,37 @@ w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name("Sat -> RW 2")
 w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name("Sat -> RW 3")
 
 w.spawn(
-    el.Panel.viewport(
-        track_entity=sat.id(),
-        track_rotation=False,
+    el.Panel.vsplit(
+        [
+            el.Panel.hsplit(
+                [
+                    el.Panel.viewport(
+                        track_entity=sat.id(),
+                        track_rotation=False,
+                        pos=[7.0, 0.0, 0.0],
+                        looking_at=[0.0, 0.0, 0.0],
+                    ),
+                    el.Panel.viewport(
+                        track_entity=sat.id(),
+                        track_rotation=False,
+                        pos=[7.0, -3.0, 0.0],
+                        fov=20.0,
+                        looking_at=[0.0, 0.0, 0.0],
+                    ),
+                ]
+            ),
+            el.Panel.graph(
+                [
+                    el.GraphEntity(
+                        sat.id(),
+                        [el.Component.index(el.WorldPos)[:3], el.Component.index(AttEst)]
+                    )
+                ]
+            ),
+        ],
         active=True,
-        pos=[7.0, 0.0, 0.0],
-        looking_at=[0.0, 0.0, 0.0],
     )
-).name("Viewport 2")
-
-w.spawn(
-    el.Panel.viewport(
-        track_entity=sat.id(),
-        track_rotation=False,
-        pos=[7.0, -3.0, 0.0],
-        fov=20.0,
-        looking_at=[0.0, 0.0, 0.0],
-    )
-).name("Viewport 1")
+)
 
 w.spawn(
     el.Body(

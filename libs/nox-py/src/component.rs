@@ -5,7 +5,7 @@ use std::{collections::HashMap, ops::Deref, sync::Arc};
 use nox_ecs::conduit;
 use nox_ecs::conduit::TagValue;
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::types::PySequence;
+use pyo3::types::{PyList, PySequence};
 
 use crate::Metadata;
 
@@ -85,6 +85,31 @@ impl Component {
     pub fn to_metadata(&self) -> Metadata {
         let inner = Arc::new(self.clone().into());
         Metadata { inner }
+    }
+
+    #[staticmethod]
+    pub fn index(py: Python<'_>, component: PyObject) -> Result<ShapeIndexer, Error> {
+        let metadata = component.getattr(py, "__metadata__")?;
+        let metadata = metadata.downcast::<PySequence>(py).map_err(PyErr::from)?;
+        let component = metadata.get_item(0)?.extract::<Self>()?;
+        let ty: conduit::ComponentType = component.ty.into();
+        let strides: Vec<usize> = ty
+            .shape
+            .iter()
+            .rev()
+            .scan(1, |state, &x| {
+                let result = *state;
+                *state *= x as usize;
+                Some(result)
+            })
+            .collect();
+        let strides = strides.into_iter().rev().collect();
+        Ok(ShapeIndexer::new(
+            component.name,
+            ty.shape.into_iter().map(|x| x as usize).collect(),
+            vec![],
+            strides,
+        ))
     }
 }
 
@@ -222,5 +247,74 @@ impl From<PrimitiveType> for conduit::PrimitiveTy {
             PrimitiveType::I8 => conduit::PrimitiveTy::I8,
             PrimitiveType::Bool => conduit::PrimitiveTy::Bool,
         }
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Debug)]
+pub struct ShapeIndexer {
+    pub component_name: String,
+    strides: Vec<usize>,
+    shape: Vec<usize>,
+    index: Vec<usize>,
+    py_list: Py<PyList>,
+    items: Vec<ShapeIndexer>,
+}
+
+#[pymethods]
+impl ShapeIndexer {
+    #[new]
+    fn new(
+        component_name: String,
+        shape: Vec<usize>,
+        index: Vec<usize>,
+        strides: Vec<usize>,
+    ) -> Self {
+        let items = if shape.is_empty() {
+            vec![]
+        } else {
+            let mut shape = shape.clone();
+            let count = shape.remove(0);
+            (0..count)
+                .map(|i| {
+                    let mut index = index.clone();
+                    index.insert(0, i);
+                    ShapeIndexer::new(
+                        component_name.clone(),
+                        shape.clone(),
+                        index,
+                        strides.clone(),
+                    )
+                })
+                .collect()
+        };
+        let py_list = Python::with_gil(|py| {
+            PyList::new(py, items.iter().map(|x| Py::new(py, x.clone()).unwrap())).into()
+        });
+        ShapeIndexer {
+            component_name,
+            shape,
+            index,
+            strides,
+            py_list,
+            items,
+        }
+    }
+
+    pub fn indexes(&self) -> Vec<usize> {
+        if self.shape.is_empty() {
+            vec![self
+                .index
+                .iter()
+                .zip(self.strides.iter().rev())
+                .map(|(i, stride)| i * stride)
+                .sum()]
+        } else {
+            self.items.iter().flat_map(|item| item.indexes()).collect()
+        }
+    }
+
+    fn __getitem__(&self, py: Python<'_>, index: PyObject) -> PyResult<PyObject> {
+        self.py_list.call_method1(py, "__getitem__", (index,))
     }
 }
