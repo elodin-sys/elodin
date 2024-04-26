@@ -9,7 +9,7 @@ use crate::ui::{
     utils::MarginSides,
     widgets::{
         button::ECheckboxButton,
-        label::{label_with_button, label_with_n_buttons},
+        label::{buttons_label, label_with_button},
         timeline::tagged_range::TaggedRanges,
     },
     EntityData, GraphsState, SettingModal, SettingModalState,
@@ -31,25 +31,15 @@ pub fn inspector(
     icons: InspectorIcons,
 ) {
     let graph_label_margin = egui::Margin::same(0.0).top(10.0).bottom(14.0);
-    let btn_clicked = label_with_n_buttons(
+    let [add_clicked] = buttons_label(
         ui,
-        &[
-            icons.add,
-            // icons.setting,
-        ],
+        [icons.add],
         label,
         colors::PRIMARY_CREAME,
         graph_label_margin,
     );
-
-    match btn_clicked {
-        0 => {
-            setting_modal_state.0 = Some(SettingModal::Graph(*graph_id, None, None));
-        }
-        1 => {
-            println!("edit graph");
-        }
-        _ => {}
+    if add_clicked {
+        setting_modal_state.0 = Some(SettingModal::Graph(*graph_id, None, None));
     }
 
     ui.separator();
@@ -69,36 +59,33 @@ pub fn inspector(
 
         let ro_tagged_ranges = tagged_ranges.0.clone();
 
-        let btn_clicked = label_with_n_buttons(
+        let [add_clicked, settings_clicked, subtract_clicked] = buttons_label(
             ui,
-            &[icons.add, icons.setting, icons.subtract],
+            [icons.add, icons.setting, icons.subtract],
             "RANGE",
             colors::PRIMARY_CREAME,
             egui::Margin::same(0.0).top(18.0).bottom(4.0),
         );
 
-        match btn_clicked {
-            0 => {
-                graph_state.range_id = Some(tagged_ranges.create_range(max_tick.0));
-            }
-            1 => {
-                if let Some(current_range_id) = &graph_state.range_id {
-                    if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
-                        setting_modal_state.0 = Some(SettingModal::RangeEdit(
-                            current_range_id.clone(),
-                            current_range.label.to_owned(),
-                            current_range.color.to_owned(),
-                        ));
-                    }
+        if add_clicked {
+            graph_state.range_id = Some(tagged_ranges.create_range(max_tick.0));
+        }
+        if settings_clicked {
+            if let Some(current_range_id) = &graph_state.range_id {
+                if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
+                    setting_modal_state.0 = Some(SettingModal::RangeEdit(
+                        current_range_id.clone(),
+                        current_range.label.to_owned(),
+                        current_range.color.to_owned(),
+                    ));
                 }
             }
-            2 => {
-                if let Some(current_range_id) = &graph_state.range_id {
-                    tagged_ranges.remove_range(current_range_id);
-                    graph_state.range_id = None;
-                }
+        }
+        if subtract_clicked {
+            if let Some(current_range_id) = &graph_state.range_id {
+                tagged_ranges.remove_range(current_range_id);
+                graph_state.range_id = None;
             }
-            _ => {}
         }
 
         ui.scope(|ui| {

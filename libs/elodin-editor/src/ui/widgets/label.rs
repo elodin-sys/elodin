@@ -151,14 +151,14 @@ pub fn label_with_button(
     clicked
 }
 
-pub fn label_with_n_buttons(
+pub fn buttons_label<const N: usize>(
     ui: &mut egui::Ui,
-    btn_icons: &[egui::TextureId],
+    btn_icons: [egui::TextureId; N],
     label: impl ToString,
     color: egui::Color32,
     margin: egui::Margin,
-) -> i8 {
-    let mut btn_clicked = -1;
+) -> [bool; N] {
+    let mut clicked = [false; N];
 
     egui::Frame::none().inner_margin(margin).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -184,7 +184,7 @@ pub fn label_with_n_buttons(
                         );
 
                         if btn.clicked() {
-                            btn_clicked = i as i8;
+                            clicked[i] = true;
                         }
                     }
                 });
@@ -192,5 +192,5 @@ pub fn label_with_n_buttons(
         });
     });
 
-    btn_clicked
+    clicked
 }
