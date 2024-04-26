@@ -195,6 +195,8 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_class::<Integrator>()?;
+    m.add_class::<GraphEntity>()?;
+    m.add_class::<GraphComponent>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;

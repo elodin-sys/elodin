@@ -231,6 +231,7 @@ impl EPlot {
                         for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                             if *enabled {
                                 if let Some(line) = component.lines.get(&value_index) {
+                                    let range_end = line.values.len().min(range_end);
                                     let value_chunks = line.values[range_start..range_end]
                                         .chunks_exact(chunk_size);
                                     let values = value_chunks.into_iter().map(|values| {

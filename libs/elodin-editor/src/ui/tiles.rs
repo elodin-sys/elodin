@@ -12,8 +12,9 @@ use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{
     bevy::{EntityMap, TimeStep},
-    well_known::Viewport,
-    GraphId,
+    query::MetadataStore,
+    well_known::{Panel, Viewport},
+    ComponentId, GraphId,
 };
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
@@ -40,9 +41,8 @@ pub struct TileState {
 }
 
 impl TileState {
-    fn insert_pane(&mut self, pane: Pane, active: bool) -> Option<TileId> {
-        let root = self.tree.root()?;
-        self.insert_pane_with_parent(pane, root, active)
+    fn insert_pane(&mut self, pane: Pane) -> Option<TileId> {
+        Some(self.tree.tiles.insert_pane(pane))
     }
     fn insert_pane_with_parent(
         &mut self,
@@ -50,12 +50,23 @@ impl TileState {
         parent: TileId,
         active: bool,
     ) -> Option<TileId> {
-        let child = self.tree.tiles.insert_pane(pane);
+        let tile_id = self.insert_pane(pane)?;
+        self.set_parent(tile_id, Some(parent), active)
+    }
+
+    pub fn set_parent(
+        &mut self,
+        child: TileId,
+        parent: Option<TileId>,
+        active: bool,
+    ) -> Option<TileId> {
+        let parent = parent.or_else(|| self.tree.root())?;
         let parent = self.tree.tiles.get_mut(parent)?;
         let Tile::Container(container) = parent else {
             return None;
         };
         container.add_child(child);
+
         if active {
             if let Container::Tabs(tabs) = container {
                 tabs.set_active(child);
@@ -593,47 +604,156 @@ pub fn sync_viewports(
     mut commands: Commands,
     entity_map: Res<EntityMap>,
     grid_cell: Query<&GridCell<i128>>,
+    mut graph_state: ResMut<GraphsState>,
+    metadata_store: Res<MetadataStore>,
 ) {
     for (entity, panel) in panels.iter() {
-        match panel {
-            conduit::well_known::Panel::Viewport(viewport) => {
-                let pane = ViewportPane::spawn(
-                    &mut commands,
-                    &asset_server,
-                    &mut meshes,
-                    &mut materials,
-                    &mut render_layer_alloc,
-                    viewport,
-                );
-                let camera = pane.camera.expect("no camera spawned for viewport");
-                let mut camera = commands.entity(camera);
-                if let Some(parent) = viewport.track_entity {
-                    if let Some(parent) = entity_map.0.get(&parent) {
-                        if let Ok(grid_cell) = grid_cell.get(*parent) {
-                            camera.insert(*grid_cell);
-                        }
-                        camera.set_parent(*parent);
+        spawn_panel(
+            panel,
+            None,
+            &asset_server,
+            &mut ui_state,
+            &mut meshes,
+            &mut materials,
+            &mut render_layer_alloc,
+            &mut commands,
+            &entity_map,
+            &grid_cell,
+            &mut graph_state,
+            &metadata_store,
+        );
+
+        commands.entity(entity).insert(SyncedViewport);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_panel(
+    panel: &Panel,
+    parent_id: Option<TileId>,
+    asset_server: &Res<AssetServer>,
+    ui_state: &mut ResMut<TileState>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+    commands: &mut Commands,
+    entity_map: &Res<EntityMap>,
+    grid_cell: &Query<&GridCell<i128>>,
+    graphs_state: &mut GraphsState,
+    metadata_store: &Res<MetadataStore>,
+) -> Option<TileId> {
+    match panel {
+        conduit::well_known::Panel::Viewport(viewport) => {
+            let pane = ViewportPane::spawn(
+                commands,
+                asset_server,
+                meshes,
+                materials,
+                render_layer_alloc,
+                viewport,
+            );
+            let camera = pane.camera.expect("no camera spawned for viewport");
+            let mut camera = commands.entity(camera);
+            if let Some(parent) = viewport.track_entity {
+                if let Some(parent) = entity_map.0.get(&parent) {
+                    if let Ok(grid_cell) = grid_cell.get(*parent) {
+                        camera.insert(*grid_cell);
                     }
-                };
-                camera.insert(Transform {
-                    translation: Vec3::new(viewport.pos.x, viewport.pos.y, viewport.pos.z),
-                    rotation: Quat::from_xyzw(
-                        viewport.rotation.i,
-                        viewport.rotation.j,
-                        viewport.rotation.k,
-                        viewport.rotation.w,
-                    ),
-                    ..Default::default()
-                });
-                if !viewport.track_rotation {
-                    camera.insert(NoPropagateRot);
-                } else {
-                    camera.remove::<NoPropagateRot>();
+                    camera.set_parent(*parent);
                 }
-                let pane = Pane::Viewport(pane);
-                ui_state.insert_pane(pane, viewport.active);
-                commands.entity(entity).insert(SyncedViewport);
+            };
+            camera.insert(Transform {
+                translation: Vec3::new(viewport.pos.x, viewport.pos.y, viewport.pos.z),
+                rotation: Quat::from_xyzw(
+                    viewport.rotation.i,
+                    viewport.rotation.j,
+                    viewport.rotation.k,
+                    viewport.rotation.w,
+                ),
+                ..Default::default()
+            });
+            if !viewport.track_rotation {
+                camera.insert(NoPropagateRot);
+            } else {
+                camera.remove::<NoPropagateRot>();
             }
+            let pane = Pane::Viewport(pane);
+            let tile_id = ui_state.insert_pane(pane)?;
+            ui_state.set_parent(tile_id, parent_id, viewport.active)
+        }
+        conduit::well_known::Panel::VSplit(split) => {
+            let tile_id = ui_state.tree.tiles.insert_vertical_tile(vec![]);
+            split.panels.iter().for_each(|panel| {
+                spawn_panel(
+                    panel,
+                    Some(tile_id),
+                    asset_server,
+                    ui_state,
+                    meshes,
+                    materials,
+                    render_layer_alloc,
+                    commands,
+                    entity_map,
+                    grid_cell,
+                    graphs_state,
+                    metadata_store,
+                );
+            });
+            ui_state.set_parent(tile_id, parent_id, split.active)
+        }
+        conduit::well_known::Panel::HSplit(split) => {
+            let tile_id = ui_state.tree.tiles.insert_horizontal_tile(vec![]);
+            split.panels.iter().for_each(|panel| {
+                spawn_panel(
+                    panel,
+                    Some(tile_id),
+                    asset_server,
+                    ui_state,
+                    meshes,
+                    materials,
+                    render_layer_alloc,
+                    commands,
+                    entity_map,
+                    grid_cell,
+                    graphs_state,
+                    metadata_store,
+                );
+            });
+            ui_state.set_parent(tile_id, parent_id, split.active)
+        }
+        conduit::well_known::Panel::Graph(graph) => {
+            let (graph_id, _) = graphs_state.get_or_create_graph(&None);
+            for entity in graph.entities.iter() {
+                let mut components: HashMap<ComponentId, Vec<(bool, Color32)>> = HashMap::new();
+                for component in entity.components.iter() {
+                    if let Some(metadata) = metadata_store.get_metadata(&component.component_id) {
+                        let len = metadata.component_type.shape.iter().product::<i64>() as usize;
+                        let values =
+                            components.entry(component.component_id).or_insert_with(|| {
+                                (0..len)
+                                    .map(|i| {
+                                        (entity.entity_id.0 + component.component_id.0) as usize + i
+                                    })
+                                    .map(|i| (false, colors::get_color_by_index_all(i)))
+                                    .collect()
+                            });
+                        for index in component.indexes.iter() {
+                            if let Some((enabled, _)) = values.get_mut(*index) {
+                                *enabled = true;
+                            }
+                        }
+                    }
+                }
+                for (id, values) in components.into_iter() {
+                    graphs_state.insert_component(&graph_id, &entity.entity_id, &id, values);
+                }
+            }
+            let graph = GraphPane::spawn(graph_id);
+            // let graph_id = graph.id;
+            // let graph_label = graph.label.clone();
+            let pane = Pane::Graph(graph);
+            let tile_id = ui_state.insert_pane(pane)?;
+            ui_state.set_parent(tile_id, parent_id, false)
         }
     }
 }
