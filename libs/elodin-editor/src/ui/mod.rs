@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::{SystemParam, SystemState};
+use bevy::render::camera::ScalingMode;
+
+use bevy::render::view::RenderLayers;
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::query::QueryData,
@@ -22,6 +26,7 @@ use conduit::{
 };
 use egui_tiles::TileId;
 
+use crate::plugins::navigation_gizmo::RenderLayerAlloc;
 use crate::{GridHandle, MainCamera};
 
 use self::widgets::hierarchy::Hierarchy;
@@ -164,6 +169,7 @@ impl Plugin for UiPlugin {
             .add_systems(Update, render_layout)
             .add_systems(Update, tiles::sync_viewports.after(render_layout))
             .add_systems(Update, tiles::setup_default_tiles.after(render_layout))
+            .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout));
     }
@@ -182,33 +188,83 @@ pub struct SettingModalState(pub Option<SettingModal>);
 type GraphStateComponent = Vec<(bool, egui::Color32)>;
 type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct GraphState {
     entities: BTreeMap<EntityId, GraphStateEntity>,
     range_id: Option<TaggedRangeId>,
+    enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
+    render_layers: RenderLayers,
+    camera: Entity,
 }
 
-#[derive(Resource, Default, Clone, Debug)]
+impl GraphState {
+    fn spawn(
+        commands: &mut Commands,
+        render_layer_alloc: &mut RenderLayerAlloc,
+        entities: BTreeMap<EntityId, GraphStateEntity>,
+    ) -> Self {
+        let Some(layer) = render_layer_alloc.alloc() else {
+            todo!("ran out of layers")
+        };
+        let render_layers = RenderLayers::layer(layer as u8);
+        let camera = commands
+            .spawn((
+                Camera3dBundle {
+                    camera: Camera {
+                        order: 1,
+                        hdr: true,
+                        ..Default::default()
+                    },
+                    tonemapping: Tonemapping::None,
+                    projection: Projection::Orthographic(OrthographicProjection {
+                        near: 0.0,
+                        far: 1000.0,
+                        viewport_origin: Vec2::new(0.0, 0.0),
+                        scaling_mode: ScalingMode::Fixed {
+                            width: 1000.0,
+                            height: 1.0,
+                        },
+                        scale: 1.0,
+                        area: Rect::new(0., 0., 500., 1.),
+                    }),
+                    ..Default::default()
+                },
+                ViewportRect(None),
+                MainCamera,
+                render_layers,
+            ))
+            .id();
+        GraphState {
+            entities,
+            range_id: None,
+            enabled_lines: BTreeMap::new(),
+            render_layers,
+            camera,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug, Default)]
 pub struct GraphsState(BTreeMap<GraphId, GraphState>);
 
 impl GraphsState {
-    pub fn get_or_create_graph(&mut self, graph_id: &Option<GraphId>) -> (GraphId, &GraphState) {
-        if let Some(graph_id) = graph_id {
-            if !self.0.contains_key(graph_id) {
-                self.0.insert(*graph_id, GraphState::default());
-            }
+    pub fn get(&self, graph_id: &GraphId) -> Option<&GraphState> {
+        self.0.get(graph_id)
+    }
 
-            (*graph_id, self.0.get(graph_id).unwrap())
-        } else {
-            let new_graph_id = self
-                .0
-                .keys()
-                .max()
-                .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
-            self.0.insert(new_graph_id, GraphState::default());
+    pub fn get_mut(&mut self, graph_id: &GraphId) -> Option<&mut GraphState> {
+        self.0.get_mut(graph_id)
+    }
 
-            (new_graph_id, self.0.get(&new_graph_id).unwrap())
-        }
+    pub fn push_graph_state(&mut self, graph_state: GraphState) -> GraphId {
+        let new_graph_id = self
+            .0
+            .keys()
+            .max()
+            .map_or(GraphId(0), |lk| GraphId(lk.0 + 1));
+        self.0.insert(new_graph_id, graph_state);
+
+        new_graph_id
     }
 
     pub fn default_component_values(
@@ -231,20 +287,17 @@ impl GraphsState {
         component_id: &ComponentId,
         component_values: Vec<(bool, egui::Color32)>,
     ) {
-        let mut graph = self
-            .0
-            .get(graph_id)
-            .map_or(GraphState::default(), |graph| graph.clone());
+        let Some(graph) = self.0.get_mut(graph_id) else {
+            println!("graph not found");
+            return;
+        };
 
-        let mut entity = graph
+        let entity = graph
             .entities
-            .get(entity_id)
-            .map_or(BTreeMap::new(), |ec| ec.clone());
+            .entry(*entity_id)
+            .or_insert_with(BTreeMap::new);
 
         entity.insert(*component_id, component_values);
-        graph.entities.insert(*entity_id, entity);
-
-        self.0.insert(*graph_id, graph);
     }
 
     pub fn remove_graph(&mut self, graph_id: &GraphId) {
@@ -257,25 +310,19 @@ impl GraphsState {
         entity_id: &EntityId,
         component_id: &ComponentId,
     ) {
-        let mut graph = self
-            .0
-            .get(graph_id)
-            .map_or(GraphState::default(), |state| state.clone());
+        let Some(graph) = self.0.get_mut(graph_id) else {
+            return;
+        };
 
-        let mut components = graph
-            .entities
-            .get(entity_id)
-            .map_or(BTreeMap::new(), |ec| ec.clone());
+        let Some(components) = graph.entities.get_mut(entity_id) else {
+            return;
+        };
 
         components.remove(component_id);
 
         if components.is_empty() {
             graph.entities.remove(entity_id);
-        } else {
-            graph.entities.insert(*entity_id, components);
         }
-
-        self.0.insert(*graph_id, graph);
     }
 
     pub fn contains_graph(&self, graph_id: &GraphId) -> bool {
@@ -708,7 +755,6 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        camera.order = 1;
         let Some(window) = window.iter().next() else {
             continue;
         };

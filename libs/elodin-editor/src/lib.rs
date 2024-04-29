@@ -31,16 +31,19 @@ use conduit::{
     query::MetadataStore,
     ser_de::ColumnValue,
     well_known::{EntityMetadata, Viewport, WorldPos},
-    ControlMsg, EntityId,
+    ComponentId, ControlMsg, EntityId,
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
 use ui::{
-    widgets::eplot::{EPlotDataComponent, EPlotDataEntity},
+    widgets::{
+        eplot::{EPlotDataComponent, EPlotDataEntity, EPlotDataLine},
+        eplot_gpu::Line,
+    },
     EntityPair, HoveredEntity,
 };
 
-use crate::plugins::editor_cam_touch;
+use crate::{plugins::editor_cam_touch, ui::widgets::eplot_gpu};
 
 mod plugins;
 pub(crate) mod traces;
@@ -142,6 +145,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(TweeningPlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
+            .add_plugins(eplot_gpu::EPlotGpuPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             .add_systems(PreUpdate, collect_entity_data)
@@ -149,7 +153,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
             .add_systems(Update, set_floating_origin)
-            .insert_resource(ClearColor(Color::hex("#0D0D0D").unwrap()));
+            .insert_resource(ClearColor(Color::hex("#0C0C0C").unwrap()));
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
@@ -171,11 +175,38 @@ pub struct CollectedGraphData {
     pub entities: BTreeMap<EntityId, EPlotDataEntity>,
 }
 
+impl CollectedGraphData {
+    pub fn get_entity(&self, entity_id: &EntityId) -> Option<&EPlotDataEntity> {
+        self.entities.get(entity_id)
+    }
+    pub fn get_component(
+        &self,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+    ) -> Option<&EPlotDataComponent> {
+        self.entities
+            .get(entity_id)
+            .and_then(|entity| entity.components.get(component_id))
+    }
+    pub fn get_line(
+        &self,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+        index: usize,
+    ) -> Option<&EPlotDataLine> {
+        self.entities
+            .get(entity_id)
+            .and_then(|entity| entity.components.get(component_id))
+            .and_then(|component| component.lines.get(&index))
+    }
+}
+
 pub fn collect_entity_data(
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut reader: EventReader<Msg>,
     metadata_store: Res<MetadataStore>,
     entity_metadata: Query<(&EntityId, &EntityMetadata)>,
+    mut lines: ResMut<Assets<Line>>,
 ) {
     let entity_metadata = entity_metadata
         .iter()
@@ -220,7 +251,7 @@ pub fn collect_entity_data(
                         .or_insert_with(|| {
                             EPlotDataComponent::new(component_label, element_names.to_string())
                         })
-                        .add_values(&value, col.payload.time);
+                        .add_values(&value, &mut lines, col.payload.time);
                 }
             }
             _ => {}
@@ -313,7 +344,6 @@ fn spawn_main_camera(
             }),
             ..default()
         },
-        // NOTE: Layers should be specified for all cameras otherwise `bevy_mod_picking` will use all layers
         main_camera_layers,
         MainCamera,
         GridCell::<i128>::default(),
