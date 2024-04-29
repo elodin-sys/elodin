@@ -376,6 +376,7 @@ def gravity_effector(
 
 w = el.World()
 
+sat_ids = []
 def spawn_sat(x, y, w: el.World):
     sat_num = x + y * 100
     rand_key = jax.random.key(sat_num)
@@ -404,11 +405,12 @@ def spawn_sat(x, y, w: el.World):
     rot_x = el.Quaternion.from_axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x))
     rot_y = el.Quaternion.from_axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y))
     rot = rot_x * rot_y
-
+    ang_vel = jax.random.normal(rand_key, shape=(3,))
+    ang_vel = ang_vel / la.norm(ang_vel) * 3.0
     b = el.Body(
         world_pos=el.SpatialTransform.from_linear(rot @ np.array([1.0, 0.0, 0.0]) * radius),
         world_vel=el.SpatialMotion(
-            jax.random.normal(rand_key, shape=(3,)) * 3.0, rot @ np.array([0.0, 0.0, -1.0]) * velocity
+             ang_vel, rot @ np.array([0.0, 0.0, -1.0]) * velocity
         ),
         inertia=el.SpatialInertia(12.0, j),
         pbr=w.insert_asset(
@@ -438,6 +440,7 @@ def spawn_sat(x, y, w: el.World):
     w.spawn(RWRel(el.Edge(sat.id(), rw_1.id()))).name(f"Sat {sat_num}  -> RW 1")
     w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name(f"Sat {sat_num} -> RW 2")
     w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name(f"Sat {sat_num} -> RW 3")
+    sat_ids.append(sat.id())
     return sat.id()
 
 
@@ -467,6 +470,17 @@ w.spawn(
     )
 ).name("Viewport 1")
 
+w.spawn(
+    el.Panel.graph(
+        [
+            el.GraphEntity(
+                sat_id,
+                [el.Component.index(el.WorldPos)[1]]
+            )
+            for sat_id in sat_ids
+        ]
+    ),
+)
 
 w.spawn(
     el.Body(
