@@ -8,7 +8,12 @@ TIME_STEP = 1.0 / 120.0
 thrust_vector_body_frame = jnp.array([-1.0, 0.0, 0.0])
 
 Wind = ty.Annotated[
-    el.SpatialMotion, el.Component("wind", el.ComponentType.SpatialMotionF64)
+    el.SpatialMotion,
+    el.Component(
+        "wind",
+        el.ComponentType.SpatialMotionF64,
+        metadata={"element_names": "x,y,z", "priority": "20"},
+    ),
 ]
 
 EulerAngles = ty.Annotated[
