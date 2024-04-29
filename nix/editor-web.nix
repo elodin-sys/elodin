@@ -13,6 +13,7 @@ let
     ];
     CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
     CARGO_PROFILE = "wasm-release";
+    RUSTFLAGS = "--cfg=web_sys_unstable_apis";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   wasm = craneLib.buildPackage (commonArgs // {

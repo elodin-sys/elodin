@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 pub mod button;
 pub mod eplot;
+pub mod eplot_gpu;
 pub mod hierarchy;
 pub mod inspector;
 pub mod label;

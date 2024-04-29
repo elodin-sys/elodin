@@ -142,7 +142,7 @@ pub fn tagged_range(
         let new_value = value_from_position(interact_pos.x, full_range.clone(), position_range);
         range.values = (new_value.floor() as u64, end);
 
-        if min_pos_response.drag_released() {
+        if min_pos_response.drag_stopped() {
             let (final_start, final_end) = range.values;
 
             if final_start > final_end {
@@ -173,7 +173,7 @@ pub fn tagged_range(
         let new_value = value_from_position(interact_pos.x, full_range.clone(), position_range);
         range.values = (start, new_value.floor() as u64);
 
-        if max_pos_response.drag_released() {
+        if max_pos_response.drag_stopped() {
             let (final_start, final_end) = range.values;
 
             if final_start > final_end {

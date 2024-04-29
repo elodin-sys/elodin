@@ -1,8 +1,8 @@
-use std::fmt::Display;
+use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
     event::EventWriter,
-    system::{Res, ResMut},
+    system::{Commands, Res, ResMut},
 };
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
 
@@ -15,12 +15,15 @@ use conduit::{
     ColumnPayload, ComponentValue, ElementValueMut, EntityId,
 };
 
-use crate::ui::{
-    colors::{self, with_opacity},
-    tiles,
-    utils::{format_num, MarginSides},
-    widgets::label,
-    GraphsState,
+use crate::{
+    plugins::navigation_gizmo::RenderLayerAlloc,
+    ui::{
+        colors::{self, with_opacity},
+        tiles,
+        utils::{format_num, MarginSides},
+        widgets::label,
+        GraphState, GraphsState,
+    },
 };
 
 const SEPARATOR_SPACING: f32 = 32.0;
@@ -32,10 +35,12 @@ pub fn inspector(
     entity_id: EntityId,
     map: &mut ComponentValueMap,
     metadata_store: &Res<MetadataStore>,
-    graphs_state: &mut ResMut<GraphsState>,
+    _graphs_state: &mut ResMut<GraphsState>,
     tile_state: &mut ResMut<tiles::TileState>,
     icon_chart: egui::TextureId,
     column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
+    commands: &mut Commands<'_, '_>,
+    render_layer_alloc: &mut RenderLayerAlloc,
 ) {
     ui.add(
         label::ELabel::new(&metadata.name)
@@ -114,12 +119,14 @@ pub fn inspector(
         }
 
         if create_graph {
-            let (graph_id, _) = graphs_state.get_or_create_graph(&None);
             let values =
                 GraphsState::default_component_values(&entity_id, &component_id, component_value);
-            graphs_state.insert_component(&graph_id, &entity_id, &component_id, values);
-
-            tile_state.create_graph_tile(graph_id);
+            let entities = BTreeMap::from_iter(std::iter::once((
+                entity_id,
+                BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
+            )));
+            let graph = GraphState::spawn(commands, render_layer_alloc, entities);
+            tile_state.create_graph_tile(graph);
         }
     }
 }

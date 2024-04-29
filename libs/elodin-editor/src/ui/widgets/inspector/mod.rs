@@ -16,6 +16,7 @@ use conduit::{
 };
 
 use crate::{
+    plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
         colors, tiles, CameraQuery, EntityData, GraphsState, InspectorAnchor, SelectedObject,
         SettingModalState, SidebarState,
@@ -134,6 +135,7 @@ pub struct InspectorContent<'w, 's> {
     column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     inspector_anchor: ResMut<'w, InspectorAnchor>,
+    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
 }
 
 impl WidgetSystem for InspectorContent<'_, '_> {
@@ -164,6 +166,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
         let mut column_payload_writer = state_mut.column_payload_writer;
         let mut grid_visibility = state_mut.grid_visibility;
         let mut inspector_anchor = state_mut.inspector_anchor;
+        let mut render_layer_alloc = state_mut.render_layer_alloc;
 
         inspector_anchor.0 = if is_side_panel {
             Some(ui.max_rect().min)
@@ -196,6 +199,8 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                 &mut tile_state,
                                 icons.chart,
                                 &mut column_payload_writer,
+                                &mut commands,
+                                &mut render_layer_alloc,
                             );
                         }
                         SelectedObject::Viewport { camera, .. } => {

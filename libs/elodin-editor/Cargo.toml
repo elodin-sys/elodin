@@ -17,8 +17,10 @@ nalgebra = "0.32"
 # bevy
 bevy.version = "0.13"
 bevy.features = ["wayland", ]
-bevy_egui = "0.25"
-egui_tiles = "0.7"
+bevy_egui = "0.27"
+egui.version = "0.27"
+egui.features = ["rayon"]
+egui_tiles = "0.8"
 winit.version = "0.29"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"

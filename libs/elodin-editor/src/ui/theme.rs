@@ -34,8 +34,10 @@ pub fn set_theme(context: &mut egui::Context) {
     style.visuals.window_rounding = rounding_xxs();
     style.visuals.window_stroke = Stroke::new(1.0, colors::PRIMARY_ONYX_8);
     style.visuals.window_shadow = Shadow {
-        extrusion: 4.0,
         color: colors::with_opacity(colors::BLACK_BLACK_600, 0.25),
+        blur: 4.0,
+        offset: [0.0, 0.0].into(),
+        spread: 4.0,
     };
     style.visuals.window_fill = colors::PRIMARY_SMOKE;
 
