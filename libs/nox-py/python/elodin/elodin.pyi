@@ -286,6 +286,7 @@ class Panel:
         pos: Union[List[float], jax.Array, None] = None,
         looking_at: Union[List[float], jax.Array, None] = None,
         show_grid: bool = False,
+        hdr: bool = False,
     ) -> Panel: ...
     @staticmethod
     def graph(entities: list[GraphEntity]) -> Panel: ...
