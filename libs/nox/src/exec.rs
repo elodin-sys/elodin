@@ -1,15 +1,20 @@
+//! Provides functionality for executing operations and transferring data between host and device.
 use crate::{AsBuffer, BufferArg, BufferForm, Client, FromPjrtBuffer};
 use paste::paste;
 use std::marker::PhantomData;
 
+/// Represents an executable compiled from an XLA computation, parameterized over input `T` and result `R` types.
 pub struct Exec<T, R> {
     pub(crate) exec: xla::PjRtLoadedExecutable,
     pub(crate) phantom: PhantomData<(T, R)>,
 }
 
+/// Defines a trait for converting computation results from device-specific representations to host types.
 pub trait ToHost {
+    /// The type of data to be transferred to the host.
     type HostTy;
 
+    /// Transfers data from the device to the host.
     fn to_host(&self) -> Self::HostTy;
 }
 
