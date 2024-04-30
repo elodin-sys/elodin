@@ -15,6 +15,7 @@ use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{well_known::WorldPos, Component};
 
+use crate::ui::HdrEnabled;
 use crate::{
     ui::{
         colors::{self, with_opacity},
@@ -33,6 +34,7 @@ pub fn inspector(
     commands: &mut Commands,
     entity_transform_query: &Query<&GridCell<i128>, Without<MainCamera>>,
     grid_visibility: &mut Query<&mut Visibility, With<InfiniteGrid>>,
+    hdr_enabled: &mut HdrEnabled,
 ) {
     ui.add(
         ELabel::new("Viewport")
@@ -143,6 +145,20 @@ pub fn inspector(
                 }
             });
     }
+
+    egui::Frame::none()
+        .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("HDR ENABLED")
+                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                );
+                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                    ui.checkbox(&mut hdr_enabled.0, "");
+                });
+            });
+        });
 
     if let Some(&GridHandle { grid }) = cam.grid_handle {
         egui::Frame::none()

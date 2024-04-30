@@ -445,8 +445,8 @@ def spawn_sat(x, y, w: el.World):
 
 
 sat = spawn_sat(0, 0, w)
-for x in range(-3, 3):
-    for y in range(-3, 3):
+for x in range(-7, 7):
+    for y in range(-7, 7):
         spawn_sat(x, y, w)
 
 
@@ -475,7 +475,7 @@ w.spawn(
         [
             el.GraphEntity(
                 sat_id,
-                [el.Component.index(el.WorldPos)[1]]
+                el.Component.index(el.WorldPos)[:4]
             )
             for sat_id in sat_ids
         ]

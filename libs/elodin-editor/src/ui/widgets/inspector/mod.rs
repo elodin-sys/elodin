@@ -18,8 +18,8 @@ use conduit::{
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        colors, tiles, CameraQuery, EntityData, GraphsState, InspectorAnchor, SelectedObject,
-        SettingModalState, SidebarState,
+        colors, tiles, CameraQuery, EntityData, GraphsState, HdrEnabled, InspectorAnchor,
+        SelectedObject, SettingModalState, SidebarState,
     },
     MainCamera,
 };
@@ -136,6 +136,7 @@ pub struct InspectorContent<'w, 's> {
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     inspector_anchor: ResMut<'w, InspectorAnchor>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    hdr_enabled: ResMut<'w, HdrEnabled>,
 }
 
 impl WidgetSystem for InspectorContent<'_, '_> {
@@ -167,6 +168,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
         let mut grid_visibility = state_mut.grid_visibility;
         let mut inspector_anchor = state_mut.inspector_anchor;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
+        let mut hdr_enabled = state_mut.hdr_enabled;
 
         inspector_anchor.0 = if is_side_panel {
             Some(ui.max_rect().min)
@@ -215,6 +217,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                 &mut commands,
                                 &entity_transform_query,
                                 &mut grid_visibility,
+                                &mut hdr_enabled,
                             );
                         }
                         SelectedObject::Graph {
