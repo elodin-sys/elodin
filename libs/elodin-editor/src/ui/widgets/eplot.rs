@@ -9,7 +9,7 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, Layout};
 use conduit::{ComponentId, ComponentValue, EntityId};
-use egui::Pos2;
+use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
 use itertools::{Itertools, MinMaxResult};
 use std::{
     collections::BTreeMap,
@@ -27,7 +27,6 @@ use crate::{
 };
 
 use super::{
-    button::ECheckboxButton,
     eplot_gpu::{self, Line, LineBundle, LineConfig},
     timeline::tagged_range::TaggedRange,
 };
@@ -291,7 +290,7 @@ impl EPlot {
                                         .spawn(LineBundle {
                                             line: line.values.clone(),
                                             uniform: eplot_gpu::LineUniform::new(
-                                                2.0,
+                                                graph_state.line_width,
                                                 color.into_bevy(),
                                             ),
                                             config: LineConfig {
@@ -312,7 +311,13 @@ impl EPlot {
                                         value_index,
                                     ));
                                 }
-                                (None, false) | (Some(_), true) => {}
+                                (Some((entity, _)), true) => {
+                                    commands.entity(*entity).insert(eplot_gpu::LineUniform::new(
+                                        graph_state.line_width,
+                                        color.into_bevy(),
+                                    ));
+                                }
+                                (None, false) => {}
                             }
                         }
                     }
@@ -519,16 +524,25 @@ impl EPlot {
             .title_bar(false)
             .resizable(false)
             .fixed_pos(fixed_pos)
-            .fixed_size(egui::vec2(modal_width, self.inner_rect.height() / 2.0))
+            .fixed_size(egui::vec2(modal_width, self.inner_rect.height() / 2.))
+            .frame(
+                Frame::default()
+                    .inner_margin(Margin::same(16.0))
+                    .stroke(Stroke::new(1.0, colors::BORDER_GREY))
+                    .rounding(Rounding::same(4.0))
+                    .fill(colors::PRIMARY_SMOKE)
+                    .shadow(egui::epaint::Shadow {
+                        offset: vec2(0., 5.0),
+                        blur: 8.0,
+                        spread: -2.0,
+                        color: Color32::from_black_alpha(191),
+                    }),
+            )
             .show(ui.ctx(), |ui| {
                 let time = self.time_step * index as u32;
                 let time_text = utils::time_label_ms(time.as_secs_f64());
 
-                ui.add_space(8.0);
                 ui.label(time_text);
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
                 let mut current_entity_id: Option<EntityId> = None;
                 let mut current_component_id: Option<ComponentId> = None;
                 for ((entity_id, component_id, line_index), (entity, color)) in
@@ -541,11 +555,13 @@ impl EPlot {
                         continue;
                     };
                     if current_entity_id.as_ref() != Some(entity_id) {
+                        ui.add_space(8.0);
+                        ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                        ui.add_space(8.0);
                         current_entity_id = Some(*entity_id);
                         current_component_id = None;
                         if let Some(entity_data) = collected_graph_data.get_entity(entity_id) {
                             ui.label(egui::RichText::new(entity_data.label.to_owned()).size(13.0));
-                            ui.add_space(8.0);
                         }
                     }
 
@@ -554,9 +570,10 @@ impl EPlot {
                         if let Some(component_data) =
                             collected_graph_data.get_component(entity_id, component_id)
                         {
+                            ui.add_space(8.0);
                             ui.label(
                                 egui::RichText::new(component_data.label.to_owned())
-                                    .size(13.0)
+                                    .size(11.0)
                                     .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                             );
                             ui.add_space(8.0);
@@ -570,21 +587,28 @@ impl EPlot {
                     };
 
                     ui.horizontal(|ui| {
+                        ui.style_mut().override_font_id =
+                            Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
                         ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
-                            ui.style_mut().override_font_id =
-                                Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                            ui.vertical(|ui| {
-                                ui.add(
-                                    ECheckboxButton::new(line_data.label.clone(), true)
-                                        .margin(egui::Margin::symmetric(0.0, 8.0))
-                                        .on_color(*color),
+                            ui.horizontal(|ui| {
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(8.0, 8.0),
+                                    egui::Sense::click(),
                                 );
+                                ui.painter().rect(
+                                    rect,
+                                    egui::Rounding::same(2.0),
+                                    *color,
+                                    egui::Stroke::NONE,
+                                );
+                                ui.add_space(6.);
+                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
                             })
                         });
                         ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                            ui.add_space(8.0);
-                            ui.label(format!("{:.2}", line.data[index]));
-                            ui.add_space(8.0);
+                            ui.add_space(3.0);
+                            ui.label(RichText::new(format!("{:.2}", line.data[index])).size(11.0));
+                            ui.add_space(3.0);
                         })
                     });
                 }

@@ -49,6 +49,9 @@ pub mod utils;
 pub mod widgets;
 
 #[derive(Resource, Default)]
+pub struct HdrEnabled(pub bool);
+
+#[derive(Resource, Default)]
 pub struct Paused(pub bool);
 
 #[derive(Resource, Default)]
@@ -165,8 +168,10 @@ impl Plugin for UiPlugin {
             .init_resource::<FullscreenState>()
             .init_resource::<TaggedRanges>()
             .init_resource::<SettingModalState>()
+            .init_resource::<HdrEnabled>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
+            .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::sync_viewports.after(render_layout))
             .add_systems(Update, tiles::setup_default_tiles.after(render_layout))
             .add_systems(Update, tiles::shortcuts)
@@ -195,6 +200,7 @@ pub struct GraphState {
     enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     render_layers: RenderLayers,
     camera: Entity,
+    line_width: f32,
 }
 
 impl GraphState {
@@ -212,7 +218,7 @@ impl GraphState {
                 Camera3dBundle {
                     camera: Camera {
                         order: 1,
-                        hdr: true,
+                        hdr: false,
                         ..Default::default()
                     },
                     tonemapping: Tonemapping::None,
@@ -240,6 +246,7 @@ impl GraphState {
             enabled_lines: BTreeMap::new(),
             render_layers,
             camera,
+            line_width: 2.0,
         }
     }
 }
@@ -782,5 +789,10 @@ fn sync_camera_grid_cell(
                 *grid_cell = *entity_cell;
             }
         }
+    }
+}
+fn sync_hdr(hdr_enabled: ResMut<HdrEnabled>, mut query: Query<&mut Camera>) {
+    for mut cam in query.iter_mut() {
+        cam.hdr = hdr_enabled.0;
     }
 }

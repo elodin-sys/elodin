@@ -6,7 +6,8 @@ use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::query::Has;
 use bevy::ecs::schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet};
-use bevy::ecs::system::{Commands, Query, Res, ResMut};
+use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
+use bevy::ecs::world::{Mut, World};
 use bevy::math::Vec4;
 use bevy::pbr::SetMeshViewBindGroup;
 use bevy::reflect::TypePath;
@@ -16,7 +17,7 @@ use bevy::render::render_phase::{
 };
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
-use bevy::render::{Extract, ExtractSchedule, Render, RenderSet};
+use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
 use bevy::{
     app::Plugin,
     asset::{load_internal_asset, Asset, Handle},
@@ -58,6 +59,7 @@ pub struct EPlotGpuPlugin;
 impl Plugin for EPlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
+            .init_resource::<CachedSystemState>()
             .init_asset::<Line>();
         //.add_plugins(RenderAssetPlugin::<Line>::default());
 
@@ -410,51 +412,73 @@ type DrawLine3d = (
     DrawLine,
 );
 
-type LineQuery = (
+#[derive(Resource)]
+struct CachedSystemState {
+    state: SystemState<(
+        Query<'static, 'static, LineQueryMut>,
+        Res<'static, Assets<Line>>,
+        Commands<'static, 'static>,
+    )>,
+}
+
+impl FromWorld for CachedSystemState {
+    fn from_world(world: &mut World) -> Self {
+        Self {
+            state: SystemState::new(world),
+        }
+    }
+}
+
+type LineQueryMut = (
     Entity,
     &'static Handle<Line>,
     &'static LineConfig,
-    &'static LineUniform,
+    &'static mut LineUniform,
+    Option<&'static mut GpuLine>,
 );
+
 fn extract_lines(
+    mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
-    lines: Extract<Query<LineQuery>>,
-    line_assets: Extract<Res<Assets<Line>>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
-    mut gpu_lines: Query<(&mut GpuLine, &mut LineUniform)>,
 ) {
-    for (entity, line_handle, config, uniform) in &lines {
-        let Some(line) = line_assets.get(line_handle) else {
-            continue;
-        };
-        let (prev_pos, buffer) = if let Ok((mut gpu_line, mut uniform)) = gpu_lines.get_mut(entity)
-        {
-            let mut prev_pos = std::mem::replace(
-                &mut gpu_line.position_count,
-                line.averaged_data.len() as u32,
-            ) as u64;
-            if prev_pos >= line.averaged_data.len() as u64 {
-                // handle the case where we've average data so it is shorter
-                prev_pos = 0;
-            }
-            uniform.chunk_size = line.chunk_size as f32;
-            (prev_pos, gpu_line.position_buffer.clone())
-        } else {
-            let buffer_descriptor = BufferDescriptor {
-                label: Some("Line Vertex Buffer"),
-                size: (mem::size_of::<f32>() * 15_000) as u64,
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
+    main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
+        let (mut lines, line_assets, mut main_commands) = cached_state.state.get_mut(world);
+        for (entity, line_handle, config, mut uniform, gpu_line) in lines.iter_mut() {
+            let Some(line) = line_assets.get(line_handle) else {
+                continue;
             };
-            let buffer = render_device.create_buffer(&buffer_descriptor);
-            let gpu_line = GpuLine {
-                position_buffer: buffer,
-                position_count: line.averaged_data.len() as u32,
+            let (prev_pos, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
+                let mut prev_pos = std::mem::replace(
+                    &mut gpu_line.position_count,
+                    line.averaged_data.len() as u32,
+                ) as u64;
+                if prev_pos > line.averaged_data.len() as u64 {
+                    // handle the case where we've average data so it is shorter
+                    prev_pos = 0;
+                }
+                uniform.chunk_size = line.chunk_size as f32;
+                (prev_pos, *uniform, gpu_line.clone())
+            } else {
+                let buffer_descriptor = BufferDescriptor {
+                    label: Some("Line Vertex Buffer"),
+                    size: (mem::size_of::<f32>() * 15_000) as u64,
+                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                };
+                let buffer = render_device.create_buffer(&buffer_descriptor);
+                let gpu_line = GpuLine {
+                    position_buffer: buffer,
+                    position_count: line.averaged_data.len() as u32,
+                };
+                let mut uniform = *uniform;
+                uniform.chunk_size = line.chunk_size as f32;
+                main_commands.get_or_spawn(entity).insert(gpu_line.clone());
+                (0, uniform, gpu_line)
             };
+
             let buffer = gpu_line.position_buffer.clone();
-            let mut uniform = *uniform;
-            uniform.chunk_size = line.chunk_size as f32;
             commands.get_or_spawn(entity).insert((
                 LineBundle {
                     line: line_handle.clone(),
@@ -463,14 +487,12 @@ fn extract_lines(
                 },
                 gpu_line,
             ));
-            (0, buffer)
-        };
 
-        let data = cast_slice(&line.averaged_data);
-        render_queue
-            .0
-            .write_buffer(&buffer, prev_pos, &data[prev_pos as usize..]);
-    }
+            let data = cast_slice(&line.averaged_data[prev_pos as usize..]);
+            render_queue.0.write_buffer(&buffer, prev_pos * 4, data);
+        }
+        cached_state.state.apply(world)
+    })
 }
 
 type ViewQuery = (

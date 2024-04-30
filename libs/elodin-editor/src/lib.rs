@@ -333,7 +333,7 @@ fn spawn_main_camera(
             transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
                 .looking_at(Vec3::ZERO, Vec3::Y),
             camera: Camera {
-                hdr: true,
+                hdr: false,
                 ..Default::default()
             },
             tonemapping: Tonemapping::TonyMcMapface,

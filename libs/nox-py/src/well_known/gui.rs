@@ -17,6 +17,7 @@ pub struct Panel {
 #[pymethods]
 impl Panel {
     #[staticmethod]
+    #[allow(clippy::too_many_arguments)]
     pub fn viewport(
         track_entity: Option<EntityId>,
         track_rotation: Option<bool>,
@@ -25,6 +26,7 @@ impl Panel {
         pos: Option<PyArrayLike1<f32>>,
         looking_at: Option<PyArrayLike1<f32>>,
         show_grid: Option<bool>,
+        hdr: Option<bool>,
     ) -> PyResult<Self> {
         let pos = if let Some(arr) = pos {
             let slice = arr.as_slice()?;
@@ -43,6 +45,7 @@ impl Panel {
             pos,
             track_rotation,
             show_grid: show_grid.unwrap_or_default(),
+            hdr: hdr.unwrap_or_default(),
             ..Default::default()
         };
         if let Some(pos) = looking_at {

@@ -28,7 +28,7 @@ use super::{
         timeline::tagged_range::TaggedRanges,
         RootWidgetSystem,
     },
-    GraphState, GraphsState, SelectedObject, ViewportRect,
+    GraphState, GraphsState, HdrEnabled, SelectedObject, ViewportRect,
 };
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, ui::GraphStateEntity,
@@ -661,26 +661,43 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
 #[derive(Component)]
 pub struct SyncedViewport;
 
-#[allow(clippy::too_many_arguments)]
-pub fn sync_viewports(
-    panels: Query<(Entity, &conduit::well_known::Panel), Without<SyncedViewport>>,
-    asset_server: Res<AssetServer>,
-    mut ui_state: ResMut<TileState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-    mut commands: Commands,
-    entity_map: Res<EntityMap>,
-    grid_cell: Query<&GridCell<i128>>,
-    mut graph_state: ResMut<GraphsState>,
-    metadata_store: Res<MetadataStore>,
-) {
+#[derive(SystemParam)]
+pub struct SyncViewportParams<'w, 's> {
+    panels: Query<'w, 's, (Entity, &'static conduit::well_known::Panel), Without<SyncedViewport>>,
+    commands: Commands<'w, 's>,
+    tile_state: ResMut<'w, TileState>,
+    asset_server: Res<'w, AssetServer>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    entity_map: Res<'w, EntityMap>,
+    grid_cell: Query<'w, 's, &'static GridCell<i128>>,
+    graph_state: ResMut<'w, GraphsState>,
+    metadata_store: Res<'w, MetadataStore>,
+    hdr_enabled: ResMut<'w, HdrEnabled>,
+}
+
+pub fn sync_viewports(params: SyncViewportParams) {
+    let SyncViewportParams {
+        panels,
+        mut commands,
+        mut tile_state,
+        asset_server,
+        mut meshes,
+        mut materials,
+        mut render_layer_alloc,
+        entity_map,
+        grid_cell,
+        mut graph_state,
+        metadata_store,
+        mut hdr_enabled,
+    } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
             panel,
             None,
             &asset_server,
-            &mut ui_state,
+            &mut tile_state,
             &mut meshes,
             &mut materials,
             &mut render_layer_alloc,
@@ -689,6 +706,7 @@ pub fn sync_viewports(
             &grid_cell,
             &mut graph_state,
             &metadata_store,
+            &mut hdr_enabled,
         );
 
         commands.entity(entity).insert(SyncedViewport);
@@ -709,6 +727,7 @@ fn spawn_panel(
     grid_cell: &Query<&GridCell<i128>>,
     graphs_state: &mut GraphsState,
     metadata_store: &Res<MetadataStore>,
+    hdr_enabled: &mut ResMut<HdrEnabled>,
 ) -> Option<TileId> {
     match panel {
         conduit::well_known::Panel::Viewport(viewport) => {
@@ -745,6 +764,7 @@ fn spawn_panel(
             } else {
                 camera.remove::<NoPropagateRot>();
             }
+            hdr_enabled.0 |= viewport.hdr;
             let pane = Pane::Viewport(pane);
             let tile_id = ui_state.insert_pane(pane)?;
             ui_state.set_parent(tile_id, parent_id, viewport.active)
@@ -765,6 +785,7 @@ fn spawn_panel(
                     grid_cell,
                     graphs_state,
                     metadata_store,
+                    hdr_enabled,
                 );
             });
             ui_state.set_parent(tile_id, parent_id, split.active)
@@ -785,6 +806,7 @@ fn spawn_panel(
                     grid_cell,
                     graphs_state,
                     metadata_store,
+                    hdr_enabled,
                 );
             });
             ui_state.set_parent(tile_id, parent_id, split.active)

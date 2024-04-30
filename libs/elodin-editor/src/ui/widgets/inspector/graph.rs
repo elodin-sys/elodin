@@ -2,6 +2,7 @@ use bevy::ecs::system::{Query, Res, ResMut};
 use bevy_egui::egui;
 
 use conduit::{bevy::MaxTick, query::MetadataStore, GraphId};
+use egui::Align;
 
 use crate::ui::{
     colors::{self, with_opacity},
@@ -43,11 +44,6 @@ pub fn inspector(
     }
 
     ui.separator();
-
-    let ro_graphs_state = graphs_state.clone();
-    let Some(graph_state) = ro_graphs_state.0.get(graph_id) else {
-        return;
-    };
 
     if let Some(graph_state) = graphs_state.0.get_mut(graph_id) {
         let selected_range_label = graph_state
@@ -103,7 +99,31 @@ pub fn inspector(
                     }
                 });
         });
+
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("LINE WIDTH")
+                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        ui.add(egui::DragValue::new(&mut graph_state.line_width).speed(0.2))
+                    });
+                });
+
+                ui.add_space(8.0);
+                ui.style_mut().spacing.slider_width = ui.available_size().x;
+                ui.style_mut().visuals.widgets.inactive.bg_fill = colors::PRIMARY_ONYX_8;
+                ui.add(egui::Slider::new(&mut graph_state.line_width, 1.0..=15.0).show_value(false))
+            });
     }
+
+    let ro_graphs_state = graphs_state.clone();
+    let Some(graph_state) = ro_graphs_state.0.get(graph_id) else {
+        return;
+    };
 
     for (entity_id, components) in &graph_state.entities {
         let entity = entities.iter().find(|(eid, _, _, _)| *eid == entity_id);
