@@ -90,6 +90,7 @@ w.spawn(
         active=True,
         pos=[0.0, 0.0, 5.0],
         looking_at=[0.0, 0.0, 0.0],
+        hdr=True,
     )
 ).name("Viewport 1")
 
