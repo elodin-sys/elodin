@@ -1,3 +1,4 @@
+//! Provides functionality for creating and manipulating multidimensional arrays with type-safe dimensions and operations.
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
@@ -11,16 +12,22 @@ use crate::{
     MapDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
 };
 
+/// A struct representing an array with type-safe dimensions and element type.
 pub struct Array<T: Copy, D: ArrayDim> {
     buf: D::Buf<T>,
 }
 
+/// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
 pub trait ArrayDim: TensorDim {
     type Buf<T>: ArrayBuf<T>
     where
         T: Copy;
     type Dim: AsRef<[usize]> + AsMut<[usize]> + Clone;
+
+    /// Returns the dimensions of the buffer.
     fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
+
+    /// Returns the strides of the buffer for multidimensional access.
     fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
 }
 
@@ -82,11 +89,13 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
     }
 }
 
+/// Provides buffer functionalities for a given type, allowing for safe memory operations.
 pub trait ArrayBuf<T>: Clone {
     fn as_buf(&self) -> &[T];
     fn as_mut_buf(&mut self) -> &mut [T];
 }
 
+/// Extends `ArrayBuf` for uninitialized memory management, crucial for safe and efficient array initialization.
 pub trait ArrayBufUnit<T>: ArrayBuf<MaybeUninit<T>> {
     fn uninit(dims: &[usize]) -> Self;
 
@@ -226,6 +235,7 @@ pub trait MaybeUnitMarker {
     type Init;
     fn uninit() -> Self;
 }
+
 impl<T> MaybeUnitMarker for MaybeUninit<T> {
     type Init = T;
     fn uninit() -> Self {
@@ -562,6 +572,7 @@ fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     true
 }
 
+/// An iterator for striding over an array buffer, providing element-wise access according to specified strides.
 struct StrideIterator<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> {
     buf: &'a [T],
     stride: S,
