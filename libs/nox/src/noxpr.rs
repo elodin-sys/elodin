@@ -1,3 +1,4 @@
+//! Provides the data structures and operations for representing and manipulating expression trees (Noxpr).
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -15,6 +16,7 @@ use crate::{
     CompFn, DefaultMap, DefaultMappedDim, Dim, Error, FromOp, IntoOp, MapDim, Tensor, TensorItem,
 };
 
+/// Represents various types of nodes in an expression tree for tensor computations.
 #[derive(Debug)]
 pub enum NoxprNode {
     // Params / Variables
@@ -72,6 +74,7 @@ pub enum NoxprNode {
     Jax(pyo3::PyObject),
 }
 
+/// Represents a constant value within the expression tree.
 #[derive(Clone)]
 pub struct Constant {
     pub data: xla::Literal, // NOTE: it might make more sense to use the xla independent store below
@@ -85,6 +88,7 @@ impl std::fmt::Debug for Constant {
     }
 }
 
+/// Represents the type of a node in the expression tree, either a tuple or array type.
 #[derive(Debug, Clone)]
 pub enum NoxprTy {
     Tuple(Vec<NoxprTy>),
@@ -109,6 +113,7 @@ impl NoxprTy {
     }
 }
 
+/// Represents a type of array including its element type and shape.
 #[derive(Debug, Clone)]
 pub struct ArrayTy {
     pub element_type: ElementType,
@@ -146,12 +151,14 @@ impl From<NoxprTy> for xla::Shape {
     }
 }
 
+/// Represents an operation producing an array of sequential integers.
 #[derive(Debug, Clone)]
 pub struct Iota {
     pub shape: ArrayTy,
     pub dim: usize,
 }
 
+/// Represents a binary operation in the expression tree.
 #[derive(Debug)]
 pub struct BinaryOp {
     pub lhs: Noxpr,
@@ -200,6 +207,7 @@ pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 
         .collect()
 }
 
+/// Represents a generalized dot product operation for matrix or tensor multiplication.
 #[derive(Debug)]
 pub struct DotGeneral {
     pub lhs: Noxpr,
@@ -341,12 +349,14 @@ impl DotDimensionNums {
     }
 }
 
+/// Stores the details for concatenation operations within the expression tree.
 #[derive(Debug)]
 pub struct Concat {
     pub nodes: Vec<Noxpr>,
     pub dimension: usize,
 }
 
+/// Represents slicing operations within the expression tree.
 #[derive(Debug)]
 pub struct Slice {
     pub expr: Noxpr,
@@ -355,6 +365,7 @@ pub struct Slice {
     pub strides: SmallVec<[i64; 4]>,
 }
 
+/// Represents dynamic slicing operations within the expression tree.
 #[derive(Debug)]
 pub struct DynamicSlice {
     pub expr: Noxpr,
@@ -362,18 +373,21 @@ pub struct DynamicSlice {
     pub size_indices: SmallVec<[i64; 4]>,
 }
 
+/// Represents reshaping operations within the expression tree.
 #[derive(Debug)]
 pub struct Reshape {
     pub expr: Noxpr,
     pub new_sizes: SmallVec<[i64; 4]>,
 }
 
+/// Represents a broadcast operation within the expression tree.
 #[derive(Debug)]
 pub struct Broadcast {
     pub expr: Noxpr,
     pub sizes: SmallVec<[i64; 4]>,
 }
 
+/// Represents a broadcast operation with specific dimensions.
 #[derive(Debug)]
 pub struct BroadcastInDim {
     pub expr: Noxpr,
@@ -381,12 +395,14 @@ pub struct BroadcastInDim {
     pub broadcast_dims: SmallVec<[i64; 4]>,
 }
 
+/// Represents a transpose operation within the expression tree.
 #[derive(Debug)]
 pub struct Transpose {
     pub expr: Noxpr,
     pub permutation: SmallVec<[i64; 4]>,
 }
 
+/// Represents a gather operation, a form of advanced indexing.
 #[derive(Debug)]
 pub struct Gather {
     pub expr: Noxpr,
@@ -398,6 +414,7 @@ pub struct Gather {
     pub index_vector_dim: i64,
 }
 
+/// Represents a dynamic update slice operation, updating slices of a tensor dynamically.
 #[derive(Debug)]
 pub struct DynamicUpdateSlice {
     pub expr: Noxpr,
@@ -405,6 +422,7 @@ pub struct DynamicUpdateSlice {
     pub update: Noxpr,
 }
 
+/// Represents the operation to extract an element from a tuple.
 #[derive(Debug)]
 pub struct GetTupleElement {
     pub expr: Noxpr,
@@ -418,6 +436,7 @@ pub struct Noxpr {
     pub backtrace: Arc<std::backtrace::Backtrace>,
 }
 
+/// Represents a scan operation, a form of reduction across one dimension.
 #[derive(Debug, Clone)]
 pub struct Scan {
     pub inputs: Vec<Noxpr>,
@@ -1112,6 +1131,7 @@ impl Deref for Noxpr {
     }
 }
 
+/// Represents a parameter in the expression tree.
 #[derive(Debug, Clone)]
 pub struct ParamExpr {
     pub number: i64,
