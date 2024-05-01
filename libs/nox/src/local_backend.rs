@@ -261,12 +261,14 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<MaybeUninit<T1>, D1>
 where
     D1::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1>,
 {
+    /// Constructs an uninitialized array given dimensions.
     fn uninit(dims: &[usize]) -> Self {
         Self {
             buf: D1::Buf::<MaybeUninit<T1>>::uninit(dims),
         }
     }
 
+    /// Transitions the array from uninitialized to initialized state, assuming all values are initialized.
     unsafe fn assume_init(self) -> Array<T1, D1>
     where
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
@@ -342,6 +344,7 @@ impl_op!(-, Sub, sub);
 impl_op!(/, Div, div);
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    /// Generates an iterator over the elements of the array after applying broadcasting to new dimensions.
     pub fn broadcast_iter(
         &self,
         new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
@@ -384,6 +387,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         })
     }
 
+    /// Performs a dot product between two arrays and returns a new array.
     fn dot<D2>(
         &self,
         right: &Array<T1, D2>,
@@ -441,6 +445,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         }
     }
 
+    /// Concatenates two arrays along the first dimension.
     pub fn concat<D2: Dim + DefaultMap>(
         &self,
         right: &Array<T1, D2>,
@@ -474,6 +479,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
+    /// Concatenates multiple arrays into a single array along a specified dimension.
     pub fn concat_many<const N: usize>(args: [&Array<T1, D1>; N]) -> Array<T1, ConcatManyDim<D1, N>>
     where
         DefaultMappedDim<D1>: nalgebra::DimMul<Const<N>> + nalgebra::Dim,
@@ -503,6 +509,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
+    /// Retrieves a specific element from the array based on an index, effectively slicing the array.
     pub fn get(&self, index: usize) -> Array<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
