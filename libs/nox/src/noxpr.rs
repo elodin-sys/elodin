@@ -319,6 +319,7 @@ impl DotGeneral {
     }
 }
 
+/// Stores dimensions specifications for generalized dot product operations.
 #[derive(Debug, Clone, Default)]
 pub struct DotDimensionNums {
     pub lhs_contracting_dimensions: SmallVec<[i64; 2]>,
@@ -1209,12 +1210,14 @@ impl_binary_op!(Mul, mul, Mul);
 impl_binary_op!(Div, div, Div);
 impl_binary_op!(Sub, sub, Sub);
 
+/// Traces and transforms `Noxpr` expressions into XLA operations.
 pub struct XlaTracer {
     builder: XlaBuilder,
     cache: HashMap<NoxprId, XlaOp>,
 }
 
 impl XlaTracer {
+    /// Constructs a new `XlaTracer` with a specified computation name.
     pub fn new(name: &str) -> Self {
         Self {
             builder: XlaBuilder::new(name),
@@ -1222,6 +1225,7 @@ impl XlaTracer {
         }
     }
 
+    /// Visits a `Noxpr`, recursively compiling it into an `XlaOp` using the XlaBuilder, with caching to prevent redundant computations.
     pub fn visit(&mut self, expr: &Noxpr) -> Result<XlaOp, Error> {
         let id = expr.id();
         if let Some(op) = self.cache.get(&id) {
@@ -1480,6 +1484,7 @@ impl XlaTracer {
         Ok(op)
     }
 
+    /// Helps in visiting and compiling binary operations like Add, Mul into XLA binary operations.
     #[inline]
     fn visit_binary_op(&mut self, op: &BinaryOp) -> Result<(XlaOp, XlaOp), Error> {
         Ok((self.visit(&op.lhs)?, self.visit(&op.rhs)?))

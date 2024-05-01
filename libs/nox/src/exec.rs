@@ -3,7 +3,7 @@ use crate::{AsBuffer, BufferArg, BufferForm, Client, FromPjrtBuffer};
 use paste::paste;
 use std::marker::PhantomData;
 
-/// Represents an executable compiled from an XLA computation, parameterized over input `T` and result `R` types.
+/// Represents an executable compiled from an XLA computation.
 pub struct Exec<T, R> {
     pub(crate) exec: xla::PjRtLoadedExecutable,
     pub(crate) phantom: PhantomData<(T, R)>,

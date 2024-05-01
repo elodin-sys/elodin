@@ -138,18 +138,21 @@ impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
+/// A wrapper to manage ownership of resources, allowing for both owned and borrowed references.
 pub enum MaybeOwned<'a, T> {
     Owned(T),
     Borrowed(&'a T),
 }
 
 impl<'a, T> MaybeOwned<'a, T> {
+    /// Constructs a `MaybeOwned` as a borrowed reference.
     fn borrow(val: &'a T) -> Self {
         MaybeOwned::Borrowed(val)
     }
 }
 
 impl<'a, T> Borrow<T> for MaybeOwned<'a, T> {
+    /// Provides a reference to the owned or borrowed value.
     fn borrow(&self) -> &T {
         match self {
             MaybeOwned::Borrowed(b) => b,

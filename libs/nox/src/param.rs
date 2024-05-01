@@ -14,10 +14,13 @@ use crate::{
     DottedDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim, XlaDim,
 };
 
+/// Represents an operand.
 pub struct Op;
 
+/// Represents a literal value.
 pub struct Literal;
 
+/// Represents a memory buffer.
 pub struct Buffer;
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.

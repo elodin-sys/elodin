@@ -231,8 +231,11 @@ impl<const D1: usize, const D2: usize, const D3: usize, T: Copy + Clone> ArrayBu
     }
 }
 
+/// Trait marking types that can be instantiated as uninitialized memory blocks.
 pub trait MaybeUnitMarker {
     type Init;
+
+    /// Creates an uninitialized instance of the type.
     fn uninit() -> Self;
 }
 
@@ -529,21 +532,26 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 }
 
+/// Represents a type resulting from combining dimensions of two arrays during concatenation operations.
 type ConcatDim<D1, D2> = ReplaceMappedDim<
     <D2 as DefaultMap>::DefaultMapDim,
     D1,
     AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>,
 >;
 
+/// Represents a type resulting from multiplying a dimension by a constant, used in expanding arrays.
 pub type ConcatManyDim<D1, const N: usize> =
     ReplaceMappedDim<<D1 as DefaultMap>::DefaultMapDim, D1, MulDim<DefaultMappedDim<D1>, Const<N>>>;
 
+/// Represents a type resulting from multiplication operations between two dimensions.
 pub type MulDim<A, B> = <A as nalgebra::DimMul<B>>::Output;
 
+/// Trait to enable retrieving a specified dimension type from a composite dimension.
 pub trait DimGet<D: Dim> {
     type Output: Dim;
 }
 
+/// Type alias for the result of a get operation, providing a sliced view of the array.
 pub type GetDim<D> = <ShapeConstraint as DimGet<D>>::Output;
 
 impl<const N: usize> DimGet<Const<N>> for ShapeConstraint {
@@ -617,6 +625,7 @@ impl<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
     }
 }
 
+/// Backend implementation for local computation on arrays.
 pub struct LocalBackend;
 
 impl Repr for LocalBackend {
