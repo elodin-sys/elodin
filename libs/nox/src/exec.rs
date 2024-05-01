@@ -30,6 +30,7 @@ macro_rules! impl_exec {
             $($ty: AsBuffer, )*
         {
             paste! {
+                #[doc = "Executes the compiled XLA computation with provided arguments."]
                 pub fn run<$([<arg_$ty>]: BufferArg<$ty>,)*>(&self, client: &Client, $(mut $ty: [<arg_$ty>],)*) -> Result<R::BufferTy, xla::Error> {
                     let mut args = xla::BufferArgsRef::default();
                     $(

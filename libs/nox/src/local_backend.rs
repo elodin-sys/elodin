@@ -285,6 +285,7 @@ where
 macro_rules! impl_op {
     ($op:tt, $op_trait:tt, $fn_name:tt) => {
         impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+            #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
             pub fn $fn_name<D2: ArrayDim + TensorDim + XlaDim>(
                 &self,
                 b: &Array<T1, D2>,
