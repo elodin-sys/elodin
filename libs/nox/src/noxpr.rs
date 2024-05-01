@@ -121,6 +121,7 @@ pub struct ArrayTy {
 }
 
 impl ArrayTy {
+    /// Creates a new array type with specified element type and shape.
     pub fn new(element_type: ElementType, shape: SmallVec<[i64; 4]>) -> Self {
         Self {
             element_type,
@@ -128,6 +129,7 @@ impl ArrayTy {
         }
     }
 
+    /// Pretty prints the array type to the given writer.
     fn pretty_print(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
         write!(writer, "{:?}{:?}", self.element_type, &self.shape)
     }
@@ -166,12 +168,14 @@ pub struct BinaryOp {
 }
 
 impl BinaryOp {
+    /// Calculates the resulting shape of the binary operation.
     fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
         let lhs_shape = self.lhs.shape()?;
         let rhs_shape = self.rhs.shape()?;
         broadcast_dims(&lhs_shape, &rhs_shape)
     }
 
+    /// Determines the resulting type of the binary operation.
     fn ty(&self) -> Option<NoxprTy> {
         let NoxprTy::ArrayTy(lhs_ty) = self.lhs.ty()? else {
             return None;
@@ -190,6 +194,7 @@ impl BinaryOp {
     }
 }
 
+/// Broadcasts dimensions of two shapes to determine the resulting shape.
 pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 4]>> {
     // logic from https://numpy.org/doc/stable/user/basics.broadcasting.html extended with extra rule for dynamic arrays
     let lhs = lhs.iter().rev().copied();
@@ -216,6 +221,7 @@ pub struct DotGeneral {
 }
 
 impl DotGeneral {
+    /// Calculates the resulting shape of the dot operation considering the dimension mappings.
     fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
         let lhs = self.lhs.shape()?;
         let rhs = self.lhs.shape()?;
@@ -259,6 +265,7 @@ impl DotGeneral {
         Some(result)
     }
 
+    /// Determines the resulting type of the dot operation based on input types and dimension mappings.
     fn ty(&self) -> Option<NoxprTy> {
         let NoxprTy::ArrayTy(lhs) = self.lhs.ty()? else {
             return None;
@@ -321,6 +328,7 @@ pub struct DotDimensionNums {
 }
 
 impl DotDimensionNums {
+    /// Conversion of `DotDimensionNums` to XLA's internal `DotDimensionNumbers` structure.
     fn to_xla(&self) -> xla::DotDimensionNumbers {
         let DotDimensionNums {
             lhs_contracting_dimensions,
@@ -429,6 +437,7 @@ pub struct GetTupleElement {
     pub index: usize,
 }
 
+/// Core structure for representing computational expressions.
 #[derive(Debug, Clone)]
 pub struct Noxpr {
     pub node: Arc<NoxprNode>,
@@ -444,10 +453,12 @@ pub struct Scan {
     pub scan_fn: NoxprFn,
 }
 
+/// A unique identifier for `Noxpr` expressions to facilitate caching and optimization.
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct NoxprId(usize);
 
 impl Default for NoxprId {
+    /// Provides default generation of unique identifiers for expressions.
     fn default() -> Self {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         Self(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
@@ -455,6 +466,7 @@ impl Default for NoxprId {
 }
 
 impl Noxpr {
+    /// Creates a new `Noxpr` instance from a node.
     pub fn new(node: NoxprNode) -> Self {
         Self {
             backtrace: Arc::new(std::backtrace::Backtrace::capture()),
@@ -463,10 +475,12 @@ impl Noxpr {
         }
     }
 
+    /// Creates a parameter `Noxpr` with a given index, type, and name.
     pub fn parameter(number: i64, ty: NoxprTy, name: String) -> Self {
         Self::new(NoxprNode::Param(ParamExpr { ty, number, name }))
     }
 
+    /// Creates a dot product expression between two `Noxpr` instances.
     pub fn dot(self, rhs: &Noxpr) -> Self {
         Self::new(NoxprNode::Dot(BinaryOp {
             lhs: self,
@@ -474,6 +488,7 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a generalized dot product expression between two `Noxpr` instances with dimension mapping.
     fn dot_general(self, rhs: Noxpr, dimensions: DotDimensionNums) -> Self {
         Self::new(NoxprNode::DotGeneral(DotGeneral {
             lhs: self,
@@ -482,30 +497,37 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a logarithmic transformation of the `Noxpr`.
     pub fn log(self) -> Self {
         Self::new(NoxprNode::Log(self))
     }
 
+    /// Creates a square root transformation of the `Noxpr`.
     pub fn sqrt(self) -> Self {
         Self::new(NoxprNode::Sqrt(self))
     }
 
+    /// Creates a sine transformation of the `Noxpr`.
     pub fn sin(self) -> Self {
         Self::new(NoxprNode::Sin(self))
     }
 
+    /// Creates a cosine transformation of the `Noxpr`.
     pub fn cos(self) -> Self {
         Self::new(NoxprNode::Cos(self))
     }
 
+    /// Creates a constant `Noxpr` from a given literal and type.
     pub fn constant(data: xla::Literal, ty: ArrayTy) -> Self {
         Self::new(NoxprNode::Constant(Constant { data, ty }))
     }
 
+    /// Combines multiple `Noxpr` into a tuple.
     pub fn tuple(nodes: Vec<Noxpr>) -> Self {
         Self::new(NoxprNode::Tuple(nodes))
     }
 
+    /// Concatenates a list of `Noxpr` along a specified dimension.
     pub fn concat_in_dim(mut nodes: Vec<Noxpr>, dimension: usize) -> Self {
         for node in &mut nodes {
             if node.shape().map(|s| s.is_empty()).unwrap_or_default() {
@@ -515,6 +537,7 @@ impl Noxpr {
         Self::new(NoxprNode::Concat(Concat { nodes, dimension }))
     }
 
+    /// Creates a slice from an `Noxpr`.
     pub fn slice(
         self,
         start_indices: SmallVec<[i64; 4]>,
@@ -529,6 +552,7 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a broadcasted expression along specified dimensions.
     pub fn broadcast_in_dim(
         self,
         sizes: SmallVec<[i64; 4]>,
@@ -541,10 +565,12 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a broadcasted expression.
     pub fn broadcast(self, sizes: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Broadcast(Broadcast { expr: self, sizes }))
     }
 
+    /// Creates a transposed `Noxpr`.
     pub fn transpose(self, permuation: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Transpose(Transpose {
             expr: self,
@@ -552,26 +578,32 @@ impl Noxpr {
         }))
     }
 
+    /// Logical OR between two `Noxpr`.
     pub fn or(self, rhs: Noxpr) -> Self {
         Self::new(NoxprNode::Or(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Logical AND between two `Noxpr`.
     pub fn and(self, rhs: Noxpr) -> Self {
         Self::new(NoxprNode::And(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Creates a greater-or-equal comparison between two `Noxpr`.
     pub fn greater_or_equal(self, rhs: Noxpr) -> Self {
         Self::new(NoxprNode::GreaterOrEqual(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Creates a less-or-equal comparison between two `Noxpr`.
     pub fn less_or_equal(self, rhs: Noxpr) -> Self {
         Self::new(NoxprNode::LessOrEqual(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Creates a less-than comparison between two `Noxpr`.
     pub fn less(self, rhs: Noxpr) -> Self {
         Self::new(NoxprNode::Less(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Reshapes an `Noxpr` to a new size.
     pub fn reshape(self, new_sizes: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Reshape(Reshape {
             expr: self,
@@ -579,6 +611,7 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a gather operation from an `Noxpr`.
     pub fn gather(
         self,
         indices: Noxpr,
@@ -599,10 +632,12 @@ impl Noxpr {
         }))
     }
 
+    /// Creates an iota operation, which generates an array of sequential integers.
     pub fn iota(shape: ArrayTy, dim: usize) -> Self {
         Self::new(NoxprNode::Iota(Iota { shape, dim }))
     }
 
+    /// Extracts an element from a tuple `Noxpr`.
     pub fn get_tuple_element(&self, index: usize) -> Self {
         Self::new(NoxprNode::GetTupleElement(GetTupleElement {
             expr: self.clone(),
@@ -610,6 +645,7 @@ impl Noxpr {
         }))
     }
 
+    /// Creates a scan operation over a sequence of `Noxpr`.
     pub fn scan(inputs: Vec<Noxpr>, initial_state: Noxpr, scan_fn: NoxprFn) -> Self {
         Self::new(NoxprNode::Scan(Scan {
             inputs,
@@ -618,6 +654,7 @@ impl Noxpr {
         }))
     }
 
+    /// Retrieves the type of the expression, which might be useful for type-checking or transformations.
     pub fn ty(&self) -> Option<NoxprTy> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(NoxprTy::ArrayTy(ArrayTy {
@@ -835,6 +872,7 @@ impl Noxpr {
         }
     }
 
+    /// Retrieves the element type of the expression if it's a constant or a parameter with a defined type.
     pub fn element_type(&self) -> Option<ElementType> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(c.ty.element_type),
@@ -895,6 +933,7 @@ impl Noxpr {
         }
     }
 
+    /// Returns the shape of the expression as an array of integers representing the size of each dimension.
     pub fn shape(&self) -> Option<SmallVec<[i64; 4]>> {
         match self.deref() {
             NoxprNode::Constant(c) => Some(c.ty.shape.clone()),
@@ -1037,6 +1076,7 @@ impl Noxpr {
         }
     }
 
+    /// Constructs a `Noxpr` for a dynamic slicing operation.
     pub fn dynamic_slice(
         &self,
         start_indices: Vec<Noxpr>,
@@ -1049,6 +1089,7 @@ impl Noxpr {
         }))
     }
 
+    /// Constructs a `Noxpr` for dynamically updating a slice of the original data.
     pub fn dynamic_update_slice(&self, start_indicies: Vec<Noxpr>, update: Noxpr) -> Noxpr {
         Noxpr::new(NoxprNode::DynamicUpdateSlice(DynamicUpdateSlice {
             expr: self.clone(),
@@ -1057,15 +1098,18 @@ impl Noxpr {
         }))
     }
 
+    /// Constructs a new `Noxpr` from a JAX Python object.
     #[cfg(feature = "jax")]
     pub fn jax(py: pyo3::PyObject) -> Noxpr {
         Noxpr::new(NoxprNode::Jax(py))
     }
 
+    /// Retrieves the unique identifier of the `Noxpr` instance.
     pub fn id(&self) -> NoxprId {
         self.id
     }
 
+    /// Provides a readable name for the type of node.
     pub fn name(&self) -> &'static str {
         match self.deref() {
             NoxprNode::Param(_) => "Param",
@@ -1103,6 +1147,7 @@ impl Noxpr {
         }
     }
 
+    /// Expands the rank of an expression to a higher dimensionality, typically used in broadcasting scenarios.
     fn expand_rank(self, rank: usize) -> Option<Noxpr> {
         let in_shape = self.shape()?;
         let in_rank = in_shape.len();
@@ -1441,6 +1486,7 @@ impl XlaTracer {
     }
 }
 
+/// A function that encapsulates a `Noxpr` and its arguments.
 #[derive(Debug, Clone)]
 pub struct NoxprFn {
     pub args: Vec<Noxpr>,
@@ -1448,10 +1494,12 @@ pub struct NoxprFn {
 }
 
 impl NoxprFn {
+    /// Creates a new `NoxprFn` with specified arguments and inner expression.
     pub fn new(args: Vec<Noxpr>, inner: Noxpr) -> Self {
         Self { args, inner }
     }
 
+    /// Builds an XLA operation based on the `NoxprFn` definition.
     pub fn build(&self, name: &str) -> Result<XlaOp, Error> {
         let mut tracer = XlaTracer::new(name);
         for a in self.args.iter() {
@@ -1460,6 +1508,7 @@ impl NoxprFn {
         tracer.visit(&self.inner)
     }
 
+    /// Collapses multiple parameters into a single tuple parameter for compact representation.
     pub fn collapse_params(&self, mut init_tuple: Vec<NoxprTy>) -> Result<Self, Error> {
         let init_offset = init_tuple.len();
         for a in self.args.iter() {
@@ -1487,6 +1536,7 @@ impl NoxprFn {
         Ok(final_fn)
     }
 
+    /// Pretty prints the function's structure into a formatted string.
     pub fn pretty_print(
         &self,
         parent_printer: &PrettyPrintTracer,
@@ -1515,17 +1565,20 @@ impl std::fmt::Display for NoxprFn {
     }
 }
 
+/// Used to trace and replace `Noxpr` references, mainly for transformation or optimization purposes.
 pub struct ReplacementTracer {
     cache: HashMap<NoxprId, Noxpr>,
 }
 
 impl ReplacementTracer {
+    /// Visits and potentially modifies a `NoxprFn` based on cached transformations.
     fn visit_fn(&mut self, func: &NoxprFn) -> NoxprFn {
         let args = func.args.iter().map(|a| self.visit(a)).collect::<Vec<_>>();
         let inner = self.visit(&func.inner);
         NoxprFn::new(args, inner)
     }
 
+    /// Visits and potentially modifies a `Noxpr` based on cached transformations.
     fn visit(&mut self, expr: &Noxpr) -> Noxpr {
         let id = expr.id();
         if let Some(expr) = self.cache.get(&id) {
@@ -1625,6 +1678,7 @@ impl ReplacementTracer {
         expr
     }
 
+    /// Helper method to visit and modify binary operations.
     fn visit_binary_op(&mut self, op: &BinaryOp) -> BinaryOp {
         BinaryOp {
             lhs: self.visit(&op.lhs),
@@ -1634,6 +1688,7 @@ impl ReplacementTracer {
 }
 
 impl Noxpr {
+    /// Applies vectorized map operation to a function across specified axes.
     pub fn vmap_with_axis(
         func: NoxprFn,
         in_axis: &[usize],
@@ -1677,6 +1732,7 @@ impl Noxpr {
 }
 
 impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
+    /// Vectorized map of a function over a tensor.
     pub fn vmap<O: TensorItem + IntoOp>(
         &self,
         func: impl CompFn<(T::Tensor<<D::DefaultMapDim as MapDim<D>>::Item>,), O>,
@@ -1684,6 +1740,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
         self.vmap_with_dim::<D::DefaultMapDim, O>(func)
     }
 
+    /// Vectorized map of a function over a tensor with a specified mapping dimension.
     pub fn vmap_with_dim<MDim: MapDim<D>, O: TensorItem + IntoOp>(
         &self,
         func: impl CompFn<(T::Tensor<MDim::Item>,), O>,
@@ -1697,6 +1754,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
         })
     }
 
+    /// Applies a scan operation over a tensor, accumulating results using a specified function.
     pub fn scan<O: FromOp + IntoOp>(
         &self,
         initial_state: O,
@@ -1709,12 +1767,14 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     }
 }
 
+/// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
 #[derive(Clone)]
 pub struct BatchTracer {
     cache: HashMap<NoxprId, BatchedExpr>,
     out_axis: BatchAxis,
 }
 
+/// Represents an expression along with its batch axis information.
 #[derive(Clone, Debug)]
 pub struct BatchedExpr {
     inner: Noxpr,
@@ -1767,6 +1827,7 @@ impl BatchedExpr {
     }
 }
 
+/// Describes the axis along which batch operations are performed.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BatchAxis {
     NotMapped,
@@ -1774,6 +1835,7 @@ pub enum BatchAxis {
 }
 
 impl BatchTracer {
+    /// Creates a new `BatchTracer` for managing batch operation contexts.
     pub fn new(out_axis: BatchAxis) -> Self {
         Self {
             cache: HashMap::default(),
@@ -1781,6 +1843,7 @@ impl BatchTracer {
         }
     }
 
+    /// Visits a `Noxpr` and applies any batch-specific transformations.
     pub fn visit(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
         let id = expr.id();
         if let Some(op) = self.cache.get(&id) {
@@ -2196,6 +2259,7 @@ impl BatchTracer {
         Ok(op)
     }
 
+    /// Specifically handles the dot-general operation in a batched context.
     fn visit_dot_general(
         &mut self,
         lhs: &Noxpr,
@@ -2316,6 +2380,7 @@ impl BatchTracer {
         }
     }
 
+    /// Handles the broadcasting of expressions within a batched context.
     fn visit_broadcast_in_dim(
         &mut self,
         inner: &Noxpr,
@@ -2356,6 +2421,7 @@ impl BatchTracer {
         }
     }
 
+    /// Manages binary operations in a batched context, considering batch axes.
     fn visit_binary_op(
         &mut self,
         op: &BinaryOp,
@@ -2420,6 +2486,7 @@ impl BatchTracer {
         }
     }
 
+    /// Manages unary operations in a batched context.
     fn visit_unary_op(
         &mut self,
         expr: &Noxpr,
@@ -2437,7 +2504,9 @@ impl BatchTracer {
     }
 }
 
+/// Extension for scalar operations on `Noxpr`.
 pub trait NoxprScalarExt {
+    /// Creates a constant `Noxpr` from a scalar value.
     fn constant(self) -> Noxpr;
 }
 
@@ -2453,16 +2522,19 @@ impl<T: NativeType + ArrayElement> NoxprScalarExt for T {
     }
 }
 
+/// Utility class for pretty printing expressions, useful for debugging or displaying computational graphs.
 #[derive(Clone, Debug, Default)]
 pub struct PrettyPrintTracer {
     printed: HashMap<NoxprId, usize>,
 }
 
 impl PrettyPrintTracer {
+    /// Prints a variable label for debugging purposes.
     fn print_var_label(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
         write!(writer, "var_{}", self.printed.len())
     }
 
+    /// Prints a variable with a given ID.
     fn print_var(
         &mut self,
         id: NoxprId,
@@ -2476,6 +2548,7 @@ impl PrettyPrintTracer {
         Ok(num)
     }
 
+    /// Visits a `Noxpr` and prints it in a readable format.
     fn visit<W: std::fmt::Write>(
         &mut self,
         expr: &Noxpr,
@@ -2707,6 +2780,7 @@ impl PrettyPrintTracer {
         num
     }
 
+    /// Specifically handles printing of binary operations.
     fn visit_binary_op(
         &mut self,
         id: NoxprId,
