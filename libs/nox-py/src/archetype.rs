@@ -40,14 +40,16 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
 }
 
 pub enum Spawnable<'py> {
-    Archetype(Archetype<'py>),
+    Archetypes(Vec<Archetype<'py>>),
     Asset { id: AssetId, bytes: PyBufBytes },
 }
 
 impl<'py> FromPyObject<'py> for Spawnable<'py> {
     fn extract(ob: &'py PyAny) -> PyResult<Self> {
-        if let Ok(archetype) = Archetype::extract(ob) {
-            Ok(Self::Archetype(archetype))
+        if let Ok(archetype_seq) = ob.extract::<Vec<Archetype>>() {
+            Ok(Self::Archetypes(archetype_seq))
+        } else if let Ok(archetype) = Archetype::extract(ob) {
+            Ok(Self::Archetypes(vec![archetype]))
         } else {
             let id: u64 = ob.call_method0("asset_id")?.extract()?;
             let bytes = ob.call_method0("bytes")?.extract()?;

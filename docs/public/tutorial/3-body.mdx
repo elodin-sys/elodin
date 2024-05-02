@@ -57,37 +57,31 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
         Before we can do anything we'll need an instance of a WorldBuilder, and with that we can spawn our first entities:
         ```python
         w = el.World()
-        a = (
-            w.spawn(
-                el.Body(
-                    world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
-                    world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
-                    inertia=el.Inertia.from_mass(1.0 / G),
-                    pbr=w.insert_asset(
-                        el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
-                    ),
-                )
-            )
-            .name("A")
-            .id()
+        a = w.spawn(
+            el.Body(
+                world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
+                world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
+                inertia=el.Inertia.from_mass(1.0 / G),
+                pbr=w.insert_asset(
+                    el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
+                ),
+            ),
+            name="A",
         )
-        b = (
-            w.spawn(
-                el.Body(
-                    world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
-                    world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
-                    inertia=el.Inertia.from_mass(1.0 / G),
-                    pbr=w.insert_asset(
-                        el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
-                    ),
-                )
-            )
-            .name("B")
-            .id()
+        b = w.spawn(
+            el.Body(
+                world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
+                world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
+                inertia=el.Inertia.from_mass(1.0 / G),
+                pbr=w.insert_asset(
+                    el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
+                ),
+            ),
+            name="B",
         )
 
-        w.spawn(GravityConstraint(a, b)).name("A -> B")
-        w.spawn(GravityConstraint(b, a)).name("B -> A")
+        w.spawn(GravityConstraint(a, b), name="A -> B")
+        w.spawn(GravityConstraint(b, a), name="B -> A")
         ```
         `GravityConstraint` tells the simulation to calculate gravity between the two objects.
     </Step>
@@ -101,8 +95,9 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
                 active=True,
                 pos=[0.0, 0.0, 5.0],
                 looking_at=[0.0, 0.0, 0.0],
-            )
-        ).name("Viewport")
+            ),
+            name="Viewport 1",
+        )
         ```
 
         Now, we're ready to start simulating:
@@ -115,26 +110,23 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
     <Step title="Add the Third Body">
         And last but not least, we will add the third body which will make this a stable orbit.
         ```python
-        c = (
-            w.spawn(
-                el.Body(
-                    world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
-                    world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
-                    inertia=el.Inertia.from_mass(1.0 / G),
-                    pbr=w.insert_asset(
-                        el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
-                    ),
-                )
-            )
-            .name("C")
-            .id()
+        c = w.spawn(
+            el.Body(
+                world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
+                world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
+                inertia=el.Inertia.from_mass(1.0 / G),
+                pbr=w.insert_asset(
+                    el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
+                ),
+            ),
+            name="C",
         )
 
-        w.spawn(GravityConstraint(a, c)).name("A -> C")
-        w.spawn(GravityConstraint(b, c)).name("B -> C")
+        w.spawn(GravityConstraint(a, c), name="A -> C")
+        w.spawn(GravityConstraint(b, c), name="B -> C")
 
-        w.spawn(GravityConstraint(c, a)).name("C -> A")
-        w.spawn(GravityConstraint(c, b)).name("C -> B")
+        w.spawn(GravityConstraint(c, a), name="C -> A")
+        w.spawn(GravityConstraint(c, b), name="C -> B")
         ```
     </Step>
     <Step title="Start the Simulation!">
