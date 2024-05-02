@@ -62,15 +62,16 @@ def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
 
 
 w = el.World()
-w.spawn(Globals(seed=jnp.int64(0))).metadata(el.EntityMetadata("Globals"))
+w.spawn(Globals(seed=jnp.int64(0)), name="Globals")
 w.spawn(
     el.Body(
-        world_pos=el.WorldPos.from_linear(jnp.array([0.0, 6.0, 0.0])),
+        world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 6.0, 0.0])),
         pbr=w.insert_asset(
             el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
         ),
-    )
-).name("Ball")
+    ),
+    name="Ball",
+)
 w.spawn(
     el.Panel.viewport(
         track_rotation=False,
@@ -78,8 +79,9 @@ w.spawn(
         pos=[6.0, 3.0, 6.0],
         looking_at=[0.0, 1.0, 0.0],
         show_grid=True,
-    )
-).name("Viewport")
+    ),
+    name="Viewport",
+)
 effectors = gravity.pipe(apply_wind)
 sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
 w.run(sys)
