@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, Seek};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atc_entity::events::DbExt;
@@ -81,7 +82,10 @@ impl Runner {
             .await?
             .ok_or_else(|| anyhow::anyhow!("monte carlo run {} not found", run_id))?;
 
-        let (run_exec, sim_code) = self.download_artifacts(run.id).await?;
+        let temp_dir = tempfile::tempdir()?;
+        let artifacts = self.download_artifacts(&temp_dir, run.id).await?;
+        let context_dir = artifacts.join("context");
+        let run_exec = WorldExec::read_from_dir(artifacts)?;
 
         for b in batches {
             let txn = self.db.begin().await?;
@@ -98,7 +102,7 @@ impl Runner {
 
             let start_time = chrono::Utc::now();
             let failed = self
-                .process_batch(&run, &batch, &run_exec, sim_code.clone())
+                .process_batch(&run, &batch, &run_exec, &context_dir)
                 .instrument(tracing::info_span!("batch", no = %b.batch_no))
                 .await
                 .inspect_err(|err| tracing::error!(?err, "batch failed"))
@@ -124,13 +128,14 @@ impl Runner {
         run: &atc_entity::mc_run::Model,
         batch: &atc_entity::batches::Model,
         run_exec: &WorldExec,
-        code: String,
+        context_dir: &Path,
     ) -> Result<BitVec<u32>, Error> {
         let sim_start = Instant::now();
         let mut batch_world = PolarsWorld::default();
         // TODO: parallelize batch sim execution
         let batch_no = batch.batch_number as usize;
         let samples = batch.samples as usize;
+
         for i in 0..samples {
             let mut sample_exec = run_exec.fork();
             let sample_no = batch_no * samples + i;
@@ -152,12 +157,13 @@ impl Runner {
         }
         tracing::debug!(elapsed = ?sim_start.elapsed(), "simulated batch");
         let archive_start = Instant::now();
-        let mut batch_tar = write_history_tar(&mut batch_world)?;
+        let mut batch_tar = write_results_tar(context_dir, &mut batch_world)?;
         let batch_tar_zst = compress(&mut batch_tar)?;
         tracing::debug!(elapsed = ?archive_start.elapsed(), "wrote batch archive");
         let file_name = format!("runs/{}/batches/{}.tar.zst", run.id, batch_no);
         self.upload_archive(batch_tar_zst, file_name.clone());
 
+        // run pytest:
         let results_file = file_name.replace('/', "_");
         let file_stream = stream_file(batch_tar, results_file.clone());
         self.vm_client.clone().send_file(file_stream).await?;
@@ -165,7 +171,7 @@ impl Runner {
         let report = self
             .vm_client
             .clone()
-            .test(TestReq { code, results_file })
+            .test(TestReq { results_file })
             .await?
             .into_inner()
             .report;
@@ -175,7 +181,11 @@ impl Runner {
         Ok(failed)
     }
 
-    async fn download_artifacts(&self, run_id: Uuid) -> anyhow::Result<(WorldExec, String)> {
+    async fn download_artifacts(
+        &self,
+        temp_dir: &tempfile::TempDir,
+        run_id: Uuid,
+    ) -> anyhow::Result<PathBuf> {
         tracing::info!("downloading sim artifacts for run {}", run_id);
         let data = self
             .gcs_client
@@ -190,12 +200,9 @@ impl Runner {
             .await?;
         let zstd = zstd::Decoder::new(data.as_slice())?;
         let mut tar = tar::Archive::new(zstd);
-        let temp_dir = tempfile::tempdir()?;
         tar.unpack(temp_dir.path())?;
         let artifacts = temp_dir.path().join("artifacts");
-        let sim_code = std::fs::read_to_string(artifacts.join("sim_code.py"))?;
-        let run_exec = WorldExec::read_from_dir(artifacts)?;
-        Ok((run_exec, sim_code))
+        Ok(artifacts)
     }
 
     fn upload_archive(&self, archive: File, file_name: String) -> tokio::task::JoinHandle<()> {
@@ -259,12 +266,13 @@ fn stream_file(file: File, file_name: String) -> ReceiverStream<FileChunk> {
     ReceiverStream::new(rx)
 }
 
-fn write_history_tar(history: &mut PolarsWorld) -> Result<File, Error> {
+fn write_results_tar(context_dir: &Path, history: &mut PolarsWorld) -> Result<File, Error> {
     let results_dir = tempfile::tempdir()?;
     history.write_to_dir(&results_dir)?;
 
     let mut ar = tar::Builder::new(tempfile::tempfile()?);
     ar.append_dir_all("results", &results_dir)?;
+    ar.append_dir_all("context", context_dir)?;
     let mut results_tar = ar.into_inner()?;
     results_tar.sync_all()?;
     results_tar.rewind()?;
@@ -291,4 +299,6 @@ enum Error {
     Tonic(#[from] tonic::Status),
     #[error("pytest error: {0}")]
     Pytest(#[from] pytest::Error),
+    #[error("serde error: {0}")]
+    Serde(#[from] serde_json::Error),
 }

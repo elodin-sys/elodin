@@ -40,6 +40,22 @@ defmodule Elodin.Types.Sandbox.BuildResp do
   field :artifacts_file, 1, type: :string, json_name: "artifactsFile"
 end
 
+defmodule Elodin.Types.Sandbox.TestReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :results_file, 2, type: :string, json_name: "resultsFile"
+end
+
+defmodule Elodin.Types.Sandbox.TestResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :report, 1, type: :string
+end
+
 defmodule Elodin.Types.Sandbox.FileChunk do
   @moduledoc false
 
@@ -85,6 +101,8 @@ defmodule Elodin.Types.Sandbox.Sandbox.Service do
   use GRPC.Service, name: "elodin.types.sandbox.Sandbox", protoc_gen_elixir_version: "0.12.0"
 
   rpc :Build, Elodin.Types.Sandbox.BuildReq, Elodin.Types.Sandbox.BuildResp
+
+  rpc :Test, Elodin.Types.Sandbox.TestReq, Elodin.Types.Sandbox.TestResp
 
   rpc :SendFile, stream(Elodin.Types.Sandbox.FileChunk), Elodin.Types.Sandbox.FileTransferResp
 

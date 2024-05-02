@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
+use elodin_types::Metadata;
 use tonic::{service::interceptor::InterceptedService, transport};
 
 use super::auth::AuthInterceptor;
@@ -81,12 +82,15 @@ impl Cli {
             file,
             open,
         } = args.clone();
-        let mut client = self.client().await?;
+        let entrypoint = file.file_name().unwrap().to_string_lossy().into_owned();
+        let metadata = Metadata { entrypoint };
         let create_req = CreateMonteCarloRunReq {
             name: name.clone(),
             samples,
             max_duration,
+            metadata: serde_json::to_string(&metadata)?,
         };
+        let mut client = self.client().await?;
         let create_res = client
             .create_monte_carlo_run(create_req)
             .await?
@@ -170,7 +174,11 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
         anyhow::bail!("Failed to prepare simulation artifacts: {}", status);
     }
 
-    std::fs::copy(&file, tmp_dir.path().join("sim_code.py"))?;
+    let file = file.canonicalize()?;
+    let context_dir = file.parent().unwrap();
+
+    // copy the context directory to the temp dir:
+    copy_dir::copy_dir(context_dir, tmp_dir.path().join("context"))?;
 
     let archive_file = tempfile::tempfile()?;
     let buf = std::io::BufWriter::new(archive_file);

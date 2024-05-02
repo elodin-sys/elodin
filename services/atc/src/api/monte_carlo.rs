@@ -42,13 +42,15 @@ impl api::Api {
         let samples = i32::try_from(req.samples).map_err(|_| error::Error::InvalidRequest)?;
         let max_duration =
             i64::try_from(req.max_duration).map_err(|_| error::Error::InvalidRequest)?;
+        let metadata = serde_json::from_str::<Json>(&req.metadata)
+            .map_err(|_| error::Error::InvalidRequest)?;
         let mc_run = atc_entity::mc_run::ActiveModel {
             id: sea_orm::Set(id),
             user_id: sea_orm::Set(user.id),
             samples: sea_orm::Set(samples),
             name: sea_orm::Set(req.name),
             status: sea_orm::Set(mc_run::Status::Pending),
-            metadata: sea_orm::Set(Json::Null),
+            metadata: sea_orm::Set(metadata),
             max_duration: sea_orm::Set(max_duration),
             started: sea_orm::Set(None),
         }

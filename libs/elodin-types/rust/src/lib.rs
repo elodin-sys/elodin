@@ -64,3 +64,8 @@ pub struct Batch {
     pub batch_no: usize,
     pub buffer: bool,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct Metadata {
+    pub entrypoint: String,
+}

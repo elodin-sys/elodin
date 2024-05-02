@@ -1,4 +1,5 @@
 use std::io::{BufRead, Write};
+use std::path::Path;
 use std::time::Instant;
 
 use anyhow::Context;
@@ -40,7 +41,8 @@ impl Sandbox for Service {
     async fn test(&self, req: Request<TestReq>) -> Result<Response<TestResp>, Status> {
         let req = req.into_inner();
 
-        let results = test(req.code, req.results_file).await.map_err(|err| {
+        let results_path = std::env::temp_dir().join(req.results_file);
+        let results = test(&results_path).await.map_err(|err| {
             tracing::error!(?err, "failed to test results");
             Status::internal(format!("{err:#}"))
         })?;
@@ -138,42 +140,39 @@ async fn build(code: String) -> anyhow::Result<String> {
     Ok(file_name)
 }
 
-async fn test(code: String, results_file: String) -> anyhow::Result<TestResp> {
+async fn test(results_path: &Path) -> anyhow::Result<TestResp> {
     let tempdir = tempfile::tempdir()?;
-    let hash = blake3::hash(code.as_bytes()).to_hex();
-    let code_file = std::env::temp_dir().join(format!("test_code_{}.py", hash));
-    tracing::debug!(len = code.len(), file = %code_file.display(), "writing code to temp file");
-    std::fs::write(&code_file, &code)?;
-
     let report = tempdir.path().join("report.json");
     let start = Instant::now();
 
-    let batch_results = if results_file.is_empty() {
-        None
-    } else {
-        let results_file_path = std::env::temp_dir().join(&results_file);
-        let results_file = std::fs::File::open(&results_file_path)?;
-        let metadata = results_file.metadata()?;
-        tracing::debug!(path = %results_file_path.display(), size = metadata.len(), "unpacking");
-        let mut tar = tar::Archive::new(results_file);
-        tar.unpack(tempdir.path())?;
-        let results_path = tempdir.path().join("results");
-        Some(results_path)
-    };
+    let results_file = std::fs::File::open(results_path)?;
+    let metadata = results_file.metadata()?;
+    tracing::debug!(path = %results_path.display(), size = metadata.len(), "unpacking");
+    let mut tar = tar::Archive::new(results_file);
+    tar.unpack(tempdir.path())?;
+    let batch_results = tempdir.path().join("results");
+    let workdir = tempdir.path().join("context");
 
     let json_report_file = report.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         pyo3::Python::with_gil(|py| {
             let locals = PyDict::new(py);
-            locals.set_item("path", code_file)?;
+            locals.set_item("path", workdir)?;
             locals.set_item("json_report_file", json_report_file)?;
             locals.set_item("batch_results", batch_results)?;
-            let py_code = "import pytest
+            let py_code = r#"import pytest
 import sys
-args = [path, '--json-report', '--json-report-file', json_report_file]
-if batch_results:
-  args.extend(['--batch-results', batch_results])
-retcode = pytest.main(args)";
+sys.path.append(path)
+args = [
+    path,
+    "--json-report",
+    "--json-report-file",
+    json_report_file,
+    "--batch-results",
+    batch_results,
+]
+retcode = pytest.main(args)
+"#;
             py.run(py_code, None, Some(locals))?;
             let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
             // exit code 1: tests ran but some failed
@@ -186,18 +185,13 @@ retcode = pytest.main(args)";
         })
     })
     .await
-    .unwrap();
-    if let Err(err) = result {
-        tracing::warn!(?err, "failed to run pytest");
-    }
+    .unwrap()
+    .context("failed to run pytest")?;
     let report = std::fs::read_to_string(report)?;
     tracing::debug!(elapsed = ?start.elapsed(), "tested results");
 
-    if !results_file.is_empty() {
-        let results_file_path = std::env::temp_dir().join(&results_file);
-        if let Err(err) = std::fs::remove_file(results_file_path) {
-            tracing::error!(?err, "failed to delete results file");
-        }
+    if let Err(err) = std::fs::remove_file(results_path) {
+        tracing::error!(?err, "failed to delete results file");
     }
 
     Ok(TestResp { report })
