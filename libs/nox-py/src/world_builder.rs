@@ -6,8 +6,6 @@ use nox_ecs::{
     nox::{self, ScalarExt},
     spawn_tcp_server, HostColumn, HostStore, SharedWorld, Table, World,
 };
-use pyo3::exceptions::PySystemExit;
-use pyo3::types::PyDict;
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{collections::hash_map::Entry, path::PathBuf, time::Duration};
 
@@ -247,30 +245,6 @@ impl WorldBuilder {
                     let _ = SimSupervisor::spawn(path);
                     Ok(Some(addr.to_string()))
                 }
-            }
-            Args::Test {
-                batch_results,
-                json_report_file,
-            } => {
-                let locals = PyDict::new(py);
-                locals.set_item("path", path)?;
-                locals.set_item("json_report_file", json_report_file)?;
-                locals.set_item("batch_results", batch_results)?;
-                let py_code = "import pytest
-import sys
-args = [path, '--json-report', '--json-report-file', json_report_file]
-if batch_results:
-  args.extend(['--batch-results', batch_results])
-retcode = pytest.main(args)";
-                py.run(py_code, None, Some(locals))?;
-                let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
-                // exit code 1: tests ran but some failed
-                // exit code 5: no tests found
-                if retcode != 0 && retcode != 1 && retcode != 5 {
-                    let err = PySystemExit::new_err(retcode);
-                    return Err(Error::PyErr(err));
-                }
-                Ok(None)
             }
         }
     }

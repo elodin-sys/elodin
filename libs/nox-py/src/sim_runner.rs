@@ -29,12 +29,6 @@ pub enum Args {
         #[arg(long)]
         watch: bool,
     },
-    Test {
-        #[arg(long)]
-        batch_results: Option<PathBuf>,
-        #[arg(long)]
-        json_report_file: PathBuf,
-    },
 }
 
 pub struct SimSupervisor;
