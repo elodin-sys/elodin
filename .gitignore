@@ -23,5 +23,3 @@ elo-dashboard-secret.env
 
 .buildkite/__pycache__
 .buildkite/pipeline.json
-
-libs/nox-py/assets
