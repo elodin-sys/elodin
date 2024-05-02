@@ -100,15 +100,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    if config.monte_carlo.spawn_batches {
-        let batch_spawner = monte_carlo::BatchSpawner::new(&redis, &config.pod_name).await?;
-        services.spawn(
-            batch_spawner
-                .run(cancel_token.clone())
-                .instrument(tracing::info_span!("batch_spawner")),
-        );
-    }
-
     // wait for cancellation
     cancel_token.cancelled().await;
     info!("waiting for services to terminate gracefully");

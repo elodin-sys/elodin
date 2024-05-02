@@ -2,7 +2,7 @@ use crate::monte_carlo::{BATCH_SIZE, MAX_SAMPLE_COUNT};
 use crate::{api, error};
 
 use atc_entity::{batches, mc_run};
-use elodin_types::{api::*, Run, RUN_TOPIC};
+use elodin_types::{api::*, Batch, BATCH_TOPIC};
 use futures::StreamExt;
 use sea_orm::{prelude::*, QueryOrder};
 
@@ -104,18 +104,24 @@ impl api::Api {
         mc_run.started = sea_orm::Set(Some(start_time));
         let mc_run = mc_run.update(txn).await?;
 
-        let mc_run_msg = Run {
-            id: mc_run.id,
-            name: mc_run.name,
-            samples: mc_run.samples as usize,
-            batch_size: BATCH_SIZE,
-            start_time,
-            max_duration: mc_run.max_duration as u64,
-        };
-        self.msg_queue.send(RUN_TOPIC, vec![mc_run_msg]).await?;
+        self.spawn_batches(&mc_run).await?;
         tracing::debug!(%user.id, %id, "started monte carlo run");
-
         Ok(StartMonteCarloRunResp {})
+    }
+
+    async fn spawn_batches(&self, run: &mc_run::Model) -> Result<(), error::Error> {
+        tracing::debug!(%run.id, %run.name, "spawning batches");
+        let samples = run.samples as usize;
+        let batch_count = samples.div_ceil(BATCH_SIZE);
+        let batches = (0..batch_count)
+            .map(|batch_no| Batch {
+                run_id: run.id,
+                batch_no,
+                buffer: false,
+            })
+            .collect();
+        self.msg_queue.send(BATCH_TOPIC, batches).await?;
+        Ok(())
     }
 
     pub async fn get_monte_carlo_run(

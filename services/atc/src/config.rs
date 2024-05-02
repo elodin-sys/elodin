@@ -37,8 +37,6 @@ pub struct OrcaConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct MonteCarloConfig {
-    #[serde(default)]
-    pub spawn_batches: bool,
     pub sim_artifacts_bucket_name: String,
     pub sim_results_bucket_name: String,
 }
