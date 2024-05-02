@@ -15,7 +15,7 @@ Unit quaternions are used to represent spatial orientations and rotations of bod
 
 - `Quaternion.from_axis_angle()` -> [elodin.Quaternion]
 
-    Create a quaternion from an axis and an angle. 
+    Create a quaternion from an axis and an angle.
 
 - `inverse()` -> [elodin.Quaternion]
 
@@ -25,6 +25,22 @@ Unit quaternions are used to represent spatial orientations and rotations of bod
 
     Normalize to a unit quaternion.
 
+- `__add__(other)` -> [elodin.Quaternion]
+
+    Add two quaternions.
+
+    <Info>
+    Adding quaternions does not yield the composite rotation unless they are [infinitesimal rotations](https://en.wikipedia.org/wiki/Rotation_matrix#Infinitesimal_rotations). Use multiplication instead.
+    </Info>
+
+- `__mul__(other)` -> [elodin.Quaternion]
+
+    Multiply two quaternions.
+
+- `__matmul__(vector)` -> [jax.Array]
+
+    Rotate `vector` by computing the matrix product. The vector can be a plain [jax.Array] or one of the following spatial objects: [elodin.SpatialTransform], [elodin.SpatialMotion], [elodin.SpatialForce].
+
 
 ## Spatial Vector Algebra
 
@@ -33,6 +49,10 @@ Elodin uses Featherstone’s spatial vector algebra notation for rigid-body dyna
 ### _class_ `elodin.SpatialTransform`
 
 A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
+
+- `SpatialTransform.zero()` -> [elodin.SpatialTransform]
+
+    Create a spatial transform with no rotation or translation.
 
 - `SpatialTransform.from_linear(linear)` -> [elodin.SpatialTransform]
 
@@ -50,9 +70,17 @@ A spatial transform is a 7D vector that represents a rigid body transformation i
 
     Get the angular part of the spatial transform as a quaternion.
 
+- `__add__(other)` -> [elodin.SpatialTransform]
+
+    Add two spatial transforms.
+
 ### _class_ `elodin.SpatialMotion`
 
 A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
+
+- `SpatialMotion.zero()` -> [elodin.SpatialMotion]
+
+    Create a spatial motion with no linear or angular velocity.
 
 - `SpatialMotion.from_linear(linear)` -> [elodin.SpatialMotion]
 
@@ -70,9 +98,17 @@ A spatial motion is a 6D vector that represents the velocity of a rigid body in 
 
     Get the angular part of the spatial motion as a vector with shape (3,).
 
+- `__add__(other)` -> [elodin.SpatialMotion]
+
+    Add two spatial motions.
+
 ### _class_ `elodin.SpatialForce`
 
 A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
+
+- `SpatialForce.zero()` -> [elodin.SpatialForce]
+
+    Create a spatial force with no linear force or torque.
 
 - `SpatialForce.from_linear(linear)` -> [elodin.SpatialForce]
 
@@ -90,9 +126,36 @@ A spatial force is a 6D vector that represents the linear force and torque appli
 
     Get the torque part of the spatial force as a vector with shape (3,).
 
+- `__add__(other)` -> [elodin.SpatialForce]
+
+    Add two spatial forces.
+
+### _class_ `elodin.SpatialInertia`
+
+A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space. The moment of inertia is represented in its [diagonalized form] of $[I_1, I_2, I_3]$.
+
+[diagonalized form]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+
+- `__init__(mass, inertia)` -> [elodin.SpatialInertia]
+
+    Create a spatial tensor inertia from a scalar mass and an inertia tensor diagonal with shape (3,).
+
+- `SpatialInertia.from_mass(mass)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from just the mass. The inertia is set to the same value as the mass along all axes.
+
+- `mass()` -> [jax.Array]
+
+    Get the scalar mass of the spatial inertia.
+
+- `inertia_diag()` -> [jax.Array]
+
+    Get the inertia tensor diagonal of the spatial inertia with shape (3,).
+
 [elodin.Quaternion]: #class-elodin-quaternion
 [elodin.SpatialTransform]: #class-elodin-spatialtransform
 [elodin.SpatialMotion]: #class-elodin-spatialmotion
 [elodin.SpatialForce]: #class-elodin-spatialforce
+[elodin.SpatialInertia]: #class-elodin-spatialinertia
 [jax.Array]: https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array
 [jax.typing.ArrayLike]: https://jax.readthedocs.io/en/latest/_autosummary/jax.typing.ArrayLike.html#jax.typing.ArrayLike
