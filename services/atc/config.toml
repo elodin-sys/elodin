@@ -20,4 +20,3 @@ timeout = 600.0
 [monte_carlo]
 sim_artifacts_bucket_name = ""
 sim_results_bucket_name = ""
-spawn_batches = false

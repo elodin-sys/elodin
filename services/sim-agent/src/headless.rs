@@ -3,14 +3,14 @@ use std::io::{BufRead, Seek};
 use std::time::Instant;
 
 use atc_entity::events::DbExt;
-use elodin_types::{sandbox::*, Batch, BitVec, Run, BATCH_TOPIC, RUN_TOPIC};
+use elodin_types::{sandbox::*, Batch, BitVec, BATCH_TOPIC};
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::{polars::PolarsWorld, ComponentExt, Seed, WorldExec};
-use sea_orm::{prelude::*, TransactionTrait};
+use sea_orm::{prelude::*, IntoActiveModel, TransactionTrait};
 use tokio::sync::mpsc;
 use tokio::task::block_in_place;
 use tokio_stream::wrappers::ReceiverStream;
@@ -72,51 +72,47 @@ impl Runner {
     }
 
     async fn process_batches(&mut self, batches: &[redmq::Received<Batch>]) -> anyhow::Result<()> {
-        let Some(run_id) = batches.iter().find(|b| !b.buffer).map(|b| b.id.clone()) else {
+        let Some(run_id) = batches.iter().find(|b| !b.buffer).map(|b| b.run_id) else {
             return Ok(());
         };
-        let Some(run) = self.msg_queue.get::<Run>(RUN_TOPIC, &run_id).await? else {
-            anyhow::bail!("monte carlo run {} not found", run_id);
-        };
 
-        for batch in batches {
-            let txn = self.db.begin().await?;
-            let batch_model = atc_entity::batches::ActiveModel {
-                run_id: sea_orm::Unchanged(run.id),
-                batch_number: sea_orm::Unchanged(batch.batch_no as i32),
-                status: sea_orm::Set(atc_entity::batches::Status::Running),
-                ..Default::default()
-            };
-            batch_model
-                .update_with_event(&txn, &mut self.redis_conn.clone())
-                .await?;
-            txn.commit().await?;
-        }
+        let run = atc_entity::MonteCarloRun::find_by_id(run_id)
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("monte carlo run {} not found", run_id))?;
 
         let (run_exec, sim_code) = self.download_artifacts(run.id).await?;
 
         for b in batches {
+            let txn = self.db.begin().await?;
+            let mut batch = atc_entity::Batches::find_by_id((run.id, b.batch_no as i32))
+                .one(&txn)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("batch {}/{} not found", run_id, b.batch_no))?
+                .into_active_model();
+            batch.status = sea_orm::Set(atc_entity::batches::Status::Running);
+            let batch = batch
+                .update_with_event(&txn, &mut self.redis_conn.clone())
+                .await?;
+            txn.commit().await?;
+
             let start_time = chrono::Utc::now();
             let failed = self
-                .process_batch(&run, &run_exec, sim_code.clone(), b.batch_no)
+                .process_batch(&run, &batch, &run_exec, sim_code.clone())
                 .instrument(tracing::info_span!("batch", no = %b.batch_no))
                 .await
                 .inspect_err(|err| tracing::error!(?err, "batch failed"))
-                .unwrap_or(BitVec::from_elem(run.batch_size, true));
+                .unwrap_or(BitVec::from_elem(batch.samples as usize, true));
             let finish_time = chrono::Utc::now();
             let runtime = (finish_time - start_time).to_std().unwrap();
             let failed_count = failed.iter().filter(|b| *b).count();
             tracing::info!(failed_count, ?runtime, "processed batch");
 
-            let results_model = atc_entity::batches::ActiveModel {
-                run_id: sea_orm::Unchanged(run.id),
-                batch_number: sea_orm::Unchanged(b.batch_no as i32),
-                samples: sea_orm::Set(run.batch_size as i32),
-                failures: sea_orm::Set(failed.to_bytes()),
-                finished: sea_orm::Set(Some(finish_time)),
-                status: sea_orm::Set(atc_entity::batches::Status::Done),
-            };
-            results_model
+            let mut batch = batch.into_active_model();
+            batch.failures = sea_orm::Set(failed.to_bytes());
+            batch.finished = sea_orm::Set(Some(finish_time));
+            batch.status = sea_orm::Set(atc_entity::batches::Status::Done);
+            batch
                 .update_with_event(&self.db, &mut self.redis_conn.clone())
                 .await?;
         }
@@ -125,17 +121,19 @@ impl Runner {
 
     async fn process_batch(
         &mut self,
-        run: &Run,
+        run: &atc_entity::mc_run::Model,
+        batch: &atc_entity::batches::Model,
         run_exec: &WorldExec,
         code: String,
-        batch_no: usize,
     ) -> Result<BitVec<u32>, Error> {
         let sim_start = Instant::now();
         let mut batch_world = PolarsWorld::default();
         // TODO: parallelize batch sim execution
-        for i in 0..run.batch_size {
+        let batch_no = batch.batch_number as usize;
+        let samples = batch.samples as usize;
+        for i in 0..samples {
             let mut sample_exec = run_exec.fork();
-            let sample_no = batch_no * run.batch_size + i;
+            let sample_no = batch_no * samples + i;
             let span = tracing::info_span!("sample", no = %sample_no);
             let _guard = span.enter();
 
@@ -146,7 +144,7 @@ impl Runner {
                     .iter_mut()
                     .for_each(|s| *s = sample_no as u64);
             }
-            block_in_place(|| self.run_sim(run, &mut sample_exec))?;
+            block_in_place(|| self.run_sim(run.max_duration as usize, &mut sample_exec))?;
 
             let mut history = sample_exec.history.compact_to_world()?;
             history.add_sample_number(sample_no)?;
@@ -173,7 +171,7 @@ impl Runner {
             .report;
         let report = pytest::Report::from_json(&report)?;
         tracing::debug!(elasped = ?test_start.elapsed(), ?report.summary, "received test results");
-        let failed = report.failed(run.batch_size, batch_no * run.batch_size);
+        let failed = report.failed(samples, batch_no * samples);
         Ok(failed)
     }
 
@@ -225,8 +223,8 @@ impl Runner {
         })
     }
 
-    fn run_sim(&self, run: &Run, exec: &mut WorldExec) -> Result<(), nox_ecs::Error> {
-        let ticks = run.max_duration * 60;
+    fn run_sim(&self, max_duration: usize, exec: &mut WorldExec) -> Result<(), nox_ecs::Error> {
+        let ticks = max_duration * 60;
         for _ in 0..ticks {
             exec.run(&self.nox_client)?;
         }
