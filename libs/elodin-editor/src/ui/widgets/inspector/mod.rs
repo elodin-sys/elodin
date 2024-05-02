@@ -1,32 +1,14 @@
-use bevy::{
-    ecs::{
-        event::EventWriter,
-        query::{With, Without},
-        system::{Commands, Query, Res, ResMut, SystemParam, SystemState},
-        world::World,
-    },
-    render::view::Visibility,
+use bevy::ecs::{
+    system::{Res, ResMut, SystemParam, SystemState},
+    world::World,
 };
 use bevy_egui::egui;
-use bevy_infinite_grid::InfiniteGrid;
-use big_space::GridCell;
-use conduit::{
-    bevy::{ColumnPayloadMsg, MaxTick},
-    query::MetadataStore,
-};
 
-use crate::{
-    plugins::navigation_gizmo::RenderLayerAlloc,
-    ui::{
-        colors, tiles, CameraQuery, EntityData, GraphsState, HdrEnabled, InspectorAnchor,
-        SelectedObject, SettingModalState, SidebarState,
-    },
-    MainCamera,
-};
+use crate::ui::{colors, InspectorAnchor, SelectedObject, SidebarState};
 
-use super::{
-    timeline::tagged_range::TaggedRanges, RootWidgetSystem, WidgetSystem, WidgetSystemExt,
-};
+use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
+
+use super::{RootWidgetSystem, WidgetSystem, WidgetSystemExt};
 
 pub mod entity;
 pub mod graph;
@@ -120,26 +102,12 @@ impl RootWidgetSystem for Inspector<'_> {
 }
 
 #[derive(SystemParam)]
-pub struct InspectorContent<'w, 's> {
-    entities: Query<'w, 's, EntityData<'static>>,
-    graphs_state: ResMut<'w, GraphsState>,
-    setting_modal_state: ResMut<'w, SettingModalState>,
-    tagged_ranges: ResMut<'w, TaggedRanges>,
-    max_tick: Res<'w, MaxTick>,
-    tile_state: ResMut<'w, tiles::TileState>,
-    metadata_store: Res<'w, MetadataStore>,
-    commands: Commands<'w, 's>,
-    camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
-    selected_object: ResMut<'w, SelectedObject>,
-    entity_transform_query: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
-    column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
-    grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
+pub struct InspectorContent<'w> {
     inspector_anchor: ResMut<'w, InspectorAnchor>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    hdr_enabled: ResMut<'w, HdrEnabled>,
+    selected_object: Res<'w, SelectedObject>,
 }
 
-impl WidgetSystem for InspectorContent<'_, '_> {
+impl WidgetSystem for InspectorContent<'_> {
     type Args = (InspectorIcons, bool);
     type Output = ();
 
@@ -153,22 +121,8 @@ impl WidgetSystem for InspectorContent<'_, '_> {
 
         let (icons, is_side_panel) = args;
 
-        let mut entities = state_mut.entities;
-        let mut graphs_state = state_mut.graphs_state;
-        let mut setting_modal_state = state_mut.setting_modal_state;
-        let mut tagged_ranges = state_mut.tagged_ranges;
-        let max_tick = state_mut.max_tick;
-        let mut tile_state = state_mut.tile_state;
-        let metadata_store = state_mut.metadata_store;
-        let mut commands = state_mut.commands;
-        let mut camera_query = state_mut.camera_query;
-        let selected_object = state_mut.selected_object.as_ref();
-        let entity_transform_query = state_mut.entity_transform_query;
-        let mut column_payload_writer = state_mut.column_payload_writer;
-        let mut grid_visibility = state_mut.grid_visibility;
         let mut inspector_anchor = state_mut.inspector_anchor;
-        let mut render_layer_alloc = state_mut.render_layer_alloc;
-        let mut hdr_enabled = state_mut.hdr_enabled;
+        let selected_object = state_mut.selected_object.to_owned();
 
         inspector_anchor.0 = if is_side_panel {
             Some(ui.max_rect().min)
@@ -186,54 +140,26 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                             ui.add(empty_inspector());
                         }
                         SelectedObject::Entity(pair) => {
-                            let Ok((entity_id, _, mut map, metadata)) = entities.get_mut(pair.bevy)
-                            else {
-                                ui.add(empty_inspector());
-                                return;
-                            };
-                            entity::inspector(
-                                ui,
-                                metadata,
-                                *entity_id,
-                                map.as_mut(),
-                                &metadata_store,
-                                &mut graphs_state,
-                                &mut tile_state,
-                                icons.chart,
-                                &mut column_payload_writer,
-                                &mut commands,
-                                &mut render_layer_alloc,
+                            ui.add_widget_with::<InspectorEntity>(
+                                world,
+                                "inspector_entity",
+                                (icons, pair),
                             );
                         }
                         SelectedObject::Viewport { camera, .. } => {
-                            let Ok(cam) = camera_query.get_mut(*camera) else {
-                                ui.add(empty_inspector());
-                                return;
-                            };
-                            viewport::inspector(
-                                ui,
-                                &entities,
-                                cam,
-                                &mut commands,
-                                &entity_transform_query,
-                                &mut grid_visibility,
-                                &mut hdr_enabled,
+                            ui.add_widget_with::<InspectorViewport>(
+                                world,
+                                "inspector_viewport",
+                                (icons, camera),
                             );
                         }
                         SelectedObject::Graph {
                             label, graph_id, ..
                         } => {
-                            graph::inspector(
-                                ui,
-                                graph_id,
-                                label,
-                                &entities,
-                                &mut graphs_state,
-                                &mut setting_modal_state,
-                                &mut tagged_ranges,
-                                max_tick,
-                                &metadata_store,
-                                icons,
+                            ui.add_widget_with::<InspectorGraph>(
+                                world,
+                                "inspector_graph",
+                                (icons, graph_id, label),
                             );
                         }
                     })

@@ -15,11 +15,12 @@ use conduit::{
 use crate::ui::{
     colors, utils,
     widgets::{button::EImageButton, WidgetSystem},
-    Paused,
+    Paused, ViewportRange,
 };
 
 use super::{
-    get_position_range, get_segment_size, position_from_value, value_from_position, TimelineArgs,
+    get_position_range, get_segment_size, position_from_value, tagged_range::TaggedRanges,
+    value_from_position, TimelineArgs,
 };
 
 // ----------------------------------------------------------------------------
@@ -368,6 +369,8 @@ pub struct TimelineWithControls<'w> {
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, Tick>,
     max_tick: Res<'w, MaxTick>,
+    tagged_ranges: Res<'w, TaggedRanges>,
+    viewport_range: Res<'w, ViewportRange>,
 }
 
 impl WidgetSystem for TimelineWithControls<'_> {
@@ -388,8 +391,22 @@ impl WidgetSystem for TimelineWithControls<'_> {
         let max_tick = state_mut.max_tick;
         let mut tick = state_mut.tick;
         let mut event = state_mut.event;
+        let viewport_range = state_mut.viewport_range;
+        let tagged_ranges = state_mut.tagged_ranges;
 
         let handle_icon = icons.handle;
+
+        if let Some(viewport_range_id) = &viewport_range.0 {
+            if let Some(viewport_range) = tagged_ranges.0.get(viewport_range_id) {
+                let (a, b) = viewport_range.values;
+                let fixed_range = if a > b { b..a } else { a..b };
+
+                if !fixed_range.contains(&tick.0) {
+                    tick.0 = fixed_range.start;
+                    event.send(ControlMsg::Rewind(tick.0));
+                }
+            }
+        }
 
         ui.vertical(|ui| {
             let mut tick_changed = false;
