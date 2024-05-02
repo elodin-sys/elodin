@@ -37,8 +37,11 @@ def test_basic_system():
     w = WorldBuilder()
     w.spawn(Test(np.array([1.0], dtype="float32"), np.array([500.0], dtype="float32")))
     w.spawn(
-        Test(np.array([15.0], dtype="float32"), np.array([500.0], dtype="float32"))
-    ).insert(Effect(np.array([15.0], dtype="float32")))
+        [
+            Test(np.array([15.0], dtype="float32"), np.array([500.0], dtype="float32")),
+            Effect(np.array([15.0], dtype="float32")),
+        ]
+    )
     exec = w.build(sys)
     exec.run(client)
     x1 = exec.column_array(Component.id(X))
@@ -89,9 +92,10 @@ def test_graph():
     a = w.spawn(Test(np.array([1.0], dtype="float64")))
     b = w.spawn(Test(np.array([2.0], dtype="float64")))
     c = w.spawn(Test(np.array([2.0], dtype="float64")))
-    w.spawn(EdgeArchetype(Edge(a.id(), b.id())))
-    w.spawn(EdgeArchetype(Edge(a.id(), c.id())))
-    w.spawn(EdgeArchetype(Edge(b.id(), c.id())))
+    print(a, b, c)
+    w.spawn(EdgeArchetype(Edge(a, b)))
+    w.spawn(EdgeArchetype(Edge(a, c)))
+    w.spawn(EdgeArchetype(Edge(b, c)))
     client = Client.cpu()
     exec = w.build(fold_test)
     exec.run(client)

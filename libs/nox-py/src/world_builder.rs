@@ -55,41 +55,38 @@ impl WorldBuilder {
         Self::default()
     }
 
-    pub fn spawn(mut slf: PyRefMut<'_, Self>, archetype: Spawnable<'_>) -> Result<Entity, Error> {
+    pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
         let entity_id = EntityId {
-            inner: conduit::EntityId(slf.world.entity_len),
+            inner: conduit::EntityId(self.world.entity_len),
         };
-
-        slf.spawn_with_entity_id(archetype, entity_id.clone())?;
-        let world = slf.into();
-        Ok(Entity {
-            id: entity_id,
-            world,
-        })
+        self.insert(entity_id.clone(), spawnable)?;
+        self.world.entity_len += 1;
+        if let Some(name) = name {
+            let metadata = EntityMetadata::new(name, None);
+            let metadata = self.world.insert_asset(metadata.inner);
+            self.world.spawn_with_id(metadata, entity_id.inner);
+        }
+        Ok(entity_id)
     }
 
-    pub fn spawn_with_entity_id(
-        &mut self,
-        spawnable: Spawnable,
-        entity_id: EntityId,
-    ) -> Result<EntityId, Error> {
+    pub fn insert(&mut self, entity_id: EntityId, spawnable: Spawnable) -> Result<(), Error> {
         match spawnable {
-            Spawnable::Archetype(archetype) => {
-                let entity_id = entity_id.inner;
-                let table = self.get_or_insert_archetype(&archetype)?;
-                table.entity_buffer.push(entity_id.0.constant());
-                for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
-                    let col = table
-                        .columns
-                        .get_mut(&ComponentId::new(&component.name))
-                        .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                    let ty = col.component_type();
-                    let size = ty.primitive_ty.element_type().element_size_in_bytes();
-                    let buf = unsafe { arr.buf(size) };
-                    col.push_raw(buf);
+            Spawnable::Archetypes(archetypes) => {
+                for archetype in archetypes {
+                    let table = self.get_or_insert_archetype(&archetype)?;
+                    table.entity_buffer.push(entity_id.inner.0.constant());
+                    for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
+                        let col = table
+                            .columns
+                            .get_mut(&ComponentId::new(&component.name))
+                            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                        let ty = col.component_type();
+                        let size = ty.primitive_ty.element_type().element_size_in_bytes();
+                        let buf = unsafe { arr.buf(size) };
+                        col.push_raw(buf);
+                    }
                 }
-                self.world.entity_len += 1;
-                Ok(EntityId { inner: entity_id })
+                Ok(())
             }
             Spawnable::Asset { id, bytes } => {
                 let inner = self.world.assets.insert_bytes(id, bytes.bytes);
@@ -112,8 +109,7 @@ impl WorldBuilder {
                     .get_mut(&ComponentId::new(&component_name))
                     .ok_or(nox_ecs::Error::ComponentNotFound)?;
                 col.push_raw(&inner.id.to_le_bytes());
-                self.world.entity_len += 1;
-                Ok(entity_id)
+                Ok(())
             }
         }
     }
