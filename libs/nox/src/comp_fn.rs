@@ -1,4 +1,4 @@
-//! Defines traits and structures for constructing computational functions and transforming them into executable formats.
+//! Defines traits and structures for constructing functions and transforming them into executable formats.
 use crate::{
     ArrayTy, Builder, Comp, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem, XlaDim,
 };

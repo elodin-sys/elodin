@@ -187,7 +187,7 @@ impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
 /// Trait for dimensions compatible with XLA computation, defining shape information.
 pub trait XlaDim {
-    /// Returns an empty shape, representing a scalar with no dimensions.
+    /// Returns the shape of the implementing type.
     fn shape() -> SmallVec<[i64; 4]>;
 }
 

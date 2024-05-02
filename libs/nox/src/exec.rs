@@ -1,4 +1,4 @@
-//! Provides functionality for executing operations and transferring data between host and device.
+//! Provides functionality for executing operations and transferring data between host and client device.
 use crate::{AsBuffer, BufferArg, BufferForm, Client, FromPjrtBuffer};
 use paste::paste;
 use std::marker::PhantomData;
@@ -14,7 +14,7 @@ pub trait ToHost {
     /// The type of data to be transferred to the host.
     type HostTy;
 
-    /// Transfers data from the device to the host.
+    /// Transfers data from the client device to the host.
     fn to_host(&self) -> Self::HostTy;
 }
 

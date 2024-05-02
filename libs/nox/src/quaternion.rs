@@ -62,7 +62,7 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
-    /// Creates a quaternion from a 3D axis and an angle.
+    /// Creates a quaternion from an axis and an angle.
     pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
         let axis = axis.into();
         let axis = axis.normalize();

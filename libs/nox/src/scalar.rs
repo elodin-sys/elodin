@@ -9,7 +9,7 @@ use nalgebra::Scalar as NalgebraScalar;
 use std::{marker::PhantomData, ops::Add};
 use xla::{ArrayElement, NativeType};
 
-/// Type alias for a scalar tensor with a specified precision type `P`, defaulting to operation type `Op`.
+/// Type alias for a scalar tensor with a specific type `T`, an underlying representation `P`, and defaulting to operation type `Op`.
 pub type Scalar<T, P = Op> = Tensor<T, ScalarDim, P>;
 
 impl<T: NativeType + ArrayElement> ToHost for Scalar<T, Buffer> {

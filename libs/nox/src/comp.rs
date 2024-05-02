@@ -1,4 +1,4 @@
-//! Provides the `Comp` struct which encapsulates XLA computations and methods for their manipulation.
+//! Provides the `Comp` struct which encapsulates an XLA computation with type information.
 use std::marker::PhantomData;
 
 use crate::{BufferForm, Client, Exec};
@@ -15,7 +15,7 @@ impl<T: BufferForm, R> Comp<T, R> {
         self.comp.to_hlo_text()
     }
 
-    /// Compiles the XLA computation into an executable, utilizing the specified client for execution environment context.
+    /// Compiles the XLA computation into a kernel.
     pub fn compile(&self, client: &Client) -> Result<Exec<T::BufferTy, R>, xla::Error> {
         let exec = client.compile(&self.comp)?;
         Ok(Exec {

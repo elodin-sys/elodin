@@ -1,4 +1,6 @@
 //! Provides abstractions for rigid body dynamics in 3D space.
+//! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
+//! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::Field;
 use crate::FixedSliceExt;
 use crate::Tensor;
@@ -129,14 +131,15 @@ impl<T: Field> Add for SpatialForce<T> {
     }
 }
 
-/// Represents spatial inertia as a 7D vector.
+/// A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space.
+/// The inertia matrix is assumed to be symmetric and represented in its diagonalized form.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialInertia<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
 impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
-    /// Constructs a new spatial inertia from inertia, momentum, and mass components.
+    /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
     pub fn new(
         inertia: impl Into<Vector<T, 3>>,
         momentum: impl Into<Vector<T, 3>>,
@@ -149,7 +152,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         SpatialInertia { inner }
     }
 
-    /// Constructs spatial inertia from a mass, assuming inertia and momentum are derived from it.
+    /// Constructs spatial inertia from a mass, assuming momentum is 0 and the inertia is the same value as the mass along all axes.
     pub fn from_mass(mass: impl Into<Scalar<T>>) -> Self {
         let mass = mass.into();
         SpatialInertia::new(
@@ -159,7 +162,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         )
     }
 
-    /// Returns the diagonal inertia as a vector.
+    /// Returns the diagonal inertia as a diagonalized vector.
     pub fn inertia_diag(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
@@ -169,7 +172,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         self.inner.fixed_slice(&[3])
     }
 
-    /// Returns the momentum as a vector.
+    /// Returns the mass as a scalar.
     pub fn mass(&self) -> Scalar<T> {
         self.inner.fixed_slice::<Const<1>>(&[6]).reshape()
     }

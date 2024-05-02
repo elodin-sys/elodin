@@ -28,12 +28,12 @@ impl Client {
         }
     }
 
-    /// Disables optimizations in the compilation options.
+    /// Disables XLA optimizations.
     pub fn disable_optimizations(&mut self) {
         self.compile_options.disable_optimizations();
     }
 
-    /// Compiles an XLA computation into an executable using the client's compile options.
+    /// Compiles an XLA computation into a kernel using the client's compile options.
     pub fn compile(
         &self,
         comp: &xla::XlaComputation,
@@ -47,10 +47,10 @@ impl Client {
         xla::PjRtClient::cpu().map(Client::new).map_err(Error::from)
     }
 
-    /// Creates a new `Client` using the default GPU backend with memory settings.
+    /// Creates a new [`Client`] using the GPU backend with default memory settings
     /// By default the backend is either CUDA or Metal depending on your OS.
     ///
-    /// This functions uses a default memory fraction of `0.95` and does not preallocate any memory.
+    /// This function uses a default memory fraction of `0.95` and does not preallocate any memory.
     pub fn gpu() -> Result<Self, Error> {
         const DEFAULT_MEMORY_PERCENT: f64 = 0.95;
         xla::PjRtClient::gpu(DEFAULT_MEMORY_PERCENT, false)

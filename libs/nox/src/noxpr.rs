@@ -1,4 +1,4 @@
-//! Provides the data structures and operations for representing and manipulating expression trees (Noxpr).
+//! Provides the data structures and operations for representing and manipulating tensor computations as expression trees (Noxpr).
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -16,7 +16,7 @@ use crate::{
     CompFn, DefaultMap, DefaultMappedDim, Dim, Error, FromOp, IntoOp, MapDim, Tensor, TensorItem,
 };
 
-/// Represents various types of nodes in an expression tree for tensor computations.
+/// Represents various types of nodes in an expression tree (Noxpr) for tensor computations.
 #[derive(Debug)]
 pub enum NoxprNode {
     // Params / Variables
@@ -74,7 +74,7 @@ pub enum NoxprNode {
     Jax(pyo3::PyObject),
 }
 
-/// Represents a constant value within the expression tree.
+/// Represents a constant value within the Noxpr.
 #[derive(Clone)]
 pub struct Constant {
     pub data: xla::Literal, // NOTE: it might make more sense to use the xla independent store below
@@ -88,7 +88,7 @@ impl std::fmt::Debug for Constant {
     }
 }
 
-/// Represents the type of a node in the expression tree, either a tuple or array type.
+/// Represents the type of a node in the Noxpr, either a tuple or array type.
 #[derive(Debug, Clone)]
 pub enum NoxprTy {
     Tuple(Vec<NoxprTy>),
@@ -160,7 +160,7 @@ pub struct Iota {
     pub dim: usize,
 }
 
-/// Represents a binary operation in the expression tree.
+/// Represents a binary operation in the Noxpr.
 #[derive(Debug)]
 pub struct BinaryOp {
     pub lhs: Noxpr,
@@ -358,14 +358,14 @@ impl DotDimensionNums {
     }
 }
 
-/// Stores the details for concatenation operations within the expression tree.
+/// Stores the details for concatenation operations within the Noxpr.
 #[derive(Debug)]
 pub struct Concat {
     pub nodes: Vec<Noxpr>,
     pub dimension: usize,
 }
 
-/// Represents slicing operations within the expression tree.
+/// Represents slicing operations within the Noxpr.
 #[derive(Debug)]
 pub struct Slice {
     pub expr: Noxpr,
@@ -374,7 +374,7 @@ pub struct Slice {
     pub strides: SmallVec<[i64; 4]>,
 }
 
-/// Represents dynamic slicing operations within the expression tree.
+/// Represents dynamic slicing operations within the Noxpr.
 #[derive(Debug)]
 pub struct DynamicSlice {
     pub expr: Noxpr,
@@ -382,14 +382,14 @@ pub struct DynamicSlice {
     pub size_indices: SmallVec<[i64; 4]>,
 }
 
-/// Represents reshaping operations within the expression tree.
+/// Represents reshaping operations within the Noxpr.
 #[derive(Debug)]
 pub struct Reshape {
     pub expr: Noxpr,
     pub new_sizes: SmallVec<[i64; 4]>,
 }
 
-/// Represents a broadcast operation within the expression tree.
+/// Represents a broadcast operation within the Noxpr.
 #[derive(Debug)]
 pub struct Broadcast {
     pub expr: Noxpr,
@@ -404,7 +404,7 @@ pub struct BroadcastInDim {
     pub broadcast_dims: SmallVec<[i64; 4]>,
 }
 
-/// Represents a transpose operation within the expression tree.
+/// Represents a transpose operation within the Noxpr.
 #[derive(Debug)]
 pub struct Transpose {
     pub expr: Noxpr,
@@ -1177,7 +1177,7 @@ impl Deref for Noxpr {
     }
 }
 
-/// Represents a parameter in the expression tree.
+/// Represents a parameter in the Noxpr.
 #[derive(Debug, Clone)]
 pub struct ParamExpr {
     pub number: i64,

@@ -1,7 +1,4 @@
 //! This module provides utilities for converting `Noxpr` expressions to `Jax` operations in Python.
-//!
-//! It interfaces with `pyo3` to execute operations within a Python environment using Jax libraries.
-//! Additionally, it includes the implementation of `JaxTracer` which manages the caching and translation of expressions.
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,

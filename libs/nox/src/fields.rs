@@ -1,4 +1,4 @@
-//! Defines the `Field` trait for scalar operations and constants, supporting basic arithmetic, matrix multiplication, and associated utilities for types like integers and floating-point numbers.
+//! Defines the `Field` trait for scalar operations and constants, supporting basic arithmetic, matrix multiplication, and associated utilities for numerical types.
 use std::ops::{Add, Div, Mul, Sub};
 
 use crate::{Scalar, TensorItem};

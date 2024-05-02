@@ -1,4 +1,4 @@
-//! Provides functionality for handling matrices in computational tasks, supporting conversion between host and Nox-specific representations, and enabling matrix operations like constant initialization.
+//! Provides a Matrix type alias with convenience functions for converting to various representations.
 use crate::{
     ArrayTy, Buffer, BufferArg, Client, FromHost, Literal, MaybeOwned, Noxpr, Op, Tensor, ToHost,
 };

@@ -1,4 +1,4 @@
-//! Provides functionality for creating and manipulating multidimensional arrays with type-safe dimensions and operations.
+//! Provides a local, non-XLA backend for operating on Tensors.
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
@@ -95,7 +95,7 @@ pub trait ArrayBuf<T>: Clone {
     fn as_mut_buf(&mut self) -> &mut [T];
 }
 
-/// Extends `ArrayBuf` for uninitialized memory management, crucial for safe and efficient array initialization.
+/// Extends `ArrayBuf` for uninitialized memory management.
 pub trait ArrayBufUnit<T>: ArrayBuf<MaybeUninit<T>> {
     fn uninit(dims: &[usize]) -> Self;
 
@@ -348,7 +348,7 @@ impl_op!(-, Sub, sub);
 impl_op!(/, Div, div);
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
-    /// Generates an iterator over the elements of the array after applying broadcasting to new dimensions.
+    /// Generates an iterator over the elements of the array after broadcasting to new dimensions.
     pub fn broadcast_iter(
         &self,
         new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
