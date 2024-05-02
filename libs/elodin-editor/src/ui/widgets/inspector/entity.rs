@@ -2,17 +2,17 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
     event::EventWriter,
-    system::{Commands, Res, ResMut},
+    system::{Commands, Query, Res, ResMut, SystemParam, SystemState},
+    world::World,
 };
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
 
 use conduit::{
-    bevy::{ColumnPayloadMsg, ComponentValueMap},
+    bevy::ColumnPayloadMsg,
     ndarray::{self, Dimension},
     query::MetadataStore,
     ser_de::ColumnValue,
-    well_known::EntityMetadata,
-    ColumnPayload, ComponentValue, ElementValueMut, EntityId,
+    ColumnPayload, ComponentValue, ElementValueMut,
 };
 
 use crate::{
@@ -21,112 +21,142 @@ use crate::{
         colors::{self, with_opacity},
         tiles,
         utils::{format_num, MarginSides},
-        widgets::label,
-        GraphState, GraphsState,
+        widgets::{label, WidgetSystem},
+        EntityData, EntityPair, GraphState, GraphsState,
     },
 };
 
-const SEPARATOR_SPACING: f32 = 32.0;
+use super::{empty_inspector, InspectorIcons};
 
-#[allow(clippy::too_many_arguments)]
-pub fn inspector(
-    ui: &mut egui::Ui,
-    metadata: &EntityMetadata,
-    entity_id: EntityId,
-    map: &mut ComponentValueMap,
-    metadata_store: &Res<MetadataStore>,
-    _graphs_state: &mut ResMut<GraphsState>,
-    tile_state: &mut ResMut<tiles::TileState>,
-    icon_chart: egui::TextureId,
-    column_payload_writer: &mut EventWriter<ColumnPayloadMsg>,
-    commands: &mut Commands<'_, '_>,
-    render_layer_alloc: &mut RenderLayerAlloc,
-) {
-    ui.add(
-        label::ELabel::new(&metadata.name)
-            .padding(egui::Margin::same(0.0).bottom(24.0))
-            .bottom_stroke(label::ELabel::DEFAULT_STROKE)
-            .margin(egui::Margin::same(0.0).bottom(26.0)),
-    );
+#[derive(SystemParam)]
+pub struct InspectorEntity<'w, 's> {
+    entities: Query<'w, 's, EntityData<'static>>,
+    tile_state: ResMut<'w, tiles::TileState>,
+    metadata_store: Res<'w, MetadataStore>,
+    commands: Commands<'w, 's>,
+    column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
+    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+}
 
-    let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
-    egui::Frame::none()
-        .inner_margin(egui::Margin::symmetric(0.0, 8.0))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("ENTITY ID")
-                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6))
-                        .font(mono_font.clone()),
-                );
-                ui.vertical(|ui| {
-                    ui.add_space(3.0);
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            RichText::new(entity_id.0.to_string())
-                                .color(colors::PRIMARY_CREAME)
-                                .font(mono_font),
-                        )
+impl WidgetSystem for InspectorEntity<'_, '_> {
+    type Args = (InspectorIcons, EntityPair);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+
+        let (icons, pair) = args;
+
+        let mut entities = state_mut.entities;
+        // let mut graphs_state = state_mut.graphs_state;
+        let mut tile_state = state_mut.tile_state;
+        let metadata_store = state_mut.metadata_store;
+        let mut commands = state_mut.commands;
+        let mut column_payload_writer = state_mut.column_payload_writer;
+        let mut render_layer_alloc = state_mut.render_layer_alloc;
+
+        let Ok((entity_id, _, mut map, metadata)) = entities.get_mut(pair.bevy) else {
+            ui.add(empty_inspector());
+            return;
+        };
+
+        let icon_chart = icons.chart;
+        let entity_id = *entity_id;
+
+        ui.add(
+            label::ELabel::new(&metadata.name)
+                .padding(egui::Margin::same(0.0).bottom(24.0))
+                .bottom_stroke(label::ELabel::DEFAULT_STROKE)
+                .margin(egui::Margin::same(0.0).bottom(26.0)),
+        );
+
+        let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(0.0, 8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("ENTITY ID")
+                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6))
+                            .font(mono_font.clone()),
+                    );
+                    ui.vertical(|ui| {
+                        ui.add_space(3.0);
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.label(
+                                RichText::new(entity_id.0.to_string())
+                                    .color(colors::PRIMARY_CREAME)
+                                    .font(mono_font),
+                            )
+                        });
                     });
                 });
             });
-        });
 
-    let mut components = map
-        .0
-        .keys()
-        .filter_map(|id| {
-            let metadata = metadata_store.get_metadata(id)?;
-            let priority = metadata.priority();
-            Some((*id, priority, metadata))
-        })
-        .filter(|(_, _, metadata)| !metadata.asset)
-        .filter(|(_, priority, _)| *priority >= 0)
-        .collect::<Vec<_>>();
-    components.sort_by_key(|(id, priority, _)| (*priority, *id));
+        let mut components = map
+            .0
+            .keys()
+            .filter_map(|id| {
+                let metadata = metadata_store.get_metadata(id)?;
+                let priority = metadata.priority();
+                Some((*id, priority, metadata))
+            })
+            .filter(|(_, _, metadata)| !metadata.asset)
+            .filter(|(_, priority, _)| *priority >= 0)
+            .collect::<Vec<_>>();
+        components.sort_by_key(|(id, priority, _)| (*priority, *id));
 
-    for (component_id, _, metadata) in components.into_iter().rev() {
-        let component_value = map.0.get_mut(&component_id).unwrap();
-        let label = metadata.component_name();
-        let element_names = metadata.element_names();
+        for (component_id, _, metadata) in components.into_iter().rev() {
+            let component_value = map.0.get_mut(&component_id).unwrap();
+            let label = metadata.component_name();
+            let element_names = metadata.element_names();
 
-        ui.add(egui::Separator::default().spacing(SEPARATOR_SPACING));
+            ui.add(egui::Separator::default().spacing(32.0));
 
-        let mut create_graph = false;
+            let mut create_graph = false;
 
-        let res = inspector_item_multi(
-            ui,
-            label,
-            element_names,
-            component_value,
-            icon_chart,
-            &mut create_graph,
-        );
-        if res.changed() {
-            if let Ok(payload) = ColumnPayload::try_from_value_iter(
-                0,
-                std::iter::once(ColumnValue {
-                    entity_id,
-                    value: component_value.clone(),
-                }),
-            ) {
-                column_payload_writer.send(ColumnPayloadMsg {
-                    component_name: metadata.component_name().to_string(),
-                    component_type: component_value.ty(),
-                    payload,
-                });
+            let res = inspector_item_multi(
+                ui,
+                label,
+                element_names,
+                component_value,
+                icon_chart,
+                &mut create_graph,
+            );
+            if res.changed() {
+                if let Ok(payload) = ColumnPayload::try_from_value_iter(
+                    0,
+                    std::iter::once(ColumnValue {
+                        entity_id,
+                        value: component_value.clone(),
+                    }),
+                ) {
+                    column_payload_writer.send(ColumnPayloadMsg {
+                        component_name: metadata.component_name().to_string(),
+                        component_type: component_value.ty(),
+                        payload,
+                    });
+                }
             }
-        }
 
-        if create_graph {
-            let values =
-                GraphsState::default_component_values(&entity_id, &component_id, component_value);
-            let entities = BTreeMap::from_iter(std::iter::once((
-                entity_id,
-                BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
-            )));
-            let graph = GraphState::spawn(commands, render_layer_alloc, entities);
-            tile_state.create_graph_tile(graph);
+            if create_graph {
+                let values = GraphsState::default_component_values(
+                    &entity_id,
+                    &component_id,
+                    component_value,
+                );
+                let entities = BTreeMap::from_iter(std::iter::once((
+                    entity_id,
+                    BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
+                )));
+                let graph = GraphState::spawn(&mut commands, &mut render_layer_alloc, entities);
+                tile_state.create_graph_tile(graph);
+            }
         }
     }
 }

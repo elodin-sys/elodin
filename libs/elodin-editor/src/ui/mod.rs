@@ -57,7 +57,10 @@ pub struct Paused(pub bool);
 #[derive(Resource, Default)]
 pub struct ShowStats(pub bool);
 
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Default)]
+pub struct ViewportRange(pub Option<TaggedRangeId>);
+
+#[derive(Resource, Default, Debug, Clone)]
 pub enum SelectedObject {
     #[default]
     None,
@@ -169,6 +172,7 @@ impl Plugin for UiPlugin {
             .init_resource::<TaggedRanges>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
+            .init_resource::<ViewportRange>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
