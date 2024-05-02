@@ -74,15 +74,16 @@ def bounce(q: el.Query[el.WorldPos, el.WorldVel]) -> el.Query[el.WorldVel]:
 
 def run(seed: int) -> pl.DataFrame:
     w = el.WorldBuilder()
-    w.spawn(Globals(seed=jnp.int64(seed))).metadata(el.EntityMetadata("Globals"))
+    w.spawn(Globals(seed=jnp.int64(seed)), name="Globals")
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(jnp.array([0.0, 6.0, 0.0])),
+            world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 6.0, 0.0])),
             pbr=w.insert_asset(
                 el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
             ),
-        )
-    ).metadata(el.EntityMetadata("Ball"))
+        ),
+        name="Ball",
+    )
     effectors = gravity.pipe(apply_wind)
     sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
     exec = w.build(sys)
