@@ -39,7 +39,6 @@ StarReadingRef = Annotated[
 ]
 
 
-
 @dataclass
 class Sensors(el.Archetype):
     gyro_omega: GyroOmega
@@ -252,7 +251,6 @@ ControlForce = Annotated[
 ]
 
 
-
 @dataclass
 class ControlInput(el.Archetype):
     goal: Goal
@@ -262,8 +260,6 @@ class ControlInput(el.Archetype):
 @dataclass
 class UserInput(el.Archetype):
     deg: UserGoal
-
-
 
 
 def lqr_control_mat(j, q, r):
@@ -282,6 +278,7 @@ q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
 
+
 def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     [roll, pitch, yaw] = np.deg2rad(angles)
     cr = np.cos(roll * 0.5)
@@ -295,7 +292,7 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     x = sr * cp * cy - cr * sp * sy
     y = cr * sp * cy + sr * cp * sy
     z = cr * cp * sy - sr * sp * cy
-    return el.Quaternion(np.array([x,y,z,w]))
+    return el.Quaternion(np.array([x, y, z, w]))
 
 
 @el.map
@@ -305,7 +302,9 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     body_axis = np.array([0.0, 0.0, -1.0])
     a = np.cross(body_axis, r)
     w = 1 + np.dot(body_axis, r)
-    return euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+    return (
+        euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
+    )
 
 
 @el.system
@@ -319,25 +318,30 @@ def control(
         ),
     )
 
+
 RWEdge = Annotated[el.Edge, el.Component("rw_edge", el.ComponentType.Edge)]
+
 
 @el.system
 def actuator_allocator(
-        q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
-        rw_query: el.Query[RWAxis],
-        control_query: el.Query[ControlForce]) -> el.Query[RWForce]:
+    q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
+    rw_query: el.Query[RWAxis],
+    control_query: el.Query[ControlForce],
+) -> el.Query[RWForce]:
     return q.edge_fold(
         rw_query,
         control_query,
         RWForce,
         el.SpatialForce.zero(),
-        lambda xs, axis, control_force: xs + el.SpatialForce.from_torque(
+        lambda xs, axis, control_force: xs
+        + el.SpatialForce.from_torque(
             np.clip(
-                np.dot(control_force.torque(), axis) * axis, -rw_force_clamp, rw_force_clamp
+                np.dot(control_force.torque(), axis) * axis,
+                -rw_force_clamp,
+                rw_force_clamp,
             )
         ),
     )
-
 
 
 # effectors
@@ -347,18 +351,27 @@ def actuator_allocator(
 class RWRel(el.Archetype):
     edge: RWEdge
 
+
 @dataclass
 class ReactionWheel(el.Archetype):
     rw_force: RWForce
     axis: RWAxis
 
+
 @el.system
 def rw_effector(
     rw_force: el.GraphQuery[RWEdge],
     force_query: el.Query[el.Force],
-    rw_query: el.Query[RWForce]
+    rw_query: el.Query[RWForce],
 ) -> el.Query[el.Force]:
-    return rw_force.edge_fold(force_query, rw_query, el.Force, el.SpatialForce.zero(), lambda f, _, force: f + force)
+    return rw_force.edge_fold(
+        force_query,
+        rw_query,
+        el.Force,
+        el.SpatialForce.zero(),
+        lambda f, _, force: f + force,
+    )
+
 
 @el.map
 def gravity_effector(
@@ -377,6 +390,8 @@ def gravity_effector(
 w = el.World()
 
 sat_ids = []
+
+
 def spawn_sat(x, y, w: el.World):
     sat_num = x + y * 100
     rand_key = jax.random.key(sat_num)
@@ -384,33 +399,41 @@ def spawn_sat(x, y, w: el.World):
         ReactionWheel(
             rw_force=el.SpatialForce.zero(),
             axis=np.array([1.0, 0.0, 0.0]),
-        )
-    ).name(f"Sat {sat_num} Reaction Wheel 1")
-
+        ),
+        name=f"Sat {sat_num} Reaction Wheel 1",
+    )
 
     rw_2 = w.spawn(
         ReactionWheel(
             rw_force=el.SpatialForce.zero(),
             axis=np.array([0.0, 1.0, 0.0]),
-        )
-    ).name(f"Sat {sat_num} Reaction Wheel 2")
+        ),
+        name=f"Sat {sat_num} Reaction Wheel 2",
+    )
 
     rw_3 = w.spawn(
         ReactionWheel(
             rw_force=el.SpatialForce.zero(),
             axis=np.array([0.0, 0.0, 1.0]),
-        )
-    ).name(f"Sat {sat_num} Reaction Wheel 3")
+        ),
+        name=f"Sat {sat_num} Reaction Wheel 3",
+    )
 
-    rot_x = el.Quaternion.from_axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x))
-    rot_y = el.Quaternion.from_axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y))
+    rot_x = el.Quaternion.from_axis_angle(
+        np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x)
+    )
+    rot_y = el.Quaternion.from_axis_angle(
+        np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y)
+    )
     rot = rot_x * rot_y
     ang_vel = jax.random.normal(rand_key, shape=(3,))
     ang_vel = ang_vel / la.norm(ang_vel) * 3.0
     b = el.Body(
-        world_pos=el.SpatialTransform.from_linear(rot @ np.array([1.0, 0.0, 0.0]) * radius),
+        world_pos=el.SpatialTransform.from_linear(
+            rot @ np.array([1.0, 0.0, 0.0]) * radius
+        ),
         world_vel=el.SpatialMotion(
-             ang_vel, rot @ np.array([0.0, 0.0, -1.0]) * velocity
+            ang_vel, rot @ np.array([0.0, 0.0, -1.0]) * velocity
         ),
         inertia=el.SpatialInertia(12.0, j),
         pbr=w.insert_asset(
@@ -421,27 +444,27 @@ def spawn_sat(x, y, w: el.World):
         # Credit to the OreSat program https://www.oresat.org for the model above
     )
 
-    sat = (
-        w.spawn(b)
-        .metadata(el.EntityMetadata(f"OreSat {sat_num}"))
-        .insert(
+    sat = w.spawn(
+        [
+            b,
             ControlInput(
                 el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
                 el.SpatialForce.zero(),
             ),
-        )
-        .insert(UserInput(np.array([0.0, 0.0, 0.0])))
-        .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
-        .insert(
-            KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
-        )
+            UserInput(np.array([0.0, 0.0, 0.0])),
+            Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
+            KalmanFilter(
+                np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
+            ),
+        ],
+        name=f"OreSat {sat_num}",
     )
 
-    w.spawn(RWRel(el.Edge(sat.id(), rw_1.id()))).name(f"Sat {sat_num}  -> RW 1")
-    w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name(f"Sat {sat_num} -> RW 2")
-    w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name(f"Sat {sat_num} -> RW 3")
-    sat_ids.append(sat.id())
-    return sat.id()
+    w.spawn(RWRel(el.Edge(sat, rw_1)), name=f"Sat {sat_num}  -> RW 1")
+    w.spawn(RWRel(el.Edge(sat, rw_2)), name=f"Sat {sat_num} -> RW 2")
+    w.spawn(RWRel(el.Edge(sat, rw_3)), name=f"Sat {sat_num} -> RW 3")
+    sat_ids.append(sat)
+    return sat
 
 
 sat = spawn_sat(0, 0, w)
@@ -457,8 +480,9 @@ w.spawn(
         active=True,
         pos=[7.0, 0.0, 0.0],
         looking_at=[0.0, 0.0, 0.0],
-    )
-).name("Viewport 2")
+    ),
+    name="Viewport 2",
+)
 
 w.spawn(
     el.Panel.viewport(
@@ -467,16 +491,14 @@ w.spawn(
         pos=[7.0, -3.0, 0.0],
         fov=20.0,
         looking_at=[0.0, 0.0, 0.0],
-    )
-).name("Viewport 1")
+    ),
+    name="Viewport 1",
+)
 
 w.spawn(
     el.Panel.graph(
         [
-            el.GraphEntity(
-                sat_id,
-                el.Component.index(el.WorldPos)[:4]
-            )
+            el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
             for sat_id in sat_ids
         ]
     ),
@@ -494,8 +516,9 @@ w.spawn(
                 "https://storage.googleapis.com/elodin-marketing/models/earth.glb"
             )
         ),
-    )
-).name("Earth")
+    ),
+    name="Earth",
+)
 
 
 exec = w.run(

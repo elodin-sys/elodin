@@ -39,7 +39,6 @@ StarReadingRef = Annotated[
 ]
 
 
-
 @dataclass
 class Sensors(el.Archetype):
     gyro_omega: GyroOmega
@@ -252,7 +251,6 @@ ControlForce = Annotated[
 ]
 
 
-
 @dataclass
 class ControlInput(el.Archetype):
     goal: Goal
@@ -262,8 +260,6 @@ class ControlInput(el.Archetype):
 @dataclass
 class UserInput(el.Archetype):
     deg: UserGoal
-
-
 
 
 def lqr_control_mat(j, q, r):
@@ -322,21 +318,27 @@ def control(
         ),
     )
 
+
 RWEdge = Annotated[el.Edge, el.Component("rw_edge", el.ComponentType.Edge)]
+
 
 @el.system
 def actuator_allocator(
-        q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
-        rw_query: el.Query[RWAxis],
-        control_query: el.Query[ControlForce]) -> el.Query[RWForce]:
+    q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
+    rw_query: el.Query[RWAxis],
+    control_query: el.Query[ControlForce],
+) -> el.Query[RWForce]:
     return q.edge_fold(
         rw_query,
         control_query,
         RWForce,
         el.SpatialForce.zero(),
-        lambda xs, axis, control_force: xs + el.SpatialForce.from_torque(
+        lambda xs, axis, control_force: xs
+        + el.SpatialForce.from_torque(
             np.clip(
-                np.dot(control_force.torque(), axis) * axis, -rw_force_clamp, rw_force_clamp
+                np.dot(control_force.torque(), axis) * axis,
+                -rw_force_clamp,
+                rw_force_clamp,
             )
         ),
     )
@@ -349,6 +351,7 @@ def actuator_allocator(
 class RWRel(el.Archetype):
     edge: RWEdge
 
+
 @dataclass
 class ReactionWheel(el.Archetype):
     rw_force: RWForce
@@ -359,9 +362,15 @@ class ReactionWheel(el.Archetype):
 def rw_effector(
     rw_force: el.GraphQuery[RWEdge],
     force_query: el.Query[el.Force],
-    rw_query: el.Query[RWForce]
+    rw_query: el.Query[RWForce],
 ) -> el.Query[el.Force]:
-    return rw_force.edge_fold(force_query, rw_query, el.Force, el.SpatialForce.zero(), lambda f, _, force: f + force)
+    return rw_force.edge_fold(
+        force_query,
+        rw_query,
+        el.Force,
+        el.SpatialForce.zero(),
+        lambda f, _, force: f + force,
+    )
 
 
 @el.map
@@ -397,43 +406,46 @@ rw_1 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([1.0, 0.0, 0.0]),
-    )
-).name("Reaction Wheel 1")
+    ),
+    name="Reaction Wheel 1",
+)
 
 
 rw_2 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([0.0, 1.0, 0.0]),
-    )
-).name("Reaction Wheel 2")
+    ),
+    name="Reaction Wheel 2",
+)
 
 rw_3 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([0.0, 0.0, 1.0]),
-    )
-).name("Reaction Wheel 3")
+    ),
+    name="Reaction Wheel 3",
+)
 
-sat = (
-    w.spawn(b)
-    .metadata(el.EntityMetadata("OreSat"))
-    .insert(
+sat = w.spawn(
+    [
+        b,
         ControlInput(
             el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
             el.SpatialForce.zero(),
         ),
-    )
-    .insert(UserInput(np.array([0.0, 0.0, 0.0])))
-    .insert(Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)))
-    .insert(
-        KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3))
-    )
+        UserInput(np.array([0.0, 0.0, 0.0])),
+        Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
+        KalmanFilter(
+            np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
+        ),
+    ],
+    name="OreSat",
 )
 
-w.spawn(RWRel(el.Edge(sat.id(), rw_1.id()))).name("Sat -> RW 1")
-w.spawn(RWRel(el.Edge(sat.id(), rw_2.id()))).name("Sat -> RW 2")
-w.spawn(RWRel(el.Edge(sat.id(), rw_3.id()))).name("Sat -> RW 3")
+w.spawn(RWRel(el.Edge(sat, rw_1)), name="Sat -> RW 1")
+w.spawn(RWRel(el.Edge(sat, rw_2)), name="Sat -> RW 2")
+w.spawn(RWRel(el.Edge(sat, rw_3)), name="Sat -> RW 3")
 
 w.spawn(
     el.Panel.vsplit(
@@ -441,13 +453,13 @@ w.spawn(
             el.Panel.hsplit(
                 [
                     el.Panel.viewport(
-                        track_entity=sat.id(),
+                        track_entity=sat,
                         track_rotation=False,
                         pos=[7.0, 0.0, 0.0],
                         looking_at=[0.0, 0.0, 0.0],
                     ),
                     el.Panel.viewport(
-                        track_entity=sat.id(),
+                        track_entity=sat,
                         track_rotation=False,
                         pos=[7.0, -3.0, 0.0],
                         fov=20.0,
@@ -458,8 +470,11 @@ w.spawn(
             el.Panel.graph(
                 [
                     el.GraphEntity(
-                        sat.id(),
-                        [el.Component.index(el.WorldPos)[:3], el.Component.index(AttEst)]
+                        sat,
+                        [
+                            el.Component.index(el.WorldPos)[:3],
+                            el.Component.index(AttEst),
+                        ],
                     )
                 ]
             ),
@@ -480,8 +495,9 @@ w.spawn(
                 "https://storage.googleapis.com/elodin-marketing/models/earth.glb"
             )
         ),
-    )
-).name("Earth")
+    ),
+    name="Earth",
+)
 
 
 exec = w.run(

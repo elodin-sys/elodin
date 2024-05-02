@@ -29,60 +29,53 @@ def gravity(
         f = G * M * m * r / (norm * norm * norm)
         return el.SpatialForce.from_linear(force.force() - f)
 
-    return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
+    return graph.edge_fold(
+        query, query, el.Force, el.SpatialForce.zero(), gravity_inner
+    )
 
 
 w = el.World()
-a = (
-    w.spawn(
-        el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
-            world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
-            inertia=el.Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(
-                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
-            ),
-        )
-    )
-    .name("A")
-    .id()
+a = w.spawn(
+    el.Body(
+        world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
+        world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
+        inertia=el.Inertia.from_mass(1.0 / G),
+        pbr=w.insert_asset(
+            el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
+        ),
+    ),
+    name="A",
 )
-b = (
-    w.spawn(
-        el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
-            world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
-            inertia=el.Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(
-                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
-            ),
-        )
-    )
-    .name("B")
-    .id()
+b = w.spawn(
+    el.Body(
+        world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
+        world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
+        inertia=el.Inertia.from_mass(1.0 / G),
+        pbr=w.insert_asset(
+            el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
+        ),
+    ),
+    name="B",
 )
-c = (
-    w.spawn(
-        el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
-            world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
-            inertia=el.Inertia.from_mass(1.0 / G),
-            pbr=w.insert_asset(
-                el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
-            ),
-        )
-    )
-    .name("C")
-    .id()
+c = w.spawn(
+    el.Body(
+        world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
+        world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
+        inertia=el.Inertia.from_mass(1.0 / G),
+        pbr=w.insert_asset(
+            el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
+        ),
+    ),
+    name="C",
 )
-w.spawn(GravityConstraint(a, b)).name("A -> B")
-w.spawn(GravityConstraint(a, c)).name("A -> C")
+w.spawn(GravityConstraint(a, b), name="A -> B")
+w.spawn(GravityConstraint(a, c), name="A -> C")
 
-w.spawn(GravityConstraint(b, c)).name("B -> C")
-w.spawn(GravityConstraint(b, a)).name("B -> A")
+w.spawn(GravityConstraint(b, c), name="B -> C")
+w.spawn(GravityConstraint(b, a), name="B -> A")
 
-w.spawn(GravityConstraint(c, a)).name("C -> A")
-w.spawn(GravityConstraint(c, b)).name("C -> B")
+w.spawn(GravityConstraint(c, a), name="C -> A")
+w.spawn(GravityConstraint(c, b), name="C -> B")
 
 w.spawn(
     el.Panel.viewport(
@@ -91,8 +84,9 @@ w.spawn(
         pos=[0.0, 0.0, 5.0],
         looking_at=[0.0, 0.0, 0.0],
         hdr=True,
-    )
-).name("Viewport 1")
+    ),
+    name="Viewport 1",
+)
 
 sys = el.six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)

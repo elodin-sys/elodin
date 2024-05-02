@@ -192,8 +192,8 @@ def apply_thrust(t: el.Time, p: el.WorldPos, f: el.Force) -> el.Force:
 
 
 w = el.World()
-rocket = (
-    w.spawn(
+rocket = w.spawn(
+    [
         el.Body(
             world_pos=el.WorldPos.from_linear(jnp.array([0.0, 1.0, 0.0]))
             + el.WorldPos.from_angular(euler_to_quat(jnp.array([0.0, 0.0, -90.0]))),
@@ -203,17 +203,15 @@ rocket = (
                 )
             ),
             inertia=el.Inertia.from_mass(2.0),
-        )
-    )
-    .name("Rocket")
-    .insert(
+        ),
         Rocket(
             euler_pos=jnp.array([0.0, 0.0, 0.0]),
             angle_of_attack=jnp.array([0.0, 0.0, 0.0]),
             time=jnp.float64(0.0),
             wind=el.SpatialMotion.zero(),
-        )
-    )
+        ),
+    ],
+    name="Rocket",
 )
 w.spawn(
     el.Panel.viewport(
@@ -221,18 +219,20 @@ w.spawn(
         pos=[5.0, 2.0, 5.0],
         looking_at=[0.0, 0.0, 0.0],
         show_grid=True,
-    )
-).name("Viewport (Origin)")
+    ),
+    name="Viewport (Origin)",
+)
 w.spawn(
     el.Panel.viewport(
-        track_entity=rocket.id(),
+        track_entity=rocket,
         track_rotation=False,
         active=True,
         pos=[5.0, 1.0, 0.0],
         looking_at=[0.0, 0.0, 0.0],
         show_grid=True,
-    )
-).name("Viewport (Follow)")
+    ),
+    name="Viewport (Follow)",
+)
 
 effectors = (
     gravity

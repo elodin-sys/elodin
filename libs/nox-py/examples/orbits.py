@@ -20,14 +20,15 @@ def gravity(q: Query[WorldPos, Inertia, Force]) -> Query[Force]:
     return q.map(Force, gravity_impl)
 
 
-w = WorldBuilder()
+w = World()
 w.spawn(
     Body(
         world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.01])),
         world_vel=WorldVel.from_linear(np.array([0.0, 0.0, 0.0])),
         inertia=Inertia.from_mass(1.0),
         pbr=w.insert_asset(Pbr(Mesh.sphere(1.0), Material.color(25.3, 18.4, 1.0))),
-    )
+    ),
+    name="A",
 )
 w.spawn(
     Body(
@@ -35,7 +36,8 @@ w.spawn(
         world_vel=WorldVel.from_linear(np.array([0.0, 0.0, 10.0])),
         inertia=Inertia.from_mass(1.0),
         pbr=w.insert_asset(Pbr(Mesh.sphere(0.2), Material.color(1.0, 1.0, 1.0))),
-    )
+    ),
+    name="B",
 )
 w.spawn(
     Body(
@@ -43,7 +45,8 @@ w.spawn(
         world_vel=WorldVel.from_linear(np.array([0.0, 0.0, 24.0])),
         inertia=Inertia.from_mass(2.0),
         pbr=w.insert_asset(Pbr(Mesh.sphere(0.3), Material.color(1.0, 1.0, 1.0))),
-    )
+    ),
+    name="C",
 )
 sys = six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)

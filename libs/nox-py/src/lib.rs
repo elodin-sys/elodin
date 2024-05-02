@@ -183,7 +183,6 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
     m.add_class::<Pbr>()?;
-    m.add_class::<EntityMetadata>()?;
     m.add_class::<PrimitiveType>()?;
     m.add_class::<Metadata>()?;
     m.add_class::<QueryInner>()?;
