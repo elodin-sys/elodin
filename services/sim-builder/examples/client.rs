@@ -43,15 +43,6 @@ async fn main() -> anyhow::Result<()> {
     let artifacts = tmp_dir.path().join("artifacts");
 
     println!("extracted artifacts to: {:?}", artifacts);
-    std::mem::forget(tmp_dir); // don't delete the temp dir
-
-    let test_req = tonic::Request::new(TestReq {
-        code: code.clone(),
-        ..Default::default()
-    });
-    let test_res = client.test(test_req).await?.into_inner();
-    println!("received test results: {:?}", test_res);
-
     Ok(())
 }
 

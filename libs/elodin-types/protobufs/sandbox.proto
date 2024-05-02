@@ -35,7 +35,9 @@ message BuildResp {
 }
 
 message TestReq {
-    string code = 1;
+    reserved 1;
+    reserved "code";
+
     string results_file = 2;
 }
 

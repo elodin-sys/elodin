@@ -196,6 +196,7 @@ defmodule Elodin.Types.Api.CreateMonteCarloRunReq do
   field :name, 1, type: :string
   field :samples, 2, type: :uint32
   field :max_duration, 3, type: :uint64, json_name: "maxDuration"
+  field :metadata, 4, type: :string
 end
 
 defmodule Elodin.Types.Api.CreateMonteCarloRunResp do
@@ -257,16 +258,16 @@ defmodule Elodin.Types.Api.MonteCarloBatch do
   field :status, 6, type: Elodin.Types.Api.MonteCarloBatch.Status, enum: true
 end
 
-defmodule Elodin.Types.Api.GetSampleResultsReq do
+defmodule Elodin.Types.Api.GetMonteCarloResultsReq do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
-  field :sample_number, 2, type: :uint32, json_name: "sampleNumber"
+  field :batch_number, 2, type: :uint32, json_name: "batchNumber"
 end
 
-defmodule Elodin.Types.Api.GetSampleResultsResp do
+defmodule Elodin.Types.Api.GetMonteCarloResultsResp do
   @moduledoc false
 
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
@@ -285,8 +286,6 @@ defmodule Elodin.Types.Api.Api.Service do
 
   rpc :GetSandbox, Elodin.Types.Api.GetSandboxReq, Elodin.Types.Api.Sandbox
 
-  rpc :DeleteSandbox, Elodin.Types.Api.DeleteSandboxReq, Elodin.Types.Api.Sandbox
-
   rpc :ListSandboxes, Elodin.Types.Api.ListSandboxesReq, Elodin.Types.Api.ListSandboxesResp
 
   rpc :CreateSandbox, Elodin.Types.Api.CreateSandboxReq, Elodin.Types.Api.CreateSandboxResp
@@ -294,6 +293,8 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :UpdateSandbox, Elodin.Types.Api.UpdateSandboxReq, Elodin.Types.Api.UpdateSandboxResp
 
   rpc :BootSandbox, Elodin.Types.Api.BootSandboxReq, Elodin.Types.Api.BootSandboxResp
+
+  rpc :DeleteSandbox, Elodin.Types.Api.DeleteSandboxReq, Elodin.Types.Api.Sandbox
 
   rpc :SandboxEvents, Elodin.Types.Api.GetSandboxReq, stream(Elodin.Types.Api.Sandbox)
 
@@ -319,9 +320,9 @@ defmodule Elodin.Types.Api.Api.Service do
       Elodin.Types.Api.GetMonteCarloRunReq,
       stream(Elodin.Types.Api.MonteCarloBatch)
 
-  rpc :GetSampleResults,
-      Elodin.Types.Api.GetSampleResultsReq,
-      Elodin.Types.Api.GetSampleResultsResp
+  rpc :GetMonteCarloResults,
+      Elodin.Types.Api.GetMonteCarloResultsReq,
+      Elodin.Types.Api.GetMonteCarloResultsResp
 end
 
 defmodule Elodin.Types.Api.Api.Stub do
