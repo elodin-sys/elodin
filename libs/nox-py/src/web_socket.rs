@@ -10,8 +10,11 @@ use axum::{
 use bytes::{Bytes, BytesMut};
 use conduit::{client::MsgPair, server::handle_stream_sink};
 use futures::{SinkExt, StreamExt, TryStreamExt};
+use include_dir::{include_dir, Dir};
 use nox_ecs::{nox, ConduitExec, Error, WorldExec};
 use std::net::SocketAddr;
+
+static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
 pub fn spawn_ws_server(
     socket_addr: std::net::SocketAddr,
@@ -125,12 +128,15 @@ init("/editor-web_bg.wasm")
 async fn editor_web_js() -> impl IntoResponse {
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/javascript".parse().unwrap());
-    (headers, include_str!("../assets/editor-web.js"))
+    let js_file = ASSETS.get_file("editor-web.js").unwrap();
+    let js_contents = js_file.contents_utf8().unwrap();
+    (headers, js_contents);
 }
 
 async fn editor_web_wasm() -> impl IntoResponse {
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/wasm".parse().unwrap());
-
-    (headers, include_bytes!("../assets/editor-web_bg.wasm"))
+    let wasm_file = ASSETS.get_file("editor-web_bg.wasm").unwrap();
+    let wasm_contents = wasm_file.contents();
+    (headers, wasm_contents)
 }

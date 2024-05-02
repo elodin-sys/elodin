@@ -66,3 +66,4 @@ futures.optional = true
 tokio-util.version = "0.7.10"
 tokio-util.features = ["io"]
 tokio-util.optional = true
+include_dir = "0.7.3"
