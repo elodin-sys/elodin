@@ -302,6 +302,10 @@ impl EPlot {
                                         (*entity_id, *component_id, value_index),
                                         (entity, *color),
                                     );
+                                    if let Some(values) = lines.get_mut(&line.values) {
+                                        values.max_count = max_length;
+                                        values.recalculate_chunk_size();
+                                    }
                                 }
                                 (Some((entity, _)), false) => {
                                     commands.entity(*entity).despawn();
@@ -500,7 +504,7 @@ impl EPlot {
         graph_state: &GraphState,
         collected_graph_data: &CollectedGraphData,
         pointer_pos: egui::Pos2,
-        index: usize,
+        tick: usize,
     ) {
         let modal_width = 200.0;
         let margin = 20.0;
@@ -539,7 +543,7 @@ impl EPlot {
                     }),
             )
             .show(ui.ctx(), |ui| {
-                let time = self.time_step * index as u32;
+                let time = self.time_step * tick as u32;
                 let time_text = utils::time_label_ms(time.as_secs_f64());
 
                 ui.label(time_text);
@@ -554,6 +558,7 @@ impl EPlot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
+                    let index = tick / line.chunk_size;
                     if current_entity_id.as_ref() != Some(entity_id) {
                         ui.add_space(8.0);
                         ui.add(egui::Separator::default().grow(16.0 * 2.0));
@@ -605,9 +610,14 @@ impl EPlot {
                                 ui.label(RichText::new(line_data.label.clone()).size(11.0));
                             })
                         });
+                        let value = line
+                            .averaged_data
+                            .get(index)
+                            .map(|x| format!("{:.2}", x))
+                            .unwrap_or_else(|| "N/A".to_string());
                         ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                             ui.add_space(3.0);
-                            ui.label(RichText::new(format!("{:.2}", line.data[index])).size(11.0));
+                            ui.label(RichText::new(value).size(11.0));
                             ui.add_space(3.0);
                         })
                     });
@@ -707,7 +717,7 @@ impl EPlot {
                 let x_range = self.bounds.max_x - self.bounds.min_x;
                 let x_pos = x_offset * (x_range as f32 / self.inner_rect.width())
                     + self.bounds.min_x as f32;
-                let x_index = x_pos as usize;
+                let x_tick = x_pos as usize;
                 self.draw_cursor(ui, pointer_pos, x_offset, self.inner_rect);
 
                 // Draw highlight circles on lines
@@ -721,10 +731,11 @@ impl EPlot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
-                    let Some(y) = line.data.get(x_index) else {
+                    let x_index = x_tick / line.chunk_size;
+                    let Some(y) = line.averaged_data.get(x_index) else {
                         continue;
                     };
-                    let y_offset = y - self.bounds.min_y;
+                    let y_offset = *y as f64 - self.bounds.min_y;
                     let y_range = self.bounds.max_y - self.bounds.min_y;
                     let y_pos = y_offset as f32 * (self.inner_rect.height() / y_range as f32);
                     let y_pos = self.inner_rect.max.y - y_pos;
@@ -745,7 +756,7 @@ impl EPlot {
                         graph_state,
                         collected_graph_data,
                         pointer_pos,
-                        x_index,
+                        x_tick,
                     );
                 }
             }
