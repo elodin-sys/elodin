@@ -25,7 +25,7 @@ impl History {
 
     pub fn push_world(&mut self, host: &World) -> Result<(), Error> {
         let mut world = host.to_polars()?;
-        world.add_time()?;
+        world.add_tick()?;
         self.worlds.push(world);
         Ok(())
     }
