@@ -67,7 +67,7 @@ impl PolarsWorld {
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
         let mut tables = self.archetypes.values();
         let init = tables.next().cloned().unwrap_or_default();
-        let mut keys = vec![EntityId::NAME, "time"];
+        let mut keys = vec![EntityId::NAME, "tick"];
         if init.get_column_names().contains(&"sample_number") {
             keys.push("sample_number");
         }
@@ -96,7 +96,7 @@ impl PolarsWorld {
         Ok(())
     }
 
-    pub fn add_time(&mut self) -> Result<(), Error> {
+    pub fn add_tick(&mut self) -> Result<(), Error> {
         for df in self.archetypes.values_mut() {
             let len = df
                 .get_columns()
@@ -104,7 +104,7 @@ impl PolarsWorld {
                 .map(|s| s.len())
                 .unwrap_or_default();
             let series: Series = std::iter::repeat(self.metadata.tick).take(len).collect();
-            df.with_column(series.with_name("time"))?;
+            df.with_column(series.with_name("tick"))?;
         }
         Ok(())
     }
