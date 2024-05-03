@@ -1,5 +1,5 @@
-use bevy_egui::egui::Color32;
 use conduit::well_known::Color;
+use egui::Color32;
 
 pub const WHITE: Color32 = Color32::WHITE;
 pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;
@@ -25,14 +25,14 @@ pub const REDDISH_DEFAULT: Color32 = Color32::from_rgb(0xE9, 0x4B, 0x14);
 pub const HYPERBOLE_DEFAULT: Color32 = Color32::from_rgb(0x14, 0x5F, 0xCF);
 pub const MINT_DEFAULT: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
 
-pub const TURQUOISE_40: Color32 = Color32::from_rgba_premultiplied(0x69, 0xB3, 0xBF, 100);
-pub const SLATE_40: Color32 = Color32::from_rgba_premultiplied(0x7F, 0x70, 0xFF, 100);
-pub const PUMPKIN_40: Color32 = Color32::from_rgba_premultiplied(0xFF, 0x6F, 0x1E, 100);
-pub const YOLK_40: Color32 = Color32::from_rgba_premultiplied(0xFE, 0xC5, 0x04, 100);
-pub const PEACH_40: Color32 = Color32::from_rgba_premultiplied(0xFF, 0xD7, 0xB3, 100);
-pub const REDDISH_40: Color32 = Color32::from_rgba_premultiplied(0xE9, 0x4B, 0x14, 100);
-pub const HYPERBOLE_40: Color32 = Color32::from_rgba_premultiplied(0x14, 0x5F, 0xCF, 100);
-pub const MINT_40: Color32 = Color32::from_rgba_premultiplied(0x88, 0xDE, 0x9F, 100);
+pub const TURQUOISE_40: Color32 = Color32::from_rgb(0x38, 0x55, 0x59);
+pub const SLATE_40: Color32 = Color32::from_rgb(0x41, 0x3A, 0x73);
+pub const PUMPKIN_40: Color32 = Color32::from_rgb(0x74, 0x3A, 0x1A);
+pub const YOLK_40: Color32 = Color32::from_rgb(0x73, 0x5C, 0x0D);
+pub const PEACH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
+pub const REDDISH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
+pub const HYPERBOLE_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
+pub const MINT_40: Color32 = Color32::from_rgb(0x43, 0x66, 0x4C);
 
 pub fn get_color_by_index_solid(index: usize) -> Color32 {
     let colors = [

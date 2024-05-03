@@ -311,7 +311,7 @@ impl Line {
         }
     }
 
-    fn recalculate_chunk_size(&mut self) -> bool {
+    pub fn recalculate_chunk_size(&mut self) -> bool {
         let new_chunk_size = (self.data.len() / self.max_count).max(1);
         if new_chunk_size == self.chunk_size {
             return true;
