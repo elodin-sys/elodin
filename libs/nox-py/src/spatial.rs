@@ -353,18 +353,15 @@ impl From<nox::SpatialInertia<f64>> for SpatialInertia {
 #[pymethods]
 impl SpatialInertia {
     #[new]
-    fn new(mass: PyObject, inertia: PyObject) -> Self {
-        nox::SpatialInertia::new(
-            Vector::<f64, 3>::from_op(Noxpr::jax(inertia)),
-            Vector::<f64, 3>::zeros(),
-            Scalar::<f64>::from_op(Noxpr::jax(mass)),
-        )
-        .into()
-    }
-
-    #[staticmethod]
-    fn from_mass(arr: PyObject) -> Self {
-        nox::SpatialInertia::from_mass(Scalar::from_op(Noxpr::jax(arr))).into()
+    fn new(mass: PyObject, inertia: Option<PyObject>) -> Self {
+        let mass = Scalar::<f64>::from_op(Noxpr::jax(mass));
+        let momentum = Vector::<f64, 3>::zeros();
+        let inertia = if let Some(inertia) = inertia {
+            Vector::<f64, 3>::from_op(Noxpr::jax(inertia))
+        } else {
+            Vector::<f64, 3>::ones() * mass.clone()
+        };
+        nox::SpatialInertia::new(inertia, momentum, mass).into()
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
