@@ -9,7 +9,7 @@ drones, satellites, and aerospace control systems.
 
 Quick Demo: https://app.elodin.systems/sandbox/hn/cube-sat
 
-Sandbox Alpha: https://app.elodin.systems  
+Sandbox Alpha: https://app.elodin.systems
 Docs (WIP): https://docs.elodin.systems
 
 This repository is a collection of core libraries:
@@ -33,7 +33,7 @@ Join us on Discord: https://discord.gg/agvGJaZXy5!
 1. Install Rust using https://rustup.rs
 2. Setup a new venv with:
 
-```fish 
+```fish
 python3 -m venv .venv
  . .venv/bin/activate.fish # or activate.sh if you do not use fish
 ```
@@ -46,39 +46,48 @@ pip install matplotlib
 
 4. Try running the following code
 
-```python 
+```python
 import matplotlib.pyplot as plt
-import jax.numpy as np
-from elodin import *
+import jax
+import jax.numpy as jnp
+import elodin as el
 
-@system
-def gravity(q: Query[WorldPos]) -> Query[Force]:
-  return q.map(Force, lambda _p: Force.from_linear(np.array([0.0, -9.81, 0.0])))
 
-@system
-def bounce(q: Query[WorldPos, WorldVel]) -> Query[WorldVel]:
-  return q.map(WorldVel, lambda p, v: jax.lax.cond(
-    jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
-    lambda _: WorldVel.from_linear(v.linear() * np.array([1.,-1.,1.]) * 0.85),
-    lambda _: v,
-    operand=None
-  ))
+@el.map
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce.from_linear(
+        jnp.array([0.0, inertia.mass() * -9.81, 0.0])
+    )
 
-w = WorldBuilder()
-w.spawn(
-    Body(
-        world_pos=WorldPos.from_linear(np.array([0.0, 10.0, 0.0])),
-        world_vel=WorldVel.from_linear(np.array([0.0, 0.0, 0.0])),
-        inertia=Inertia.from_mass(1.0),
+
+@el.map
+def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
+    return jax.lax.cond(
+        jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
+        lambda _: el.SpatialMotion.from_linear(
+            v.linear() * jnp.array([1.0, -1.0, 1.0]) * 0.85
+        ),
+        lambda _: v,
+        operand=None,
+    )
+
+
+world = el.World()
+world.spawn(
+    el.Body(
+        world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 10.0, 0.0])),
+        world_vel=el.SpatialMotion.from_linear(jnp.array([0.0, 0.0, 0.0])),
+        inertia=el.SpatialInertia.from_mass(1.0),
     )
 )
-client = Client.cpu()
-exec = w.build(bounce.pipe(six_dof(1.0 / 60.0, gravity)))
+client = el.Client.cpu()
+sys = bounce.pipe(el.six_dof(1.0 / 60.0, gravity))
+exec = world.build(sys)
 t = range(500)
 pos = []
 for _ in t:
     exec.run(client)
-    y = exec.column_array(Component.id(WorldPos))[0, 5]
+    y = exec.column_array("world_pos")[0, 5]
     pos.append(y)
 fig, ax = plt.subplots()
 ax.plot(t, pos)
