@@ -2,6 +2,16 @@
 
 ## [unreleased]
 
+- **(breaking)** Remove `SpatialInertia.from_mass()`.
+  - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.
+
+    ```python
+    # before:
+    inertia=el.SpatialInertia.from_mass(1.0 / G),
+    # after:
+    inertia=el.SpatialInertia(1.0 / G),
+    ```
+
 ## [v0.3.20]
 
 - **(breaking)** Replace entity builder pattern with a more flexible `spawn` API.

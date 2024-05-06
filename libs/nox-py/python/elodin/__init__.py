@@ -469,7 +469,7 @@ class C:
 class Body(Archetype):
     world_pos: WorldPos = SpatialTransform.zero()
     world_vel: WorldVel = SpatialMotion.zero()
-    inertia: Inertia = SpatialInertia.from_mass(1.0)
+    inertia: Inertia = SpatialInertia(1.0)
     pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))  # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
     force: Force = SpatialForce.zero()
     world_accel: WorldAccel = SpatialMotion.zero()
