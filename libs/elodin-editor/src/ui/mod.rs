@@ -201,7 +201,7 @@ type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 pub struct GraphState {
     entities: BTreeMap<EntityId, GraphStateEntity>,
     range_id: Option<TaggedRangeId>,
-    enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
+    pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     render_layers: RenderLayers,
     camera: Entity,
     line_width: f32,
@@ -256,7 +256,7 @@ impl GraphState {
 }
 
 #[derive(Resource, Clone, Debug, Default)]
-pub struct GraphsState(BTreeMap<GraphId, GraphState>);
+pub struct GraphsState(pub BTreeMap<GraphId, GraphState>);
 
 impl GraphsState {
     pub fn get(&self, graph_id: &GraphId) -> Option<&GraphState> {
