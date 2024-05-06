@@ -40,7 +40,7 @@ use ui::{
         eplot::{EPlotDataComponent, EPlotDataEntity, EPlotDataLine},
         eplot_gpu::Line,
     },
-    EntityPair, HoveredEntity,
+    EntityPair, GraphsState, HoveredEntity,
 };
 
 use crate::{plugins::editor_cam_touch, ui::widgets::eplot_gpu};
@@ -203,10 +203,12 @@ impl CollectedGraphData {
 
 pub fn collect_entity_data(
     mut collected_graph_data: ResMut<CollectedGraphData>,
+    mut graph_states: ResMut<GraphsState>,
     mut reader: EventReader<Msg>,
     metadata_store: Res<MetadataStore>,
     entity_metadata: Query<(&EntityId, &EntityMetadata)>,
     mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
 ) {
     let entity_metadata = entity_metadata
         .iter()
@@ -217,6 +219,12 @@ pub fn collect_entity_data(
             Msg::Control(ControlMsg::StartSim { .. }) => {
                 collected_graph_data.entities.clear();
                 collected_graph_data.tick_range = 0..0;
+                for graph in graph_states.0.values_mut() {
+                    for (_, (entity, _)) in graph.enabled_lines.iter() {
+                        commands.entity(*entity).despawn();
+                    }
+                    graph.enabled_lines.clear();
+                }
             }
             Msg::Control(ControlMsg::Tick { tick, max_tick: _ }) => {
                 if collected_graph_data.tick_range.end < *tick {
