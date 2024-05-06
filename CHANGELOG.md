@@ -2,9 +2,73 @@
 
 ## [unreleased]
 
+## [v0.3.20]
+
+- **(breaking)** Replace entity builder pattern with a more flexible `spawn` API.
+  - To migrate to the new API, replace `name()` with the keyword argument:
+    ```python
+    # before:
+    w.spawn(el.Body()).name("entity_name")
+    # after:
+    w.spawn(el.Body(), name="entity_name")
+    ```
+  - If the entity has multiple archetypes, just provide a list of archetypes as the first positional argument instead of using `insert()`:
+    ```python
+    # before:
+    w.spawn(el.Body()).name("entity_name").insert(OtherArchetype())
+    # after:
+    w.spawn([el.Body(), OtherArchetype()], name="entity_name")
+    ```
+  - Also, `spawn` now returns `EntityId` directly instead of `Entity`. So, there's no need to call `id()` to reference the entity in an edge component or viewport.
+    ```python
+    a = w.spawn(...)
+    b = w.spawn(...)
+    # before:
+    w.spawn(Rel(el.Edge(a.id(), b.id())))
+    # after:
+    w.spawn(Rel(el.Edge(a, b)))
+    ```
+- Add multi-file support for Monte Carlo runs.
+- Add ability to use ranges in viewports for replay.
+
 ## [v0.3.19]
 
-- **(breaking)** Allow different graph query parameters via the new `edge_fold` API.
+- **(breaking)** Allow querying different components from the left and right entities via the new `edge_fold` API.
+  - To migrate to the new API, move the graph query's input components to a separate query parameter:
+    ```python
+    # before:
+    @el.system
+    def gravity(
+        graph: el.GraphQuery[GravityEdge, el.WorldPos, el.Inertia],
+    )
+
+    # after:
+    @el.system
+    def gravity(
+        graph: el.GraphQuery[GravityEdge],
+        query: el.Query[el.WorldPos, el.Inertia],
+    )
+    ```
+
+    And then reference it in `edge_fold`:
+    ```python
+    # before:
+    return graph.edge_fold(el.Force, ...
+
+    # after:
+    return graph.edge_fold(query, query, el.Force, ...
+    ```
+  - To query different components from the left and right entities, use multiple queries:
+
+    ```python
+    @el.system
+    def rw_effector(
+        rw_force: el.GraphQuery[RWEdge],
+        force_query: el.Query[el.Force],
+        rw_query: el.Query[RWForce]
+    ) -> el.Query[el.Force]:
+        return rw_force.edge_fold(force_query, rw_query, el.Force, ...
+    ```
 - Make graph colors deterministic.
 - Drop milliseconds from the x-axis in graphs.
 - Prevent grid from changing origin.
@@ -39,7 +103,8 @@
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.19...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...HEAD
+[v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.19...v0.3.20
 [v0.3.19]: https://github.com/elodin-sys/paracosm/compare/v0.3.18...v0.3.19
 [v0.3.18]: https://github.com/elodin-sys/paracosm/compare/v0.3.17...v0.3.18
 [v0.3.17]: https://github.com/elodin-sys/paracosm/compare/v0.3.16...v0.3.17
