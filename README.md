@@ -1,5 +1,12 @@
 # Elodin
 
+## Setup
+
+```sh
+# Enable repo-specific git hooks
+git config --local core.hooksPath .githooks/
+```
+
 ### Directory Layout
 - `apps` - contains binaries that users run
 - `.buildkite` - contains everything related to CI pipeline
