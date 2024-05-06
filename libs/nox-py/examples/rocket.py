@@ -202,7 +202,7 @@ rocket = w.spawn(
                     "https://storage.googleapis.com/elodin-marketing/models/rocket.glb"
                 )
             ),
-            inertia=el.Inertia.from_mass(2.0),
+            inertia=el.SpatialInertia(2.0),
         ),
         Rocket(
             euler_pos=jnp.array([0.0, 0.0, 0.0]),

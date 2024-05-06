@@ -138,11 +138,7 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 
 - `__init__(mass, inertia)` -> [elodin.SpatialInertia]
 
-    Create a spatial tensor inertia from a scalar mass and an inertia tensor diagonal with shape (3,).
-
-- `SpatialInertia.from_mass(mass)` -> [elodin.SpatialInertia]
-
-    Create a spatial inertia from just the mass. The inertia is set to the same value as the mass along all axes.
+    Create a spatial tensor inertia from a scalar mass and an optional inertia tensor diagonal with shape (3,). If the inertia tensor is not provided, it is set to the same value as the mass along all axes.
 
 - `mass()` -> [jax.Array]
 
