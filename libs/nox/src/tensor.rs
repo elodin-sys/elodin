@@ -158,6 +158,10 @@ impl<T: Field, D: Dim> Tensor<T, D, Op> {
     pub fn zeros() -> Self {
         T::zero().broadcast()
     }
+
+    pub fn ones() -> Self {
+        T::one().broadcast()
+    }
 }
 
 impl<T: TensorItem, D: Dim> IntoOp for Tensor<T, D, Op> {

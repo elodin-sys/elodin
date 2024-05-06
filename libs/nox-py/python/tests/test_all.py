@@ -61,7 +61,7 @@ def test_six_dof():
         Body(
             world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
             world_vel=WorldVel.from_linear(np.array([1.0, 0.0, 0.0])),
-            inertia=Inertia.from_mass(1.0),
+            inertia=SpatialInertia(1.0),
         )
     )
     client = Client.cpu()
