@@ -39,7 +39,7 @@ a = w.spawn(
     el.Body(
         world_pos=el.WorldPos.from_linear(np.array([0.8822391241, 0, 0])),
         world_vel=el.WorldVel.from_linear(np.array([0, 1.0042424155, 0])),
-        inertia=el.Inertia.from_mass(1.0 / G),
+        inertia=el.SpatialInertia(1.0 / G),
         pbr=w.insert_asset(
             el.Pbr(el.Mesh.sphere(0.2), el.Material.color(25.3, 18.4, 1.0))
         ),
@@ -50,7 +50,7 @@ b = w.spawn(
     el.Body(
         world_pos=el.WorldPos.from_linear(np.array([-0.6432718586, 0, 0])),
         world_vel=el.WorldVel.from_linear(np.array([0, -1.6491842814, 0])),
-        inertia=el.Inertia.from_mass(1.0 / G),
+        inertia=el.SpatialInertia(1.0 / G),
         pbr=w.insert_asset(
             el.Pbr(el.Mesh.sphere(0.2), el.Material.color(10.0, 0.0, 10.0))
         ),
@@ -61,7 +61,7 @@ c = w.spawn(
     el.Body(
         world_pos=el.WorldPos.from_linear(np.array([-0.2389672654, 0, 0])),
         world_vel=el.WorldVel.from_linear(np.array([0, 0.6449418659, 0.0])),
-        inertia=el.Inertia.from_mass(1.0 / G),
+        inertia=el.SpatialInertia(1.0 / G),
         pbr=w.insert_asset(
             el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
         ),

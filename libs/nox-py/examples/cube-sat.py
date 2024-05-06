@@ -489,7 +489,7 @@ w.spawn(
         world_vel=el.SpatialMotion.from_angular(
             np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
         ),
-        inertia=el.SpatialInertia.from_mass(1.0),
+        inertia=el.SpatialInertia(1.0),
         pbr=w.insert_asset(
             el.Pbr.from_url(
                 "https://storage.googleapis.com/elodin-marketing/models/earth.glb"
