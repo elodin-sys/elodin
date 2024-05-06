@@ -8,3 +8,6 @@ members = [
     "libs/nox-py",
     "libs/xla-rs",
 ]
+
+[workspace.package]
+version = "0.1.0"
