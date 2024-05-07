@@ -604,14 +604,14 @@ pub struct LocalBackend;
 impl Repr for LocalBackend {
     type Inner<T, D: Dim> = Array<T, D> where T: Copy;
 
-    fn add<T, D1: ArrayDim, D2: ArrayDim>(
+    fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
         T: Add<Output = T> + Copy,
-        D1: TensorDim + XlaDim,
-        D2: TensorDim + XlaDim,
+        D1: ArrayDim + TensorDim + XlaDim,
+        D2: ArrayDim + TensorDim + XlaDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
@@ -668,12 +668,12 @@ impl Repr for LocalBackend {
         left.div(right)
     }
 
-    fn dot<T: Field, D1, D2>(
+    fn dot<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
     where
-        T: Div<Output = T> + Copy,
+        T: Field + Div<Output = T> + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
@@ -684,14 +684,14 @@ impl Repr for LocalBackend {
         left.dot(right)
     }
 
-    fn concat_many<T1: Field, D1: Dim, const N: usize>(
+    fn concat_many<T1: Field, D1, const N: usize>(
         args: [&Self::Inner<T1, D1>; N],
     ) -> Self::Inner<T1, ConcatManyDim<D1, N>>
     where
         DefaultMappedDim<D1>: nalgebra::DimMul<Const<N>> + nalgebra::Dim,
         D1::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D1>,
-        D1: DefaultMap,
+        D1: Dim + DefaultMap,
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,

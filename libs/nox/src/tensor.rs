@@ -604,7 +604,7 @@ impl<T: TensorItem, D: Dim> Tensor<T, D> {
         }
     }
 
-    pub fn broadcast<ND: Dim>(self) -> Tensor<T, ND>
+    pub fn broadcast<ND>(self) -> Tensor<T, ND>
     where
         ND: Dim + XlaDim,
     {
