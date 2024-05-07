@@ -20,6 +20,9 @@ pub struct Config {
 pub struct ApiConfig {
     pub address: SocketAddr,
     pub auth0: Auth0Config,
+    pub base_url: String,
+    pub stripe_secret_key: String,
+    pub stripe_webhook_secret: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

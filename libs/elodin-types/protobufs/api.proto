@@ -6,6 +6,7 @@ service Api {
     // User Ops
     rpc CreateUser(CreateUserReq) returns (CreateUserResp);
     rpc CurrentUser(CurrentUserReq) returns (CurrentUserResp);
+    rpc UpdateUser(UpdateUserReq) returns (UpdateUserResp);
 
     // Sandbox Ops
     rpc GetSandbox(GetSandboxReq) returns (Sandbox);
@@ -28,6 +29,12 @@ service Api {
     rpc MonteCarloBatchEvents(GetMonteCarloRunReq) returns (stream MonteCarloBatch);
 
     rpc GetMonteCarloResults(GetMonteCarloResultsReq) returns (GetMonteCarloResultsResp);
+
+    // Billing Account
+    rpc CreateBillingAccount(CreateBillingAccountReq) returns (BillingAccount);
+
+    // License Gen
+    rpc GenerateLicense(GenerateLicenseReq) returns (GenerateLicenseResp);
 }
 
 message CurrentUserReq {}
@@ -36,6 +43,16 @@ message CurrentUserResp {
     string email = 2;
     string name = 3;
     string avatar = 4;
+    LicenseType license_type = 5;
+    optional bytes billing_account_id = 6;
+    optional OnboardingData onboarding_data = 7;
+}
+
+enum LicenseType {
+    NONE = 0;
+    NON_COMMERCIAL = 1;
+    COMMERCIAL = 2;
+    GOD_TIER = 3;
 }
 
 message CreateUserReq {
@@ -46,6 +63,16 @@ message CreateUserReq {
 message CreateUserResp {
     bytes id = 1;
 }
+
+message UpdateUserReq {
+    optional OnboardingData onboarding_data = 1;
+}
+
+message OnboardingData {
+    repeated string usecases = 1;
+}
+
+message UpdateUserResp {}
 
 message CreateSandboxReq {
     string name = 1;
@@ -179,4 +206,24 @@ message GetMonteCarloResultsReq {
 
 message GetMonteCarloResultsResp {
     string download_url = 1;
+}
+
+message CreateBillingAccountReq {
+    string name = 1;
+    LicenseType trial_license_type = 2;
+}
+
+message BillingAccount {
+    bytes id = 1;
+    string name = 2;
+    string customer_id = 3;
+}
+
+
+message GenerateLicenseReq {
+    bytes machine_id = 1;
+}
+
+message GenerateLicenseResp {
+    bytes license = 1;
 }

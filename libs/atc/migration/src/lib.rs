@@ -11,6 +11,11 @@ mod m20240307_235204_add_run_start;
 mod m20240308_002847_add_batches;
 mod m20240311_190106_add_batch_state;
 mod m20240402_101606_change_vms_sandbox_id_fk_on_delete;
+mod m20240430_043601_add_usage_events;
+mod m20240430_044602_add_billing_account;
+mod m20240430_044605_add_license_state;
+mod m20240502_161407_add_billing_account_seat_count;
+mod m20240502_233542_add_onboarding_data;
 
 pub struct Migrator;
 
@@ -29,6 +34,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20240308_002847_add_batches::Migration),
             Box::new(m20240311_190106_add_batch_state::Migration),
             Box::new(m20240402_101606_change_vms_sandbox_id_fk_on_delete::Migration),
+            Box::new(m20240430_043601_add_usage_events::Migration),
+            Box::new(m20240430_044602_add_billing_account::Migration),
+            Box::new(m20240430_044605_add_license_state::Migration),
+            Box::new(m20240502_161407_add_billing_account_seat_count::Migration),
+            Box::new(m20240502_233542_add_onboarding_data::Migration),
         ]
     }
 }

@@ -64,6 +64,15 @@ defmodule ElodinDashboard.AtcAgent do
     end)
   end
 
+  def update_user(pid, request, token) do
+    ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
+      channel
+      |> Elodin.Types.Api.Api.Stub.update_user(request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
+
   def create_sandbox(pid, request, token) do
     ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
       channel
@@ -144,6 +153,15 @@ defmodule ElodinDashboard.AtcAgent do
       )
     end)
   end
+
+  def create_billing_account(pid, request, token) do
+    ElodinDashboard.AtcAgent.with_channel(pid, fn channel ->
+      channel
+      |> Elodin.Types.Api.Api.Stub.create_billing_account(request,
+        metadata: %{"Authorization" => "Bearer #{token}"}
+      )
+    end)
+  end
 end
 
 defmodule ElodinDashboard.Atc do
@@ -163,6 +181,16 @@ defmodule ElodinDashboard.Atc do
       :atc,
       fn pid ->
         ElodinDashboard.AtcAgent.create_user(pid, request, token)
+      end,
+      @timeout
+    )
+  end
+
+  def update_user(request, token) do
+    :poolboy.transaction(
+      :atc,
+      fn pid ->
+        ElodinDashboard.AtcAgent.update_user(pid, request, token)
       end,
       @timeout
     )
@@ -243,6 +271,16 @@ defmodule ElodinDashboard.Atc do
       :atc,
       fn pid ->
         ElodinDashboard.AtcAgent.get_monte_carlo_run(pid, request, token)
+      end,
+      @timeout
+    )
+  end
+
+  def create_billing_account(request, token) do
+    :poolboy.transaction(
+      :atc,
+      fn pid ->
+        ElodinDashboard.AtcAgent.create_billing_account(pid, request, token)
       end,
       @timeout
     )

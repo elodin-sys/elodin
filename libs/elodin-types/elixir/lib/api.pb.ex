@@ -1,3 +1,14 @@
+defmodule Elodin.Types.Api.LicenseType do
+  @moduledoc false
+
+  use Protobuf, enum: true, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :NONE, 0
+  field :NON_COMMERCIAL, 1
+  field :COMMERCIAL, 2
+  field :GOD_TIER, 3
+end
+
 defmodule Elodin.Types.Api.Sandbox.Status do
   @moduledoc false
 
@@ -44,6 +55,13 @@ defmodule Elodin.Types.Api.CurrentUserResp do
   field :email, 2, type: :string
   field :name, 3, type: :string
   field :avatar, 4, type: :string
+  field :license_type, 5, type: Elodin.Types.Api.LicenseType, json_name: "licenseType", enum: true
+  field :billing_account_id, 6, proto3_optional: true, type: :bytes, json_name: "billingAccountId"
+
+  field :onboarding_data, 7,
+    proto3_optional: true,
+    type: Elodin.Types.Api.OnboardingData,
+    json_name: "onboardingData"
 end
 
 defmodule Elodin.Types.Api.CreateUserReq do
@@ -61,6 +79,31 @@ defmodule Elodin.Types.Api.CreateUserResp do
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 
   field :id, 1, type: :bytes
+end
+
+defmodule Elodin.Types.Api.UpdateUserReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :onboarding_data, 1,
+    proto3_optional: true,
+    type: Elodin.Types.Api.OnboardingData,
+    json_name: "onboardingData"
+end
+
+defmodule Elodin.Types.Api.OnboardingData do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :usecases, 1, repeated: true, type: :string
+end
+
+defmodule Elodin.Types.Api.UpdateUserResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
 end
 
 defmodule Elodin.Types.Api.CreateSandboxReq do
@@ -275,6 +318,45 @@ defmodule Elodin.Types.Api.GetMonteCarloResultsResp do
   field :download_url, 1, type: :string, json_name: "downloadUrl"
 end
 
+defmodule Elodin.Types.Api.CreateBillingAccountReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :name, 1, type: :string
+
+  field :trial_license_type, 2,
+    type: Elodin.Types.Api.LicenseType,
+    json_name: "trialLicenseType",
+    enum: true
+end
+
+defmodule Elodin.Types.Api.BillingAccount do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :id, 1, type: :bytes
+  field :name, 2, type: :string
+  field :customer_id, 3, type: :string, json_name: "customerId"
+end
+
+defmodule Elodin.Types.Api.GenerateLicenseReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :machine_id, 1, type: :bytes, json_name: "machineId"
+end
+
+defmodule Elodin.Types.Api.GenerateLicenseResp do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :license, 1, type: :bytes
+end
+
 defmodule Elodin.Types.Api.Api.Service do
   @moduledoc false
 
@@ -283,6 +365,8 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :CreateUser, Elodin.Types.Api.CreateUserReq, Elodin.Types.Api.CreateUserResp
 
   rpc :CurrentUser, Elodin.Types.Api.CurrentUserReq, Elodin.Types.Api.CurrentUserResp
+
+  rpc :UpdateUser, Elodin.Types.Api.UpdateUserReq, Elodin.Types.Api.UpdateUserResp
 
   rpc :GetSandbox, Elodin.Types.Api.GetSandboxReq, Elodin.Types.Api.Sandbox
 
@@ -323,6 +407,12 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :GetMonteCarloResults,
       Elodin.Types.Api.GetMonteCarloResultsReq,
       Elodin.Types.Api.GetMonteCarloResultsResp
+
+  rpc :CreateBillingAccount,
+      Elodin.Types.Api.CreateBillingAccountReq,
+      Elodin.Types.Api.BillingAccount
+
+  rpc :GenerateLicense, Elodin.Types.Api.GenerateLicenseReq, Elodin.Types.Api.GenerateLicenseResp
 end
 
 defmodule Elodin.Types.Api.Api.Stub do

@@ -33,6 +33,16 @@ Hooks.EditorWasmHook = {
     }
 }
 
+Hooks.FireworksHook = {
+    async mounted() {
+      const container = document.querySelector('#fireworks')
+      const fireworks = new Fireworks.default(container)
+      fireworks.start()
+    }
+}
+
+
+
 // source: https://stackoverflow.com/a/61511955
 function waitForElm(selector) {
     return new Promise(resolve => {
@@ -82,6 +92,10 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 window.addEventListener("phx:copy", (event) => {
   navigator.clipboard.writeText(event.target.value).then(() => {})
 });
+window.addEventListener("phx:copy-inner", (event) => {
+  navigator.clipboard.writeText(event.target.innerText).then(() => {})
+});
+
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 

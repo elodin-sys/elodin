@@ -1,0 +1,205 @@
+use crate::error::Error;
+use atc_entity::{billing_account, events::DbExt, user};
+use axum::{
+    async_trait,
+    extract::{FromRequest, State},
+    http::{Request, StatusCode},
+    response::{IntoResponse, Response},
+};
+use elodin_types::api::LicenseType;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, Unchanged};
+use stripe::{Event, EventObject, EventType};
+use tracing::warn;
+use uuid::Uuid;
+
+use super::AxumContext;
+
+pub const MONTE_CARLO_PRICE: &str = "price_1PBnS5G68UBhCjJFgvwkvQwx";
+pub const COMMERCIAL_PRICE: &str = "price_1PBnNtG68UBhCjJF82vJsv5n";
+pub const NON_COMMERCIAL_PRICE: &str = "price_1PBnNDG68UBhCjJFLZMvrR92";
+
+pub struct StripeEvent(Event);
+
+#[async_trait]
+impl<B> FromRequest<AxumContext, B> for StripeEvent
+where
+    String: FromRequest<AxumContext, B>,
+    B: Send + Sync + 'static,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request<B>, state: &AxumContext) -> Result<Self, Self::Rejection> {
+        let signature = if let Some(sig) = req.headers().get("stripe-signature") {
+            sig.to_owned()
+        } else {
+            return Err(StatusCode::BAD_REQUEST.into_response());
+        };
+
+        let payload = String::from_request(req, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+
+        Ok(Self(
+            stripe::Webhook::construct_event(
+                &payload,
+                signature.to_str().unwrap(),
+                &state.webhook_secret,
+            )
+            .map_err(|_| StatusCode::BAD_REQUEST.into_response())?,
+        ))
+    }
+}
+
+pub async fn stripe_webhook(
+    State(context): State<AxumContext>,
+    StripeEvent(event): StripeEvent,
+) -> Result<impl IntoResponse, Error> {
+    if let EventType::CustomerSubscriptionPaused
+    | EventType::CustomerSubscriptionDeleted
+    | EventType::CustomerSubscriptionCreated
+    | EventType::CustomerSubscriptionUpdated
+    | EventType::CustomerSubscriptionResumed
+    | EventType::CustomerSubscriptionTrialWillEnd
+    | EventType::CustomerSubscriptionPendingUpdateExpired
+    | EventType::CustomerSubscriptionPendingUpdateApplied = event.type_
+    {
+        if let EventObject::Subscription(sub) = event.data.object {
+            let Some(billing_account_id) =
+                sub.metadata.get("billing_account_id").map(|s| s.as_str())
+            else {
+                warn!("no billing account id in subscription metadata");
+                return Ok(());
+            };
+            let billing_account_id = Uuid::parse_str(billing_account_id)?;
+            return match sub.metadata.get("sub_type").as_ref().map(|s| s.as_str()) {
+                Some("seat") => {
+                    let mut license_type = LicenseType::None;
+                    let mut seat_count = 0;
+                    for item in &sub.items.data {
+                        let Some(ref price) = item.price else {
+                            continue;
+                        };
+                        let price_id = price.id.to_string();
+                        let new_license_type = match price_id.as_str() {
+                            COMMERCIAL_PRICE => LicenseType::Commercial,
+                            NON_COMMERCIAL_PRICE => LicenseType::NonCommercial,
+                            MONTE_CARLO_PRICE => {
+                                warn!("found monte carlo price in seat subscription");
+                                continue;
+                            }
+                            price_id => {
+                                warn!(?price_id, "unknown price id in seat subscription");
+                                continue;
+                            }
+                        };
+                        if license_type == LicenseType::None {
+                            license_type = new_license_type;
+                        } else if license_type != new_license_type {
+                            warn!(
+                                ?license_type,
+                                ?new_license_type,
+                                "multiple seat types in one subscription is unsupported"
+                            );
+                            continue;
+                        };
+                        seat_count += item.quantity.unwrap_or_default();
+                    }
+                    let Some(billing_account) =
+                        billing_account::Entity::find_by_id(billing_account_id)
+                            .one(&context.db)
+                            .await?
+                    else {
+                        return Ok(());
+                    };
+                    let (license_type, seat_count) = if sub_status_active(&sub.status) {
+                        (license_type, seat_count)
+                    } else {
+                        (LicenseType::None, 0)
+                    };
+                    let mut redis = context.redis.clone();
+                    billing_account::ActiveModel {
+                        id: Unchanged(billing_account.id),
+                        seat_subscription_id: Set(Some(sub.id.to_string())),
+                        seat_count: Set(seat_count as i32),
+                        seat_license_type: Set(license_type.into()),
+                        ..Default::default()
+                    }
+                    .update_with_event(&context.db, &mut redis)
+                    .await?;
+                    sync_user_license(billing_account.owner_user_id, &context).await?;
+                    Ok(())
+                }
+                Some("monte-carlo") => {
+                    let monte_carlo_present = sub.items.data.iter().any(|item| {
+                        item.price.as_ref().map(|price| price.id.as_str())
+                            == Some(MONTE_CARLO_PRICE)
+                    });
+                    let Some(billing_account) =
+                        billing_account::Entity::find_by_id(billing_account_id)
+                            .one(&context.db)
+                            .await?
+                    else {
+                        return Ok(());
+                    };
+                    let monte_carlo_active = monte_carlo_present && sub_status_active(&sub.status);
+                    let mut redis = context.redis.clone();
+                    billing_account::ActiveModel {
+                        id: Unchanged(billing_account.id),
+                        usage_subscription_id: Set(Some(sub.id.to_string())),
+                        monte_carlo_active: Set(monte_carlo_active),
+                        ..Default::default()
+                    }
+                    .update_with_event(&context.db, &mut redis)
+                    .await?;
+                    sync_user_license(billing_account.owner_user_id, &context).await?;
+                    Ok(())
+                }
+                sub_type => {
+                    warn!(?sub_type, "unknown subscription type");
+                    Ok(())
+                }
+            };
+        }
+    }
+    Ok(())
+}
+
+async fn sync_user_license(user_id: Uuid, context: &AxumContext) -> Result<(), Error> {
+    let billing_accounts = billing_account::Entity::find()
+        .filter(billing_account::Column::OwnerUserId.eq(user_id))
+        .all(&context.db)
+        .await?;
+    let (license_type, monte_carlo_active) = billing_accounts.into_iter().fold(
+        (LicenseType::None, false),
+        |(seat, monte_carlo), account| {
+            let new_license_type = (account.seat_license_type as i32).max(seat as i32);
+            let new_monte_carlo = account.monte_carlo_active || monte_carlo;
+            (
+                LicenseType::try_from(new_license_type).expect("incorrect license type"),
+                new_monte_carlo,
+            )
+        },
+    );
+    let mut redis = context.redis.clone();
+    user::ActiveModel {
+        id: Unchanged(user_id),
+        license_type: Set(license_type.into()),
+        monte_carlo_active: Set(monte_carlo_active),
+        ..Default::default()
+    }
+    .update_with_event(&context.db, &mut redis)
+    .await?;
+    Ok(())
+}
+
+fn sub_status_active(status: &stripe::SubscriptionStatus) -> bool {
+    match status {
+        stripe::SubscriptionStatus::Active | stripe::SubscriptionStatus::Trialing => true,
+        stripe::SubscriptionStatus::Canceled
+        | stripe::SubscriptionStatus::Incomplete
+        | stripe::SubscriptionStatus::IncompleteExpired
+        | stripe::SubscriptionStatus::PastDue
+        | stripe::SubscriptionStatus::Paused
+        | stripe::SubscriptionStatus::Unpaid => false,
+    }
+}

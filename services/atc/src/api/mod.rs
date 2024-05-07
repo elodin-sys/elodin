@@ -7,8 +7,8 @@ use crate::{
     optional_current_user_route, optional_current_user_route_txn,
 };
 use atc_entity::events::DbEvent;
-use axum::http::Request;
 use axum::{extract::MatchedPath, routing::get};
+use axum::{http::Request, routing::post};
 use elodin_types::api::*;
 use futures::Stream;
 use jsonwebtoken::jwk::JwkSet;
@@ -24,9 +24,12 @@ use tracing::{info, Span};
 
 use crate::config::ApiConfig;
 
+mod billing_account;
+mod license;
 mod monte_carlo;
 mod multiplex;
 mod sandbox;
+mod stripe;
 mod user;
 mod utils;
 use utils::*;
@@ -41,6 +44,8 @@ pub struct Api {
     sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
     monte_carlo_run_events: broadcast::Receiver<DbEvent<atc_entity::mc_run::Model>>,
     monte_carlo_batch_events: broadcast::Receiver<DbEvent<atc_entity::batches::Model>>,
+    stripe: ::stripe::Client,
+    stripe_webhook_secret: String,
 }
 
 #[derive(Clone)]
@@ -50,9 +55,11 @@ pub struct AuthContext {
 }
 
 #[derive(Clone)]
-pub struct WSContext {
+pub struct AxumContext {
     auth_context: AuthContext,
     db: DatabaseConnection,
+    redis: MultiplexedConnection,
+    webhook_secret: String,
 }
 
 impl Api {
@@ -66,6 +73,8 @@ impl Api {
         sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
         monte_carlo_run_events: broadcast::Receiver<DbEvent<atc_entity::mc_run::Model>>,
         monte_carlo_batch_events: broadcast::Receiver<DbEvent<atc_entity::batches::Model>>,
+        stripe: ::stripe::Client,
+        stripe_webhook_secret: String,
     ) -> anyhow::Result<Self> {
         let auth0_keys = get_keyset(&config.auth0.domain).await?;
         let auth_context = AuthContext {
@@ -82,6 +91,8 @@ impl Api {
             sim_storage_client,
             monte_carlo_run_events,
             monte_carlo_batch_events,
+            stripe,
+            stripe_webhook_secret,
         })
     }
 
@@ -112,9 +123,12 @@ impl Api {
             )
             .route("/sim/ws/:id", get(sim_socket))
             .route("/healthz", get(healthz))
-            .with_state(WSContext {
+            .route("/stripe/webhook", post(stripe::stripe_webhook))
+            .with_state(AxumContext {
                 auth_context: self.auth_context.clone(),
                 db: self.db.clone(),
+                redis: self.redis.clone(),
+                webhook_secret: self.stripe_webhook_secret.clone(),
             });
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
@@ -162,6 +176,14 @@ pub struct Claims {
 
 #[async_trait]
 impl api_server::Api for Api {
+    async fn create_user(
+        &self,
+        req: tonic::Request<CreateUserReq>,
+    ) -> Result<Response<CreateUserResp>, Status> {
+        self.authed_route_userinfo(req, |req, userinfo| self.create_user(req, userinfo))
+            .await
+    }
+
     async fn current_user(
         &self,
         req: tonic::Request<CurrentUserReq>,
@@ -173,12 +195,25 @@ impl api_server::Api for Api {
         .await
     }
 
-    async fn create_user(
+    async fn update_user(
         &self,
-        req: tonic::Request<CreateUserReq>,
-    ) -> Result<Response<CreateUserResp>, Status> {
-        self.authed_route_userinfo(req, |req, userinfo| self.create_user(req, userinfo))
-            .await
+        req: tonic::Request<UpdateUserReq>,
+    ) -> Result<Response<UpdateUserResp>, Status> {
+        current_user_route_txn!(self, req, Self::update_user)
+    }
+
+    async fn get_sandbox(
+        &self,
+        req: tonic::Request<GetSandboxReq>,
+    ) -> Result<Response<Sandbox>, Status> {
+        optional_current_user_route_txn!(self, req, Self::get_sandbox)
+    }
+
+    async fn list_sandboxes(
+        &self,
+        req: tonic::Request<ListSandboxesReq>,
+    ) -> Result<Response<ListSandboxesResp>, Status> {
+        current_user_route_txn!(self, req, Self::list_sandbox)
     }
 
     async fn create_sandbox(
@@ -200,20 +235,6 @@ impl api_server::Api for Api {
         req: tonic::Request<BootSandboxReq>,
     ) -> Result<Response<BootSandboxResp>, Status> {
         optional_current_user_route!(self, req, Self::boot_sandbox)
-    }
-
-    async fn list_sandboxes(
-        &self,
-        req: tonic::Request<ListSandboxesReq>,
-    ) -> Result<Response<ListSandboxesResp>, Status> {
-        current_user_route_txn!(self, req, Self::list_sandbox)
-    }
-
-    async fn get_sandbox(
-        &self,
-        req: tonic::Request<GetSandboxReq>,
-    ) -> Result<Response<Sandbox>, Status> {
-        optional_current_user_route_txn!(self, req, Self::get_sandbox)
     }
 
     async fn delete_sandbox(
@@ -252,13 +273,6 @@ impl api_server::Api for Api {
         current_user_route_txn!(self, req, Self::start_monte_carlo_run)
     }
 
-    async fn get_monte_carlo_results(
-        &self,
-        req: tonic::Request<GetMonteCarloResultsReq>,
-    ) -> Result<Response<GetMonteCarloResultsResp>, Status> {
-        current_user_route!(self, req, Self::get_monte_carlo_results)
-    }
-
     async fn get_monte_carlo_run(
         &self,
         req: tonic::Request<GetMonteCarloRunReq>,
@@ -284,6 +298,27 @@ impl api_server::Api for Api {
         req: tonic::Request<GetMonteCarloRunReq>,
     ) -> Result<Response<Self::MonteCarloBatchEventsStream>, Status> {
         current_user_route!(self, req, Self::monte_carlo_batch_events)
+    }
+
+    async fn get_monte_carlo_results(
+        &self,
+        req: tonic::Request<GetMonteCarloResultsReq>,
+    ) -> Result<Response<GetMonteCarloResultsResp>, Status> {
+        current_user_route!(self, req, Self::get_monte_carlo_results)
+    }
+
+    async fn create_billing_account(
+        &self,
+        req: tonic::Request<CreateBillingAccountReq>,
+    ) -> Result<Response<BillingAccount>, Status> {
+        current_user_route_txn!(self, req, Self::create_billing_account)
+    }
+
+    async fn generate_license(
+        &self,
+        req: tonic::Request<GenerateLicenseReq>,
+    ) -> Result<Response<GenerateLicenseResp>, Status> {
+        current_user_route!(self, req, Self::generate_license)
     }
 }
 

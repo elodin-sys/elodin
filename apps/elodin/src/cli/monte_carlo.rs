@@ -9,13 +9,13 @@ use tonic::{service::interceptor::InterceptedService, transport};
 use super::auth::AuthInterceptor;
 use super::Cli;
 
-#[derive(clap::Args)]
+#[derive(clap::Args, Clone)]
 pub struct Args {
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     /// Create and submit a Monte Carlo run
     Run(RunArgs),

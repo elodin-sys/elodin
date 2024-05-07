@@ -62,6 +62,15 @@ defmodule ElodinDashboardWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{ElodinDashboardWeb.UserAuth, :ensure_authenticated}] do
+      live("/onboard", OnboardingLive, :view)
+      live("/onboard/:page_num", OnboardingLive, :view)
+    end
+
+    live_session :require_onboard,
+      on_mount: [
+        # {ElodinDashboardWeb.UserAuth, :ensure_authenticated},
+        {ElodinDashboardWeb.UserAuth, :ensure_onboarded}
+      ] do
       live("/", SandboxPickerLive, :list)
       live("/sandbox/new", SandboxPickerLive, :new)
       live("/sandbox/new/:template", SandboxPickerLive, :new)

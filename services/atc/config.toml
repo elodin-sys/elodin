@@ -1,13 +1,15 @@
-database_url = "postgres://postgres:secret@localhost/atc_dev"
+database_url = "postgres://sphw:@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
 pod_name="elo-atc"
 migrate = true
-pod_name = "foo"
 
 [api]
 address = "[::]:50051"
 auth0.domain = "auth.elodin.dev"
 auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
+stripe_secret_key = "sk_test_51NUaAnG68UBhCjJFokYXChtW9vEOOBdVX1z8LZb3jQBn6PmVBh7Prg4gCxV9CDLvzhl53CLANPmHDREutxXxFXnj003lNQ0ef9"
+stripe_webhook_secret = "whsec_6fb9fd43c282b06cecb7d0bf8ea6e7c453de50d48c371626b376c7e8283b0b9f"
+base_url = "https://app.elodin.dev"
 
 [orca]
 vm_namespace = "vms"

@@ -17,6 +17,10 @@ pub struct Model {
     pub auth0_id: String,
     pub permissions: Permissions,
     pub avatar: String,
+    pub license_type: LicenseType,
+    pub monte_carlo_active: bool,
+    pub onboarding_data: Json,
+    pub billing_account_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -89,5 +93,40 @@ impl Permissions {
             .iter()
             .filter(move |(_, p)| p.entity_type == entity_type && p.verb.contains(verb))
             .map(|(id, _)| *id)
+    }
+}
+
+#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Copy)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum LicenseType {
+    #[sea_orm(num_value = 0)]
+    None = 0,
+    #[sea_orm(num_value = 1)]
+    NonCommercial = 1,
+    #[sea_orm(num_value = 2)]
+    Commercial = 2,
+    #[sea_orm(num_value = 3)]
+    GodTier = 3,
+}
+
+impl From<LicenseType> for elodin_types::api::LicenseType {
+    fn from(val: LicenseType) -> Self {
+        match val {
+            LicenseType::None => elodin_types::api::LicenseType::None,
+            LicenseType::NonCommercial => elodin_types::api::LicenseType::NonCommercial,
+            LicenseType::Commercial => elodin_types::api::LicenseType::Commercial,
+            LicenseType::GodTier => elodin_types::api::LicenseType::GodTier,
+        }
+    }
+}
+
+impl From<elodin_types::api::LicenseType> for LicenseType {
+    fn from(val: elodin_types::api::LicenseType) -> Self {
+        match val {
+            elodin_types::api::LicenseType::None => LicenseType::None,
+            elodin_types::api::LicenseType::NonCommercial => LicenseType::NonCommercial,
+            elodin_types::api::LicenseType::Commercial => LicenseType::Commercial,
+            elodin_types::api::LicenseType::GodTier => LicenseType::GodTier,
+        }
     }
 }

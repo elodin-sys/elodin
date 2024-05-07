@@ -41,7 +41,7 @@ module.exports = {
           5: "rgba(233, 75, 20, 0.05)"
         },
         yellow: {
-          DEFAULT: "rgba(254, 197, 4, 1)",
+          DEFAULT: "rgb(254, 197, 4)",
           400: "#FEC504",
         },
         "tan": "rgb(255, 215, 179)",
@@ -53,7 +53,7 @@ module.exports = {
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
         "crema": {
-          DEFAULT: "rgba(255, 251, 240, 1)",
+          DEFAULT: "rgb(255, 251, 240)",
           60:  "rgba(255, 251, 240, 0.6)",
         },
         "black-primary": "rgba(23, 22, 21, 1)",
@@ -72,6 +72,7 @@ module.exports = {
           "9": "rgba(46, 45, 44, 1)",
         },
         "primary-smoke": "rgba(13, 13, 13, 1)",
+        "slate": "rgb(127, 113, 255)"
       },
       spacing: {
         'elo-xxs': "4px",
