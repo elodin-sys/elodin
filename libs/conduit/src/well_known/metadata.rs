@@ -11,7 +11,7 @@ pub struct EntityMetadata {
 }
 
 impl Asset for EntityMetadata {
-    const ASSET_ID: crate::AssetId = AssetId(2242);
+    const ASSET_ID: crate::AssetId = AssetId(2245);
 
     fn asset_id(&self) -> crate::AssetId {
         Self::ASSET_ID

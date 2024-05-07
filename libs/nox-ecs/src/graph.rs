@@ -90,6 +90,8 @@ impl EdgeComponent for Edge {
     }
 }
 
+pub struct TotalEdge;
+
 impl<E: EdgeComponent + 'static> SystemParam for GraphQuery<E> {
     type Item = Self;
 
@@ -119,6 +121,30 @@ impl<E: EdgeComponent + 'static> SystemParam for GraphQuery<E> {
     fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
 }
 
+impl SystemParam for GraphQuery<TotalEdge> {
+    type Item = Self;
+
+    fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
+        let edges = (0..builder.world.entity_len)
+            .flat_map(|from| {
+                (0..builder.world.entity_len)
+                    .filter(move |to| from != *to)
+                    .map(move |to| Edge::new(from, to))
+            })
+            .collect::<Vec<_>>();
+        GraphQuery {
+            edges,
+            phantom_data: PhantomData,
+        }
+    }
+
+    fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
+}
+
 pub fn exprs_from_edges_queries<A, B>(
     edges: &[Edge],
     f_query: Query<A>,
@@ -132,6 +158,9 @@ pub fn exprs_from_edges_queries<A, B>(
     let mut exprs: BTreeMap<usize, (Query<A>, Query<B>)> = BTreeMap::new();
     for (from_id, ids) in from_map {
         let from = f_query.filter(&[from_id]);
+        if from.len == 0 {
+            continue;
+        }
         let mut to = t_query.filter(&ids);
         match exprs.entry(ids.len()) {
             std::collections::btree_map::Entry::Occupied(mut o) => {
@@ -165,7 +194,7 @@ pub fn exprs_from_edges_queries<A, B>(
     exprs
 }
 
-impl<E: EdgeComponent> GraphQuery<E> {
+impl<E> GraphQuery<E> {
     /// Folds over each edge of a graph, using the `from` EntityId
     /// to form th resulting `ComponentArray`
     pub fn edge_fold<I: ComponentGroup + IntoOp, F: ComponentGroup, T: ComponentGroup>(
@@ -336,5 +365,28 @@ mod tests {
 
             world.build().unwrap();
         }
+    }
+
+    #[test]
+    fn test_total_fold_graph() {
+        #[derive(Component)]
+        struct A(Scalar<f64>);
+
+        fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
+            g.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+                A(acc.0 + b.0)
+            })
+        }
+
+        let mut world = fold_system.world();
+        world.spawn(A(10.0.constant())).id();
+        world.spawn(A(100.0.constant())).id();
+        world.spawn(A(1000.0.constant())).id();
+
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world.build().unwrap();
+        exec.run(&client).unwrap();
+        let c = exec.column(A::component_id()).unwrap();
+        assert_eq!(c.typed_buf::<f64>().unwrap(), &[1105.0, 1015.0, 115.0,],);
     }
 }

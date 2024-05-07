@@ -257,6 +257,7 @@ E = TypeVar("E")
 
 class RevEdge: ...
 
+class TotalEdge: ...
 
 class GraphQuery(Generic[E]):
     bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
@@ -272,6 +273,8 @@ class GraphQuery(Generic[E]):
     def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> "GraphQuery[E]":
         t_args = typing.get_args(new_tp)
         edge_ty = t_args[0]
+        if isinstance(edge_ty, type(TotalEdge)):
+            return GraphQuery(GraphQueryInner.from_builder_total_edge(builder))
         edge_id = Component.name(edge_ty)
         reverse = False
         if len(edge_ty.__metadata__) > 1 and edge_ty.__metadata__[1] is RevEdge:
@@ -283,6 +286,9 @@ class GraphQuery(Generic[E]):
     @staticmethod
     def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
+        edge_ty = t_args[0]
+        if isinstance(edge_ty, type(TotalEdge)):
+            return
         for t_arg in t_args:
             component_data: Component = t_arg.__metadata__[0]
             builder.init_var(Component.name(t_arg), component_data.ty)
@@ -424,9 +430,17 @@ Seed = Annotated[
 Time = Annotated[
     jax.Array, Component("time", ComponentType.F64, metadata={"priority": 5})
 ]
-PbrAsset = Annotated[
+MeshAsset = Annotated[
     Handle,
-    Component("asset_handle_241", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2240", ComponentType.U64, True, metadata={"priority": -1}),
+]
+MaterialAsset = Annotated[
+    Handle,
+    Component("asset_handle_2241", ComponentType.U64, True, metadata={"priority": -1}),
+]
+GlbAsset = Annotated[
+    Handle,
+    Component("asset_handle_2242", ComponentType.U64, True, metadata={"priority": -1}),
 ]
 GizmoAsset = Annotated[
     Handle,
@@ -470,9 +484,17 @@ class Body(Archetype):
     world_pos: WorldPos = SpatialTransform.zero()
     world_vel: WorldVel = SpatialMotion.zero()
     inertia: Inertia = SpatialInertia(1.0)
-    pbr: PbrAsset = Pbr(Mesh.sphere(1.0), Material.color(1.0, 1.0, 1.0))  # type: ignore # TODO(sphw): this code is wrong, but fixing it is hard
     force: Force = SpatialForce.zero()
     world_accel: WorldAccel = SpatialMotion.zero()
+
+@dataclass
+class Shape(Archetype):
+    mesh: MeshAsset
+    material: MaterialAsset
+
+@dataclass
+class Scene(Archetype):
+    glb: GlbAsset
 
 
 def build_expr(builder: PipelineBuilder, sys: System) -> Any:
@@ -527,3 +549,10 @@ class World(WorldBuilder):
 
         addr = super().serve(system, True, time_step, client, None)
         return IFrame(f"http://{addr}", width=960, height=540)
+
+
+    def glb(self, url: str) -> Scene:
+        return Scene(self.insert_asset(Glb(url))) # type: ignore
+
+    def shape(self, mesh: Mesh, material: Material) -> Shape:
+        return Shape(self.insert_asset(mesh), self.insert_asset(material)) # type: ignore

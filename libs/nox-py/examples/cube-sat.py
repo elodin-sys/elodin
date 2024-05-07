@@ -395,11 +395,6 @@ b = el.Body(
         initial_angular_vel, np.array([0.0, 0.0, -1.0]) * velocity
     ),
     inertia=el.SpatialInertia(12.0, j),
-    pbr=w.insert_asset(
-        el.Pbr.from_url(
-            "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
-        )
-    ),
     # Credit to the OreSat program https://www.oresat.org for the model above
 )
 rw_1 = w.spawn(
@@ -439,6 +434,7 @@ sat = w.spawn(
         KalmanFilter(
             np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
         ),
+        w.glb("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"),
     ],
     name="OreSat",
 )
@@ -484,18 +480,16 @@ w.spawn(
 )
 
 w.spawn(
-    el.Body(
-        world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-        world_vel=el.SpatialMotion.from_angular(
-            np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
+    [
+        el.Body(
+            world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion.from_angular(
+                np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
+            ),
+            inertia=el.SpatialInertia(1.0),
         ),
-        inertia=el.SpatialInertia(1.0),
-        pbr=w.insert_asset(
-            el.Pbr.from_url(
-                "https://storage.googleapis.com/elodin-marketing/models/earth.glb"
-            )
-        ),
-    ),
+        w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb"),
+    ],
     name="Earth",
 )
 

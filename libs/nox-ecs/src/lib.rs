@@ -1,7 +1,7 @@
 extern crate self as nox_ecs;
 
 use bytemuck::{AnyBitPattern, Pod};
-use conduit::well_known::EntityMetadata;
+use conduit::well_known::{EntityMetadata, Material, Mesh};
 use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId, Metadata};
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
@@ -161,12 +161,14 @@ impl<S: WorldStore> World<S> {
         })
     }
 
-    pub fn insert_asset<C: Asset + Send + Sync + 'static>(
-        //
-        &mut self,
-        asset: C,
-    ) -> Handle<C> {
+    pub fn insert_asset<C: Asset + Send + Sync + 'static>(&mut self, asset: C) -> Handle<C> {
         self.assets.insert(asset)
+    }
+
+    pub fn insert_shape(&mut self, mesh: Mesh, material: Material) -> Shape {
+        let mesh = self.insert_asset(mesh);
+        let material = self.insert_asset(material);
+        Shape { mesh, material }
     }
 }
 
@@ -178,12 +180,12 @@ pub struct Entity<'a> {
 impl Entity<'_> {
     pub fn metadata(self, metadata: EntityMetadata) -> Self {
         let metadata = self.world.insert_asset(metadata);
-        self.world.spawn_with_id(metadata, self.id);
+        self.world.insert_with_id(metadata, self.id);
         self
     }
 
     pub fn insert(self, archetype: impl Archetype + 'static) -> Self {
-        self.world.spawn_with_id(archetype, self.id);
+        self.world.insert_with_id(archetype, self.id);
         self
     }
 
@@ -224,13 +226,16 @@ impl World<HostStore> {
             world: self,
         }
     }
-
     pub fn spawn_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
+        self.insert_with_id(archetype, entity_id);
+        self.entity_len += 1;
+    }
+
+    pub fn insert_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
         use nox::ScalarExt;
         let table = self.get_or_insert_archetype::<A>();
         table.entity_buffer.push(entity_id.0.constant());
         archetype.insert_into_table(table);
-        self.entity_len += 1;
     }
 
     pub fn copy_to_client(&self, client: &Client) -> Result<World<ClientStore>, Error> {
@@ -847,8 +852,8 @@ where
         self.world.spawn(archetype)
     }
 
-    pub fn spawn_with_id(&mut self, archetype: impl Archetype + 'static, entity_id: EntityId) {
-        self.world.spawn_with_id(archetype, entity_id);
+    pub fn insert_with_id(&mut self, archetype: impl Archetype + 'static, entity_id: EntityId) {
+        self.world.insert_with_id(archetype, entity_id);
     }
 
     pub fn build(mut self) -> Result<WorldExec, Error> {
@@ -1373,6 +1378,12 @@ impl ColumnRef for HostColumnRef<'_> {
     }
 }
 
+#[derive(Archetype)]
+pub struct Shape {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<Material>,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("nox {0}")]
@@ -1425,7 +1436,7 @@ impl<T> From<flume::SendError<T>> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use conduit::well_known::Pbr;
+    use conduit::well_known::Glb;
     use nox::nalgebra::{self, vector};
     use nox::{Scalar, ScalarExt, Vector};
 
@@ -1526,12 +1537,12 @@ mod tests {
 
         #[derive(Archetype)]
         struct Body {
-            pbr: Handle<Pbr>,
+            glb: Handle<Glb>,
             a: A,
         }
         let mut world = World::default();
         let body = Body {
-            pbr: world.insert_asset(Pbr::Url("foo-bar".to_string())),
+            glb: world.insert_asset(Glb("foo-bar".to_string())),
             a: A(1.0.constant()),
         };
         world.spawn(body);

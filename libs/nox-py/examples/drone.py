@@ -85,15 +85,8 @@ class Camera(el.Archetype):
 world = el.World()
 drone = world.spawn(
     [
-        el.Body(
-            world_pos=el.SpatialTransform.from_linear(points[0]),
-            # world_vel=el.SpatialMotion.from_linear(jnp.array([120.0, 10.0, 50.0])),
-            pbr=world.insert_asset(
-                el.Pbr.from_url(
-                    "https://storage.googleapis.com/elodin-marketing/models/drone.glb"
-                )
-            ),
-        ),
+        el.Body(world_pos=el.SpatialTransform.from_linear(points[0])),
+        world.glb("https://storage.googleapis.com/elodin-marketing/models/drone.glb"),
         Camera(np.array([0]), np.array(0.0)),
     ],
     name="Drone",

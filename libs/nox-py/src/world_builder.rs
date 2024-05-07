@@ -62,7 +62,7 @@ impl WorldBuilder {
         if let Some(name) = name {
             let metadata = EntityMetadata::new(name, None);
             let metadata = self.world.insert_asset(metadata.inner);
-            self.world.spawn_with_id(metadata, entity_id.inner);
+            self.world.insert_with_id(metadata, entity_id.inner);
         }
         Ok(entity_id)
     }

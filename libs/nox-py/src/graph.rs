@@ -2,8 +2,9 @@ use super::*;
 
 use conduit::ComponentId;
 use nox_ecs::{
-    graph::{exprs_from_edges_queries, GraphQuery},
+    graph::{exprs_from_edges_queries, GraphQuery, TotalEdge},
     nox::IntoOp,
+    SystemParam,
 };
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -15,6 +16,17 @@ pub struct GraphQueryInner {
 
 #[pymethods]
 impl GraphQueryInner {
+    #[staticmethod]
+    fn from_builder_total_edge(builder: &mut PipelineBuilder) -> Result<GraphQueryInner, Error> {
+        let query = GraphQuery::<TotalEdge>::from_builder(&builder.builder);
+        Ok(GraphQueryInner {
+            query: GraphQuery {
+                edges: query.edges,
+                phantom_data: PhantomData,
+            },
+        })
+    }
+
     #[staticmethod]
     fn from_builder(
         builder: &mut PipelineBuilder,

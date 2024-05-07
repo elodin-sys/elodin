@@ -276,6 +276,7 @@ fn send_sub(exec: &mut impl ColumnStore, sub: &mut Subscription) -> Result<(), E
                     entity_id: EntityId(entity_id),
                     bytes: value.inner.clone(),
                     id: value.asset_id,
+                    asset_index: *id,
                 }),
             };
             sub.connection

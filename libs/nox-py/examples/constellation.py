@@ -391,6 +391,8 @@ w = el.World()
 
 sat_ids = []
 
+scene = w.glb("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")
+
 
 def spawn_sat(x, y, w: el.World):
     sat_num = x + y * 100
@@ -436,11 +438,6 @@ def spawn_sat(x, y, w: el.World):
             ang_vel, rot @ np.array([0.0, 0.0, -1.0]) * velocity
         ),
         inertia=el.SpatialInertia(12.0, j),
-        pbr=w.insert_asset(
-            el.Pbr.from_url(
-                "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
-            )
-        ),
         # Credit to the OreSat program https://www.oresat.org for the model above
     )
 
@@ -456,6 +453,7 @@ def spawn_sat(x, y, w: el.World):
             KalmanFilter(
                 np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
             ),
+            scene,
         ],
         name=f"OreSat {sat_num}",
     )
@@ -468,8 +466,10 @@ def spawn_sat(x, y, w: el.World):
 
 
 sat = spawn_sat(0, 0, w)
-for x in range(-7, 7):
-    for y in range(-7, 7):
+count = 500
+bound = int(count**0.5 / 2)
+for x in range(-bound, bound):
+    for y in range(-bound, bound):
         spawn_sat(x, y, w)
 
 
@@ -505,18 +505,16 @@ w.spawn(
 )
 
 w.spawn(
-    el.Body(
-        world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-        world_vel=el.SpatialMotion.from_angular(
-            np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
+    [
+        el.Body(
+            world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion.from_angular(
+                np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
+            ),
+            inertia=el.SpatialInertia(1.0),
         ),
-        inertia=el.SpatialInertia(1.0),
-        pbr=w.insert_asset(
-            el.Pbr.from_url(
-                "https://storage.googleapis.com/elodin-marketing/models/earth.glb"
-            )
-        ),
-    ),
+        w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb"),
+    ],
     name="Earth",
 )
 
