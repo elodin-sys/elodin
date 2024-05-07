@@ -1,0 +1,5 @@
+default:
+  d2 -t 300 --pad 50 --scale 0.8 sdk/architecture.d2
+  d2 -t 300 --pad 50 --scale 0.8 sdk/data_model.d2
+  d2 -t 300 --pad 50 --scale 0.8 sdk/system.d2
+  mintlify dev
