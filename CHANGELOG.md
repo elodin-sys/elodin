@@ -1,6 +1,24 @@
 # Changelog
 
 ## [unreleased]
+- Add `TotalEdge`, an edge type that connects every entity to every other entity.
+- **(breaking)** Split `el.Pbr` into `el.Mesh`, `el.Material`, `el.Shape`, and `el.Glb`.
+  - Use the `el.shape` and `el.glb` helpers instead
+  ```python
+  # before:
+  w.spawn(el.Body(pbr = w.insert_asset( el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0)))))
+  w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/earth.glb"))))
+  # after
+  w.spawn([
+    el.Body(),
+    w.shape(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
+  ])
+  w.spawn([
+    el.Body(),
+    w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb")
+  ])
+
+  ```
 
 - **(breaking)** Remove `SpatialInertia.from_mass()`.
   - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.

@@ -182,7 +182,6 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
-    m.add_class::<Pbr>()?;
     m.add_class::<PrimitiveType>()?;
     m.add_class::<Metadata>()?;
     m.add_class::<QueryInner>()?;
@@ -196,6 +195,7 @@ pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Integrator>()?;
     m.add_class::<GraphEntity>()?;
     m.add_class::<GraphComponent>()?;
+    m.add_class::<Glb>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;

@@ -436,7 +436,6 @@ mod tests {
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
         Archetype, WorldPos,
     };
-    use conduit::well_known::{Material, Mesh, Pbr};
     use nox::{
         nalgebra::{self, vector},
         SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform,
@@ -449,10 +448,6 @@ mod tests {
     #[test]
     fn test_convert_to_df() {
         let mut world = World::default();
-        let pbr = world.insert_asset(Pbr::Bundle {
-            mesh: Mesh::sphere(0.1, 36, 18),
-            material: Material::color(1.0, 1.0, 1.0),
-        });
 
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
@@ -464,7 +459,6 @@ mod tests {
             accel: WorldAccel(SpatialMotion {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
-            pbr,
             force: Force(SpatialForce {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
@@ -499,10 +493,6 @@ mod tests {
     #[test]
     fn test_write_read_file() {
         let mut world = World::default();
-        let pbr = world.insert_asset(Pbr::Bundle {
-            mesh: Mesh::sphere(0.1, 36, 18),
-            material: Material::color(1.0, 1.0, 1.0),
-        });
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
                 inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
@@ -513,7 +503,6 @@ mod tests {
             accel: WorldAccel(SpatialMotion {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
-            pbr,
             force: Force(SpatialForce {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
@@ -532,10 +521,6 @@ mod tests {
     #[test]
     fn test_to_world() {
         let mut world = World::default();
-        let pbr = world.insert_asset(Pbr::Bundle {
-            mesh: Mesh::sphere(0.1, 36, 18),
-            material: Material::color(1.0, 1.0, 1.0),
-        });
 
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
@@ -547,7 +532,6 @@ mod tests {
             accel: WorldAccel(SpatialMotion {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
-            pbr,
             force: Force(SpatialForce {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
@@ -563,10 +547,6 @@ mod tests {
     #[test]
     fn test_write_read_world() {
         let mut world = World::default();
-        let pbr = world.insert_asset(Pbr::Bundle {
-            mesh: Mesh::sphere(0.1, 36, 18),
-            material: Material::color(1.0, 1.0, 1.0),
-        });
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
                 inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
@@ -577,7 +557,6 @@ mod tests {
             accel: WorldAccel(SpatialMotion {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
-            pbr,
             force: Force(SpatialForce {
                 inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),

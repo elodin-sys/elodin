@@ -64,12 +64,10 @@ def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
 w = el.World()
 w.spawn(Globals(seed=jnp.int64(0)), name="Globals")
 w.spawn(
-    el.Body(
-        world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 6.0, 0.0])),
-        pbr=w.insert_asset(
-            el.Pbr(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5))
-        ),
-    ),
+    [
+        el.Body(world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 6.0, 0.0]))),
+        w.shape(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5)),
+    ],
     name="Ball",
 )
 w.spawn(
@@ -79,6 +77,7 @@ w.spawn(
         pos=[6.0, 3.0, 6.0],
         looking_at=[0.0, 1.0, 0.0],
         show_grid=True,
+        hdr=True,
     ),
     name="Viewport",
 )

@@ -195,6 +195,7 @@ pub trait AssetAdapter {
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
+        asset_index: u64,
         value: &[u8],
     );
 }
@@ -376,12 +377,19 @@ fn recv_system(args: RecvSystemArgs) {
                 id,
                 bytes,
                 entity_id,
+                asset_index,
             }) => {
                 let Some(adapter) = asset_map.0.get(id) else {
                     warn!(?id, "unknown asset type");
                     continue;
                 };
-                adapter.insert(&mut commands, entity_map.as_mut(), *entity_id, bytes);
+                adapter.insert(
+                    &mut commands,
+                    entity_map.as_mut(),
+                    *entity_id,
+                    *asset_index,
+                    bytes,
+                );
             }
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit);
@@ -539,6 +547,7 @@ pub fn query_asset<T>(
                     id: asset_id,
                     entity_id: *id,
                     bytes: bytes.into(),
+                    asset_index: 0, // TODO: fix me
                 })
             })
             .collect::<Result<Vec<_>, Error>>()
@@ -575,6 +584,7 @@ pub fn sync_asset<T>(
                 id: asset_id,
                 entity_id: *id,
                 bytes: bytes.into(),
+                asset_index: 0, // TODO: fix me
             })
         })
         .collect::<Result<Vec<_>, Error>>()
