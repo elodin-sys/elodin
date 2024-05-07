@@ -41,6 +41,14 @@ pub enum Error {
     TonicTransport(#[from] tonic::transport::Error),
     #[error("signed url error: {0}")]
     SignedURL(#[from] google_cloud_storage::sign::SignedURLError),
+    #[error("stripe error: {0}")]
+    Stripe(#[from] stripe::StripeError),
+    #[error("invalid license type")]
+    InvalidLicenseType,
+    #[error("uuid error: {0}")]
+    Uuid(#[from] uuid::Error),
+    #[error("serde_json error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 impl From<EventError> for Error {

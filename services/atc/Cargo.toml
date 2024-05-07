@@ -67,6 +67,7 @@ atc-migration.path = "../../libs/atc/migration"
 
 # crypto
 jsonwebtoken = "9"
+ring = "0.17"
 
 # http
 reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
@@ -85,3 +86,7 @@ chrono = "0.4"
 
 # gcs
 google-cloud-storage = { version = "0.15.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
+
+# stripe
+async-stripe.version = "0.37"
+async-stripe.features = ["runtime-tokio-hyper-rustls"]

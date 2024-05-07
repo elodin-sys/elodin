@@ -1,4 +1,4 @@
-use super::{utils::validate_auth_header, Api, CurrentUser, WSContext};
+use super::{utils::validate_auth_header, Api, AxumContext, CurrentUser};
 use crate::{error::Error, sandbox::update_sandbox_code};
 use atc_entity::{
     events::{DbExt, EntityExt},
@@ -362,7 +362,7 @@ pub struct WsAuth {
 pub async fn sim_socket(
     ws: WebSocketUpgrade,
     Path(sandbox_id): Path<Uuid>,
-    State(context): State<WSContext>,
+    State(context): State<AxumContext>,
     auth: Query<WsAuth>,
 ) -> Result<impl IntoResponse, Error> {
     trace!(?sandbox_id, "sandbox id");

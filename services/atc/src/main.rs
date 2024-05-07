@@ -2,6 +2,7 @@ use api::Api;
 use config::Config;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
+use stripe::EventFilter;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn, Instrument};
@@ -68,6 +69,31 @@ async fn main() -> anyhow::Result<()> {
         };
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
         let redis = redis.get_multiplexed_tokio_connection().await?;
+        let stripe = stripe::Client::new(api_config.stripe_secret_key.clone());
+        let stripe_webhook_secret = if let Some(secret) = api_config.stripe_webhook_secret.clone() {
+            secret
+        } else {
+            let endpoint = stripe::WebhookEndpoint::create(
+                &stripe,
+                stripe::CreateWebhookEndpoint::new(
+                    vec![
+                        EventFilter::CustomerSubscriptionPaused,
+                        EventFilter::CustomerSubscriptionDeleted,
+                        EventFilter::CustomerSubscriptionCreated,
+                        EventFilter::CustomerSubscriptionUpdated,
+                        EventFilter::CustomerSubscriptionResumed,
+                        EventFilter::CustomerSubscriptionTrialWillEnd,
+                        EventFilter::CustomerSubscriptionPendingUpdateExpired,
+                        EventFilter::CustomerSubscriptionPendingUpdateApplied,
+                    ],
+                    &format!("{}/stripe/webhook", api_config.base_url),
+                ),
+            )
+            .await?;
+            endpoint
+                .secret
+                .ok_or_else(|| anyhow::anyhow!("stripe webhook secret not found"))?
+        };
         let api = Api::new(
             api_config,
             db.clone(),
@@ -77,6 +103,8 @@ async fn main() -> anyhow::Result<()> {
             sandbox_events,
             monte_carlo_run_events,
             monte_carlo_batch_events,
+            stripe,
+            stripe_webhook_secret,
         )
         .await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();

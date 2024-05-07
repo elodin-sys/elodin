@@ -9,3 +9,7 @@ pub use mc_run::Entity as MonteCarloRun;
 pub mod batches;
 pub use batches::Entity as Batches;
 pub mod events;
+pub use usage_event::Entity as UsageEvent;
+pub mod usage_event;
+pub use billing_account::Entity as BillingAccount;
+pub mod billing_account;

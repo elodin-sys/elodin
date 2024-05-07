@@ -70,6 +70,8 @@ configMapGenerator:
   namespace: elodin-app
   files:
   - atc.toml=elo-atc-config.toml
+  literals:
+  - ELODIN_API.BASE_URL=https://app.elodin.systems
 - name: elo-atc-proxy-config
   namespace: elodin-app
   files:
@@ -90,6 +92,10 @@ configMapGenerator:
 
 secretGenerator:
 - name: elo-dashboard-secret
+  namespace: elodin-app
+  envs:
+  - elo-dashboard-secret.env
+- name: elo-atc-secret
   namespace: elodin-app
   envs:
   - elo-dashboard-secret.env

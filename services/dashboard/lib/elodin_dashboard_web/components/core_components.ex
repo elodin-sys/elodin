@@ -301,7 +301,8 @@ defmodule ElodinDashboardWeb.CoreComponents do
       <.button phx-click="go" class="ml-2">Send!</.button>
   """
   attr(:type, :string, default: nil)
-  attr(:class, :string, default: nil)
+  attr(:class, :any, default: nil)
+  attr(:disabled, :boolean, default: false)
   attr(:rest, :global, include: ~w(disabled form name value))
 
   slot(:inner_block, required: true)
@@ -333,6 +334,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       type={@type}
+      disabled={@disabled}
       class={[
         "rounded-elo-sm bg-white hover:bg-white/80 p-[12px] ",
         "text-[12px] leading-[8px] font-semibold text-hyper-blue active:text-hyper-blue-dim",
@@ -372,11 +374,12 @@ defmodule ElodinDashboardWeb.CoreComponents do
         "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-green border-opacity-40 p-[12px] ",
         "transition-all",
         "bg-green bg-opacity-5",
-        "hover:bg-opacity-15 hover:border-opacity-30",
-        "active:brightness-75",
+        "enabled:hover:bg-opacity-15 enabled:hover:border-opacity-30",
+        "enabled:active:brightness-75",
         "text-[12px] leading-[8px] font-semibold text-green",
         @class
       ]}
+      disabled={@disabled}
       {@rest}
     >
       <%= render_slot(@inner_block) %>

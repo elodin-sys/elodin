@@ -34,3 +34,10 @@ spec:
             name: elo-atc
             port:
               number: 50051
+      - path: /stripe/webhook
+        pathType: Prefix
+        backend:
+          service:
+            name: elo-atc
+            port:
+              number: 50051

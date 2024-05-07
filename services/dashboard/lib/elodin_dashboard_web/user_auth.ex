@@ -32,7 +32,9 @@ defmodule ElodinDashboardWeb.UserAuth do
            "name" => user.name,
            "email" => user.email,
            "avatar" => user.avatar,
-           "id" => user.id
+           "id" => user.id,
+           "billing_account_id" => user.billing_account_id,
+           "onboarding_data" => user.onboarding_data
          }}
 
       {:error, err} ->
@@ -243,7 +245,10 @@ defmodule ElodinDashboardWeb.UserAuth do
          {:ok, user} <- get_user_by_token(user_token) do
       assign(conn, :current_user, user)
     else
-      _ -> assign(conn, :current_user, nil)
+      {:error, %GRPC.RPCError{status: 5}} -> assign(conn, :current_user, nil)
+      {:error, %GRPC.RPCError{status: 7}} -> assign(conn, :current_user, nil)
+      {:error, %GRPC.RPCError{status: 16}} -> assign(conn, :current_user, nil)
+      {nil, _} -> assign(conn, :current_user, nil)
     end
   end
 
@@ -305,6 +310,24 @@ defmodule ElodinDashboardWeb.UserAuth do
 
     if socket.assigns.current_user do
       {:cont, socket}
+    else
+      socket =
+        socket
+        |> redirect_to_login()
+
+      {:halt, socket}
+    end
+  end
+
+  def on_mount(:ensure_onboarded, _params, session, socket) do
+    socket = mount_current_user(socket, session)
+
+    if socket.assigns.current_user do
+      if socket.assigns.current_user["billing_account_id"] != nil do
+        {:cont, socket}
+      else
+        {:halt, socket |> Phoenix.LiveView.redirect(to: "/onboard")}
+      end
     else
       socket =
         socket

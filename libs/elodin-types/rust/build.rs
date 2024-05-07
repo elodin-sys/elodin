@@ -12,6 +12,14 @@ fn main() {
     tonic_build::configure()
         .build_client(true)
         .build_server(true)
+        .type_attribute(
+            "elodin.types.api.LicenseType",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
+            "elodin.types.api.OnboardingData",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
         // only needed for libprotoc versions <= 3.14, optional keyword is supported by default in >= 3.15
         .protoc_arg("--experimental_allow_proto3_optional")
         .file_descriptor_set_path(out_dir.join("elodin_types.bin"))

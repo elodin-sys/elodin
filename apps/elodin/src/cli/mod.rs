@@ -2,9 +2,10 @@ use clap::{Parser, Subcommand};
 
 mod auth;
 mod editor;
+mod license;
 mod monte_carlo;
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
@@ -13,7 +14,7 @@ pub struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     /// Obtain access credentials for your user account
     Login,
@@ -34,6 +35,14 @@ impl Cli {
             .enable_all()
             .build()
             .expect("tokio runtime failed to start");
+        match self.command {
+            // un-licensed commands
+            Some(Commands::Login) | None => {}
+            // licensed commands
+            _ => {
+                rt.block_on(self.verify_license_key());
+            }
+        }
         let res = match &self.command {
             Some(Commands::Login) => rt.block_on(self.login()),
             Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
