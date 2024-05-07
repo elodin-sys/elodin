@@ -6,11 +6,14 @@ use crate::{
         Subscriptions,
     },
     client::MsgPair,
-    well_known::{self, EntityMetadata, Gizmo, Panel, Pbr, TraceAnchor, WorldPos},
+    well_known::{
+        self, EntityMetadata, Gizmo, Glb, Material, Mesh as ConduitMesh, Panel, TraceAnchor,
+        WorldPos,
+    },
     EntityId,
 };
-use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
+use bevy::{ecs::system::SystemId, utils::HashMap};
 use big_space::GridCell;
 use serde::de::DeserializeOwned;
 
@@ -32,7 +35,9 @@ impl SyncPlugin {
 
 impl Plugin for SyncPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        let sync_pbr = app.world.register_system(sync_pbr_to_bevy);
+        let sync_mesh = app.world.register_system(sync_mesh_to_bevy);
+        let sync_material = app.world.register_system(sync_material_to_bevy);
+        let sync_glb = app.world.register_system(sync_glb_to_bevy);
         app.add_plugins(self.plugin.clone())
             .insert_resource(SimPeer::default())
             .insert_resource(self.subscriptions.clone())
@@ -45,8 +50,14 @@ impl Plugin for SyncPlugin {
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
             ))
-            .add_conduit_asset::<Pbr>(Box::new(SyncPostcardAdapter::<Pbr>::new(
-                self.enable_pbr.then_some(sync_pbr),
+            .add_conduit_asset::<ConduitMesh>(Box::new(SyncPostcardAdapter::<ConduitMesh>::new(
+                self.enable_pbr.then_some(sync_mesh),
+            )))
+            .add_conduit_asset::<Material>(Box::new(SyncPostcardAdapter::<Material>::new(
+                self.enable_pbr.then_some(sync_material),
+            )))
+            .add_conduit_asset::<Glb>(Box::new(SyncPostcardAdapter::<Glb>::new(
+                self.enable_pbr.then_some(sync_glb),
             )));
     }
 }
@@ -65,16 +76,17 @@ impl<T: DeserializeOwned> SyncPostcardAdapter<T> {
     }
 }
 
-impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
+impl<T: DeserializeOwned + Component + crate::Asset> AssetAdapter for SyncPostcardAdapter<T> {
     fn insert(
         &self,
         commands: &mut Commands,
         entity_map: &mut EntityMap,
         entity_id: EntityId,
+        asset_index: u64,
         value: &[u8],
     ) {
         let Ok(comp) = postcard::from_bytes::<T>(value) else {
-            warn!("failed to deserialize material");
+            warn!("failed to deserialize asset");
             return;
         };
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
@@ -96,42 +108,138 @@ impl<T: DeserializeOwned + Component> AssetAdapter for SyncPostcardAdapter<T> {
             entity_map.0.insert(entity_id, e.id());
             e
         };
-        e.insert(comp);
+        e.insert(comp).insert((
+            AssetHandle::<T> {
+                id: asset_index,
+                phantom_data: PhantomData,
+            },
+            T::ASSET_ID,
+        ));
         if let Some(sync_system) = self.sync_system {
             commands.run_system(sync_system);
         }
     }
 }
 
-fn sync_pbr_to_bevy(
-    query: Query<(Entity, &Pbr)>,
-    mut mat_assets: ResMut<Assets<StandardMaterial>>,
-    mut image_assets: ResMut<Assets<Image>>,
+#[derive(bevy::prelude::Component, Debug, Clone)]
+struct AssetHandle<T> {
+    id: u64,
+    phantom_data: PhantomData<T>,
+}
+
+impl<T> PartialEq for AssetHandle<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<T> Eq for AssetHandle<T> {}
+
+impl<T> core::hash::Hash for AssetHandle<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+#[derive(Default)]
+struct SyncedMeshes(HashMap<AssetHandle<ConduitMesh>, Handle<Mesh>>);
+#[derive(Default)]
+struct SyncedMaterials(HashMap<AssetHandle<Material>, Handle<StandardMaterial>>);
+#[derive(Default)]
+struct SyncedGlbs(HashMap<AssetHandle<Glb>, Handle<Scene>>);
+#[derive(Component)]
+struct SyncedPbr;
+
+fn sync_mesh_to_bevy(
+    mesh: Query<(
+        Entity,
+        &ConduitMesh,
+        &AssetHandle<ConduitMesh>,
+        Option<&SyncedPbr>,
+    )>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
     mut commands: Commands,
-    assets: Res<AssetServer>,
+    mut cache: Local<SyncedMeshes>,
 ) {
-    for (entity, pbr) in query.iter() {
+    for (entity, mesh, handle, synced_pbr) in mesh.iter() {
         let mut entity = commands.entity(entity);
-        match pbr {
-            Pbr::Url(u) => {
-                let scene = assets.load(format!("{u}#Scene0"));
-                entity.insert(SceneBundle {
-                    scene,
-                    ..Default::default()
-                });
-            }
-            Pbr::Bundle { mesh, material } => {
-                let material = material.clone().into_material(image_assets.deref_mut());
-                let material = mat_assets.add(material);
-                let asset = Mesh::from(mesh.clone());
-                let mesh = mesh_assets.add(asset);
-                entity.insert((PbrBundle {
+        let mesh = if let Some(mesh) = cache.0.get(handle) {
+            mesh.clone()
+        } else {
+            let mesh = Mesh::from(mesh.clone());
+            let mesh = mesh_assets.add(mesh);
+            cache.0.insert(handle.clone(), mesh.clone());
+            mesh
+        };
+        if synced_pbr.is_some() {
+            entity.insert(mesh);
+        } else {
+            entity.insert((
+                PbrBundle {
                     mesh,
+                    ..Default::default()
+                },
+                SyncedPbr,
+            ));
+        }
+    }
+}
+
+fn sync_material_to_bevy(
+    material: Query<(
+        Entity,
+        &Material,
+        &AssetHandle<Material>,
+        Option<&SyncedPbr>,
+    )>,
+    mut material_assets: ResMut<Assets<StandardMaterial>>,
+    mut image_assets: ResMut<Assets<Image>>,
+    mut commands: Commands,
+    mut cache: Local<SyncedMaterials>,
+) {
+    for (entity, material, handle, synced_pbr) in material.iter() {
+        let mut entity = commands.entity(entity);
+        let material = if let Some(material) = cache.0.get(handle) {
+            material.clone()
+        } else {
+            let material = material.clone().into_material(image_assets.deref_mut());
+            let material = material_assets.add(material);
+            cache.0.insert(handle.clone(), material.clone());
+            material
+        };
+        if synced_pbr.is_some() {
+            entity.insert(material);
+        } else {
+            entity.insert((
+                PbrBundle {
                     material,
                     ..Default::default()
-                },));
-            }
+                },
+                SyncedPbr,
+            ));
         }
+    }
+}
+fn sync_glb_to_bevy(
+    mut commands: Commands,
+    mut cache: Local<SyncedGlbs>,
+    glb: Query<(Entity, &Glb, &AssetHandle<Glb>)>,
+    assets: Res<AssetServer>,
+) {
+    for (entity, glb, handle) in glb.iter() {
+        let Glb(u) = glb;
+        let mut entity = commands.entity(entity);
+        let scene = if let Some(glb) = cache.0.get(handle) {
+            glb.clone()
+        } else {
+            let url = format!("{u}#Scene0");
+            let scene = assets.load(&url);
+            cache.0.insert(handle.clone(), scene.clone());
+            scene
+        };
+        entity.insert((SceneBundle {
+            scene,
+            ..Default::default()
+        },));
     }
 }

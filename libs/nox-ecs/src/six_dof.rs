@@ -1,7 +1,6 @@
-use conduit::well_known::Pbr;
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{Archetype, Component};
-use nox_ecs::{Handle, IntoSystem, Query, System, WorldPos};
+use nox_ecs::{IntoSystem, Query, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 use std::sync::Arc;
@@ -111,7 +110,6 @@ pub struct Body {
     pub accel: WorldAccel,
     pub force: Force,
     pub mass: Inertia,
-    pub pbr: Handle<Pbr>,
 }
 
 pub fn advance_time(time_step: f64) -> impl System {

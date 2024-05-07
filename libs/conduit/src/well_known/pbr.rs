@@ -1,34 +1,11 @@
 //! The rendering thing not the beer
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId, Error};
+use crate::{Asset, AssetId};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-#[allow(clippy::large_enum_variant)]
-pub enum Pbr {
-    Url(String),
-    Bundle { mesh: Mesh, material: Material },
-}
-
-impl Pbr {
-    pub const ASSET_ID: AssetId = AssetId(2241);
-
-    pub fn path(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = std::fs::canonicalize(path)?;
-        let url = path
-            .into_os_string()
-            .into_string()
-            .map_err(|_| Error::NonUtf8Path)?;
-        Ok(Self::Url(url))
-    }
-
-    pub fn bundle(mesh: Mesh, material: Material) -> Self {
-        Self::Bundle { mesh, material }
-    }
-}
+pub struct Glb(pub String);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -330,8 +307,22 @@ pub enum Face {
     Back = 1,
 }
 
-impl Asset for Pbr {
-    const ASSET_ID: AssetId = Self::ASSET_ID;
+impl Asset for Mesh {
+    const ASSET_ID: AssetId = AssetId(2240);
+    fn asset_id(&self) -> AssetId {
+        Self::ASSET_ID
+    }
+}
+
+impl Asset for Material {
+    const ASSET_ID: AssetId = AssetId(2241);
+    fn asset_id(&self) -> AssetId {
+        Self::ASSET_ID
+    }
+}
+
+impl Asset for Glb {
+    const ASSET_ID: AssetId = AssetId(2242);
     fn asset_id(&self) -> AssetId {
         Self::ASSET_ID
     }
