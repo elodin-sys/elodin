@@ -197,13 +197,9 @@ rocket = w.spawn(
         el.Body(
             world_pos=el.WorldPos.from_linear(jnp.array([0.0, 1.0, 0.0]))
             + el.WorldPos.from_angular(euler_to_quat(jnp.array([0.0, 0.0, -90.0]))),
-            pbr=w.insert_asset(
-                el.Pbr.from_url(
-                    "https://storage.googleapis.com/elodin-marketing/models/rocket.glb"
-                )
-            ),
             inertia=el.SpatialInertia(2.0),
         ),
+        w.glb("https://storage.googleapis.com/elodin-marketing/models/rocket.glb"),
         Rocket(
             euler_pos=jnp.array([0.0, 0.0, 0.0]),
             angle_of_attack=jnp.array([0.0, 0.0, 0.0]),
