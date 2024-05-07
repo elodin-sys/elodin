@@ -3,8 +3,6 @@ title: Monte Carlo
 icon: dice
 ---
 
-<Note>This document discusses features not present in the alpha sandbox.</Note>
-
 With our physics toolkit, you can simulate a wide variety of physical situations. But what's the point of making these simulations?
 Our primary goal is to test control systems for aerospace vehicles.
 It's not sufficient to test the control systems in just one situation; you need to test them across the entire gamut of possible outcomes.
@@ -22,8 +20,8 @@ Other solutions simply require large amounts of engineering effort and/or massiv
 
 ## Our Solution
 
-Elodin solves these problems by introducing a cloud-based simulation runner that can run 100,000 simulations simultaneously. Thankfully, there have been some innovations in the world of computing that make this problem tractable.
+Elodin solves these problems by introducing a cloud-based simulation runner that can run up to 100,000 simulations simultaneously. We're able to do so in a cost-effective way by:
 
-Cloud service providers need to solve a very similar problem to support their serverless offerings. They give users the ability to spawn micro virtual machines (microVMs) every time a user requests their website. Amazon has open-sourced their Firecracker virtual machine manager, which powers their serverless service, AWS lambda. We utilize firecrackers to spawn iterations of a user's control system and simulation in a fast, isolated, and safe manner. This technology unlocks the ability to run many user simulations in parallel.
-
-There are still a few other problems to solve in the quest for a cloud-based simulation platform. Mainly, how will the simulation and control software communicate, and how will we record the results of the communication?
+- Using the [ECS](https://en.wikipedia.org/wiki/Entity_component_system) architecture to exploit the inherent parallelism in running the same compute kernel against different sets of data.
+- Leveraging [XLA](https://openxla.org/xla) to compile the simulation code to run on GPUs.
+- Using the cloud's elasticity to scale up and down as needed.
