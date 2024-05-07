@@ -220,6 +220,10 @@ class GraphQueryInner:
     def from_builder(
         builder: PipelineBuilder, edge_name: str, reverse: bool
     ) -> GraphQueryInner: ...
+    @staticmethod
+    def from_builder_total_edge(
+        builder: PipelineBuilder
+    ) -> GraphQueryInner: ...
     def insert_into_builder(self, builder: PipelineBuilder) -> None: ...
     def map(
         self,
@@ -301,6 +305,9 @@ class GraphEntity:
 
 class GraphComponent:
     def __init__(self, component_name: str, indexes: list[int]): ...
+class Glb:
+    def __init__(self, path: str): ...
+    def bytes(self) -> bytes: ...
 
 def six_dof(
     time_step: float, sys: Any = None, integrator: Integrator = Integrator.Rk4

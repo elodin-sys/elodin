@@ -68,6 +68,7 @@ impl From<u64> for GraphId {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[repr(transparent)]
 pub struct AssetId(pub u64);
 
@@ -486,6 +487,7 @@ pub enum ControlMsg {
         id: AssetId,
         entity_id: EntityId,
         bytes: Bytes,
+        asset_index: u64,
     },
     SetPlaying(bool),
     Rewind(u64),

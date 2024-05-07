@@ -1,4 +1,4 @@
-use conduit::well_known::{Material, Mesh, Pbr};
+use conduit::well_known::{Material, Mesh};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
 use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldPos};
@@ -22,53 +22,49 @@ fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
 fn main() {
     tracing_subscriber::fmt::init();
     let mut world = World::default();
-    let pbr = world.insert_asset(Pbr::Bundle {
-        mesh: Mesh::sphere(0.1, 36, 18),
-        material: Material::color(1.0, 1.0, 1.0),
-    });
+    let shape = world.insert_shape(Mesh::sphere(0.1, 36, 18), Material::color(1.0, 1.0, 1.0));
 
-    let pbr_b = world.insert_asset(Pbr::Bundle {
-        mesh: Mesh::sphere(0.1, 36, 18),
-        material: Material::color(0.5, 1.0, 1.0),
-    });
+    let shape_b = world.insert_shape(Mesh::sphere(0.1, 36, 18), Material::color(0.5, 1.0, 1.0));
 
-    world.spawn(Body {
-        pos: WorldPos(SpatialTransform {
-            inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-        }),
-        vel: WorldVel(SpatialMotion {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
-        }),
-        accel: WorldAccel(SpatialMotion {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-        }),
-        pbr,
-        force: Force(SpatialForce {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-        }),
-        mass: Inertia(SpatialInertia {
-            inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-        }),
-    });
+    world
+        .spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        })
+        .insert(shape);
 
-    world.spawn(Body {
-        pos: WorldPos(SpatialTransform {
-            inner: vector![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-        }),
-        vel: WorldVel(SpatialMotion {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
-        }),
-        accel: WorldAccel(SpatialMotion {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-        }),
-        pbr: pbr_b,
-        force: Force(SpatialForce {
-            inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-        }),
-        mass: Inertia(SpatialInertia {
-            inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-        }),
-    });
+    world
+        .spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        })
+        .insert(shape_b);
 
     let time_step = 1.0 / 60.0;
     let exec = world
