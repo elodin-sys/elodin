@@ -1,6 +1,7 @@
 # Changelog
 
 ## [unreleased]
+- Add visualization of the current tick in the graph views of the editor 
 - Add `TotalEdge`, an edge type that connects every entity to every other entity.
 - **(breaking)** Split `el.Pbr` into `el.Mesh`, `el.Material`, `el.Shape`, and `el.Glb`.
   - Use the `el.shape` and `el.glb` helpers instead
