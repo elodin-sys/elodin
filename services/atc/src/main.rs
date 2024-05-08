@@ -54,7 +54,8 @@ async fn main() -> anyhow::Result<()> {
                 .instrument(tracing::info_span!("orca")),
         );
     }
-    if let Some(api_config) = config.api {
+    let mut stripe_webhook_id = None;
+    if let Some(ref api_config) = config.api {
         let sandbox_events = {
             let redis = redis.get_async_pubsub().await?;
             atc_entity::events::subscribe(redis).await?
@@ -90,12 +91,13 @@ async fn main() -> anyhow::Result<()> {
                 ),
             )
             .await?;
+            stripe_webhook_id = Some(endpoint.id.clone());
             endpoint
                 .secret
                 .ok_or_else(|| anyhow::anyhow!("stripe webhook secret not found"))?
         };
         let api = Api::new(
-            api_config,
+            api_config.clone(),
             db.clone(),
             redis,
             msg_queue,
@@ -131,8 +133,18 @@ async fn main() -> anyhow::Result<()> {
     // wait for cancellation
     cancel_token.cancelled().await;
     info!("waiting for services to terminate gracefully");
+    // cleanup webhook
+    if let Some(stripe_webhook_id) = stripe_webhook_id {
+        stripe::WebhookEndpoint::delete(
+            &stripe::Client::new(config.api.unwrap().stripe_secret_key),
+            &stripe_webhook_id,
+        )
+        .await?;
+    }
+
     while let Some(res) = services.join_next().await {
         res.unwrap()?
     }
+
     Ok(())
 }
