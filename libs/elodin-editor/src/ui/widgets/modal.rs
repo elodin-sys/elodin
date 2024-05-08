@@ -12,7 +12,8 @@ use crate::ui::{
     colors::{self, with_opacity},
     images, theme,
     utils::MarginSides,
-    EntityData, GraphsState, InspectorAnchor, SettingModal, SettingModalState,
+    widgets::plot::GraphsState,
+    EntityData, InspectorAnchor, SettingModal, SettingModalState,
 };
 
 use super::{

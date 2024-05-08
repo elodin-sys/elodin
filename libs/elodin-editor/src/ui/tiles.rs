@@ -23,16 +23,16 @@ use super::{
     utils::MarginSides,
     widgets::{
         button::EImageButton,
-        eplot::{self, EPlot},
-        eplot_gpu::Line,
+        plot::{self, gpu::Line, GraphState, GraphsState, Plot},
         timeline::tagged_range::TaggedRanges,
         RootWidgetSystem,
     },
-    GraphState, GraphsState, HdrEnabled, SelectedObject, ViewportRect,
+    HdrEnabled, SelectedObject, ViewportRect,
 };
 use crate::{
-    plugins::navigation_gizmo::RenderLayerAlloc, spawn_main_camera, ui::GraphStateEntity,
-    CollectedGraphData,
+    plugins::navigation_gizmo::RenderLayerAlloc,
+    spawn_main_camera,
+    ui::widgets::plot::{CollectedGraphData, GraphStateEntity},
 };
 
 struct TileIcons {
@@ -123,7 +123,7 @@ impl Pane {
         let content_rect = ui.available_rect_before_wrap();
         match self {
             Pane::Graph(pane) => {
-                pane.rect = Some(eplot::get_inner_rect(content_rect));
+                pane.rect = Some(plot::get_inner_rect(content_rect));
                 // ui.painter()
                 //     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
@@ -136,7 +136,7 @@ impl Pane {
                     .as_ref()
                     .and_then(|rid| tagged_ranges.0.get(rid));
 
-                EPlot::new()
+                Plot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
                     .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
                     .steps(7, 4)

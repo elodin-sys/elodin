@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Range, time::Duration};
+use std::time::Duration;
 
 use bevy::{
     asset::{embedded_asset, AssetMetaCheck},
@@ -27,23 +27,14 @@ use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
-    client::Msg,
-    query::MetadataStore,
-    ser_de::ColumnValue,
-    well_known::{EntityMetadata, Viewport, WorldPos},
-    ComponentId, ControlMsg, EntityId,
+    well_known::{Viewport, WorldPos},
+    ControlMsg, EntityId,
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
-use ui::{
-    widgets::{
-        eplot::{EPlotDataComponent, EPlotDataEntity, EPlotDataLine},
-        eplot_gpu::Line,
-    },
-    EntityPair, GraphsState, HoveredEntity,
-};
+use ui::{EntityPair, HoveredEntity};
 
-use crate::{plugins::editor_cam_touch, ui::widgets::eplot_gpu};
+use crate::plugins::editor_cam_touch;
 
 mod plugins;
 pub(crate) mod traces;
@@ -130,7 +121,6 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
-            .init_resource::<CollectedGraphData>()
             .add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
@@ -145,10 +135,9 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(TweeningPlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
-            .add_plugins(eplot_gpu::EPlotGpuPlugin)
+            .add_plugins(crate::ui::widgets::plot::PlotPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
-            .add_systems(PreUpdate, collect_entity_data)
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
@@ -165,104 +154,6 @@ impl Plugin for EditorPlugin {
         embedded_asset!(app, "./assets/specular.ktx2");
         if cfg!(not(target_arch = "wasm32")) {
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
-        }
-    }
-}
-
-#[derive(Resource, Default, Clone)]
-pub struct CollectedGraphData {
-    pub tick_range: Range<u64>,
-    pub entities: BTreeMap<EntityId, EPlotDataEntity>,
-}
-
-impl CollectedGraphData {
-    pub fn get_entity(&self, entity_id: &EntityId) -> Option<&EPlotDataEntity> {
-        self.entities.get(entity_id)
-    }
-    pub fn get_component(
-        &self,
-        entity_id: &EntityId,
-        component_id: &ComponentId,
-    ) -> Option<&EPlotDataComponent> {
-        self.entities
-            .get(entity_id)
-            .and_then(|entity| entity.components.get(component_id))
-    }
-    pub fn get_line(
-        &self,
-        entity_id: &EntityId,
-        component_id: &ComponentId,
-        index: usize,
-    ) -> Option<&EPlotDataLine> {
-        self.entities
-            .get(entity_id)
-            .and_then(|entity| entity.components.get(component_id))
-            .and_then(|component| component.lines.get(&index))
-    }
-}
-
-pub fn collect_entity_data(
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    mut graph_states: ResMut<GraphsState>,
-    mut reader: EventReader<Msg>,
-    metadata_store: Res<MetadataStore>,
-    entity_metadata: Query<(&EntityId, &EntityMetadata)>,
-    mut lines: ResMut<Assets<Line>>,
-    mut commands: Commands,
-) {
-    let entity_metadata = entity_metadata
-        .iter()
-        .collect::<BTreeMap<&EntityId, &EntityMetadata>>();
-
-    for msg in reader.read() {
-        match msg {
-            Msg::Control(ControlMsg::StartSim { .. }) => {
-                collected_graph_data.entities.clear();
-                collected_graph_data.tick_range = 0..0;
-                for graph in graph_states.0.values_mut() {
-                    for (_, (entity, _)) in graph.enabled_lines.iter() {
-                        commands.entity(*entity).despawn();
-                    }
-                    graph.enabled_lines.clear();
-                }
-            }
-            Msg::Control(ControlMsg::Tick { tick, max_tick: _ }) => {
-                if collected_graph_data.tick_range.end < *tick {
-                    collected_graph_data.tick_range.end = *tick;
-                }
-            }
-            Msg::Column(col) => {
-                let component_id = col.metadata.component_id();
-                let Some(component_metadata) = metadata_store.get_metadata(&component_id) else {
-                    return;
-                };
-                let component_label = component_metadata.component_name();
-                let element_names = component_metadata.element_names();
-                for res in col.iter() {
-                    let Ok(ColumnValue { entity_id, value }) = res else {
-                        warn!("error parsing column value");
-                        continue;
-                    };
-                    collected_graph_data
-                        .entities
-                        .entry(entity_id)
-                        .or_insert_with(|| EPlotDataEntity {
-                            label: entity_metadata
-                                .get(&entity_id)
-                                .map_or(format!("E[{}]", entity_id.0), |metadata| {
-                                    metadata.name.to_owned()
-                                }),
-                            components: Default::default(),
-                        })
-                        .components
-                        .entry(component_id)
-                        .or_insert_with(|| {
-                            EPlotDataComponent::new(component_label, element_names.to_string())
-                        })
-                        .add_values(&value, &mut lines, col.payload.time);
-                }
-            }
-            _ => {}
         }
     }
 }
