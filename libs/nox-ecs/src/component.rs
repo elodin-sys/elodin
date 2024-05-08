@@ -48,6 +48,18 @@ impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
     }
 }
 
+impl<T: ArrayElement + NativeType> Component for nox::Quaternion<T> {
+    fn name() -> String {
+        format!("quaternion_{}", T::PRIMITIVE_TY)
+    }
+    fn component_type() -> ComponentType {
+        ComponentType {
+            primitive_ty: T::PRIMITIVE_TY,
+            shape: smallvec![4],
+        }
+    }
+}
+
 impl<T: ArrayElement + NativeType> Component for nox::SpatialTransform<T> {
     fn name() -> String {
         format!("spatial_transform_{}", T::PRIMITIVE_TY)

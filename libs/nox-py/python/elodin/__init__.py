@@ -133,18 +133,19 @@ def system(func) -> System:
 O = TypeVar("O")
 S = TypeVarTuple("S")
 A = TypeVarTuple("A")
+B = TypeVarTuple("B")
 
 
 class Query(Generic[Unpack[A]]):
     bufs: list[jax.Array]
-    component_data: list[Component]
+    component_data: list[Metadata]
     component_classes: list[type[Any]]
     inner: QueryInner
 
     def __init__(
         self,
         inner: QueryInner,
-        component_data: list[Component],
+        component_data: list[Metadata],
         component_classes: list[type[Any]],
     ):
         self.bufs = inner.arrays()
@@ -174,12 +175,12 @@ class Query(Generic[Unpack[A]]):
         component_data = []
         component_classes = []
         for out_tp, buf in zip(out_tps_tuple, bufs):
-            this_inner = self.inner.map(buf, out_tp.__metadata__[0].to_metadata())  # type: ignore
+            this_inner = self.inner.map(buf, Metadata.of(out_tp))  # type: ignore
             if inner is None:
                 inner = this_inner
             else:
                 inner = inner.join_query(this_inner)
-            component_data += [out_tp.__metadata__[0]]  # type: ignore
+            component_data += [Metadata.of(out_tp)]  # type: ignore
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
@@ -199,8 +200,7 @@ class Query(Generic[Unpack[A]]):
         component_data = []
         component_classes = []
         for t_arg in t_args:
-            data = t_arg.__metadata__[0]
-            component_data.append(data)
+            component_data.append(Metadata.of(t_arg))
             component_classes.append(t_arg)
             ids.append(Component.name(t_arg))
         return Query(
@@ -211,7 +211,7 @@ class Query(Generic[Unpack[A]]):
     def init_builder(new_tp: type[Any], builder: PipelineBuilder):
         t_args = typing.get_args(new_tp)
         for t_arg in t_args:
-            component_data: Component = t_arg.__metadata__[0]
+            component_data = Metadata.of(t_arg)
             builder.init_var(Component.name(t_arg), component_data.ty)
 
     def __getitem__(self, index: int) -> Any:
@@ -257,7 +257,9 @@ E = TypeVar("E")
 
 class RevEdge: ...
 
+
 class TotalEdge: ...
+
 
 class GraphQuery(Generic[E]):
     bufs: dict[int, Tuple[list[jax.Array], list[jax.Array]]]
@@ -290,13 +292,13 @@ class GraphQuery(Generic[E]):
         if isinstance(edge_ty, type(TotalEdge)):
             return
         for t_arg in t_args:
-            component_data: Component = t_arg.__metadata__[0]
+            component_data = Metadata.of(t_arg)
             builder.init_var(Component.name(t_arg), component_data.ty)
 
     def edge_fold(
         self,
-        from_query: Query[Any],
-        to_query: Query[Any],
+        from_query: Query[Unpack[A]],
+        to_query: Query[Unpack[B]],
         out_tp: Annotated[Any, Component],
         init_value: O,
         fn: Callable[..., O],
@@ -333,13 +335,13 @@ class GraphQuery(Generic[E]):
                 out_bufs = [
                     jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)
                 ]
-        component_data = out_tp.__metadata__[0]  # type: ignore
+        component_data = Metadata.of(out_tp)
         return Query(
             self.inner.map(
                 from_query.inner,
                 to_query.inner,
                 out_bufs[0],
-                component_data.to_metadata(),
+                component_data,
             ),
             [component_data],
             [out_tp],
@@ -354,9 +356,9 @@ class Archetype(Protocol):
     def archetype_name(cls) -> str:
         return snake_case_pattern.sub("_", cls.__name__).lower()
 
-    def component_data(self) -> list[Component]:
+    def component_data(self) -> list[Metadata]:
         return [
-            v.__metadata__[0]
+            Metadata.of(v)
             for v in typing.get_type_hints(self, include_extras=True).values()
         ]
 
@@ -392,7 +394,6 @@ WorldPos = Annotated[
     SpatialTransform,
     Component(
         "world_pos",
-        ComponentType.SpatialPosF64,
         metadata={"element_names": "q0,q1,q2,q3,x,y,z", "priority": 5},
     ),
 ]
@@ -400,7 +401,6 @@ WorldVel = Annotated[
     SpatialMotion,
     Component(
         "world_vel",
-        ComponentType.SpatialMotionF64,
         metadata={"element_names": "ωx,ωy,ωz,x,y,z", "priority": 5},
     ),
 ]
@@ -408,7 +408,6 @@ WorldAccel = Annotated[
     SpatialMotion,
     Component(
         "world_accel",
-        ComponentType.SpatialMotionF64,
         metadata={"element_names": "αx,αy,αz,x,y,z", "priority": 5},
     ),
 ]
@@ -416,13 +415,12 @@ Force = Annotated[
     SpatialForce,
     Component(
         "force",
-        ComponentType.SpatialMotionF64,
         metadata={"element_names": "τx,τy,τz,x,y,z", "priority": 5},
     ),
 ]
 Inertia = Annotated[
     SpatialInertia,
-    Component("inertia", ComponentType.SpatialPosF64, metadata={"priority": 5}),
+    Component("inertia", metadata={"priority": 5}),
 ]
 Seed = Annotated[
     jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})
@@ -432,23 +430,23 @@ Time = Annotated[
 ]
 MeshAsset = Annotated[
     Handle,
-    Component("asset_handle_2240", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2240", asset=True, metadata={"priority": -1}),
 ]
 MaterialAsset = Annotated[
     Handle,
-    Component("asset_handle_2241", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2241", asset=True, metadata={"priority": -1}),
 ]
 GlbAsset = Annotated[
     Handle,
-    Component("asset_handle_2242", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2242", asset=True, metadata={"priority": -1}),
 ]
 GizmoAsset = Annotated[
     Handle,
-    Component("asset_handle_2243", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2243", asset=True, metadata={"priority": -1}),
 ]
 PanelAsset = Annotated[
     Handle,
-    Component("asset_handle_2244", ComponentType.U64, True, metadata={"priority": -1}),
+    Component("asset_handle_2244", asset=True, metadata={"priority": -1}),
 ]
 Camera = Annotated[
     jax.Array,
@@ -462,10 +460,10 @@ Camera = Annotated[
 class C:
     def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
         if isinstance(tys, tuple) and isinstance(values, tuple):
-            self.data = [ty.__metadata__[0] for ty in tys]  # type: ignore
+            self.data = [Metadata.of(ty) for ty in tys]  # type: ignore
             self.bufs = [numpy.asarray(tree_flatten(v)[0][0]) for v in values]
         else:
-            self.data = [tys.__metadata__[0]]  # type: ignore
+            self.data = [Metadata.of(tys)]  # type: ignore
             self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
 
     @classmethod
@@ -487,10 +485,12 @@ class Body(Archetype):
     force: Force = SpatialForce.zero()
     world_accel: WorldAccel = SpatialMotion.zero()
 
+
 @dataclass
 class Shape(Archetype):
     mesh: MeshAsset
     material: MaterialAsset
+
 
 @dataclass
 class Scene(Archetype):
@@ -550,9 +550,8 @@ class World(WorldBuilder):
         addr = super().serve(system, True, time_step, client, None)
         return IFrame(f"http://{addr}", width=960, height=540)
 
-
     def glb(self, url: str) -> Scene:
-        return Scene(self.insert_asset(Glb(url))) # type: ignore
+        return Scene(self.insert_asset(Glb(url)))  # type: ignore
 
     def shape(self, mesh: Mesh, material: Material) -> Shape:
-        return Shape(self.insert_asset(mesh), self.insert_asset(material)) # type: ignore
+        return Shape(self.insert_asset(mesh), self.insert_asset(material))  # type: ignore

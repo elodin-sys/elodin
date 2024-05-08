@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 
-use crate::{Archetype, Component, EntityId, Error, PyUntypedArrayExt};
+use crate::{Archetype, EntityId, Error, Metadata, PyUntypedArrayExt};
 
 #[pyclass]
 pub struct Conduit {
@@ -44,7 +44,7 @@ impl Conduit {
             .iter()
             .zip(component_datas.iter())
             .map(|(arr, data)| {
-                let ty: conduit::ComponentType = data.ty.clone().into();
+                let ty: conduit::ComponentType = data.component_type.clone();
                 let elem_size = ty.primitive_ty.element_type().element_size_in_bytes();
                 unsafe { Bytes::copy_from_slice(arr.buf(elem_size)) }
             })
@@ -74,7 +74,7 @@ impl ConduitInner {
     async fn send(
         &mut self,
         entity_id: EntityId,
-        component_datas: Vec<Component>,
+        component_datas: Vec<Metadata>,
         arrays: Vec<Bytes>,
         time: u64,
     ) -> Result<(), Error> {
@@ -95,13 +95,13 @@ impl ConduitInner {
 async fn send_inner(
     client: &mut conduit::client::TcpClient,
     entity_id: EntityId,
-    component_datas: &[Component],
+    component_datas: &[Metadata],
     arrays: &[Bytes],
     time: u64,
 ) -> Result<(), conduit::Error> {
     let stream_id = StreamId::rand();
     for (data, value_buf) in component_datas.iter().zip(arrays.iter()) {
-        let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.clone().into());
+        let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.inner.clone());
         client.send(packet).await?;
 
         client

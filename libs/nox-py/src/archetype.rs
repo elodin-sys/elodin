@@ -6,7 +6,7 @@ use nox_ecs::{conduit, ArchetypeName};
 use numpy::PyUntypedArray;
 
 pub struct Archetype<'py> {
-    pub component_datas: Vec<Component>,
+    pub component_datas: Vec<Metadata>,
     pub arrays: Vec<&'py PyUntypedArray>,
     pub archetype_name: ArchetypeName,
 }
@@ -28,7 +28,7 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
         let archetype_name = ArchetypeName::from(archetype_name.as_str());
         let component_datas = archetype
             .call_method0("component_data")?
-            .extract::<Vec<Component>>()?;
+            .extract::<Vec<Metadata>>()?;
         let arrays = archetype.call_method0("arrays")?;
         let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
         Ok(Self {
