@@ -32,7 +32,9 @@
           openblas
           lapack
           openssl
+          libclang
         ];
+      LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
       doCheck = false;
     };
     elixir = pkgs.mkShell {

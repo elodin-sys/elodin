@@ -1,0 +1,3 @@
+[submodule "libs/basilisk-rs/basilisk"]
+	path = libs/basilisk-rs/basilisk
+	url = https://github.com/AVSLab/basilisk.git

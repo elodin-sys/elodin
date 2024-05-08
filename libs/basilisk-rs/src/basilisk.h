@@ -1,0 +1,8 @@
+#include "fswAlgorithms/attControl/mrpSteering/mrpSteering.h"
+#include "fswAlgorithms/attControl/mrpFeedback/mrpFeedback.h"
+#include "cMsgCInterface/RWSpeedMsg_C.h"
+#include "cMsgCInterface/RWAvailabilityMsg_C.h"
+#include "cMsgCInterface/RWArrayConfigMsg_C.h"
+#include "cMsgCInterface/VehicleConfigMsg_C.h"
+#include "cMsgCInterface/AttGuidMsg_C.h"
+#include "cMsgCInterface/CmdTorqueBodyMsg_C.h"
