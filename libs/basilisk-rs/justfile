@@ -1,0 +1,11 @@
+pull:
+  git submodule update --init --recursive
+venv:
+  [ -d .venv ] || python3 -m venv .venv && ./.venv/bin/pip3 install wheel 'conan<2.0' setuptools
+vendor: pull venv
+  rm -rf vendor
+  mkdir -p vendor
+  source .venv/bin/activate && cd basilisk && CMAKE_PREFIX_PATH=$(readlink ../.venv/bin/python3)/../.. python3 conanfile.py
+  cp -r basilisk/src/fswAlgorithms vendor/
+  cp -r basilisk/src/architecture vendor/
+  cp -r basilisk/dist3/autoSource/cMsgCInterface vendor/
