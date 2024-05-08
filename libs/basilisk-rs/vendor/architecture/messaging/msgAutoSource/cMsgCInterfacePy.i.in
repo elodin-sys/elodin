@@ -1,0 +1,59 @@
+%{{
+#include "cMsgCInterface/{type}_C.h"
+%}}
+%include "cMsgCInterface/{type}_C.h"
+%include "architecture/messaging/msgHeader.h"
+typedef struct {type};
+%extend {type}_C {{
+    %pythoncode %{{
+
+    def subscribeTo(self, source):
+        """subscribe to another message source"""
+        from Basilisk.architecture.messaging import {type}
+        if type(source) == type(self):
+            {type}_C_subscribe(self, source)
+        elif type(source) == {type}:
+            {type}_cpp_subscribe(self, source)
+        else:
+            raise Exception('tried to subscribe {type} to another message type')
+
+
+
+    def isSubscribedTo(self, source):
+        """check if self is subscribed to another message source"""
+        from Basilisk.architecture.messaging import {type}
+        if type(source) == type(self):
+            return ({type}_C_isSubscribedTo(self, source))
+        elif type(source) == {type}:
+            return ({type}_cpp_isSubscribedTo(self, source))
+        else:
+            return 0
+
+
+    def recorder(self, timeDiff=0):
+        """create a recorder module for this message"""
+        from Basilisk.architecture.messaging import {type}Recorder
+        self.header.isLinked = 1
+        return {type}Recorder(self, timeDiff)
+
+    def init(self, data=None):
+        """returns a Msg copy connected to itself"""
+        {type}_C_addAuthor(self, self)
+        if data:
+            {type}_C_write(data, self, -1, 0)
+        return self
+
+    def write(self, payload, time=0, moduleID=0):
+        """write the message payload.
+        The 2nd argument is time in nanoseconds.  It is optional and defaults to 0.
+        The 3rd argument is the module ID which defaults to 0.
+        """
+        {type}_C_addAuthor(self, self)
+        {type}_C_write(payload, self, moduleID, time)  # msgs written in Python have 0 module ID
+        return self
+
+    def read(self):
+        """read the message payload."""
+        return {type}_C_read(self)
+    %}}
+}};

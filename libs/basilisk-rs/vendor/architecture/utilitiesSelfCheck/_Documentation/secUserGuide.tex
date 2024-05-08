@@ -1,0 +1,166 @@
+% !TEX root = ./Basilisk-avsLibrary20170812.tex
+
+\section{User Guide}
+
+\subsection{{\tt linearAlgebra} Library}
+The linear algebra library provides numerous C-based functions to perform basic matrix math operations.  For a complete list of functions supported, consult the {\tt linearAlgebra.h} file. 
+
+\subsubsection{Vector Operations}
+The vector related functions all begin with a letter '{\tt v}' and are broken down in the following categories depending on if the linear algebra operation is performed on a matrix of a general size, or of a specific size of 2, 3, 4 or 6.
+\begin{itemize}
+	\item if the function is  {\tt vXXXX()} the code works on a $n$x1 matrix of arbitrary length $n$.  
+	\item if the function is {\tt v2XXXX()}  the code works on a matrix of length 2 defined as {\tt double vec[2]}.
+	\item if the function is {\tt v3XXXX()}  the code works on a matrix of length 2 defined as {\tt double vec[3]}.
+	\item if the function is {\tt v4XXXX()} the code works on a matrix of length 2 defined as {\tt double vec[4]}.
+\end{itemize}
+
+The most extensive set of linear algebra support functions are for operation on 3 and 4 dimensional matrices common with orbital mechanics (position and velocity vector representations) and attitude dynamics (working with 3- and 4-parameter attitude descriptions).  The following list details what vector operation each function performs:
+\begin{itemize}
+	\item {\tt Copy}: Copies vector $\bm v_{1}$ into vector $\bm v_{2}$
+	\item {\tt SetZero}: Returns a zero vector
+	\item {\tt Set}: Sets the vector representation to specific values
+	\item {\tt Add}: Sums  $\bm v_{1}$ and  $\bm v_{2}$
+	\item {\tt Subtract}: Returns the difference  $\bm v_{1}$ - $\bm v_{2}$
+	\item {\tt Scale}: Returns $\bm v_{1}$ multiplied by a scalar $\alpha$
+	\item {\tt Dot}: Returns the dot product $\bm v_{1} \cdot \bm v_{2}$
+	\item {\tt OuterProduct}: Returns the outer product $\bm v_{1} \bm v_{2}^{T}$
+	\item {\tt Normalize}: Returns a normalized vector $\bm v_{1}/ v_{1}$
+	\item {\tt MaxAbs}: Returns the largest element of a vector
+	\item {\tt IsEqual}: Checks if two vector represnetations are identical	
+	\item {\tt IsZero}: Checks if a vector is full of zero elements
+	\item {\tt Print}: Prints the vector representation to a file
+	\item {\tt Sort}: Sorts the vector elements by size
+	\item {\tt Print}: Prints the vector representation to a file
+	\item {\tt PrintScreen}: Prints the vector representation to the screen
+\end{itemize}
+
+
+
+
+
+\subsubsection{Matrix Operations}
+The matrix related functions are all labeled with a letter '{\tt M}' and are broken down into the following matrix dimension related categories:
+\begin{itemize}
+	\item  {\tt mXXXXy()}: the code works on a $n\times m$ matrix of arbitrary dimension $n$ and $m$.
+	\item {\tt m22XXXX()}: the code works on a $2\times 2$ matrix defined through {\tt mat[2][2]}. 
+	\item {\tt m33XXXX()}: the code works on a $3\times 3$ matrix defined through {\tt mat[3]3]}. 
+	\item {\tt m44XXXX()}: the code works on a $4\times 4$ matrix defined through {\tt mat[4][4]}. 
+\end{itemize}
+
+The following list provides an overview of the supported matrix functions.  Note that not al dimensions have all functions provided, but the 2, 3, and 4 dimensional matrix support is pretty complete.  
+\begin{itemize}
+	\item {\tt SetIdentity}: Returns an identity matrix
+	\item {\tt SetZero}: Returns a zero matrix
+	\item {\tt Set}: Creates a matrix with specific values
+	\item {\tt Copy}: Copies the matrix $[M_{1}]$ into $[M_{2}]$
+	\item {\tt m33MultM33}: Performs the matrix to matrix multiplication $[M_{1}][M_{2}]$
+	\item {\tt m33MultM33t}: Performs the matrix to matrix multiplication $[M_{1}][M_{2}]^{T}$
+	\item {\tt m33tMultM33}: Performs the matrix to matrix multiplication $[M_{1}]^{T}[M_{2}]$
+	\item {\tt m33MultV3}: Computes $[M_{1}]\bm v_{1}$ 
+	\item {\tt m33tMultV3}: Computes $[M_{1}]^{T}\bm v_{1}$ 
+	\item {\tt v3tMultM33}: Computes $\bm v_{1}^{T}[M_{1}]$ 
+	\item {\tt v3tMultM33t}: Computes  $\bm v_{1}^{T}[M_{1}]^{T}$
+	\item {\tt Tilde}: Returns the skew-symmetric matrix $[\tilde{\bm v}_{1}]$
+	\item {\tt Transpose}: Returns $[M_{1}]^{T}$
+	\item {\tt Add}: Returns the sum $[M_{1}] + [M_{2}]$
+	\item {\tt Subtract}: Returns the difference $[M_{1}] - [M_{2}]$
+	\item {\tt Scale}: Returns the scaled matrix $\alpha [M_{1}]$
+	\item {\tt Trace}: Compute the matrix trace $\sum M_{ii}$
+	\item {\tt Determinant}: Returns the square matrix determinant
+	\item {\tt IsEqual}: Checks if all matrix elements are equal
+	\item {\tt IsZero}: Checks if all matrix elements are zero
+	\item {\tt Print}: Prints the matrix representation to a file
+	\item {\tt PrintScreen}: Prints the matrix representation to the screen
+	\item {\tt Inverse}: Returns the matrix inverse $[M_{1}]^{-1}$
+	\item {\tt SingularValues}: Computes the singular values of $[M_{1}]$
+	\item {\tt EigenValues}: Computes the Eigenvalues of $[M_{1}]$
+	\item {\tt ConditionNumber}: Computes the condition number of $[M_{1}]$
+\end{itemize}
+
+
+
+
+\subsection{{\tt rigidBodyKinematics} Library}
+
+The following discussion is a brief overview of the {\tt rigidBodyKinematics} library function notation.  Please see Appendix E in Reference~\citenum{schaub} for a complete description:
+\begin{itemize}
+	\item {\tt XXX2YYY}: Converts the attitude coordinates {\tt XXX} to {\tt YYY}
+	\item {\tt addXXX}: Add the two attitude descriptions $\bm x_{1} = \bm x_{\cal B/F}$ and $\bm x_{2}= \bm x_{\cal F/N}$ to return the sequential rotation of first $\bm x_{1}$ and then $\bm x_{2}$.  Returns is the description $\bm x_{3} = \bm x_{\cal B/N}$
+	\item {\tt subXXX}: Subtract the two attitude descriptions $\bm x_{1} = \bm x_{\cal F/N}$ and $\bm x_{2}= \bm x_{\cal B/N}$ to return the relative orientation $\bm x_{3} = \bm x_{\cal F/B}$
+	\item {\tt BmatXXX}: Returns the matrix $[B]$ of the differential kinematic equations of the attitude parameters {\tt XXX} in Reference~\citenum{schaub}.  Note the scalar multiplier is not included here.  For example, with MRPs\cite{survey} $[B]$ is defined as $$\dot{\bm \sigma}_{\cal B/N} = \frac{1}{4}[B(\bm\sigma_{\cal B/N})] \leftexp{B}{\bm\omega}_{\cal B/N}$$
+	\item {\tt BinvXXX}: Returns the matrix inverse $[B]^{-1}$ of the attitude parameters {\tt XXX}
+	\item {\tt dX}: Returns the time derivatives of the attitude parameters {\tt XXX} as a function of these parameters and the body angular velocity vector $\bm \omega$
+	\item {\tt Mi}: Returns the single-axis DCM about the $\hat{\bm b}_{i}$ axis
+	\item {\tt wrapToPi}: Makes sure that an angle  lies within $\pm\pi$
+\end{itemize}
+
+
+
+
+\subsection{{\tt orbitalMotion} Library}
+
+\subsubsection{Orbit Anomaly Angle Conversions}
+To convert between the various anomaly angles, the following functions are defined:
+\begin{itemize}
+	\item {\tt double f2E(double f, double e)}
+	\item {\tt double E2f(double Ecc, double e)}
+	\item {\tt double E2M(double Ecc, double e)}
+	\item {\tt double M2E(double M, double e)}, with a change conversion tolerance of $10^{-13}$ and a maximum iteration limit of 200
+	\item {\tt double f2H(double f, double e)}
+	\item {\tt double H2f(double H, double e)}
+	\item {\tt double H2N(double H, double e)}
+	\item {\tt double N2H(double N, double e)}, with a change conversion tolerance of $10^{-13}$ and a maximum iteration limit of 200
+\end{itemize}
+
+
+
+\subsubsection{Orbit Element Conversion}
+To convert from classical orbit elements to inertial Cartesian coordinates, the function
+\begin{verbatim}
+	elem2rv(double mu, classicElements *elements, double *rVec, double *vVec)
+\end{verbatim}
+is used where {\tt mu} is the gravitational constant of the 2-body problem, the classical elements are defined through 
+$$
+	(a, e, i, \Omega, \omega, f)
+$$
+where the anomaly angle is typically given by $f$, unless the orbit is a rectilinear motion in which case the anomaly angle input is $E$.  The function returns the inertial position and velocity vectors in the arrays {\tt rVec} and {\tt vVec}.  
+
+To convert from  inertial Cartesian coordinates to classical orbit elements, the function
+\begin{verbatim}
+	rv2elem(double mu, double *rVec, double *vVec, classicElements *elements)
+\end{verbatim}
+Beyond the classical elements listed above, this routine also stores the radius of perapses $r_{p}$ and apoapses $r_{a}$, as well as $\alpha = \dfrac{1}{a}$.  
+
+
+\subsubsection{Space Environment Functions}
+\paragraph{Atmospheric Density}
+The Earth's atmospheric density $\rho$ is computed using\\
+\indent	{\tt double atmosphericDensity(double alt)} \\
+The density is returned as a scalar value.  
+
+\paragraph{Mean Debye Length}
+The mean Debye Length for the near-Earth environment is approximated, very crudely, through a polynomial fit.  The function returns the scalar $\lambda_{d}$ and is called through \\
+\indent {\tt double debyeLength(double alt)}
+
+\paragraph{Atmospheric Drag Acceleration}
+To compute an estimate of  the Earth's atmospheric drag acceleration, use the function: \\
+\indent {\tt void atmosphericDrag(double Cd, double A, double m, double *rvec, double *vvec, double *advec)}
+
+The inputs are the ballistic drag coefficient {\tt Cd}, the velocity-projected cross-sectional area {\tt A}, as well as the spacecraft mass {\tt m}.  Given the inertial position vectors {\tt rvec} and {\tt vvec}, the function returns the drag acceleration {\tt advec}.  
+
+\paragraph{Gravitational Zonal Harmonics}
+This function returns the inertial acceleration due to a planets zonal Harmonic.  The function call is:\\
+\indent {\tt  void jPerturb(double *rvec, int num, double *ajtot, ...)}
+
+If not option argument is provided, then the zonal harmonics of Earth are simulated.  About other celestial objects only the $J_{2}$ harmonic is implemented.  Here the object is specified through the {\tt CelestialObject\_t} enumeration.  For example, to get the $J_{2}$ zonal harmonic about Venus the argument {\tt CELESTIAL\_VENUS} is provided.  
+
+\paragraph{Solar Radiation Pressure Acceleration}
+To compute the inertial disturbance acceleration due to the solar radiation pressure use  the function\\
+\indent {\tt void solarRad(double A, double m, double *sunvec, double *arvec)}
+
+Here {\tt A} is the projected surface area, {\tt m} is the spacecraft mass, {\tt sunvec} is the sun position vector to the Sun in units of AU.  
+
+
+
+
+

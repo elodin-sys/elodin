@@ -1,0 +1,17 @@
+\section{Model Functions}
+The Gauss Markov functions are:
+\begin{itemize}
+	\item \textbf{Set seed}: Sets the random number generator seed.
+	\item \textbf{Compute next state}: Computes the next state using the propagation and noise matrices taking walk bounds into account
+	\item \textbf{Get current state}: Retrieves the noise calculated to add to a state.
+	\item \textbf{Set noise matrix}: Sets the noise covariance matrix
+	\item \textbf{Set propagation matrix}: Sets the matrix by which to propagate noise.
+	\item \textbf{Set bounds}: Sets the random walk bounds symmetric about 0.
+\end{itemize}
+
+
+\section{Model Assumptions and Limitations}
+\begin{itemize}
+	\item \textbf{Walk Bounds}: A walk bounds of zero actually allows infinite walk bounds. A walk bounds of something like 1e-15 will produce white noise to within machine error.
+	\item \textbf{Covariance Magnitude}: Currently, it is necessary to enter 1.5x the desired standard deviation or to account for this factor when comparing outputs.
+\end{itemize}

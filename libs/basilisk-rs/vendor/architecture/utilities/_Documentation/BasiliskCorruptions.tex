@@ -1,0 +1,297 @@
+%README file for moduleDocumentationTemplate TeX template.
+%This template should be used to document all Basilisk modules.
+%Updated 20170711 - S. Carnahan
+%
+%-Copy the contents of this folder to your own _Documentation folder
+%
+%-Rename the Basilisk-moduleDocumentationTemplate.tex appropriately
+%
+%-All edits should be made in one of:
+%—header.tex
+%— modelAssumptionsLimitations.tex
+%— modelDescription.tex
+%— modelFunctions.tex
+%— revisionTable.tex
+%— testDescription.tex
+%— testParameters.tex
+%— testResults.tex
+%— user_guide.tex
+%
+%-Some rules about referencing within the document:
+%1. If writing the suer guide, assume the module description is present
+%2. If writing the validation section, assume the module features section is present
+%3. Make no other assumptions about any sections being present. This allow for sections of the document to be used elsewhere without breaking.
+
+%In order to import some of these sections into a document in a different directory:
+%\usepackage{import}
+%Then, the sections are called with \subimport{relative path}{file} in order to \input{file} using the right relative path.
+%\import{full path}{file} can also be used if absolute paths are preferred over relative paths.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\documentclass[]{BasiliskReportMemo}
+
+\usepackage{cite}
+\usepackage{AVS}
+\usepackage{float} %use [H] to keep tables where you put them
+\usepackage{array} %easy control of text in tables
+\usepackage{import} %allows for importing from multiple sub-directories
+\usepackage{bm} %allows bolded math symbols easily
+\bibliographystyle{plain}
+\usepackage{adjustbox}
+%The below new column type and new command allow for nicely rotated table column headers
+\newcolumntype{R}[2]{%
+	>{\adjustbox{angle=#1,lap=\width-(#2)}\bgroup}%
+	l%
+	<{\egroup}%
+}
+\newcommand*\rot{\multicolumn{1}{R{45}{1em}}}% no optional argument here, please!
+
+
+
+\newcommand{\submiterInstitute}{Autonomous Vehicle Simulation (AVS) Laboratory,\\ University of Colorado}
+
+
+\newcommand{\ModuleName}{Corruptions}
+\newcommand{\subject}{Basilisk Corruption Modeling}
+\newcommand{\status}{Draft}
+\newcommand{\preparer}{S. Carnahan}
+\newcommand{\summary}{This documents the way that corruptions are currently applied in Basilisk and makes suggestions for changes.}
+
+\begin{document}
+
+\makeCover
+
+%
+%	enter the revision documentation here
+%	to add more lines, copy the table entry and the \hline, and paste after the current entry.
+%
+\pagestyle{empty}
+{\renewcommand{\arraystretch}{2}
+	\noindent
+	\begin{longtable}{|p{0.5in}|p{3.5in}|p{1.07in}|p{0.9in}|}
+		\hline
+		{\bfseries Rev} & {\bfseries Change Description} & {\bfseries By}& {\bfseries Date} \\
+		\hline
+		1.0 & First draft & S. Carnahan & 20171018 \\
+		\hline
+
+	\end{longtable}
+}
+
+\newpage
+\setcounter{page}{1}
+\pagestyle{fancy}
+
+\tableofcontents %Autogenerate the table of contents
+~\\ \hrule ~\\ %Makes the line under table of contents
+
+To facilitate adequate and efficient error modeling in Basilisk, this document will discuss which ``corruptions" need to be implemented. Then, for each module which needs corruptions it will discuss the current methods as well as the recommend changes and updates.
+
+\section{Desired Corruptions}
+Having not received FMEA documentation from LASP at this point, we have agreed that the following corruptions will be useful:
+\begin{enumerate}
+	\item bias
+	\item random walk
+	\item stuck sensor (on, off, at present value, at set value, max, min)
+	\item noise
+	\item square wave
+	\item max/min saturation
+	\item triangle/ramp
+	\item discretization
+\end{enumerate}
+My current understanding of these corruptions tells me they could be grouped like this:
+\begin{enumerate}
+	\item Error
+	\begin{enumerate}
+		\item bias
+		\item white noise
+		\item brown noise
+	\end{enumerate}
+	\item Stuck sensor
+	\begin{enumerate}
+		\item on/off
+		\item at present value
+		\item at set value
+		\item at max/min
+	\end{enumerate}
+		\item Saturation
+		\begin{enumerate}
+			\item Max
+			\item Min
+		\end{enumerate} 
+	\item Discretization
+		\begin{enumerate}
+			\item Max/min only = 2 bit
+			\item ramp/triangle = 3 bit
+		\end{enumerate}
+\end{enumerate}
+
+\section{Sensor Discussion}
+The IMU has most of the desired corruptions and I am familiar with it, so I will start with the IMU.
+\subsection{Error}
+The IMU has all three types of error from above. The IMU runs the code below when UpdateState() is called:\\\\
+\verb|/* Compute true data */|\\
+\verb|computePlatformDR();|\\
+\verb|computePlatformDV(CurrentSimNanos);|\\
+\verb|/* Compute sensed data */|\\
+\verb|computeSensorErrors();|\\
+\verb|applySensorErrors(CurrentSimNanos);|\\
+\verb|applySensorDiscretization(CurrentSimNanos);|\\
+\verb|applySensorSaturation(CurrentSimNanos);|\\
+\verb|/* Output sensed data */|\\
+\verb|writeOutputMessages(CurrentSimNanos);|\\\\
+
+\subsubsection{Bias}
+Bias is input to the IMU by the python code:\\\\
+\verb|ImuSensor.senRotBias = [xRotBias, yRotBias, zRotBias]|\\
+\verb|ImuSensor.senTransBias = [xBias, yBias, zBias]|\\\\
+where the values in the bias lists are doubles and the names don't matter.
+The c++ code initializes these as \\\\
+\verb|double senRotBias[3]; |\\
+\verb|double senTransBias[3]; |\\\\
+The bias values are unaffected by \verb|computeSensorErrors()|. When  \verb|applySensorErrors()| is called, the bias values are added per-axis to the errors computed in \verb|computeSensorErrors()|. Then those values are added to the \verb|trueValues| to get \verb|sensedValues |. This is done no matter what, so bias is just turned off by having 0 values for bias.
+
+\subsubsection{Noise}
+Noise inputs are given to the IMU by the python code:\\\\
+\verb|ImuSensor.PMatrixAccel = sim_model.DoubleVector(PMatrixAccel)|\\
+\verb|ImuSensor.walkBoundsAccel = sim_model.DoubleVector(errorBoundsAccel)|\\
+\verb|ImuSensor.PMatrixGyro = sim_model.DoubleVector(PMatrixGyro)|\\
+\verb|ImuSensor.walkBoundsGyro = sim_model.DoubleVector(errorBoundsGyro)|\\\\
+where the input matrices and bounds are calculated in python as:\\\\
+\verb|PMatrixGyro = [0.0] * 3 * 3|\\
+\verb|PMatrixGyro[0*3+0] = PMatrixGyro[1*3+1] = PMatrixGyro[2*3+2] = senRotNoiseStd|\\
+\verb|PMatrixAccel = [0.0] * 3 * 3|\\
+\verb|PMatrixAccel[0*3+0] = PMatrixAccel[1*3+1] = PMatrixAccel[2*3+2] = senTransNoiseStd|\\
+\verb|self.PMatrixAccel = sim_model.DoubleVector(PMatrixAccel)|\\
+\verb|self.walkBoundsAccel = sim_model.DoubleVector(errorBoundsAccel)|\\
+\verb|self.PMatrixGyro = sim_model.DoubleVector(PMatrixGyro)|\\
+\verb|self.walkBoundsGyro = sim_model.DoubleVector(errorBoundsGyro)|\\\\
+where \verb|senRotNoiseStd| and \verb|senTransNoiseStd| are input by the user as $\bm{1.5 \times}$ the desired standard deviation as scalar floats. The error bounds are input by the user as 3x1 lists of floats.
+
+The values sent to the IMU are initialized in c++ as:\\\\
+\verb|std::vector<double> PMatrixAccel;   //!< [-] Covariance matrix used to perturb state|\\
+\verb|std::vector<double> AMatrixAccel;   //!< [-] AMatrix that we use for error propagation|\\
+\verb|std::vector<double> walkBoundsAccel;//!< [-] "3-sigma" errors to permit for states|\\
+\verb|std::vector<double> navErrorsAccel; //!< [-] Current navigation errors applied to truth|\\
+\verb|std::vector<double> PMatrixGyro;    //!< [-] Covariance matrix used to perturb state|\\
+\verb|std::vector<double> AMatrixGyro;    //!< [-] AMatrix that we use for error propagation|\\
+\verb|std::vector<double> walkBoundsGyro; //!< [-] "3-sigma" errors to permit for states|\\
+\verb|std::vector<double> navErrorsGyro;  //!< [-] Current navigation errors applied to truth|\\\\
+\verb|computeSensorErrors()| contains this code:\\\\
+\verb|this->errorModelAccel.setPropMatrix(this->AMatrixAccel);|\\
+\verb|this->errorModelAccel.computeNextState();|\\
+\verb|this->navErrorsAccel = this->errorModelAccel.getCurrentState();|\\
+\verb|this->errorModelGyro.setPropMatrix(this->AMatrixGyro);|\\
+\verb|this->errorModelGyro.computeNextState();|\\
+\verb|this->navErrorsGyro = this->errorModelGyro.getCurrentState();|\\\\
+\verb|setPropMatrix()| literally just sets:\\\\
+\verb|propMatrix = prop|\\\\
+where both values are a double vector, prop is AMatrixAccel, and AMatrixAccel is just identity.
+
+
+The Gauss-Markov model takes over when \verb|computeNextState()| is called. This method iterates through the state vector given and calculates a random noise for each state. It also checks if a value greater than 0 was given as walk-bounds. If not, it doesn't do anything with the error given. If there is a bound, it applies an exponential correction to values that are too close to the edge. It states here :\\\\
+\verb|/*! - Ideally we should find the statistical likelihood of violating a bound and use that.|\\
+\verb|However, that would require an error function, for now (PDR), just use an exponential |\\
+\verb|to pull states down that are getting "close" to the bound.*/|\\\\
+After the random numbers are generated and modified, the noise matrix (deviations) is multiplied by the random numbers vector to get noise along each axis. The weighted noise is then added to the current state of the GM model (adding the noise to the previous noise).\\\\
+After noise is calculated, bias is added to the noise \textit{within} the IMU model.\\\\
+Then, these values are added to the truth values (element-wise) and stored as sensedValues. The noise added to acceleration and omega is multiplied by dt to get DV and PRV noise which is then added to those values as well.\\\\
+Things to note about the Gauss Markov model:
+\begin{enumerate}
+	\item I see how random walk is bounded, but not how it is created in the first place. is it the additive noise part? how is plain white noise made, then?
+	\item std deviations can be given per state
+	\item walk bounds can be given per state, but are assumed to be the same $\pm$
+	\item the random number generator is reseeded between \verb|computeNextState()| calls, but not between states.
+	\item the walk bounds are limited exponentially, rather than using an error model?
+	\item GM does not use Eigen. (neither does the IMU)
+	\item GM requires the user to do significant work in python to generate the inputs. Can simpler inputs be given and GM or the sensor model does more work to generate noise matrices, etc?
+	\item the std deviation value input is actually 1.5 the output std deviation.
+	\item errors are computed with \verb|computeNextState()| but must be retrieved with \verb|getCurrentState()|
+\end{enumerate}
+\subsubsection{Discretization}
+After error application, sensedValues linear acceleration and angular rate are discretized. This is based on the least significant bit (LSB) input.\\\\
+\verb|ImuSensor.gyroLSB = gyroLSBIn|\\
+\verb|ImuSensor.accelLSB = accelLSBIn|\\\\
+ Essentially, the sensed value is rounded down in magnitude to the nearest multiple of a least significant bit. The difference from before and after discretization is integrated over the time step and added/subtracted with the DeltaV or step PRV value to simulate the integration error due to discretization.\\\\
+Things to note about discretization:
+\begin{enumerate}
+	\item This would be difficult, but not impossible, to generalize because the integration of the discretization error is not straightforward for the general case.
+	\item The DeltaV value is not necessarily a multiple of the least significant bit.
+	\item There is not bit-limit on the data. should we have a bit limit and should does a negative sign require a bit? By bit-limit I mean the output data is 2-bit or 4-bit and scaled to fit somehow. A lot of GPS receivers are 1 bit or 2 bit. Doing this turns the data into square waves, like Mar mentioned. That makes square waves just a special case of discretization.
+	\item Discretization is all internal to the IMU. There is no model that can be reused for other sensors right now.
+	\item if discretization is used for square/triangle waves, how are the two of those distinguished logically?
+\end{enumerate}
+\subsubsection{Saturation}
+Finally, the sensedValues are saturated. This is your basic max/min situation for each state (along each axis for the IMU). Again, the error due to saturation of acceleration and omega is integrated to get error due to saturation for DV and PRV.\\
+Inputs are given by:\\\\
+\verb|ImuSensor.senTransMax = senTransMaxIn|\\
+\verb|ImuSensor.senRotMax = senRotMaxIn|\\\\
+Notes on saturation:
+\begin{enumerate}
+	\item  saturation cannot be set separately for each state (axis). it is set separately for rotational and linear states. Saturation values are considered the same $\pm$.
+	\item this would not be easily generalizable because the integration of the error is not straightforward. it would be straightforward to generalize the direct discretization parts.
+	\item saturated values are not forced to be discretized values. This is left to the user. since the discretization is a floor, does it make sense to just reverse the order? Should discretization be a floor or a round?
+	\item if saturated values were given with a max and a min rather than one $\pm$ value, those values could be set equal to some desired value, giving a "stuck" behavior. alternatively, saturation could be a stuck behavior that is activated outside of certain bounds. Does this work with the way that the errors are integrated for DV and PRV?
+\end{enumerate}
+
+\subsection{Recommendations}
+\subsubsection{Noise}
+\begin{enumerate}
+	\item Make GM model use Eigen
+	\item make a unit test for GM
+	\item Update the random walk bounds per the comment to use an error model.
+	\item Make an overall noise model that combines bias, white noise, and brown noise and gives a single value back to to whoever asks for it in one line. Make options for the types of noise that this outputs, with Gaussian being one type.
+	\item Bring noise matrix generation into noise method only asking the user for standard deviations and type of noise
+	\item make it so that the given standard deviation doesn't have to be scaled by 1.5.
+	\item this could all be set from python by user using syntax like:\\
+	\verb|IMUsensor.noise.type = "normal"|\\
+	\verb|IMUsensor.noise.std = [1.5,1.1, 1.3]|\\
+	\verb|IMUsensor.noise.bias = [1., 2., 3.]|\\
+	\subitem for things like the imu where there are different states (accel, DV, PRV, etc.) should the code be re-written to make these all part of one state vector? Should it work like IMUsensor.accel.noise.bias? this means that a different instance of the noise module would be used for each separate state, while states could have multiple "sub-states" (like coordinate axes).
+	\item there should be a toggle for noise on/off:\\
+	\verb|IMUsensor.noise.on = 0|\\
+	\item this noise behavior could then be standardized across sensors like \verb|CSS.noise.on = 1| by use of a standard noise utility.
+\end{enumerate}
+\subsubsection{Discretization}
+\begin{enumerate}
+	\item give an option to input number of bits
+	\item given an option for floor, ceiling, and round
+	\item how to deal with discretization of integrated values?
+	\item run discretization on saturation values in selfInit() to ensure saturated output is a proper discrete value
+	\item example:\\
+	\verb|IMUsensor.linear.discrete.LSB = 0.1| Currenty, LSB inputs are the float value that can be represented by a bit. Is this the best/good enough way to enter the value?\\\\
+	\verb|IMUsensor.angular.discrete.numBits = 4| Here, angular and linear are different instances of discrete that the programmer makes for the linear and angular states.
+	\item if number of bits are given and saturation is given, the width of a bit can be determined to discretize values across the full range of possible outputs. This can be taken care of in selfInit()?
+	\item integrating discretization errors remains in the realm of each sensor model.
+	\item make a switch: \verb|IMUsensor.linear.discrete.on = 1|
+\end{enumerate}
+\subsubsection{Saturation}
+\begin{enumerate}
+	\item make saturation specific to each state (i.e. each axis for the imu)
+	\item make both a max and a min value for each state: \\
+	\verb|IMUsensor.linear.sat.max = [1,1,1]|\\
+	\verb|IMUsensor.linear.sat.min = [-1,-1,-0.9]|\\
+	\item make a helper function to go with saturation to simulates stuck values when asked for it. i.e., the helper function adjusts the saturation limits as necessary.
+	\item provide an on/off switch.
+\end{enumerate}
+\subsubsection{General for IMU}
+\begin{enumerate}
+	\item convert to Eigen
+	\item saturation checks the instantaneous value. It could be updated to check the average value over the past time step as well.
+	\item make corruption groups (.linear and .angular)
+	\item attach .noise, .discrete, and .sat to the corruption groups.
+\end{enumerate}
+
+I am not sure of the "best practice" for building these types of things. Please provide whatever critiques you see fit. 
+
+
+
+
+
+%\bibliography{bibliography.bib} %This includes references used and mentioned.
+
+\end{document}
