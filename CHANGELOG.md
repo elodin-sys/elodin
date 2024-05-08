@@ -1,25 +1,36 @@
 # Changelog
 
 ## [unreleased]
-- Add visualization of the current tick in the graph views of the editor 
-- Add `TotalEdge`, an edge type that connects every entity to every other entity.
 - **(breaking)** Split `el.Pbr` into `el.Mesh`, `el.Material`, `el.Shape`, and `el.Glb`.
   - Use the `el.shape` and `el.glb` helpers instead
-  ```python
-  # before:
-  w.spawn(el.Body(pbr = w.insert_asset( el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0)))))
-  w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/earth.glb"))))
-  # after
-  w.spawn([
-    el.Body(),
-    w.shape(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
-  ])
-  w.spawn([
-    el.Body(),
-    w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb")
-  ])
-
-  ```
+    ```python
+    # before:
+    w.spawn(el.Body(pbr = w.insert_asset( el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0)))))
+    w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/earth.glb"))))
+    # after
+    w.spawn([
+      el.Body(),
+      w.shape(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0))
+    ])
+    w.spawn([
+      el.Body(),
+      w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb")
+    ])
+    ```
+- If a `Component` base class provides `ComponentType` information via `__metadata__`, then it can be omitted from the `Component(...)` annotation as it can be inferred from the base class instead.
+  - `Quaternion`, `Handle`, `Edge`, and all spatial classes (`SpatialTransform`, `SpatialForce`, `SpatialMotion`, `SpatialInertia`) have been updated to provide `ComponentType` information directly. So, components that annotate these classes can now be defined more simply:
+    ```python
+    # before:
+    ControlForce = Annotated[
+      el.SpatialForce, el.Component("control_force", el.ComponentType.SpatialMotionF64)
+    ]
+    # after:
+    ControlForce = Annotated[
+      el.SpatialForce, el.Component("control_force")
+    ]
+    ```
+- Add visualization of the current tick in the graph views of the editor.
+- Add `TotalEdge`, an edge type that connects every entity to every other entity.
 
 - **(breaking)** Remove `SpatialInertia.from_mass()`.
   - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.

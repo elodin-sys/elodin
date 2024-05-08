@@ -1,6 +1,6 @@
 use crate::*;
 
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use conduit::ComponentId;
 use nox_ecs::join_query;
@@ -28,7 +28,7 @@ impl QueryInner {
             .iter()
             .map(|id| {
                 builder.builder.world.column_by_id(*id).map(|c| Metadata {
-                    inner: Arc::new(c.column.metadata.clone()),
+                    inner: c.column.metadata.clone(),
                 })
             })
             .collect::<Option<Vec<_>>>()
