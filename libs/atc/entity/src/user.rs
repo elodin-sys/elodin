@@ -19,7 +19,7 @@ pub struct Model {
     pub avatar: String,
     pub license_type: LicenseType,
     pub monte_carlo_active: bool,
-    pub onboarding_data: Json,
+    pub onboarding_data: Option<Json>,
     pub billing_account_id: Option<Uuid>,
 }
 
