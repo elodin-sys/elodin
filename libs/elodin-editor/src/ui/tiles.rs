@@ -11,7 +11,7 @@ use bevy_egui::{
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::{
-    bevy::{EntityMap, TimeStep},
+    bevy::{EntityMap, Tick, TimeStep},
     query::MetadataStore,
     well_known::{Panel, Viewport},
     ComponentId, EntityId, GraphId,
@@ -35,9 +35,10 @@ use crate::{
     CollectedGraphData,
 };
 
-struct TabIcons {
+struct TileIcons {
     pub add: egui::TextureId,
     pub close: egui::TextureId,
+    pub scrub: egui::TextureId,
 }
 
 #[derive(Resource)]
@@ -110,12 +111,14 @@ impl Pane {
         &mut self,
         ui: &mut Ui,
         time_step: std::time::Duration,
+        current_tick: u64,
         collected_graph_data: &CollectedGraphData,
         graphs_state: &mut GraphsState,
         tagged_ranges: &TaggedRanges,
         lines: &mut Assets<Line>,
         lines_query: &Query<&Handle<Line>>,
         commands: &mut Commands,
+        icons: &TileIcons,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -138,6 +141,7 @@ impl Pane {
                     .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
                     .steps(7, 4)
                     .time_step(time_step)
+                    .current_tick(current_tick)
                     .calculate_lines(
                         ui,
                         collected_graph_data,
@@ -146,7 +150,14 @@ impl Pane {
                         lines,
                         commands,
                     )
-                    .render(ui, lines, lines_query, collected_graph_data, graph_state);
+                    .render(
+                        ui,
+                        lines,
+                        lines_query,
+                        collected_graph_data,
+                        graph_state,
+                        &icons.scrub,
+                    );
 
                 egui_tiles::UiResponse::None
             }
@@ -227,7 +238,7 @@ impl Default for TileState {
 }
 
 struct TreeBehavior<'a, 'w, 's> {
-    icons: TabIcons,
+    icons: TileIcons,
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
     graphs_state: &'a mut GraphsState,
@@ -236,6 +247,7 @@ struct TreeBehavior<'a, 'w, 's> {
     lines: &'a mut Assets<Line>,
     line_query: &'a Query<'w, 's, &'static Handle<Line>>,
     time_step: std::time::Duration,
+    current_tick: u64,
     commands: &'a mut Commands<'w, 's>,
 }
 
@@ -266,12 +278,14 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
         pane.ui(
             ui,
             self.time_step,
+            self.current_tick,
             self.collected_graph_data,
             self.graphs_state,
             self.tagged_ranges,
             self.lines,
             self.line_query,
             self.commands,
+            &self.icons,
         )
     }
 
@@ -495,6 +509,7 @@ pub struct TileLayout<'w, 's> {
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     collected_graph_data: Res<'w, CollectedGraphData>,
     time_step: Res<'w, TimeStep>,
+    tick: Res<'w, Tick>,
     lines: ResMut<'w, Assets<Line>>,
     line_query: Query<'w, 's, &'static Handle<Line>>,
 }
@@ -525,13 +540,15 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
             mut render_layer_alloc,
             collected_graph_data,
             time_step,
+            tick,
             mut lines,
             line_query,
         } = state_mut;
 
-        let icons = TabIcons {
+        let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
             close: contexts.add_image(images.icon_close.clone_weak()),
+            scrub: contexts.add_image(images.icon_scrub.clone_weak()),
         };
 
         egui::CentralPanel::default()
@@ -548,6 +565,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     tagged_ranges: tagged_ranges.as_ref(),
                     collected_graph_data: collected_graph_data.as_ref(),
                     time_step: time_step.0,
+                    current_tick: tick.0,
                     lines: lines.as_mut(),
                     commands: &mut commands,
                     line_query: &line_query,

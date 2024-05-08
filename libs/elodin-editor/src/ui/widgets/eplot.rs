@@ -107,6 +107,7 @@ pub struct EPlotDataEntity {
 #[derive(Debug)]
 pub struct EPlot {
     tick_range: Range<u64>,
+    current_tick: u64,
     time_step: std::time::Duration,
     bounds: EPlotBounds,
     rect: egui::Rect,
@@ -171,6 +172,7 @@ impl EPlot {
     pub fn new() -> Self {
         Self {
             tick_range: Range::default(),
+            current_tick: 0,
             time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
             bounds: EPlotBounds::default(),
             rect: egui::Rect::ZERO,
@@ -334,6 +336,11 @@ impl EPlot {
 
     pub fn time_step(mut self, step: std::time::Duration) -> Self {
         self.time_step = step;
+        self
+    }
+
+    pub fn current_tick(mut self, tick: u64) -> Self {
+        self.current_tick = tick;
         self
     }
 
@@ -665,6 +672,7 @@ impl EPlot {
         line_handles: &Query<&Handle<Line>>,
         collected_graph_data: &CollectedGraphData,
         graph_state: &GraphState,
+        scrub_icon: &egui::TextureId,
     ) {
         let _response = ui.allocate_rect(self.rect, egui::Sense::click_and_drag());
         let pointer_pos = ui.input(|i| i.pointer.latest_pos());
@@ -710,9 +718,7 @@ impl EPlot {
                 let pointer_plot_point = EPlotPoint::from_plot_pos2(self, pointer_pos);
 
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
-            }
 
-            if self.inner_rect.contains(pointer_pos) {
                 let x_offset = pointer_pos.x - self.inner_rect.min.x;
                 let x_range = self.bounds.max_x - self.bounds.min_x;
                 let x_pos = x_offset * (x_range as f32 / self.inner_rect.width())
@@ -747,18 +753,55 @@ impl EPlot {
                         egui::Stroke::new(2.0, *color),
                     );
                 }
+            }
+        }
 
-                if self.show_modal && ui.ui_contains_pointer() {
-                    self.draw_modal(
-                        ui,
-                        lines,
-                        line_handles,
-                        graph_state,
-                        collected_graph_data,
-                        pointer_pos,
-                        x_tick,
-                    );
-                }
+        // Draw a line for the current_tick
+        if self.tick_range.contains(&self.current_tick) {
+            let line_width = 1.0;
+            let aspect_ratio = 12.0 / 30.0;
+
+            let scrub_height = 12.0 * line_width;
+            let scrub_width = scrub_height * aspect_ratio;
+
+            let tick_pos =
+                EPlotPoint::from_plot_point(self, self.current_tick as f64, self.bounds.min_y).pos2;
+            ui.painter().vline(
+                tick_pos.x,
+                self.rect.min.y..=border_rect.max.y,
+                egui::Stroke::new(line_width, colors::WHITE),
+            );
+
+            let scrub_center = egui::pos2(tick_pos.x, self.rect.min.y + (scrub_height * 0.5));
+            let scrub_rect =
+                egui::Rect::from_center_size(scrub_center, egui::vec2(scrub_width, scrub_height));
+
+            ui.painter().image(
+                *scrub_icon,
+                scrub_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                colors::WHITE,
+            );
+        }
+
+        if let Some(pointer_pos) = pointer_pos {
+            if self.inner_rect.contains(pointer_pos) && self.show_modal && ui.ui_contains_pointer()
+            {
+                let x_offset = pointer_pos.x - self.inner_rect.min.x;
+                let x_range = self.bounds.max_x - self.bounds.min_x;
+                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width())
+                    + self.bounds.min_x as f32;
+                let x_tick = x_pos as usize;
+
+                self.draw_modal(
+                    ui,
+                    lines,
+                    line_handles,
+                    graph_state,
+                    collected_graph_data,
+                    pointer_pos,
+                    x_tick,
+                );
             }
         }
 
