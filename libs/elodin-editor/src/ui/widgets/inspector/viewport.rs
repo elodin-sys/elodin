@@ -151,6 +151,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut track_rotation = cam.no_propagate_rot.is_none();
+                            theme::configure_input_with_border(ui.style_mut());
                             ui.checkbox(&mut track_rotation, "");
 
                             if track_rotation != cam.no_propagate_rot.is_none() {
@@ -202,6 +203,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        theme::configure_input_with_border(ui.style_mut());
                         ui.checkbox(&mut hdr_enabled.0, "");
                     });
                 });
@@ -219,6 +221,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut visibility = grid_visibility.get_mut(grid).unwrap();
                             let mut visible = *visibility == Visibility::Visible;
+                            theme::configure_input_with_border(ui.style_mut());
                             ui.checkbox(&mut visible, "");
                             if visible {
                                 *visibility = Visibility::Visible;

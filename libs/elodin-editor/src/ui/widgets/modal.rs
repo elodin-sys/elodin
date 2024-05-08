@@ -177,7 +177,7 @@ impl WidgetSystem for ModalUpdateRangeName<'_> {
                 });
 
             ui.scope(|ui| {
-                theme::configure_text_edit(ui.style_mut());
+                theme::configure_input_with_border(ui.style_mut());
                 ui.add(egui::TextEdit::singleline(m_range_label).margin(egui::vec2(16.0, 16.0)));
             })
         });
