@@ -1,13 +1,11 @@
 use crate::*;
 
-use std::{collections::HashMap, ops::Deref, sync::Arc};
+use std::{collections::HashMap, ops::Deref};
 
 use nox_ecs::conduit;
 use nox_ecs::conduit::TagValue;
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::types::{PyList, PySequence};
-
-use crate::Metadata;
+use pyo3::types::PyList;
 
 #[derive(Clone)]
 #[pyclass]
@@ -15,31 +13,20 @@ pub struct Component {
     #[pyo3(set)]
     pub name: String,
     #[pyo3(get, set)]
-    pub ty: ComponentType,
+    pub ty: Option<ComponentType>,
     #[pyo3(get, set)]
     pub asset: bool,
     pub metadata: HashMap<String, TagValue>,
 }
 
-impl From<Component> for conduit::Metadata {
-    fn from(c: Component) -> Self {
-        conduit::Metadata {
-            name: c.name,
-            component_type: c.ty.into(),
-            asset: c.asset,
-            tags: c.metadata,
-        }
-    }
-}
-
 #[pymethods]
 impl Component {
     #[new]
-    #[pyo3(signature = (name, ty, asset = false, metadata = HashMap::default()))]
+    #[pyo3(signature = (name, ty = None, asset = false, metadata = HashMap::default()))]
     pub fn new(
         py: Python<'_>,
         name: String,
-        ty: ComponentType,
+        ty: Option<ComponentType>,
         asset: bool,
         metadata: HashMap<String, PyObject>,
     ) -> Result<Self, Error> {
@@ -74,25 +61,13 @@ impl Component {
 
     #[staticmethod]
     pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
-        let metadata_attr = component.getattr(py, "__metadata__")?;
-        let metadata = metadata_attr
-            .downcast::<PySequence>(py)
-            .map_err(PyErr::from)?;
-        let component = metadata.get_item(0)?.extract::<Self>()?;
-        Ok(component.name)
-    }
-
-    pub fn to_metadata(&self) -> Metadata {
-        let inner = Arc::new(self.clone().into());
-        Metadata { inner }
+        Metadata::of(py, component).map(|metadata| metadata.inner.name)
     }
 
     #[staticmethod]
     pub fn index(py: Python<'_>, component: PyObject) -> Result<ShapeIndexer, Error> {
-        let metadata = component.getattr(py, "__metadata__")?;
-        let metadata = metadata.downcast::<PySequence>(py).map_err(PyErr::from)?;
-        let component = metadata.get_item(0)?.extract::<Self>()?;
-        let ty: conduit::ComponentType = component.ty.into();
+        let metadata = Metadata::of(py, component)?.inner;
+        let ty = metadata.component_type;
         let strides: Vec<usize> = ty
             .shape
             .iter()
@@ -104,12 +79,8 @@ impl Component {
             })
             .collect();
         let strides = strides.into_iter().rev().collect();
-        Ok(ShapeIndexer::new(
-            component.name,
-            ty.shape.into_iter().map(|x| x as usize).collect(),
-            vec![],
-            strides,
-        ))
+        let shape = ty.shape.iter().map(|x| *x as usize).collect();
+        Ok(ShapeIndexer::new(metadata.name, shape, vec![], strides))
     }
 }
 
@@ -203,6 +174,18 @@ impl ComponentType {
     }
 }
 
+impl From<conduit::ComponentType> for ComponentType {
+    fn from(val: conduit::ComponentType) -> Self {
+        Python::with_gil(|py| {
+            let shape = PyArray1::from_vec(py, val.shape.to_vec()).to_owned();
+            ComponentType {
+                ty: val.primitive_ty.into(),
+                shape,
+            }
+        })
+    }
+}
+
 impl From<ComponentType> for conduit::ComponentType {
     fn from(val: ComponentType) -> Self {
         Python::with_gil(|py| {
@@ -230,6 +213,24 @@ pub enum PrimitiveType {
     I16,
     I8,
     Bool,
+}
+
+impl From<conduit::PrimitiveTy> for PrimitiveType {
+    fn from(val: conduit::PrimitiveTy) -> Self {
+        match val {
+            conduit::PrimitiveTy::F64 => PrimitiveType::F64,
+            conduit::PrimitiveTy::F32 => PrimitiveType::F32,
+            conduit::PrimitiveTy::U64 => PrimitiveType::U64,
+            conduit::PrimitiveTy::U32 => PrimitiveType::U32,
+            conduit::PrimitiveTy::U16 => PrimitiveType::U16,
+            conduit::PrimitiveTy::U8 => PrimitiveType::U8,
+            conduit::PrimitiveTy::I64 => PrimitiveType::I64,
+            conduit::PrimitiveTy::I32 => PrimitiveType::I32,
+            conduit::PrimitiveTy::I16 => PrimitiveType::I16,
+            conduit::PrimitiveTy::I8 => PrimitiveType::I8,
+            conduit::PrimitiveTy::Bool => PrimitiveType::Bool,
+        }
+    }
 }
 
 impl From<PrimitiveType> for conduit::PrimitiveTy {

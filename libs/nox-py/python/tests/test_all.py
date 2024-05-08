@@ -74,7 +74,7 @@ def test_six_dof():
 
 def test_graph():
     X = Annotated[jax.Array, Component("x", ComponentType.F64)]
-    E = Annotated[Edge, Component("test_edge", ComponentType.Edge)]
+    E = Annotated[Edge, Component("test_edge")]
 
     @dataclass
     class Test(Archetype):

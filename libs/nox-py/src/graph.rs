@@ -4,9 +4,9 @@ use conduit::ComponentId;
 use nox_ecs::{
     graph::{exprs_from_edges_queries, GraphQuery, TotalEdge},
     nox::IntoOp,
-    SystemParam,
+    ComponentExt, SystemParam,
 };
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyList};
 
 #[pyclass]
 #[derive(Clone)]
@@ -147,9 +147,16 @@ impl Edge {
     //     todo!()
     // }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [2]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox_ecs::graph::Edge::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 
     #[staticmethod]
