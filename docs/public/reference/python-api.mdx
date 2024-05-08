@@ -3,6 +3,99 @@ title: Python API
 icon: python
 ---
 
+## Systems
+
+Systems are the building blocks of simulation; they are functions that operate on a set of input components and produce a set of output components. Elodin provides decorators that allow for systems to be easily defined from functions.
+
+### `@elodin.system`
+
+<Note>
+This is a lower-level primitive; for many cases `@elodin.map` – a wrapper around `@elodin.system` – is easier to use.
+</Note>
+
+This is a lower-level API for defining a system. A function decorated with `@elodin.system` accepts special parameter types (such as [elodin.Query] and [elodin.GraphQuery]) that specify what data the system needs access to. It returns an [elodin.Query] containing one or more [components]. Some examples of `@elodin.system` are:
+
+```python
+import elodin as el
+
+@el.system
+def gravity(
+    graph: el.GraphQuery[GravityEdge],
+    query: el.Query[el.WorldPos, el.Inertia],
+) -> el.Query[el.Force]: ...
+
+@el.system
+def apply_wind(
+    w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]
+) -> el.Query[el.Force]: ...
+```
+
+### `@elodin.map`
+
+<Note>
+Graph queries cannot be used with `@elodin.map`. Use `@elodin.system` instead.
+</Note>
+
+This is a higher-level API for defining a system that reduces the boilerplate of `@elodin.system` by unpacking the input and output queries into individual components, and wrapping the body of the function in a `query.map(ret_ty, ...)` call. It is useful for systems with simple data flow patterns. Some examples of `@elodin.map` are:
+
+```python
+import elodin as el
+
+@el.map
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force: ...
+
+@el.map
+def gyro_omega(vel: el.WorldVel) -> GyroOmega: ...
+```
+
+The following systems are equivalent as the `@elodin.map` definition effectively desugars to the `@elodin.system` one:
+
+```python
+import elodin as el
+
+@el.map
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0]))
+
+@el.system
+def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
+    return query.map(
+        el.Force,
+        lambda f, inertia: f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+    )
+```
+
+### `elodin.Query`
+
+`Query` is the primary mechanism for accessing data in Elodin. It is a view into the world state that is filtered by the components specified in the query. Only entities that have been spawned with all of the query's components will be selected for processing. For example, the query `Query[WorldPos, Inertia]` would only select entities that have both a `WorldPos` and an `Inertia` component (typically via the `Body` [archetype](#archetypes)).
+
+- `map(ret_ty, map_fn)` -> [elodin.Query]
+
+    Apply a function `map_fn` to the query's components and return a new query with the specified `ret_ty` return type. `map_fn` should be a function that takes the query's components as arguments and returns a single value of type `ret_ty`.
+
+    ```python
+    import elodin as el
+
+    @el.system
+    def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
+        return query.map(
+            el.Force,
+            lambda f, inertia: f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+        )
+    ```
+
+    In this example, `ret_ty` is `el.Force` and `map_fn` is a lambda function with the signature `(el.Force, el.Inertia) -> el.Force`.
+
+
+    To return multiple components as output, `ret_ty` must be a tuple:
+    ```python
+    import elodin as el
+
+    @el.system
+    def multi_out_sys(query: el.Query[A]) -> el.Query[C, D]:
+        return query.map(tuple[C, D], lambda a: ...)
+    ```
+
 ## Primitives
 
 ### _class_ `elodin.Quaternion`
@@ -147,6 +240,11 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 - `inertia_diag()` -> [jax.Array]
 
     Get the inertia tensor diagonal of the spatial inertia with shape (3,).
+
+[Components]: #components
+
+[elodin.Query]: #elodin-query
+[elodin.GraphQuery]: #elodin-graphquery
 
 [elodin.Quaternion]: #class-elodin-quaternion
 [elodin.SpatialTransform]: #class-elodin-spatialtransform
