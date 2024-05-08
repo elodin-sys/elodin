@@ -14,10 +14,11 @@ use crate::ui::{
     widgets::{
         button::ECheckboxButton,
         label::{buttons_label, label_with_button},
+        plot::GraphsState,
         timeline::tagged_range::TaggedRanges,
         WidgetSystem,
     },
-    EntityData, GraphsState, SettingModal, SettingModalState,
+    EntityData, SettingModal, SettingModalState,
 };
 
 use super::InspectorIcons;

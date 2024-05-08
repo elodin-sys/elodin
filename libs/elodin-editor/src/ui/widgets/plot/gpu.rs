@@ -54,9 +54,9 @@ pub enum PlotSystem {
     QueueLine,
 }
 
-pub struct EPlotGpuPlugin;
+pub struct PlotGpuPlugin;
 
-impl Plugin for EPlotGpuPlugin {
+impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<CachedSystemState>()
@@ -241,7 +241,7 @@ impl SpecializedRenderPipeline for LinePipeline {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            label: Some("EPlot Line Pipeline".into()),
+            label: Some("Plot Line Pipeline".into()),
             push_constant_ranges: vec![],
         }
     }

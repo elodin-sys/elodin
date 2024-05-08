@@ -21,8 +21,12 @@ use crate::{
         colors::{self, with_opacity},
         tiles,
         utils::{format_num, MarginSides},
-        widgets::{label, WidgetSystem},
-        EntityData, EntityPair, GraphState, GraphsState,
+        widgets::{
+            label,
+            plot::{GraphState, GraphsState},
+            WidgetSystem,
+        },
+        EntityData, EntityPair,
     },
 };
 

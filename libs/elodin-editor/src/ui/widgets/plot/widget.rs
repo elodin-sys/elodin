@@ -1,115 +1,37 @@
 use bevy::{
     asset::{Assets, Handle},
-    ecs::{
-        entity::Entity,
-        system::{Commands, Query},
-    },
+    ecs::system::{Commands, Query},
     math::{Rect, Vec2},
     render::camera::{OrthographicProjection, Projection, ScalingMode},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use conduit::{ComponentId, ComponentValue, EntityId};
+use conduit::{ComponentId, EntityId};
 use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
 use itertools::{Itertools, MinMaxResult};
 use std::{
-    collections::BTreeMap,
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
 
 use crate::{
+    ui::widgets::plot::CollectedGraphData,
     ui::{
         colors::{self, with_opacity, ColorExt},
         utils::{self, format_num},
-        GraphState,
+        widgets::{
+            plot::gpu::{Line, LineBundle, LineConfig, LineUniform},
+            plot::GraphState,
+            timeline::tagged_range::TaggedRange,
+        },
     },
-    CollectedGraphData,
 };
-
-use super::{
-    eplot_gpu::{self, Line, LineBundle, LineConfig},
-    timeline::tagged_range::TaggedRange,
-};
-
-#[derive(Debug, Clone)]
-pub struct EPlotDataLine {
-    pub label: String,
-    pub values: Handle<Line>,
-    pub line_entity: Option<Entity>,
-    pub min: f64,
-    pub max: f64,
-}
-
-#[derive(Clone, Debug)]
-pub struct EPlotDataComponent {
-    pub label: String,
-    pub element_names: String,
-    pub next_tick: u64,
-    pub lines: BTreeMap<usize, EPlotDataLine>,
-}
-
-impl EPlotDataComponent {
-    pub fn new(component_label: impl ToString, element_names: String) -> Self {
-        Self {
-            label: component_label.to_string(),
-            element_names,
-            next_tick: 0,
-            lines: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_values(
-        &mut self,
-        component_value: &ComponentValue,
-        assets: &mut Assets<Line>,
-        tick: u64,
-    ) {
-        if tick < self.next_tick {
-            return;
-        }
-        self.next_tick += 1;
-        let element_names = self
-            .element_names
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(Option::Some)
-            .chain(std::iter::repeat(None));
-        for (i, (new_value, name)) in component_value.iter().zip(element_names).enumerate() {
-            let new_value = new_value.as_f64();
-            let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
-            let line = self.lines.entry(i).or_insert_with(|| EPlotDataLine {
-                label,
-                values: assets.add(Line::default()),
-                min: new_value,
-                max: new_value,
-                line_entity: None,
-            });
-            let values = assets
-                .get_mut(line.values.clone())
-                .expect("missing line asset");
-            values.push(new_value);
-            if line.min > new_value {
-                line.min = new_value;
-            }
-            if line.max < new_value {
-                line.max = new_value;
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct EPlotDataEntity {
-    pub label: String,
-    pub components: BTreeMap<ComponentId, EPlotDataComponent>,
-}
 
 #[derive(Debug)]
-pub struct EPlot {
+pub struct Plot {
     tick_range: Range<u64>,
     current_tick: u64,
     time_step: std::time::Duration,
-    bounds: EPlotBounds,
+    bounds: PlotBounds,
     rect: egui::Rect,
     inner_rect: egui::Rect,
 
@@ -162,19 +84,19 @@ pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
     }
 }
 
-impl Default for EPlot {
+impl Default for Plot {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EPlot {
+impl Plot {
     pub fn new() -> Self {
         Self {
             tick_range: Range::default(),
             current_tick: 0,
             time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
-            bounds: EPlotBounds::default(),
+            bounds: PlotBounds::default(),
             rect: egui::Rect::ZERO,
             inner_rect: egui::Rect::ZERO,
 
@@ -245,7 +167,7 @@ impl EPlot {
             }
         }
 
-        self.bounds = EPlotBounds::from_lines(&self.tick_range, &minmax_lines);
+        self.bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
         let x_range = self.bounds.max_x - self.bounds.min_x;
         let y_range = self.bounds.max_y - self.bounds.min_y;
         commands
@@ -291,7 +213,7 @@ impl EPlot {
                                     let entity = commands
                                         .spawn(LineBundle {
                                             line: line.values.clone(),
-                                            uniform: eplot_gpu::LineUniform::new(
+                                            uniform: LineUniform::new(
                                                 graph_state.line_width,
                                                 color.into_bevy(),
                                             ),
@@ -318,7 +240,7 @@ impl EPlot {
                                     ));
                                 }
                                 (Some((entity, _)), true) => {
-                                    commands.entity(*entity).insert(eplot_gpu::LineUniform::new(
+                                    commands.entity(*entity).insert(LineUniform::new(
                                         graph_state.line_width,
                                         color.into_bevy(),
                                     ));
@@ -386,7 +308,7 @@ impl EPlot {
             .collect::<Vec<f64>>();
 
         for x_step in steps_x {
-            let x_position = EPlotPoint::from_plot_point(self, x_step, self.bounds.min_y).pos2;
+            let x_position = PlotPoint::from_plot_point(self, x_step, self.bounds.min_y).pos2;
 
             ui.painter().line_segment(
                 [
@@ -421,7 +343,7 @@ impl EPlot {
             .collect::<Vec<f64>>();
 
         for y_step in steps_y {
-            let y_position = EPlotPoint::from_plot_point(self, self.bounds.min_x, y_step).pos2;
+            let y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, y_step).pos2;
 
             ui.painter().line_segment(
                 [
@@ -450,7 +372,7 @@ impl EPlot {
     fn draw_y_axis_flag(
         &self,
         ui: &mut egui::Ui,
-        pointer_plot_point: EPlotPoint,
+        pointer_plot_point: PlotPoint,
         border_rect: egui::Rect,
         font_id: egui::FontId,
     ) {
@@ -715,7 +637,7 @@ impl EPlot {
 
         if let Some(pointer_pos) = pointer_pos {
             if self.inner_rect.contains(pointer_pos) {
-                let pointer_plot_point = EPlotPoint::from_plot_pos2(self, pointer_pos);
+                let pointer_plot_point = PlotPoint::from_plot_pos2(self, pointer_pos);
 
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
 
@@ -765,7 +687,7 @@ impl EPlot {
             let scrub_width = scrub_height * aspect_ratio;
 
             let tick_pos =
-                EPlotPoint::from_plot_point(self, self.current_tick as f64, self.bounds.min_y).pos2;
+                PlotPoint::from_plot_point(self, self.current_tick as f64, self.bounds.min_y).pos2;
             ui.painter().vline(
                 tick_pos.x,
                 self.rect.min.y..=border_rect.max.y,
@@ -814,14 +736,14 @@ impl EPlot {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct EPlotBounds {
+pub struct PlotBounds {
     min_x: f64,
     min_y: f64,
     max_x: f64,
     max_y: f64,
 }
 
-impl EPlotBounds {
+impl PlotBounds {
     pub fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Self {
         Self {
             min_x,
@@ -863,19 +785,19 @@ impl EPlotBounds {
 }
 
 #[derive(Debug, Clone)]
-pub struct EPlotPoint {
+pub struct PlotPoint {
     #[allow(dead_code)] // we might want to use the x values again
     x: f64,
     y: f64,
     pos2: egui::Pos2,
 }
 
-impl EPlotPoint {
+impl PlotPoint {
     pub fn new(x: f64, y: f64, pos2: egui::Pos2) -> Self {
         Self { x, y, pos2 }
     }
 
-    pub fn from_plot_pos2(plot: &EPlot, pos: egui::Pos2) -> Self {
+    pub fn from_plot_pos2(plot: &Plot, pos: egui::Pos2) -> Self {
         Self::new(
             egui::remap(
                 pos.x,
@@ -891,11 +813,11 @@ impl EPlotPoint {
         )
     }
 
-    pub fn from_plot_point(plot: &EPlot, x: f64, y: f64) -> Self {
+    pub fn from_plot_point(plot: &Plot, x: f64, y: f64) -> Self {
         Self::new(x, y, Self::pos2(plot, x, y))
     }
 
-    fn pos2(plot: &EPlot, x: f64, y: f64) -> egui::Pos2 {
+    fn pos2(plot: &Plot, x: f64, y: f64) -> egui::Pos2 {
         egui::pos2(
             egui::remap(
                 x as f32,
