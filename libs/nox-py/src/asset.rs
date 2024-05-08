@@ -65,4 +65,21 @@ impl Handle {
     fn from_array(_arr: PyObject) -> Self {
         todo!()
     }
+
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: conduit::Metadata {
+                name: "handle".to_string(),
+                component_type: conduit::ComponentType::u64(),
+                asset: true,
+                tags: Default::default(),
+            },
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
+    }
 }

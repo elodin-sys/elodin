@@ -114,9 +114,7 @@ YQY = Y @ Q @ Y.T
 P = Annotated[
     jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))
 ]
-AttEst = Annotated[
-    el.Quaternion, el.Component("att_est", el.ComponentType.Quaternion)
-]  # q_hat
+AttEst = Annotated[el.Quaternion, el.Component("att_est")]  # q_hat
 AngVelEst = Annotated[
     jax.Array, el.Component("ang_vel_est", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]  # omega_hat
@@ -233,7 +231,7 @@ class KalmanFilter(el.Archetype):
 
 
 # control system
-Goal = Annotated[el.Quaternion, el.Component("goal", el.ComponentType.Quaternion)]
+Goal = Annotated[el.Quaternion, el.Component("goal")]
 UserGoal = Annotated[
     jax.Array, el.Component("euler_input", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
@@ -242,13 +240,9 @@ RWAxis = Annotated[
     jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
 
-RWForce = Annotated[
-    el.SpatialForce, el.Component("rw_force", el.ComponentType.SpatialMotionF64)
-]
+RWForce = Annotated[el.SpatialForce, el.Component("rw_force")]
 
-ControlForce = Annotated[
-    el.SpatialForce, el.Component("control_force", el.ComponentType.SpatialMotionF64)
-]
+ControlForce = Annotated[el.SpatialForce, el.Component("control_force")]
 
 
 @dataclass
@@ -319,7 +313,7 @@ def control(
     )
 
 
-RWEdge = Annotated[el.Edge, el.Component("rw_edge", el.ComponentType.Edge)]
+RWEdge = Annotated[el.Edge, el.Component("rw_edge")]
 
 
 @el.system

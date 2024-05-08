@@ -1,9 +1,10 @@
 use std::ops::{Add, Mul};
 
 use nox_ecs::nox::{self, FromOp, IntoOp, Noxpr, Scalar, Vector};
+use nox_ecs::ComponentExt;
 use pyo3::{prelude::*, types::PyTuple};
 
-use crate::Error;
+use crate::{Component, Error, Metadata};
 
 #[pyclass]
 #[derive(Clone)]
@@ -82,9 +83,16 @@ impl SpatialTransform {
         Ok(self.inner.clone().into_op().to_jax()?)
     }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [7]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox::SpatialTransform::<f64>::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 
     fn __add__(&self, other: &SpatialTransform) -> Self {
@@ -156,9 +164,16 @@ impl SpatialMotion {
         Ok(self.inner.angular().into_op().to_jax()?)
     }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [6]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox::SpatialMotion::<f64>::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 
     fn __add__(&self, other: &SpatialMotion) -> Self {
@@ -232,9 +247,16 @@ impl SpatialForce {
         Ok(self.inner.torque().into_op().to_jax()?)
     }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [6]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox::SpatialForce::<f64>::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 
     fn __add__(&self, other: &SpatialForce) -> Self {
@@ -288,9 +310,16 @@ impl Quaternion {
         nox::Quaternion::from_op(Noxpr::jax(jax)).into()
     }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [4]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox::Quaternion::<f64>::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 
     #[staticmethod]
@@ -397,8 +426,15 @@ impl SpatialInertia {
         Ok(self.inner.clone().into_op().to_jax()?)
     }
 
-    #[getter]
-    fn shape(&self) -> PyObject {
-        Python::with_gil(|py| PyTuple::new(py, [7]).into())
+    #[classattr]
+    fn metadata() -> Metadata {
+        Metadata {
+            inner: nox::SpatialInertia::<f64>::metadata(),
+        }
+    }
+
+    #[classattr]
+    fn __metadata__() -> (Component,) {
+        (Self::metadata().into(),)
     }
 }

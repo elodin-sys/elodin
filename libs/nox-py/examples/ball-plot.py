@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 import numpy as np
 from jax.numpy import linalg as la
+from dataclasses import field
 
 TIME_STEP = 1.0 / 120.0
 G = 6.6743e-11
@@ -14,21 +15,26 @@ R = 6.378e6
 M = 5.972e24
 
 Wind = typing.Annotated[
-    el.SpatialMotion, el.Component("wind", el.ComponentType.SpatialMotionF64)
+    jax.Array,
+    el.Component(
+        "wind",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
 ]
 
 
 @el.dataclass
 class Globals(el.Archetype):
-    seed: el.Seed
-    wind: Wind = el.SpatialMotion.zero()
+    seed: el.Seed = field(default_factory=lambda: jnp.int64(0))
+    wind: Wind = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0]))
 
 
 @el.system
 def sample_wind(s: el.Query[el.Seed], q: el.Query[Wind]) -> el.Query[Wind]:
     return q.map(
         Wind,
-        lambda _w: el.Force.from_linear(random.normal(random.key(s[0]), shape=(3,))),
+        lambda _w: random.normal(random.key(s[0]), shape=(3,)),
     )
 
 
@@ -37,7 +43,7 @@ def apply_wind(
     w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]
 ) -> el.Query[el.Force]:
     def apply_wind_inner(f, v):
-        v_diff = w[0].linear() - v.linear()
+        v_diff = w[0] - v.linear()
         v_diff_dir = v_diff / la.norm(v_diff)
         return el.Force.from_linear(f.force() + 0.2 * 0.5 * v_diff**2 * v_diff_dir)
 
@@ -73,7 +79,7 @@ def bounce(q: el.Query[el.WorldPos, el.WorldVel]) -> el.Query[el.WorldVel]:
 
 
 def run(seed: int) -> pl.DataFrame:
-    w = el.WorldBuilder()
+    w = el.World()
     w.spawn(Globals(seed=jnp.int64(seed)), name="Globals")
     w.spawn(
         [
@@ -92,6 +98,7 @@ def run(seed: int) -> pl.DataFrame:
     for _ in range(1200):
         exec.run(client)
     return exec.history()
+
 
 fig, ax = plt.subplots()
 

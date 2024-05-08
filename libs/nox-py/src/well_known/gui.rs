@@ -70,17 +70,6 @@ impl Panel {
         Ok(PyBufBytes { bytes })
     }
 
-    #[getter]
-    pub fn __metadata__(&self, py: Python<'_>) -> Result<((Component,),), Error> {
-        let name = conduit::well_known::Panel::ASSET_ID.component_name();
-        Ok(((Component {
-            name,
-            ty: ComponentType::u64(py),
-            asset: true,
-            metadata: Default::default(),
-        },),))
-    }
-
     #[staticmethod]
     pub fn vsplit(panels: Vec<Panel>, active: Option<bool>) -> Self {
         let active = active.unwrap_or_default();

@@ -28,7 +28,7 @@ impl WorldBuilder {
                     .component_datas
                     .iter()
                     .cloned()
-                    .map(|c| (ComponentId::new(&c.name), HostColumn::new(c.into())))
+                    .map(|c| (ComponentId::new(&c.name), HostColumn::new(c.inner)))
                     .collect();
                 for component in &archetype.component_datas {
                     let component_id = ComponentId::new(&component.name);
@@ -90,11 +90,13 @@ impl WorldBuilder {
                 let inner = self.world.assets.insert_bytes(id, bytes.bytes);
                 let component_name = id.component_name();
                 let archetype = Archetype {
-                    component_datas: vec![Component {
-                        name: component_name.clone(),
-                        ty: Python::with_gil(ComponentType::u64),
-                        asset: true,
-                        metadata: Default::default(),
+                    component_datas: vec![Metadata {
+                        inner: conduit::Metadata {
+                            name: component_name.clone(),
+                            component_type: conduit::ComponentType::u64(),
+                            asset: true,
+                            tags: Default::default(),
+                        },
                     }],
                     arrays: vec![],
                     archetype_name: component_name.as_str().into(),
