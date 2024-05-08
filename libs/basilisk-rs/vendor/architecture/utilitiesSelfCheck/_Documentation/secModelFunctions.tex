@@ -1,0 +1,72 @@
+% !TEX root = ./Basilisk-avsLibrary20170812.tex
+
+\section{Library Functions}
+
+The AVS astrodynamics support library is developed to facility writing C-code that must perform the associated mathematical functions.  It is not a Basilisk module, but included with the main Basilisk distribution as a support library.  The library goals are
+
+\begin{itemize}
+	\item \textbf{C-Code implementation}: All function calls only use C-code.
+	\item \textbf{Linear Algebra}: Basic matrix math function that are common in Matlab and Python environment quickly become tedious when programming in C.  To avoid this, a custom written C library is developed to perform specialized 2, 3, 4, and 6 dimensional matrix math, but some linear algebra math on matrices of general size.
+	\item \textbf{Rigid Body Kinematics}: Provides a comprehensive C-based software library to convert between a broad range of rigid body attitude coordinates, as well as add and subtract orientations.  This library can also compute the differential kinematic equations of select coordinate types. The textbook  Reference~\citenum{schaub} contains a complete listing of all the attitude library function in Appendix E.
+	\item \textbf{Orbital Motion Library}:  Provides a comprehensive C-based software library to convert between orbit anomaly angles, as well as orbit elements and Cartesian coordinates.  This library also contains some simple space environment modeling functions.  
+	
+\end{itemize}
+
+
+
+\section{Library Assumptions and Limitations}
+
+\subsection{Assumptions}
+\subsubsection{Linear Algebra Library}
+The vector dimension can be declared either explicitly through 
+\begin{verbatim}
+     double vec[3]
+\end{verbatim}
+or implicitly through 
+\begin{verbatim} 
+     double *vec
+\end{verbatim} 
+and allocating the required memory dynamically.   However, with the specialized matrix dimensions the matrices are assumed to be defined through commands like 
+\begin{verbatim}
+     double m33[3][3]
+\end{verbatim}
+ for a $3\times 3$ matrix. 
+
+\subsubsection{Rigid Body Kinematics}
+These attitude kinematic relationships are general enough that no assumptions are made on the mathematics.  However, when the $3\times 3$ DCM are defined, they must be of type
+\begin{verbatim}
+     double BN[3][3]
+\end{verbatim}
+
+
+\subsubsection{Orbital Motion}
+This orbital motion library accepts the inertial position and velocity vectors as pointers to a 3-dimensional array.  As with the linear algebra library, these can be declared explicitly or implicitly.    
+
+
+\subsection{Limitations}
+\subsubsection{Linear Algebra Library}
+There are no limitations on the provided linear algebra routines.  They are written in a general manner. 
+
+\subsubsection{Rigid Body Kinematics}
+There are no limitations on the provided linear algebra routines.  They are written in a general manner.  
+
+\subsubsection{Orbital Motion}
+The orbital motion support library has the following limitations.
+\begin{itemize}
+	\item While the {\tt elem2rv()} support rectilinear cases, the inverse mapping in {\tt rv2elem()} does not.
+	\item The gravitational zonal harmonics for $J_{3}$-$J_{6}$ are only implemented for Earth, and not other celestial objects.
+	\item The atmospheric density and drag, as well as the Debye length models are only implemented for Earth orbiting scenarios. 
+\end{itemize}
+
+
+
+
+
+
+
+
+
+
+
+
+

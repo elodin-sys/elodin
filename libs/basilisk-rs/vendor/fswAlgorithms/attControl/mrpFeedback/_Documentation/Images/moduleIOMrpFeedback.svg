@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xl="http://www.w3.org/1999/xlink" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" viewBox="130.5 302.5 471.8452 168" width="471.8452" height="168">
+  <defs>
+    <font-face font-family="Helvetica Neue" font-size="14" panose-1="2 0 5 3 0 0 0 2 0 4" units-per-em="1000" underline-position="-100" underline-thickness="50" slope="0" x-height="517" cap-height="714" ascent="951.9958" descent="-212.99744" font-weight="400">
+      <font-face-src>
+        <font-face-name name="HelveticaNeue"/>
+      </font-face-src>
+    </font-face>
+    <marker orient="auto" overflow="visible" markerUnits="strokeWidth" id="SharpArrow_Marker" stroke-linejoin="miter" stroke-miterlimit="10" viewBox="-4 -4 10 8" markerWidth="10" markerHeight="8" color="black">
+      <g>
+        <path d="M 5 0 L -3 -3 L 0 0 L 0 0 L -3 3 Z" fill="currentColor" stroke="currentColor" stroke-width="1"/>
+      </g>
+    </marker>
+    <font-face font-family="Helvetica" font-size="9" units-per-em="1000" underline-position="-75.68359" underline-thickness="49.316406" slope="0" x-height="522.9492" cap-height="717.28516" ascent="770.0195" descent="-229.98047" font-weight="400">
+      <font-face-src>
+        <font-face-name name="Helvetica"/>
+      </font-face-src>
+    </font-face>
+    <font-face font-family="Courier" font-size="9" units-per-em="1000" underline-position="-178.22266" underline-thickness="57.61719" slope="0" x-height="456.54297" cap-height="586.91406" ascent="753.90625" descent="-246.09375" font-weight="400">
+      <font-face-src>
+        <font-face-name name="Courier"/>
+      </font-face-src>
+    </font-face>
+  </defs>
+  <metadata> Produced by OmniGraffle 7.18.1\n2021-01-12 17:38:44 +0000</metadata>
+  <g id="Canvas_2" stroke-dasharray="none" stroke-opacity="1" stroke="none" fill="none" fill-opacity="1">
+    <title>Canvas 2</title>
+    <g id="Canvas_2_Layer_1">
+      <title>Layer 1</title>
+      <g id="Graphic_21">
+        <path d="M 293 303 L 462 303 C 464.7614 303 467 305.23858 467 308 L 467 465 C 467 467.7614 464.7614 470 462 470 L 293 470 C 290.23858 470 288 467.7614 288 465 L 288 308 C 288 305.23858 290.23858 303 293 303 Z" fill="#ffc0ff"/>
+        <path d="M 293 303 L 462 303 C 464.7614 303 467 305.23858 467 308 L 467 465 C 467 467.7614 464.7614 470 462 470 L 293 470 C 290.23858 470 288 467.7614 288 465 L 288 308 C 288 305.23858 290.23858 303 293 303 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(293 378.304)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="14" font-weight="400" fill="black" x="37.432" y="13">mrpFeedback()</tspan>
+        </text>
+      </g>
+      <g id="Line_20">
+        <line x1="170.14286" y1="323" x2="281.1" y2="323" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_19">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(191.7288 308)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="39.997276" y="9">guidInMsg</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_18">
+        <text transform="translate(473.125 328)" fill="black">
+          <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="0" y="9">CmdTorqueBodyMsgPayload</tspan>
+        </text>
+      </g>
+      <g id="Line_17">
+        <line x1="467" y1="326.42857" x2="554.6" y2="326.42857" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_16">
+        <text transform="translate(135.5 390.07143)" fill="black">
+          <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="18.422638" y="9">RWArrayConfigMsgPayload</tspan>
+        </text>
+      </g>
+      <g id="Line_15">
+        <line x1="169.01786" y1="389.14286" x2="279.97503" y2="389.4791" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4.0,4.0" stroke-width="1"/>
+      </g>
+      <g id="Line_35">
+        <line x1="170.14286" y1="357" x2="281.1" y2="357" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_34">
+        <text transform="translate(148.5 357.5)" fill="black">
+          <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="5.422638" y="9">VehicleConfigMsgPayload</tspan>
+        </text>
+      </g>
+      <g id="Graphic_42">
+        <text transform="translate(147.375 418.64286)" fill="black">
+          <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="38.95291" y="9">RWSpeedMsgPayload</tspan>
+        </text>
+      </g>
+      <g id="Line_41">
+        <line x1="170.14286" y1="417.64286" x2="281.10003" y2="417.9791" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4.0,4.0" stroke-width="1"/>
+      </g>
+      <g id="Graphic_46">
+        <text transform="translate(149.64676 446.85714)" fill="black">
+          <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="0" y="9">RWAvailabilityMsgPayload</tspan>
+        </text>
+      </g>
+      <g id="Line_45">
+        <line x1="170.14286" y1="446.5" x2="281.10003" y2="446.83623" marker-end="url(#SharpArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4.0,4.0" stroke-width="1"/>
+      </g>
+      <g id="Graphic_47">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(175.14286 323.35714)" fill="black">
+            <tspan font-family="Courier" font-size="9" font-weight="400" fill="black" x="6.292198" y="9">AttGuidMsgPayload</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_51">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(194.17522 344.35714)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="16.486534" y="9">vehConfigInMsg</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_52">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(191.7288 377.42857)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="16.508507" y="9">rwParamsInMsg</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_53">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(191.7288 404.5)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="16.991905" y="9">rwSpeedsInMsg</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_54">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(191.7288 435.57143)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="28.167198" y="9">rwAvailInMsg</tspan>
+          </text>
+        </a>
+      </g>
+      <g id="Graphic_55">
+        <a xl:href="http://../../../../_images/fswAlgorithms/fswMessages/attGuidFswMsg.html">
+          <text transform="translate(475.73214 313.42857)" fill="black">
+            <tspan font-family="Helvetica" font-size="9" font-weight="400" fill="black" x="0" y="9">cmdTorqueOutMsg</tspan>
+          </text>
+        </a>
+      </g>
+    </g>
+  </g>
+</svg>

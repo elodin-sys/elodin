@@ -1,0 +1,15 @@
+\section{Model Functions}
+The Gauss Markov functions are:
+\begin{itemize}
+	\item \textbf{Set LSB}: Sets the least significant bit as a vector of length n.
+	\item \textbf{Set Round Direction}: Sets the round direction when discretizing as to zero, away from zero, or nearest LSB multiple.
+	\item \textbf{Set Carry Error}: Takes a boolean to state whether or not to carry over discretization error.
+	\item \textbf{Discretize}: Discretizes a state vector of size n by corresponding LSBs
+	\item \textbf{Get Discretization Error}: retrieves the discretization error for use by user.
+\end{itemize}
+
+
+\section{Model Assumptions and Limitations}
+\begin{itemize}
+	\item \textbf{LSB Only}: Right now, discretization can only be set by giving a least significant bit. In the future, capability should be added to allow for discretization by max/min and number of bits.
+\end{itemize}

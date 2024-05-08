@@ -1,0 +1,166 @@
+/*
+Copyright (c) 2020, Autonomous Vehicle Systems Lab, Univeristy of Colorado at Boulder
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+%pythoncode %{
+    import numpy as np
+%};
+%{
+#include "architecture/_GeneralModuleFiles/sys_model.h"
+#include "architecture/messaging/messaging.h"
+#include "architecture/utilities/macroDefinitions.h"
+#include "fswAlgorithms/fswUtilities/fswDefinitions.h"
+#include <vector>
+%}
+
+%define INSTANTIATE_TEMPLATES(messageType, messageTypePayload, folder)
+%{
+#include "folder/messageTypePayload.h"
+%}
+%include "folder/messageTypePayload.h"
+
+%template(messageType ## Reader) ReadFunctor<messageTypePayload>;
+%extend ReadFunctor<messageTypePayload> {
+        %pythoncode %{
+            def subscribeTo(self, source):
+                if type(source) == messageType:
+                    self.__subscribe_to(source)
+                    return
+                
+                try:
+                    from Basilisk.architecture.messaging.messageType ## Payload import messageType ## _C
+                    if type(source) == messageType ## _C:
+                        self.__subscribe_to_C(source)
+                        return
+                except ImportError:
+                    pass
+    
+                raise Exception('tried to subscribe ReadFunctor<messageTypePayload> to output message type'
+                                + str(type(source)))
+
+
+            def isSubscribedTo(self, source):
+                if type(source) == messageType:
+                    return self.__is_subscribed_to(source)
+                
+                try:
+                    from Basilisk.architecture.messaging.messageType ## Payload import messageType ## _C
+                except ImportError:
+                    return 0
+                
+                if type(source) == messageType ## _C:
+                    return self.__is_subscribed_to_C(source)
+                else:
+                    return 0
+        %}
+};
+
+%template(messageType ## Writer) WriteFunctor<messageTypePayload>;
+
+%template(messageType) Message<messageTypePayload>;
+%extend Message<messageTypePayload>{
+    %pythoncode %{
+        def write(self, payload, time=0, moduleID=0):
+            """Write the message payload.
+            The 2nd argument is time in nanoseconds.  It is optional and defaults to 0.
+            The 3rd argument is the module ID which defaults to 0.
+            """
+            writeMsg = self.addAuthor()
+            writeMsg(payload, moduleID, time)  # msgs written in python have 0 module ID
+            return self
+
+        def read(self):
+            """Read the message payload."""
+            readMsg = self.addSubscriber()
+            return readMsg()
+    %}
+};
+
+%template(messageType ## Recorder) Recorder<messageType ## Payload>;
+%extend Recorder<messageType ## Payload> {
+    %pythoncode %{
+        def times(self):
+            return np.array(self.__time_vector())
+
+        def timesWritten(self):
+            return np.array(self.__timeWritten_vector())
+
+        def explore_and_find_subattr(self, attr, attr_name, content):
+            if "method" in str(type(attr)):
+                # The attribute is a method, nothing to do here
+                pass
+            elif isinstance(attr, list):
+                # The attribute is a list of yet to be determined types
+                if len(attr) > 0:
+                    if "Basilisk" in str(type(attr[0])):
+                        # The attribute is a list of swigged BSK objects
+                        for el, k in zip(attr, range(len(attr))):
+                            self.explore_and_find_subattr(el, attr_name + "[" + str(k) + "]", content)
+                    else:
+                        # The attribute is a list of common types 
+                        content[attr_name] = attr
+            elif "Basilisk" in str(type(attr)):
+                # The attribute is a swigged BSK object
+                # Check to see if the object is a vector and pull out the data
+                if "Vector" in str(type(attr)) or "vector" in str(type(attr)):
+                    content[attr_name] = []
+                    for data in attr:
+                        content[attr_name].append(data)
+                else:
+                    for subattr_name in  dir(attr):
+                        if not subattr_name.startswith("__") and subattr_name != "this":
+                            self.explore_and_find_subattr(getattr(attr, subattr_name),
+                                                          attr_name + "." + subattr_name,
+                                                          content)
+            else:
+                # The attribute has a common type
+                content[attr_name] = attr
+
+        # This __getattr__ is written in message.i.
+        # It lets us return message struct attribute record as lists for plotting, etc.
+        def __getattr__(self, name):
+            data = self.__record_vector()
+            data_record = []
+            for rec in data.iterator():
+                content = {}
+                self.explore_and_find_subattr(rec.__getattribute__(name), name, content)
+                if len(content) == 1 and "." not in str(list(content.keys())[0]):
+                    data_record.append(next(iter(content.values())))
+                else:
+                    data_record.append(content)
+
+            return np.array(data_record)
+
+        def record(self):
+            return self.__record_vector
+    %}
+};
+
+typedef struct messageType;
+
+%template(messageType ## PayloadVector) std::vector<messageType ## Payload, std::allocator<messageType ## Payload>>;
+%extend std::vector<messageType ## Payload, std::allocator<messageType ## Payload>>{
+    %pythoncode %{
+        # This __getattr__ is written in message.i.
+        # It lets us return message struct attribute record as lists for plotting, etc.
+        def __getattr__(self, name):
+            data_record = []
+            for rec in self.iterator():
+                data_record.append(rec.__getattribute__(name))
+            return np.array(data_record)
+    %}
+};
+%enddef

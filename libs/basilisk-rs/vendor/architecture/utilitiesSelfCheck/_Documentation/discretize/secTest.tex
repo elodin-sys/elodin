@@ -1,0 +1,32 @@
+\section{Test Description and Success Criteria}
+This test is located at {\tt src/simulation/utilitiesSelfCheck}. \par
+
+\subsection{Test Descriptions}
+
+
+\begin{enumerate}
+	\item \underline{To Zero} Checks discretization toward zero.
+	\item \underline{From Zero}: Checks discretization away from zero.
+	\item \underline{Near} Checks discretization to the closest LSB multiple.
+	\item \underline{Carry} Checks error carrying.
+	
+\end{enumerate} 
+
+\section{Test Results}
+All test results below
+
+\begin{table}[H]
+	\caption{Test results}
+	\label{tab:results}
+	\centering \fontsize{10}{10}\selectfont
+	\begin{tabular}{ c | c  } % Column formatting, 
+		\hline
+		\textbf{Test} 						  		&\textbf{Pass/Fail} \\ \hline
+		All Tests	   			& \input{_Documentation/AutoTex/discretizePass} \\ \hline
+	\end{tabular}
+
+\end{table}
+
+
+
+\pagebreak %needed to keep images/paragraphs in the right place. Cannot \usepackage{float} here because it is not used in the AutoTex implementation.
