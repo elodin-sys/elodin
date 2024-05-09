@@ -536,9 +536,6 @@ name = "arrow-schema"
 version = "51.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02d9483aaabe910c4781153ae1b6ae0393f72d9ef757d38d09d450070cf2e528"
-dependencies = [
- "bitflags 2.5.0",
-]
 
 [[package]]
 name = "arrow-select"
@@ -6916,6 +6913,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "725b09f2b5ef31279b66e27bbab63c58d49d8f6696b66b1f46c7eaab95e80f75"
 dependencies = [
  "ahash 0.8.11",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
  "atoi",
  "atoi_simd",
  "bytemuck",
