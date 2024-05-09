@@ -96,19 +96,6 @@ impl PolarsWorld {
         Ok(())
     }
 
-    pub fn add_tick(&mut self) -> Result<(), Error> {
-        for df in self.archetypes.values_mut() {
-            let len = df
-                .get_columns()
-                .first()
-                .map(|s| s.len())
-                .unwrap_or_default();
-            let series: Series = std::iter::repeat(self.metadata.tick).take(len).collect();
-            df.with_column(series.with_name("tick"))?;
-        }
-        Ok(())
-    }
-
     pub fn vstack(&mut self, other: &Self) -> Result<(), Error> {
         if self.archetypes.is_empty() {
             *self = other.clone();
@@ -168,7 +155,10 @@ impl World<HostStore> {
         let mut archetypes = HashMap::default();
         let mut archetype_metadata = HashMap::default();
         for (id, table) in &self.archetypes {
-            let (metadata, df) = table.to_polars()?;
+            let len = table.entity_buffer.len();
+            let (metadata, mut df) = table.to_polars()?;
+            let series: Series = std::iter::repeat(self.tick).take(len).collect();
+            df.with_column(series.with_name("tick"))?;
             archetypes.insert(*id, df);
             archetype_metadata.insert(*id, metadata);
         }
@@ -409,6 +399,12 @@ impl<'a> ColumnStore for &'a PolarsWorld {
 
     fn tick(&self) -> u64 {
         self.metadata.tick
+    }
+}
+
+impl PolarsColumnRef<'_> {
+    pub fn value_series(&self) -> Series {
+        self.buf.clone()
     }
 }
 
