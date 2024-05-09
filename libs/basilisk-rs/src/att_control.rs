@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn test_mrp_steer_basic() {
         let att_guid = BskChannel::pair();
-        let mut rate_cmd = BskChannel::pair();
+        let rate_cmd = BskChannel::pair();
         let mut mrp_steer =
             MRPSteering::new(1.0, 1.0, 1.0, true, rate_cmd.clone(), att_guid.clone());
         att_guid.write(AttGuidMsgPayload {
@@ -217,7 +217,7 @@ mod tests {
             domega_RN_B: [1.0, 1.0, 1.0],
         });
         mrp_steer.update(0);
-        let out = rate_cmd.read().unwrap();
+        let out = rate_cmd.read();
         assert_relative_eq!(
             out.omega_BastR_B.as_ref(),
             [-0.8038134760954126, -0.0, -0.0].as_ref()
@@ -273,7 +273,7 @@ mod tests {
             }
             .into(),
         );
-        let mut cmd_torque_body = BskChannel::pair();
+        let cmd_torque_body = BskChannel::pair();
         let int_feedback = BskChannel::pair();
         let att_guid_cmd = BskChannel::pair();
         att_guid_cmd.write(AttGuidMsgPayload {
@@ -295,7 +295,7 @@ mod tests {
         );
         mrp_feedback.reset(0);
         mrp_feedback.update(1);
-        let cmd_torque = cmd_torque_body.read().unwrap();
+        let cmd_torque = cmd_torque_body.read();
         assert_eq!(
             cmd_torque,
             CmdTorqueBodyMsgPayload {
