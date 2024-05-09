@@ -52,12 +52,12 @@ impl PipelineBuilder {
             let NoxprNode::Param(p) = p.deref() else {
                 continue;
             };
-            let jnp = py.import("jax.numpy")?;
+            let jnp = py.import_bound("jax.numpy")?;
             let NoxprTy::ArrayTy(ty) = &p.ty else {
                 unreachable!()
             };
             let dtype = nox::jax::dtype(&ty.element_type)?;
-            let shape = PyTuple::new(py, ty.shape.iter().collect::<Vec<_>>());
+            let shape = PyTuple::new_bound(py, ty.shape.iter().collect::<Vec<_>>());
             let arr = jnp.call_method1("zeros", (shape, dtype))?; // NOTE(sphw): this could be a huge bottleneck
             res.push(arr.into());
         }
@@ -99,6 +99,6 @@ impl PipelineBuilder {
                 var.buffer().to_jax()
             })
             .collect::<Result<Vec<_>, nox_ecs::nox::Error>>()?;
-        Ok(PyTuple::new(py, vars).into())
+        Ok(PyTuple::new_bound(py, vars).into())
     }
 }

@@ -69,11 +69,11 @@ impl GraphQueryInner {
         from_query: QueryInner,
         to_query: QueryInner,
     ) -> Result<PyObject, Error> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
         for (len, (a, b)) in exprs.iter() {
-            let a_list = PyList::empty(py);
-            let b_list = PyList::empty(py);
+            let a_list = PyList::empty_bound(py);
+            let b_list = PyList::empty_bound(py);
             for x in &a.exprs {
                 a_list.append(x.to_jax()?)?;
             }

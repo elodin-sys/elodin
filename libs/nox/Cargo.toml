@@ -28,9 +28,9 @@ matrixmultiply = "0.3"
 xla.path = "../xla-rs"
 
 # jax
-pyo3.version = "0.20.0"
+pyo3.version = "0.21.0"
 pyo3.optional = true
-numpy.version = "0.20.0"
+numpy.version = "0.21.0"
 numpy.optional = true
 bytemuck.version = "1.14"
 bytemuck.optional = true
