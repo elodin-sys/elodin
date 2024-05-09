@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
     event::EventWriter,
-    system::{Commands, Query, Res, ResMut, SystemParam, SystemState},
+    system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
@@ -23,7 +23,7 @@ use crate::{
         utils::{format_num, MarginSides},
         widgets::{
             label,
-            plot::{GraphState, GraphsState},
+            plot::{default_component_values, GraphBundle},
             WidgetSystem,
         },
         EntityData, EntityPair,
@@ -37,7 +37,6 @@ pub struct InspectorEntity<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     tile_state: ResMut<'w, tiles::TileState>,
     metadata_store: Res<'w, MetadataStore>,
-    commands: Commands<'w, 's>,
     column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
 }
@@ -57,10 +56,8 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let (icons, pair) = args;
 
         let mut entities = state_mut.entities;
-        // let mut graphs_state = state_mut.graphs_state;
         let mut tile_state = state_mut.tile_state;
         let metadata_store = state_mut.metadata_store;
-        let mut commands = state_mut.commands;
         let mut column_payload_writer = state_mut.column_payload_writer;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
 
@@ -149,17 +146,13 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             }
 
             if create_graph {
-                let values = GraphsState::default_component_values(
-                    &entity_id,
-                    &component_id,
-                    component_value,
-                );
+                let values = default_component_values(&entity_id, &component_id, component_value);
                 let entities = BTreeMap::from_iter(std::iter::once((
                     entity_id,
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
-                let graph = GraphState::spawn(&mut commands, &mut render_layer_alloc, entities);
-                tile_state.create_graph_tile(graph);
+                let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
+                tile_state.create_graph_tile(bundle);
             }
         }
     }

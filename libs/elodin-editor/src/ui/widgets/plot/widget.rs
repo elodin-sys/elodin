@@ -1,6 +1,9 @@
 use bevy::{
     asset::{Assets, Handle},
-    ecs::system::{Commands, Query},
+    ecs::{
+        entity::Entity,
+        system::{Commands, Query},
+    },
     math::{Rect, Vec2},
     render::camera::{OrthographicProjection, Projection, ScalingMode},
 };
@@ -19,8 +22,9 @@ use crate::{
         colors::{self, with_opacity, ColorExt},
         utils::{self, format_num},
         widgets::{
-            plot::gpu::{Line, LineBundle, LineConfig, LineUniform},
+            plot::gpu::{LineBundle, LineConfig, LineUniform},
             plot::GraphState,
+            plot::Line,
             timeline::tagged_range::TaggedRange,
         },
     },
@@ -120,6 +124,7 @@ impl Plot {
 
     /// Calculate bounds and point positions based on the current UI allocation
     /// Should be run last, right before render
+    #[allow(clippy::too_many_arguments)]
     pub fn calculate_lines(
         mut self,
         ui: &egui::Ui,
@@ -128,6 +133,7 @@ impl Plot {
         tagged_range: Option<&TaggedRange>,
         lines: &mut Assets<Line>,
         commands: &mut Commands,
+        graph_id: Entity,
     ) -> Self {
         self.rect = ui.max_rect();
         self.inner_rect = get_inner_rect(self.rect);
@@ -154,11 +160,13 @@ impl Plot {
                     if let Some(component) = entity.components.get(component_id) {
                         for (value_index, (enabled, _)) in component_values.iter().enumerate() {
                             if *enabled {
-                                if let Some(line) = component.lines.get(&value_index) {
+                                if let Some(line) = component
+                                    .lines
+                                    .get(&value_index)
+                                    .and_then(|handle| lines.get_mut(handle))
+                                {
                                     minmax_lines.push(vec![line.min, line.max]);
-                                    if let Some(values) = lines.get_mut(&line.values) {
-                                        values.max_count = max_length;
-                                    }
+                                    line.data.max_count = max_length;
                                 }
                             }
                         }
@@ -171,7 +179,7 @@ impl Plot {
         let x_range = self.bounds.max_x - self.bounds.min_x;
         let y_range = self.bounds.max_y - self.bounds.min_y;
         commands
-            .entity(graph_state.camera)
+            .entity(graph_id)
             .insert(Projection::Orthographic(OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
@@ -212,7 +220,7 @@ impl Plot {
                                 (None, true) => {
                                     let entity = commands
                                         .spawn(LineBundle {
-                                            line: line.values.clone(),
+                                            line: line.clone(),
                                             uniform: LineUniform::new(
                                                 graph_state.line_width,
                                                 color.into_bevy(),
@@ -226,8 +234,8 @@ impl Plot {
                                         (*entity_id, *component_id, value_index),
                                         (entity, *color),
                                     );
-                                    if let Some(values) = lines.get_mut(&line.values) {
-                                        values.max_count = max_length;
+                                    if let Some(values) = lines.get_mut(line) {
+                                        values.data.max_count = max_length;
                                         values.recalculate_chunk_size();
                                     }
                                 }
@@ -252,6 +260,16 @@ impl Plot {
                 }
             }
         }
+        graph_state
+            .enabled_lines
+            .retain(|(entity_id, component_id, index), _| {
+                graph_state
+                    .entities
+                    .get(entity_id)
+                    .and_then(|entity| entity.get(component_id))
+                    .and_then(|component| component.get(*index))
+                    .is_some()
+            });
 
         self
     }
@@ -487,7 +505,7 @@ impl Plot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
-                    let index = tick / line.chunk_size;
+                    let index = tick / line.data.chunk_size;
                     if current_entity_id.as_ref() != Some(entity_id) {
                         ui.add_space(8.0);
                         ui.add(egui::Separator::default().grow(16.0 * 2.0));
@@ -514,8 +532,9 @@ impl Plot {
                         }
                     }
 
-                    let Some(line_data) =
-                        collected_graph_data.get_line(entity_id, component_id, *line_index)
+                    let Some(line_data) = collected_graph_data
+                        .get_line(entity_id, component_id, *line_index)
+                        .and_then(|h| lines.get(h))
                     else {
                         continue;
                     };
@@ -540,6 +559,7 @@ impl Plot {
                             })
                         });
                         let value = line
+                            .data
                             .averaged_data
                             .get(index)
                             .map(|x| format!("{:.2}", x))
@@ -659,8 +679,8 @@ impl Plot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
-                    let x_index = x_tick / line.chunk_size;
-                    let Some(y) = line.averaged_data.get(x_index) else {
+                    let x_index = x_tick / line.data.chunk_size;
+                    let Some(y) = line.data.averaged_data.get(x_index) else {
                         continue;
                     };
                     let y_offset = *y as f64 - self.bounds.min_y;

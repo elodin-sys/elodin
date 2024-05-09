@@ -10,7 +10,6 @@ use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::ecs::world::{Mut, World};
 use bevy::math::Vec4;
 use bevy::pbr::SetMeshViewBindGroup;
-use bevy::reflect::TypePath;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
 use bevy::render::render_phase::{
     DrawFunctions, RenderCommandResult, RenderPhase, SetItemPipeline,
@@ -20,7 +19,7 @@ use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
 use bevy::{
     app::Plugin,
-    asset::{load_internal_asset, Asset, Handle},
+    asset::{load_internal_asset, Handle},
     core::cast_slice,
     core_pipeline::core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT},
     ecs::{
@@ -43,8 +42,9 @@ use bevy::{
         RenderApp,
     },
 };
-use itertools::Itertools;
 use std::mem;
+
+use crate::ui::widgets::plot::Line;
 
 const LINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(175745314079092880743018103868034362817);
@@ -61,7 +61,6 @@ impl Plugin for PlotGpuPlugin {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<CachedSystemState>()
             .init_asset::<Line>();
-        //.add_plugins(RenderAssetPlugin::<Line>::default());
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -84,7 +83,6 @@ impl Plugin for PlotGpuPlugin {
                 Render,
                 prepare_uniform_bind_group.in_set(RenderSet::PrepareBindGroups),
             )
-            //.add_systems(Render, prepare_gpu_line.in_set(RenderSet::PrepareAssets))
             .add_systems(
                 Render,
                 queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
@@ -272,80 +270,6 @@ pub struct LineConfig {
     pub render_layers: RenderLayers,
 }
 
-#[derive(Debug, Asset, Clone, TypePath)]
-pub struct Line {
-    pub data: Vec<f64>,
-    pub averaged_data: Vec<f32>,
-    pub chunk_size: usize,
-    pub max_count: usize,
-    pub mean_state: MeanState,
-}
-
-impl Default for Line {
-    fn default() -> Self {
-        Self {
-            data: Default::default(),
-            averaged_data: Default::default(),
-            chunk_size: 1,
-            max_count: 1_000,
-            mean_state: Default::default(),
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Default)]
-pub enum MeanState {
-    #[default]
-    Pending,
-    Averaging {
-        count: usize,
-        sum: f64,
-    },
-}
-
-impl Line {
-    pub fn push(&mut self, value: f64) {
-        self.data.push(value);
-        if self.recalculate_chunk_size() {
-            self.push_raw(value)
-        }
-    }
-
-    pub fn recalculate_chunk_size(&mut self) -> bool {
-        let new_chunk_size = (self.data.len() / self.max_count).max(1);
-        if new_chunk_size == self.chunk_size {
-            return true;
-        }
-        self.chunk_size = new_chunk_size;
-        self.averaged_data = self
-            .data
-            .iter()
-            .chunks(new_chunk_size)
-            .into_iter()
-            .map(|chunk| (chunk.sum::<f64>() / new_chunk_size as f64) as f32)
-            .collect();
-        false
-    }
-
-    fn push_raw(&mut self, value: f64) {
-        let (count, sum) = match self.mean_state {
-            MeanState::Pending => (1, value),
-            MeanState::Averaging { count, sum } => {
-                let count = count + 1;
-                let sum = sum + value;
-                (count, sum)
-            }
-        };
-        if count >= self.chunk_size {
-            self.mean_state = MeanState::Pending;
-            let datum = sum / count as f64;
-            self.averaged_data.push(datum as f32);
-        } else {
-            self.mean_state = MeanState::Averaging { count, sum }
-        }
-    }
-}
-
 #[derive(Clone, Component)]
 pub struct GpuLine {
     position_buffer: Buffer,
@@ -449,6 +373,7 @@ fn extract_lines(
             let Some(line) = line_assets.get(line_handle) else {
                 continue;
             };
+            let line = &line.data;
             let (prev_pos, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
                 let mut prev_pos = std::mem::replace(
                     &mut gpu_line.position_count,

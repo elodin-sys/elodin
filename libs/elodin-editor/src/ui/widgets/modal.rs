@@ -12,13 +12,13 @@ use crate::ui::{
     colors::{self, with_opacity},
     images, theme,
     utils::MarginSides,
-    widgets::plot::GraphsState,
     EntityData, InspectorAnchor, SettingModal, SettingModalState,
 };
 
 use super::{
     button::{EButton, EImageButton},
     label::{self, ELabel},
+    plot::{default_component_values, GraphState},
     timeline::tagged_range::TaggedRanges,
     RootWidgetSystem, WidgetSystem, WidgetSystemExt,
 };
@@ -206,9 +206,9 @@ impl WidgetSystem for ModalUpdateRangeName<'_> {
 #[derive(SystemParam)]
 pub struct ModalUpdateGraph<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    graph_states: ResMut<'w, GraphsState>,
     setting_modal_state: ResMut<'w, SettingModalState>,
     metadata_store: Res<'w, MetadataStore>,
+    graph_states: Query<'w, 's, &'static mut GraphState>,
 }
 
 impl WidgetSystem for ModalUpdateGraph<'_, '_> {
@@ -224,10 +224,12 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         let state_mut = state.get_mut(world);
         let close_icon = args;
 
-        let mut graph_states = state_mut.graph_states;
-        let mut setting_modal_state = state_mut.setting_modal_state;
-        let entities_meta = state_mut.entities_meta;
-        let metadata_store = state_mut.metadata_store;
+        let ModalUpdateGraph {
+            entities_meta,
+            mut setting_modal_state,
+            metadata_store,
+            mut graph_states,
+        } = state_mut;
 
         let Some(setting_modal) = setting_modal_state.0.as_mut() else {
             return;
@@ -237,10 +239,10 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         };
 
         // Reset modal if Graph was removed
-        if !graph_states.contains_graph(m_graph_id) {
+        let Ok(mut graph_state) = graph_states.get_mut(*m_graph_id) else {
             setting_modal_state.0 = None;
             return;
-        }
+        };
 
         let title_margin = egui::Margin::same(8.0).bottom(16.0);
         if label::label_with_button(
@@ -345,9 +347,8 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                 );
 
                 if add_component_btn.clicked() {
-                    let values =
-                        GraphsState::default_component_values(entity_id, component_id, component);
-                    graph_states.insert_component(m_graph_id, entity_id, component_id, values);
+                    let values = default_component_values(entity_id, component_id, component);
+                    graph_state.insert_component(entity_id, component_id, values);
 
                     setting_modal_state.0 = None;
                 }
