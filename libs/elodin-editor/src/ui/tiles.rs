@@ -14,7 +14,7 @@ use conduit::{
     bevy::{EntityMap, Tick, TimeStep},
     query::MetadataStore,
     well_known::{Panel, Viewport},
-    ComponentId, EntityId, GraphId,
+    ComponentId, EntityId,
 };
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
@@ -23,7 +23,7 @@ use super::{
     utils::MarginSides,
     widgets::{
         button::EImageButton,
-        plot::{self, gpu::Line, GraphState, GraphsState, Plot},
+        plot::{self, GraphBundle, GraphState, Line, Plot},
         timeline::tagged_range::TaggedRanges,
         RootWidgetSystem,
     },
@@ -45,7 +45,7 @@ struct TileIcons {
 pub struct TileState {
     tree: egui_tiles::Tree<Pane>,
     tab_diffs: Vec<TabDiff>,
-    graphs: HashMap<TileId, GraphId>,
+    graphs: HashMap<TileId, Entity>,
 }
 
 impl TileState {
@@ -83,7 +83,7 @@ impl TileState {
         Some(child)
     }
 
-    pub fn create_graph_tile(&mut self, graph_state: GraphState) {
+    pub fn create_graph_tile(&mut self, graph_state: GraphBundle) {
         if let Some(parent) = self.tree.root {
             self.tab_diffs
                 .push(TabDiff::AddGraph(parent, Some(graph_state)));
@@ -113,7 +113,7 @@ impl Pane {
         time_step: std::time::Duration,
         current_tick: u64,
         collected_graph_data: &CollectedGraphData,
-        graphs_state: &mut GraphsState,
+        graphs_state: &mut Query<&mut GraphState>,
         tagged_ranges: &TaggedRanges,
         lines: &mut Assets<Line>,
         lines_query: &Query<&Handle<Line>>,
@@ -127,7 +127,7 @@ impl Pane {
                 // ui.painter()
                 //     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
-                let Some(graph_state) = graphs_state.get_mut(&pane.id) else {
+                let Ok(mut graph_state) = graphs_state.get_mut(pane.id) else {
                     return egui_tiles::UiResponse::None;
                 };
 
@@ -145,17 +145,18 @@ impl Pane {
                     .calculate_lines(
                         ui,
                         collected_graph_data,
-                        graph_state,
+                        graph_state.as_mut(),
                         tagged_range,
                         lines,
                         commands,
+                        pane.id,
                     )
                     .render(
                         ui,
                         lines,
                         lines_query,
                         collected_graph_data,
-                        graph_state,
+                        graph_state.as_mut(),
                         &icons.scrub,
                     );
 
@@ -212,16 +213,16 @@ impl ViewportPane {
 }
 
 struct GraphPane {
-    pub id: GraphId,
+    pub id: Entity,
     pub label: String,
     pub rect: Option<egui::Rect>,
 }
 
 impl GraphPane {
-    fn spawn(graph_id: GraphId) -> Self {
+    fn new(graph_id: Entity, index: usize) -> Self {
         Self {
             id: graph_id,
-            label: format!("Graph {}", graph_id.0),
+            label: format!("Graph {:?}", index),
             rect: None,
         }
     }
@@ -241,20 +242,19 @@ struct TreeBehavior<'a, 'w, 's> {
     icons: TileIcons,
     tab_diffs: Vec<TabDiff>,
     selected_object: &'a mut SelectedObject,
-    graphs_state: &'a mut GraphsState,
     tagged_ranges: &'a TaggedRanges,
     collected_graph_data: &'a CollectedGraphData,
     lines: &'a mut Assets<Line>,
     line_query: &'a Query<'w, 's, &'static Handle<Line>>,
+    graph_state_query: &'a mut Query<'w, 's, &'static mut GraphState>,
     time_step: std::time::Duration,
     current_tick: u64,
     commands: &'a mut Commands<'w, 's>,
 }
 
-#[derive(Clone)]
 pub enum TabDiff {
     AddViewport(TileId),
-    AddGraph(TileId, Option<GraphState>),
+    AddGraph(TileId, Option<GraphBundle>),
     Delete(TileId),
 }
 
@@ -280,7 +280,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             self.time_step,
             self.current_tick,
             self.collected_graph_data,
-            self.graphs_state,
+            self.graph_state_query,
             self.tagged_ranges,
             self.lines,
             self.line_query,
@@ -499,7 +499,6 @@ pub struct TileLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     commands: Commands<'w, 's>,
-    graphs_state: ResMut<'w, GraphsState>,
     tagged_ranges: Res<'w, TaggedRanges>,
     selected_object: ResMut<'w, SelectedObject>,
     ui_state: ResMut<'w, TileState>,
@@ -512,6 +511,7 @@ pub struct TileLayout<'w, 's> {
     tick: Res<'w, Tick>,
     lines: ResMut<'w, Assets<Line>>,
     line_query: Query<'w, 's, &'static Handle<Line>>,
+    graph_state_query: Query<'w, 's, &'static mut GraphState>,
 }
 
 impl RootWidgetSystem for TileLayout<'_, '_> {
@@ -530,7 +530,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
             mut contexts,
             images,
             mut commands,
-            mut graphs_state,
+            mut graph_state_query,
             tagged_ranges,
             mut selected_object,
             mut ui_state,
@@ -557,11 +557,11 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                let tab_diffs = std::mem::take(&mut ui_state.tab_diffs);
                 let mut behavior = TreeBehavior {
                     icons,
-                    tab_diffs: ui_state.tab_diffs.clone(),
+                    tab_diffs,
                     selected_object: selected_object.as_mut(),
-                    graphs_state: graphs_state.as_mut(),
                     tagged_ranges: tagged_ranges.as_ref(),
                     collected_graph_data: collected_graph_data.as_ref(),
                     time_step: time_step.0,
@@ -569,8 +569,8 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     lines: lines.as_mut(),
                     commands: &mut commands,
                     line_query: &line_query,
+                    graph_state_query: &mut graph_state_query,
                 };
-                ui_state.tab_diffs = vec![];
                 ui_state.tree.ui(&mut behavior, ui);
                 for diff in behavior.tab_diffs.drain(..) {
                     match diff {
@@ -586,17 +586,14 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                             };
 
                             if let egui_tiles::Tile::Pane(Pane::Graph(graph)) = tile {
-                                if let Some(state) = graphs_state.get(&graph.id) {
-                                    commands.entity(state.camera).despawn();
-                                    graphs_state.remove_graph(&graph.id);
-                                }
+                                commands.entity(graph.id).despawn();
                             };
 
                             if ui_state.tree.tiles.len() > 1 {
                                 ui_state.tree.tiles.remove(tile_id);
 
                                 if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
-                                    graphs_state.remove_graph(graph_id);
+                                    commands.entity(*graph_id).despawn();
                                     ui_state.graphs.remove(&tile_id);
                                 }
                             }
@@ -612,19 +609,15 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                             ));
                             ui_state.insert_pane_with_parent(pane, parent, true);
                         }
-                        TabDiff::AddGraph(parent, graph_state) => {
-                            let graph_state = if let Some(graph_state) = graph_state {
-                                graph_state
+                        TabDiff::AddGraph(parent, graph_bundle) => {
+                            let graph_bundle = if let Some(graph_bundle) = graph_bundle {
+                                graph_bundle
                             } else {
-                                GraphState::spawn(
-                                    &mut commands,
-                                    &mut render_layer_alloc,
-                                    BTreeMap::default(),
-                                )
+                                GraphBundle::new(&mut render_layer_alloc, BTreeMap::default())
                             };
-                            let graph_id = graphs_state.push_graph_state(graph_state);
+                            let graph_id = commands.spawn(graph_bundle).id();
 
-                            let graph = GraphPane::spawn(graph_id);
+                            let graph = GraphPane::new(graph_id, graph_state_query.iter().len());
                             let graph_id = graph.id;
                             let graph_label = graph.label.clone();
                             let pane = Pane::Graph(graph);
@@ -660,12 +653,11 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                             }
                         }
                         Pane::Graph(graph) => {
-                            let graph_state = graphs_state.get(&graph.id).expect("graph missing");
                             if active_tiles.contains(tile_id) {
-                                if let Some(mut cam) = commands.get_entity(graph_state.camera) {
+                                if let Some(mut cam) = commands.get_entity(graph.id) {
                                     cam.insert(ViewportRect(graph.rect));
                                 }
-                            } else if let Some(mut cam) = commands.get_entity(graph_state.camera) {
+                            } else if let Some(mut cam) = commands.get_entity(graph.id) {
                                 cam.insert(ViewportRect(None));
                             }
                         }
@@ -690,9 +682,9 @@ pub struct SyncViewportParams<'w, 's> {
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     entity_map: Res<'w, EntityMap>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>>,
-    graph_state: ResMut<'w, GraphsState>,
     metadata_store: Res<'w, MetadataStore>,
     hdr_enabled: ResMut<'w, HdrEnabled>,
+    graph_states: Query<'w, 's, &'static GraphState>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -706,9 +698,9 @@ pub fn sync_viewports(params: SyncViewportParams) {
         mut render_layer_alloc,
         entity_map,
         grid_cell,
-        mut graph_state,
         metadata_store,
         mut hdr_enabled,
+        graph_states,
     } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
@@ -722,9 +714,9 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &mut commands,
             &entity_map,
             &grid_cell,
-            &mut graph_state,
             &metadata_store,
             &mut hdr_enabled,
+            &graph_states,
         );
 
         commands.entity(entity).insert(SyncedViewport);
@@ -743,9 +735,9 @@ fn spawn_panel(
     commands: &mut Commands,
     entity_map: &Res<EntityMap>,
     grid_cell: &Query<&GridCell<i128>>,
-    graphs_state: &mut GraphsState,
     metadata_store: &Res<MetadataStore>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
+    graph_states: &Query<&GraphState>,
 ) -> Option<TileId> {
     match panel {
         conduit::well_known::Panel::Viewport(viewport) => {
@@ -801,9 +793,9 @@ fn spawn_panel(
                     commands,
                     entity_map,
                     grid_cell,
-                    graphs_state,
                     metadata_store,
                     hdr_enabled,
+                    graph_states,
                 );
             });
             ui_state.set_parent(tile_id, parent_id, split.active)
@@ -822,9 +814,9 @@ fn spawn_panel(
                     commands,
                     entity_map,
                     grid_cell,
-                    graphs_state,
                     metadata_store,
                     hdr_enabled,
+                    graph_states,
                 );
             });
             ui_state.set_parent(tile_id, parent_id, split.active)
@@ -854,9 +846,11 @@ fn spawn_panel(
                 }
                 entities.insert(entity.entity_id, components);
             }
-            let state = GraphState::spawn(commands, render_layer_alloc, entities);
-            let graph_id = graphs_state.push_graph_state(state);
-            let graph = GraphPane::spawn(graph_id);
+
+            let graph_id = commands
+                .spawn(GraphBundle::new(render_layer_alloc, entities))
+                .id();
+            let graph = GraphPane::new(graph_id, graph_states.iter().len());
             let pane = Pane::Graph(graph);
             let tile_id = ui_state.insert_pane(pane)?;
             ui_state.set_parent(tile_id, parent_id, false)

@@ -18,7 +18,7 @@ use conduit::bevy::MaxTick;
 use conduit::{
     bevy::{ComponentValueMap, Received, TimeStep},
     well_known::EntityMetadata,
-    ComponentId, EntityId, GraphId,
+    ComponentId, EntityId,
 };
 use egui_tiles::TileId;
 
@@ -67,7 +67,7 @@ pub enum SelectedObject {
     Graph {
         tile_id: TileId,
         label: String,
-        graph_id: GraphId,
+        graph_id: Entity,
     },
 }
 
@@ -180,8 +180,8 @@ impl Plugin for UiPlugin {
 
 #[derive(Clone, Debug)]
 pub enum SettingModal {
-    Graph(GraphId, Option<EntityId>, Option<ComponentId>),
-    GraphRename(GraphId, String),
+    Graph(Entity, Option<EntityId>, Option<ComponentId>),
+    GraphRename(Entity, String),
     RangeEdit(TaggedRangeId, String, egui::Color32),
 }
 
