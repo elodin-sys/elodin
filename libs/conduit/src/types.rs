@@ -55,18 +55,6 @@ impl From<u64> for ComponentId {
     }
 }
 
-#[derive(
-    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
-#[repr(transparent)]
-pub struct GraphId(pub u64);
-
-impl From<u64> for GraphId {
-    fn from(val: u64) -> Self {
-        GraphId(val)
-    }
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[repr(transparent)]
