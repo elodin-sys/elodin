@@ -19,12 +19,12 @@ impl System for PySystem {
     ) -> Result<(), nox_ecs::Error> {
         let builder = std::mem::take(in_builder);
         let builder = PipelineBuilder { builder };
-        let builder = Python::with_gil(move |py| {
-            let builder = PyCell::new(py, builder)?;
+        *in_builder = Python::with_gil(move |py| {
+            let builder = Bound::new(py, builder)?;
             self.sys.call_method1(py, "init", (builder.borrow_mut(),))?;
-            Ok::<_, nox_ecs::Error>(builder.replace(PipelineBuilder::default()))
+            let builder = std::mem::take(&mut builder.borrow_mut().builder);
+            Ok::<_, nox_ecs::Error>(builder)
         })?;
-        *in_builder = builder.builder;
         Ok(())
     }
 
@@ -34,12 +34,12 @@ impl System for PySystem {
     ) -> Result<(), nox_ecs::Error> {
         let builder = std::mem::take(in_builder);
         let builder = PipelineBuilder { builder };
-        let builder = Python::with_gil(move |py| {
-            let builder = PyCell::new(py, builder)?;
+        *in_builder = Python::with_gil(move |py| {
+            let builder = Bound::new(py, builder)?;
             self.sys.call_method1(py, "call", (builder.borrow_mut(),))?;
-            Ok::<_, nox_ecs::Error>(builder.replace(PipelineBuilder::default()))
+            let builder = std::mem::take(&mut builder.borrow_mut().builder);
+            Ok::<_, nox_ecs::Error>(builder)
         })?;
-        *in_builder = builder.builder;
         Ok(())
     }
 }

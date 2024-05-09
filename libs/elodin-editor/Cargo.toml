@@ -47,13 +47,6 @@ conduit.path = "../../libs/conduit"
 postcard.version = "1.0.8"
 itertools = "0.12.1"
 
-# python
-# pyo3.version = "0.20.0"
-# elodin-py.path = "../elodin-py"
-
-# thread priority
-# thread-priority = "0.13.1"
-
 # futures
 futures-lite = "2.0"
 

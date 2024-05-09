@@ -2,7 +2,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 import jax
 from typing import Any, Optional, Union, Tuple, ClassVar, List, Protocol, Annotated
-import numpy
 import polars as pl
 from elodin import Archetype
 
