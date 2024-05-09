@@ -6050,6 +6050,7 @@ dependencies = [
  "nox-ecs-macros",
  "numpy",
  "parking_lot",
+ "polars",
  "postcard",
  "pyo3",
  "pyo3-polars",

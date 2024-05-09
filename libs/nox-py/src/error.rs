@@ -26,6 +26,8 @@ pub enum Error {
     InvalidTimeStep(std::time::Duration),
     #[error("conduit error {0}")]
     Conduit(#[from] conduit::Error),
+    #[error("polars error {0}")]
+    Polars(#[from] polars::error::PolarsError),
 }
 
 impl From<Error> for PyErr {
