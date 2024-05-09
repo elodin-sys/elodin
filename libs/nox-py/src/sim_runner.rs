@@ -118,8 +118,10 @@ impl SimRunner {
         let build_dir_str = tmpdir.path().to_string_lossy().to_string();
         let args = vec![&path_str, "build", "--dir", &build_dir_str];
         Python::with_gil(|py| {
-            py.import("sys")?.setattr("argv", args)?;
-            py.run(&script, None, None)
+            py.import_bound("sys")?
+                .into_gil_ref()
+                .setattr("argv", args)?;
+            py.run_bound(&script, None, None)
         })?;
 
         let exec = nox_ecs::WorldExec::read_from_dir(tmpdir.path())?;
