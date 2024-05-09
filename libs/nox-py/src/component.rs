@@ -1,10 +1,9 @@
 use crate::*;
 
-use std::{collections::HashMap, ops::Deref};
+use std::collections::HashMap;
 
 use nox_ecs::conduit;
 use nox_ecs::conduit::TagValue;
-use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::types::PyList;
 
 #[derive(Clone)]
@@ -90,112 +89,95 @@ pub struct ComponentType {
     #[pyo3(get, set)]
     pub ty: PrimitiveType,
     #[pyo3(get, set)]
-    pub shape: Py<PyArray1<i64>>,
+    pub shape: Vec<i64>,
 }
 
 #[pymethods]
 impl ComponentType {
     #[new]
-    pub fn new(ty: PrimitiveType, shape: numpy::PyArrayLike1<i64>) -> Self {
-        let py_readonly: &PyReadonlyArray1<i64> = shape.deref();
-        let py_array: &PyArray1<i64> = py_readonly.deref();
-        let shape = py_array.to_owned();
+    pub fn new(ty: PrimitiveType, shape: Vec<i64>) -> Self {
         Self { ty, shape }
     }
 
     #[classattr]
     #[pyo3(name = "SpatialPosF64")]
-    pub fn spatial_pos_f64(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![7]).to_owned();
+    pub fn spatial_pos_f64() -> Self {
         Self {
             ty: PrimitiveType::F64,
-            shape,
+            shape: vec![7],
         }
     }
 
     #[classattr]
     #[pyo3(name = "SpatialMotionF64")]
-    pub fn spatial_motion_f64(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![6]).to_owned();
+    pub fn spatial_motion_f64() -> Self {
         Self {
             ty: PrimitiveType::F64,
-            shape,
+            shape: vec![6],
         }
     }
 
     #[classattr]
     #[pyo3(name = "U64")]
-    pub fn u64(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+    pub fn u64() -> Self {
         Self {
             ty: PrimitiveType::U64,
-            shape,
+            shape: vec![],
         }
     }
 
     #[classattr]
     #[pyo3(name = "F32")]
-    pub fn f32(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+    pub fn f32() -> Self {
         Self {
             ty: PrimitiveType::F32,
-            shape,
+            shape: vec![],
         }
     }
 
     #[classattr]
     #[pyo3(name = "F64")]
-    pub fn f64(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![]).to_owned();
+    pub fn f64() -> Self {
         Self {
             ty: PrimitiveType::F64,
-            shape,
+            shape: vec![],
         }
     }
 
     #[classattr]
     #[pyo3(name = "Edge")]
-    pub fn edge(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![2]).to_owned();
+    pub fn edge() -> Self {
         Self {
             ty: PrimitiveType::U64,
-            shape,
+            shape: vec![2],
         }
     }
 
     #[classattr]
     #[pyo3(name = "Quaternion")]
-    pub fn quaternion(py: Python<'_>) -> Self {
-        let shape = numpy::PyArray1::from_vec(py, vec![4]).to_owned();
+    pub fn quaternion() -> Self {
         Self {
             ty: PrimitiveType::F64,
-            shape,
+            shape: vec![4],
         }
     }
 }
 
 impl From<conduit::ComponentType> for ComponentType {
     fn from(val: conduit::ComponentType) -> Self {
-        Python::with_gil(|py| {
-            let shape = PyArray1::from_vec(py, val.shape.to_vec()).to_owned();
-            ComponentType {
-                ty: val.primitive_ty.into(),
-                shape,
-            }
-        })
+        ComponentType {
+            ty: val.primitive_ty.into(),
+            shape: val.shape.to_vec(),
+        }
     }
 }
 
 impl From<ComponentType> for conduit::ComponentType {
     fn from(val: ComponentType) -> Self {
-        Python::with_gil(|py| {
-            let shape = val.shape.as_ref(py);
-            let shape = shape.to_vec().unwrap().into();
-            conduit::ComponentType {
-                primitive_ty: val.ty.into(),
-                shape,
-            }
-        })
+        conduit::ComponentType {
+            primitive_ty: val.ty.into(),
+            shape: val.shape.into(),
+        }
     }
 }
 
@@ -290,7 +272,7 @@ impl ShapeIndexer {
                 .collect()
         };
         let py_list = Python::with_gil(|py| {
-            PyList::new(py, items.iter().map(|x| Py::new(py, x.clone()).unwrap())).into()
+            PyList::new_bound(py, items.iter().map(|x| Py::new(py, x.clone()).unwrap())).into()
         });
         ShapeIndexer {
             component_name,

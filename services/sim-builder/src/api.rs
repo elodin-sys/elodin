@@ -5,7 +5,7 @@ use std::time::Instant;
 use anyhow::Context;
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
 use pyo3::exceptions::PySystemExit;
-use pyo3::types::PyDict;
+use pyo3::types::{IntoPyDict, PyAnyMethods, PyDictMethods};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -122,8 +122,10 @@ async fn build(code: String) -> anyhow::Result<String> {
     let build_dir_str = artifact_dir.path().to_string_lossy().to_string();
     let args = vec!["code.py", "build", "--dir", &build_dir_str];
     pyo3::Python::with_gil(|py| {
-        py.import("sys")?.setattr("argv", args)?;
-        py.run(&code, None, None)
+        py.import_bound("sys")?
+            .into_gil_ref()
+            .setattr("argv", args)?;
+        py.run_bound(&code, None, None)
     })
     .context("python command failed")?;
     tracing::debug!(elapsed = ?start.elapsed(), "built artifacts");
@@ -156,10 +158,12 @@ async fn test(results_path: &Path) -> anyhow::Result<TestResp> {
     let json_report_file = report.clone();
     tokio::task::spawn_blocking(move || {
         pyo3::Python::with_gil(|py| {
-            let locals = PyDict::new(py);
-            locals.set_item("path", workdir)?;
-            locals.set_item("json_report_file", json_report_file)?;
-            locals.set_item("batch_results", batch_results)?;
+            let locals = &[
+                ("path", workdir),
+                ("json_report_file", json_report_file),
+                ("batch_results", batch_results),
+            ]
+            .into_py_dict_bound(py);
             let py_code = r#"import pytest
 import sys
 sys.path.append(path)
@@ -173,7 +177,7 @@ args = [
 ]
 retcode = pytest.main(args)
 "#;
-            py.run(py_code, None, Some(locals))?;
+            py.run_bound(py_code, None, Some(locals))?;
             let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
             // exit code 1: tests ran but some failed
             // exit code 5: no tests found
