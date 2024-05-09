@@ -69,7 +69,7 @@ def test_six_dof():
     exec = w.build(sys)
     exec.run(client)
     x = exec.column_array(Component.id(WorldPos))
-    assert (x == [0, 0, 0, 1, 1.0 / 60.0, 0.0, 0.0]).all()
+    assert (x == [0.0, 0.0, 0.0, 1.0, 1.0 / 60.0, 0.0, 0.0]).all()
 
 
 def test_graph():

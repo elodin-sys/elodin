@@ -1103,14 +1103,14 @@ pub struct WorldExec {
 
 impl WorldExec {
     pub fn new(world: SharedWorld, tick_exec: Exec, startup_exec: Option<Exec>) -> Self {
-        let mut history = History::default();
-        history.push_world(&world.host).unwrap();
-        Self {
+        let mut world = Self {
             world,
             tick_exec,
             startup_exec,
-            history: History::default(),
-        }
+            history: Default::default(),
+        };
+        world.push_world().unwrap();
+        world
     }
 
     pub fn start_compiling(&mut self, client: &Client) {
@@ -1136,7 +1136,13 @@ impl WorldExec {
         self.tick_exec.run(&mut self.world, client)?;
         self.world.copy_all_columns()?;
         self.world.host.tick += 1;
-        self.history.push_world(&self.world.host)?;
+        self.push_world()?;
+        Ok(())
+    }
+
+    fn push_world(&mut self) -> Result<(), Error> {
+        let world = self.world.host.to_polars()?;
+        self.history.worlds.push(world);
         Ok(())
     }
 
@@ -1224,6 +1230,10 @@ impl WorldExec {
         let world = SharedWorld::from_host(world);
         let world_exec = WorldExec::new(world, tick_exec, startup_exec);
         Ok(world_exec)
+    }
+
+    pub fn last_world(&self) -> &PolarsWorld {
+        self.history.worlds.last().unwrap()
     }
 }
 

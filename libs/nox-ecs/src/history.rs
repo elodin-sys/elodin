@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{polars::PolarsWorld, Error, World};
+use crate::{polars::PolarsWorld, Error};
 
 #[derive(Default, Debug, Clone)]
 pub struct History {
@@ -20,13 +20,6 @@ impl History {
     pub fn write_to_dir(&self, dir: impl AsRef<Path>) -> Result<(), Error> {
         let mut world = self.compact_to_world()?;
         world.write_to_dir(dir)?;
-        Ok(())
-    }
-
-    pub fn push_world(&mut self, host: &World) -> Result<(), Error> {
-        let mut world = host.to_polars()?;
-        world.add_tick()?;
-        self.worlds.push(world);
         Ok(())
     }
 }
