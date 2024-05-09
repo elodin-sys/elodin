@@ -13,6 +13,7 @@ fn main() {
         .derive_partialeq(true)
         .derive_default(true)
         .derive_debug(true)
+        .no_copy("(.*)Msg_C")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))

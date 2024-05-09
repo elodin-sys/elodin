@@ -1,77 +1,23 @@
 use paste::paste;
 use std::sync::Arc;
-use std::{fmt::Debug, mem::MaybeUninit};
-use thingbuf::recycling::DefaultRecycle;
-use thingbuf::Recycle;
 
 use crate::sys::*;
 
-// Create a pair of `Tx` and `Rx` channels
-pub fn pair<T: Clone + Default>() -> (Tx<T>, Rx<T>) {
-    let (tx, rx) = thingbuf::mpsc::channel(2);
-    (
-        Tx {
-            inner: Arc::new(tx),
-        },
-        Rx {
-            inner: Arc::new(rx),
-            last_msg: None,
-        },
-    )
-}
+/// `Mailbox` is a thread-safe container for a single message.
+///
+/// A spin lock is appropriate here because we can effectively guarantee that
+/// the lock will be held for a very short period of time (the duration of
+/// copying a message).
+#[derive(Default)]
+pub struct Mailbox<T>(spin::Mutex<T>);
 
-/// The send half of a channel
-pub struct Tx<T> {
-    inner: std::sync::Arc<thingbuf::mpsc::Sender<T>>,
-}
-
-impl<T> Clone for Tx<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<T: Default> Tx<T>
-where
-    DefaultRecycle: Recycle<T>,
-{
-    fn write(&self, msg: T) {
-        if self.inner.try_send(msg).is_err() {
-            tracing::warn!("bsk channel closed")
-        }
-    }
-}
-
-/// The receive half of a channel
-pub struct Rx<T> {
-    inner: Arc<thingbuf::mpsc::Receiver<T>>,
-    last_msg: Option<T>,
-}
-
-impl<T> Clone for Rx<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            last_msg: None,
-        }
-    }
-}
-
-impl<T: Clone + Debug + Default> Rx<T> {
-    /// Internal function used by macro to generate basilisk compat interface, hence the strange naming
-    fn is_linked(&self) -> bool {
-        !self.inner.is_closed()
+impl<T: Default + Clone> Mailbox<T> {
+    pub fn write(&self, val: T) {
+        *self.0.lock() = val;
     }
 
-    fn read(&mut self) -> Option<T> {
-        if let Ok(new_msg) = self.inner.try_recv() {
-            self.last_msg = Some(new_msg.clone());
-            Some(new_msg)
-        } else {
-            self.last_msg.clone()
-        }
+    pub fn read(&self) -> T {
+        self.0.lock().clone()
     }
 }
 
@@ -82,84 +28,32 @@ const CHANNEL_MSG_HEADER: MsgHeader = MsgHeader {
     moduleID: 0x2241,
 };
 
-/// A struct that is designed to be byte compatible with the `FooMsg_C` structs in Basilisk
-#[repr(C)]
-pub struct BskChannel<T> {
-    header: MsgHeader,
-    _payload: MaybeUninit<T>,
-    rx_ptr: *mut Rx<T>,
-    tx_ptr: *mut Tx<T>,
-}
+#[derive(Clone, Default)]
+pub struct BskChannel<T>(Arc<Mailbox<T>>);
 
-impl<T: Clone + Debug + Default> Clone for BskChannel<T> {
-    fn clone(&self) -> Self {
-        let tx = Box::new(self.tx().unwrap().clone());
-        let rx = Box::new(self.rx().unwrap().clone());
-        Self {
-            header: self.header,
-            _payload: MaybeUninit::zeroed(),
-            rx_ptr: Box::into_raw(rx),
-            tx_ptr: Box::into_raw(tx),
-        }
+impl<T> std::ops::Deref for BskChannel<T> {
+    type Target = Mailbox<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl<T: Clone + Debug + Default> BskChannel<T> {
+impl<T: Default + Clone> BskChannel<T> {
     pub fn pair() -> Self {
-        let (tx, rx) = crate::channel::pair();
-        BskChannel::new(tx, rx)
+        Self::default()
     }
 
-    pub fn new(tx: Tx<T>, rx: Rx<T>) -> Self {
-        let tx = Box::new(tx);
-        let rx = Box::new(rx);
-        BskChannel {
-            header: CHANNEL_MSG_HEADER,
-            _payload: MaybeUninit::zeroed(),
-            rx_ptr: Box::into_raw(rx),
-            tx_ptr: Box::into_raw(tx),
-        }
+    fn into_raw(self) -> *const Mailbox<T> {
+        Arc::into_raw(self.0)
     }
 
-    fn validate_header(&self) -> Option<()> {
-        if self.header != CHANNEL_MSG_HEADER {
-            tracing::warn!("invalid bsk channel");
-            return None;
-        }
-        Some(())
-    }
-
-    fn rx_mut(&mut self) -> Option<&mut Rx<T>> {
-        self.validate_header()?;
-        let rx = unsafe { &mut *self.rx_ptr };
-        Some(rx)
-    }
-
-    pub fn rx(&self) -> Option<&Rx<T>> {
-        self.validate_header()?;
-        let rx = unsafe { &*self.rx_ptr };
-        Some(rx)
-    }
-
-    pub fn tx(&self) -> Option<&Tx<T>> {
-        self.validate_header()?;
-        let tx = unsafe { &*self.tx_ptr };
-        Some(tx)
-    }
-
-    pub fn read(&mut self) -> Option<T> {
-        let rx = self.rx_mut()?;
-        rx.read()
-    }
-
-    pub fn write(&self, msg: T) -> Option<()> {
-        let tx = self.tx()?;
-        tx.write(msg);
-        Some(())
-    }
-
-    fn is_linked(&self) -> bool {
-        self.rx().map(|rx| rx.is_linked()).unwrap_or_default()
+    /// # Safety
+    ///
+    /// This function is safe to call as long as the pointer is valid.
+    /// The raw pointer must have been previously returned by a call to `into_raw`.
+    pub unsafe fn from_raw(ptr: *mut Mailbox<T>) -> Self {
+        Self(Arc::from_raw(ptr))
     }
 }
 
@@ -167,7 +61,12 @@ macro_rules! impl_basilisk_channel {
     ($msg_name:tt, $payload_name:tt) => {
         impl From<BskChannel<$payload_name>> for $msg_name {
             fn from(val: BskChannel<$payload_name>) -> $msg_name {
-                unsafe { std::mem::transmute(val) }
+                $msg_name {
+                    header: CHANNEL_MSG_HEADER,
+                    payload: $payload_name::default(),
+                    payloadPointer: val.into_raw() as _,
+                    headerPointer: std::ptr::null_mut(),
+                }
             }
         }
 
@@ -183,15 +82,16 @@ macro_rules! impl_basilisk_channel {
                 _module_id: i64,
                 _call_time: u64,
             ) {
-                let channel: *mut BskChannel<$payload_name> =
-                    unsafe { std::mem::transmute(channel) };
-                let channel: &mut BskChannel<$payload_name> = unsafe { &mut *channel };
-                if data.is_null() {
-                    tracing::warn!("watcha doin passing null ptrs to write, you know better than that");
+                let channel = channel.as_ref().unwrap();
+                if channel.header != CHANNEL_MSG_HEADER {
                     return;
                 }
-                let data = unsafe { &*data };
-                channel.write(data.clone());
+                let Some(data) = data.as_ref() else {
+                    tracing::warn!("watcha doin passing null ptrs to write, you know better than that");
+                    return;
+                };
+                let mailbox = channel.payloadPointer as *const Mailbox<$payload_name>;
+                mailbox.as_ref().unwrap().write(data.clone());
             }
         }
 
@@ -202,10 +102,12 @@ macro_rules! impl_basilisk_channel {
             /// Don't call this yourself, Basilisk will call it for you
             #[no_mangle]
             pub unsafe extern "C" fn [<$msg_name _read>](channel: *mut $msg_name) -> $payload_name {
-                let channel: *mut BskChannel<$payload_name> =
-                    unsafe { std::mem::transmute(channel) };
-                let channel: &mut BskChannel<$payload_name> = unsafe { &mut *channel };
-                channel.read().unwrap_or_default()
+                let channel = channel.as_ref().unwrap();
+                if channel.header != CHANNEL_MSG_HEADER {
+                    return $payload_name::default();
+                }
+                let mailbox = channel.payloadPointer as *const Mailbox<$payload_name>;
+                mailbox.as_ref().unwrap().read()
             }
         }
 
@@ -216,10 +118,7 @@ macro_rules! impl_basilisk_channel {
             /// Don't call this yourself, Basilisk will call it for you
             #[no_mangle]
             pub unsafe extern "C" fn [<$msg_name _isLinked>](channel: *mut $msg_name) -> bool {
-                let channel: *mut BskChannel<$payload_name> =
-                    unsafe { std::mem::transmute(channel) };
-                let channel: &mut BskChannel<$payload_name> = unsafe { &mut *channel };
-                channel.is_linked()
+                channel.as_ref().is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
             }
         }
 

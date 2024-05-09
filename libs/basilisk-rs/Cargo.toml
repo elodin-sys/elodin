@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # queue
-thingbuf = "0.1.6"
+spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
 
 # logs
 tracing = "0.1.40"

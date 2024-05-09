@@ -1024,7 +1024,7 @@ dependencies = [
  "bindgen 0.65.1",
  "cc",
  "paste",
- "thingbuf",
+ "spin 0.9.8",
  "tracing",
 ]
 
@@ -9412,16 +9412,6 @@ name = "textwrap"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23d434d3f8967a09480fb04132ebe0a3e088c173e6d0ee7897abbdf4eab0f8b9"
-
-[[package]]
-name = "thingbuf"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "662b54ef6f7b4e71f683dadc787bbb2d8e8ef2f91b682ebed3164a5a7abca905"
-dependencies = [
- "parking_lot",
- "pin-project",
-]
 
 [[package]]
 name = "thiserror"
