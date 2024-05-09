@@ -1,5 +1,4 @@
 use arrow::array::ArrayData;
-use arrow::ffi::FFI_ArrowArray;
 use conduit::{ComponentId, ComponentType, EntityId, PrimitiveTy};
 use polars::prelude::*;
 use polars::{frame::DataFrame, series::Series};
@@ -329,31 +328,13 @@ pub trait SeriesExt {
 
 impl SeriesExt for Series {
     fn to_bytes(&self) -> Vec<u8> {
-        // safety: we ensure that we only use the
-        // returned `ArrayData` while `Series` is in
-        // scope, so this is safe
-        let data = unsafe { series_to_array_data(self) };
         let mut out = Vec::default();
-        recurse_array_data(&data, &mut out);
+        for chunk in self.chunks() {
+            let data = polars_arrow::array::to_data(chunk.as_ref());
+            recurse_array_data(&data, &mut out);
+        }
         out
     }
-}
-
-unsafe fn series_to_array_data(series: &Series) -> ArrayData {
-    let array = series.to_arrow(0, false);
-    let field = series.field();
-    let field = field.to_arrow(false);
-    let schema = polars_arrow::ffi::export_field_to_c(&field);
-    // safety: these two types have identical layouts
-    // as they are both guarenteed to match the c-ffi layout
-    let schema = unsafe { std::mem::transmute(schema) };
-    let array = polars_arrow::ffi::export_array_to_c(array);
-    // safety: these two types have identical layouts
-    // as they are both guarenteed to match the c-ffi layout
-    let array: FFI_ArrowArray = unsafe { std::mem::transmute(array) };
-    // safety: this function requires the user ensure that `Series`
-    // is alive while `ArrayData` is accessible
-    unsafe { arrow::ffi::from_ffi(array, &schema) }.expect("polars arrow layout disagreement")
 }
 
 pub fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
