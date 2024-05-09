@@ -167,7 +167,7 @@ pub fn read_batch_results(path: String) -> Result<PyDataFrame, Error> {
 }
 
 #[pymodule]
-pub fn elodin(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
     m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;

@@ -50,7 +50,7 @@ impl SpatialTransform {
     }
     #[staticmethod]
     fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
-        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+        let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
             jax
@@ -137,7 +137,7 @@ impl SpatialMotion {
     }
     #[staticmethod]
     fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
-        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+        let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
             jax
@@ -222,7 +222,7 @@ impl SpatialForce {
 
     #[staticmethod]
     fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
-        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+        let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
             jax
@@ -296,7 +296,7 @@ impl Quaternion {
 
     #[staticmethod]
     fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
-        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+        let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
             jax
@@ -400,7 +400,7 @@ impl SpatialInertia {
 
     #[staticmethod]
     fn unflatten(py: Python<'_>, _aux: PyObject, jax: PyObject) -> pyo3::PyResult<Self> {
-        let jax = if let Ok(tuple) = jax.downcast::<PyTuple>(py) {
+        let jax = if let Ok(tuple) = jax.downcast_bound::<PyTuple>(py) {
             tuple.get_item(0)?.into()
         } else {
             jax

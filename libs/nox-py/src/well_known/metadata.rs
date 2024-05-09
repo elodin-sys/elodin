@@ -71,7 +71,7 @@ impl Metadata {
             .getattr(py, intern!(py, "__metadata__"))
             .and_then(|metadata| {
                 metadata
-                    .downcast::<PySequence>(py)
+                    .downcast_bound::<PySequence>(py)
                     .map_err(PyErr::from)
                     .and_then(|seq| seq.get_item(0))
                     .and_then(|item| item.extract::<Component>())
@@ -83,7 +83,7 @@ impl Metadata {
                 .and_then(|origin| origin.getattr(py, intern!(py, "__metadata__")))
                 .and_then(|metadata| {
                     metadata
-                        .downcast::<PySequence>(py)
+                        .downcast_bound::<PySequence>(py)
                         .map_err(PyErr::from)
                         .and_then(|seq| seq.get_item(0))
                         .and_then(|item| item.extract::<Component>())

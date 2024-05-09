@@ -1,5 +1,6 @@
 use pyo3::{
     exceptions::PyValueError,
+    prelude::*,
     types::{PyDict, PyTuple},
     PyObject, PyResult, Python,
 };
@@ -26,8 +27,8 @@ pub struct JaxTracer {
 impl JaxTracer {
     pub fn new() -> Self {
         Python::with_gil(|py| {
-            let lax = py.import("jax.lax").unwrap().into();
-            let jnp = py.import("jax.numpy").unwrap().into();
+            let lax = py.import_bound("jax.lax").unwrap().into();
+            let jnp = py.import_bound("jax.numpy").unwrap().into();
             Self {
                 lax,
                 jnp,
@@ -271,8 +272,8 @@ impl JaxNoxprFn {
     fn __call__(
         &mut self,
         _py: Python<'_>,
-        args: &PyTuple,
-        kwargs: Option<&PyDict>,
+        args: Bound<PyTuple>,
+        kwargs: Option<Bound<PyDict>>,
     ) -> PyResult<PyObject> {
         for (i, arg) in self.inner.args.iter().enumerate() {
             let a = args.get_item(i)?;
@@ -301,8 +302,8 @@ fn literal_to_arr<T: ArrayElement + numpy::Element + bytemuck::Pod>(
         .map(|x| *x as usize)
         .collect::<SmallVec<[usize; 4]>>();
     Python::with_gil(|py| {
-        let arr = numpy::PyArray::from_slice(py, buf);
-        let arr = arr.reshape(&shape[..]).unwrap();
+        let arr = numpy::PyArray::from_slice_bound(py, buf);
+        let arr = arr.into_gil_ref().reshape(&shape[..]).unwrap();
         let arr = jnp.call_method1(py, "array", (&arr,))?;
         Ok(arr)
     })

@@ -17,11 +17,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-polars = "0.38"
-pyo3.version = "0.20.0"
+polars = "0.39"
+pyo3.version = "0.21.0"
 pyo3.features = ["abi3-py310"]
-pyo3-polars = "0.12.0"
-numpy.version = "0.20"
+pyo3-polars = "0.13.0"
+numpy.version = "0.21"
 
 # nox
 nox-ecs.path = "../nox-ecs"

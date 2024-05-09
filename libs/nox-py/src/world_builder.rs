@@ -196,7 +196,7 @@ impl WorldBuilder {
             .try_init();
 
         let pytesting = py
-            .import("elodin")?
+            .import_bound("elodin")?
             .getattr("_called_from_test")
             .unwrap()
             .extract::<bool>()?;
@@ -206,7 +206,7 @@ impl WorldBuilder {
         }
 
         let args = py
-            .import("sys")?
+            .import_bound("sys")?
             .getattr("argv")?
             .extract::<Vec<String>>()?;
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
@@ -280,23 +280,22 @@ def build_expr(builder, sys):
             }
         }
 
-        let fun: Py<PyAny> = PyModule::from_code(py, py_code, "", "")?
+        let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
             .getattr("build_expr")?
             .into();
-        let builder = PyCell::new(py, builder)?;
+        let builder = Bound::new(py, builder)?;
         let comp = fun
             .call1(py, (builder.borrow_mut(), sys))?
             .extract::<PyObject>(py)?;
         let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
         let comp = comp
-            .downcast::<PyBytes>(py)
+            .downcast_bound::<PyBytes>(py)
             .map_err(|_| Error::HloModuleNotBytes)?;
         let comp_bytes = comp.as_bytes();
         let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         tracing::debug!(duration = ?start.elapsed(), "generated HLO");
-        let builder = builder.replace(PipelineBuilder::default());
-        let builder = builder.builder;
+        let builder = std::mem::take(&mut builder.borrow_mut().builder);
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
         let time_step = time_step.map(Duration::from_secs_f64);
         let world = SharedWorld {
