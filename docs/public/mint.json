@@ -24,6 +24,7 @@
     "name": "Dashboard",
     "url": "https://app.elodin.systems"
   },
+  "versions": ["v0.3.20"],
   "navigation": [
     {
       "group": "Get Started",
@@ -31,7 +32,8 @@
     },
     {
       "group": "Reference",
-      "pages": ["reference/overview", "reference/python-api"]
+      "pages": ["reference/overview", "reference/python-api"],
+      "version": "v0.3.20"
     },
     {
       "group": "The Tao of Elodin",
@@ -39,7 +41,7 @@
     },
     {
       "group": "Updates",
-      "pages": ["updates/changelog"]
+      "pages": ["updates/monthly-updates", "updates/changelog"]
     }
   ],
   "feedback": {
