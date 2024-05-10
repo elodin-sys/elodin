@@ -351,12 +351,8 @@ pub struct PolarsColumnRef<'a> {
     buf: &'a Series,
 }
 
-impl<'a> ColumnStore for &'a PolarsWorld {
+impl ColumnStore for PolarsWorld {
     type Column<'b> = PolarsColumnRef<'b> where Self: 'b;
-
-    fn transfer_column(&mut self, _id: ComponentId) -> Result<(), Error> {
-        Ok(())
-    }
 
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
         let archetype = self
