@@ -1305,7 +1305,6 @@ pub trait ColumnStore {
     type Column<'a>: ColumnRef
     where
         Self: 'a;
-    fn transfer_column(&mut self, id: ComponentId) -> Result<(), Error>;
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error>;
     fn assets(&self) -> Option<&AssetStore>;
     fn tick(&self) -> u64;
@@ -1313,11 +1312,6 @@ pub trait ColumnStore {
 
 impl ColumnStore for WorldExec {
     type Column<'a> = HostColumnRef<'a>;
-
-    fn transfer_column(&mut self, id: ComponentId) -> Result<(), Error> {
-        let _ = WorldExec::column(self, id)?;
-        Ok(())
-    }
 
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
         self.world
