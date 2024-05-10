@@ -79,18 +79,18 @@ impl ConduitExec {
                 send(
                     &mut self.subscriptions,
                     &mut self.connections,
-                    &mut self.exec,
+                    &self.exec,
                     max_tick,
                 );
             }
             State::Replaying { index } => {
-                let Some(mut polars) = &self.exec.history.worlds.get(index) else {
+                let Some(polars) = self.exec.history.worlds.get(index) else {
                     return;
                 };
                 send(
                     &mut self.subscriptions,
                     &mut self.connections,
-                    &mut polars,
+                    polars,
                     self.exec.history.worlds.len(),
                 );
             }
@@ -211,7 +211,7 @@ impl ConduitExec {
 fn send(
     subscriptions: &mut Vec<Subscription>,
     connections: &mut Vec<Connection>,
-    exec: &mut impl ColumnStore,
+    exec: &impl ColumnStore,
     max_tick: usize,
 ) {
     // drop connections and subscriptions if the connection is closed
@@ -237,9 +237,8 @@ fn send(
     });
 }
 
-fn send_sub(exec: &mut impl ColumnStore, sub: &mut Subscription) -> Result<(), Error> {
+fn send_sub(exec: &impl ColumnStore, sub: &mut Subscription) -> Result<(), Error> {
     let comp_id = sub.component_id;
-    exec.transfer_column(comp_id)?;
     let col = exec.column(comp_id)?;
     if col.is_asset() {
         let Some(assets) = exec.assets() else {
