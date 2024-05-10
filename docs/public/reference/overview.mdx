@@ -10,7 +10,7 @@ An Elodin simulation consists of:
 - **World:** World is a container of all the entities in the simulation. See [ECS Data Model](#ecs-data-model) for more context on entities.
 - **Flight Software (FSW):** Flight software is a set of processes that run independent of the simulation. Using conduit, FSW subscribes to relevant simulation data and sends control commands back to the simulation.
 
-![Simulation Architecture](reference/architecture.svg)
+![Simulation Architecture](/reference/architecture.svg)
 
 ## ECS Data Model
 
@@ -18,8 +18,8 @@ Elodin uses the Entity Component System (ECS) pattern to manage simulation data.
 
 Archetypes are a unique combination of components that allow for efficient memory management and data access patterns. Entities are spawned with a list of archetypes rather than individual components.
 
-![Data Model](reference/data_model.svg)
+![Data Model](/reference/data_model.svg)
 
 Systems are simply functions that operate on component data.
 
-![System](reference/system.svg)
+![System](/reference/system.svg)

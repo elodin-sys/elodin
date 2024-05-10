@@ -101,3 +101,11 @@ promote tag:
   gsutil -m cp -r "$dir/*" "gs://elodin-releases/{{tag}}/"
   gsutil -m cp -r "gs://elodin-releases/{{tag}}/*" "gs://elodin-releases/latest/"
   twine upload "$dir/*.whl"
+
+public-changelog:
+  #!/usr/bin/env sh
+  cd {{justfile_directory()}}
+  ./scripts/public-changelog.sh CHANGELOG.md > docs/public/updates/changelog.mdx
+  old_version=$(jq -r '.versions[0]' docs/public/mint.json)
+  new_version=$(git describe --tags --abbrev=0)
+  sed -i "" "s/$old_version/$new_version/g" docs/public/mint.json
