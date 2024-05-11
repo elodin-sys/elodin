@@ -3,6 +3,99 @@ title: Python API
 icon: python
 ---
 
+## Components
+
+Components are containers of data that is associated with an entity. See [ECS Data Model](/reference/overview#ecs-data-model) for more context on entities and components.
+
+To define a new component, add [elodin.Component] as metadata to a base class using [typing.Annotated]. The base class can be [jax.Array] or some other container of array data. This is an example of a component that annotates [jax.Array]:
+
+```python
+import elodin as el
+
+Wind = typing.Annotated[
+    jax.Array,
+    el.Component(
+        "wind",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
+]
+```
+
+### _class_ `elodin.Component`
+
+A container of component metadata.
+
+- `__init__(name, type = None, asset = False, metadata = {})` -> [elodin.Component]
+
+    Create a new component with:
+    - Unique name (e.g. "world_pos, "inertia").
+    - Component type information (via [elodin.ComponentType]). This is optional if the base class already provides component type information as part of `__metadata__`, which is the case for [elodin.Quaternion], [elodin.Edge], and all [spatial vector algebra](#spatial-vector-algebra) classes.
+    - Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).
+    - Other metadata that is optional (e.g. description, units, labels, etc.).
+
+    ```python
+    import elodin as el
+
+    el.Component(
+        "wind",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"element_names": "x,y,z"},
+    ),
+    ```
+
+    The above example defines a "wind" component that is a 3D vector of `float64` values. The "element_names" entry is an example of optional metadata. It specifies the labels for each element of the vector that are displayed in the component inspector.
+
+### _class_ `elodin.ComponentType`
+
+`ComponentType` describes the shape and data type of a component. The shape is a tuple of integers that specifies the size of each dimension (e.g. `()` for scalars, `(3,)` for 3D vectors). The data type is an [elodin.PrimitiveType].
+
+- `__init__(dtype, shape)` -> [elodin.ComponentType]
+
+    Create a component type from a data type and shape.
+
+### _class_ `elodin.Edge`
+
+An edge is a relationship between two entities. See [elodin.GraphQuery] for information on how to use edges in graph queries.
+
+- `__init__(left, right)` -> [elodin.Edge]
+
+    Create an edge between two entities given their unique ids.
+
+## Archetypes
+
+An archetype is a combination of components with a unique name. To define a new archetype, create a subclass of `elodin.Archetype` with the desired components as fields. Here is an example of an archetype for a kalman filter:
+
+<Note>
+The [@dataclass](https://docs.python.org/3/library/dataclasses.html) decorator can be used to automatically generate `__init__()`, but it is not required.
+</Note>
+
+```python
+import elodin as el
+from dataclasses import dataclass
+
+@dataclass
+class KalmanFilter(el.Archetype):
+    p: P
+    att_est: AttEst
+    ang_vel_est: AngVelEst
+    bias_est: BiasEst
+```
+
+The archetype can then be used to attach components to entities:
+
+```python
+world.insert(
+    satellite,
+    KalmanFilter(
+        p=np.identity(6),
+        att_est=el.Quaternion.identity(),
+        ang_vel_est=np.zeros(3),
+        bias_est=np.zeros(3),
+    ),
+)
+```
+
 ## Systems
 
 Systems are the building blocks of simulation; they are functions that operate on a set of input components and produce a set of output components. Elodin provides decorators that allow for systems to be easily defined from functions.
@@ -36,7 +129,7 @@ def apply_wind(
 Graph queries cannot be used with `@elodin.map`. Use `@elodin.system` instead.
 </Note>
 
-This is a higher-level API for defining a system that reduces the boilerplate of `@elodin.system` by unpacking the input and output queries into individual components, and wrapping the body of the function in a `query.map(ret_ty, ...)` call. It is useful for systems with simple data flow patterns. Some examples of `@elodin.map` are:
+This is a higher-level API for defining a system that reduces the boilerplate of `@elodin.system` by unpacking the input and output queries into individual components, and wrapping the body of the function in a `query.map(ret_type, ...)` call. It is useful for systems with simple data flow patterns. Some examples of `@elodin.map` are:
 
 ```python
 import elodin as el
@@ -65,13 +158,13 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     )
 ```
 
-### `elodin.Query`
+### _class_ `elodin.Query`
 
 `Query` is the primary mechanism for accessing data in Elodin. It is a view into the world state that is filtered by the components specified in the query. Only entities that have been spawned with all of the query's components will be selected for processing. For example, the query `Query[WorldPos, Inertia]` would only select entities that have both a `WorldPos` and an `Inertia` component (typically via the `Body` [archetype](#archetypes)).
 
-- `map(ret_ty, map_fn)` -> [elodin.Query]
+- `map(ret_type, map_fn)` -> [elodin.Query]
 
-    Apply a function `map_fn` to the query's components and return a new query with the specified `ret_ty` return type. `map_fn` should be a function that takes the query's components as arguments and returns a single value of type `ret_ty`.
+    Apply a function `map_fn` to the query's components and return a new query with the specified `ret_type` return type. `map_fn` should be a function that takes the query's components as arguments and returns a single value of type `ret_type`.
 
     ```python
     import elodin as el
@@ -84,10 +177,10 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
         )
     ```
 
-    In this example, `ret_ty` is `el.Force` and `map_fn` is a lambda function with the signature `(el.Force, el.Inertia) -> el.Force`.
+    In this example, `ret_type` is `el.Force` and `map_fn` is a lambda function with the signature `(el.Force, el.Inertia) -> el.Force`.
 
 
-    To return multiple components as output, `ret_ty` must be a tuple:
+    To return multiple components as output, `ret_type` must be a tuple:
     ```python
     import elodin as el
 
@@ -96,7 +189,43 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
         return query.map(tuple[C, D], lambda a: ...)
     ```
 
+### _class_ `elodin.GraphQuery`
+
+`GraphQuery` is a special type of query for operating on edges in an entity graph. [Edges](#class-elodin-edge) represent relationships between entities and are fundamental for modeling physics systems such as gravity.
+
+A `GraphQuery` requires exactly one type argument, which must be an annotated [elodin.Edge] component. For example, `GraphQuery[GravityEdge]` is a valid graph query iff `GravityEdge` is a component with `Edge` as the base class:
+
+```python
+GravityEdge = typing.Annotated[elodin.Edge, elodin.Component("gravity_edge")]
+```
+
+- `edge_fold(left_query, right_query, ret_type, init_val, fold_fn)` -> [elodin.Query]
+
+    For each edge, query the left and right entity components using `left_query` and `right_query`, respectively. Then, apply the `fold_fn` function to those input components to compute the `ret_type` output component(s).
+
+    <Note>
+    The `ret_type` component(s) must belong to the **left** entity of the edge.
+    </Note>
+
+    A single left entity may have edges to multiple right entities, but it can only hold a single value for each `ret_type` component. So, the `fold_fn` computations for each entity's edges must be accumulated into a single final value. To carry the intermediate results, `fold_fn` takes an "accumulator" value as the first argument. Its output is set as the accumulator value for the next iteration. `init_val` is the initial value of the accumulator.
+
+    <Note>
+    `edge_fold` makes no guarantees about the order in which edges are processed. For associative operators like `+`, the order the elements are combined in is not important, but for non-associative operators like `-`, the order will affect the final result.
+    </Note>
+
+    See the [Three-Body Orbit Tutorial](/tutorial/3-body) for a practical example of using `edge_fold` to compute gravitational forces between entities.
+
 ## Primitives
+
+### _class_ `elodin.PrimitiveType`
+
+- `elodin.PrimitiveType.F64` -> [elodin.PrimitiveType]
+
+    A constant representing the 64-bit floating point data type.
+
+- `elodin.PrimitiveType.U64` -> [elodin.PrimitiveType]
+
+    A constant representing the 64-bit unsigned integer data type.
 
 ### _class_ `elodin.Quaternion`
 
@@ -242,10 +371,15 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
     Get the inertia tensor diagonal of the spatial inertia with shape (3,).
 
 [Components]: #components
+[elodin.Component]: #class-elodin-component
+[elodin.ComponentType]: #class-elodin-componenttype
+[elodin.Edge]: #class-elodin-edge
+[typing.Annotated]: https://docs.python.org/3/library/typing.html#typing.Annotated
 
-[elodin.Query]: #elodin-query
-[elodin.GraphQuery]: #elodin-graphquery
+[elodin.Query]: #class-elodin-query
+[elodin.GraphQuery]: #class-elodin-graphquery
 
+[elodin.PrimitiveType]: #class-elodin-primitivetype
 [elodin.Quaternion]: #class-elodin-quaternion
 [elodin.SpatialTransform]: #class-elodin-spatialtransform
 [elodin.SpatialMotion]: #class-elodin-spatialmotion
