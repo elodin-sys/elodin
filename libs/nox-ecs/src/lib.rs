@@ -6,7 +6,6 @@ use conduit::{Asset, ComponentId, ComponentType, ComponentValue, EntityId, Metad
 use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
-use once_cell::sync::OnceCell;
 use polars::PolarsWorld;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
@@ -980,12 +979,10 @@ impl Exec {
     }
 
     fn run(&mut self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
-        world.clear_cache();
-        world.load_dirty_components(client)?;
-        let client_world = world.copy_to_client(client)?;
         let mut buffers = BufferArgsRef::default().untuple_result(true);
         for id in &self.metadata.arg_ids {
-            let col = client_world
+            let col = world
+                .client
                 .column_by_id(*id)
                 .ok_or(Error::ComponentNotFound)?;
             buffers.push(col.column);
@@ -995,8 +992,7 @@ impl Exec {
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
             let col = world
                 .client
-                .get_mut()
-                .and_then(|c| c.column_by_id_mut(*comp_id))
+                .column_by_id_mut(*comp_id)
                 .ok_or(Error::ComponentNotFound)?;
             *col.column = buf;
         }
@@ -1024,42 +1020,52 @@ impl Exec {
 
 #[derive(Default)]
 pub struct SharedWorld {
-    pub host: World,
-    pub client: OnceCell<World<ClientStore>>,
-    pub loaded_components: HashSet<ComponentId>,
-    pub dirty_components: HashSet<ComponentId>,
+    host: World,
+    client: World<ClientStore>,
+    dirty_components: HashSet<ComponentId>,
 }
 
 impl SharedWorld {
     pub fn from_host(host: World) -> Self {
+        let archetypes = host
+            .archetypes
+            .iter()
+            .map(|(id, table)| {
+                let columns = table
+                    .columns
+                    .keys()
+                    .map(|id| (*id, PjRtBuffer::default()))
+                    .collect::<BTreeMap<_, _>>();
+                let table = Table::<ClientStore> {
+                    columns,
+                    entity_buffer: PjRtBuffer::default(),
+                };
+                (*id, table)
+            })
+            .collect();
+        let client = World {
+            archetypes,
+            component_map: host.component_map.clone(),
+            assets: AssetStore::default(),
+            tick: host.tick,
+            entity_len: host.entity_len,
+        };
+        let dirty_components = host.component_map.keys().copied().collect();
         SharedWorld {
             host,
-            ..Default::default()
+            client,
+            dirty_components,
         }
     }
 
     fn fork(&self) -> Self {
-        Self {
-            host: self.host.clone(),
-            ..Default::default()
-        }
+        Self::from_host(self.host.clone())
     }
 
-    fn copy_to_client(&self, client: &Client) -> Result<&World<ClientStore>, Error> {
-        self.client
-            .get_or_try_init(|| self.host.copy_to_client(client))
-    }
-
-    fn clear_cache(&mut self) {
-        self.loaded_components.clear();
-    }
-
-    fn load_dirty_components(&mut self, client: &Client) -> Result<(), Error> {
-        let Some(client_world) = self.client.get_mut() else {
-            return Ok(());
-        };
+    fn copy_to_client(&mut self, client: &Client) -> Result<(), Error> {
         for id in self.dirty_components.drain() {
-            let client_column = client_world
+            let client_column = self
+                .client
                 .column_by_id_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
             let host_column = self
@@ -1071,12 +1077,10 @@ impl SharedWorld {
         Ok(())
     }
 
-    fn copy_all_columns(&mut self) -> Result<(), Error> {
-        let Some(client_world) = self.client.get_mut() else {
-            return Ok(());
-        };
+    fn copy_to_host(&mut self) -> Result<(), Error> {
         for (id, host_table) in &mut self.host.archetypes {
-            let client_table = client_world
+            let client_table = self
+                .client
                 .archetypes
                 .get_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
@@ -1087,7 +1091,6 @@ impl SharedWorld {
             {
                 let literal = client.to_literal_sync()?;
                 host.buf.copy_from_slice(literal.raw_buf());
-                self.loaded_components.insert(host.metadata.component_id());
             }
         }
         Ok(())
@@ -1130,11 +1133,12 @@ impl WorldExec {
     }
 
     pub fn run(&mut self, client: &Client) -> Result<(), Error> {
+        self.world.copy_to_client(client)?;
         if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.world, client)?;
         }
         self.tick_exec.run(&mut self.world, client)?;
-        self.world.copy_all_columns()?;
+        self.world.copy_to_host()?;
         self.world.host.tick += 1;
         self.push_world()?;
         Ok(())
@@ -1163,44 +1167,12 @@ impl WorldExec {
     }
 
     pub fn column_mut(&mut self, component_id: ComponentId) -> Result<ColumnRefMut<'_>, Error> {
-        if !self.world.loaded_components.contains(&component_id) {
-            if let Some(client_world) = self.world.client.get() {
-                self.world
-                    .host
-                    .load_column_from_client(component_id, client_world)?;
-            }
-        }
         self.world
             .host
             .column_by_id_mut(component_id)
             .inspect(|_| {
                 self.world.dirty_components.insert(component_id);
             })
-            .ok_or(Error::ComponentNotFound)
-    }
-
-    pub fn column(&mut self, component_id: ComponentId) -> Result<HostColumnRef<'_>, Error> {
-        if !self.world.loaded_components.contains(&component_id) {
-            if let Some(client_world) = self.world.client.get() {
-                self.world
-                    .host
-                    .load_column_from_client(component_id, client_world)?;
-            }
-            self.world.loaded_components.insert(component_id);
-        }
-        self.world
-            .host
-            .column_by_id(component_id)
-            .ok_or(Error::ComponentNotFound)
-    }
-
-    pub fn cached_column(&self, component_id: ComponentId) -> Result<HostColumnRef<'_>, Error> {
-        if !self.world.loaded_components.contains(&component_id) {
-            return Err(Error::ComponentNotFound);
-        }
-        self.world
-            .host
-            .column_by_id(component_id)
             .ok_or(Error::ComponentNotFound)
     }
 
@@ -1348,7 +1320,10 @@ impl ColumnStore for WorldExec {
     }
 
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
-        self.cached_column(id)
+        self.world
+            .host
+            .column_by_id(id)
+            .ok_or(Error::ComponentNotFound)
     }
 
     fn assets(&self) -> Option<&AssetStore> {
