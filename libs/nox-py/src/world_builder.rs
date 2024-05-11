@@ -298,10 +298,7 @@ def build_expr(builder, sys):
         let builder = std::mem::take(&mut builder.borrow_mut().builder);
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
         let time_step = time_step.map(Duration::from_secs_f64);
-        let world = SharedWorld {
-            host: builder.world,
-            ..Default::default()
-        };
+        let world = SharedWorld::from_host(builder.world);
         let metadata = nox_ecs::ExecMetadata {
             time_step,
             arg_ids: builder.param_ids,
