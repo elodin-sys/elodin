@@ -74,5 +74,5 @@ fn main() {
         .build()
         .unwrap();
     let client = nox::Client::cpu().unwrap();
-    spawn_tcp_server("0.0.0.0:2240".parse().unwrap(), exec, &client, || false).unwrap();
+    spawn_tcp_server("0.0.0.0:2240".parse().unwrap(), exec, client, || false).unwrap();
 }
