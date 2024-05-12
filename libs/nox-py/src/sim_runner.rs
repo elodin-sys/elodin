@@ -1,6 +1,6 @@
 use clap::Parser;
 use conduit::client::MsgPair;
-use nox_ecs::{ConduitExec, WorldExec};
+use nox_ecs::{Compiled, ConduitExec, WorldExec};
 use pyo3::Python;
 use std::{
     net::SocketAddr,
@@ -77,19 +77,18 @@ fn eprint_err<E: std::fmt::Debug>(err: &E) {
 
 #[derive(Clone)]
 struct SimRunner {
-    exec_tx: flume::Sender<WorldExec>,
+    exec_tx: flume::Sender<WorldExec<Compiled>>,
 }
 
 impl SimRunner {
     fn new(server_rx: flume::Receiver<MsgPair>) -> Self {
         let (exec_tx, exec_rx) = flume::bounded(1);
         std::thread::spawn(move || -> anyhow::Result<()> {
-            let client = nox_ecs::nox::Client::cpu()?;
-            let exec: WorldExec = exec_rx.recv()?;
+            let exec: WorldExec<Compiled> = exec_rx.recv()?;
             let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
             loop {
                 let start = Instant::now();
-                if let Err(err) = conduit_exec.run(&client) {
+                if let Err(err) = conduit_exec.run() {
                     error!(?err, "failed to run conduit exec");
                     return Err(err.into());
                 }
@@ -111,7 +110,7 @@ impl SimRunner {
 
     fn try_update_sim(&self, path: &Path) -> anyhow::Result<()> {
         let tmpdir = tempfile::tempdir()?;
-        let start = Instant::now();
+        let mut start = Instant::now();
         info!("building sim");
         let script = std::fs::read_to_string(path)?;
         let path_str = path.to_string_lossy().to_string();
@@ -126,6 +125,10 @@ impl SimRunner {
 
         let exec = nox_ecs::WorldExec::read_from_dir(tmpdir.path())?;
         info!(elapsed = ?start.elapsed(), "built sim");
+        start = Instant::now();
+        let client = nox_ecs::nox::Client::cpu()?;
+        let exec = exec.compile(client)?;
+        info!(elapsed = ?start.elapsed(), "compiled sim");
         self.exec_tx.send(exec)?;
         Ok(())
     }

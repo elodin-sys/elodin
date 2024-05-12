@@ -33,7 +33,6 @@ def test_basic_system():
         e: E
 
     sys = foo.pipe(bar).pipe(baz)
-    client = Client.cpu()
     w = WorldBuilder()
     w.spawn(Test(np.array([1.0], dtype="float32"), np.array([500.0], dtype="float32")))
     w.spawn(
@@ -43,12 +42,12 @@ def test_basic_system():
         ]
     )
     exec = w.build(sys)
-    exec.run(client)
+    exec.run()
     x1 = exec.column_array(Component.id(X))
     y1 = exec.column_array(Component.id(Y))
     assert (x1 == [1000.0, 15015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
-    exec.run(client)
+    exec.run()
     x1 = exec.column_array(Component.id(X))
     y1 = exec.column_array(Component.id(Y))
     assert (x1 == [1000000.0, 15015015.0]).all()
@@ -64,10 +63,9 @@ def test_six_dof():
             inertia=SpatialInertia(1.0),
         )
     )
-    client = Client.cpu()
     sys = six_dof(1.0 / 60.0)
     exec = w.build(sys)
-    exec.run(client)
+    exec.run()
     x = exec.column_array(Component.id(WorldPos))
     assert (x == [0.0, 0.0, 0.0, 1.0, 1.0 / 60.0, 0.0, 0.0]).all()
 
@@ -96,9 +94,8 @@ def test_graph():
     w.spawn(EdgeArchetype(Edge(a, b)))
     w.spawn(EdgeArchetype(Edge(a, c)))
     w.spawn(EdgeArchetype(Edge(b, c)))
-    client = Client.cpu()
     exec = w.build(fold_test)
-    exec.run(client)
+    exec.run()
     x = exec.column_array(Component.id(X))
     assert (x == [11.0, 9.0, 2.0]).all()
 
@@ -139,13 +136,12 @@ def test_seed():
         y: Y
 
     sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
-    client = Client.cpu()
     w = WorldBuilder()
     w.spawn(Globals(seed=np.array(2)))
     w.spawn(Test(np.array(1.0), np.array(500.0)))
     w.spawn(Test(np.array(15.0), np.array(500.0)))
     exec = w.build(sys)
-    exec.run(client)
+    exec.run()
     x1 = exec.column_array(Component.id(X))
     y1 = exec.column_array(Component.id(Y))
     assert (x1 == [2000.0, 30000.0]).all()
@@ -169,10 +165,9 @@ def test_spatial_vector_algebra():
     def double_vec(v: WorldVel) -> WorldVel:
         return v + v
 
-    client = Client.cpu()
     w = WorldBuilder()
     w.spawn(Body(world_vel=WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
     exec = w.build(double_vec)
-    exec.run(client)
+    exec.run()
     v = exec.column_array(Component.id(WorldVel))
     assert (v[0][3:] == [2.0, 0.0, 0.0]).all()

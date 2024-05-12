@@ -1,4 +1,4 @@
-use crate::{assets::Handle, ColumnRef, ColumnStore, Error, WorldExec};
+use crate::{assets::Handle, ColumnRef, ColumnStore, Compiled, Error, WorldExec};
 use bytes::Bytes;
 use conduit::{
     client::{Msg, MsgPair},
@@ -21,13 +21,13 @@ pub struct ConduitExec {
     connections: Vec<Connection>,
     metadata_store: MetadataStore,
     rx: flume::Receiver<MsgPair>,
-    exec: WorldExec,
+    exec: WorldExec<Compiled>,
     playing: bool,
     state: State,
 }
 
 impl ConduitExec {
-    pub fn new(exec: WorldExec, rx: flume::Receiver<MsgPair>) -> Self {
+    pub fn new(exec: WorldExec<Compiled>, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
         for arch in exec.world.host.archetypes.values() {
             for col in arch.columns.values() {
@@ -49,23 +49,19 @@ impl ConduitExec {
         self.exec.time_step()
     }
 
-    pub fn run(&mut self, client: &nox::Client) -> Result<(), Error> {
-        if self.exec.compiled() {
-            if self.playing {
-                match &mut self.state {
-                    State::Running => {
-                        self.exec.run(client)?;
-                    }
-                    State::Replaying { index } => {
-                        *index += 1;
-                        if *index >= self.exec.history.worlds.len() {
-                            self.state = State::Running;
-                        }
+    pub fn run(&mut self) -> Result<(), Error> {
+        if self.playing {
+            match &mut self.state {
+                State::Running => {
+                    self.exec.run()?;
+                }
+                State::Replaying { index } => {
+                    *index += 1;
+                    if *index >= self.exec.history.worlds.len() {
+                        self.state = State::Running;
                     }
                 }
             }
-        } else {
-            self.exec.start_compiling(client);
         }
         self.send();
         self.recv();
@@ -312,7 +308,7 @@ enum State {
 pub fn spawn_tcp_server(
     socket_addr: std::net::SocketAddr,
     exec: WorldExec,
-    client: &nox::Client,
+    client: nox::Client,
     check_canceled: impl Fn() -> bool,
 ) -> Result<(), Error> {
     use std::time::Instant;
@@ -321,6 +317,7 @@ pub fn spawn_tcp_server(
 
     let time_step = exec.time_step();
     let (tx, rx) = flume::unbounded();
+    let exec = exec.compile(client)?;
     let mut conduit_exec = ConduitExec::new(exec, rx);
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -332,7 +329,7 @@ pub fn spawn_tcp_server(
     });
     loop {
         let start = Instant::now();
-        conduit_exec.run(client)?;
+        conduit_exec.run()?;
         if check_canceled() {
             break Ok(());
         }

@@ -1,17 +1,17 @@
 use crate::*;
 
-use nox_ecs::ColumnStore;
+use nox_ecs::{ColumnStore, Compiled};
 use pyo3_polars::{PyDataFrame, PySeries};
 
 #[pyclass]
 pub struct Exec {
-    pub exec: nox_ecs::WorldExec,
+    pub exec: nox_ecs::WorldExec<Compiled>,
 }
 
 #[pymethods]
 impl Exec {
-    pub fn run(&mut self, client: &Client) -> Result<(), Error> {
-        Python::with_gil(|_| self.exec.run(&client.client).map_err(Error::from))
+    pub fn run(&mut self) -> Result<(), Error> {
+        Python::with_gil(|_| self.exec.run().map_err(Error::from))
     }
 
     pub fn history(&self) -> Result<PyDataFrame, Error> {
