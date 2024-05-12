@@ -275,7 +275,7 @@ mod tests {
 
     use nox::{Scalar, ScalarExt};
 
-    use crate::{ComponentExt, IntoSystem};
+    use crate::IntoSystem;
 
     use super::*;
 
@@ -301,10 +301,8 @@ mod tests {
         world.spawn(Edge::new(b, a));
         world.spawn(Edge::new(b, c));
 
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(A::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<A>().unwrap();
         assert_eq!(
             c.typed_buf::<f64>().unwrap(),
             &[1105.0, 1015.0, 1000.0, 10000.0],
@@ -329,10 +327,8 @@ mod tests {
         world.spawn(A(10000.0.constant()));
         world.spawn(Edge::new(a, b));
 
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(A::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<A>().unwrap();
         assert_eq!(
             c.typed_buf::<f64>().unwrap(),
             &[105.0, 100.0, 1000.0, 10000.0],
@@ -383,10 +379,8 @@ mod tests {
         world.spawn(A(100.0.constant())).id();
         world.spawn(A(1000.0.constant())).id();
 
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(A::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[1105.0, 1015.0, 115.0,],);
     }
 }

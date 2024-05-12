@@ -863,6 +863,16 @@ where
         let world_exec = WorldExec::new(world, tick_exec, Some(startup_exec));
         Ok(world_exec)
     }
+
+    // Convenience method for building, compiling, and running the world in one go.
+    // This is useful for quick prototyping and testing.
+    // Panicks if any of the steps fail.
+    pub fn run(self) -> World {
+        let client = Client::cpu().unwrap();
+        let mut exec = self.build().unwrap();
+        exec.run(&client).unwrap();
+        exec.world.host
+    }
 }
 
 pub trait SystemExt {
@@ -1104,8 +1114,13 @@ pub struct WorldExec {
     pub history: History,
 }
 
-impl WorldExec {
-    pub fn new(world: SharedWorld, tick_exec: Exec, startup_exec: Option<Exec>) -> Self {
+impl std::ops::Deref for WorldExec {
+    type Target = World;
+    fn deref(&self) -> &Self::Target {
+        &self.world.host
+    }
+}
+
         let mut world = Self {
             world,
             tick_exec,
@@ -1310,22 +1325,19 @@ pub trait ColumnStore {
     fn tick(&self) -> u64;
 }
 
-impl ColumnStore for WorldExec {
+impl ColumnStore for World {
     type Column<'a> = HostColumnRef<'a>;
 
     fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
-        self.world
-            .host
-            .column_by_id(id)
-            .ok_or(Error::ComponentNotFound)
+        self.column_by_id(id).ok_or(Error::ComponentNotFound)
     }
 
     fn assets(&self) -> Option<&AssetStore> {
-        Some(&self.world.host.assets)
+        Some(&self.assets)
     }
 
     fn tick(&self) -> u64 {
-        self.world.host.tick
+        self.tick
     }
 }
 
@@ -1453,10 +1465,8 @@ mod tests {
             b: B(2.0.constant()),
             c: C((-1.0).constant()),
         });
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(C::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<C>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
     }
 
@@ -1476,10 +1486,8 @@ mod tests {
         world.spawn(Seed(5.0.constant()));
         world.spawn(Value((-1.0).constant()));
         world.spawn(Value(7.0.constant()));
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let v = exec.column(Value::component_id()).unwrap();
+        let world = world.run();
+        let v = world.column::<Value>().unwrap();
         assert_eq!(v.typed_buf::<f64>().unwrap(), &[4.0, 12.0])
     }
 
@@ -1499,10 +1507,8 @@ mod tests {
         world.spawn(Seed(vector![5.0, 2.0, -3.0].into()));
         world.spawn(Value(vector![-1.0, 3.5, 6.0].into()));
         world.spawn(Value(vector![7.0, -1.0, 1.0].into()));
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let v = exec.column(Value::component_id()).unwrap();
+        let world = world.run();
+        let v = world.column::<Value>().unwrap();
         assert_eq!(
             v.typed_buf::<f64>().unwrap(),
             &[4.0, 5.5, 3.0, 12.0, 1.0, -2.0]
@@ -1542,15 +1548,12 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(A(1.0.constant()));
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world
+        let world = world
             .builder()
             .tick_pipeline(tick)
             .startup_pipeline(startup)
-            .build()
-            .unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(A::component_id()).unwrap();
+            .run();
+        let c = world.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
     }
 
@@ -1569,7 +1572,6 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(A(1.0.constant()));
-        let client = nox::Client::cpu().unwrap();
         let exec = world
             .builder()
             .tick_pipeline(tick)
@@ -1580,8 +1582,9 @@ mod tests {
         let tempdir = tempdir.path();
         exec.write_to_dir(tempdir).unwrap();
         let mut exec = WorldExec::read_from_dir(tempdir).unwrap();
+        let client = nox::Client::cpu().unwrap();
         exec.run(&client).unwrap();
-        let c = exec.column(A::component_id()).unwrap();
+        let c = exec.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
     }
 }

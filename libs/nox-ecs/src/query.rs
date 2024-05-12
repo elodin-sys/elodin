@@ -456,10 +456,8 @@ mod tests {
             x: X(400.0.constant()),
         });
 
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(X::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<X>().unwrap();
         assert_eq!(
             c.typed_buf::<f64>().unwrap(),
             &[-91.0, 945.0, 5.0, 200.0, -49900.0, 400.0]
@@ -506,10 +504,8 @@ mod tests {
             b: B(2.0.constant()),
             c: C((-1.0).constant()),
         });
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world.build().unwrap();
-        exec.run(&client).unwrap();
-        let c = exec.column(C::component_id()).unwrap();
+        let world = world.run();
+        let c = world.column::<C>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
     }
 }
