@@ -10,8 +10,12 @@ pub struct Exec {
 
 #[pymethods]
 impl Exec {
-    pub fn run(&mut self) -> Result<(), Error> {
-        Python::with_gil(|_| self.exec.run().map_err(Error::from))
+    #[pyo3(signature = (ticks=1))]
+    pub fn run(&mut self, ticks: usize) -> Result<(), Error> {
+        for _ in 0..ticks {
+            self.exec.run()?;
+        }
+        Ok(())
     }
 
     pub fn history(&self) -> Result<PyDataFrame, Error> {
