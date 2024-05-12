@@ -93,9 +93,7 @@ def run(seed: int) -> pl.DataFrame:
     effectors = gravity.pipe(apply_wind)
     sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
     exec = w.build(sys)
-
-    for _ in range(1200):
-        exec.run()
+    exec.run(ticks=1200)
     return exec.history()
 
 
