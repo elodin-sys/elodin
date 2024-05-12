@@ -146,7 +146,7 @@ impl WorldBuilder {
             )
             .try_init();
 
-        let exec = self.build(py, sys, time_step)?.exec;
+        let exec = self.build_uncompiled(py, sys, time_step)?;
 
         let client = match client {
             Some(c) => c.client.clone(),
@@ -215,7 +215,7 @@ impl WorldBuilder {
 
         match args {
             Args::Build { dir } => {
-                let exec = self.build(py, sys, time_step)?.exec;
+                let exec = self.build_uncompiled(py, sys, time_step)?;
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
@@ -226,17 +226,17 @@ impl WorldBuilder {
                 watch,
             } => {
                 if !watch {
-                    let exec = self.build(py, sys, time_step)?.exec;
+                    let exec = self.build_uncompiled(py, sys, time_step)?;
                     let client = match client {
                         Some(c) => c.client.clone(),
                         None => nox::Client::cpu()?,
                     };
                     if no_repl {
-                        spawn_tcp_server(addr, exec, &client, || py.check_signals().is_err())?;
+                        spawn_tcp_server(addr, exec, client, || py.check_signals().is_err())?;
                         Ok(None)
                     } else {
                         std::thread::spawn(move || {
-                            spawn_tcp_server(addr, exec, &client, || false).unwrap()
+                            spawn_tcp_server(addr, exec, client, || false).unwrap()
                         });
                         Ok(Some(addr.to_string()))
                     }
@@ -256,7 +256,25 @@ impl WorldBuilder {
         py: Python<'_>,
         sys: PyObject,
         time_step: Option<f64>,
+        client: Option<&Client>,
     ) -> Result<Exec, Error> {
+        let exec = self.build_uncompiled(py, sys, time_step)?;
+        let client = match client {
+            Some(c) => c.client.clone(),
+            None => nox::Client::cpu()?,
+        };
+        let exec = exec.compile(client.clone())?;
+        Ok(Exec { exec })
+    }
+}
+
+impl WorldBuilder {
+    fn build_uncompiled(
+        &mut self,
+        py: Python<'_>,
+        sys: PyObject,
+        time_step: Option<f64>,
+    ) -> Result<nox_ecs::WorldExec, Error> {
         let start = std::time::Instant::now();
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
@@ -305,6 +323,6 @@ def build_expr(builder, sys):
         };
         let tick_exec = nox_ecs::Exec::new(metadata, hlo_module);
         let exec = nox_ecs::WorldExec::new(builder.world, tick_exec, None);
-        Ok(Exec { exec })
+        Ok(exec)
     }
 }

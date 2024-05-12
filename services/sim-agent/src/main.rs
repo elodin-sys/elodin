@@ -9,7 +9,7 @@ use elodin_types::sandbox::{
     BuildReq, FileTransferReq, UpdateCodeReq, UpdateCodeResp,
 };
 use nox::Client;
-use nox_ecs::{ConduitExec, WorldExec};
+use nox_ecs::{Compiled, ConduitExec, WorldExec};
 use std::{io::Seek, time::Duration};
 use std::{net::SocketAddr, thread, time::Instant};
 use tokio::io::AsyncWriteExt;
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     }) = config.sandbox
     {
         let (server_tx, server_rx) = flume::unbounded();
-        let sim_runner = SimRunner::new(server_rx);
+        let sim_runner = SimRunner::new(server_rx)?;
         let control = ControlService::new(sim_runner, control_addr, builder_addr)?;
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
         let sim = async move {
@@ -214,20 +214,21 @@ impl SandboxControl for ControlService {
 
 #[derive(Clone)]
 struct SimRunner {
-    exec_tx: flume::Sender<WorldExec>,
+    client: Client,
+    exec_tx: flume::Sender<WorldExec<Compiled>>,
 }
 
 impl SimRunner {
-    fn new(server_rx: flume::Receiver<MsgPair>) -> Self {
+    fn new(server_rx: flume::Receiver<MsgPair>) -> anyhow::Result<Self> {
+        let mut client = Client::cpu()?;
+        client.disable_optimizations();
         let (exec_tx, exec_rx) = flume::bounded(1);
         std::thread::spawn(move || -> anyhow::Result<()> {
-            let mut client = Client::cpu()?;
-            client.disable_optimizations();
-            let exec: WorldExec = exec_rx.recv()?;
+            let exec: WorldExec<Compiled> = exec_rx.recv()?;
             let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
             loop {
                 let start = Instant::now();
-                if let Err(err) = conduit_exec.run(&client) {
+                if let Err(err) = conduit_exec.run() {
                     error!(?err, "failed to run conduit exec");
                     return Err(err.into());
                 }
@@ -244,10 +245,11 @@ impl SimRunner {
                 }
             }
         });
-        Self { exec_tx }
+        Ok(Self { client, exec_tx })
     }
 
     fn update(&self, exec: WorldExec) -> anyhow::Result<()> {
+        let exec = exec.compile(self.client.clone())?;
         self.exec_tx
             .try_send(exec)
             .context("failed to send new exec to sim runner")

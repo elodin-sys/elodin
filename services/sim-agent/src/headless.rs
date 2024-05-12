@@ -11,6 +11,7 @@ use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
+use nox_ecs::Compiled;
 use nox_ecs::{polars::PolarsWorld, ComponentExt, Seed, WorldExec};
 use sea_orm::{prelude::*, IntoActiveModel, TransactionTrait};
 use tokio::sync::mpsc;
@@ -88,6 +89,7 @@ impl Runner {
         let artifacts = self.download_artifacts(&temp_dir, run.id).await?;
         let context_dir = artifacts.join("context");
         let run_exec = WorldExec::read_from_dir(artifacts)?;
+        let run_exec = run_exec.compile(self.nox_client.clone())?;
 
         for b in batches {
             let txn = self.db.begin().await?;
@@ -125,7 +127,7 @@ impl Runner {
         &mut self,
         run: &atc_entity::mc_run::Model,
         batch: &atc_entity::batches::Model,
-        run_exec: &WorldExec,
+        run_exec: &WorldExec<Compiled>,
         context_dir: &Path,
     ) -> Result<BitVec<u32>, Error> {
         let sim_start = Instant::now();
@@ -228,10 +230,14 @@ impl Runner {
         })
     }
 
-    fn run_sim(&self, max_duration: usize, exec: &mut WorldExec) -> Result<(), nox_ecs::Error> {
+    fn run_sim(
+        &self,
+        max_duration: usize,
+        exec: &mut WorldExec<Compiled>,
+    ) -> Result<(), nox_ecs::Error> {
         let ticks = max_duration * 60;
         for _ in 0..ticks {
-            exec.run(&self.nox_client)?;
+            exec.run()?;
         }
         Ok(())
     }
