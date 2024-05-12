@@ -79,7 +79,7 @@ impl ConduitExec {
                 send(
                     &mut self.subscriptions,
                     &mut self.connections,
-                    &self.exec,
+                    &self.exec.world.host,
                     max_tick,
                 );
             }
