@@ -859,8 +859,7 @@ where
         let mut tick_exec = self.pipe.build(&mut self.world)?;
         tick_exec.metadata.time_step = self.time_step;
         let startup_exec = self.startup_sys.build(&mut self.world)?;
-        let world = SharedWorld::from_host(self.world);
-        let world_exec = WorldExec::new(world, tick_exec, Some(startup_exec));
+        let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
         Ok(world_exec)
     }
 
@@ -1121,8 +1120,10 @@ impl std::ops::Deref for WorldExec {
     }
 }
 
+impl WorldExec {
+    pub fn new(world: World, tick_exec: Exec, startup_exec: Option<Exec>) -> Self {
         let mut world = Self {
-            world,
+            world: SharedWorld::from_host(world),
             tick_exec,
             startup_exec,
             history: Default::default(),
@@ -1214,7 +1215,6 @@ impl std::ops::Deref for WorldExec {
         };
         let polars_world = PolarsWorld::read_from_dir(dir.join("world"))?;
         let world = World::try_from(polars_world)?;
-        let world = SharedWorld::from_host(world);
         let world_exec = WorldExec::new(world, tick_exec, startup_exec);
         Ok(world_exec)
     }
