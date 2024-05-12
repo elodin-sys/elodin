@@ -29,6 +29,11 @@ pub enum Args {
         #[arg(long)]
         watch: bool,
     },
+    #[clap(hide = true)]
+    Bench {
+        #[arg(long, default_value = "1000")]
+        ticks: usize,
+    },
 }
 
 pub struct SimSupervisor;

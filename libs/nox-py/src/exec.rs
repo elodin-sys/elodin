@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::*;
 
 use nox_ecs::{ColumnStore, Compiled};
@@ -16,6 +18,10 @@ impl Exec {
             self.exec.run()?;
         }
         Ok(())
+    }
+
+    pub fn profile(&self) -> HashMap<&'static str, f64> {
+        self.exec.profile()
     }
 
     pub fn history(&self) -> Result<PyDataFrame, Error> {

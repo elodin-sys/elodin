@@ -7,6 +7,7 @@ use history::History;
 use nox::xla::{ArrayElement, BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
 use polars::PolarsWorld;
+use profile::Profiler;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use std::borrow::Cow;
@@ -16,7 +17,7 @@ use std::fs::File;
 use std::iter::once;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub use conduit;
@@ -28,6 +29,7 @@ mod conduit_exec;
 mod dyn_array;
 mod host_column;
 mod integrator;
+mod profile;
 mod query;
 
 pub mod graph;
@@ -1089,6 +1091,7 @@ pub struct WorldExec<S: ExecState = Uncompiled> {
     pub tick_exec: Exec<S>,
     pub startup_exec: Option<Exec<S>>,
     pub history: History,
+    pub profiler: Profiler,
 }
 
 impl<S: ExecState> std::ops::Deref for WorldExec<S> {
@@ -1105,14 +1108,17 @@ impl<S: ExecState> WorldExec<S> {
             tick_exec,
             startup_exec,
             history: Default::default(),
+            profiler: Default::default(),
         };
         world.push_world().unwrap();
         world
     }
 
     fn push_world(&mut self) -> Result<(), Error> {
+        let start = &mut Instant::now();
         let world = self.world.host.to_polars()?;
         self.history.worlds.push(world);
+        self.profiler.add_to_history.observe(start);
         Ok(())
     }
 
@@ -1129,6 +1135,7 @@ impl<S: ExecState> WorldExec<S> {
             tick_exec: self.tick_exec.clone(),
             startup_exec: self.startup_exec.clone(),
             history: self.history.clone(),
+            profiler: self.profiler.clone(),
         }
     }
 
@@ -1142,7 +1149,8 @@ impl<S: ExecState> WorldExec<S> {
             .ok_or(Error::ComponentNotFound)
     }
 
-    pub fn write_to_dir(&self, dir: impl AsRef<Path>) -> Result<(), Error> {
+    pub fn write_to_dir(&mut self, dir: impl AsRef<Path>) -> Result<(), Error> {
+        let start = &mut Instant::now();
         let dir = dir.as_ref();
         self.tick_exec.write_to_dir(dir.join("tick_exec"))?;
         if let Some(startup_exec) = &self.startup_exec {
@@ -1151,6 +1159,7 @@ impl<S: ExecState> WorldExec<S> {
         let mut polars_world = self.world.host.to_polars()?;
         polars_world.write_to_dir(dir.join("world"))?;
         self.history.write_to_dir(dir.join("history"))?;
+        self.profiler.write_to_dir.observe(start);
         Ok(())
     }
 
@@ -1160,17 +1169,20 @@ impl<S: ExecState> WorldExec<S> {
 }
 
 impl WorldExec<Uncompiled> {
-    pub fn compile(self, client: Client) -> Result<WorldExec<Compiled>, Error> {
+    pub fn compile(mut self, client: Client) -> Result<WorldExec<Compiled>, Error> {
+        let start = &mut Instant::now();
         let tick_exec = self.tick_exec.compile(client.clone())?;
         let startup_exec = self
             .startup_exec
             .map(|exec| exec.compile(client))
             .transpose()?;
+        self.profiler.compile.observe(start);
         Ok(WorldExec {
             world: self.world,
             tick_exec,
             startup_exec,
             history: self.history,
+            profiler: self.profiler,
         })
     }
 
@@ -1192,16 +1204,24 @@ impl WorldExec<Uncompiled> {
 
 impl WorldExec<Compiled> {
     pub fn run(&mut self) -> Result<(), Error> {
+        let start = &mut Instant::now();
         let client = &self.tick_exec.state.client;
         self.world.copy_to_client(client)?;
+        self.profiler.copy_to_client.observe(start);
         if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.world)?;
         }
         self.tick_exec.run(&mut self.world)?;
+        self.profiler.execute_buffers.observe(start);
         self.world.copy_to_host()?;
+        self.profiler.copy_to_host.observe(start);
         self.world.host.tick += 1;
         self.push_world()?;
         Ok(())
+    }
+
+    pub fn profile(&self) -> HashMap<&'static str, f64> {
+        self.profiler.profile(self.time_step())
     }
 }
 
@@ -1553,7 +1573,7 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(A(1.0.constant()));
-        let exec = world
+        let mut exec = world
             .builder()
             .tick_pipeline(tick)
             .startup_pipeline(startup)

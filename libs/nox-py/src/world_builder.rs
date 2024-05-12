@@ -215,7 +215,7 @@ impl WorldBuilder {
 
         match args {
             Args::Build { dir } => {
-                let exec = self.build_uncompiled(py, sys, time_step)?;
+                let mut exec = self.build_uncompiled(py, sys, time_step)?;
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
@@ -248,17 +248,29 @@ impl WorldBuilder {
                     Ok(Some(addr.to_string()))
                 }
             }
+            Args::Bench { ticks } => {
+                let mut exec = self.build(py, sys, time_step, client)?;
+                exec.run(ticks)?;
+                let profile = exec.profile();
+                println!("compile time:         {:.3} ms", profile["compile"]);
+                println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
+                println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
+                println!("= tick time:          {:.3} ms", profile["tick"]);
+                println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                Ok(None)
+            }
         }
     }
 
     pub fn build(
         &mut self,
         py: Python<'_>,
-        sys: PyObject,
+        system: PyObject,
         time_step: Option<f64>,
         client: Option<&Client>,
     ) -> Result<Exec, Error> {
-        let exec = self.build_uncompiled(py, sys, time_step)?;
+        let exec = self.build_uncompiled(py, system, time_step)?;
         let client = match client {
             Some(c) => c.client.clone(),
             None => nox::Client::cpu()?,
