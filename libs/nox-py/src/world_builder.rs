@@ -4,7 +4,7 @@ use clap::Parser;
 use nox_ecs::{
     conduit,
     nox::{self, ScalarExt},
-    spawn_tcp_server, HostColumn, HostStore, SharedWorld, Table, World,
+    spawn_tcp_server, HostColumn, HostStore, Table, World,
 };
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{collections::hash_map::Entry, path::PathBuf, time::Duration};
@@ -298,14 +298,13 @@ def build_expr(builder, sys):
         let builder = std::mem::take(&mut builder.borrow_mut().builder);
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
         let time_step = time_step.map(Duration::from_secs_f64);
-        let world = SharedWorld::from_host(builder.world);
         let metadata = nox_ecs::ExecMetadata {
             time_step,
             arg_ids: builder.param_ids,
             ret_ids,
         };
         let tick_exec = nox_ecs::Exec::new(metadata, hlo_module);
-        let exec = nox_ecs::WorldExec::new(world, tick_exec, None);
+        let exec = nox_ecs::WorldExec::new(builder.world, tick_exec, None);
         Ok(Exec { exec })
     }
 }
