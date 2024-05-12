@@ -171,6 +171,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
     m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;
+    m.add_class::<Exec>()?;
     m.add_class::<EntityId>()?;
     m.add_class::<Client>()?;
     m.add_class::<SpatialTransform>()?;
