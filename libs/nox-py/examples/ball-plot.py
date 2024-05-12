@@ -94,9 +94,8 @@ def run(seed: int) -> pl.DataFrame:
     sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
     exec = w.build(sys)
 
-    client = el.Client.cpu()
     for _ in range(1200):
-        exec.run(client)
+        exec.run()
     return exec.history()
 
 

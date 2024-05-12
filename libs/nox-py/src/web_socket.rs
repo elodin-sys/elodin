@@ -28,6 +28,7 @@ pub fn spawn_ws_server(
 
     let time_step = exec.time_step();
     let (tx, rx) = flume::unbounded();
+    let exec = exec.compile(client.clone())?;
     let mut conduit_exec = ConduitExec::new(exec, rx);
     let axum_token = cancel_token.clone();
     std::thread::spawn(move || {
@@ -59,7 +60,7 @@ pub fn spawn_ws_server(
     });
     loop {
         let start = Instant::now();
-        conduit_exec.run(client)?;
+        conduit_exec.run()?;
         if check_canceled() {
             break Ok(());
         }

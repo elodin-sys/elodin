@@ -16,7 +16,6 @@ use std::fs::File;
 use std::iter::once;
 use std::path::Path;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -868,8 +867,8 @@ where
     // Panicks if any of the steps fail.
     pub fn run(self) -> World {
         let client = Client::cpu().unwrap();
-        let mut exec = self.build().unwrap();
-        exec.run(&client).unwrap();
+        let mut exec = self.build().unwrap().compile(client).unwrap();
+        exec.run().unwrap();
         exec.world.host
     }
 }
@@ -923,91 +922,28 @@ pub struct ExecMetadata {
     pub ret_ids: Vec<ComponentId>,
 }
 
+pub trait ExecState: Clone {}
+
+#[derive(Clone, Default)]
+pub struct Uncompiled;
+
 #[derive(Clone)]
-pub struct Exec {
+pub struct Compiled {
+    client: Client,
+    exec: PjRtLoadedExecutable,
+}
+
+impl ExecState for Uncompiled {}
+impl ExecState for Compiled {}
+
+#[derive(Clone)]
+pub struct Exec<S: ExecState = Uncompiled> {
     metadata: ExecMetadata,
     hlo_module: HloModuleProto,
-    state: ExecState,
+    state: S,
 }
 
-enum ExecState {
-    Uncompiled,
-    Compiling(JoinHandle<Result<PjRtLoadedExecutable, Error>>),
-    Compiled(PjRtLoadedExecutable),
-}
-
-impl Clone for ExecState {
-    fn clone(&self) -> Self {
-        match self {
-            ExecState::Uncompiled => ExecState::Uncompiled,
-            ExecState::Compiling(_) => ExecState::Uncompiled,
-            ExecState::Compiled(executable) => ExecState::Compiled(executable.clone()),
-        }
-    }
-}
-
-impl Exec {
-    pub fn new(metadata: ExecMetadata, hlo_module: HloModuleProto) -> Self {
-        Self {
-            metadata,
-            hlo_module,
-            state: ExecState::Uncompiled,
-        }
-    }
-
-    fn start_compiling(&mut self, client: &Client) {
-        if let ExecState::Uncompiled = self.state {
-            let comp = self.hlo_module.computation();
-            let client = client.clone();
-            let handle = std::thread::spawn(move || client.compile(&comp).map_err(Error::from));
-            self.state = ExecState::Compiling(handle);
-        }
-    }
-
-    fn compiled(&self) -> bool {
-        match &self.state {
-            ExecState::Uncompiled => false,
-            ExecState::Compiling(handle) => handle.is_finished(),
-            ExecState::Compiled(_) => true,
-        }
-    }
-
-    fn compile(&mut self, client: &Client) -> Result<&PjRtLoadedExecutable, Error> {
-        self.start_compiling(client);
-        self.state = match std::mem::replace(&mut self.state, ExecState::Uncompiled) {
-            ExecState::Compiling(handle) => {
-                let executable = handle.join().unwrap()?;
-                ExecState::Compiled(executable)
-            }
-            state => state,
-        };
-        match &self.state {
-            ExecState::Compiled(executable) => Ok(executable),
-            _ => unreachable!(),
-        }
-    }
-
-    fn run(&mut self, world: &mut SharedWorld, client: &Client) -> Result<(), Error> {
-        let mut buffers = BufferArgsRef::default().untuple_result(true);
-        for id in &self.metadata.arg_ids {
-            let col = world
-                .client
-                .column_by_id(*id)
-                .ok_or(Error::ComponentNotFound)?;
-            buffers.push(col.column);
-        }
-        let exec = self.compile(client)?;
-        let ret_bufs = exec.execute_buffers(buffers)?;
-        for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
-            let col = world
-                .client
-                .column_by_id_mut(*comp_id)
-                .ok_or(Error::ComponentNotFound)?;
-            *col.column = buf;
-        }
-        Ok(())
-    }
-
+impl<S: ExecState> Exec<S> {
     pub fn write_to_dir(&self, path: impl AsRef<Path>) -> Result<(), Error> {
         let path = path.as_ref();
         std::fs::create_dir_all(path)?;
@@ -1016,14 +952,56 @@ impl Exec {
         std::fs::write(path.join("hlo.binpb"), self.hlo_module.to_bytes())?;
         Ok(())
     }
+}
 
-    pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
+impl Exec {
+    pub fn new(metadata: ExecMetadata, hlo_module: HloModuleProto) -> Self {
+        Self {
+            metadata,
+            hlo_module,
+            state: Uncompiled,
+        }
+    }
+
+    pub fn compile(self, client: Client) -> Result<Exec<Compiled>, Error> {
+        let comp = self.hlo_module.computation();
+        let exec = client.compile(&comp)?;
+        Ok(Exec {
+            metadata: self.metadata,
+            hlo_module: self.hlo_module,
+            state: Compiled { client, exec },
+        })
+    }
+
+    pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Exec, Error> {
         let path = path.as_ref();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: ExecMetadata = serde_json::from_reader(&mut metadata)?;
         let hlo_module_data = std::fs::read(path.join("hlo.binpb"))?;
         let hlo_module = HloModuleProto::parse_binary(&hlo_module_data)?;
-        Ok(Self::new(metadata, hlo_module))
+        Ok(Exec::new(metadata, hlo_module))
+    }
+}
+
+impl Exec<Compiled> {
+    fn run(&mut self, world: &mut SharedWorld) -> Result<(), Error> {
+        let mut buffers = BufferArgsRef::default().untuple_result(true);
+        for id in &self.metadata.arg_ids {
+            let col = world
+                .client
+                .column_by_id(*id)
+                .ok_or(Error::ComponentNotFound)?;
+            buffers.push(col.column);
+        }
+        let ret_bufs = self.state.exec.execute_buffers(buffers)?;
+        for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
+            let col = world
+                .client
+                .column_by_id_mut(*comp_id)
+                .ok_or(Error::ComponentNotFound)?;
+            *col.column = buf;
+        }
+        Ok(())
     }
 }
 
@@ -1106,22 +1084,22 @@ impl SharedWorld {
     }
 }
 
-pub struct WorldExec {
+pub struct WorldExec<S: ExecState = Uncompiled> {
     pub world: SharedWorld,
-    pub tick_exec: Exec,
-    pub startup_exec: Option<Exec>,
+    pub tick_exec: Exec<S>,
+    pub startup_exec: Option<Exec<S>>,
     pub history: History,
 }
 
-impl std::ops::Deref for WorldExec {
+impl<S: ExecState> std::ops::Deref for WorldExec<S> {
     type Target = World;
     fn deref(&self) -> &Self::Target {
         &self.world.host
     }
 }
 
-impl WorldExec {
-    pub fn new(world: World, tick_exec: Exec, startup_exec: Option<Exec>) -> Self {
+impl<S: ExecState> WorldExec<S> {
+    pub fn new(world: World, tick_exec: Exec<S>, startup_exec: Option<Exec<S>>) -> Self {
         let mut world = Self {
             world: SharedWorld::from_host(world),
             tick_exec,
@@ -1130,34 +1108,6 @@ impl WorldExec {
         };
         world.push_world().unwrap();
         world
-    }
-
-    pub fn start_compiling(&mut self, client: &Client) {
-        self.tick_exec.start_compiling(client);
-        if let Some(startup_exec) = &mut self.startup_exec {
-            startup_exec.start_compiling(client);
-        }
-    }
-
-    pub fn compiled(&self) -> bool {
-        let startup_compiled = self
-            .startup_exec
-            .as_ref()
-            .map_or(true, |exec| exec.compiled());
-        let tick_compiled = self.tick_exec.compiled();
-        startup_compiled && tick_compiled
-    }
-
-    pub fn run(&mut self, client: &Client) -> Result<(), Error> {
-        self.world.copy_to_client(client)?;
-        if let Some(mut startup_exec) = self.startup_exec.take() {
-            startup_exec.run(&mut self.world, client)?;
-        }
-        self.tick_exec.run(&mut self.world, client)?;
-        self.world.copy_to_host()?;
-        self.world.host.tick += 1;
-        self.push_world()?;
-        Ok(())
     }
 
     fn push_world(&mut self) -> Result<(), Error> {
@@ -1204,7 +1154,27 @@ impl WorldExec {
         Ok(())
     }
 
-    pub fn read_from_dir(dir: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn last_world(&self) -> &PolarsWorld {
+        self.history.worlds.last().unwrap()
+    }
+}
+
+impl WorldExec<Uncompiled> {
+    pub fn compile(self, client: Client) -> Result<WorldExec<Compiled>, Error> {
+        let tick_exec = self.tick_exec.compile(client.clone())?;
+        let startup_exec = self
+            .startup_exec
+            .map(|exec| exec.compile(client))
+            .transpose()?;
+        Ok(WorldExec {
+            world: self.world,
+            tick_exec,
+            startup_exec,
+            history: self.history,
+        })
+    }
+
+    pub fn read_from_dir(dir: impl AsRef<Path>) -> Result<WorldExec, Error> {
         let dir = dir.as_ref();
         let tick_exec = Exec::read_from_dir(dir.join("tick_exec"))?;
         let startup_exec_path = dir.join("startup_exec");
@@ -1218,9 +1188,20 @@ impl WorldExec {
         let world_exec = WorldExec::new(world, tick_exec, startup_exec);
         Ok(world_exec)
     }
+}
 
-    pub fn last_world(&self) -> &PolarsWorld {
-        self.history.worlds.last().unwrap()
+impl WorldExec<Compiled> {
+    pub fn run(&mut self) -> Result<(), Error> {
+        let client = &self.tick_exec.state.client;
+        self.world.copy_to_client(client)?;
+        if let Some(mut startup_exec) = self.startup_exec.take() {
+            startup_exec.run(&mut self.world)?;
+        }
+        self.tick_exec.run(&mut self.world)?;
+        self.world.copy_to_host()?;
+        self.world.host.tick += 1;
+        self.push_world()?;
+        Ok(())
     }
 }
 
@@ -1581,9 +1562,12 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let tempdir = tempdir.path();
         exec.write_to_dir(tempdir).unwrap();
-        let mut exec = WorldExec::read_from_dir(tempdir).unwrap();
         let client = nox::Client::cpu().unwrap();
-        exec.run(&client).unwrap();
+        let mut exec = WorldExec::read_from_dir(tempdir)
+            .unwrap()
+            .compile(client)
+            .unwrap();
+        exec.run().unwrap();
         let c = exec.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
     }
