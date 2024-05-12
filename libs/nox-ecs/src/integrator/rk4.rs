@@ -102,8 +102,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, World};
-    use crate::{Component, ComponentExt};
+    use crate::{Archetype, Component, World};
     use nox::nalgebra::vector;
     use nox::{nalgebra, Scalar, ScalarExt, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
@@ -152,10 +151,8 @@ mod tests {
             v: V(10.0.constant()),
         });
         let builder = world.builder().tick_pipeline(().rk4::<X, V>());
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build().unwrap();
-        exec.run(&client).unwrap();
-        let col = exec.column(X::component_id()).unwrap();
+        let world = builder.run();
+        let col = world.column::<X>().unwrap();
         assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
     }
 
@@ -233,10 +230,8 @@ mod tests {
             }),
         });
         let builder = world.builder().tick_pipeline(().rk4::<U, DU>());
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build().unwrap();
-        exec.run(&client).unwrap();
-        let col = exec.column(X::component_id()).unwrap();
+        let world = builder.run();
+        let col = world.column::<X>().unwrap();
         assert_eq!(
             col.typed_buf::<f64>().unwrap(),
             &[1.0f64, 0.0, 0.0, 0.0, 0.016666666666666666, 0.0, 0.0]

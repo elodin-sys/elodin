@@ -55,8 +55,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, World};
-    use crate::{Component, ComponentExt};
+    use crate::{Archetype, Component, World};
     use nox::{
         nalgebra::{self, vector},
         Scalar, ScalarExt, SpatialMotion, SpatialTransform,
@@ -121,10 +120,8 @@ mod tests {
         let builder = world
             .builder()
             .tick_pipeline(semi_implicit_euler::<X, V, A>());
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build().unwrap();
-        exec.run(&client).unwrap();
-        let col = exec.column(X::component_id()).unwrap();
+        let world = builder.run();
+        let col = world.column::<X>().unwrap();
         assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.0027222222222222222])
     }
 
@@ -191,10 +188,8 @@ mod tests {
         let builder = world
             .builder()
             .tick_pipeline(semi_implicit_euler::<X, V, A>());
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = builder.build().unwrap();
-        exec.run(&client).unwrap();
-        let col = exec.column(X::component_id()).unwrap();
+        let world = builder.run();
+        let col = world.column::<X>().unwrap();
         assert_eq!(
             col.typed_buf::<f64>().unwrap(),
             &[1.0f64, 0.0, 0.0, 0.0, 0.016666666666666666, 0.0, 0.0]
