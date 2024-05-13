@@ -17,6 +17,15 @@
       w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb")
     ])
     ```
+- **(breaking)** Remove `SpatialInertia.from_mass()`.
+  - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.
+
+    ```python
+    # before:
+    inertia=el.SpatialInertia.from_mass(1.0 / G),
+    # after:
+    inertia=el.SpatialInertia(1.0 / G),
+    ```
 - If a `Component` base class provides `ComponentType` information via `__metadata__`, then it can be omitted from the `Component(...)` annotation as it can be inferred from the base class instead.
   - `Quaternion`, `Handle`, `Edge`, and all spatial classes (`SpatialTransform`, `SpatialForce`, `SpatialMotion`, `SpatialInertia`) have been updated to provide `ComponentType` information directly. So, components that annotate these classes can now be defined more simply:
     ```python
@@ -31,16 +40,7 @@
     ```
 - Add visualization of the current tick in the graph views of the editor.
 - Add `TotalEdge`, an edge type that connects every entity to every other entity.
-
-- **(breaking)** Remove `SpatialInertia.from_mass()`.
-  - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.
-
-    ```python
-    # before:
-    inertia=el.SpatialInertia.from_mass(1.0 / G),
-    # after:
-    inertia=el.SpatialInertia(1.0 / G),
-    ```
+- Fix issue where stepping backwards or forwards in the editor would sometimes not work.
 
 ## [v0.3.20]
 
