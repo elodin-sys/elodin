@@ -44,7 +44,7 @@ struct TileIcons {
 #[derive(Resource)]
 pub struct TileState {
     tree: egui_tiles::Tree<Pane>,
-    tab_diffs: Vec<TabDiff>,
+    tree_actions: Vec<TreeAction>,
     graphs: HashMap<TileId, Entity>,
 }
 
@@ -85,8 +85,8 @@ impl TileState {
 
     pub fn create_graph_tile(&mut self, graph_state: GraphBundle) {
         if let Some(parent) = self.tree.root {
-            self.tab_diffs
-                .push(TabDiff::AddGraph(parent, Some(graph_state)));
+            self.tree_actions
+                .push(TreeAction::AddGraph(parent, Some(graph_state)));
         }
     }
 }
@@ -232,7 +232,7 @@ impl Default for TileState {
     fn default() -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs("tab_tree", vec![]),
-            tab_diffs: vec![],
+            tree_actions: vec![],
             graphs: HashMap::new(),
         }
     }
@@ -240,7 +240,7 @@ impl Default for TileState {
 
 struct TreeBehavior<'a, 'w, 's> {
     icons: TileIcons,
-    tab_diffs: Vec<TabDiff>,
+    tree_actions: Vec<TreeAction>,
     selected_object: &'a mut SelectedObject,
     tagged_ranges: &'a TaggedRanges,
     collected_graph_data: &'a CollectedGraphData,
@@ -252,10 +252,11 @@ struct TreeBehavior<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
 }
 
-pub enum TabDiff {
+pub enum TreeAction {
     AddViewport(TileId),
     AddGraph(TileId, Option<GraphBundle>),
-    Delete(TileId),
+    DeleteTab(TileId),
+    SelectTile(TileId),
 }
 
 enum TabState {
@@ -265,6 +266,15 @@ enum TabState {
 }
 
 impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
+    fn on_edit(&mut self, edit_action: egui_tiles::EditAction) {
+        // NOTE: Override accidental selection onDrag
+        if edit_action == egui_tiles::EditAction::TabSelected {
+            if let Some(tile_id) = self.selected_object.tile_id() {
+                self.tree_actions.push(TreeAction::SelectTile(tile_id));
+            }
+        }
+    }
+
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         pane.title().into()
     }
@@ -354,7 +364,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
                     .hovered_bg_color(colors::TRANSPARENT),
             );
             if close_response.clicked() {
-                self.tab_diffs.push(TabDiff::Delete(tile_id));
+                self.tree_actions.push(TreeAction::DeleteTab(tile_id));
             }
 
             ui.painter().hline(
@@ -386,7 +396,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
         button_response: egui::Response,
     ) -> egui::Response {
         if button_response.middle_clicked() {
-            self.tab_diffs.push(TabDiff::Delete(tile_id));
+            self.tree_actions.push(TreeAction::DeleteTab(tile_id));
         } else if button_response.clicked() {
             let Some(tile) = tiles.get(tile_id) else {
                 return button_response;
@@ -399,17 +409,17 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
                         graph_id: graph.id,
                     };
                 }
-                Tile::Pane(Pane::Welcome) => {
-                    *self.selected_object = SelectedObject::None;
-                }
                 Tile::Pane(Pane::Viewport(viewport)) => {
                     let Some(camera) = viewport.camera else {
                         return button_response;
                     };
                     *self.selected_object = SelectedObject::Viewport { tile_id, camera };
                 }
-                _ => {}
+                _ => {
+                    *self.selected_object = SelectedObject::None;
+                }
             }
+            self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
         button_response
     }
@@ -477,12 +487,12 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
         resp.context_menu(|ui| {
             ui.style_mut().spacing.item_spacing = vec2(16.0, 8.0);
             if ui.button("VIEWPORT").clicked() {
-                self.tab_diffs.push(TabDiff::AddViewport(tile_id));
+                self.tree_actions.push(TreeAction::AddViewport(tile_id));
                 ui.close_menu();
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                self.tab_diffs.push(TabDiff::AddGraph(tile_id, None));
+                self.tree_actions.push(TreeAction::AddGraph(tile_id, None));
                 ui.close_menu();
             }
         });
@@ -557,10 +567,10 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                let tab_diffs = std::mem::take(&mut ui_state.tab_diffs);
+                let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
                 let mut behavior = TreeBehavior {
                     icons,
-                    tab_diffs,
+                    tree_actions: tab_diffs,
                     selected_object: selected_object.as_mut(),
                     tagged_ranges: tagged_ranges.as_ref(),
                     collected_graph_data: collected_graph_data.as_ref(),
@@ -572,9 +582,9 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     graph_state_query: &mut graph_state_query,
                 };
                 ui_state.tree.ui(&mut behavior, ui);
-                for diff in behavior.tab_diffs.drain(..) {
+                for diff in behavior.tree_actions.drain(..) {
                     match diff {
-                        TabDiff::Delete(tile_id) => {
+                        TreeAction::DeleteTab(tile_id) => {
                             let Some(tile) = ui_state.tree.tiles.get(tile_id) else {
                                 continue;
                             };
@@ -598,7 +608,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                                 }
                             }
                         }
-                        TabDiff::AddViewport(parent) => {
+                        TreeAction::AddViewport(parent) => {
                             let pane = Pane::Viewport(ViewportPane::spawn(
                                 &mut commands,
                                 &asset_server,
@@ -607,9 +617,13 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                                 &mut render_layer_alloc,
                                 &Viewport::default(),
                             ));
-                            ui_state.insert_pane_with_parent(pane, parent, true);
+                            if let Some(tile_id) =
+                                ui_state.insert_pane_with_parent(pane, parent, true)
+                            {
+                                ui_state.tree.make_active(|id, _| id == tile_id);
+                            }
                         }
-                        TabDiff::AddGraph(parent, graph_bundle) => {
+                        TreeAction::AddGraph(parent, graph_bundle) => {
                             let graph_bundle = if let Some(graph_bundle) = graph_bundle {
                                 graph_bundle
                             } else {
@@ -630,8 +644,12 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                                     label: graph_label,
                                     graph_id,
                                 };
+                                ui_state.tree.make_active(|id, _| id == tile_id);
                                 ui_state.graphs.insert(tile_id, graph_id);
                             }
+                        }
+                        TreeAction::SelectTile(tile_id) => {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
                 }
