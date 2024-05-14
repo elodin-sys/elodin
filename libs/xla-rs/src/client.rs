@@ -434,4 +434,39 @@ impl PjRtClient {
             })
         }
     }
+
+    pub fn to_host_vec(&self, buffer: &PjRtBuffer) -> Result<Vec<u8>> {
+        let mut dst = Vec::default();
+        self.copy_into_host_vec(buffer, &mut dst)?;
+        Ok(dst)
+    }
+
+    pub fn copy_into_host_vec(&self, buffer: &PjRtBuffer, dst: &mut Vec<u8>) -> Result<()> {
+        if !buffer.is_on_cpu() {
+            // fallback to regular copy if buffer is not on CPU
+            return buffer.copy_into(dst);
+        }
+
+        let len = buffer.shape().size();
+        dst.clear();
+        dst.reserve_exact(len);
+        let dst_ptr = dst.as_mut_ptr();
+
+        let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
+        unsafe {
+            let src_ptr = cpp!([self as "std::shared_ptr<PjRtClient>*", buffer as "const std::unique_ptr<PjRtBuffer>*", out_status as "Status*"] -> *const u8 as "std::uintptr_t" {
+                auto status = (*self)->UnsafeBufferPointer(buffer->get());
+                if (status.ok()) {
+                    return status.value();
+                } else {
+                    *out_status = Status(status.status());
+                    return 0;
+                }
+            });
+            out_status.to_result()?;
+            dst.set_len(len);
+            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, len);
+        };
+        Ok(())
+    }
 }
