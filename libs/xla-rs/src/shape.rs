@@ -39,6 +39,10 @@ impl ArrayShape {
         self.dims.iter().map(|d| *d as usize).product::<usize>()
     }
 
+    pub fn size(&self) -> usize {
+        self.element_count() * self.ty().element_size_in_bytes()
+    }
+
     pub fn dims(&self) -> &[i64] {
         &self.dims
     }
@@ -97,6 +101,13 @@ impl Shape {
         }
     }
 
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Tuple(shapes) => shapes.iter().map(|s| s.size()).sum(),
+            Self::Array(a) => a.size(),
+        }
+    }
+
     pub fn raw_shape(&self) -> RawShape {
         match self {
             Self::Tuple(shapes) => {
@@ -152,6 +163,10 @@ impl RawShape {
             })
         };
         FromPrimitive::from_i32(ty).ok_or_else(|| Error::UnexpectedElementType(ty))
+    }
+
+    pub fn size(&self) -> usize {
+        self.shape().unwrap().size()
     }
 
     pub fn shape(&self) -> Result<Shape> {
