@@ -1,4 +1,4 @@
-use crate::{Literal, Result, Status};
+use crate::{Literal, RawShape, Result, Status};
 
 use cpp::{cpp, cpp_class};
 
@@ -24,6 +24,43 @@ impl PjRtBuffer {
                 return self == nullptr;
             })
         }
+    }
+
+    pub fn is_on_cpu(&self) -> bool {
+        unsafe {
+            cpp!([self as "const std::shared_ptr<PjRtBuffer>*"] -> bool as "bool" {
+                return (*self)->IsOnCpu();
+            })
+        }
+    }
+
+    pub fn shape(&self) -> RawShape {
+        unsafe {
+            cpp!([self as "std::unique_ptr<PjRtBuffer>*"] -> RawShape as "xla::Shape" {
+                auto device_shape = (*self)->on_device_shape();
+                auto host_shape = ShapeUtil::DeviceShapeToHostShape(device_shape);
+                return host_shape;
+            })
+        }
+    }
+
+    pub fn copy_into(&self, dst: &mut Vec<u8>) -> Result<()> {
+        let shape = self.shape();
+        let len = shape.size();
+        dst.clear();
+        dst.reserve_exact(len);
+        let dst_ptr = dst.as_mut_ptr();
+
+        let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
+        unsafe {
+            cpp!([self as "std::unique_ptr<PjRtBuffer>*", dst_ptr as "char*", shape as "xla::Shape", out_status as "Status*"] {
+                auto literal = std::make_unique<xla::MutableBorrowingLiteral>(dst_ptr, shape);
+                *out_status = (*self)->ToLiteralSync(literal.get());
+            });
+            out_status.to_result()?;
+            dst.set_len(len);
+        }
+        Ok(())
     }
 
     pub fn copy_to_host(&self, out: &mut [u8], offset: usize) -> Result<()> {
