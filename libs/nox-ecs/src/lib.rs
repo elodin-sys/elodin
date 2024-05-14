@@ -264,20 +264,6 @@ impl World<HostStore> {
         })
     }
 
-    pub fn load_column_from_client(
-        &mut self,
-        id: ComponentId,
-        client_world: &World<ClientStore>,
-    ) -> Result<(), Error> {
-        let host_column = self.column_by_id_mut(id).ok_or(Error::ComponentNotFound)?;
-        let client_column = client_world
-            .column_by_id(id)
-            .ok_or(Error::ComponentNotFound)?;
-        let literal = client_column.column.to_literal_sync()?;
-        host_column.column.buf.copy_from_slice(literal.raw_buf());
-        Ok(())
-    }
-
     pub fn builder(self) -> WorldBuilder {
         WorldBuilder::default().world(self)
     }
@@ -1066,20 +1052,19 @@ impl SharedWorld {
         Ok(())
     }
 
-    fn copy_to_host(&mut self) -> Result<(), Error> {
+    fn copy_to_host(&mut self, client: &Client) -> Result<(), Error> {
         for (id, host_table) in &mut self.host.archetypes {
             let client_table = self
                 .client
                 .archetypes
                 .get_mut(id)
                 .ok_or(Error::ComponentNotFound)?;
-            for (host, client) in host_table
+            for (host, client_buf) in host_table
                 .columns
                 .values_mut()
                 .zip(client_table.columns.values_mut())
             {
-                let literal = client.to_literal_sync()?;
-                host.buf.copy_from_slice(literal.raw_buf());
+                client.copy_into_host_vec(client_buf, &mut host.buf)?;
             }
         }
         Ok(())
@@ -1205,15 +1190,14 @@ impl WorldExec<Uncompiled> {
 impl WorldExec<Compiled> {
     pub fn run(&mut self) -> Result<(), Error> {
         let start = &mut Instant::now();
-        let client = &self.tick_exec.state.client;
-        self.world.copy_to_client(client)?;
+        self.world.copy_to_client(&self.tick_exec.state.client)?;
         self.profiler.copy_to_client.observe(start);
         if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.world)?;
         }
         self.tick_exec.run(&mut self.world)?;
         self.profiler.execute_buffers.observe(start);
-        self.world.copy_to_host()?;
+        self.world.copy_to_host(&self.tick_exec.state.client)?;
         self.profiler.copy_to_host.observe(start);
         self.world.host.tick += 1;
         self.push_world()?;
