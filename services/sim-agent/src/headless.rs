@@ -131,7 +131,7 @@ impl Runner {
         context_dir: &Path,
     ) -> Result<BitVec<u32>, Error> {
         let sim_start = Instant::now();
-        let mut batch_world = PolarsWorld::default();
+        let mut batch_world = Vec::new();
         // TODO: parallelize batch sim execution
         let batch_no = batch.batch_number as usize;
         let samples = batch.samples as usize;
@@ -153,10 +153,12 @@ impl Runner {
 
             let mut history = sample_exec.polars()?;
             history.add_sample_number(sample_no)?;
-            batch_world.vstack(&history)?;
+            batch_world.push(history);
         }
         tracing::debug!(elapsed = ?sim_start.elapsed(), "simulated batch");
         let archive_start = Instant::now();
+
+        let mut batch_world = PolarsWorld::vstack(batch_world)?;
         let mut batch_tar = write_results_tar(context_dir, &mut batch_world)?;
         let batch_tar_zst = compress(&mut batch_tar)?;
         tracing::debug!(elapsed = ?archive_start.elapsed(), "wrote batch archive");
