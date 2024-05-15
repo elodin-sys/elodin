@@ -12,7 +12,7 @@ use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::Compiled;
-use nox_ecs::{polars::PolarsWorld, ComponentExt, Seed, WorldExec};
+use nox_ecs::{polars::PolarsWorld, Seed, WorldExec};
 use sea_orm::{prelude::*, IntoActiveModel, TransactionTrait};
 use tokio::sync::mpsc;
 use tokio::task::block_in_place;
@@ -142,7 +142,7 @@ impl Runner {
             let span = tracing::info_span!("sample", no = %sample_no);
             let _guard = span.enter();
 
-            if let Ok(mut col) = sample_exec.column_mut(Seed::component_id()) {
+            if let Some(mut col) = sample_exec.world.column_mut::<Seed>() {
                 tracing::trace!("setting seed");
                 col.typed_buf_mut::<u64>()
                     .unwrap_or_default()
