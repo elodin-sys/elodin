@@ -1,9 +1,9 @@
-use crate::{assets::Handle, ColumnRef, ColumnStore, Compiled, Error, WorldExec};
+use crate::{assets::Handle, Compiled, Error, WorldExec};
 use bytes::Bytes;
 use conduit::{
     client::{Msg, MsgPair},
     query::{MetadataStore, QueryId},
-    ColumnPayload, ComponentId, ControlMsg, EntityId, Packet, Payload, StreamId,
+    ColumnPayload, ComponentId, ControlMsg, Packet, Payload, StreamId,
 };
 use tracing::warn;
 
@@ -29,10 +29,8 @@ pub struct ConduitExec {
 impl ConduitExec {
     pub fn new(exec: WorldExec<Compiled>, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
-        for arch in exec.world.host.archetypes.values() {
-            for col in arch.columns.values() {
-                metadata_store.push(col.metadata.clone());
-            }
+        for (_, metadata) in exec.world.host.component_map.values() {
+            metadata_store.push(metadata.clone());
         }
         Self {
             subscriptions: Vec::new(),
@@ -57,7 +55,7 @@ impl ConduitExec {
                 }
                 State::Replaying { index } => {
                     *index += 1;
-                    if *index >= self.exec.history.worlds.len() {
+                    if *index >= self.exec.history.len() {
                         self.state = State::Running;
                     }
                 }
@@ -69,28 +67,31 @@ impl ConduitExec {
     }
 
     pub fn send(&mut self) {
-        match self.state {
-            State::Running => {
-                let max_tick = self.exec.history.worlds.len();
-                send(
-                    &mut self.subscriptions,
-                    &mut self.connections,
-                    &self.exec.world.host,
-                    max_tick,
-                );
-            }
-            State::Replaying { index } => {
-                let Some(polars) = self.exec.history.worlds.get(index) else {
-                    return;
-                };
-                send(
-                    &mut self.subscriptions,
-                    &mut self.connections,
-                    polars,
-                    self.exec.history.worlds.len(),
-                );
-            }
-        }
+        let tick = match self.state {
+            State::Running => self.exec.tick,
+            State::Replaying { index } => index as u64,
+        };
+        // drop connections and subscriptions if the connection is closed
+        self.connections.retain_mut(|con| {
+            con.send(Packet {
+                stream_id: StreamId::CONTROL,
+                payload: Payload::ControlMsg(ControlMsg::Tick {
+                    tick,
+                    max_tick: self.exec.tick,
+                }),
+            })
+            .inspect_err(|err| {
+                tracing::debug!(?err, "send tick error, dropping connection");
+            })
+            .is_ok()
+        });
+        self.subscriptions.retain_mut(|sub| {
+            send_sub(&self.exec, sub, self.state)
+                .inspect_err(|err| {
+                    tracing::debug!(?err, "send sub error, dropping connection");
+                })
+                .is_ok()
+        });
     }
 
     pub fn recv(&mut self) {
@@ -204,52 +205,20 @@ impl ConduitExec {
     }
 }
 
-fn send(
-    subscriptions: &mut Vec<Subscription>,
-    connections: &mut Vec<Connection>,
-    exec: &impl ColumnStore,
-    max_tick: usize,
-) {
-    // drop connections and subscriptions if the connection is closed
-    connections.retain_mut(|con| {
-        con.send(Packet {
-            stream_id: StreamId::CONTROL,
-            payload: Payload::ControlMsg(ControlMsg::Tick {
-                tick: exec.tick(),
-                max_tick: max_tick as u64,
-            }),
-        })
-        .inspect_err(|err| {
-            tracing::debug!(?err, "send tick error, dropping connection");
-        })
-        .is_ok()
-    });
-    subscriptions.retain_mut(|sub| {
-        send_sub(exec, sub)
-            .inspect_err(|err| {
-                tracing::debug!(?err, "send sub error, dropping connection");
-            })
-            .is_ok()
-    });
-}
-
-fn send_sub(exec: &impl ColumnStore, sub: &mut Subscription) -> Result<(), Error> {
+fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) -> Result<(), Error> {
     let comp_id = sub.component_id;
-    let col = exec.column(comp_id)?;
-    if col.is_asset() {
-        let Some(assets) = exec.assets() else {
-            return Ok(());
-        };
-        let buf = col.value_buf();
-        let Ok(buf) = bytemuck::try_cast_slice(&buf) else {
-            // TODO: warn
-            todo!()
-        };
-
+    let col = match state {
+        State::Running => exec.column_by_id(comp_id).ok_or(Error::ComponentNotFound)?,
+        State::Replaying { index } => exec
+            .column_at_tick(comp_id, index as u64)
+            .ok_or(Error::ComponentNotFound)?,
+    };
+    if col.metadata.asset {
         let mut changed = false;
-        for id in buf.iter() {
-            let gen = assets
-                .gen(Handle::<()>::new(*id))
+        for (_, id) in col.typed_iter::<u64>() {
+            let gen = exec
+                .assets
+                .gen(Handle::<()>::new(id))
                 .ok_or(Error::AssetNotFound)?;
             if gen > sub.sent_generation {
                 changed = true;
@@ -259,19 +228,17 @@ fn send_sub(exec: &impl ColumnStore, sub: &mut Subscription) -> Result<(), Error
         if !changed {
             return Ok(());
         }
-        let entities_buf = col.entity_buf();
-        let entities_buf = bytemuck::cast_slice(&entities_buf);
-        for (id, entity_id) in buf.iter().zip(entities_buf.iter().copied()) {
-            let Some(value) = assets.value(Handle::<()>::new(*id)) else {
+        for (entity_id, id) in col.typed_iter::<u64>() {
+            let Some(value) = exec.assets.value(Handle::<()>::new(id)) else {
                 todo!("gracefully handle")
             };
             let packet = Packet {
                 stream_id: StreamId::CONTROL,
                 payload: Payload::ControlMsg(ControlMsg::Asset {
-                    entity_id: EntityId(entity_id),
+                    entity_id,
                     bytes: value.inner.clone(),
                     id: value.asset_id,
-                    asset_index: *id,
+                    asset_index: id,
                 }),
             };
             sub.connection
@@ -282,10 +249,10 @@ fn send_sub(exec: &impl ColumnStore, sub: &mut Subscription) -> Result<(), Error
         let packet = Packet {
             stream_id: sub.stream_id,
             payload: Payload::Column(ColumnPayload {
-                time: exec.tick(),
+                time: exec.tick,
                 len: col.len() as u32,
-                entity_buf: Bytes::copy_from_slice(&col.entity_buf()),
-                value_buf: Bytes::copy_from_slice(&col.value_buf()), // TODO: make the Vec<u8> here bytes so this is a ref-count
+                entity_buf: col.entities.clone().into(),
+                value_buf: col.column.clone().into(),
             }),
         };
         sub.connection
@@ -295,7 +262,7 @@ fn send_sub(exec: &impl ColumnStore, sub: &mut Subscription) -> Result<(), Error
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 enum State {
     #[default]
     Running,
