@@ -24,6 +24,7 @@ mod assets;
 mod component;
 mod conduit_exec;
 mod dyn_array;
+mod history;
 mod host_column;
 mod integrator;
 mod profile;
@@ -47,70 +48,48 @@ pub type ArchetypeName = ustr::Ustr;
 // 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
-pub struct Table<B = Vec<u8>> {
-    pub columns: BTreeMap<ComponentId, B>,
-    pub entity_buffer: B,
-}
+pub type Buffers<B = Vec<u8>> = BTreeMap<ComponentId, B>;
 
-#[derive(Default, Clone, Debug)]
-pub struct World<B = Vec<u8>> {
-    pub archetypes: ustr::UstrMap<Table<B>>,
+#[derive(Default)]
+pub struct World {
+    pub host: Buffers,
+    pub client: Buffers<PjRtBuffer>,
+    pub entity_ids: ustr::UstrMap<Vec<u8>>,
+    pub dirty_components: HashSet<ComponentId>,
     pub component_map: HashMap<ComponentId, (ArchetypeName, Metadata)>,
     pub assets: AssetStore,
     pub tick: u64,
     pub entity_len: u64,
 }
 
-impl Table {
-    pub fn push_entity_id(&mut self, entity_id: EntityId) {
-        self.entity_buffer
-            .extend_from_slice(&entity_id.0.to_le_bytes());
-    }
-
-    pub fn entity_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
-        bytemuck::cast_slice::<_, u64>(self.entity_buffer.as_ref())
-            .iter()
-            .copied()
-            .map(EntityId)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entity_buffer.len() / std::mem::size_of::<EntityId>()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-impl<B> World<B> {
-    pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRef<'_, &mut B>> {
+impl World {
+    pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
         self.column_by_id_mut(C::component_id())
     }
 
-    pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, &B>> {
+    pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, &Vec<u8>>> {
         self.column_by_id(C::component_id())
     }
 
-    pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, &B>> {
+    pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, &Vec<u8>>> {
         let (table_id, metadata) = self.component_map.get(&id)?;
-        let archetype = self.archetypes.get(table_id)?;
-        let column = archetype.columns.get(&id)?;
+        let column = self.host.get(&id)?;
+        let entities = self.entity_ids.get(table_id)?;
         Some(ColumnRef {
             column,
-            entities: &archetype.entity_buffer,
+            entities,
             metadata,
         })
     }
 
-    pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<ColumnRef<'_, &mut B>> {
+    pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
         let (table_id, metadata) = self.component_map.get(&id)?;
-        let archetype = self.archetypes.get_mut(table_id)?;
-        let column = archetype.columns.get_mut(&id)?;
+        let column = self.host.get_mut(&id)?;
+        let entities = self.entity_ids.get_mut(table_id)?;
+        self.dirty_components.insert(id);
         Some(ColumnRef {
             column,
-            entities: &mut archetype.entity_buffer,
+            entities,
             metadata,
         })
     }
@@ -145,20 +124,16 @@ impl From<Entity<'_>> for EntityId {
 }
 
 impl World {
-    pub fn get_or_insert_archetype<A: Archetype + 'static>(&mut self) -> &mut Table {
-        let archetype_name = A::name();
-        self.archetypes.entry(archetype_name).or_insert_with(|| {
-            let mut columns = BTreeMap::default();
-            for c in A::components() {
-                let id = c.component_id();
-                columns.insert(id, Vec::new());
-                self.component_map.insert(id, (archetype_name, c));
-            }
-            Table {
-                columns,
-                ..Default::default()
-            }
-        })
+    pub fn entity_ids(&self) -> HashSet<EntityId> {
+        self.entity_ids
+            .values()
+            .flat_map(|ids| {
+                bytemuck::cast_slice::<_, u64>(ids)
+                    .iter()
+                    .copied()
+                    .map(EntityId)
+            })
+            .collect()
     }
 
     pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
@@ -172,8 +147,17 @@ impl World {
     }
 
     pub fn insert_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
-        let table = self.get_or_insert_archetype::<A>();
-        table.push_entity_id(entity_id);
+        let archetype_name = A::name();
+        for metadata in A::components() {
+            let id = metadata.component_id();
+            self.component_map.insert(id, (archetype_name, metadata));
+            self.host.entry(id).or_default();
+            self.dirty_components.insert(id);
+        }
+        self.entity_ids
+            .entry(archetype_name)
+            .or_default()
+            .extend_from_slice(&entity_id.0.to_le_bytes());
         archetype.insert_into_world(self);
     }
 
@@ -189,6 +173,41 @@ impl World {
         let mesh = self.insert_asset(mesh);
         let material = self.insert_asset(material);
         Shape { mesh, material }
+    }
+
+    fn fork(&self) -> Self {
+        let dirty_components = self.host.keys().copied().collect();
+        Self {
+            host: self.host.clone(),
+            client: Default::default(),
+            entity_ids: self.entity_ids.clone(),
+            dirty_components,
+            component_map: self.component_map.clone(),
+            assets: self.assets.clone(),
+            tick: self.tick,
+            entity_len: self.entity_len,
+        }
+    }
+
+    fn copy_to_client(&mut self, client: &Client) -> Result<(), Error> {
+        for id in self.dirty_components.clone().into_iter() {
+            let pjrt_buf = self.column_by_id_mut(id).unwrap().copy_to_client(client)?;
+            self.client.insert(id, pjrt_buf);
+        }
+        self.dirty_components.clear();
+        Ok(())
+    }
+
+    fn copy_to_host(&mut self, client: &Client) -> Result<(), Error> {
+        for (id, pjrt_buf) in self.client.iter() {
+            let host_buf = self.host.get_mut(id).unwrap();
+            client.copy_into_host_vec(pjrt_buf, host_buf)?;
+        }
+        Ok(())
+    }
+
+    pub fn polars(&self) -> PolarsWorld {
+        PolarsWorld::new(&self.component_map, &self.entity_ids)
     }
 }
 
@@ -712,7 +731,7 @@ where
         let client = Client::cpu().unwrap();
         let mut exec = self.build().unwrap().compile(client).unwrap();
         exec.run().unwrap();
-        exec.world.host
+        exec.world
     }
 }
 
@@ -827,124 +846,38 @@ impl Exec {
 }
 
 impl Exec<Compiled> {
-    fn run(&mut self, world: &mut SharedWorld) -> Result<(), Error> {
+    fn run(&mut self, world: &mut World) -> Result<(), Error> {
         let mut buffers = BufferArgsRef::default().untuple_result(true);
         for id in &self.metadata.arg_ids {
-            let col = world
-                .client
-                .column_by_id(*id)
-                .ok_or(Error::ComponentNotFound)?;
-            buffers.push(col.column);
+            buffers.push(&world.client[id]);
         }
         let ret_bufs = self.state.exec.execute_buffers(buffers)?;
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
-            let col = world
-                .client
-                .column_by_id_mut(*comp_id)
-                .ok_or(Error::ComponentNotFound)?;
-            *col.column = buf;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-pub struct SharedWorld {
-    host: World,
-    client: World<PjRtBuffer>,
-    dirty_components: HashSet<ComponentId>,
-}
-
-impl SharedWorld {
-    pub fn from_host(host: World) -> Self {
-        let archetypes = host
-            .archetypes
-            .iter()
-            .map(|(id, table)| {
-                let columns = table
-                    .columns
-                    .keys()
-                    .map(|id| (*id, PjRtBuffer::default()))
-                    .collect::<BTreeMap<_, _>>();
-                let table = Table::<PjRtBuffer> {
-                    columns,
-                    entity_buffer: PjRtBuffer::default(),
-                };
-                (*id, table)
-            })
-            .collect();
-        let client = World {
-            archetypes,
-            component_map: host.component_map.clone(),
-            assets: AssetStore::default(),
-            tick: host.tick,
-            entity_len: host.entity_len,
-        };
-        let dirty_components = host.component_map.keys().copied().collect();
-        SharedWorld {
-            host,
-            client,
-            dirty_components,
-        }
-    }
-
-    fn fork(&self) -> Self {
-        Self::from_host(self.host.clone())
-    }
-
-    fn copy_to_client(&mut self, client: &Client) -> Result<(), Error> {
-        for id in self.dirty_components.drain() {
-            let client_column = self
-                .client
-                .column_by_id_mut(id)
-                .ok_or(Error::ComponentNotFound)?;
-            let host_column = self
-                .host
-                .column_by_id_mut(id)
-                .ok_or(Error::ComponentNotFound)?;
-            *client_column.column = host_column.copy_to_client(client)?;
-        }
-        Ok(())
-    }
-
-    fn copy_to_host(&mut self, client: &Client) -> Result<(), Error> {
-        for (id, host_table) in &mut self.host.archetypes {
-            let client_table = self
-                .client
-                .archetypes
-                .get_mut(id)
-                .ok_or(Error::ComponentNotFound)?;
-            for (host, client_buf) in host_table
-                .columns
-                .values_mut()
-                .zip(client_table.columns.values_mut())
-            {
-                client.copy_into_host_vec(client_buf, host)?;
-            }
+            world.client.insert(*comp_id, buf);
         }
         Ok(())
     }
 }
 
 pub struct WorldExec<S: ExecState = Uncompiled> {
-    pub world: SharedWorld,
+    pub world: World,
     pub tick_exec: Exec<S>,
     pub startup_exec: Option<Exec<S>>,
-    pub history: Vec<ustr::UstrMap<Table>>,
+    pub history: Vec<Buffers>,
     pub profiler: Profiler,
 }
 
 impl<S: ExecState> std::ops::Deref for WorldExec<S> {
     type Target = World;
     fn deref(&self) -> &Self::Target {
-        &self.world.host
+        &self.world
     }
 }
 
 impl<S: ExecState> WorldExec<S> {
     pub fn new(world: World, tick_exec: Exec<S>, startup_exec: Option<Exec<S>>) -> Self {
         let mut world = Self {
-            world: SharedWorld::from_host(world),
+            world,
             tick_exec,
             startup_exec,
             history: Default::default(),
@@ -956,7 +889,7 @@ impl<S: ExecState> WorldExec<S> {
 
     fn push_world(&mut self) {
         let start = &mut Instant::now();
-        self.history.push(self.world.host.archetypes.clone());
+        self.history.push(self.world.host.clone());
         self.profiler.add_to_history.observe(start);
     }
 
@@ -985,35 +918,20 @@ impl<S: ExecState> WorldExec<S> {
         if tick == self.tick {
             return self.column_by_id(component_id);
         }
-
-        let archetypes = self.history.get(tick as usize)?;
-        let (archetype_name, metadata) = self.world.host.component_map.get(&component_id)?;
-        let archetype = archetypes.get(archetype_name)?;
-        let column = archetype.columns.get(&component_id)?;
+        let column = self.history.get(tick as usize)?.get(&component_id)?;
+        let (archetype_name, metadata) = self.world.component_map.get(&component_id)?;
+        let entities = self.entity_ids.get(archetype_name)?;
         Some(ColumnRef {
             column,
-            entities: &archetype.entity_buffer,
+            entities,
             metadata,
         })
     }
 
-    pub fn column_mut(
-        &mut self,
-        component_id: ComponentId,
-    ) -> Result<ColumnRef<'_, &mut Vec<u8>>, Error> {
-        self.world
-            .host
-            .column_by_id_mut(component_id)
-            .inspect(|_| {
-                self.world.dirty_components.insert(component_id);
-            })
-            .ok_or(Error::ComponentNotFound)
-    }
-
     pub fn polars(&self) -> Result<PolarsWorld, Error> {
-        let mut polars_world = PolarsWorld::new(&self.component_map);
-        for (tick, archetypes) in self.history.iter().enumerate() {
-            polars_world.push(archetypes, tick as u64)?;
+        let mut polars_world = self.world.polars();
+        for (tick, buffers) in self.history.iter().enumerate() {
+            polars_world.push(buffers, tick as u64)?;
         }
         Ok(polars_world)
     }
@@ -1071,12 +989,19 @@ impl WorldExec<Uncompiled> {
         let assets = postcard::from_bytes(&assets_buf)?;
 
         let polars_world = PolarsWorld::read_from_dir(&world_dir)?;
+        let host = polars_world.at(0)?;
+        let dirty_components = host.keys().copied().collect();
+        let component_map = polars_world.component_map();
+        let entity_len = polars_world.entity_len();
         let world = World {
-            archetypes: polars_world.at(0)?,
-            component_map: polars_world.component_map(),
+            host,
+            client: Default::default(),
+            entity_ids: polars_world.entity_ids,
+            dirty_components,
+            component_map,
             assets,
             tick: 0,
-            entity_len: polars_world.entity_len(),
+            entity_len,
         };
         let world_exec = WorldExec::new(world, tick_exec, startup_exec);
         Ok(world_exec)
@@ -1095,7 +1020,7 @@ impl WorldExec<Compiled> {
         self.profiler.execute_buffers.observe(start);
         self.world.copy_to_host(&self.tick_exec.state.client)?;
         self.profiler.copy_to_host.observe(start);
-        self.world.host.tick += 1;
+        self.world.tick += 1;
         self.push_world();
         Ok(())
     }
