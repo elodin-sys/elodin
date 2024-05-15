@@ -1,9 +1,9 @@
 use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
-use nox_ecs::{conduit, nox, spawn_tcp_server, Table, World};
+use nox_ecs::{conduit, nox, spawn_tcp_server, World};
 use pyo3::{exceptions::PyValueError, types::PyBytes};
-use std::{collections::hash_map::Entry, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 #[pyclass(subclass)]
 #[derive(Default)]
@@ -12,30 +12,21 @@ pub struct WorldBuilder {
 }
 
 impl WorldBuilder {
-    fn get_or_insert_archetype(&mut self, archetype: &Archetype) -> Result<&mut Table, Error> {
+    fn insert_entity_id(&mut self, archetype: &Archetype, entity_id: EntityId) {
         let archetype_name = archetype.archetype_name;
-        match self.world.archetypes.entry(archetype_name) {
-            Entry::Occupied(entry) => Ok(entry.into_mut()),
-            Entry::Vacant(entry) => {
-                let columns = archetype
-                    .component_datas
-                    .iter()
-                    .cloned()
-                    .map(|c| (ComponentId::new(&c.name), Vec::default()))
-                    .collect();
-                for metadata in &archetype.component_datas {
-                    let component_id = ComponentId::new(&metadata.name);
-                    self.world
-                        .component_map
-                        .insert(component_id, (archetype_name, metadata.inner.clone()));
-                }
-                let table = Table {
-                    columns,
-                    ..Default::default()
-                };
-                Ok(entry.insert(table))
-            }
+        let columns = archetype.component_datas.iter().cloned();
+        for metadata in columns {
+            let id = metadata.component_id();
+            self.world
+                .component_map
+                .insert(id, (archetype_name, metadata.inner));
+            self.world.host.entry(id).or_default();
         }
+        self.world
+            .entity_ids
+            .entry(archetype_name)
+            .or_default()
+            .extend_from_slice(&entity_id.inner.0.to_le_bytes());
     }
 }
 
@@ -50,7 +41,7 @@ impl WorldBuilder {
         let entity_id = EntityId {
             inner: conduit::EntityId(self.world.entity_len),
         };
-        self.insert(entity_id.clone(), spawnable)?;
+        self.insert(entity_id, spawnable)?;
         self.world.entity_len += 1;
         if let Some(name) = name {
             let metadata = EntityMetadata::new(name, None);
@@ -64,8 +55,7 @@ impl WorldBuilder {
         match spawnable {
             Spawnable::Archetypes(archetypes) => {
                 for archetype in archetypes {
-                    let table = self.get_or_insert_archetype(&archetype)?;
-                    table.push_entity_id(entity_id.inner);
+                    self.insert_entity_id(&archetype, entity_id);
                     for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
                         let mut col = self
                             .world
@@ -95,8 +85,7 @@ impl WorldBuilder {
                     archetype_name: component_name.as_str().into(),
                 };
 
-                let table = self.get_or_insert_archetype(&archetype)?;
-                table.push_entity_id(entity_id.inner);
+                self.insert_entity_id(&archetype, entity_id);
                 let mut col = self
                     .world
                     .column_by_id_mut(ComponentId::new(&component_name))
@@ -246,6 +235,7 @@ impl WorldBuilder {
                 exec.run(ticks)?;
                 let profile = exec.profile();
                 println!("compile time:         {:.3} ms", profile["compile"]);
+                println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                 println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                 println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                 println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);

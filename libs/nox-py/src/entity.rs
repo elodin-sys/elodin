@@ -3,7 +3,7 @@ use core::fmt;
 
 use nox_ecs::conduit;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[pyclass]
 pub struct EntityId {
     pub inner: conduit::EntityId,

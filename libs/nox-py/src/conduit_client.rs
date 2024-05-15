@@ -80,7 +80,7 @@ impl ConduitInner {
     ) -> Result<(), Error> {
         let client = self.client().await?;
         for _ in 0..2 {
-            match send_inner(client, entity_id.clone(), &component_datas, &arrays, time).await {
+            match send_inner(client, entity_id, &component_datas, &arrays, time).await {
                 Ok(_) => break,
                 Err(conduit::Error::Io(_)) => {
                     continue;

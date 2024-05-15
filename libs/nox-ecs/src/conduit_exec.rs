@@ -29,7 +29,7 @@ pub struct ConduitExec {
 impl ConduitExec {
     pub fn new(exec: WorldExec<Compiled>, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
-        for (_, metadata) in exec.world.host.component_map.values() {
+        for (_, metadata) in exec.world.component_map.values() {
             metadata_store.push(metadata.clone());
         }
         Self {
@@ -113,20 +113,12 @@ impl ConduitExec {
             return Ok(());
         }
         tracing::debug!("received connect, sending metadata");
-        let entity_ids = self
-            .exec
-            .world
-            .host
-            .archetypes
-            .values()
-            .flat_map(|arch| arch.entity_ids())
-            .collect();
         conn.send(Packet {
             stream_id: StreamId::CONTROL,
             payload: Payload::ControlMsg(ControlMsg::StartSim {
                 metadata_store: self.metadata_store.clone(),
                 time_step: self.exec.time_step(),
-                entity_ids,
+                entity_ids: self.exec.entity_ids(),
             }),
         })?;
         self.connections.push(conn);
@@ -178,7 +170,11 @@ impl ConduitExec {
             Msg::Column(new_col) => {
                 // NOTE: the entity ids in `new_col` can be a subset of the ones in `col`,
                 // but the order must be the same
-                let mut col_ref = self.exec.column_mut(new_col.metadata.component_id())?;
+                let mut col_ref = self
+                    .exec
+                    .world
+                    .column_by_id_mut(new_col.metadata.component_id())
+                    .ok_or(Error::ComponentNotFound)?;
                 let mut col = col_ref.iter();
                 let updates = new_col
                     .iter()

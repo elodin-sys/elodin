@@ -9,16 +9,20 @@ use polars_arrow::{
 use std::collections::HashMap;
 use std::{fs::File, path::Path};
 
-use crate::{ArchetypeName, Error, Table};
+use crate::{ArchetypeName, Buffers, Error};
 
 #[derive(Debug, Clone, Default)]
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
     pub metadata: ustr::UstrMap<Vec<Metadata>>,
+    pub entity_ids: ustr::UstrMap<Vec<u8>>,
 }
 
 impl PolarsWorld {
-    pub fn new(component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>) -> Self {
+    pub fn new(
+        component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
+        entity_ids: &ustr::UstrMap<Vec<u8>>,
+    ) -> Self {
         let metadata = component_map.iter().fold(
             ustr::UstrMap::<Vec<Metadata>>::default(),
             |mut archetype_metadata, (_, (archetype_name, component_metadata))| {
@@ -32,6 +36,7 @@ impl PolarsWorld {
         Self {
             archetypes: Default::default(),
             metadata,
+            entity_ids: entity_ids.clone(),
         }
     }
 
@@ -78,21 +83,43 @@ impl PolarsWorld {
             .collect()
     }
 
-    pub fn at(&self, tick: u64) -> Result<ustr::UstrMap<Table>, Error> {
-        let mut archetypes = ustr::UstrMap::default();
-        for (archetype_name, df) in &self.archetypes {
+    pub fn at(&self, tick: u64) -> Result<Buffers, Error> {
+        let mut buffers = Buffers::default();
+        for df in self.archetypes.values() {
             let df = df.clone().lazy().filter(col("tick").eq(tick)).collect()?;
-            let table = Table::from_df(&df)?;
-            archetypes.insert(*archetype_name, table);
+            df.get_columns()
+                .iter()
+                .filter(|s| s.name() != "tick" && s.name() != EntityId::NAME)
+                .for_each(|series| {
+                    let component_id = ComponentId::new(series.name());
+                    let buf = series.to_bytes();
+                    buffers.insert(component_id, buf);
+                });
         }
-        Ok(archetypes)
+        Ok(buffers)
     }
 
-    pub fn push(&mut self, archetypes: &ustr::UstrMap<Table>, tick: u64) -> Result<(), Error> {
-        for (archetype_name, table) in archetypes {
-            let metadata = &self.metadata[archetype_name];
+    pub fn push(&mut self, buffers: &Buffers, tick: u64) -> Result<(), Error> {
+        for (archetype_name, components) in self.metadata.iter() {
+            let entity_buf = &self.entity_ids[archetype_name];
+            let len = entity_buf.len() / std::mem::size_of::<EntityId>();
+            let tick_series = std::iter::repeat(tick)
+                .take(len)
+                .collect::<Series>()
+                .with_name("tick");
+            let entity_series = to_series(entity_buf.as_ref(), &EntityId::metadata())?;
+            let mut new_df = components
+                .iter()
+                .map(|metadata| {
+                    let component_id = metadata.component_id();
+                    let buf = buffers.get(&component_id).ok_or(Error::ComponentNotFound)?;
+                    to_series(buf, metadata)
+                })
+                .collect::<Result<DataFrame, Error>>()?;
+            new_df.with_column(tick_series)?;
+            new_df.with_column(entity_series)?;
+
             let df = self.archetypes.entry(*archetype_name).or_default();
-            let new_df = table.to_df(metadata, tick)?;
             if df.is_empty() {
                 *df = new_df;
             } else {
@@ -129,17 +156,21 @@ impl PolarsWorld {
     pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let mut archetypes = ustr::UstrMap::default();
+        let mut entity_ids = ustr::UstrMap::default();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: ustr::UstrMap<Vec<Metadata>> = serde_json::from_reader(&mut metadata)?;
         for name in metadata.keys() {
             let path = path.join(format!("{}.parquet", name));
             let file = File::open(&path)?;
             let df = polars::prelude::ParquetReader::new(file).finish()?;
+            let entity_id_buf = df.column(EntityId::NAME)?.to_bytes();
             archetypes.insert(*name, df);
+            entity_ids.insert(*name, entity_id_buf);
         }
         Ok(Self {
             archetypes,
             metadata,
+            entity_ids,
         })
     }
 
@@ -167,49 +198,6 @@ impl PolarsWorld {
             })
             .max()
             .expect("at least one archetype exists")
-    }
-}
-
-impl Table {
-    pub fn to_df(&self, metadata: &[Metadata], tick: u64) -> Result<DataFrame, Error> {
-        let entity_series = to_series(&self.entity_buffer, &EntityId::metadata())?;
-        let tick_series = std::iter::repeat(tick)
-            .take(self.len())
-            .collect::<Series>()
-            .with_name("tick");
-        let mut df = metadata
-            .iter()
-            .map(|metadata| {
-                let column = &self.columns[&metadata.component_id()];
-                let series = to_series(column, metadata)?;
-                Ok(series)
-            })
-            .collect::<Result<DataFrame, Error>>()?;
-        df.with_column(tick_series)?;
-        df.with_column(entity_series)?;
-        Ok(df)
-    }
-
-    pub fn from_df(df: &DataFrame) -> Result<Self, Error> {
-        let ticks = df.column("tick")?.n_unique()?;
-        assert_eq!(ticks, 1);
-        let entity_buffer = df.column(EntityId::NAME)?.to_bytes();
-
-        // ignore tick entity_id columns:
-        let columns = df
-            .get_columns()
-            .iter()
-            .filter(|s| s.name() != "tick" && s.name() != EntityId::NAME)
-            .map(|series| {
-                let component_id = ComponentId::new(series.name());
-                let buf = series.to_bytes();
-                (component_id, buf)
-            })
-            .collect();
-        Ok(Self {
-            columns,
-            entity_buffer,
-        })
     }
 }
 
@@ -333,8 +321,8 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = PolarsWorld::new(&world.component_map);
-        polars.push(&world.archetypes, 0).unwrap();
+        let mut polars = world.polars();
+        polars.push(&world.host, 0).unwrap();
         let df = polars.archetypes[&Body::name()].clone();
         let out = df
             .lazy()
@@ -378,8 +366,8 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = PolarsWorld::new(&world.component_map);
-        polars.push(&world.archetypes, 0).unwrap();
+        let mut polars = world.polars();
+        polars.push(&world.host, 0).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
@@ -408,10 +396,10 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = PolarsWorld::new(&world.component_map);
-        polars.push(&world.archetypes, 0).unwrap();
-        let archetypes = polars.at(0).unwrap();
-        assert_eq!(archetypes, world.archetypes);
+        let mut polars = world.polars();
+        polars.push(&world.host, 0).unwrap();
+        let buffers = polars.at(0).unwrap();
+        assert_eq!(buffers, world.host);
     }
 
     #[test]
@@ -434,13 +422,13 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = PolarsWorld::new(&world.component_map);
-        polars.push(&world.archetypes, 0).unwrap();
+        let mut polars = world.polars();
+        polars.push(&world.host, 0).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
         let new_polars = PolarsWorld::read_from_dir(dir).unwrap();
-        let archetypes = new_polars.at(0).unwrap();
-        assert_eq!(archetypes, world.archetypes);
+        let buffers = new_polars.at(0).unwrap();
+        assert_eq!(buffers, world.host);
     }
 }
