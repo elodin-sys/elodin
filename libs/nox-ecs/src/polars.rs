@@ -11,18 +11,18 @@ use std::{fs::File, path::Path};
 
 use crate::{ArchetypeName, Buffers, Error};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
     pub metadata: ustr::UstrMap<Vec<Metadata>>,
-    pub entity_ids: ustr::UstrMap<Vec<u8>>,
 }
 
 impl PolarsWorld {
     pub fn new(
         component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
         entity_ids: &ustr::UstrMap<Vec<u8>>,
-    ) -> Self {
+        history: &[Buffers],
+    ) -> Result<Self, Error> {
         let metadata = component_map.iter().fold(
             ustr::UstrMap::<Vec<Metadata>>::default(),
             |mut archetype_metadata, (_, (archetype_name, component_metadata))| {
@@ -33,11 +33,48 @@ impl PolarsWorld {
                 archetype_metadata
             },
         );
-        Self {
-            archetypes: Default::default(),
-            metadata,
-            entity_ids: entity_ids.clone(),
+        let ticks = history.len();
+        let mut archetypes = ustr::UstrMap::default();
+        for (archetype_name, components) in metadata.iter() {
+            let entity_buf = &entity_ids[archetype_name];
+            let len = entity_buf.len() / std::mem::size_of::<EntityId>();
+
+            let entity_series = to_series(&entity_buf.repeat(ticks), &EntityId::metadata())?;
+            let tick_series = (0..ticks)
+                .flat_map(|tick| std::iter::repeat(tick as u64).take(len))
+                .collect::<Series>()
+                .with_name("tick");
+
+            let mut df = components
+                .iter()
+                .map(|metadata| {
+                    let component_id = metadata.component_id();
+                    let buf = history
+                        .iter()
+                        .map(|buffers| buffers[&component_id].as_slice())
+                        .collect::<Vec<&[u8]>>()
+                        .concat();
+                    to_series(&buf, metadata)
+                })
+                .collect::<Result<DataFrame, Error>>()?;
+            df.with_column(tick_series)?;
+            df.with_column(entity_series)?;
+            archetypes.insert(*archetype_name, df);
         }
+        Ok(Self {
+            archetypes,
+            metadata,
+        })
+    }
+
+    pub fn vstack(mut samples: Vec<Self>) -> Result<Self, Error> {
+        let mut world = samples.pop().unwrap();
+        for sample in samples.into_iter() {
+            for (archetype_name, df) in &mut world.archetypes {
+                df.vstack_mut(&sample.archetypes[archetype_name])?;
+            }
+        }
+        Ok(world)
     }
 
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
@@ -83,61 +120,24 @@ impl PolarsWorld {
             .collect()
     }
 
-    pub fn at(&self, tick: u64) -> Result<Buffers, Error> {
-        let mut buffers = Buffers::default();
+    pub fn history(&self) -> Result<Vec<Buffers>, Error> {
+        let ticks = self.tick() + 1;
+        let mut history = std::iter::repeat_with(Buffers::default)
+            .take(ticks as usize)
+            .collect::<Vec<_>>();
         for df in self.archetypes.values() {
-            let df = df.clone().lazy().filter(col("tick").eq(tick)).collect()?;
             df.get_columns()
                 .iter()
                 .filter(|s| s.name() != "tick" && s.name() != EntityId::NAME)
                 .for_each(|series| {
                     let component_id = ComponentId::new(series.name());
                     let buf = series.to_bytes();
-                    buffers.insert(component_id, buf);
+                    for (index, chunk) in buf.chunks_exact(buf.len() / ticks as usize).enumerate() {
+                        history[index].insert(component_id, chunk.to_vec());
+                    }
                 });
         }
-        Ok(buffers)
-    }
-
-    pub fn push(&mut self, buffers: &Buffers, tick: u64) -> Result<(), Error> {
-        for (archetype_name, components) in self.metadata.iter() {
-            let entity_buf = &self.entity_ids[archetype_name];
-            let len = entity_buf.len() / std::mem::size_of::<EntityId>();
-            let tick_series = std::iter::repeat(tick)
-                .take(len)
-                .collect::<Series>()
-                .with_name("tick");
-            let entity_series = to_series(entity_buf.as_ref(), &EntityId::metadata())?;
-            let mut new_df = components
-                .iter()
-                .map(|metadata| {
-                    let component_id = metadata.component_id();
-                    let buf = buffers.get(&component_id).ok_or(Error::ComponentNotFound)?;
-                    to_series(buf, metadata)
-                })
-                .collect::<Result<DataFrame, Error>>()?;
-            new_df.with_column(tick_series)?;
-            new_df.with_column(entity_series)?;
-
-            let df = self.archetypes.entry(*archetype_name).or_default();
-            if df.is_empty() {
-                *df = new_df;
-            } else {
-                df.vstack_mut(&new_df)?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn vstack(&mut self, other: &Self) -> Result<(), Error> {
-        if self.archetypes.is_empty() {
-            *self = other.clone();
-            return Ok(());
-        }
-        for (archetype_name, df) in &mut self.archetypes {
-            df.vstack_mut(&other.archetypes[archetype_name])?;
-        }
-        Ok(())
+        Ok(history)
     }
 
     pub fn write_to_dir(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
@@ -156,22 +156,28 @@ impl PolarsWorld {
     pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let mut archetypes = ustr::UstrMap::default();
-        let mut entity_ids = ustr::UstrMap::default();
         let mut metadata = File::open(path.join("metadata.json"))?;
         let metadata: ustr::UstrMap<Vec<Metadata>> = serde_json::from_reader(&mut metadata)?;
         for name in metadata.keys() {
             let path = path.join(format!("{}.parquet", name));
             let file = File::open(&path)?;
             let df = polars::prelude::ParquetReader::new(file).finish()?;
-            let entity_id_buf = df.column(EntityId::NAME)?.to_bytes();
             archetypes.insert(*name, df);
-            entity_ids.insert(*name, entity_id_buf);
         }
         Ok(Self {
             archetypes,
             metadata,
-            entity_ids,
         })
+    }
+
+    pub fn entity_ids(&self) -> Result<ustr::UstrMap<Vec<u8>>, Error> {
+        self.archetypes
+            .iter()
+            .map(|(name, df)| {
+                let entity_id_buf = df.column(EntityId::NAME)?.to_bytes();
+                Ok((*name, entity_id_buf))
+            })
+            .collect()
     }
 
     pub fn tick(&self) -> u64 {
@@ -321,8 +327,7 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.polars();
-        polars.push(&world.host, 0).unwrap();
+        let polars = world.polars().unwrap();
         let df = polars.archetypes[&Body::name()].clone();
         let out = df
             .lazy()
@@ -366,8 +371,7 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.polars();
-        polars.push(&world.host, 0).unwrap();
+        let mut polars = world.polars().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
@@ -396,10 +400,9 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.polars();
-        polars.push(&world.host, 0).unwrap();
-        let buffers = polars.at(0).unwrap();
-        assert_eq!(buffers, world.host);
+        let polars = world.polars().unwrap();
+        let buffers = &polars.history().unwrap()[0];
+        assert_eq!(buffers, &world.host);
     }
 
     #[test]
@@ -422,13 +425,12 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.polars();
-        polars.push(&world.host, 0).unwrap();
+        let mut polars = world.polars().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
         let new_polars = PolarsWorld::read_from_dir(dir).unwrap();
-        let buffers = new_polars.at(0).unwrap();
-        assert_eq!(buffers, world.host);
+        let buffers = &new_polars.history().unwrap()[0];
+        assert_eq!(buffers, &world.host);
     }
 }
