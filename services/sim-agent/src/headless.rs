@@ -151,7 +151,7 @@ impl Runner {
             }
             block_in_place(|| self.run_sim(run.max_duration as usize, &mut sample_exec))?;
 
-            let mut history = sample_exec.history.compact_to_world()?;
+            let mut history = sample_exec.polars()?;
             history.add_sample_number(sample_no)?;
             batch_world.vstack(&history)?;
         }

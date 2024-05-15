@@ -1,41 +1,103 @@
 use std::{collections::BTreeMap, ops::Deref};
 
 use bytemuck::Pod;
-use conduit::{ComponentType, ComponentValue, EntityId, Metadata};
+use conduit::{ComponentValue, EntityId};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
 };
-use smallvec::SmallVec;
+use polars::series::Series;
 
-use crate::{Component, DynArrayView, Error};
+use crate::{polars::to_series, ColumnRef, Component, Error};
 
-/// A type erased columnar data store located on the host CPU
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub struct HostColumn {
-    pub buf: Vec<u8>,
-    pub len: usize,
-    pub metadata: Metadata,
-}
-
-impl HostColumn {
-    pub fn new(metadata: Metadata) -> Self {
-        HostColumn {
-            buf: vec![],
-            len: 0,
-            metadata,
+impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
+    pub fn typed_buf<T: ArrayElement + Pod>(&self) -> Option<&[T]> {
+        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
+            return None;
         }
+        bytemuck::try_cast_slice(self.column.as_ref()).ok()
+    }
+
+    pub fn entity_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
+        bytemuck::cast_slice::<_, u64>(self.entities.as_ref())
+            .iter()
+            .copied()
+            .map(EntityId)
     }
 
     pub fn entity_map(&self) -> BTreeMap<EntityId, usize> {
-        if self.metadata.name != EntityId::NAME {
-            return BTreeMap::default();
-        }
-        self.iter::<u64>()
-            .map(EntityId)
+        self.entity_ids()
             .enumerate()
-            .map(|(offset, id)| (id, offset))
+            .map(|(i, id)| (id, i))
             .collect()
+    }
+
+    pub fn values_iter(&self) -> impl Iterator<Item = ComponentValue<'_>> + '_ {
+        let mut buf_offset = 0;
+        std::iter::from_fn(move || {
+            let buf = self.column.as_ref().get(buf_offset..)?;
+            let (offset, value) = self.metadata.component_type.parse_value(buf).ok()?;
+            buf_offset += offset;
+            Some(value)
+        })
+    }
+
+    pub fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
+        let mut dims = self.metadata.component_type.shape.clone();
+        dims.insert(0, self.len() as i64);
+        client
+            .copy_raw_host_buffer(
+                self.metadata.component_type.primitive_ty.element_type(),
+                self.column.as_ref(),
+                &dims[..],
+            )
+            .map_err(Error::from)
+    }
+
+    pub fn series(&self) -> Result<Series, Error> {
+        to_series(self.column.as_ref(), self.metadata)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (EntityId, ComponentValue<'_>)> {
+        self.entity_ids().zip(self.values_iter())
+    }
+
+    pub fn typed_iter<T: conduit::Component>(&self) -> impl Iterator<Item = (EntityId, T)> + '_ {
+        assert_eq!(self.metadata.component_type, T::component_type());
+        self.entity_ids().zip(
+            self.values_iter()
+                .filter_map(|v| T::from_component_value(v)),
+        )
+    }
+
+    pub fn len(&self) -> usize {
+        self.column.as_ref().len() / self.metadata.component_type.size()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {
+    pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
+        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
+            return None;
+        }
+        bytemuck::try_cast_slice_mut(self.column.as_mut_slice()).ok()
+    }
+
+    pub fn update(&mut self, offset: usize, value: ComponentValue<'_>) -> Result<(), Error> {
+        let size = self.metadata.component_type.size();
+        let offset = offset * size;
+        let out = &mut self.column[offset..offset + size];
+        if let Some(bytes) = value.bytes() {
+            if bytes.len() != out.len() {
+                return Err(Error::ValueSizeMismatch);
+            }
+            out.copy_from_slice(bytes);
+        }
+        Ok(())
     }
 
     pub fn push<T: Component + 'static>(&mut self, val: T) {
@@ -48,134 +110,6 @@ impl HostColumn {
     }
 
     pub fn push_raw(&mut self, raw: &[u8]) {
-        self.buf.extend_from_slice(raw);
-        self.len += 1;
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn copy_to_client(&self, client: &Client) -> Result<PjRtBuffer, Error> {
-        let mut dims = self.metadata.component_type.shape.clone();
-        dims.insert(0, self.len as i64);
-        client
-            .copy_raw_host_buffer(
-                self.metadata.component_type.primitive_ty.element_type(),
-                &self.buf,
-                &dims[..],
-            )
-            .map_err(Error::from)
-    }
-
-    pub fn values_iter(&self) -> impl Iterator<Item = ComponentValue<'_>> + '_ {
-        let mut buf_offset = 0;
-        std::iter::from_fn(move || {
-            let buf = self.buf.get(buf_offset..)?;
-            let (offset, value) = self.metadata.component_type.parse_value(buf).ok()?;
-            buf_offset += offset;
-            Some(value)
-        })
-    }
-
-    pub fn iter<T: conduit::Component>(&self) -> impl Iterator<Item = T> + '_ {
-        assert_eq!(self.metadata.component_type, T::component_type());
-        self.values_iter()
-            .filter_map(|v| T::from_component_value(v))
-    }
-
-    pub fn component_type(&self) -> ComponentType {
-        self.metadata.component_type.clone()
-    }
-
-    pub fn raw_buf(&self) -> &[u8] {
-        &self.buf
-    }
-
-    pub fn typed_buf<T: ArrayElement + Pod>(&self) -> Option<&[T]> {
-        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
-            return None;
-        }
-        bytemuck::try_cast_slice(self.buf.as_slice()).ok()
-    }
-
-    pub fn typed_buf_mut<T: ArrayElement + Pod>(&mut self) -> Option<&mut [T]> {
-        if self.metadata.component_type.primitive_ty.element_type() != T::TY {
-            return None;
-        }
-        bytemuck::try_cast_slice_mut(self.buf.as_mut_slice()).ok()
-    }
-
-    pub fn ndarray<T: ArrayElement + Pod>(&self) -> Option<ndarray::ArrayViewD<'_, T>> {
-        let comp_shape = self.metadata.component_type.shape.iter().map(|n| *n as _);
-        let shape: SmallVec<[usize; 4]> = std::iter::once(self.len).chain(comp_shape).collect();
-        let buf = self.typed_buf::<T>()?;
-        ndarray::ArrayViewD::from_shape(&shape[..], buf).ok()
-    }
-
-    pub fn dyn_ndarray(&self) -> Option<DynArrayView<'_>> {
-        let elem_type = self.metadata.component_type.primitive_ty.element_type();
-        match elem_type {
-            nox::xla::ElementType::Pred => {
-                todo!()
-            }
-            nox::xla::ElementType::S8 => {
-                let buf = self.ndarray::<i8>()?;
-                Some(DynArrayView::I8(buf))
-            }
-            nox::xla::ElementType::S16 => {
-                let buf = self.ndarray::<i16>()?;
-                Some(DynArrayView::I16(buf))
-            }
-            nox::xla::ElementType::S32 => {
-                let buf = self.ndarray::<i32>()?;
-                Some(DynArrayView::I32(buf))
-            }
-            nox::xla::ElementType::S64 => {
-                let buf = self.ndarray::<i64>()?;
-                Some(DynArrayView::I64(buf))
-            }
-            nox::xla::ElementType::U8 => {
-                let buf = self.ndarray::<u8>()?;
-                Some(DynArrayView::U8(buf))
-            }
-            nox::xla::ElementType::U16 => {
-                let buf = self.ndarray::<u16>()?;
-                Some(DynArrayView::U16(buf))
-            }
-            nox::xla::ElementType::U32 => {
-                let buf = self.ndarray::<u32>()?;
-                Some(DynArrayView::U32(buf))
-            }
-            nox::xla::ElementType::U64 => {
-                let buf = self.ndarray::<u64>()?;
-                Some(DynArrayView::U64(buf))
-            }
-            nox::xla::ElementType::F32 => {
-                let buf = self.ndarray::<f32>()?;
-                Some(DynArrayView::F32(buf))
-            }
-            nox::xla::ElementType::F64 => {
-                let buf = self.ndarray::<f64>()?;
-                Some(DynArrayView::F64(buf))
-            }
-            nox::xla::ElementType::F16 => {
-                todo!()
-            }
-            nox::xla::ElementType::Bf16 => {
-                todo!()
-            }
-            nox::xla::ElementType::C64 => {
-                todo!()
-            }
-            nox::xla::ElementType::C128 => {
-                todo!()
-            }
-        }
+        self.column.extend_from_slice(raw);
     }
 }

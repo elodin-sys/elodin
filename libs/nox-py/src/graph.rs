@@ -33,20 +33,15 @@ impl GraphQueryInner {
         edge_name: String,
         reverse: bool,
     ) -> Result<GraphQueryInner, Error> {
-        use bytes::Buf;
         use nox_ecs::graph::EdgeComponent;
         let col = builder
             .builder
             .world
             .column_by_id(ComponentId::new(&edge_name))
             .unwrap();
-        let ty = &col.column.metadata.component_type;
-        let buf = &mut &col.column.buf[..];
-        let len = col.column.len;
-        let edges = (0..len)
-            .map(move |_| {
-                let (size, value) = ty.parse_value(buf).unwrap();
-                buf.advance(size);
+        let edges = col
+            .iter()
+            .map(move |(_, value)| {
                 let edge = nox_ecs::graph::Edge::from_value(value).unwrap();
                 if reverse {
                     edge.reverse()
