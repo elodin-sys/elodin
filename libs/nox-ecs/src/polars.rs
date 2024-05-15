@@ -1,68 +1,40 @@
 use arrow::array::ArrayData;
-use conduit::{ComponentId, ComponentType, EntityId, PrimitiveTy};
+use conduit::{ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
 use polars::prelude::*;
 use polars::{frame::DataFrame, series::Series};
 use polars_arrow::{
     array::{Array, PrimitiveArray},
     datatypes::ArrowDataType,
 };
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::{fs::File, path::Path};
 
-use crate::{
-    ArchetypeName, AssetStore, ColumnRef, ColumnStore, Error, HostColumn, HostStore, Table, World,
-};
+use crate::{ArchetypeName, Error, Table};
 
 #[derive(Debug, Clone, Default)]
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
-    pub component_map: HashMap<ComponentId, ArchetypeName>,
-    pub component_names: HashMap<ComponentId, String>,
-    pub metadata: Metadata,
-    pub assets: AssetStore,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct Metadata {
-    pub archetypes: ustr::UstrMap<ArchetypeMetadata>,
-    pub tick: u64,
-    pub entity_len: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ArchetypeMetadata {
-    pub columns: Vec<conduit::Metadata>,
-}
-
-impl Metadata {
-    fn component_map(&self) -> HashMap<ComponentId, ArchetypeName> {
-        self.archetypes
-            .iter()
-            .flat_map(|(name, metadata)| {
-                metadata
-                    .columns
-                    .iter()
-                    .map(move |metadata| (metadata.component_id(), *name))
-            })
-            .collect()
-    }
-
-    fn component_names(&self) -> HashMap<ComponentId, String> {
-        self.archetypes
-            .iter()
-            .flat_map(|(_, metadata)| {
-                metadata
-                    .columns
-                    .iter()
-                    .map(move |metadata| (metadata.component_id(), metadata.name.clone()))
-            })
-            .collect()
-    }
+    pub metadata: ustr::UstrMap<Vec<Metadata>>,
 }
 
 impl PolarsWorld {
+    pub fn new(component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>) -> Self {
+        let metadata = component_map.iter().fold(
+            ustr::UstrMap::<Vec<Metadata>>::default(),
+            |mut archetype_metadata, (_, (archetype_name, component_metadata))| {
+                archetype_metadata
+                    .entry(*archetype_name)
+                    .or_default()
+                    .push(component_metadata.clone());
+                archetype_metadata
+            },
+        );
+        Self {
+            archetypes: Default::default(),
+            metadata,
+        }
+    }
+
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
         let mut tables = self.archetypes.values();
         let init = tables.next().cloned().unwrap_or_default();
@@ -95,17 +67,48 @@ impl PolarsWorld {
         Ok(())
     }
 
+    pub fn component_map(&self) -> HashMap<ComponentId, (ArchetypeName, Metadata)> {
+        self.metadata
+            .iter()
+            .flat_map(|(archetype_name, metadata)| {
+                metadata.iter().map(move |metadata| {
+                    (metadata.component_id(), (*archetype_name, metadata.clone()))
+                })
+            })
+            .collect()
+    }
+
+    pub fn at(&self, tick: u64) -> Result<ustr::UstrMap<Table>, Error> {
+        let mut archetypes = ustr::UstrMap::default();
+        for (archetype_name, df) in &self.archetypes {
+            let df = df.clone().lazy().filter(col("tick").eq(tick)).collect()?;
+            let table = Table::from_df(&df)?;
+            archetypes.insert(*archetype_name, table);
+        }
+        Ok(archetypes)
+    }
+
+    pub fn push(&mut self, archetypes: &ustr::UstrMap<Table>, tick: u64) -> Result<(), Error> {
+        for (archetype_name, table) in archetypes {
+            let metadata = &self.metadata[archetype_name];
+            let df = self.archetypes.entry(*archetype_name).or_default();
+            let new_df = table.to_df(metadata, tick)?;
+            if df.is_empty() {
+                *df = new_df;
+            } else {
+                df.vstack_mut(&new_df)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn vstack(&mut self, other: &Self) -> Result<(), Error> {
         if self.archetypes.is_empty() {
             *self = other.clone();
             return Ok(());
         }
         for (archetype_name, df) in &mut self.archetypes {
-            let other_df = other
-                .archetypes
-                .get(archetype_name)
-                .ok_or(Error::ComponentNotFound)?;
-            df.vstack_mut(other_df)?;
+            df.vstack_mut(&other.archetypes[archetype_name])?;
         }
         Ok(())
     }
@@ -120,169 +123,117 @@ impl PolarsWorld {
             let file = std::fs::File::create(&path)?;
             ParquetWriter::new(file).finish(df)?;
         }
-        let path = path.join("assets.bin");
-        let file = std::fs::File::create(path)?;
-        postcard::to_io(&self.assets, file).unwrap();
         Ok(())
     }
 
     pub fn read_from_dir(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let mut archetypes = HashMap::default();
+        let mut archetypes = ustr::UstrMap::default();
         let mut metadata = File::open(path.join("metadata.json"))?;
-        let metadata: Metadata = serde_json::from_reader(&mut metadata)?;
-        for name in metadata.archetypes.keys() {
+        let metadata: ustr::UstrMap<Vec<Metadata>> = serde_json::from_reader(&mut metadata)?;
+        for name in metadata.keys() {
             let path = path.join(format!("{}.parquet", name));
             let file = File::open(&path)?;
             let df = polars::prelude::ParquetReader::new(file).finish()?;
             archetypes.insert(*name, df);
         }
-        let assets_buf = std::fs::read(path.join("assets.bin"))?;
-        let assets = postcard::from_bytes(&assets_buf)?;
         Ok(Self {
             archetypes,
-            component_map: metadata.component_map(),
-            component_names: metadata.component_names(),
             metadata,
-            assets,
         })
     }
-}
 
-impl World<HostStore> {
-    pub fn to_polars(&self) -> Result<PolarsWorld, Error> {
-        let mut archetypes = HashMap::default();
-        let mut archetype_metadata = HashMap::default();
-        for (id, table) in &self.archetypes {
-            let len = table.entity_buffer.len();
-            let (metadata, mut df) = table.to_polars()?;
-            let series: Series = std::iter::repeat(self.tick).take(len).collect();
-            df.with_column(series.with_name("tick"))?;
-            archetypes.insert(*id, df);
-            archetype_metadata.insert(*id, metadata);
-        }
-
-        let metadata = Metadata {
-            archetypes: archetype_metadata,
-            tick: self.tick,
-            entity_len: self.entity_len,
-        };
-
-        Ok(PolarsWorld {
-            archetypes,
-            component_map: metadata.component_map(),
-            component_names: metadata.component_names(),
-            metadata,
-            assets: self.assets.clone(),
-        })
+    pub fn tick(&self) -> u64 {
+        self.archetypes
+            .values()
+            .next()
+            .expect("at least one archetype exists")
+            .column("tick")
+            .expect("tick column exists")
+            .max::<u64>()
+            .unwrap()
+            .expect("tick value is not null")
     }
-}
 
-impl TryFrom<PolarsWorld> for World<HostStore> {
-    type Error = Error;
-
-    fn try_from(polars: PolarsWorld) -> Result<Self, Self::Error> {
-        let Metadata {
-            archetypes,
-            tick,
-            entity_len,
-        } = polars.metadata;
-        let archetypes = polars
-            .archetypes
-            .into_iter()
-            .map(|(name, df)| {
-                let metadata = archetypes
-                    .get(&name)
-                    .ok_or(Error::ComponentNotFound)?
-                    .clone();
-                let table = Table::from_dataframe(df, metadata)?;
-                Ok((name, table))
+    pub fn entity_len(&self) -> u64 {
+        self.archetypes
+            .values()
+            .map(|df| {
+                df.column(EntityId::NAME)
+                    .expect("entity id column exists")
+                    .max::<u64>()
+                    .unwrap()
+                    .expect("entity id is not null")
             })
-            .collect::<Result<_, Error>>()?;
-        Ok(World {
-            archetypes,
-            component_map: polars.component_map,
-            assets: polars.assets,
-            tick,
-            entity_len,
-        })
+            .max()
+            .expect("at least one archetype exists")
     }
 }
 
-impl PartialEq for Table<HostStore> {
-    fn eq(&self, other: &Self) -> bool {
-        self.columns == other.columns && self.entity_buffer == other.entity_buffer
-    }
-}
-
-impl Table<HostStore> {
-    pub fn from_dataframe(df: DataFrame, metadata: ArchetypeMetadata) -> Result<Self, Error> {
-        let columns = metadata
-            .columns
-            .into_iter()
-            .zip(df.iter().filter(|s| s.name() != EntityId::NAME))
-            .map(|(metadata, series)| {
-                let component_id = metadata.component_id();
-                let column = HostColumn::from_series(series, metadata)?;
-                Ok((component_id, column))
+impl Table {
+    pub fn to_df(&self, metadata: &[Metadata], tick: u64) -> Result<DataFrame, Error> {
+        let entity_series = to_series(&self.entity_buffer, &EntityId::metadata())?;
+        let tick_series = std::iter::repeat(tick)
+            .take(self.len())
+            .collect::<Series>()
+            .with_name("tick");
+        let mut df = metadata
+            .iter()
+            .map(|metadata| {
+                let column = &self.columns[&metadata.component_id()];
+                let series = to_series(column, metadata)?;
+                Ok(series)
             })
-            .collect::<Result<_, Error>>()?;
-        let column = df
-            .column(EntityId::NAME)
-            .map_err(|_| Error::ComponentNotFound)?;
-        let entity_buffer = HostColumn::from_series(column, EntityId::metadata())?;
+            .collect::<Result<DataFrame, Error>>()?;
+        df.with_column(tick_series)?;
+        df.with_column(entity_series)?;
+        Ok(df)
+    }
 
+    pub fn from_df(df: &DataFrame) -> Result<Self, Error> {
+        let ticks = df.column("tick")?.n_unique()?;
+        assert_eq!(ticks, 1);
+        let entity_buffer = df.column(EntityId::NAME)?.to_bytes();
+
+        // ignore tick entity_id columns:
+        let columns = df
+            .get_columns()
+            .iter()
+            .filter(|s| s.name() != "tick" && s.name() != EntityId::NAME)
+            .map(|series| {
+                let component_id = ComponentId::new(series.name());
+                let buf = series.to_bytes();
+                (component_id, buf)
+            })
+            .collect();
         Ok(Self {
             columns,
             entity_buffer,
         })
     }
-
-    pub fn to_polars(&self) -> Result<(ArchetypeMetadata, DataFrame), Error> {
-        let columns = self.columns.values().map(|c| c.metadata.clone()).collect();
-        let metadata = ArchetypeMetadata { columns };
-
-        Ok((
-            metadata,
-            self.columns
-                .values()
-                .chain(std::iter::once(&self.entity_buffer))
-                .map(HostColumn::to_series)
-                .collect::<Result<DataFrame, Error>>()?,
-        ))
-    }
 }
 
-impl HostColumn {
-    pub fn from_series(series: &Series, metadata: conduit::Metadata) -> Result<Self, Error> {
-        let buf = series.to_bytes();
-        let len = series.len();
-        Ok(Self { buf, len, metadata })
-    }
+pub fn to_series(buf: &[u8], metadata: &Metadata) -> Result<Series, Error> {
+    let component_type = &metadata.component_type;
+    let array = match component_type.primitive_ty {
+        PrimitiveTy::F64 => tensor_array(component_type, prim_array::<f64>(buf)),
+        PrimitiveTy::F32 => tensor_array(component_type, prim_array::<f32>(buf)),
+        PrimitiveTy::U64 => tensor_array(component_type, prim_array::<u64>(buf)),
+        PrimitiveTy::U32 => tensor_array(component_type, prim_array::<u32>(buf)),
+        PrimitiveTy::U16 => tensor_array(component_type, prim_array::<u16>(buf)),
+        PrimitiveTy::U8 => tensor_array(component_type, prim_array::<u8>(buf)),
+        PrimitiveTy::I64 => tensor_array(component_type, prim_array::<i64>(buf)),
+        PrimitiveTy::I32 => tensor_array(component_type, prim_array::<i32>(buf)),
+        PrimitiveTy::I16 => tensor_array(component_type, prim_array::<i16>(buf)),
+        PrimitiveTy::I8 => tensor_array(component_type, prim_array::<i8>(buf)),
+        PrimitiveTy::Bool => todo!(),
+    };
+    Series::from_arrow(&metadata.name, array).map_err(Error::from)
+}
 
-    pub fn to_series(&self) -> Result<Series, Error> {
-        let component_type = &self.metadata.component_type;
-        let array = match component_type.primitive_ty {
-            PrimitiveTy::F64 => tensor_array(component_type, self.prim_array::<f64>()),
-            PrimitiveTy::F32 => tensor_array(component_type, self.prim_array::<f32>()),
-            PrimitiveTy::U64 => tensor_array(component_type, self.prim_array::<u64>()),
-            PrimitiveTy::U32 => tensor_array(component_type, self.prim_array::<u32>()),
-            PrimitiveTy::U16 => tensor_array(component_type, self.prim_array::<u16>()),
-            PrimitiveTy::U8 => tensor_array(component_type, self.prim_array::<u8>()),
-            PrimitiveTy::I64 => tensor_array(component_type, self.prim_array::<i64>()),
-            PrimitiveTy::I32 => tensor_array(component_type, self.prim_array::<i32>()),
-            PrimitiveTy::I16 => tensor_array(component_type, self.prim_array::<i16>()),
-            PrimitiveTy::I8 => tensor_array(component_type, self.prim_array::<i8>()),
-            PrimitiveTy::Bool => todo!(),
-        };
-        Series::from_arrow(&self.metadata.name, array).map_err(Error::from)
-    }
-
-    fn prim_array<T: polars_arrow::types::NativeType + nox::xla::ArrayElement>(
-        &self,
-    ) -> Box<dyn Array> {
-        Box::new(PrimitiveArray::from_slice(self.typed_buf::<T>().unwrap()))
-    }
+fn prim_array<T: polars_arrow::types::NativeType>(buf: &[u8]) -> Box<dyn Array> {
+    let buf = bytemuck::cast_slice::<_, T>(buf);
+    Box::new(PrimitiveArray::from_slice(buf))
 }
 
 fn arrow_data_type(ty: PrimitiveTy) -> ArrowDataType {
@@ -346,68 +297,11 @@ pub fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
     }
 }
 
-pub struct PolarsColumnRef<'a> {
-    entity_series: &'a Series,
-    buf: &'a Series,
-}
-
-impl ColumnStore for PolarsWorld {
-    type Column<'b> = PolarsColumnRef<'b> where Self: 'b;
-
-    fn column(&self, id: ComponentId) -> Result<Self::Column<'_>, Error> {
-        let archetype = self
-            .component_map
-            .get(&id)
-            .ok_or(Error::ComponentNotFound)?;
-        let table = self
-            .archetypes
-            .get(archetype)
-            .ok_or(Error::ComponentNotFound)?;
-        let component_name = self.component_names.get(&id).unwrap();
-        Ok(PolarsColumnRef {
-            entity_series: table.column(EntityId::NAME)?,
-            buf: table.column(component_name)?, // TODO(sphw): add a map to metadata between component id and series offset
-        })
-    }
-
-    fn assets(&self) -> Option<&AssetStore> {
-        None
-    }
-
-    fn tick(&self) -> u64 {
-        self.metadata.tick
-    }
-}
-
-impl PolarsColumnRef<'_> {
-    pub fn value_series(&self) -> Series {
-        self.buf.clone()
-    }
-}
-
-impl ColumnRef for PolarsColumnRef<'_> {
-    fn len(&self) -> usize {
-        self.entity_series.len()
-    }
-
-    fn entity_buf(&self) -> std::borrow::Cow<'_, [u8]> {
-        Cow::Owned(self.entity_series.to_bytes())
-    }
-
-    fn value_buf(&self) -> std::borrow::Cow<'_, [u8]> {
-        Cow::Owned(self.buf.to_bytes())
-    }
-
-    fn is_asset(&self) -> bool {
-        false
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
-        Archetype, WorldPos,
+        Archetype, World, WorldPos,
     };
     use nox::{
         nalgebra::{self, vector},
@@ -439,7 +333,8 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let polars = world.to_polars().unwrap();
+        let mut polars = PolarsWorld::new(&world.component_map);
+        polars.push(&world.archetypes, 0).unwrap();
         let df = polars.archetypes[&Body::name()].clone();
         let out = df
             .lazy()
@@ -483,7 +378,8 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.to_polars().unwrap();
+        let mut polars = PolarsWorld::new(&world.component_map);
+        polars.push(&world.archetypes, 0).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
@@ -512,9 +408,10 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let polars = world.to_polars().unwrap();
-        let new_world = World::try_from(polars).unwrap();
-        assert_eq!(new_world.archetypes, world.archetypes);
+        let mut polars = PolarsWorld::new(&world.component_map);
+        polars.push(&world.archetypes, 0).unwrap();
+        let archetypes = polars.at(0).unwrap();
+        assert_eq!(archetypes, world.archetypes);
     }
 
     #[test]
@@ -537,12 +434,13 @@ mod tests {
                 inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
-        let mut polars = world.to_polars().unwrap();
+        let mut polars = PolarsWorld::new(&world.component_map);
+        polars.push(&world.archetypes, 0).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();
         polars.write_to_dir(dir).unwrap();
         let new_polars = PolarsWorld::read_from_dir(dir).unwrap();
-        let new_world = World::try_from(new_polars).unwrap();
-        assert_eq!(new_world.archetypes, world.archetypes);
+        let archetypes = new_polars.at(0).unwrap();
+        assert_eq!(archetypes, world.archetypes);
     }
 }

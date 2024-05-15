@@ -1,25 +1,18 @@
 use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
-use nox_ecs::{
-    conduit,
-    nox::{self, ScalarExt},
-    spawn_tcp_server, HostColumn, HostStore, Table, World,
-};
+use nox_ecs::{conduit, nox, spawn_tcp_server, Table, World};
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{collections::hash_map::Entry, path::PathBuf, time::Duration};
 
 #[pyclass(subclass)]
 #[derive(Default)]
 pub struct WorldBuilder {
-    pub world: World<HostStore>,
+    pub world: World,
 }
 
 impl WorldBuilder {
-    fn get_or_insert_archetype(
-        &mut self,
-        archetype: &Archetype,
-    ) -> Result<&mut Table<HostStore>, Error> {
+    fn get_or_insert_archetype(&mut self, archetype: &Archetype) -> Result<&mut Table, Error> {
         let archetype_name = archetype.archetype_name;
         match self.world.archetypes.entry(archetype_name) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
@@ -28,13 +21,13 @@ impl WorldBuilder {
                     .component_datas
                     .iter()
                     .cloned()
-                    .map(|c| (ComponentId::new(&c.name), HostColumn::new(c.inner)))
+                    .map(|c| (ComponentId::new(&c.name), Vec::default()))
                     .collect();
-                for component in &archetype.component_datas {
-                    let component_id = ComponentId::new(&component.name);
+                for metadata in &archetype.component_datas {
+                    let component_id = ComponentId::new(&metadata.name);
                     self.world
                         .component_map
-                        .insert(component_id, archetype_name);
+                        .insert(component_id, (archetype_name, metadata.inner.clone()));
                 }
                 let table = Table {
                     columns,
@@ -72,13 +65,13 @@ impl WorldBuilder {
             Spawnable::Archetypes(archetypes) => {
                 for archetype in archetypes {
                     let table = self.get_or_insert_archetype(&archetype)?;
-                    table.entity_buffer.push(entity_id.inner.0.constant());
+                    table.push_entity_id(entity_id.inner);
                     for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
-                        let col = table
-                            .columns
-                            .get_mut(&ComponentId::new(&component.name))
+                        let mut col = self
+                            .world
+                            .column_by_id_mut(ComponentId::new(&component.name))
                             .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                        let ty = col.component_type();
+                        let ty = &col.metadata.component_type;
                         let size = ty.primitive_ty.element_type().element_size_in_bytes();
                         let buf = unsafe { arr.buf(size) };
                         col.push_raw(buf);
@@ -103,10 +96,10 @@ impl WorldBuilder {
                 };
 
                 let table = self.get_or_insert_archetype(&archetype)?;
-                table.entity_buffer.push(entity_id.inner.0.constant());
-                let col = table
-                    .columns
-                    .get_mut(&ComponentId::new(&component_name))
+                table.push_entity_id(entity_id.inner);
+                let mut col = self
+                    .world
+                    .column_by_id_mut(ComponentId::new(&component_name))
                     .ok_or(nox_ecs::Error::ComponentNotFound)?;
                 col.push_raw(&inner.id.to_le_bytes());
                 Ok(())
