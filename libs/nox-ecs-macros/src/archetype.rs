@@ -46,9 +46,9 @@ pub fn archetype(input: TokenStream) -> TokenStream {
                 vec![#( <#tys>::metadata(), )*]
             }
 
-            fn insert_into_table(self, table: &mut #crate_name::Table<#crate_name::HostStore>) {
+            fn insert_into_world(self, world: &mut #crate_name::World) {
                 #(
-                   self.#idents.insert_into_table(table);
+                   self.#idents.insert_into_world(world);
                 )*
             }
         }

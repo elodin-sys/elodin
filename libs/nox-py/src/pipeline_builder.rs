@@ -30,7 +30,7 @@ impl PipelineBuilder {
             .column_by_id(id)
             .ok_or(nox_ecs::Error::ComponentNotFound)?;
         let ty: conduit::ComponentType = ty.into();
-        let len = column.column.len();
+        let len = column.len();
         let shape = std::iter::once(len as i64).chain(ty.shape).collect();
         let op = Noxpr::parameter(
             self.builder.param_ops.len() as i64,
@@ -77,12 +77,12 @@ impl PipelineBuilder {
             let column = world
                 .column_by_id(*id)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
-            let len = column.column.len();
+            let len = column.len();
             let array = ComponentArray {
                 buffer: Noxpr::jax(arg),
                 phantom_data: PhantomData,
                 len,
-                entity_map: column.entities.entity_map(),
+                entity_map: column.entity_map(),
             };
             vars.insert(*id, array.into());
         }

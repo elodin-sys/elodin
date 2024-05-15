@@ -28,11 +28,11 @@ impl QueryInner {
             .iter()
             .map(|id| {
                 builder.builder.world.column_by_id(*id).map(|c| Metadata {
-                    inner: c.column.metadata.clone(),
+                    inner: c.metadata.clone(),
                 })
             })
             .collect::<Option<Vec<_>>>()
-            .ok_or(Error::NoxEcs(nox_ecs::Error::ComponentNotFound))?;
+            .ok_or(nox_ecs::Error::ComponentNotFound)?;
         let query = component_ids
             .iter()
             .copied()
