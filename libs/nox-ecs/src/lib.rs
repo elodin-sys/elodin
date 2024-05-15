@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::iter::once;
 use std::path::Path;
+use std::slice::from_ref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
@@ -208,8 +209,8 @@ impl World {
         Ok(())
     }
 
-    pub fn polars(&self) -> PolarsWorld {
-        PolarsWorld::new(&self.component_map, &self.entity_ids)
+    pub fn polars(&self) -> Result<PolarsWorld, Error> {
+        PolarsWorld::new(&self.component_map, &self.entity_ids, from_ref(&self.host))
     }
 }
 
@@ -927,12 +928,12 @@ impl<S: ExecState> WorldExec<S> {
         })
     }
 
-    pub fn polars(&self) -> Result<PolarsWorld, Error> {
-        let mut polars_world = self.world.polars();
-        for (tick, buffers) in self.history.iter().enumerate() {
-            polars_world.push(buffers, tick as u64)?;
-        }
-        Ok(polars_world)
+    pub fn polars(&mut self) -> Result<PolarsWorld, Error> {
+        PolarsWorld::new(
+            &self.world.component_map,
+            &self.world.entity_ids,
+            &self.history,
+        )
     }
 
     pub fn write_to_dir(&mut self, dir: impl AsRef<Path>) -> Result<(), Error> {
@@ -988,21 +989,26 @@ impl WorldExec<Uncompiled> {
         let assets = postcard::from_bytes(&assets_buf)?;
 
         let polars_world = PolarsWorld::read_from_dir(&world_dir)?;
-        let host = polars_world.at(0)?;
+        let history = polars_world.history()?;
+        let host = history.last().unwrap().clone();
         let dirty_components = host.keys().copied().collect();
-        let component_map = polars_world.component_map();
-        let entity_len = polars_world.entity_len();
         let world = World {
             host,
             client: Default::default(),
-            entity_ids: polars_world.entity_ids,
+            entity_ids: polars_world.entity_ids()?,
             dirty_components,
-            component_map,
+            component_map: polars_world.component_map(),
             assets,
-            tick: 0,
-            entity_len,
+            tick: history.len() as u64,
+            entity_len: polars_world.entity_len(),
         };
-        let world_exec = WorldExec::new(world, tick_exec, startup_exec);
+        let world_exec = Self {
+            world,
+            tick_exec,
+            startup_exec,
+            history,
+            profiler: Default::default(),
+        };
         Ok(world_exec)
     }
 }
