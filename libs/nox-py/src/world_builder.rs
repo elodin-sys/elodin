@@ -233,13 +233,16 @@ impl WorldBuilder {
             Args::Bench { ticks } => {
                 let mut exec = self.build(py, sys, time_step, client)?;
                 exec.run(ticks)?;
+                let tempdir = tempfile::tempdir()?;
+                exec.exec.write_to_dir(tempdir)?;
                 let profile = exec.profile();
-                println!("compile time:         {:.3} ms", profile["compile"]);
                 println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                 println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                 println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                 println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                 println!("= tick time:          {:.3} ms", profile["tick"]);
+                println!("compile time:         {:.3} ms", profile["compile"]);
+                println!("write_to_dir time:    {:.3} ms", profile["write_to_dir"]);
                 println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
                 Ok(None)
             }
