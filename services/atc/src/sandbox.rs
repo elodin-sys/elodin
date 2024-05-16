@@ -6,7 +6,7 @@ use chrono::Utc;
 use elodin_types::sandbox::{
     sandbox_control_client::SandboxControlClient, UpdateCodeReq, UpdateCodeResp,
 };
-use redis::aio::MultiplexedConnection;
+use fred::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
@@ -26,7 +26,7 @@ pub async fn update_sandbox_code(vm_ip: &str, code: String) -> Result<UpdateCode
 
 pub async fn garbage_collect(
     db: DatabaseConnection,
-    mut redis: MultiplexedConnection,
+    redis: RedisClient,
     timeout: Duration,
     cancel_token: CancellationToken,
 ) -> anyhow::Result<()> {
@@ -44,7 +44,7 @@ pub async fn garbage_collect(
             .await?;
         for sandbox in stale_sandboxes {
             if let Some(vm_id) = sandbox.vm_id {
-                vm::Entity::delete_with_event(vm_id, &db, &mut redis).await?;
+                vm::Entity::delete_with_event(vm_id, &db, &redis).await?;
             }
         }
     }

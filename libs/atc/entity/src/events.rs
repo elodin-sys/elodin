@@ -1,5 +1,4 @@
-use futures_util::StreamExt;
-use redis::{aio::PubSub, AsyncCommands};
+use fred::prelude::*;
 use sea_orm::prelude::*;
 use sea_orm::IntoActiveModel;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -11,10 +10,10 @@ pub enum Error {
     Db(#[from] sea_orm::DbErr),
     #[error("not found")]
     NotFound,
-    #[error("postcard: {0}")]
-    Postcard(#[from] postcard::Error),
     #[error("redis: {0}")]
-    Redis(#[from] redis::RedisError),
+    Redis(#[from] RedisError),
+    #[error("serde: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub trait EventModel {
@@ -35,12 +34,12 @@ pub trait DbExt: ActiveModelTrait {
     async fn update_with_event(
         self,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<<Self::Entity as EntityTrait>::Model, Error>;
     async fn insert_with_event(
         self,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<<Self::Entity as EntityTrait>::Model, Error>;
 }
 
@@ -52,13 +51,13 @@ where
     async fn update_with_event(
         self,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<<Self::Entity as EntityTrait>::Model, Error> {
         let model = self.update(db).await?;
         let topic_name = <Self::Entity as EntityTrait>::Model::topic_name();
         let event = DbEvent::Update(model);
-        let buf = postcard::to_allocvec(&event)?;
-        redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
+        let buf = serde_json::to_string(&event)?;
+        redis.publish(&topic_name, buf).await?;
         let DbEvent::Update(model) = event else {
             unreachable!()
         };
@@ -69,13 +68,13 @@ where
     async fn insert_with_event(
         self,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<<Self::Entity as EntityTrait>::Model, Error> {
         let model = self.insert(db).await?;
         let topic_name = <Self::Entity as EntityTrait>::Model::topic_name();
         let event = DbEvent::Insert(model);
-        let buf = postcard::to_allocvec(&event)?;
-        redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
+        let buf = serde_json::to_string(&event)?;
+        redis.publish(&topic_name, buf).await?;
         let DbEvent::Insert(model) = event else {
             unreachable!()
         };
@@ -88,7 +87,7 @@ pub trait EntityExt: EntityTrait {
     async fn delete_with_event(
         id: <Self::PrimaryKey as PrimaryKeyTrait>::ValueType,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<Self::Model, Error>;
 }
 
@@ -101,7 +100,7 @@ where
     async fn delete_with_event(
         id: <Self::PrimaryKey as PrimaryKeyTrait>::ValueType,
         db: &impl ConnectionTrait,
-        redis: &mut redis::aio::MultiplexedConnection,
+        redis: &RedisClient,
     ) -> Result<Self::Model, Error> {
         let topic_name = Self::Model::topic_name();
         let Some(model) = Self::find_by_id(id.clone()).one(db).await? else {
@@ -109,8 +108,8 @@ where
         };
         Self::delete_by_id(id).exec(db).await?;
         let event = DbEvent::Delete(model);
-        let buf = postcard::to_allocvec(&event)?;
-        redis.publish::<&str, &[u8], _>(&topic_name, &buf).await?;
+        let buf = serde_json::to_string(&event)?;
+        redis.publish(&topic_name, buf).await?;
         let DbEvent::Delete(model) = event else {
             unreachable!()
         };
@@ -136,18 +135,24 @@ impl<M> DbEvent<M> {
 }
 
 pub async fn subscribe<M: EventModel + DeserializeOwned + Send + 'static + Clone>(
-    mut redis: PubSub,
+    builder: &Builder,
 ) -> Result<broadcast::Receiver<DbEvent<M>>, Error> {
     let (tx, rx) = broadcast::channel(128);
+    let redis = builder.build_subscriber_client()?;
+    let conn_task = redis.init().await?;
+    redis.manage_subscriptions();
     redis.subscribe(M::topic_name().as_str()).await?;
-    let mut stream = redis.into_on_message();
+    let mut stream = redis.message_rx();
     tokio::spawn(async move {
-        while let Some(msg) = stream.next().await {
-            let msg = postcard::from_bytes(msg.get_payload_bytes())?;
+        while let Ok(msg) = stream.recv().await {
+            let value = msg.value.into_json()?;
+            let msg = serde_json::from_value(value)?;
             if tx.send(msg).is_err() {
                 break;
             }
         }
+        redis.quit().await?;
+        conn_task.await.unwrap()?;
         Ok::<_, Error>(())
     });
     Ok(rx)

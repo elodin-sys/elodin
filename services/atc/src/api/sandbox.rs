@@ -136,7 +136,6 @@ impl Api {
             }
             Some(_) | None => req.code,
         };
-        let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
         let user_id = user.as_ref().map(|u| u.user.id);
         sandbox::ActiveModel {
@@ -150,7 +149,7 @@ impl Api {
             public: Set(false),
             last_used: ActiveValue::Set(Utc::now()),
         }
-        .insert_with_event(txn, &mut redis)
+        .insert_with_event(txn, &self.redis)
         .await?;
         if let Some(CurrentUser { mut user, .. }) = user {
             user.permissions
@@ -160,7 +159,7 @@ impl Api {
                 permissions: ActiveValue::Set(user.permissions),
                 ..Default::default()
             }
-            .update_with_event(txn, &mut redis)
+            .update_with_event(txn, &self.redis)
             .await?;
         }
         Ok(CreateSandboxResp {
@@ -174,7 +173,6 @@ impl Api {
         user: Option<CurrentUser>,
         txn: &DatabaseTransaction,
     ) -> Result<UpdateSandboxResp, Error> {
-        let mut redis = self.redis.clone();
         let id = req.id()?;
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
@@ -198,7 +196,7 @@ impl Api {
             public: Set(req.public),
             ..Default::default()
         }
-        .update_with_event(txn, &mut redis)
+        .update_with_event(txn, &self.redis)
         .await?;
         let Some(code) = req.code else {
             return Ok(UpdateSandboxResp::default());
@@ -227,7 +225,6 @@ impl Api {
         req: BootSandboxReq,
         user: Option<CurrentUser>,
     ) -> Result<BootSandboxResp, Error> {
-        let mut redis = self.redis.clone();
         let id = req.id()?;
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
@@ -251,7 +248,7 @@ impl Api {
                 last_used: ActiveValue::Set(Utc::now()),
                 ..Default::default()
             }
-            .update_with_event(&self.db, &mut redis)
+            .update_with_event(&self.db, &self.redis)
             .await?;
             return Ok(BootSandboxResp {});
         }
@@ -263,7 +260,7 @@ impl Api {
             sandbox_id: Set(Some(id)),
             ..Default::default()
         }
-        .insert_with_event(&self.db, &mut redis)
+        .insert_with_event(&self.db, &self.redis)
         .await?;
         sandbox::ActiveModel {
             id: Unchanged(id),
@@ -271,7 +268,7 @@ impl Api {
             last_used: ActiveValue::Set(Utc::now()),
             ..Default::default()
         }
-        .update_with_event(&self.db, &mut redis)
+        .update_with_event(&self.db, &self.redis)
         .await?;
 
         Ok(BootSandboxResp {})
@@ -283,7 +280,6 @@ impl Api {
         CurrentUser { user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<Sandbox, Error> {
-        let mut redis = self.redis.clone();
         let id = req.id()?;
 
         if !user
@@ -293,7 +289,7 @@ impl Api {
             return Err(Error::Unauthorized);
         }
 
-        let delete_result = match sandbox::Entity::delete_with_event(id, txn, &mut redis).await {
+        let delete_result = match sandbox::Entity::delete_with_event(id, txn, &self.redis).await {
             Ok(model) => model,
             Err(err) => {
                 return Err(err.into());
@@ -301,7 +297,7 @@ impl Api {
         };
 
         if let Some(vm_id) = delete_result.vm_id {
-            match vm::Entity::delete_with_event(vm_id, txn, &mut redis).await {
+            match vm::Entity::delete_with_event(vm_id, txn, &self.redis).await {
                 Ok(_)
                 | Err(atc_entity::events::Error::NotFound)
                 | Err(atc_entity::events::Error::Db(sea_orm::DbErr::RecordNotFound(_))) => {}

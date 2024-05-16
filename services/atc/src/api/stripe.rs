@@ -116,7 +116,6 @@ pub async fn stripe_webhook(
                     } else {
                         (LicenseType::None, 0)
                     };
-                    let mut redis = context.redis.clone();
                     billing_account::ActiveModel {
                         id: Unchanged(billing_account.id),
                         seat_subscription_id: Set(Some(sub.id.to_string())),
@@ -124,7 +123,7 @@ pub async fn stripe_webhook(
                         seat_license_type: Set(license_type.into()),
                         ..Default::default()
                     }
-                    .update_with_event(&context.db, &mut redis)
+                    .update_with_event(&context.db, &context.redis)
                     .await?;
                     sync_user_license(billing_account.owner_user_id, &context).await?;
                     Ok(())
@@ -142,14 +141,13 @@ pub async fn stripe_webhook(
                         return Ok(());
                     };
                     let monte_carlo_active = monte_carlo_present && sub_status_active(&sub.status);
-                    let mut redis = context.redis.clone();
                     billing_account::ActiveModel {
                         id: Unchanged(billing_account.id),
                         usage_subscription_id: Set(Some(sub.id.to_string())),
                         monte_carlo_active: Set(monte_carlo_active),
                         ..Default::default()
                     }
-                    .update_with_event(&context.db, &mut redis)
+                    .update_with_event(&context.db, &context.redis)
                     .await?;
                     sync_user_license(billing_account.owner_user_id, &context).await?;
                     Ok(())
@@ -180,14 +178,13 @@ async fn sync_user_license(user_id: Uuid, context: &AxumContext) -> Result<(), E
             )
         },
     );
-    let mut redis = context.redis.clone();
     user::ActiveModel {
         id: Unchanged(user_id),
         license_type: Set(license_type.into()),
         monte_carlo_active: Set(monte_carlo_active),
         ..Default::default()
     }
-    .update_with_event(&context.db, &mut redis)
+    .update_with_event(&context.db, &context.redis)
     .await?;
     Ok(())
 }

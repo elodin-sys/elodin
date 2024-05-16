@@ -1,11 +1,9 @@
 // Redis-based message queue library
 
-use std::collections::HashMap;
-use std::fmt;
 use std::time::Duration;
+use std::{collections::HashMap, fmt};
 
-use redis::streams;
-use redis::AsyncCommands;
+use fred::prelude::*;
 
 mod de;
 mod ser;
@@ -14,7 +12,7 @@ pub use de::from_redis;
 pub use ser::to_redis;
 
 pub struct MsgQueue {
-    conn: redis::aio::ConnectionManager,
+    client: RedisClient,
     group: String,
     consumer: String,
 }
@@ -55,34 +53,31 @@ impl serde::de::Error for Error {
     }
 }
 
-type StreamRangeReply = Vec<HashMap<String, Vec<(String, String)>>>;
 type StreamReadReply = Vec<HashMap<String, Vec<HashMap<String, Vec<(String, String)>>>>>;
 
 impl MsgQueue {
     pub async fn new(
-        client: &redis::Client,
+        client: &RedisClient,
         group: impl Into<String>,
         consumer: impl Into<String>,
-    ) -> redis::RedisResult<Self> {
+    ) -> RedisResult<Self> {
+        let client = client.clone_new();
+        client.init().await?;
         Ok(Self {
-            conn: client.get_connection_manager().await?,
+            client,
             group: group.into(),
             consumer: consumer.into(),
         })
     }
 
-    pub async fn send<M: Message>(
-        &self,
-        topic: &str,
-        entries: Vec<M>,
-    ) -> redis::RedisResult<Vec<String>> {
-        let ids = entries
-            .iter()
-            .map(to_redis)
-            .fold(&mut redis::pipe(), |p, fields| p.xadd(topic, "*", &fields))
-            .atomic()
-            .query_async::<_, Vec<String>>(&mut self.conn.clone())
-            .await?;
+    pub async fn send<M: Message>(&self, topic: &str, entries: Vec<M>) -> RedisResult<Vec<String>> {
+        let pipeline = self.client.pipeline();
+        for entry in entries {
+            pipeline
+                .xadd(topic, false, None, "*", to_redis(&entry))
+                .await?;
+        }
+        let ids: Vec<String> = pipeline.all().await?;
         tracing::trace!(
             topic,
             group = &self.group,
@@ -93,29 +88,15 @@ impl MsgQueue {
         Ok(ids)
     }
 
-    pub async fn get<M: Message>(&self, topic: &str, id: &str) -> redis::RedisResult<Option<M>> {
-        self.conn
-            .clone()
-            .xrange::<_, _, _, StreamRangeReply>(topic, id, id)
-            .await?
-            .into_iter()
-            .flat_map(|row| row.into_iter())
-            .next()
-            .map(|(_, v)| from_redis::<M>(v))
-            .transpose()
-    }
-
-    // TODO(Akhil): Remove after Redis supports auto group creation (https://github.com/redis/redis/pull/10747)
-    async fn register(&mut self, topic: &str) -> redis::RedisResult<()> {
+    async fn register(&self, topic: &str) -> RedisResult<()> {
         let result: Result<(), _> = self
-            .conn
-            .xgroup_create_mkstream(topic, &self.group, "0-0")
+            .client
+            .xgroup_create(topic, &self.group, "0-0", true)
             .await;
         if let Err(err) = result {
             // ignore BUSYGROUP error, which indicates the group already exists
-            let code = err.code().unwrap_or_default();
-            tracing::warn!(consumer = &self.consumer, code, ?err);
-            if code != "BUSYGROUP" {
+            tracing::warn!(consumer = &self.consumer, ?err);
+            if !err.details().starts_with("BUSYGROUP") {
                 return Err(err);
             }
         } else {
@@ -124,13 +105,12 @@ impl MsgQueue {
         Ok(())
     }
 
-    // Will return immediately (without waiting for limit) if there is at least 1 message in the queue.
     pub async fn recv<M: Message>(
-        &mut self,
+        &self,
         topic: &str,
-        limit: usize,
+        count: usize,
         last_id: Option<&str>,
-    ) -> redis::RedisResult<Vec<Received<M>>> {
+    ) -> RedisResult<Vec<Received<M>>> {
         // TODO(Akhil): add autoclaim (https://redis.io/docs/data-types/streams/#automatic-claiming)
         let mut check_pending = true;
         let mut delay = Duration::from_secs(1);
@@ -143,22 +123,24 @@ impl MsgQueue {
             // exponential backoff with a max of 2 minutes
             delay = Duration::from_secs(2 * 60).min(delay * 2);
 
-            // TODO(Akhil): add jitter to block time to prevent thundering herd
-            let opts = streams::StreamReadOptions::default()
-                .block(delay.as_millis() as usize)
-                .count(limit)
-                .group(&self.group, &self.consumer);
-            let result = self
-                .conn
-                .xread_options::<_, _, StreamReadReply>(&[topic], &[id], &opts)
+            let result: Result<StreamReadReply, _> = self
+                .client
+                .xreadgroup(
+                    &self.group,
+                    &self.consumer,
+                    Some(count as u64),
+                    Some(delay.as_millis() as u64),
+                    false,
+                    &[topic],
+                    id,
+                )
                 .await;
             let srr = match result {
                 Ok(srr) => srr,
                 Err(err) => {
                     // create group if it doesn't exist, and retry the xread
-                    let code = err.code().unwrap_or_default();
-                    tracing::warn!(consumer = &self.consumer, code, ?err);
-                    if code == "NOGROUP" {
+                    tracing::warn!(consumer = &self.consumer, ?err);
+                    if err.details().starts_with("NOGROUP") {
                         self.register(topic).await?;
                         continue;
                     }
@@ -192,20 +174,20 @@ impl MsgQueue {
 
             let mut bad_ids = Vec::default();
             let entries: Vec<Received<M>> = stream
-                .into_iter()
-                .filter_map(|(id, v)| match from_redis(v) {
-                    Ok(entry) => Some(Received { id, entry }),
-                    Err(err) => {
-                        tracing::error!(consumer = &self.consumer, id, %err, "failed to parse message");
-                        bad_ids.push(id);
-                        None
-                    }
-                })
-                .collect();
+                    .into_iter()
+                    .filter_map(|(id, v)| match from_redis(v) {
+                        Ok(entry) => Some(Received { id, entry }),
+                        Err(err) => {
+                            tracing::error!(consumer = &self.consumer, id, %err, "failed to parse message");
+                            bad_ids.push(id);
+                            None
+                        }
+                    })
+                    .collect();
 
             if !bad_ids.is_empty() {
                 // auto-ack bad messages
-                self.conn.xack(topic, &self.group, &bad_ids).await?;
+                self.client.xack(topic, &self.group, bad_ids).await?;
             }
 
             if !entries.is_empty() {
@@ -218,9 +200,9 @@ impl MsgQueue {
         &self,
         topic: &str,
         entries: &[Received<M>],
-    ) -> redis::RedisResult<usize> {
+    ) -> RedisResult<usize> {
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
-        let acks = self.conn.clone().xack(topic, &self.group, &ids).await?;
+        let acks = self.client.xack(topic, &self.group, ids).await?;
         tracing::trace!(
             topic,
             group = &self.group,
@@ -235,9 +217,9 @@ impl MsgQueue {
         &self,
         topic: &str,
         entries: &[Received<M>],
-    ) -> redis::RedisResult<usize> {
+    ) -> RedisResult<usize> {
         let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
-        let deleted = self.conn.clone().xdel(topic, &ids).await?;
+        let deleted = self.client.xdel(topic, ids).await?;
         tracing::trace!(
             topic,
             group = &self.group,
@@ -245,12 +227,6 @@ impl MsgQueue {
             count = deleted,
             "deleted"
         );
-        Ok(deleted)
-    }
-
-    pub async fn del_topic(&self, topic: &str) -> redis::RedisResult<usize> {
-        let deleted = self.conn.clone().del(topic).await?;
-        tracing::debug!(topic, "deleted");
         Ok(deleted)
     }
 }

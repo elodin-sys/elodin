@@ -35,7 +35,6 @@ impl Api {
         req: CreateUserReq,
         userinfo: UserInfo,
     ) -> Result<CreateUserResp, Error> {
-        let mut redis = self.redis.clone();
         let id = Uuid::now_v7();
         let name = req.name.unwrap_or(userinfo.name);
         let email = req.email.unwrap_or(userinfo.email);
@@ -51,7 +50,7 @@ impl Api {
             onboarding_data: Set(None),
             billing_account_id: Set(None),
         }
-        .insert_with_event(&self.db, &mut redis)
+        .insert_with_event(&self.db, &self.redis)
         .await?;
         Ok(CreateUserResp {
             id: id.as_bytes().to_vec(),
@@ -70,13 +69,12 @@ impl Api {
         } else {
             sea_orm::NotSet
         };
-        let mut redis = self.redis.clone();
         user::ActiveModel {
             id: Unchanged(user.id),
             onboarding_data,
             ..Default::default()
         }
-        .update_with_event(txn, &mut redis)
+        .update_with_event(txn, &self.redis)
         .await?;
         Ok(UpdateUserResp {})
     }

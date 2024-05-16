@@ -10,9 +10,9 @@ use atc_entity::events::DbEvent;
 use axum::{extract::MatchedPath, routing::get};
 use axum::{http::Request, routing::post};
 use elodin_types::api::*;
+use fred::prelude::*;
 use futures::Stream;
 use jsonwebtoken::jwk::JwkSet;
-use redis::aio::MultiplexedConnection;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, pin::Pin, time::Duration};
@@ -39,7 +39,7 @@ pub struct Api {
     db: DatabaseConnection,
     sim_storage_client: SimStorageClient,
     auth_context: AuthContext,
-    redis: MultiplexedConnection,
+    redis: RedisClient,
     msg_queue: redmq::MsgQueue,
     sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,
     monte_carlo_run_events: broadcast::Receiver<DbEvent<atc_entity::mc_run::Model>>,
@@ -58,7 +58,7 @@ pub struct AuthContext {
 pub struct AxumContext {
     auth_context: AuthContext,
     db: DatabaseConnection,
-    redis: MultiplexedConnection,
+    redis: RedisClient,
     webhook_secret: String,
 }
 
@@ -67,7 +67,7 @@ impl Api {
     pub async fn new(
         config: ApiConfig,
         db: DatabaseConnection,
-        redis: MultiplexedConnection,
+        redis: RedisClient,
         msg_queue: redmq::MsgQueue,
         sim_storage_client: SimStorageClient,
         sandbox_events: broadcast::Receiver<DbEvent<atc_entity::sandbox::Model>>,

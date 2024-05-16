@@ -1,17 +1,15 @@
+use fred::error::{RedisError, RedisErrorKind};
 use serde::{de, Deserialize};
 
 use crate::Error;
 
-pub fn from_redis<'a, T: Deserialize<'a>>(
-    map: Vec<(String, String)>,
-) -> Result<T, redis::RedisError> {
+pub fn from_redis<'a, T: Deserialize<'a>>(map: Vec<(String, String)>) -> Result<T, RedisError> {
     let mut deserializer = Deserializer {
         input: map,
         next_value: None,
     };
-    T::deserialize(&mut deserializer).map_err(|err| {
-        redis::RedisError::from((redis::ErrorKind::TypeError, "invalid type", err.to_string()))
-    })
+    T::deserialize(&mut deserializer)
+        .map_err(|_| RedisError::new(RedisErrorKind::Parse, "invalid type"))
 }
 
 struct Deserializer {
