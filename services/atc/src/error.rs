@@ -1,5 +1,6 @@
 use atc_entity::events::Error as EventError;
 use elodin_types::ValidationError;
+use fred::prelude::*;
 use sea_orm::TransactionError;
 use std::io;
 use thiserror::Error;
@@ -28,7 +29,7 @@ pub enum Error {
     #[error("postcard: {0}")]
     Postcard(#[from] postcard::Error),
     #[error("redis: {0}")]
-    Redis(#[from] redis::RedisError),
+    Redis(#[from] RedisError),
     #[error("kube watcher: {0}")]
     KubeWatcher(#[from] kube::runtime::watcher::Error),
     #[error("sandbox not booted")]
@@ -56,7 +57,7 @@ impl From<EventError> for Error {
         match value {
             EventError::Db(err) => Error::Db(err),
             EventError::NotFound => Error::NotFound,
-            EventError::Postcard(err) => Error::Postcard(err),
+            EventError::SerdeJson(err) => Error::SerdeJson(err),
             EventError::Redis(err) => Error::Redis(err),
         }
     }

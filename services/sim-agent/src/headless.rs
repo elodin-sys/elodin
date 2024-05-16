@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use atc_entity::events::DbExt;
 use elodin_types::{sandbox::*, Batch, BitVec, BATCH_TOPIC};
+use fred::prelude::*;
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
@@ -23,7 +24,7 @@ use crate::pytest;
 
 pub struct Runner {
     db: DatabaseConnection,
-    redis_conn: redis::aio::MultiplexedConnection,
+    redis: RedisClient,
     msg_queue: redmq::MsgQueue,
     nox_client: NoxClient,
     gcs_client: GcsClient,
@@ -38,8 +39,8 @@ impl Runner {
         opt.sqlx_logging(false);
         let db = sea_orm::Database::connect(opt).await?;
 
-        let redis = redis::Client::open(config.redis_url)?;
-        let redis_conn = redis.get_multiplexed_tokio_connection().await?;
+        let redis_config = RedisConfig::from_url(&config.redis_url)?;
+        let redis = Builder::from_config(redis_config).build()?;
         let msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
         let gcs_config = ClientConfig::default().with_auth().await?;
 
@@ -47,7 +48,7 @@ impl Runner {
         let vm_client = sandbox_client::SandboxClient::new(channel.clone());
         Ok(Self {
             db,
-            redis_conn,
+            redis,
             msg_queue,
             nox_client: NoxClient::cpu()?,
             gcs_client: GcsClient::new(gcs_config),
@@ -59,6 +60,7 @@ impl Runner {
 
     pub async fn run(mut self) -> anyhow::Result<()> {
         tracing::info!("running monte carlo agent");
+        self.redis.init().await?;
         loop {
             let batches = self.msg_queue.recv::<Batch>(BATCH_TOPIC, 1, None).await?;
 
@@ -95,9 +97,7 @@ impl Runner {
                 .ok_or_else(|| anyhow::anyhow!("batch {}/{} not found", run_id, b.batch_no))?
                 .into_active_model();
             batch.status = sea_orm::Set(atc_entity::batches::Status::Running);
-            let batch = batch
-                .update_with_event(&txn, &mut self.redis_conn.clone())
-                .await?;
+            let batch = batch.update_with_event(&txn, &self.redis).await?;
             txn.commit().await?;
 
             let start_time = chrono::Utc::now();
@@ -116,9 +116,7 @@ impl Runner {
             batch.failures = sea_orm::Set(failed.to_bytes());
             batch.finished = sea_orm::Set(Some(finish_time));
             batch.status = sea_orm::Set(atc_entity::batches::Status::Done);
-            batch
-                .update_with_event(&self.db, &mut self.redis_conn.clone())
-                .await?;
+            batch.update_with_event(&self.db, &self.redis).await?;
         }
         Ok(())
     }

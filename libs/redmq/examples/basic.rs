@@ -1,3 +1,5 @@
+use fred::prelude::*;
+
 const TOPIC_PING: &str = "ping";
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -6,14 +8,15 @@ pub struct Ping {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> redis::RedisResult<()> {
+async fn main() -> RedisResult<()> {
     tracing_subscriber::fmt::init();
 
-    let redis_url = std::env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
-    let client = redis::Client::open(redis_url)?;
+    let client = RedisClient::default();
+    client.init().await?;
+    client.flushall(false).await?;
 
     // send ping
-    let mut mq = redmq::MsgQueue::new(&client, "pinger", "").await?;
+    let mq = redmq::MsgQueue::new(&client, "pinger", "").await?;
     mq.send(TOPIC_PING, vec![Ping { id: 74 }]).await?;
 
     // receive ping

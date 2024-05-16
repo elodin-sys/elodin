@@ -1,3 +1,5 @@
+use fred::prelude::*;
+
 const ENTRIES: usize = 1000;
 const WORKERS: usize = 10;
 
@@ -25,15 +27,16 @@ impl Job {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> redis::RedisResult<()> {
+async fn main() -> RedisResult<()> {
     tracing_subscriber::fmt::init();
 
-    let redis_url = std::env::var("REDIS_URL").unwrap_or("redis://127.0.0.1/".to_string());
-    let client = redis::Client::open(redis_url)?;
+    let client = RedisClient::default();
+    client.init().await?;
+    client.flushall(false).await?;
 
     for i in 0..WORKERS {
-        let mut mq = redmq::MsgQueue::new(&client, "worker", i.to_string()).await?;
-        let _: tokio::task::JoinHandle<redis::RedisResult<()>> = tokio::spawn(async move {
+        let mq = redmq::MsgQueue::new(&client, "worker", i.to_string()).await?;
+        let _: tokio::task::JoinHandle<RedisResult<()>> = tokio::spawn(async move {
             tracing::info!(worker = i, "spawning");
             loop {
                 let work = mq.recv::<Job>(TOPIC_JOB, 10, None).await?;
@@ -51,7 +54,7 @@ async fn main() -> redis::RedisResult<()> {
 
     let jobs = (0..ENTRIES as u32).map(Job::new).collect();
 
-    let mut mq = redmq::MsgQueue::new(&client, "producer", "").await?;
+    let mq = redmq::MsgQueue::new(&client, "producer", "").await?;
     mq.send(TOPIC_JOB, jobs).await?;
 
     let mut num_results = 0;

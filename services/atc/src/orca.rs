@@ -1,8 +1,9 @@
-use atc_entity::events::{DbEvent, DbExt, EntityExt, Error as EventError, EventModel};
+use atc_entity::events::{DbEvent, DbExt, EntityExt, Error as EventError};
 use atc_entity::{
     sandbox,
     vm::{self, Status},
 };
+use fred::prelude::*;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -11,8 +12,8 @@ use kube::{
     runtime::watcher::Event,
     Api,
 };
-use redis::aio::{MultiplexedConnection, PubSub};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
+use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, trace, warn};
 use uuid::Uuid;
@@ -24,15 +25,17 @@ pub struct Orca {
     db: DatabaseConnection,
     vm_namespace: String,
     image_name: String,
-    redis: MultiplexedConnection,
+    redis: RedisClient,
     runtime_class: Option<String>,
+    vm_events: broadcast::Receiver<DbEvent<vm::Model>>,
 }
 
 impl Orca {
     pub async fn new(
         config: OrcaConfig,
         db: DatabaseConnection,
-        redis: MultiplexedConnection,
+        redis: RedisClient,
+        vm_events: broadcast::Receiver<DbEvent<vm::Model>>,
     ) -> anyhow::Result<Self> {
         let k8s = kube::Client::try_default().await?;
         Ok(Self {
@@ -42,30 +45,21 @@ impl Orca {
             image_name: config.image_name,
             redis,
             runtime_class: config.runtime_class,
+            vm_events,
         })
     }
 
-    pub async fn run(
-        mut self,
-        mut redis: PubSub,
-        cancel_token: CancellationToken,
-    ) -> anyhow::Result<()> {
+    pub async fn run(mut self, cancel_token: CancellationToken) -> anyhow::Result<()> {
         let cancel_on_drop = cancel_token.clone().drop_guard();
         let pods: Api<Pod> = kube::api::Api::namespaced(self.k8s.clone(), &self.vm_namespace);
         let events = watcher(pods, watcher::Config::default())
             .map(|e| e.map(OrcaMsg::K8sEvent).map_err(Error::from));
         tokio::pin!(events);
-        redis.subscribe(vm::Model::topic_name().as_str()).await?;
-        let mut rx = redis.on_message().map(|msg| {
-            postcard::from_bytes(msg.get_payload_bytes())
-                .map(OrcaMsg::DbEvent)
-                .map_err(Error::from)
-        });
         loop {
             let msg = tokio::select! {
                 _ = cancel_token.cancelled() => break,
                 Some(msg) = events.next() => msg,
-                Some(msg) = rx.next() => msg,
+                Ok(msg) = self.vm_events.recv() => Ok(OrcaMsg::DbEvent(msg)),
                 else => break,
             };
             match msg {
@@ -187,7 +181,7 @@ impl Orca {
             status: Set(new_sandbox_state),
             ..Default::default()
         }
-        .update_with_event(&self.db, &mut self.redis.clone())
+        .update_with_event(&self.db, &self.redis)
         .await?;
         match (sandbox.status, new_sandbox_state) {
             (sandbox::Status::Running, sandbox::Status::Running) => {}
@@ -210,7 +204,7 @@ impl Orca {
         let Ok(id) = Uuid::parse_str(name) else {
             return Ok(());
         };
-        let model = match vm::Entity::delete_with_event(id, &self.db, &mut self.redis).await {
+        let model = match vm::Entity::delete_with_event(id, &self.db, &self.redis).await {
             Ok(model) => model,
             Err(EventError::NotFound) | Err(EventError::Db(sea_orm::DbErr::RecordNotFound(_))) => {
                 return Ok(())
@@ -224,7 +218,7 @@ impl Orca {
                 vm_id: Set(None),
                 ..Default::default()
             }
-            .update_with_event(&self.db, &mut self.redis)
+            .update_with_event(&self.db, &self.redis)
             .await?;
         }
         Ok(())

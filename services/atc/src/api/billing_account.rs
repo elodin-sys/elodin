@@ -19,7 +19,6 @@ impl Api {
         CurrentUser { user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<BillingAccount, Error> {
-        let mut redis = self.redis.clone();
         let billing_account_id = Uuid::now_v7();
         let customer = Customer::create(
             &self.stripe,
@@ -55,7 +54,7 @@ impl Api {
                 .then(|| req.trial_license_type().into())
                 .unwrap_or(atc_entity::user::LicenseType::None)),
         }
-        .insert_with_event(&self.db, &mut redis)
+        .insert_with_event(&self.db, &self.redis)
         .await?;
 
         if existing_accounts.is_empty() {
@@ -103,7 +102,7 @@ impl Api {
                 billing_account_id: Set(Some(billing_account_id)),
                 ..Default::default()
             }
-            .update_with_event(txn, &mut redis)
+            .update_with_event(txn, &self.redis)
             .await?;
         }
 

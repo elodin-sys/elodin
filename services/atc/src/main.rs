@@ -1,5 +1,7 @@
 use api::Api;
+use atc_entity::{events, vm};
 use config::Config;
+use fred::prelude::*;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use stripe::EventFilter;
@@ -42,34 +44,26 @@ async fn main() -> anyhow::Result<()> {
         Migrator::up(&db, None).await?;
     }
 
-    let redis = redis::Client::open(config.redis_url)?;
+    let redis_config = RedisConfig::from_url(&config.redis_url)?;
+    let redis_builder = Builder::from_config(redis_config);
+    let redis = redis_builder.build()?;
+    let conn_task = redis.init().await?;
     let sim_storage_client = monte_carlo::SimStorageClient::new(&config.monte_carlo).await?;
 
     if let Some(orca_config) = config.orca {
-        let pubsub = redis.get_async_pubsub().await?;
-        let redis = redis.get_multiplexed_tokio_connection().await?;
-        let orca = Orca::new(orca_config, db.clone(), redis).await?;
+        let vm_events = events::subscribe::<vm::Model>(&redis_builder).await?;
+        let orca = Orca::new(orca_config, db.clone(), redis.clone(), vm_events).await?;
         services.spawn(
-            orca.run(pubsub, cancel_token.clone())
+            orca.run(cancel_token.clone())
                 .instrument(tracing::info_span!("orca")),
         );
     }
     let mut stripe_webhook_id = None;
     if let Some(ref api_config) = config.api {
-        let sandbox_events = {
-            let redis = redis.get_async_pubsub().await?;
-            atc_entity::events::subscribe(redis).await?
-        };
-        let monte_carlo_run_events = {
-            let redis = redis.get_async_pubsub().await?;
-            atc_entity::events::subscribe(redis).await?
-        };
-        let monte_carlo_batch_events = {
-            let redis = redis.get_async_pubsub().await?;
-            atc_entity::events::subscribe(redis).await?
-        };
+        let sandbox_events = events::subscribe(&redis_builder).await?;
+        let monte_carlo_run_events = events::subscribe(&redis_builder).await?;
+        let monte_carlo_batch_events = events::subscribe(&redis_builder).await?;
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
-        let redis = redis.get_multiplexed_tokio_connection().await?;
         let stripe = stripe::Client::new(api_config.stripe_secret_key.clone());
         let stripe_webhook_secret = if let Some(secret) = api_config.stripe_webhook_secret.clone() {
             secret
@@ -99,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         let api = Api::new(
             api_config.clone(),
             db.clone(),
-            redis,
+            redis.clone(),
             msg_queue,
             sim_storage_client,
             sandbox_events,
@@ -122,9 +116,8 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(gc) = config.garbage_collect {
         if gc.enabled {
-            let redis = redis.get_multiplexed_tokio_connection().await?;
             services.spawn(
-                garbage_collect(db.clone(), redis, gc.timeout, cancel_token.clone())
+                garbage_collect(db.clone(), redis.clone(), gc.timeout, cancel_token.clone())
                     .instrument(tracing::info_span!("gc")),
             );
         }
@@ -142,9 +135,11 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     }
 
+    redis.quit().await?;
     while let Some(res) = services.join_next().await {
         res.unwrap()?
     }
+    conn_task.await.unwrap()?;
 
     Ok(())
 }
