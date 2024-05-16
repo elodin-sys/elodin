@@ -4,8 +4,6 @@ use std::time::Instant;
 
 use anyhow::Context;
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
-use pyo3::exceptions::PySystemExit;
-use pyo3::types::{IntoPyDict, PyAnyMethods, PyDictMethods};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -41,8 +39,8 @@ impl Sandbox for Service {
     async fn test(&self, req: Request<TestReq>) -> Result<Response<TestResp>, Status> {
         let req = req.into_inner();
 
-        let results_path = std::env::temp_dir().join(req.results_file);
-        let results = test(&results_path).await.map_err(|err| {
+        let artifact_dir = std::env::temp_dir().join(req.results_file);
+        let results = test(&artifact_dir).await.map_err(|err| {
             tracing::error!(?err, "failed to test results");
             Status::internal(format!("{err:#}"))
         })?;
@@ -142,61 +140,44 @@ async fn build(code: String) -> anyhow::Result<String> {
     Ok(file_name)
 }
 
-async fn test(results_path: &Path) -> anyhow::Result<TestResp> {
+async fn test(artifact_dir: &Path) -> anyhow::Result<TestResp> {
     let tempdir = tempfile::tempdir()?;
     let report = tempdir.path().join("report.json");
     let start = Instant::now();
 
-    let results_file = std::fs::File::open(results_path)?;
-    let metadata = results_file.metadata()?;
-    tracing::debug!(path = %results_path.display(), size = metadata.len(), "unpacking");
-    let mut tar = tar::Archive::new(results_file);
+    let archive = std::fs::File::open(artifact_dir)?;
+    let metadata = archive.metadata()?;
+    tracing::debug!(path = %artifact_dir.display(), size = metadata.len(), "unpacking");
+    let mut tar = tar::Archive::new(archive);
     tar.unpack(tempdir.path())?;
     let batch_results = tempdir.path().join("results");
     let workdir = tempdir.path().join("context");
 
-    let json_report_file = report.clone();
-    tokio::task::spawn_blocking(move || {
-        pyo3::Python::with_gil(|py| {
-            let locals = &[
-                ("path", workdir),
-                ("json_report_file", json_report_file),
-                ("batch_results", batch_results),
-            ]
-            .into_py_dict_bound(py);
-            let py_code = r#"import pytest
-import sys
-sys.path.append(path)
-args = [
-    path,
-    "--json-report",
-    "--json-report-file",
-    json_report_file,
-    "--batch-results",
-    batch_results,
-]
-retcode = pytest.main(args)
-"#;
-            py.run_bound(py_code, None, Some(locals))?;
-            let retcode = locals.get_item("retcode")?.unwrap().extract::<i32>()?;
-            // exit code 1: tests ran but some failed
-            // exit code 5: no tests found
-            if retcode != 0 && retcode != 1 && retcode != 5 {
-                let err = PySystemExit::new_err(retcode);
-                return Err(err);
-            }
-            Ok(())
-        })
-    })
-    .await
-    .unwrap()
-    .context("failed to run pytest")?;
-    let report = std::fs::read_to_string(report)?;
-    tracing::debug!(elapsed = ?start.elapsed(), "tested results");
+    let status = tokio::process::Command::new("python")
+        .arg("-B")
+        .arg("-m")
+        .arg("pytest")
+        .arg(&workdir)
+        .arg("--json-report")
+        .arg("--json-report-file")
+        .arg(&report)
+        .arg("--batch-results")
+        .arg(&batch_results)
+        .spawn()?
+        .wait()
+        .await?;
+    let code = status.code().unwrap_or(1);
+    tracing::debug!(elapsed = ?start.elapsed(), %code, "tested results");
 
-    if let Err(err) = std::fs::remove_file(results_path) {
+    // exit code 1: tests ran but some failed
+    // exit code 5: no tests found
+    if code != 0 && code != 1 && code != 5 {
+        anyhow::bail!("pytest failed with exit code: {}", code);
+    }
+    if let Err(err) = std::fs::remove_file(artifact_dir) {
         tracing::error!(?err, "failed to delete results file");
     }
 
+    let report = std::fs::read_to_string(report)?;
     Ok(TestResp { report })
 }
