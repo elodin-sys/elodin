@@ -55,7 +55,7 @@ impl ConduitExec {
                 }
                 State::Replaying { index } => {
                     *index += 1;
-                    if *index >= self.exec.history.len() {
+                    if *index >= self.exec.tick() {
                         self.state = State::Running;
                     }
                 }
@@ -68,8 +68,8 @@ impl ConduitExec {
 
     pub fn send(&mut self) {
         let tick = match self.state {
-            State::Running => self.exec.tick,
-            State::Replaying { index } => index as u64,
+            State::Running => self.exec.tick(),
+            State::Replaying { index } => index,
         };
         // drop connections and subscriptions if the connection is closed
         self.connections.retain_mut(|con| {
@@ -77,7 +77,7 @@ impl ConduitExec {
                 stream_id: StreamId::CONTROL,
                 payload: Payload::ControlMsg(ControlMsg::Tick {
                     tick,
-                    max_tick: self.exec.tick,
+                    max_tick: self.exec.tick(),
                 }),
             })
             .inspect_err(|err| {
@@ -118,7 +118,7 @@ impl ConduitExec {
             payload: Payload::ControlMsg(ControlMsg::StartSim {
                 metadata_store: self.metadata_store.clone(),
                 time_step: self.exec.time_step(),
-                entity_ids: self.exec.entity_ids(),
+                entity_ids: self.exec.world.entity_ids(),
             }),
         })?;
         self.connections.push(conn);
@@ -161,11 +161,7 @@ impl ConduitExec {
                 });
             }
             Msg::Control(ControlMsg::SetPlaying(playing)) => self.playing = playing,
-            Msg::Control(ControlMsg::Rewind(index)) => {
-                self.state = State::Replaying {
-                    index: index as usize,
-                }
-            }
+            Msg::Control(ControlMsg::Rewind(index)) => self.state = State::Replaying { index },
             Msg::Control(_) => {}
             Msg::Column(new_col) => {
                 // NOTE: the entity ids in `new_col` can be a subset of the ones in `col`,
@@ -204,15 +200,19 @@ impl ConduitExec {
 fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) -> Result<(), Error> {
     let comp_id = sub.component_id;
     let col = match state {
-        State::Running => exec.column_by_id(comp_id).ok_or(Error::ComponentNotFound)?,
+        State::Running => exec
+            .world
+            .column_by_id(comp_id)
+            .ok_or(Error::ComponentNotFound)?,
         State::Replaying { index } => exec
-            .column_at_tick(comp_id, index as u64)
+            .column_at_tick(comp_id, index)
             .ok_or(Error::ComponentNotFound)?,
     };
     if col.metadata.asset {
         let mut changed = false;
         for (_, id) in col.typed_iter::<u64>() {
             let gen = exec
+                .world
                 .assets
                 .gen(Handle::<()>::new(id))
                 .ok_or(Error::AssetNotFound)?;
@@ -225,7 +225,7 @@ fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) ->
             return Ok(());
         }
         for (entity_id, id) in col.typed_iter::<u64>() {
-            let Some(value) = exec.assets.value(Handle::<()>::new(id)) else {
+            let Some(value) = exec.world.assets.value(Handle::<()>::new(id)) else {
                 todo!("gracefully handle")
             };
             let packet = Packet {
@@ -245,7 +245,7 @@ fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) ->
         let packet = Packet {
             stream_id: sub.stream_id,
             payload: Payload::Column(ColumnPayload {
-                time: exec.tick,
+                time: exec.tick(),
                 len: col.len() as u32,
                 entity_buf: col.entities.clone().into(),
                 value_buf: col.column.clone().into(),
@@ -263,7 +263,7 @@ enum State {
     #[default]
     Running,
     Replaying {
-        index: usize,
+        index: u64,
     },
 }
 
