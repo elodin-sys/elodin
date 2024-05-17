@@ -19,6 +19,7 @@ pub struct InspectorIcons {
     pub add: egui::TextureId,
     pub subtract: egui::TextureId,
     pub setting: egui::TextureId,
+    pub search: egui::TextureId,
 }
 
 fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
