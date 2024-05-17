@@ -34,6 +34,7 @@ impl Exec {
         let id = ComponentId::new(&name);
         let series = self
             .exec
+            .world
             .column_by_id(id)
             .ok_or(nox_ecs::Error::ComponentNotFound)?
             .series()?;

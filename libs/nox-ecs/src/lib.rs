@@ -867,13 +867,6 @@ pub struct WorldExec<S: ExecState = Uncompiled> {
     pub profiler: Profiler,
 }
 
-impl<S: ExecState> std::ops::Deref for WorldExec<S> {
-    type Target = World;
-    fn deref(&self) -> &Self::Target {
-        &self.world
-    }
-}
-
 impl<S: ExecState> WorldExec<S> {
     pub fn new(world: World, tick_exec: Exec<S>, startup_exec: Option<Exec<S>>) -> Self {
         let mut world = Self {
@@ -891,6 +884,10 @@ impl<S: ExecState> WorldExec<S> {
         let start = &mut Instant::now();
         self.history.push(self.world.host.clone());
         self.profiler.add_to_history.observe(start);
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.world.tick
     }
 
     pub fn time_step(&self) -> Duration {
@@ -915,12 +912,12 @@ impl<S: ExecState> WorldExec<S> {
         component_id: ComponentId,
         tick: u64,
     ) -> Option<ColumnRef<'_, &Vec<u8>>> {
-        if tick == self.tick {
-            return self.column_by_id(component_id);
+        if tick == self.world.tick {
+            return self.world.column_by_id(component_id);
         }
         let column = self.history.get(tick as usize)?.get(&component_id)?;
         let (archetype_name, metadata) = self.world.component_map.get(&component_id)?;
-        let entities = self.entity_ids.get(archetype_name)?;
+        let entities = self.world.entity_ids.get(archetype_name)?;
         Some(ColumnRef {
             column,
             entities,
@@ -949,7 +946,7 @@ impl<S: ExecState> WorldExec<S> {
 
         let path = world_dir.join("assets.bin");
         let file = std::fs::File::create(path)?;
-        postcard::to_io(&self.assets, file)?;
+        postcard::to_io(&self.world.assets, file)?;
 
         self.profiler.write_to_dir.observe(start);
         Ok(())
@@ -1340,7 +1337,7 @@ mod tests {
             .compile(client)
             .unwrap();
         exec.run().unwrap();
-        let c = exec.column::<A>().unwrap();
+        let c = exec.world.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
     }
 }
