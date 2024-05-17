@@ -92,15 +92,21 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             .map(|(_, _, _, meta)| meta.name.clone())
             .unwrap_or_else(|| "NONE".to_string());
 
+        let mut reset_focus = false;
+
         egui::Frame::none()
             .inner_margin(egui::Margin::symmetric(8.0, 8.0))
             .show(ui, |ui| {
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
-                ui.label(
-                    egui::RichText::new("TRACK ENTITY")
-                        .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                );
-                ui.add_space(8.0);
+
+                reset_focus = buttons_label(
+                    ui,
+                    [icons.search],
+                    "TRACK ENTITY",
+                    colors::PRIMARY_CREAME,
+                    egui::Margin::same(0.0).bottom(8.0),
+                )[0];
+
                 theme::configure_combo_box(ui.style_mut());
                 egui::ComboBox::from_id_source("TRACK ENTITY")
                     .selected_text(selected_name)
@@ -126,7 +132,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
             });
         let mut cam_entity = commands.entity(cam.entity);
-        if before_parent != selected_parent {
+        if before_parent != selected_parent || reset_focus {
             if let Some(entity) = selected_parent {
                 if let Ok(entity_cell) = entity_transform_query.get(entity) {
                     cam_entity.set_parent(entity);
@@ -233,58 +239,66 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 });
         }
 
-        let selected_range_label = viewport_range
-            .0
-            .as_ref()
-            .and_then(|rid| tagged_ranges.0.get(rid))
-            .map_or("Default", |r| &r.label)
-            .to_owned();
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            .show(ui, |ui| {
+                let selected_range_label = viewport_range
+                    .0
+                    .as_ref()
+                    .and_then(|rid| tagged_ranges.0.get(rid))
+                    .map_or("Default", |r| &r.label)
+                    .to_owned();
 
-        let ro_tagged_ranges = tagged_ranges.0.clone();
+                let ro_tagged_ranges = tagged_ranges.0.clone();
 
-        let [add_clicked, settings_clicked, subtract_clicked] = buttons_label(
-            ui,
-            [icons.add, icons.setting, icons.subtract],
-            "RANGE",
-            colors::PRIMARY_CREAME,
-            egui::Margin::same(0.0).top(18.0).bottom(4.0),
-        );
+                let [add_clicked, settings_clicked, subtract_clicked] = buttons_label(
+                    ui,
+                    [icons.add, icons.setting, icons.subtract],
+                    "RANGE",
+                    colors::PRIMARY_CREAME,
+                    egui::Margin::same(0.0).bottom(8.0),
+                );
 
-        if add_clicked {
-            viewport_range.0 = Some(tagged_ranges.create_range(max_tick.0));
-        }
-        if settings_clicked {
-            if let Some(current_range_id) = &viewport_range.0 {
-                if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
-                    setting_modal_state.0 = Some(SettingModal::RangeEdit(
-                        current_range_id.clone(),
-                        current_range.label.to_owned(),
-                        current_range.color.to_owned(),
-                    ));
+                if add_clicked {
+                    viewport_range.0 = Some(tagged_ranges.create_range(max_tick.0));
                 }
-            }
-        }
-        if subtract_clicked {
-            if let Some(current_range_id) = &viewport_range.0 {
-                tagged_ranges.remove_range(current_range_id);
-                viewport_range.0 = None;
-            }
-        }
-
-        ui.scope(|ui| {
-            theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("RANGE")
-                .width(ui.available_width())
-                .selected_text(selected_range_label)
-                .show_ui(ui, |ui| {
-                    theme::configure_combo_item(ui.style_mut());
-
-                    ui.selectable_value(&mut viewport_range.0, None, "Default");
-
-                    for (range_id, range) in ro_tagged_ranges {
-                        ui.selectable_value(&mut viewport_range.0, Some(range_id), range.label);
+                if settings_clicked {
+                    if let Some(current_range_id) = &viewport_range.0 {
+                        if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
+                            setting_modal_state.0 = Some(SettingModal::RangeEdit(
+                                current_range_id.clone(),
+                                current_range.label.to_owned(),
+                                current_range.color.to_owned(),
+                            ));
+                        }
                     }
+                }
+                if subtract_clicked {
+                    if let Some(current_range_id) = &viewport_range.0 {
+                        tagged_ranges.remove_range(current_range_id);
+                        viewport_range.0 = None;
+                    }
+                }
+
+                ui.scope(|ui| {
+                    theme::configure_combo_box(ui.style_mut());
+                    egui::ComboBox::from_id_source("RANGE")
+                        .width(ui.available_width())
+                        .selected_text(selected_range_label)
+                        .show_ui(ui, |ui| {
+                            theme::configure_combo_item(ui.style_mut());
+
+                            ui.selectable_value(&mut viewport_range.0, None, "Default");
+
+                            for (range_id, range) in ro_tagged_ranges {
+                                ui.selectable_value(
+                                    &mut viewport_range.0,
+                                    Some(range_id),
+                                    range.label,
+                                );
+                            }
+                        });
                 });
-        });
+            });
     }
 }

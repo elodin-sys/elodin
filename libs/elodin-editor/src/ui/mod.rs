@@ -349,6 +349,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             add: contexts.add_image(images.icon_add.clone_weak()),
             subtract: contexts.add_image(images.icon_subtract.clone_weak()),
             setting: contexts.add_image(images.icon_setting.clone_weak()),
+            search: contexts.add_image(images.icon_search.clone_weak()),
         };
 
         let titlebar_icons = TitlebarIcons {
