@@ -44,7 +44,7 @@ impl PjRtBuffer {
         }
     }
 
-    pub fn copy_into(&self, dst: &mut Vec<u8>) -> Result<()> {
+    pub(crate) fn copy_into(&self, dst: &mut Vec<u8>) -> Result<()> {
         let shape = self.shape();
         let len = shape.size();
         dst.clear();
@@ -61,18 +61,6 @@ impl PjRtBuffer {
             dst.set_len(len);
         }
         Ok(())
-    }
-
-    pub fn copy_to_host(&self, out: &mut [u8], offset: usize) -> Result<()> {
-        let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
-        let out_len = out.len();
-        let out_ptr = out.as_mut_ptr();
-        unsafe {
-            cpp!([self as "std::unique_ptr<PjRtBuffer>*", out_ptr as "uint8_t*", out_len as "size_t", offset as "size_t", out_status as "Status*"] {
-                *out_status = (*self)->CopyRawToHost(out_ptr, offset, out_len).Await();
-            });
-        }
-        out_status.to_result()
     }
 
     pub fn to_literal_sync(&self) -> Result<Literal> {
