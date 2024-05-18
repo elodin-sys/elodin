@@ -9,7 +9,7 @@ pub struct Exec<T, R> {
     pub(crate) phantom: PhantomData<(T, R)>,
 }
 
-/// Defines a trait for converting computation results from device-specific representations to host types.
+/// Defines a trait for converting computation results from client device representations to host types.
 pub trait ToHost {
     /// The type of data to be transferred to the host.
     type HostTy;

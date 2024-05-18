@@ -56,7 +56,7 @@ impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, 
     }
 }
 
-/// Extension trait for matrix operations specific to the Nox computational framework.
+/// Extension trait to convert between different representations.
 pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize> {
     /// Converts the matrix to a constant matrix representation.
     fn constant(&self) -> Matrix<T, R, C, Op>;
@@ -64,7 +64,7 @@ pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize
     /// Converts the matrix to a literal matrix representation.
     fn literal(&self) -> Matrix<T, R, C, Literal>;
 
-    /// Converts the matrix to a buffer for device-side operations.
+    /// Converts the matrix to a buffer for client-side operations.
     fn buffer(&self, client: &Client) -> Matrix<T, R, C, Buffer>;
 }
 

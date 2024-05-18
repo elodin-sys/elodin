@@ -14,7 +14,7 @@ use crate::{
     DottedDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim, XlaDim,
 };
 
-/// Represents an operand.
+/// Represents a compute operation.
 pub struct Op;
 
 /// Represents a literal value.
