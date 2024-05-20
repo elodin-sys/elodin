@@ -1,5 +1,4 @@
-use crate::{ComponentId, Metadata, MetadataPair, MetadataQuery, Query};
-use smallvec::{smallvec, SmallVec};
+use crate::{ComponentId, Metadata, MetadataPair};
 use std::collections::HashMap;
 
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
@@ -27,38 +26,4 @@ impl MetadataStore {
             .get(component_id)
             .and_then(|&index| self.metadata.get(index))
     }
-}
-
-impl Query {
-    pub fn execute(&self, store: &MetadataStore) -> SmallVec<[QueryId; 2]> {
-        match self {
-            Query::All => store
-                .metadata
-                .iter()
-                .map(|m| QueryId::Component(m.component_id()))
-                .collect(),
-            Query::Metadata(q) => q.execute(store),
-            Query::ComponentId(id) => smallvec![QueryId::Component(*id)],
-            Query::With(id) => smallvec![QueryId::With(*id)],
-            Query::And(q) => q.iter().flat_map(|q| q.execute(store)).collect(),
-        }
-    }
-}
-
-impl MetadataQuery {
-    pub fn execute(&self, store: &MetadataStore) -> SmallVec<[QueryId; 2]> {
-        match self {
-            MetadataQuery::And(q) => q.iter().flat_map(|q| q.execute(store)).collect(),
-            MetadataQuery::Equals(pair) => {
-                let id = store.metadata_index.get(pair);
-                id.into_iter().copied().map(QueryId::Component).collect()
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueryId {
-    With(ComponentId),
-    Component(ComponentId),
 }

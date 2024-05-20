@@ -1,10 +1,11 @@
 use crate::{assets::Handle, Compiled, Error, WorldExec};
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use conduit::{
     client::{Msg, MsgPair},
-    query::{MetadataStore, QueryId},
-    ColumnPayload, ComponentId, ControlMsg, Packet, Payload, StreamId,
+    query::MetadataStore,
+    ColumnPayload, ComponentId, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
+use std::mem;
 use tracing::warn;
 
 type Connection = flume::Sender<Packet<Payload<Bytes>>>;
@@ -86,7 +87,7 @@ impl ConduitExec {
             .is_ok()
         });
         self.subscriptions.retain_mut(|sub| {
-            send_sub(&self.exec, sub, self.state)
+            send_sub(&self.exec, sub, self.state, &[])
                 .inspect_err(|err| {
                     tracing::debug!(?err, "send sub error, dropping connection");
                 })
@@ -133,12 +134,12 @@ impl ConduitExec {
         match msg {
             Msg::Control(ControlMsg::Connect) => self.add_connection(tx)?,
             Msg::Control(ControlMsg::Subscribe { query }) => {
-                let ids = query.execute(&self.metadata_store);
-                if ids.len() != 1 {
+                let id = query.component_id;
+                if !query.with_component_ids.is_empty() {
                     return Err(Error::InvalidQuery); // For now we only support ids with len 1
                 }
-                let QueryId::Component(id) = ids[0] else {
-                    return Err(Error::InvalidQuery); // For now we only support ids with len 1
+                if !query.entity_ids.is_empty() {
+                    return Err(Error::InvalidQuery); // for nowe we don't support
                 };
                 let stream_id = StreamId::rand();
                 let Some(metadata) = self.metadata_store.get_metadata(&id) else {
@@ -162,6 +163,42 @@ impl ConduitExec {
             }
             Msg::Control(ControlMsg::SetPlaying(playing)) => self.playing = playing,
             Msg::Control(ControlMsg::Rewind(index)) => self.state = State::Replaying { index },
+            Msg::Control(ControlMsg::Query { time_range, query }) => {
+                let time_range = time_range.start as usize
+                    ..(time_range.end as usize).min(self.exec.history.len());
+                if !query.with_component_ids.is_empty() {
+                    return Err(Error::InvalidQuery); // For now we only support ids with len 1
+                }
+                let stream_id = StreamId::rand();
+                let Some(metadata) = self.metadata_store.get_metadata(&query.component_id) else {
+                    warn!(?query.component_id, "component not found");
+                    return Err(Error::ComponentNotFound);
+                };
+                tx.send(Packet {
+                    stream_id: StreamId::CONTROL,
+                    payload: Payload::ControlMsg(ControlMsg::OpenStream {
+                        stream_id,
+                        metadata: metadata.clone(),
+                    }),
+                })
+                .map_err(|_| Error::ChannelClosed)?;
+                let mut sub = Subscription {
+                    component_id: query.component_id,
+                    stream_id,
+                    connection: tx.clone(),
+                    sent_generation: usize::MAX,
+                };
+                for index in time_range {
+                    send_sub(
+                        &self.exec,
+                        &mut sub,
+                        State::Replaying {
+                            index: index as u64,
+                        },
+                        &query.entity_ids,
+                    )?;
+                }
+            }
             Msg::Control(_) => {}
             Msg::Column(new_col) => {
                 // NOTE: the entity ids in `new_col` can be a subset of the ones in `col`,
@@ -197,17 +234,27 @@ impl ConduitExec {
     }
 }
 
-fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) -> Result<(), Error> {
+fn send_sub(
+    exec: &WorldExec<Compiled>,
+    sub: &mut Subscription,
+    state: State,
+    entity_ids: &[EntityId],
+) -> Result<(), Error> {
     let comp_id = sub.component_id;
-    let col = match state {
-        State::Running => exec
-            .world
-            .column_by_id(comp_id)
-            .ok_or(Error::ComponentNotFound)?,
-        State::Replaying { index } => exec
-            .column_at_tick(comp_id, index)
-            .ok_or(Error::ComponentNotFound)?,
+    let (time, col) = match state {
+        State::Running => (
+            exec.tick(),
+            exec.world
+                .column_by_id(comp_id)
+                .ok_or(Error::ComponentNotFound)?,
+        ),
+        State::Replaying { index } => (
+            index,
+            exec.column_at_tick(comp_id, index)
+                .ok_or(Error::ComponentNotFound)?,
+        ),
     };
+
     if col.metadata.asset {
         let mut changed = false;
         for (_, id) in col.typed_iter::<u64>() {
@@ -242,14 +289,41 @@ fn send_sub(exec: &WorldExec<Compiled>, sub: &mut Subscription, state: State) ->
                 .map_err(|_| Error::ChannelClosed)?;
         }
     } else {
-        let packet = Packet {
-            stream_id: sub.stream_id,
-            payload: Payload::Column(ColumnPayload {
-                time: exec.tick(),
-                len: col.len() as u32,
-                entity_buf: col.entities.clone().into(),
-                value_buf: col.column.clone().into(),
-            }),
+        let packet = if entity_ids.is_empty() {
+            Packet {
+                stream_id: sub.stream_id,
+                payload: Payload::Column(ColumnPayload {
+                    time,
+                    len: col.len() as u32,
+                    entity_buf: col.entities.clone().into(),
+                    value_buf: col.column.clone().into(),
+                }),
+            }
+        } else {
+            let col_entity_ids: &[EntityId] = bytemuck::cast_slice(col.entities);
+            let mut entity_iter = col_entity_ids.iter();
+            let mut entity_buf = BytesMut::with_capacity(mem::size_of::<u64>() * entity_ids.len());
+            let comp_size = col.metadata.component_type.size();
+            let mut value_buf = BytesMut::with_capacity(comp_size * entity_ids.len());
+            let mut len: usize = 0;
+            for id in entity_ids {
+                let Some(index) = entity_iter.position(|entity_id| *entity_id == *id) else {
+                    continue;
+                };
+                len += 1;
+                entity_buf.put_u64_le(id.0);
+                value_buf
+                    .extend_from_slice(&col.column[index * comp_size..(index + 1) * comp_size]);
+            }
+            Packet {
+                stream_id: sub.stream_id,
+                payload: Payload::Column(ColumnPayload {
+                    time,
+                    len: len as u32,
+                    entity_buf: entity_buf.freeze(),
+                    value_buf: value_buf.freeze(),
+                }),
+            }
         };
         sub.connection
             .send(packet)

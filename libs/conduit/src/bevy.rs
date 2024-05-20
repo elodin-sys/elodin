@@ -1,7 +1,7 @@
 use crate::client::ColumnMsg;
 use crate::client::Msg;
 use crate::client::MsgPair;
-use crate::query::{MetadataStore, QueryId};
+use crate::query::MetadataStore;
 use crate::ser_de::ColumnValue;
 use crate::well_known::EntityMetadata;
 use crate::Asset;
@@ -266,11 +266,16 @@ pub struct ConduitRx(pub flume::Receiver<MsgPair>);
 #[derive(Component)]
 pub struct Persistent;
 
+#[derive(Debug, Resource, Deref, DerefMut)]
+pub struct ConduitMsgSender(pub flume::Sender<Msg>);
+#[derive(Debug, Resource, Deref, DerefMut)]
+pub struct ConduitMsgReceiver(pub flume::Receiver<Msg>);
+
 #[derive(SystemParam)]
 pub struct RecvSystemArgs<'w, 's> {
     rx: Res<'w, ConduitRx>,
     entity_map: ResMut<'w, EntityMap>,
-    event: EventWriter<'w, Msg>,
+    event: Res<'w, ConduitMsgSender>,
     commands: Commands<'w, 's>,
     value_map: Query<'w, 's, &'static mut ComponentValueMap>,
     metadata_store: ResMut<'w, MetadataStore>,
@@ -291,7 +296,7 @@ fn recv_system(args: RecvSystemArgs) {
     let RecvSystemArgs {
         rx,
         mut entity_map,
-        mut event,
+        event,
         mut commands,
         mut value_map,
         mut metadata_store,
@@ -358,16 +363,7 @@ fn recv_system(args: RecvSystemArgs) {
                     stream_id: StreamId::rand(),
                     tx,
                 };
-                let ids = query.execute(&metadata_store);
-                if ids.len() != 1 {
-                    warn!("only single id queries are supported for now");
-                    continue;
-                }
-                let QueryId::Component(id) = ids[0] else {
-                    warn!("only single id queries are supported for now");
-                    continue;
-                };
-                subscriptions.subscribe(id, subscription.clone());
+                subscriptions.subscribe(query.component_id, subscription.clone());
                 subscribe_event.send(SubscribeEvent {
                     query: query.clone(),
                     subscription,
@@ -400,15 +396,17 @@ fn recv_system(args: RecvSystemArgs) {
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
-                col.load_into_bevy(
-                    entity_map.as_mut(),
-                    component_map.as_ref(),
-                    &mut commands,
-                    &mut value_map,
-                );
+                if tick_res.0 == col.payload.time {
+                    col.load_into_bevy(
+                        entity_map.as_mut(),
+                        component_map.as_ref(),
+                        &mut commands,
+                        &mut value_map,
+                    );
+                }
             }
         }
-        event.send(msg);
+        let _ = event.send(msg);
     }
 }
 
@@ -430,6 +428,7 @@ impl ConduitSubscribePlugin {
 
 impl Plugin for ConduitSubscribePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
+        let (tx, rx) = flume::unbounded();
         app.insert_resource(EntityMap::default());
         app.insert_resource(ComponentMap::default());
         app.insert_resource(AssetMap::default());
@@ -437,9 +436,10 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(Tick(0));
         app.insert_resource(TimeStep(Duration::default()));
         app.insert_resource(ConduitRx(self.rx.clone()));
+        app.insert_resource(ConduitMsgSender(tx));
+        app.insert_resource(ConduitMsgReceiver(rx));
         app.add_event::<SubscribeEvent>();
         app.add_event::<ControlMsg>();
-        app.add_event::<Msg>();
         app.add_event::<ColumnPayloadMsg>();
         app.add_systems(Update, control_msg);
         app.add_systems(Update, recv_system);
@@ -484,12 +484,7 @@ pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
 ) {
     let component_id = T::component_id();
     for event in events.read() {
-        let ids = event.query.execute(&store);
-        if ids.len() != 1 {
-            warn!("only single id queries are supported right now");
-            continue;
-        }
-        if ids[0] != QueryId::Component(component_id) {
+        if event.query.component_id != component_id {
             continue;
         }
         let Some(metadata) = store.get_metadata(&component_id) else {
@@ -521,21 +516,13 @@ pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
     }
 }
 
-pub fn query_asset<T>(
-    mut events: EventReader<SubscribeEvent>,
-    store: Res<MetadataStore>,
-    query: Query<(&EntityId, &T)>,
-) where
+pub fn query_asset<T>(mut events: EventReader<SubscribeEvent>, query: Query<(&EntityId, &T)>)
+where
     T: Asset + bevy::prelude::Component + Debug,
 {
     let asset_id = T::ASSET_ID;
     for event in events.read() {
-        let ids = event.query.execute(&store);
-        if ids.len() != 1 {
-            warn!("only single id queries are supported right now");
-            continue;
-        }
-        if ids[0] != QueryId::Component(ComponentId(asset_id.0)) {
+        if event.query.component_id != ComponentId(asset_id.0) {
             continue;
         }
 
