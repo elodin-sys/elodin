@@ -1,5 +1,6 @@
+use bytemuck::{Pod, Zeroable};
 use bytes::Bytes;
-use core::{fmt, hash::Hash, mem::size_of};
+use core::{fmt, hash::Hash, mem::size_of, ops::Range};
 use ndarray::{CowArray, IxDyn};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,9 @@ type HashSet<T> = std::collections::HashSet<T>;
 #[cfg(feature = "std")]
 type HashMap<K, V> = std::collections::HashMap<K, V>;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Pod, Zeroable,
+)]
 #[repr(transparent)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct EntityId(pub u64);
@@ -499,25 +502,34 @@ pub enum ControlMsg {
         time_step: std::time::Duration,
         entity_ids: HashSet<EntityId>,
     },
+    Query {
+        time_range: Range<u64>,
+        query: Query,
+    },
 }
 
 impl ControlMsg {
     #[cfg(feature = "std")]
-    pub fn sub_component_id(id: ComponentId) -> Self {
+    pub fn sub_component_id(component_id: ComponentId) -> Self {
         ControlMsg::Subscribe {
-            query: Query::ComponentId(id),
+            query: Query {
+                component_id,
+                with_component_ids: vec![],
+                entity_ids: vec![],
+            },
         }
     }
 }
 
 #[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum Query {
-    All,
-    Metadata(MetadataQuery), // TODO(sphw): figure out
-    ComponentId(ComponentId),
-    With(ComponentId),
-    And(Vec<Query>),
+pub struct Query {
+    /// Component that will be subscribed to in the query
+    pub component_id: ComponentId,
+    /// Component ids to filter with, but won't be returned
+    pub with_component_ids: Vec<ComponentId>,
+    /// Entity ids to filter with, if empty all entities will be returned
+    pub entity_ids: Vec<EntityId>,
 }
 
 #[cfg(feature = "std")]
