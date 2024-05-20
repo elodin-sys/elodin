@@ -2,13 +2,17 @@ use bevy::{
     asset::{Assets, Handle},
     ecs::{
         entity::Entity,
+        event::EventWriter,
         system::{Commands, Query},
     },
     math::{Rect, Vec2},
     render::camera::{OrthographicProjection, Projection, ScalingMode},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use conduit::{ComponentId, EntityId};
+use conduit::{
+    bevy::EntityMap, query::MetadataStore, well_known::EntityMetadata, ComponentId, ControlMsg,
+    EntityId,
+};
 use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
 use itertools::{Itertools, MinMaxResult};
 use std::{
@@ -29,6 +33,8 @@ use crate::{
         },
     },
 };
+
+use super::{PlotDataComponent, PlotDataEntity};
 
 #[derive(Debug)]
 pub struct Plot {
@@ -128,12 +134,16 @@ impl Plot {
     pub fn calculate_lines(
         mut self,
         ui: &egui::Ui,
-        collected_graph_data: &CollectedGraphData,
+        collected_graph_data: &mut CollectedGraphData,
         graph_state: &mut GraphState,
         tagged_range: Option<&TaggedRange>,
         lines: &mut Assets<Line>,
         commands: &mut Commands,
         graph_id: Entity,
+        entity_map: &EntityMap,
+        entity_metadata: &Query<&EntityMetadata>,
+        metadata_store: &MetadataStore,
+        control_msg: &mut EventWriter<ControlMsg>,
     ) -> Self {
         self.rect = ui.max_rect();
         self.inner_rect = get_inner_rect(self.rect);
@@ -176,17 +186,13 @@ impl Plot {
         }
 
         self.bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
-        let x_range = self.bounds.max_x - self.bounds.min_x;
         let y_range = self.bounds.max_y - self.bounds.min_y;
         commands
             .entity(graph_id)
             .insert(Projection::Orthographic(OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
-                viewport_origin: Vec2::new(
-                    -(self.bounds.min_x / x_range) as f32,
-                    -(self.bounds.min_y / y_range) as f32,
-                ),
+                viewport_origin: Vec2::new(0.0, -(self.bounds.min_y / y_range) as f32),
                 scaling_mode: ScalingMode::Fixed {
                     width: (self.bounds.max_x - self.bounds.min_x) as f32,
                     height: (self.bounds.max_y - self.bounds.min_y) as f32,
@@ -203,59 +209,118 @@ impl Plot {
         // calc lines
 
         for (entity_id, components) in &graph_state.entities {
-            if let Some(entity) = collected_graph_data.entities.get(entity_id) {
-                for (component_id, component_values) in components {
-                    if let Some(component) = entity.components.get(component_id) {
-                        for (value_index, (enabled, color)) in component_values.iter().enumerate() {
-                            let entity = graph_state.enabled_lines.get(&(
+            let entity = collected_graph_data
+                .entities
+                .entry(*entity_id)
+                .or_insert_with(|| {
+                    let label = entity_map
+                        .get(entity_id)
+                        .and_then(|id| entity_metadata.get(*id).ok())
+                        .map_or(format!("E[{}]", entity_id.0), |metadata| {
+                            metadata.name.to_owned()
+                        });
+                    PlotDataEntity {
+                        label,
+                        components: Default::default(),
+                    }
+                });
+
+            for (component_id, component_values) in components {
+                let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
+                    continue;
+                };
+                let component_label = component_metadata.component_name();
+                let element_names = component_metadata.element_names();
+                let component = entity.components.entry(*component_id).or_insert_with(|| {
+                    PlotDataComponent::new(
+                        component_label,
+                        element_names
+                            .split(',')
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                            .collect(),
+                    )
+                });
+
+                for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                    let entity =
+                        graph_state
+                            .enabled_lines
+                            .get(&(*entity_id, *component_id, value_index));
+
+                    let Some(line) = component.lines.get(&value_index) else {
+                        continue;
+                    };
+                    if *enabled {
+                        if let Some(values) = lines.get_mut(line) {
+                            values.data.current_range =
+                                (self.tick_range.start as usize)..(self.tick_range.end as usize);
+                            values.data.max_count = max_length;
+                            for chunk in values.data.range() {
+                                if !chunk.unfetched.is_empty() {
+                                    let start =
+                                        chunk.unfetched.min().expect("unexpected empty chunk")
+                                            as u64;
+                                    let mut end =
+                                        chunk.unfetched.max().expect("unexpected empty chunk")
+                                            as u64;
+                                    if start == end {
+                                        end += 1;
+                                    }
+                                    let start = start.max(self.tick_range.start);
+                                    let end = end.min(self.tick_range.end) + 1;
+                                    let time_range = start..end;
+
+                                    if end.saturating_sub(start) > 0 {
+                                        chunk.unfetched.remove_range(start as u32..end as u32);
+                                        control_msg.send(ControlMsg::Query {
+                                            time_range,
+                                            query: conduit::Query {
+                                                component_id: *component_id,
+                                                with_component_ids: vec![],
+                                                entity_ids: vec![*entity_id],
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                            values.data.recalculate_avg_data();
+                        }
+                    }
+
+                    match (entity, enabled) {
+                        (None, true) => {
+                            let entity = commands
+                                .spawn(LineBundle {
+                                    line: line.clone(),
+                                    uniform: LineUniform::new(
+                                        graph_state.line_width,
+                                        color.into_bevy(),
+                                    ),
+                                    config: LineConfig {
+                                        render_layers: graph_state.render_layers,
+                                    },
+                                })
+                                .id();
+                            graph_state
+                                .enabled_lines
+                                .insert((*entity_id, *component_id, value_index), (entity, *color));
+                        }
+                        (Some((entity, _)), false) => {
+                            commands.entity(*entity).despawn();
+                            graph_state.enabled_lines.remove(&(
                                 *entity_id,
                                 *component_id,
                                 value_index,
                             ));
-
-                            let Some(line) = component.lines.get(&value_index) else {
-                                continue;
-                            };
-                            match (entity, enabled) {
-                                (None, true) => {
-                                    let entity = commands
-                                        .spawn(LineBundle {
-                                            line: line.clone(),
-                                            uniform: LineUniform::new(
-                                                graph_state.line_width,
-                                                color.into_bevy(),
-                                            ),
-                                            config: LineConfig {
-                                                render_layers: graph_state.render_layers,
-                                            },
-                                        })
-                                        .id();
-                                    graph_state.enabled_lines.insert(
-                                        (*entity_id, *component_id, value_index),
-                                        (entity, *color),
-                                    );
-                                    if let Some(values) = lines.get_mut(line) {
-                                        values.data.max_count = max_length;
-                                        values.recalculate_chunk_size();
-                                    }
-                                }
-                                (Some((entity, _)), false) => {
-                                    commands.entity(*entity).despawn();
-                                    graph_state.enabled_lines.remove(&(
-                                        *entity_id,
-                                        *component_id,
-                                        value_index,
-                                    ));
-                                }
-                                (Some((entity, _)), true) => {
-                                    commands.entity(*entity).insert(LineUniform::new(
-                                        graph_state.line_width,
-                                        color.into_bevy(),
-                                    ));
-                                }
-                                (None, false) => {}
-                            }
                         }
+                        (Some((entity, _)), true) => {
+                            commands.entity(*entity).insert(LineUniform::new(
+                                graph_state.line_width,
+                                color.into_bevy(),
+                            ));
+                        }
+                        (None, false) => {}
                     }
                 }
             }
@@ -663,8 +728,7 @@ impl Plot {
 
                 let x_offset = pointer_pos.x - self.inner_rect.min.x;
                 let x_range = self.bounds.max_x - self.bounds.min_x;
-                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width())
-                    + self.bounds.min_x as f32;
+                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width());
                 let x_tick = x_pos as usize;
                 self.draw_cursor(ui, pointer_pos, x_offset, self.inner_rect);
 
@@ -731,8 +795,7 @@ impl Plot {
             {
                 let x_offset = pointer_pos.x - self.inner_rect.min.x;
                 let x_range = self.bounds.max_x - self.bounds.min_x;
-                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width())
-                    + self.bounds.min_x as f32;
+                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width());
                 let x_tick = x_pos as usize;
 
                 self.draw_modal(

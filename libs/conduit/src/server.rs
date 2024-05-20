@@ -44,8 +44,14 @@ pub async fn handle_socket(
 ) -> Result<(), crate::Error> {
     handle_stream_sink(
         incoming_tx,
-        FramedWrite::new(tx_socket, LengthDelimitedCodec::new()),
-        FramedRead::new(rx_socket, LengthDelimitedCodec::new()),
+        FramedWrite::new(
+            tokio::io::BufWriter::with_capacity(0x8000, tx_socket),
+            LengthDelimitedCodec::new(),
+        ),
+        FramedRead::new(
+            tokio::io::BufReader::with_capacity(0x8000, rx_socket),
+            LengthDelimitedCodec::new(),
+        ),
     )
     .await
 }

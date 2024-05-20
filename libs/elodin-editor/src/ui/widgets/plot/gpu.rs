@@ -340,7 +340,7 @@ type DrawLine3d = (
 struct CachedSystemState {
     state: SystemState<(
         Query<'static, 'static, LineQueryMut>,
-        Res<'static, Assets<Line>>,
+        ResMut<'static, Assets<Line>>,
         Commands<'static, 'static>,
     )>,
 }
@@ -368,23 +368,20 @@ fn extract_lines(
     render_queue: Res<RenderQueue>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, line_assets, mut main_commands) = cached_state.state.get_mut(world);
+        let (mut lines, mut line_assets, mut main_commands) = cached_state.state.get_mut(world);
         for (entity, line_handle, config, mut uniform, gpu_line) in lines.iter_mut() {
-            let Some(line) = line_assets.get(line_handle) else {
+            let Some(line) = line_assets.get_mut(line_handle) else {
                 continue;
             };
-            let line = &line.data;
-            let (prev_pos, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
-                let mut prev_pos = std::mem::replace(
-                    &mut gpu_line.position_count,
-                    line.averaged_data.len() as u32,
-                ) as u64;
-                if prev_pos > line.averaged_data.len() as u64 {
-                    // handle the case where we've average data so it is shorter
-                    prev_pos = 0;
-                }
+            let line = &mut line.data;
+            let (range, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
+                gpu_line.position_count = line.averaged_data.len() as u32;
+                let range = line
+                    .invalidated_range
+                    .take()
+                    .unwrap_or_else(|| 0..line.averaged_data.len());
                 uniform.chunk_size = line.chunk_size as f32;
-                (prev_pos, *uniform, gpu_line.clone())
+                (range, *uniform, gpu_line.clone())
             } else {
                 let buffer_descriptor = BufferDescriptor {
                     label: Some("Line Vertex Buffer"),
@@ -400,7 +397,7 @@ fn extract_lines(
                 let mut uniform = *uniform;
                 uniform.chunk_size = line.chunk_size as f32;
                 main_commands.get_or_spawn(entity).insert(gpu_line.clone());
-                (0, uniform, gpu_line)
+                (0..line.averaged_data.len(), uniform, gpu_line)
             };
 
             let buffer = gpu_line.position_buffer.clone();
@@ -413,8 +410,11 @@ fn extract_lines(
                 gpu_line,
             ));
 
-            let data = cast_slice(&line.averaged_data[prev_pos as usize..]);
-            render_queue.0.write_buffer(&buffer, prev_pos * 4, data);
+            let index = range.start as u64 * 4;
+            let data = &line.averaged_data[range];
+            let data = &data[..(data.len().min(15_000))];
+            let data = cast_slice(data);
+            render_queue.0.write_buffer(&buffer, index, data);
         }
         cached_state.state.apply(world)
     })

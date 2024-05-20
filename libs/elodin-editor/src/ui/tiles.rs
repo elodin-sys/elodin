@@ -13,8 +13,8 @@ use big_space::GridCell;
 use conduit::{
     bevy::{EntityMap, Tick, TimeStep},
     query::MetadataStore,
-    well_known::{Panel, Viewport},
-    ComponentId, EntityId,
+    well_known::{EntityMetadata, Panel, Viewport},
+    ComponentId, ControlMsg, EntityId,
 };
 use egui_tiles::{Container, Tile, TileId, Tiles};
 
@@ -112,13 +112,17 @@ impl Pane {
         ui: &mut Ui,
         time_step: std::time::Duration,
         current_tick: u64,
-        collected_graph_data: &CollectedGraphData,
+        collected_graph_data: &mut CollectedGraphData,
         graphs_state: &mut Query<&mut GraphState>,
         tagged_ranges: &TaggedRanges,
         lines: &mut Assets<Line>,
         lines_query: &Query<&Handle<Line>>,
         commands: &mut Commands,
         icons: &TileIcons,
+        entity_map: &EntityMap,
+        entity_metadata: &Query<&EntityMetadata>,
+        metadata_store: &MetadataStore,
+        control_msg: &mut EventWriter<ControlMsg>,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -150,6 +154,10 @@ impl Pane {
                         lines,
                         commands,
                         pane.id,
+                        entity_map,
+                        entity_metadata,
+                        metadata_store,
+                        control_msg,
                     )
                     .render(
                         ui,
@@ -243,13 +251,17 @@ struct TreeBehavior<'a, 'w, 's> {
     tree_actions: Vec<TreeAction>,
     selected_object: &'a mut SelectedObject,
     tagged_ranges: &'a TaggedRanges,
-    collected_graph_data: &'a CollectedGraphData,
+    collected_graph_data: &'a mut CollectedGraphData,
     lines: &'a mut Assets<Line>,
     line_query: &'a Query<'w, 's, &'static Handle<Line>>,
     graph_state_query: &'a mut Query<'w, 's, &'static mut GraphState>,
     time_step: std::time::Duration,
     current_tick: u64,
     commands: &'a mut Commands<'w, 's>,
+    entity_map: &'a EntityMap,
+    entity_metadata: &'a Query<'w, 's, &'static EntityMetadata>,
+    metadata_store: &'a MetadataStore,
+    control_msg: &'a mut EventWriter<'w, ControlMsg>,
 }
 
 pub enum TreeAction {
@@ -296,6 +308,10 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             self.line_query,
             self.commands,
             &self.icons,
+            self.entity_map,
+            self.entity_metadata,
+            self.metadata_store,
+            self.control_msg,
         )
     }
 
@@ -516,12 +532,16 @@ pub struct TileLayout<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    collected_graph_data: Res<'w, CollectedGraphData>,
+    collected_graph_data: ResMut<'w, CollectedGraphData>,
     time_step: Res<'w, TimeStep>,
     tick: Res<'w, Tick>,
     lines: ResMut<'w, Assets<Line>>,
     line_query: Query<'w, 's, &'static Handle<Line>>,
     graph_state_query: Query<'w, 's, &'static mut GraphState>,
+    entity_map: Res<'w, EntityMap>,
+    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
+    metadata_store: Res<'w, MetadataStore>,
+    control_msg: EventWriter<'w, ControlMsg>,
 }
 
 impl RootWidgetSystem for TileLayout<'_, '_> {
@@ -548,11 +568,15 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
             mut meshes,
             mut materials,
             mut render_layer_alloc,
-            collected_graph_data,
+            mut collected_graph_data,
             time_step,
             tick,
             mut lines,
             line_query,
+            entity_map,
+            entity_metadata,
+            metadata_store,
+            mut control_msg,
         } = state_mut;
 
         let icons = TileIcons {
@@ -573,13 +597,17 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                     tree_actions: tab_diffs,
                     selected_object: selected_object.as_mut(),
                     tagged_ranges: tagged_ranges.as_ref(),
-                    collected_graph_data: collected_graph_data.as_ref(),
+                    collected_graph_data: collected_graph_data.as_mut(),
                     time_step: time_step.0,
                     current_tick: tick.0,
                     lines: lines.as_mut(),
                     commands: &mut commands,
                     line_query: &line_query,
                     graph_state_query: &mut graph_state_query,
+                    entity_map: &entity_map,
+                    entity_metadata: &entity_metadata,
+                    metadata_store: &metadata_store,
+                    control_msg: &mut control_msg,
                 };
                 ui_state.tree.ui(&mut behavior, ui);
                 for diff in behavior.tree_actions.drain(..) {
