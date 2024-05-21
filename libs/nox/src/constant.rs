@@ -1,9 +1,12 @@
+//! Provides an extension trait for creating constant representations of various data structures like scalars, vectors, matrices, and quaternions in a computational context.
 use crate::{ArrayTy, Matrix, Noxpr, Quaternion, Scalar, Vector};
 use nalgebra::{Const, IsContiguous, Storage};
 use smallvec::smallvec;
 use xla::{ArrayElement, NativeType};
 
+/// Trait to convert a given type into a constant representation suitable for computations.
 pub trait ConstantExt<Out> {
+    /// Returns a new constant representation of the implementing type.
     fn constant(&self) -> Out;
 }
 

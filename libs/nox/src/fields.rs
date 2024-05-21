@@ -1,7 +1,10 @@
+//! Defines the `Field` trait for scalar operations and constants, supporting basic arithmetic, matrix multiplication, and associated utilities for numerical types.
 use std::ops::{Add, Div, Mul, Sub};
 
 use crate::{Scalar, TensorItem};
 
+/// Represents a mathematical field, supporting basic arithmetic operations,
+/// matrix multiplication, and the generation of standard constants.
 pub trait Field:
     TensorItem<Elem = Self>
     + Copy
@@ -11,22 +14,32 @@ pub trait Field:
     + Div<Output = Self>
     + MatMul
 {
+    /// Returns a scalar tensor representing the additive identity (zero).
     fn zero() -> Scalar<Self>
     where
         Self: Sized;
+
+    /// Returns a scalar tensor representing the multiplicative identity (one).
     fn one() -> Scalar<Self>
     where
         Self: Sized;
+
+    /// Returns a scalar tensor representing the integer two.
     fn two() -> Scalar<Self>
     where
         Self: Sized;
 
+    /// Returns the primitive type representing zero.
     fn zero_prim() -> Self
     where
         Self: Sized;
+
+    /// Returns the primitive type representing one.
     fn one_prim() -> Self
     where
         Self: Sized;
+
+    /// Returns the primitive type representing two.
     fn two_prim() -> Self
     where
         Self: Sized;
@@ -75,6 +88,7 @@ impl_real_closed_field!(u16, 0, 1, 2);
 impl_real_closed_field!(u32, 0, 1, 2);
 impl_real_closed_field!(u64, 0, 1, 2);
 
+/// Trait for performing matrix multiplication.
 pub trait MatMul {
     /// Perform a matrix multiplication.
     ///
