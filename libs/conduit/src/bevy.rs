@@ -5,7 +5,6 @@ use crate::query::MetadataStore;
 use crate::ser_de::ColumnValue;
 use crate::well_known::EntityMetadata;
 use crate::Asset;
-use crate::AssetId;
 use crate::ColumnPayload;
 use crate::ComponentExt;
 use crate::ComponentType;
@@ -195,7 +194,7 @@ impl<C: Resource + BevyComponent> ComponentAdapter for StaticResourceAdapter<C> 
 }
 
 #[derive(Resource, Default)]
-pub struct AssetMap(pub HashMap<AssetId, Box<dyn AssetAdapter + Send + Sync>>);
+pub struct AssetMap(pub HashMap<ComponentId, Box<dyn AssetAdapter + Send + Sync>>);
 
 pub trait AssetAdapter {
     fn insert(
@@ -240,7 +239,7 @@ impl AppExt for bevy::app::App {
             .world
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
 
-        map.0.insert(C::component_id(), adapter);
+        map.0.insert(C::COMPONENT_ID, adapter);
         self.add_systems(Update, sync_component::<C>);
         self.add_systems(Update, query_component::<C>);
         self
@@ -251,7 +250,7 @@ impl AppExt for bevy::app::App {
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self {
         let mut map = self.world.get_resource_or_insert_with(AssetMap::default);
-        map.0.insert(R::ASSET_ID, adapter);
+        map.0.insert(R::COMPONENT_ID, adapter);
         self.add_systems(Update, sync_asset::<R>);
         self.add_systems(Update, query_asset::<R>);
         self
@@ -368,13 +367,13 @@ fn recv_system(args: RecvSystemArgs) {
                 });
             }
             Msg::Control(ControlMsg::Asset {
-                id,
+                component_id,
                 bytes,
                 entity_id,
                 asset_index,
             }) => {
-                let Some(adapter) = asset_map.0.get(id) else {
-                    warn!(?id, "unknown asset type");
+                let Some(adapter) = asset_map.0.get(component_id) else {
+                    warn!(?component_id, "unknown asset type");
                     continue;
                 };
                 adapter.insert(
@@ -450,7 +449,7 @@ pub fn sync_component<T: BevyComponent>(
     query: Query<(&EntityId, &T), (Changed<T>, Without<Received>)>,
     subs: ResMut<Subscriptions>,
 ) {
-    let component_id = T::component_id();
+    let component_id = T::COMPONENT_ID;
     if query.is_empty() {
         return;
     }
@@ -478,7 +477,7 @@ pub fn query_component<T: BevyComponent>(
     store: Res<MetadataStore>,
     query: Query<(&EntityId, &T)>,
 ) {
-    let component_id = T::component_id();
+    let component_id = T::COMPONENT_ID;
     for event in events.read() {
         if event.query.component_id != component_id {
             continue;
@@ -516,9 +515,9 @@ pub fn query_asset<T>(mut events: EventReader<SubscribeEvent>, query: Query<(&En
 where
     T: Asset + bevy::prelude::Component + Debug,
 {
-    let asset_id = T::ASSET_ID;
+    let component_id = T::COMPONENT_ID;
     for event in events.read() {
-        if event.query.component_id != ComponentId(asset_id.0) {
+        if event.query.component_id != component_id {
             continue;
         }
 
@@ -527,7 +526,7 @@ where
             .map(|(id, val)| {
                 let bytes = postcard::to_allocvec(&val)?;
                 Ok(ControlMsg::Asset {
-                    id: asset_id,
+                    component_id,
                     entity_id: *id,
                     bytes: bytes.into(),
                     asset_index: 0, // TODO: fix me
@@ -552,11 +551,11 @@ pub fn sync_asset<T>(
 ) where
     T: Asset + bevy::prelude::Component + Debug,
 {
-    let asset_id = T::ASSET_ID;
+    let component_id = T::COMPONENT_ID;
     if query.is_empty() {
         return;
     }
-    let Some(subs) = subs.get(&ComponentId(asset_id.0)) else {
+    let Some(subs) = subs.get(&component_id) else {
         return;
     };
     let msgs = query
@@ -564,7 +563,7 @@ pub fn sync_asset<T>(
         .map(|(id, val)| {
             let bytes = postcard::to_allocvec(&val)?;
             Ok(ControlMsg::Asset {
-                id: asset_id,
+                component_id,
                 entity_id: *id,
                 bytes: bytes.into(),
                 asset_index: 0, // TODO: fix me

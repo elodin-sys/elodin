@@ -18,12 +18,14 @@ pub mod ser_de;
 #[cfg(feature = "tokio")]
 pub mod server;
 pub mod types;
+mod util;
 #[cfg(feature = "well-known")]
 pub mod well_known;
 
 pub use assets::*;
 pub use error::*;
 pub use types::*;
+pub use util::*;
 
 #[doc(hidden)]
 pub use const_fnv1a_hash;
