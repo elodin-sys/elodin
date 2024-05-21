@@ -79,9 +79,15 @@ test_steps = [
     ),
   ]),
   group(name = ":python: python", steps = [
-    step(
+    nix_step(
       label = ":python: pytest",
-      command = "nix build .#checks.x86_64-linux.pytest",
+      command = "pytest libs/nox-py",
+      flake = ".#python",
+    ),
+    nix_step(
+      label = ":python: lint",
+      command = "ruff format --check libs/nox-py",
+      flake = ".#python",
     ),
     # rust_step(
     #   label = "mypy", emoji = ":python:",

@@ -69,5 +69,15 @@
         ];
       doCheck = false;
     };
+    python = pkgs.mkShell {
+      name = "elo-py-shell";
+      buildInputs = with pkgs;
+        [
+          ruff
+          python3Packages.pytest
+          python3Packages.pytest-json-report
+          config.packages.elodin-py
+        ];
+    };
   };
 }
