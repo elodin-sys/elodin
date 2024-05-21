@@ -1,7 +1,12 @@
 //! The rendering thing not the beer
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId};
+use crate::{Asset, AssetId, Handle};
+
+pub struct Shape {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<Material>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]

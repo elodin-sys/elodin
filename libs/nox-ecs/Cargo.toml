@@ -13,7 +13,7 @@ tokio = ["dep:tokio", "futures", "conduit/tokio"]
 # nox
 nox.path = "../nox"
 conduit.path = "../conduit"
-conduit.features = ["nox"]
+conduit.features = ["nox", "polars"]
 
 # data structures
 smallvec.version = "1.11.2"
@@ -52,13 +52,8 @@ tracing-subscriber = "0.3"
 # serialize
 polars.version = "0.39"
 polars.features = ["parquet", "dtype-array", "lazy"]
-polars-arrow.version = "0.39"
-polars-arrow.features = ["arrow_rs"]
-arrow.version = "51.0"
 serde.version = "1.0"
 serde_json = "1.0"
-postcard.version = "1.0.8"
-postcard.features = ["alloc"]
 
 # python
 pyo3.version = "0.21.0"

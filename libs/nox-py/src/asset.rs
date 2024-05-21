@@ -42,7 +42,7 @@ impl PyAsset {
 #[derive(Clone)]
 #[pyclass]
 pub struct Handle {
-    pub inner: nox_ecs::Handle<()>,
+    pub inner: conduit::Handle<()>,
 }
 
 #[pymethods]

@@ -36,9 +36,9 @@ pub fn archetype(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     let name = ident.to_string().to_case(Case::Snake);
     quote! {
-        impl #crate_name::Archetype for #ident #generics #where_clause {
-            fn name() -> #crate_name::ArchetypeName {
-                #crate_name::ArchetypeName::from(#name)
+        impl #crate_name::conduit::Archetype for #ident #generics #where_clause {
+            fn name() -> #crate_name::conduit::ArchetypeName {
+                #crate_name::conduit::ArchetypeName::from(#name)
             }
 
             fn components() -> Vec<#crate_name::conduit::Metadata> {

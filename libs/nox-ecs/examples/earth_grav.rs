@@ -1,7 +1,7 @@
 use conduit::well_known::{Material, Mesh};
 use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
 use nox::{nalgebra::vector, SpatialMotion};
-use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldPos};
+use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldExt, WorldPos};
 
 fn earth_gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     pos.map(|_, _, _| {
