@@ -2718,6 +2718,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "serde_with",
  "smallvec",
  "thiserror",
  "thiserror-no-std",
@@ -6102,6 +6103,7 @@ dependencies = [
  "bytes",
  "clap 4.5.4",
  "conduit",
+ "elodin-types",
  "flume",
  "futures",
  "include_dir",
@@ -6115,12 +6117,14 @@ dependencies = [
  "postcard",
  "pyo3",
  "pyo3-polars",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]

@@ -33,7 +33,7 @@ elodin-types.path = "../../libs/elodin-types/rust"
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
 conduit.path = "../../libs/conduit"
-conduit.features = ["tokio"]
+conduit.features = ["tokio", "polars"]
 
 # crypto
 ring = "0.17"

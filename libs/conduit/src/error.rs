@@ -44,6 +44,12 @@ pub enum Error {
     Polars(#[from] ::polars::error::PolarsError),
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid query")]
+    InvalidQuery,
+    #[error("component not found")]
+    ComponentNotFound,
+    #[error("asset not found")]
+    AssetNotFound,
 }
 
 impl From<try_buf::ErrorKind> for Error {
