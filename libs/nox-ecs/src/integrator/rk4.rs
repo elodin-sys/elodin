@@ -102,7 +102,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World};
+    use crate::{Archetype, Component, World, WorldExt};
     use nox::nalgebra::vector;
     use nox::{nalgebra, Scalar, ScalarExt, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};

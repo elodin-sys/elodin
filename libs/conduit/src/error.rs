@@ -9,8 +9,6 @@ pub enum Error {
     #[cfg(feature = "std")]
     #[error("io {0}")]
     Io(#[from] std::io::Error),
-    #[error("entity and component iters length must match")]
-    EntityComponentLengthMismatch,
     #[error("buffer overflow")]
     BufferOverflow,
     #[error("parsing error")]
@@ -35,10 +33,17 @@ pub enum Error {
     StreamNotFound(StreamId),
     #[error("invalid alignment")]
     InvalidAlignment,
+    #[error("value size mismatch")]
+    ValueSizeMismatch,
     #[error("connection closed")]
     ConnectionClosed,
     #[error("non utf8 path")]
     NonUtf8Path,
+    #[cfg(feature = "polars")]
+    #[error("polars {0}")]
+    Polars(#[from] ::polars::error::PolarsError),
+    #[error("serde_json {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 impl From<try_buf::ErrorKind> for Error {

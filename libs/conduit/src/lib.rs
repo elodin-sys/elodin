@@ -9,6 +9,7 @@ pub mod bevy_sync;
 #[cfg(feature = "nox")]
 pub mod nox;
 
+pub mod assets;
 pub mod client;
 pub mod error;
 #[cfg(feature = "std")]
@@ -20,6 +21,7 @@ pub mod types;
 #[cfg(feature = "well-known")]
 pub mod well_known;
 
+pub use assets::*;
 pub use error::*;
 pub use types::*;
 
@@ -29,3 +31,13 @@ pub use const_fnv1a_hash;
 #[cfg(feature = "std")]
 pub use bytes;
 pub use ndarray;
+
+#[cfg(feature = "std")]
+mod world;
+#[cfg(feature = "std")]
+pub use world::*;
+
+#[cfg(feature = "polars")]
+mod polars;
+#[cfg(feature = "polars")]
+pub use polars::PolarsWorld;
