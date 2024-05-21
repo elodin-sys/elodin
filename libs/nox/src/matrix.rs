@@ -1,3 +1,4 @@
+//! Provides a Matrix type alias with convenience functions for converting to various representations.
 use crate::{
     ArrayTy, Buffer, BufferArg, Client, FromHost, Literal, MaybeOwned, Noxpr, Op, Tensor, ToHost,
 };
@@ -7,6 +8,7 @@ use smallvec::smallvec;
 use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
+/// Type alias for a tensor that specifically represents a matrix.
 pub type Matrix<T, const R: usize, const C: usize, P = Op> = Tensor<T, (Const<R>, Const<C>), P>;
 
 impl<T, const R: usize, const C: usize> ToHost for Matrix<T, R, C, Buffer>
@@ -37,6 +39,7 @@ where
 }
 
 impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
+    /// Converts a literal matrix to a constant matrix for operations within Nox.
     pub fn constant(self) -> Matrix<T, R, C, Op> {
         let inner = Noxpr::constant(
             self.inner,
@@ -53,9 +56,15 @@ impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, 
     }
 }
 
+/// Extension trait to convert between different representations.
 pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize> {
+    /// Converts the matrix to a constant matrix representation.
     fn constant(&self) -> Matrix<T, R, C, Op>;
+
+    /// Converts the matrix to a literal matrix representation.
     fn literal(&self) -> Matrix<T, R, C, Literal>;
+
+    /// Converts the matrix to a buffer for client-side operations.
     fn buffer(&self, client: &Client) -> Matrix<T, R, C, Buffer>;
 }
 

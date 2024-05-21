@@ -1,3 +1,4 @@
+//! Provides functionality to handle quaternions, which are constructs used to represent and manipulate spatial orientations and rotations in 3D space.
 use std::ops::{Add, Mul};
 
 use nalgebra::{Const, RealField, Scalar as NalgebraScalar};
@@ -10,7 +11,7 @@ use crate::{
     ToHost, Vector,
 };
 
-/// Quaternion is representation of spatial orientation or rotation in 3D space.
+/// Represents a quaternion for spatial orientation or rotation in 3D space.
 pub struct Quaternion<T: TensorItem, P: Repr = Op>(pub Vector<T, 4, P>);
 
 impl<T: TensorItem> Clone for Quaternion<T> {
@@ -38,6 +39,7 @@ impl<T: TensorItem> std::fmt::Debug for Quaternion<T> {
 }
 
 impl<T: Field> Quaternion<T> {
+    /// Constructs a new quaternion from individual scalar components.
     pub fn new(
         w: impl Into<Scalar<T>>,
         x: impl Into<Scalar<T>>,
@@ -52,7 +54,7 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
-    /// Create a unit quaternion with no rotation.
+    /// Creates a unit quaternion with no rotation.
     pub fn identity() -> Self {
         let inner = T::zero()
             .broadcast::<Const<3>>()
@@ -60,7 +62,7 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
-    /// Create a quaternion from an axis and an angle.
+    /// Creates a quaternion from an axis and an angle.
     pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
         let axis = axis.into();
         let axis = axis.normalize();
@@ -72,23 +74,25 @@ impl<T: Field> Quaternion<T> {
         Quaternion(inner)
     }
 
+    /// Returns the four parts (components) of the quaternion as scalars.
     fn parts(&self) -> [Scalar<T>; 4] {
         let Quaternion(v) = self;
         v.parts()
     }
 
+    /// Returns the conjugate of the quaternion.
     pub fn conjugate(&self) -> Self {
         let [i, j, k, w] = self.parts();
         Quaternion(Vector::from_arr([&-i, &-j, &-k, &w]))
     }
 
-    /// Compute the inverse of the quaternion.
+    /// Computes the inverse of the quaternion.
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
 
-    /// Normalize to a unit quaternion.
+    /// Normalizes to a unit quaternion.
     pub fn normalize(&self) -> Self {
         Quaternion(self.0.clone() / self.0.norm())
     }
