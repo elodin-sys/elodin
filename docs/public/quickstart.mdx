@@ -10,6 +10,10 @@ Install the Elodin Python SDK using `pip`:
 pip install elodin
 ```
 
+<Warning>
+The SDK is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
+</Warning>
+
 Download the Elodin Client:
 | File                                                    | Platform            | Checksum                        |
 | ------------------------------------------------------- | ------------------- | ------------------------------- |
@@ -27,17 +31,29 @@ Download the Elodin Client:
 ## Start Simulating
 
 1. Download the [three-body.py] example code from our Github repo: [elodin-sys/elodin].
-2. Launch the simulation server and enter a Python REPL.
+2. Launch the simulation using the `elodin` CLI.
+    <Warning>
+    This command is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
+    </Warning>
+    ```sh
+    elodin editor three-body.py
+    ```
+
+### Windows
+
+To use Elodin on Windows, the simulation server must be run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows. Follow these steps to get started:
+
+1. Install WSL by following the instructions [here](https://docs.microsoft.com/en-us/windows/wsl/install).
+2. Install the Elodin Python SDK in WSL.
+    ```sh
+    pip install elodin
+    ```
+2. Run the simulation server in WSL.
     <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
     ```sh
     python three-body.py run --watch
     ```
-3. Launch the Elodin Client (3D viewer and component inspector).
-    <Note>`elodin.exe` on Windows</Note>
-    <Note>`elodin --help` for more information</Note>
-    ```sh
-    elodin
-    ```
+3. Run `elodin.exe` in Windows to launch the Elodin Client.
 
 [elodin-sys/elodin]: https://github.com/elodin-sys/elodin
 [three-body.py]: https://raw.githubusercontent.com/elodin-sys/elodin/main/libs/nox-py/examples/three-body.py
