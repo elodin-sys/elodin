@@ -52,7 +52,7 @@ impl FromBuilder for Edge {
     }
 }
 
-impl Component for Edge {
+impl conduit::Component for Edge {
     fn name() -> String {
         "edge".to_string()
     }
@@ -64,6 +64,8 @@ impl Component for Edge {
         }
     }
 }
+
+impl Component for Edge {}
 
 pub trait EdgeComponent: Component {
     fn to_edge(&self) -> Edge;

@@ -50,15 +50,17 @@ pub fn component(input: TokenStream) -> TokenStream {
         }
 
 
-        impl #crate_name::Component for #ident #generics #where_clause {
+        impl #crate_name::conduit::Component for #ident #generics #where_clause {
             fn name() -> String {
                 #name.to_string()
             }
 
             fn component_type() -> #crate_name::conduit::ComponentType {
-                <#ty as #crate_name::Component>::component_type()
+                <#ty as #crate_name::conduit::Component>::component_type()
             }
         }
+
+        impl #crate_name::Component for #ident #generics #where_clause {}
     }
     .into()
 }

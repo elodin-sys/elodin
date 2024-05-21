@@ -7,9 +7,11 @@ use crate::well_known::EntityMetadata;
 use crate::Asset;
 use crate::AssetId;
 use crate::ColumnPayload;
+use crate::ComponentExt;
 use crate::ComponentType;
 use crate::Error;
 use crate::Metadata;
+use crate::ValueRepr;
 use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
@@ -31,6 +33,15 @@ use bevy::{
     },
 };
 use big_space::GridCell;
+
+pub trait BevyComponent:
+    Component + ValueRepr + bevy::prelude::Component + std::fmt::Debug
+{
+}
+impl<T> BevyComponent for T where
+    T: Component + ValueRepr + bevy::prelude::Component + std::fmt::Debug
+{
+}
 
 #[derive(bevy::prelude::Component, Debug, Default)]
 pub struct ComponentValueMap(pub BTreeMap<ComponentId, ComponentValue<'static>>);
@@ -127,10 +138,7 @@ impl<C> Default for StaticComponentAdapter<C> {
     }
 }
 
-impl<C> ComponentAdapter for StaticComponentAdapter<C>
-where
-    C: Component + bevy::prelude::Component + std::fmt::Debug,
-{
+impl<C: BevyComponent> ComponentAdapter for StaticComponentAdapter<C> {
     fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue> {
         Some(world.get_entity(entity)?.get::<C>()?.component_value())
     }
@@ -168,7 +176,7 @@ impl<C> Default for StaticResourceAdapter<C> {
     }
 }
 
-impl<C: Resource + Component + std::fmt::Debug> ComponentAdapter for StaticResourceAdapter<C> {
+impl<C: Resource + BevyComponent> ComponentAdapter for StaticResourceAdapter<C> {
     fn get(&self, world: &World, _entity_id: Entity) -> Option<ComponentValue> {
         Some(world.get_resource::<C>()?.component_value())
     }
@@ -201,16 +209,12 @@ pub trait AssetAdapter {
 }
 
 pub trait AppExt {
-    fn add_conduit_component<C>(&mut self) -> &mut Self
-    where
-        C: Component + bevy::prelude::Component + std::fmt::Debug;
+    fn add_conduit_component<C: BevyComponent>(&mut self) -> &mut Self;
 
-    fn add_conduit_component_with_adapter<C>(
+    fn add_conduit_component_with_adapter<C: BevyComponent>(
         &mut self,
         adapter: Box<dyn ComponentAdapter + Send + Sync>,
-    ) -> &mut Self
-    where
-        C: Component + bevy::prelude::Component + std::fmt::Debug;
+    ) -> &mut Self;
 
     fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
@@ -219,20 +223,14 @@ pub trait AppExt {
 }
 
 impl AppExt for bevy::app::App {
-    fn add_conduit_component<C>(&mut self) -> &mut Self
-    where
-        C: Component + bevy::prelude::Component + std::fmt::Debug,
-    {
+    fn add_conduit_component<C: BevyComponent>(&mut self) -> &mut Self {
         self.add_conduit_component_with_adapter::<C>(Box::<StaticComponentAdapter<C>>::default())
     }
 
-    fn add_conduit_component_with_adapter<C>(
+    fn add_conduit_component_with_adapter<C: BevyComponent>(
         &mut self,
         adapter: Box<dyn ComponentAdapter + Send + Sync>,
-    ) -> &mut Self
-    where
-        C: Component + bevy::prelude::Component + std::fmt::Debug,
-    {
+    ) -> &mut Self {
         let mut metadata = self
             .world
             .get_resource_or_insert_with(MetadataStore::default);
@@ -448,12 +446,10 @@ impl Plugin for ConduitSubscribePlugin {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn sync_component<T>(
+pub fn sync_component<T: BevyComponent>(
     query: Query<(&EntityId, &T), (Changed<T>, Without<Received>)>,
     subs: ResMut<Subscriptions>,
-) where
-    T: bevy::prelude::Component + Component + Debug,
-{
+) {
     let component_id = T::component_id();
     if query.is_empty() {
         return;
@@ -477,7 +473,7 @@ pub fn sync_component<T>(
     }
 }
 
-pub fn query_component<T: bevy::prelude::Component + Component + Debug>(
+pub fn query_component<T: BevyComponent>(
     mut events: EventReader<SubscribeEvent>,
     store: Res<MetadataStore>,
     query: Query<(&EntityId, &T)>,

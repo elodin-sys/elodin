@@ -1,10 +1,10 @@
 use super::*;
 
-use conduit::ComponentId;
+use conduit::{ComponentExt, ComponentId};
 use nox_ecs::{
     graph::{exprs_from_edges_queries, GraphQuery, TotalEdge},
     nox::IntoOp,
-    ComponentExt, SystemParam,
+    SystemParam,
 };
 use pyo3::types::{PyDict, PyList};
 

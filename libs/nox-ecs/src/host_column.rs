@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ops::Deref};
 
 use bytemuck::Pod;
-use conduit::{ComponentValue, EntityId};
+use conduit::{ComponentValue, EntityId, ValueRepr};
 use nox::{
     xla::{ArrayElement, PjRtBuffer},
     Client, NoxprNode,
@@ -62,7 +62,9 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
         self.entity_ids().zip(self.values_iter())
     }
 
-    pub fn typed_iter<T: conduit::Component>(&self) -> impl Iterator<Item = (EntityId, T)> + '_ {
+    pub fn typed_iter<T: conduit::Component + ValueRepr>(
+        &self,
+    ) -> impl Iterator<Item = (EntityId, T)> + '_ {
         assert_eq!(self.metadata.component_type, T::component_type());
         self.entity_ids().zip(
             self.values_iter()

@@ -1,7 +1,7 @@
 use std::ops::{Add, Mul};
 
+use conduit::ComponentExt;
 use nox_ecs::nox::{self, FromOp, IntoOp, Noxpr, Scalar, Vector};
-use nox_ecs::ComponentExt;
 use pyo3::{prelude::*, types::PyTuple};
 
 use crate::{Component, Error, Metadata};

@@ -1,4 +1,4 @@
-use crate::{Component, ComponentType, ComponentValue, PrimitiveTy};
+use crate::{Component, ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
 use ndarray::array;
 use smallvec::smallvec;
 
@@ -11,8 +11,11 @@ macro_rules! impl_primitive {
         }
 
         impl Component for $ty {
-            const NAME: &'static str = stringify!($ty);
             const ASSET: bool = false;
+
+            fn name() -> String {
+                stringify!($ty).to_string()
+            }
 
             fn component_type() -> ComponentType {
                 ComponentType {
@@ -20,7 +23,9 @@ macro_rules! impl_primitive {
                     shape: smallvec![],
                 }
             }
+        }
 
+        impl ValueRepr for $ty {
             fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
                 let arr = array![*self].into_dyn();
                 ComponentValue::$prim_ty(ndarray::CowArray::from(arr))

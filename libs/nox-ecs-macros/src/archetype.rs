@@ -42,7 +42,7 @@ pub fn archetype(input: TokenStream) -> TokenStream {
             }
 
             fn components() -> Vec<#crate_name::conduit::Metadata> {
-                use #crate_name::ComponentExt;
+                use #crate_name::conduit::ComponentExt;
                 vec![#( <#tys>::metadata(), )*]
             }
 

@@ -3,7 +3,7 @@ use ndarray::{array, CowArray, Ix1};
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
-use crate::{ComponentType, ComponentValue, PrimitiveTy};
+use crate::{ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
 
 #[cfg(feature = "bevy")]
 mod bevy_conv;
@@ -27,8 +27,11 @@ pub struct WorldPos {
 }
 
 impl crate::Component for WorldPos {
-    const NAME: &'static str = "world_pos";
     const ASSET: bool = false;
+
+    fn name() -> String {
+        "world_pos".to_string()
+    }
 
     fn component_type() -> ComponentType {
         ComponentType {
@@ -36,7 +39,9 @@ impl crate::Component for WorldPos {
             shape: smallvec![7],
         }
     }
+}
 
+impl ValueRepr for WorldPos {
     fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
         let arr = array![
             self.att.coords.x,
@@ -77,8 +82,11 @@ pub struct TraceAnchor {
 }
 
 impl crate::Component for TraceAnchor {
-    const NAME: &'static str = "trace_anchor";
     const ASSET: bool = false;
+
+    fn name() -> String {
+        "trace_anchor".to_string()
+    }
 
     fn component_type() -> ComponentType {
         ComponentType {
@@ -86,7 +94,9 @@ impl crate::Component for TraceAnchor {
             shape: smallvec![3],
         }
     }
+}
 
+impl ValueRepr for TraceAnchor {
     fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
         let arr = array![self.anchor.x, self.anchor.y, self.anchor.z].into_dyn();
         ComponentValue::F64(CowArray::from(arr))
@@ -113,8 +123,6 @@ impl crate::Component for TraceAnchor {
 #[cfg(test)]
 mod tests {
     use nalgebra::UnitQuaternion;
-
-    use crate::Component;
 
     use super::*;
 

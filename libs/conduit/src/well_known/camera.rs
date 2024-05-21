@@ -1,4 +1,4 @@
-use crate::{Component, ComponentType, ComponentValue, PrimitiveTy};
+use crate::{Component, ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
 use ndarray::{array, CowArray};
 use smallvec::smallvec;
 
@@ -7,9 +7,11 @@ use smallvec::smallvec;
 pub struct Camera;
 
 impl Component for Camera {
-    const NAME: &'static str = "camera";
-
     const ASSET: bool = false;
+
+    fn name() -> String {
+        "camera".to_string()
+    }
 
     fn component_type() -> ComponentType {
         ComponentType {
@@ -17,7 +19,9 @@ impl Component for Camera {
             shape: smallvec![0],
         }
     }
+}
 
+impl ValueRepr for Camera {
     fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
         let arr = array![0].into_dyn();
         ComponentValue::U64(CowArray::from(arr))
