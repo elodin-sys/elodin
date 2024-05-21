@@ -1,9 +1,13 @@
+use std::collections::HashSet;
+use std::fs::File;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use conduit::well_known::GizmoType;
 use conduit::{ComponentId, PolarsWorld};
+use elodin_types::SampleMetadata;
 use nox_ecs::conduit::Asset;
 use nox_ecs::{
     conduit,
@@ -159,10 +163,26 @@ pub fn advance_time(time_step: f64) -> RustSystem {
 }
 
 #[pyfunction]
-pub fn read_batch_results(path: String) -> Result<PyDataFrame, Error> {
-    let world = PolarsWorld::read_from_dir(path)?;
-    let df = world.join_archetypes()?;
-    Ok(PyDataFrame(df))
+pub fn read_batch_results(path: String) -> Result<(Vec<PyDataFrame>, Vec<usize>), Error> {
+    let sample_dirs = walkdir::WalkDir::new(path)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.file_name() == "sample.json")
+        .filter_map(|entry| entry.path().parent().map(Path::to_path_buf))
+        .collect::<HashSet<_>>();
+    let mut dfs = Vec::default();
+    let mut sample_numbers = Vec::default();
+    for sample_dir in sample_dirs {
+        let metadata = File::open(sample_dir.join("sample.json"))?;
+        let metadata: SampleMetadata = serde_json::from_reader(metadata)?;
+        let world = PolarsWorld::read_from_dir(sample_dir)?;
+        let df = world.join_archetypes()?;
+        dfs.push(PyDataFrame(df));
+        sample_numbers.push(metadata.sample_no);
+    }
+    Ok((dfs, sample_numbers))
 }
 
 #[pymodule]

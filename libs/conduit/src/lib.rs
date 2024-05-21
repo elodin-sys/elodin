@@ -41,3 +41,9 @@ pub use world::*;
 mod polars;
 #[cfg(feature = "polars")]
 pub use polars::PolarsWorld;
+
+#[cfg(feature = "std")]
+mod replay;
+
+#[cfg(feature = "std")]
+pub use replay::*;

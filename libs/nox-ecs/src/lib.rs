@@ -31,16 +31,13 @@ pub mod graph;
 pub mod six_dof;
 
 pub use component::*;
-pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, World};
+pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
 pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use integrator::*;
 pub use query::*;
 
 pub use nox_ecs_macros::{Archetype, Component};
-
-// 16.67 ms
-pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
 pub struct ComponentArray<T> {
     pub buffer: Noxpr,
@@ -466,7 +463,6 @@ pub struct WorldBuilder<Sys = (), StartupSys = ()> {
     world: World,
     pipe: Sys,
     startup_sys: StartupSys,
-    time_step: Option<Duration>,
 }
 
 impl Default for WorldBuilder {
@@ -475,7 +471,6 @@ impl Default for WorldBuilder {
             world: World::default(),
             pipe: (),
             startup_sys: (),
-            time_step: None,
         }
     }
 }
@@ -498,7 +493,6 @@ where
             world: self.world,
             pipe: pipe.into_system(),
             startup_sys: self.startup_sys,
-            time_step: self.time_step,
         }
     }
 
@@ -510,12 +504,11 @@ where
             world: self.world,
             pipe: self.pipe,
             startup_sys: startup.into_system(),
-            time_step: self.time_step,
         }
     }
 
     pub fn time_step(mut self, time_step: Duration) -> Self {
-        self.time_step = Some(time_step);
+        self.world.time_step = TimeStep(time_step);
         self
     }
 
@@ -528,8 +521,7 @@ where
     }
 
     pub fn build(mut self) -> Result<WorldExec, Error> {
-        let mut tick_exec = self.pipe.build(&mut self.world)?;
-        tick_exec.metadata.time_step = self.time_step;
+        let tick_exec = self.pipe.build(&mut self.world)?;
         let startup_exec = self.startup_sys.build(&mut self.world)?;
         let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
         Ok(world_exec)
@@ -580,7 +572,6 @@ impl<S: System> SystemExt for S {
         let comp = op.build()?;
         *world = builder.world;
         let metadata = ExecMetadata {
-            time_step: None,
             arg_ids: builder.param_ids,
             ret_ids,
         };
@@ -590,7 +581,6 @@ impl<S: System> SystemExt for S {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
-    pub time_step: Option<Duration>,
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
 }
@@ -691,13 +681,6 @@ impl<S: ExecState> WorldExec<S> {
 
     pub fn tick(&self) -> u64 {
         self.world.tick
-    }
-
-    pub fn time_step(&self) -> Duration {
-        self.tick_exec
-            .metadata
-            .time_step
-            .unwrap_or(DEFAULT_TIME_STEP)
     }
 
     pub fn fork(&self) -> Self {
@@ -822,7 +805,7 @@ impl WorldExec<Compiled> {
     }
 
     pub fn profile(&self) -> HashMap<&'static str, f64> {
-        self.profiler.profile(self.time_step())
+        self.profiler.profile(self.world.time_step.0)
     }
 }
 
@@ -934,22 +917,12 @@ pub enum Error {
     ValueSizeMismatch,
     #[error("conduit error")]
     Conduit(#[from] conduit::Error),
-    #[error("asset not found")]
-    AssetNotFound,
     #[error("channel closed")]
     ChannelClosed,
-    #[error("invalid query")]
-    InvalidQuery,
-    #[error("entity not found")]
-    EntityNotFound,
     #[error("io {0}")]
     Io(#[from] std::io::Error),
-    #[error("invalid component id")]
-    InvalidComponentId,
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
-    #[error("world not found")]
-    WorldNotFound,
     #[cfg(feature = "pyo3")]
     #[error("python error")]
     PyO3(#[from] pyo3::PyErr),

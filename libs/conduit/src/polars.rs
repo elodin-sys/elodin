@@ -5,10 +5,13 @@ use polars_arrow::{
     array::{Array, PrimitiveArray},
     datatypes::ArrowDataType,
 };
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use std::collections::HashMap;
+use std::time::Duration;
 use std::{fs::File, path::Path};
 
-use crate::world::{Buffers, ColumnRef, World};
+use crate::world::{Buffers, ColumnRef, TimeStep, World};
 use crate::Error;
 use crate::{ArchetypeName, ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
 
@@ -22,6 +25,7 @@ impl World {
     pub fn polars(&self) -> Result<PolarsWorld, Error> {
         PolarsWorld::new(
             &self.component_map,
+            self.time_step.0,
             &self.entity_ids,
             &self.history,
             &self.host,
@@ -43,7 +47,8 @@ impl World {
         let history = polars_world.history()?;
         let entity_ids = polars_world.entity_ids()?;
         let component_map = polars_world.component_map();
-        let world = World::new(history, entity_ids, component_map, assets);
+        let time_step = TimeStep(polars_world.metadata.time_step);
+        let world = World::new(history, entity_ids, component_map, assets, time_step);
         Ok(world)
     }
 }
@@ -51,17 +56,26 @@ impl World {
 #[derive(Debug, Clone)]
 pub struct PolarsWorld {
     pub archetypes: ustr::UstrMap<DataFrame>,
-    pub metadata: ustr::UstrMap<Vec<Metadata>>,
+    pub metadata: WorldMetadata,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldMetadata {
+    archetypes: ustr::UstrMap<Vec<Metadata>>,
+    #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
+    time_step: std::time::Duration,
 }
 
 impl PolarsWorld {
     pub fn new(
         component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
+        time_step: Duration,
         entity_ids: &ustr::UstrMap<Vec<u8>>,
         history: &[Buffers],
         host: &Buffers,
     ) -> Result<Self, Error> {
-        let metadata = component_map.iter().fold(
+        let archetype_metadata = component_map.iter().fold(
             ustr::UstrMap::<Vec<Metadata>>::default(),
             |mut archetype_metadata, (_, (archetype_name, component_metadata))| {
                 archetype_metadata
@@ -73,7 +87,7 @@ impl PolarsWorld {
         );
         let ticks = history.len() + 1;
         let mut archetypes = ustr::UstrMap::default();
-        for (archetype_name, components) in metadata.iter() {
+        for (archetype_name, components) in archetype_metadata.iter() {
             let entity_buf = &entity_ids[archetype_name];
             let len = entity_buf.len() / std::mem::size_of::<EntityId>();
 
@@ -100,20 +114,14 @@ impl PolarsWorld {
             df.with_column(entity_series)?;
             archetypes.insert(*archetype_name, df);
         }
+        let metadata = WorldMetadata {
+            archetypes: archetype_metadata,
+            time_step,
+        };
         Ok(Self {
             archetypes,
             metadata,
         })
-    }
-
-    pub fn vstack(mut samples: Vec<Self>) -> Result<Self, Error> {
-        let mut world = samples.pop().unwrap();
-        for sample in samples.into_iter() {
-            for (archetype_name, df) in &mut world.archetypes {
-                df.vstack_mut(&sample.archetypes[archetype_name])?;
-            }
-        }
-        Ok(world)
     }
 
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
@@ -135,21 +143,9 @@ impl PolarsWorld {
             .map_err(Error::from)
     }
 
-    pub fn add_sample_number(&mut self, sample_number: usize) -> Result<(), Error> {
-        for df in self.archetypes.values_mut() {
-            let len = df
-                .get_columns()
-                .first()
-                .map(|s| s.len())
-                .unwrap_or_default();
-            let series: Series = std::iter::repeat(sample_number as u64).take(len).collect();
-            df.with_column(series.with_name("sample_number"))?;
-        }
-        Ok(())
-    }
-
     pub fn component_map(&self) -> HashMap<ComponentId, (ArchetypeName, Metadata)> {
         self.metadata
+            .archetypes
             .iter()
             .flat_map(|(archetype_name, metadata)| {
                 metadata.iter().map(move |metadata| {
@@ -196,8 +192,8 @@ impl PolarsWorld {
         let path = path.as_ref();
         let mut archetypes = ustr::UstrMap::default();
         let mut metadata = File::open(path.join("metadata.json"))?;
-        let metadata: ustr::UstrMap<Vec<Metadata>> = serde_json::from_reader(&mut metadata)?;
-        for name in metadata.keys() {
+        let metadata: WorldMetadata = serde_json::from_reader(&mut metadata)?;
+        for name in metadata.archetypes.keys() {
             let path = path.join(format!("{}.parquet", name));
             let file = File::open(&path)?;
             let df = polars::prelude::ParquetReader::new(file).finish()?;

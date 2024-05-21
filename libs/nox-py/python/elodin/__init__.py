@@ -56,24 +56,12 @@ def pytest_unconfigure(config):
     _called_from_test = False
 
 
-def read_sample_results(path):
-    df = read_batch_results(path)
-    sample_numbers = df["sample_number"].unique().sort()
-    dfs = [df.filter(pl.col("sample_number") == s) for s in sample_numbers]
-    return dfs
-
-
-def sample_number(df):
-    sample_number = df["sample_number"][0]
-    return "sample_number=" + str(sample_number)
-
-
 def pytest_generate_tests(metafunc):
     if "df" in metafunc.fixturenames and _has_df_key not in metafunc.definition.stash:
         metafunc.definition.stash[_has_df_key] = True
         path = metafunc.config.getoption("batch_results")
-        dfs = read_sample_results(path)
-        metafunc.parametrize("df", dfs, ids=sample_number)
+        dfs, sample_numbers = read_batch_results(path)
+        metafunc.parametrize("df", dfs, ids=sample_numbers)
 
 
 class System(Protocol):

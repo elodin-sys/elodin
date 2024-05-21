@@ -1,7 +1,7 @@
 use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
-use nox_ecs::{conduit, nox, spawn_tcp_server, World};
+use nox_ecs::{conduit, nox, spawn_tcp_server, TimeStep, World};
 use pyo3::{exceptions::PyValueError, types::PyBytes};
 use std::{path::PathBuf, time::Duration};
 
@@ -273,6 +273,15 @@ impl WorldBuilder {
         sys: PyObject,
         time_step: Option<f64>,
     ) -> Result<nox_ecs::WorldExec, Error> {
+        if let Some(ts) = time_step {
+            let ts = Duration::from_secs_f64(ts);
+            // 4ms (~240 ticks/sec) is the minimum time step
+            if ts <= Duration::from_millis(4) {
+                return Err(Error::InvalidTimeStep(ts));
+            }
+            self.world.time_step = TimeStep(ts);
+        }
+
         let start = std::time::Instant::now();
         let world = std::mem::take(&mut self.world);
         let builder = nox_ecs::PipelineBuilder::from_world(world);
@@ -287,14 +296,6 @@ def build_expr(builder, sys):
     var_array = builder.var_arrays()
     xla = jax.xla_computation(lambda a: call(a, builder))(var_array)
     return xla";
-
-        if let Some(ts) = time_step {
-            let ts = Duration::from_secs_f64(ts);
-            // 4ms (~240 ticks/sec) is the minimum time step
-            if ts <= Duration::from_millis(4) {
-                return Err(Error::InvalidTimeStep(ts));
-            }
-        }
 
         let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
             .getattr("build_expr")?
@@ -313,9 +314,7 @@ def build_expr(builder, sys):
         tracing::debug!(duration = ?start.elapsed(), "generated HLO");
         let builder = std::mem::take(&mut builder.borrow_mut().builder);
         let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
-        let time_step = time_step.map(Duration::from_secs_f64);
         let metadata = nox_ecs::ExecMetadata {
-            time_step,
             arg_ids: builder.param_ids,
             ret_ids,
         };

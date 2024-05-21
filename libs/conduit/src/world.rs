@@ -1,10 +1,23 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Duration;
 
 use bytemuck::Pod;
 
 use crate::*;
 
+// 16.67 ms
+pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
+
 pub type Buffers<B = Vec<u8>> = BTreeMap<ComponentId, B>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TimeStep(pub Duration);
+
+impl Default for TimeStep {
+    fn default() -> Self {
+        Self(DEFAULT_TIME_STEP)
+    }
+}
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct World {
@@ -16,6 +29,7 @@ pub struct World {
     pub assets: AssetStore,
     pub tick: u64,
     pub entity_len: u64,
+    pub time_step: TimeStep,
 }
 
 pub struct ColumnRef<'a, B: 'a> {
@@ -59,6 +73,7 @@ impl World {
         entity_ids: ustr::UstrMap<Vec<u8>>,
         component_map: HashMap<ComponentId, (ArchetypeName, Metadata)>,
         asset_store: AssetStore,
+        time_step: TimeStep,
     ) -> Self {
         let host = history.pop().unwrap_or_default();
         let tick = history.len() as u64;
@@ -79,6 +94,7 @@ impl World {
             assets: asset_store,
             tick,
             entity_len,
+            time_step,
         }
     }
 
@@ -143,6 +159,9 @@ impl World {
         component_id: ComponentId,
         tick: u64,
     ) -> Option<ColumnRef<'_, &Vec<u8>>> {
+        if tick == self.tick {
+            return self.column_by_id(component_id);
+        }
         let column = self.history.get(tick as usize)?.get(&component_id)?;
         let (archetype_name, metadata) = self.component_map.get(&component_id)?;
         let entities = self.entity_ids.get(archetype_name)?;
@@ -197,6 +216,7 @@ impl Clone for World {
             assets: self.assets.clone(),
             tick: self.tick,
             entity_len: self.entity_len,
+            time_step: self.time_step,
         }
     }
 }
