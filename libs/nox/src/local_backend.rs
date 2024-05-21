@@ -1,3 +1,4 @@
+//! Provides a local, non-XLA backend for operating on Tensors.
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
@@ -11,16 +12,22 @@ use crate::{
     MapDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
 };
 
+/// A struct representing an array with type-safe dimensions and element type.
 pub struct Array<T: Copy, D: ArrayDim> {
     buf: D::Buf<T>,
 }
 
+/// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
 pub trait ArrayDim: TensorDim {
     type Buf<T>: ArrayBuf<T>
     where
         T: Copy;
     type Dim: AsRef<[usize]> + AsMut<[usize]> + Clone;
+
+    /// Returns the dimensions of the buffer.
     fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
+
+    /// Returns the strides of the buffer for multidimensional access.
     fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
 }
 
@@ -82,11 +89,13 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
     }
 }
 
+/// Provides buffer functionalities for a given type, allowing for safe memory operations.
 pub trait ArrayBuf<T>: Clone {
     fn as_buf(&self) -> &[T];
     fn as_mut_buf(&mut self) -> &mut [T];
 }
 
+/// Extends `ArrayBuf` for uninitialized memory management.
 pub trait ArrayBufUnit<T>: ArrayBuf<MaybeUninit<T>> {
     fn uninit(dims: &[usize]) -> Self;
 
@@ -222,10 +231,14 @@ impl<const D1: usize, const D2: usize, const D3: usize, T: Copy + Clone> ArrayBu
     }
 }
 
+/// Trait marking types that can be instantiated as uninitialized memory blocks.
 pub trait MaybeUnitMarker {
     type Init;
+
+    /// Creates an uninitialized instance of the type.
     fn uninit() -> Self;
 }
+
 impl<T> MaybeUnitMarker for MaybeUninit<T> {
     type Init = T;
     fn uninit() -> Self {
@@ -251,12 +264,14 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<MaybeUninit<T1>, D1>
 where
     D1::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1>,
 {
+    /// Constructs an uninitialized array given dimensions.
     fn uninit(dims: &[usize]) -> Self {
         Self {
             buf: D1::Buf::<MaybeUninit<T1>>::uninit(dims),
         }
     }
 
+    /// Transitions the array from uninitialized to initialized state, assuming all values are initialized.
     unsafe fn assume_init(self) -> Array<T1, D1>
     where
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
@@ -270,6 +285,7 @@ where
 macro_rules! impl_op {
     ($op:tt, $op_trait:tt, $fn_name:tt) => {
         impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+            #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
             pub fn $fn_name<D2: ArrayDim + TensorDim + XlaDim>(
                 &self,
                 b: &Array<T1, D2>,
@@ -332,6 +348,7 @@ impl_op!(-, Sub, sub);
 impl_op!(/, Div, div);
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    /// Generates an iterator over the elements of the array after broadcasting to new dimensions.
     pub fn broadcast_iter(
         &self,
         new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
@@ -374,6 +391,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         })
     }
 
+    /// Performs a dot product between two arrays and returns a new array.
     fn dot<D2>(
         &self,
         right: &Array<T1, D2>,
@@ -431,6 +449,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         }
     }
 
+    /// Concatenates two arrays along the first dimension.
     pub fn concat<D2: Dim + DefaultMap>(
         &self,
         right: &Array<T1, D2>,
@@ -464,6 +483,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
+    /// Concatenates multiple arrays into a single array along a specified dimension.
     pub fn concat_many<const N: usize>(args: [&Array<T1, D1>; N]) -> Array<T1, ConcatManyDim<D1, N>>
     where
         DefaultMappedDim<D1>: nalgebra::DimMul<Const<N>> + nalgebra::Dim,
@@ -493,6 +513,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
+    /// Retrieves a specific element from the array based on an index, effectively slicing the array.
     pub fn get(&self, index: usize) -> Array<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
@@ -512,21 +533,26 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 }
 
+/// Represents a type resulting from combining dimensions of two arrays during concatenation operations.
 type ConcatDim<D1, D2> = ReplaceMappedDim<
     <D2 as DefaultMap>::DefaultMapDim,
     D1,
     AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>,
 >;
 
+/// Represents a type resulting from multiplying a dimension by a constant, used in expanding arrays.
 pub type ConcatManyDim<D1, const N: usize> =
     ReplaceMappedDim<<D1 as DefaultMap>::DefaultMapDim, D1, MulDim<DefaultMappedDim<D1>, Const<N>>>;
 
+/// Represents a type resulting from multiplication operations between two dimensions.
 pub type MulDim<A, B> = <A as nalgebra::DimMul<B>>::Output;
 
+/// Trait to enable retrieving a specified dimension type from a composite dimension.
 pub trait DimGet<D: Dim> {
     type Output: Dim;
 }
 
+/// Type alias for the result of a get operation, providing a sliced view of the array.
 pub type GetDim<D> = <ShapeConstraint as DimGet<D>>::Output;
 
 impl<const N: usize> DimGet<Const<N>> for ShapeConstraint {
@@ -562,6 +588,7 @@ fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     true
 }
 
+/// An iterator for striding over an array buffer, providing element-wise access according to specified strides.
 struct StrideIterator<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> {
     buf: &'a [T],
     stride: S,
@@ -599,6 +626,7 @@ impl<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
     }
 }
 
+/// Backend implementation for local computation on arrays.
 pub struct LocalBackend;
 
 impl Repr for LocalBackend {
