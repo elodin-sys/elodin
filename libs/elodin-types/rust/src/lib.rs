@@ -69,3 +69,11 @@ pub struct Batch {
 pub struct Metadata {
     pub entrypoint: String,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct SampleMetadata {
+    pub run_id: uuid::Uuid,
+    pub batch_no: usize,
+    pub sample_no: usize,
+    pub profile: std::collections::HashMap<String, f64>,
+}

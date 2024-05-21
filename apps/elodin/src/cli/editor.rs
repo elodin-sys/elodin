@@ -1,14 +1,19 @@
 use anyhow::Context;
 use bevy::window::WindowResized;
+use bevy::{prelude::*, utils::tracing};
+use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
+use conduit::bevy_sync::SyncPlugin;
+use conduit::World;
+use conduit::{client::MsgPair, server::handle_socket};
+use conduit::{serve_replay, Replay};
 use core::fmt;
+use elodin_editor::EditorPlugin;
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use tokio::net::TcpStream;
 
 use super::Cli;
-use bevy::{prelude::*, utils::tracing};
-use conduit::{client::MsgPair, server::handle_socket};
 
 const DEFAULT_SIM: Simulator =
     Simulator::Addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2240)));
@@ -23,6 +28,7 @@ pub struct Args {
 enum Simulator {
     Addr(SocketAddr),
     File(PathBuf),
+    ReplayDir(PathBuf),
 }
 
 #[derive(Resource)]
@@ -39,6 +45,7 @@ impl fmt::Display for Simulator {
         match self {
             Self::Addr(addr) => write!(f, "{}", addr),
             Self::File(path) => write!(f, "{}", path.display()),
+            Self::ReplayDir(path) => write!(f, "{}", path.display()),
         }
     }
 }
@@ -49,32 +56,56 @@ impl std::str::FromStr for Simulator {
         if let Ok(addr) = s.parse() {
             Ok(Self::Addr(addr))
         } else {
-            Ok(Self::File(s.into()))
+            let path = PathBuf::from(s);
+            if path.is_dir() {
+                Ok(Self::ReplayDir(path))
+            } else {
+                Ok(Self::File(path))
+            }
         }
     }
 }
 
 impl Cli {
     pub fn editor(&self, args: Args) -> anyhow::Result<()> {
-        use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-        use conduit::bevy_sync::SyncPlugin;
-        use elodin_editor::EditorPlugin;
         let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
 
-        let (addr, path) = match args.sim {
-            Simulator::Addr(addr) => (addr, None),
-            Simulator::File(path) => ("127.0.0.1:2240".parse()?, Some(path)),
-        };
-
-        if let Some(path) = &path {
+        if let Simulator::File(path) = &args.sim {
             std::process::Command::new("python3")
                 .arg(path)
                 .arg("run")
                 .arg("--watch")
-                .arg(addr.to_string())
                 .spawn()?;
         }
 
+        let mut app = self.editor_app()?;
+        match args.sim {
+            Simulator::Addr(addr) => {
+                app.add_plugins(SimClient { addr, bevy_tx });
+            }
+            Simulator::File(_) => {
+                app.add_plugins(SimClient {
+                    addr: "127.0.0.1:2240".parse().unwrap(),
+                    bevy_tx,
+                });
+            }
+            Simulator::ReplayDir(path) => {
+                let world = World::read_from_dir(&path)?;
+                let replay = Replay::new(world, bevy_tx);
+                app.insert_resource(replay);
+                app.add_systems(Update, serve_replay);
+            }
+        };
+        app.add_plugins(SyncPlugin {
+            plugin: sub,
+            subscriptions: Subscriptions::default(),
+            enable_pbr: true,
+        });
+        app.run();
+        Ok(())
+    }
+
+    pub fn editor_app(&self) -> anyhow::Result<App> {
         let mut window_state_file = self.window_state_file()?;
         let mut window_state = String::new();
         window_state_file.read_to_string(&mut window_state)?;
@@ -90,19 +121,11 @@ impl Cli {
             EditorPlugin::default()
         };
 
-        App::new()
-            .insert_resource(WindowStateFile(window_state_file))
+        let mut app = App::new();
+        app.insert_resource(WindowStateFile(window_state_file))
             .add_plugins(editor_plugin)
-            .add_plugins(SimClient { addr, bevy_tx })
-            .add_plugins(SyncPlugin {
-                plugin: sub,
-                subscriptions: Subscriptions::default(),
-                enable_pbr: true,
-            })
-            .add_systems(Update, on_window_resize)
-            .run();
-
-        Ok(())
+            .add_systems(Update, on_window_resize);
+        Ok(app)
     }
 
     fn window_state_file(&self) -> anyhow::Result<std::fs::File> {

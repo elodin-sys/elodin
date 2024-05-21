@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atc_entity::events::DbExt;
-use conduit::PolarsWorld;
-use elodin_types::{sandbox::*, Batch, BitVec, BATCH_TOPIC};
+use elodin_types::{sandbox::*, Batch, BitVec, SampleMetadata, BATCH_TOPIC};
 use fred::prelude::*;
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
@@ -132,7 +131,7 @@ impl Runner {
         context_dir: &Path,
     ) -> Result<BitVec<u32>, Error> {
         let sim_start = Instant::now();
-        let mut batch_world = Vec::new();
+        let mut batch_worlds = Vec::new();
         // TODO: parallelize batch sim execution
         let batch_no = batch.batch_number as usize;
         let samples = batch.samples as usize;
@@ -152,15 +151,23 @@ impl Runner {
             }
             block_in_place(|| self.run_sim(run.max_duration as usize, &mut sample_exec))?;
 
-            let mut history = sample_exec.world.polars()?;
-            history.add_sample_number(sample_no)?;
-            batch_world.push(history);
+            let profile = sample_exec
+                .profile()
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect();
+            let sample_metadata = SampleMetadata {
+                run_id: run.id,
+                batch_no,
+                sample_no,
+                profile,
+            };
+            batch_worlds.push((sample_metadata, sample_exec));
         }
         tracing::debug!(elapsed = ?sim_start.elapsed(), "simulated batch");
-        let archive_start = Instant::now();
 
-        let mut batch_world = PolarsWorld::vstack(batch_world)?;
-        let mut batch_tar = write_results_tar(context_dir, &mut batch_world)?;
+        let archive_start = Instant::now();
+        let mut batch_tar = write_results_tar(context_dir, batch_worlds)?;
         let batch_tar_zst = compress(&mut batch_tar)?;
         tracing::debug!(elapsed = ?archive_start.elapsed(), "wrote batch archive");
         let file_name = format!("runs/{}/batches/{}.tar.zst", run.id, batch_no);
@@ -273,10 +280,17 @@ fn stream_file(file: File, file_name: String) -> ReceiverStream<FileChunk> {
     ReceiverStream::new(rx)
 }
 
-fn write_results_tar(context_dir: &Path, history: &mut PolarsWorld) -> Result<File, Error> {
+fn write_results_tar(
+    context_dir: &Path,
+    batch_worlds: Vec<(SampleMetadata, WorldExec<Compiled>)>,
+) -> Result<File, Error> {
     let results_dir = tempfile::tempdir()?;
-    history.write_to_dir(&results_dir)?;
-
+    for (metadata, mut exec) in batch_worlds.into_iter() {
+        let sample_dir = results_dir.path().join(metadata.sample_no.to_string());
+        let metadata = serde_json::to_string(&metadata)?;
+        exec.world.write_to_dir(&sample_dir)?;
+        std::fs::write(sample_dir.join("sample.json"), metadata)?;
+    }
     let mut ar = tar::Builder::new(tempfile::tempfile()?);
     ar.append_dir_all("results", &results_dir)?;
     ar.append_dir_all("context", context_dir)?;
