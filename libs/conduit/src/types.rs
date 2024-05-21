@@ -10,6 +10,7 @@ use smallvec::SmallVec;
 use crate::query::MetadataStore;
 #[cfg(feature = "std")]
 use crate::world::World;
+use crate::Handle;
 #[cfg(feature = "std")]
 type HashSet<T> = std::collections::HashSet<T>;
 #[cfg(feature = "std")]
@@ -63,21 +64,6 @@ impl From<u64> for ComponentId {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-#[repr(transparent)]
-pub struct AssetId(pub u64);
-
-impl AssetId {
-    pub fn component_name(&self) -> String {
-        format!("asset_handle_{}", self.0)
-    }
-
-    pub fn component_id(&self) -> ComponentId {
-        ComponentId::new(&self.component_name())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct StreamId(pub u32);
 
@@ -108,21 +94,27 @@ pub enum PrimitiveTy {
     F64,
 }
 
+impl PrimitiveTy {
+    pub const fn display_str(self) -> &'static str {
+        match self {
+            PrimitiveTy::U8 => "u8",
+            PrimitiveTy::U16 => "u16",
+            PrimitiveTy::U32 => "u32",
+            PrimitiveTy::U64 => "u64",
+            PrimitiveTy::I8 => "i8",
+            PrimitiveTy::I16 => "i16",
+            PrimitiveTy::I32 => "i32",
+            PrimitiveTy::I64 => "i64",
+            PrimitiveTy::Bool => "bool",
+            PrimitiveTy::F32 => "f32",
+            PrimitiveTy::F64 => "f64",
+        }
+    }
+}
+
 impl fmt::Display for PrimitiveTy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PrimitiveTy::U8 => write!(f, "u8"),
-            PrimitiveTy::U16 => write!(f, "u16"),
-            PrimitiveTy::U32 => write!(f, "u32"),
-            PrimitiveTy::U64 => write!(f, "u64"),
-            PrimitiveTy::I8 => write!(f, "i8"),
-            PrimitiveTy::I16 => write!(f, "i16"),
-            PrimitiveTy::I32 => write!(f, "i32"),
-            PrimitiveTy::I64 => write!(f, "i64"),
-            PrimitiveTy::Bool => write!(f, "bool"),
-            PrimitiveTy::F32 => write!(f, "f32"),
-            PrimitiveTy::F64 => write!(f, "f64"),
-        }
+        write!(f, "{}", self.display_str())
     }
 }
 
@@ -426,20 +418,18 @@ pub enum ElementValueMut<'a> {
 }
 
 pub trait Component {
+    const NAME: &'static str;
     const ASSET: bool = false;
-    fn name() -> String;
     fn component_type() -> ComponentType;
 }
 
 pub trait ComponentExt: Component {
-    fn component_id() -> ComponentId {
-        ComponentId::new(&Self::name())
-    }
+    const COMPONENT_ID: ComponentId = ComponentId::new(Self::NAME);
 
     #[cfg(feature = "std")]
     fn metadata() -> Metadata {
         Metadata {
-            name: Self::name(),
+            name: Self::NAME.to_string(),
             component_type: Self::component_type(),
             asset: Self::ASSET,
             tags: Default::default(),
@@ -494,7 +484,7 @@ impl<T> Packet<Payload<T>> {
 pub enum ControlMsg {
     Connect,
     Asset {
-        id: AssetId,
+        component_id: ComponentId,
         entity_id: EntityId,
         bytes: Bytes,
         asset_index: u64,
@@ -598,6 +588,15 @@ impl Metadata {
     pub fn component_name(&self) -> &str {
         &self.name
     }
+
+    pub fn asset(name: &str) -> Self {
+        Metadata {
+            name: format!("asset_handle_{}", name),
+            component_type: ComponentType::u64(),
+            tags: Default::default(),
+            asset: true,
+        }
+    }
 }
 
 #[cfg(feature = "std")]
@@ -633,9 +632,9 @@ pub struct ColumnPayload<B = Bytes> {
     pub value_buf: B,
 }
 
-pub trait Asset: Serialize {
-    const ASSET_ID: AssetId;
-    fn asset_id(&self) -> AssetId;
+pub trait Asset: Serialize + Sized {
+    const ASSET_NAME: &'static str;
+    const COMPONENT_ID: ComponentId = Handle::<Self>::COMPONENT_ID;
 }
 
 #[cfg(test)]
