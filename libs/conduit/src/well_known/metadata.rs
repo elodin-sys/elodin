@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{well_known::Color, Asset, AssetId, ComponentId};
+use crate::{well_known::Color, Asset, ComponentId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -11,11 +11,7 @@ pub struct EntityMetadata {
 }
 
 impl Asset for EntityMetadata {
-    const ASSET_ID: crate::AssetId = AssetId(2245);
-
-    fn asset_id(&self) -> crate::AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "entity_metadata";
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,11 +22,7 @@ pub struct Gizmo {
 }
 
 impl Asset for Gizmo {
-    const ASSET_ID: crate::AssetId = AssetId(2243);
-
-    fn asset_id(&self) -> crate::AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "gizmo";
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

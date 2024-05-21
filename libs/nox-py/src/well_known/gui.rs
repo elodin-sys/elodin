@@ -61,8 +61,8 @@ impl Panel {
         })
     }
 
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::Panel::ASSET_NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {

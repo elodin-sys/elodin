@@ -1,7 +1,7 @@
 //! The rendering thing not the beer
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId, Handle};
+use crate::{Asset, Handle};
 
 pub struct Shape {
     pub mesh: Handle<Mesh>,
@@ -313,22 +313,13 @@ pub enum Face {
 }
 
 impl Asset for Mesh {
-    const ASSET_ID: AssetId = AssetId(2240);
-    fn asset_id(&self) -> AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "mesh";
 }
 
 impl Asset for Material {
-    const ASSET_ID: AssetId = AssetId(2241);
-    fn asset_id(&self) -> AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "material";
 }
 
 impl Asset for Glb {
-    const ASSET_ID: AssetId = AssetId(2242);
-    fn asset_id(&self) -> AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "glb";
 }

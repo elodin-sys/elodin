@@ -12,22 +12,17 @@ pub struct PyAsset {
 
 impl PyAsset {
     pub fn try_new(py: Python<'_>, object: PyObject) -> Result<Self, Error> {
-        let _ = object.getattr(py, "asset_id")?;
+        let _ = object.getattr(py, "asset_name")?;
         let _ = object.getattr(py, "bytes")?;
         Ok(Self { object })
     }
 }
 
 impl PyAsset {
-    pub fn asset_id(&self) -> conduit::AssetId {
+    pub fn name(&self) -> Result<String, Error> {
         Python::with_gil(|py| {
-            let id: u64 = self
-                .object
-                .call_method0(py, "asset_id")
-                .unwrap()
-                .extract(py)
-                .unwrap();
-            conduit::AssetId(id)
+            let asset_name: String = self.object.call_method0(py, "asset_name")?.extract(py)?;
+            Ok(asset_name)
         })
     }
 

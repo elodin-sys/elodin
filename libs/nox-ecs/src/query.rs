@@ -137,7 +137,7 @@ where
     }
 
     fn component_ids() -> impl Iterator<Item = ComponentId> {
-        std::iter::once(T::component_id())
+        std::iter::once(T::COMPONENT_ID)
     }
 }
 

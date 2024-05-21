@@ -1,4 +1,4 @@
-use crate::{Asset, AssetId, ComponentType};
+use crate::{concat_str, Asset, ComponentId, ComponentType};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -31,11 +31,8 @@ impl<T> Handle<T> {
 }
 
 impl<T: Asset> Component for Handle<T> {
+    const NAME: &'static str = concat_str!("asset_handle_", T::ASSET_NAME);
     const ASSET: bool = true;
-
-    fn name() -> String {
-        format!("asset_handle_{}", T::ASSET_ID.0)
-    }
 
     fn component_type() -> ComponentType {
         ComponentType::u64()
@@ -51,26 +48,30 @@ pub struct AssetStore {
 pub struct AssetItem {
     pub generation: usize,
     pub inner: Bytes,
-    pub asset_id: AssetId,
+    pub component_id: ComponentId,
 }
 
 impl AssetStore {
     pub fn insert<A: Asset + Send + Sync + 'static>(&mut self, val: A) -> Handle<A> {
-        let asset_id = val.asset_id();
-        let Handle { id, .. } = self.insert_bytes(asset_id, postcard::to_allocvec(&val).unwrap());
+        let Handle { id, .. } =
+            self.insert_bytes(A::COMPONENT_ID, postcard::to_allocvec(&val).unwrap());
         Handle {
             id,
             _phantom: PhantomData,
         }
     }
 
-    pub fn insert_bytes(&mut self, asset_id: AssetId, bytes: impl Into<Bytes>) -> Handle<()> {
+    pub fn insert_bytes(
+        &mut self,
+        component_id: ComponentId,
+        bytes: impl Into<Bytes>,
+    ) -> Handle<()> {
         let inner = bytes.into();
         let id = self.data.len();
         self.data.push(AssetItem {
             generation: 1,
             inner,
-            asset_id,
+            component_id,
         });
         Handle {
             id: id as u64,

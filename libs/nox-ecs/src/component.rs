@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn component_names() {
-        assert_eq!(WorldPos::name(), "world_pos");
-        assert_eq!(Seed::name(), "seed");
+        assert_eq!(WorldPos::NAME, "world_pos");
+        assert_eq!(Seed::NAME, "seed");
     }
 }

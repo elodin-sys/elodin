@@ -1,6 +1,6 @@
 use crate::*;
 
-use conduit::{ArchetypeName, AssetId};
+use conduit::ArchetypeName;
 
 use numpy::PyUntypedArray;
 
@@ -40,7 +40,7 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
 
 pub enum Spawnable<'py> {
     Archetypes(Vec<Archetype<'py>>),
-    Asset { id: AssetId, bytes: PyBufBytes },
+    Asset { name: String, bytes: PyBufBytes },
 }
 
 impl<'py> FromPyObject<'py> for Spawnable<'py> {
@@ -50,12 +50,9 @@ impl<'py> FromPyObject<'py> for Spawnable<'py> {
         } else if let Ok(archetype) = Archetype::extract(ob) {
             Ok(Self::Archetypes(vec![archetype]))
         } else {
-            let id: u64 = ob.call_method0("asset_id")?.extract()?;
+            let name = ob.call_method0("asset_name")?.extract()?;
             let bytes = ob.call_method0("bytes")?.extract()?;
-            Ok(Self::Asset {
-                id: AssetId(id),
-                bytes,
-            })
+            Ok(Self::Asset { name, bytes })
         }
     }
 }

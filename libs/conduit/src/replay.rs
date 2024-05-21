@@ -292,7 +292,7 @@ fn send_sub(
                 payload: Payload::ControlMsg(ControlMsg::Asset {
                     entity_id,
                     bytes: value.inner.clone(),
-                    id: value.asset_id,
+                    component_id: value.component_id,
                     asset_index: id,
                 }),
             };

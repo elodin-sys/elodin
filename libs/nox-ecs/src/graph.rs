@@ -53,9 +53,7 @@ impl FromBuilder for Edge {
 }
 
 impl conduit::Component for Edge {
-    fn name() -> String {
-        "edge".to_string()
-    }
+    const NAME: &'static str = "edge";
 
     fn component_type() -> conduit::ComponentType {
         ComponentType {

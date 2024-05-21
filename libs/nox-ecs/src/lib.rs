@@ -106,7 +106,7 @@ impl<T: conduit::Component + 'static> SystemParam for ComponentArray<T> {
     type Item = ComponentArray<T>;
 
     fn init(builder: &mut PipelineBuilder) -> Result<(), Error> {
-        let id = T::component_id();
+        let id = T::COMPONENT_ID;
         if builder.vars.contains_key(&id) {
             return Ok(());
         }
@@ -139,11 +139,11 @@ impl<T: conduit::Component + 'static> SystemParam for ComponentArray<T> {
     }
 
     fn from_builder(builder: &PipelineBuilder) -> Self::Item {
-        builder.vars[&T::component_id()].borrow().clone().cast()
+        builder.vars[&T::COMPONENT_ID].borrow().clone().cast()
     }
 
     fn insert_into_builder(self, builder: &mut PipelineBuilder) {
-        if let Some(var) = builder.vars.get_mut(&T::component_id()) {
+        if let Some(var) = builder.vars.get_mut(&T::COMPONENT_ID) {
             let mut var = var.borrow_mut();
             if var.entity_map != self.entity_map {
                 var.buffer =
@@ -151,9 +151,7 @@ impl<T: conduit::Component + 'static> SystemParam for ComponentArray<T> {
                 return;
             }
         }
-        builder
-            .vars
-            .insert(T::component_id(), self.erase_ty().into());
+        builder.vars.insert(T::COMPONENT_ID, self.erase_ty().into());
     }
 }
 

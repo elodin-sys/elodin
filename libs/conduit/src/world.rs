@@ -124,11 +124,11 @@ impl World {
     }
 
     pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
-        self.column_by_id_mut(C::component_id())
+        self.column_by_id_mut(C::COMPONENT_ID)
     }
 
     pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, &Vec<u8>>> {
-        self.column_by_id(C::component_id())
+        self.column_by_id(C::COMPONENT_ID)
     }
 
     pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, &Vec<u8>>> {
