@@ -15,7 +15,7 @@ use bevy_infinite_grid::InfiniteGrid;
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use conduit::bevy::MaxTick;
-use conduit::{well_known::WorldPos, Component};
+use conduit::{well_known::WorldPos, ComponentExt};
 
 use crate::ui::widgets::label::buttons_label;
 use crate::ui::widgets::timeline::tagged_range::TaggedRanges;
