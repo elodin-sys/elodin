@@ -1,7 +1,7 @@
 extern crate self as nox_ecs;
 
 use conduit::well_known::{EntityMetadata, Material, Mesh};
-use conduit::{Asset, ComponentId, ComponentType, EntityId, Metadata};
+use conduit::{Asset, ComponentExt, ComponentId, ComponentType, EntityId, Metadata};
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
 use polars::PolarsWorld;
@@ -63,11 +63,13 @@ pub struct World {
 }
 
 impl World {
-    pub fn column_mut<C: Component + 'static>(&mut self) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
+    pub fn column_mut<C: conduit::Component + 'static>(
+        &mut self,
+    ) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
         self.column_by_id_mut(C::component_id())
     }
 
-    pub fn column<C: Component + 'static>(&self) -> Option<ColumnRef<'_, &Vec<u8>>> {
+    pub fn column<C: conduit::Component + 'static>(&self) -> Option<ColumnRef<'_, &Vec<u8>>> {
         self.column_by_id(C::component_id())
     }
 
@@ -295,7 +297,7 @@ impl<T> ComponentArray<T> {
     }
 }
 
-impl<T: Component + FromOp> ComponentArray<T> {
+impl<T: conduit::Component + FromOp> ComponentArray<T> {
     pub fn get(&self, offset: i64) -> T {
         let ty: ArrayTy = T::component_type().into();
         let shape = ty.shape;
@@ -314,7 +316,7 @@ impl<T: Component + FromOp> ComponentArray<T> {
     }
 }
 
-impl<T: Component + 'static> SystemParam for ComponentArray<T> {
+impl<T: conduit::Component + 'static> SystemParam for ComponentArray<T> {
     type Item = ComponentArray<T>;
 
     fn init(builder: &mut PipelineBuilder) -> Result<(), Error> {
