@@ -108,13 +108,10 @@ impl<T: DeserializeOwned + Component + crate::Asset> AssetAdapter for SyncPostca
             entity_map.0.insert(entity_id, e.id());
             e
         };
-        e.insert(comp).insert((
-            AssetHandle::<T> {
-                id: asset_index,
-                phantom_data: PhantomData,
-            },
-            T::ASSET_ID,
-        ));
+        e.insert(comp).insert(AssetHandle::<T> {
+            id: asset_index,
+            phantom_data: PhantomData,
+        });
         if let Some(sync_system) = self.sync_system {
             commands.run_system(sync_system);
         }

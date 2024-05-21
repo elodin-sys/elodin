@@ -69,26 +69,21 @@ impl WorldBuilder {
                 }
                 Ok(())
             }
-            Spawnable::Asset { id, bytes } => {
-                let inner = self.world.assets.insert_bytes(id, bytes.bytes);
-                let component_name = id.component_name();
+            Spawnable::Asset { name, bytes } => {
+                let metadata = conduit::Metadata::asset(&name);
+                let component_id = metadata.component_id();
+                let archetype_name = metadata.component_name().into();
+                let inner = self.world.assets.insert_bytes(component_id, bytes.bytes);
                 let archetype = Archetype {
-                    component_datas: vec![Metadata {
-                        inner: conduit::Metadata {
-                            name: component_name.clone(),
-                            component_type: conduit::ComponentType::u64(),
-                            asset: true,
-                            tags: Default::default(),
-                        },
-                    }],
+                    component_datas: vec![Metadata { inner: metadata }],
                     arrays: vec![],
-                    archetype_name: component_name.as_str().into(),
+                    archetype_name,
                 };
 
                 self.insert_entity_id(&archetype, entity_id);
                 let mut col = self
                     .world
-                    .column_by_id_mut(ComponentId::new(&component_name))
+                    .column_by_id_mut(component_id)
                     .ok_or(nox_ecs::Error::ComponentNotFound)?;
                 col.push_raw(&inner.id.to_le_bytes());
                 Ok(())
@@ -98,10 +93,11 @@ impl WorldBuilder {
 
     fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
         let asset = PyAsset::try_new(py, asset)?;
+        let metadata = conduit::Metadata::asset(&asset.name()?);
         let inner = self
             .world
             .assets
-            .insert_bytes(asset.asset_id(), asset.bytes()?);
+            .insert_bytes(metadata.component_id(), asset.bytes()?);
         Ok(Handle { inner })
     }
 

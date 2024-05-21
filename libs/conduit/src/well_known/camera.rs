@@ -7,11 +7,8 @@ use smallvec::smallvec;
 pub struct Camera;
 
 impl Component for Camera {
+    const NAME: &'static str = "camera";
     const ASSET: bool = false;
-
-    fn name() -> String {
-        "camera".to_string()
-    }
 
     fn component_type() -> ComponentType {
         ComponentType {
