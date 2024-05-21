@@ -1,19 +1,17 @@
 extern crate self as nox_ecs;
 
-use conduit::well_known::{EntityMetadata, Material, Mesh};
-use conduit::{Asset, ComponentExt, ComponentId, ComponentType, EntityId, Metadata};
+use conduit::well_known::{Material, Mesh};
+use conduit::{Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle};
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
-use polars::PolarsWorld;
 use profile::Profiler;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::iter::once;
 use std::path::Path;
-use std::slice::from_ref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
@@ -21,22 +19,19 @@ use std::{collections::BTreeMap, marker::PhantomData};
 pub use conduit;
 pub use nox;
 
-mod assets;
 mod component;
 mod conduit_exec;
 mod dyn_array;
 mod history;
-mod host_column;
 mod integrator;
 mod profile;
 mod query;
 
 pub mod graph;
-pub mod polars;
 pub mod six_dof;
 
-pub use assets::*;
 pub use component::*;
+pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, World};
 pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use integrator::*;
@@ -44,215 +39,8 @@ pub use query::*;
 
 pub use nox_ecs_macros::{Archetype, Component};
 
-pub type ArchetypeName = ustr::Ustr;
-
 // 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
-
-pub type Buffers<B = Vec<u8>> = BTreeMap<ComponentId, B>;
-
-#[derive(Default)]
-pub struct World {
-    pub host: Buffers,
-    pub client: Buffers<PjRtBuffer>,
-    pub entity_ids: ustr::UstrMap<Vec<u8>>,
-    pub dirty_components: HashSet<ComponentId>,
-    pub component_map: HashMap<ComponentId, (ArchetypeName, Metadata)>,
-    pub assets: AssetStore,
-    pub tick: u64,
-    pub entity_len: u64,
-}
-
-impl World {
-    pub fn column_mut<C: conduit::Component + 'static>(
-        &mut self,
-    ) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
-        self.column_by_id_mut(C::component_id())
-    }
-
-    pub fn column<C: conduit::Component + 'static>(&self) -> Option<ColumnRef<'_, &Vec<u8>>> {
-        self.column_by_id(C::component_id())
-    }
-
-    pub fn column_by_id(&self, id: ComponentId) -> Option<ColumnRef<'_, &Vec<u8>>> {
-        let (table_id, metadata) = self.component_map.get(&id)?;
-        let column = self.host.get(&id)?;
-        let entities = self.entity_ids.get(table_id)?;
-        Some(ColumnRef {
-            column,
-            entities,
-            metadata,
-        })
-    }
-
-    pub fn column_by_id_mut(&mut self, id: ComponentId) -> Option<ColumnRef<'_, &mut Vec<u8>>> {
-        let (table_id, metadata) = self.component_map.get(&id)?;
-        let column = self.host.get_mut(&id)?;
-        let entities = self.entity_ids.get_mut(table_id)?;
-        self.dirty_components.insert(id);
-        Some(ColumnRef {
-            column,
-            entities,
-            metadata,
-        })
-    }
-}
-
-pub struct Entity<'a> {
-    id: EntityId,
-    world: &'a mut World,
-}
-
-impl Entity<'_> {
-    pub fn metadata(self, metadata: EntityMetadata) -> Self {
-        let metadata = self.world.insert_asset(metadata);
-        self.world.insert_with_id(metadata, self.id);
-        self
-    }
-
-    pub fn insert(self, archetype: impl Archetype + 'static) -> Self {
-        self.world.insert_with_id(archetype, self.id);
-        self
-    }
-
-    pub fn id(&self) -> EntityId {
-        self.id
-    }
-}
-
-impl From<Entity<'_>> for EntityId {
-    fn from(val: Entity<'_>) -> Self {
-        val.id
-    }
-}
-
-impl World {
-    pub fn entity_ids(&self) -> HashSet<EntityId> {
-        self.entity_ids
-            .values()
-            .flat_map(|ids| {
-                bytemuck::cast_slice::<_, u64>(ids)
-                    .iter()
-                    .copied()
-                    .map(EntityId)
-            })
-            .collect()
-    }
-
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
-        let entity_id = EntityId(self.entity_len);
-        self.insert_with_id(archetype, entity_id);
-        self.entity_len += 1;
-        Entity {
-            id: entity_id,
-            world: self,
-        }
-    }
-
-    pub fn insert_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
-        let archetype_name = A::name();
-        for metadata in A::components() {
-            let id = metadata.component_id();
-            self.component_map.insert(id, (archetype_name, metadata));
-            self.host.entry(id).or_default();
-            self.dirty_components.insert(id);
-        }
-        self.entity_ids
-            .entry(archetype_name)
-            .or_default()
-            .extend_from_slice(&entity_id.0.to_le_bytes());
-        archetype.insert_into_world(self);
-    }
-
-    pub fn builder(self) -> WorldBuilder {
-        WorldBuilder::default().world(self)
-    }
-
-    pub fn insert_asset<C: Asset + Send + Sync + 'static>(&mut self, asset: C) -> Handle<C> {
-        self.assets.insert(asset)
-    }
-
-    pub fn insert_shape(&mut self, mesh: Mesh, material: Material) -> Shape {
-        let mesh = self.insert_asset(mesh);
-        let material = self.insert_asset(material);
-        Shape { mesh, material }
-    }
-
-    fn fork(&self) -> Self {
-        let dirty_components = self.host.keys().copied().collect();
-        Self {
-            host: self.host.clone(),
-            client: Default::default(),
-            entity_ids: self.entity_ids.clone(),
-            dirty_components,
-            component_map: self.component_map.clone(),
-            assets: self.assets.clone(),
-            tick: self.tick,
-            entity_len: self.entity_len,
-        }
-    }
-
-    fn copy_to_client(&mut self, client: &Client) -> Result<(), Error> {
-        for id in self.dirty_components.clone().into_iter() {
-            let pjrt_buf = self.column_by_id_mut(id).unwrap().copy_to_client(client)?;
-            self.client.insert(id, pjrt_buf);
-        }
-        self.dirty_components.clear();
-        Ok(())
-    }
-
-    fn copy_to_host(&mut self, client: &Client) -> Result<(), Error> {
-        for (id, pjrt_buf) in self.client.iter() {
-            let host_buf = self.host.get_mut(id).unwrap();
-            client.copy_into_host_vec(pjrt_buf, host_buf)?;
-        }
-        Ok(())
-    }
-
-    pub fn polars(&self) -> Result<PolarsWorld, Error> {
-        PolarsWorld::new(&self.component_map, &self.entity_ids, from_ref(&self.host))
-    }
-}
-
-pub fn archetype_metadata(
-    component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
-) -> ustr::UstrMap<Vec<Metadata>> {
-    let mut archetype_info = ustr::UstrMap::<Vec<Metadata>>::default();
-    for (archetype_name, metadata) in component_map.values() {
-        archetype_info
-            .entry(*archetype_name)
-            .or_default()
-            .push(metadata.clone());
-    }
-    archetype_info
-}
-
-pub struct ColumnRef<'a, B: 'a> {
-    pub column: B,
-    pub entities: B,
-    pub metadata: &'a Metadata,
-}
-
-pub trait Archetype {
-    fn name() -> ArchetypeName;
-    fn components() -> Vec<Metadata>;
-    fn insert_into_world(self, world: &mut World);
-}
-
-impl<T: Component + 'static> Archetype for T {
-    fn name() -> ArchetypeName {
-        ArchetypeName::from(T::name().as_str())
-    }
-
-    fn components() -> Vec<Metadata> {
-        vec![T::metadata()]
-    }
-
-    fn insert_into_world(self, world: &mut World) {
-        let mut col = world.column_mut::<T>().unwrap();
-        col.push(self);
-    }
-}
 
 pub struct ComponentArray<T> {
     pub buffer: Noxpr,
@@ -452,7 +240,7 @@ pub trait IntoSystem<Marker, Arg, Ret> {
         Self: Sized,
         Self::System: Sized,
     {
-        World::default().builder().tick_pipeline(self.into_system())
+        WorldBuilder::default().tick_pipeline(self.into_system())
     }
 }
 
@@ -664,12 +452,32 @@ impl<A: System, B: System> System for Pipe<A, B> {
     }
 }
 
-#[derive(Default)]
+pub trait WorldExt {
+    fn builder(self) -> WorldBuilder;
+}
+
+impl WorldExt for World {
+    fn builder(self) -> WorldBuilder {
+        WorldBuilder::default().world(self)
+    }
+}
+
 pub struct WorldBuilder<Sys = (), StartupSys = ()> {
     world: World,
     pipe: Sys,
     startup_sys: StartupSys,
     time_step: Option<Duration>,
+}
+
+impl Default for WorldBuilder {
+    fn default() -> Self {
+        Self {
+            world: World::default(),
+            pipe: (),
+            startup_sys: (),
+            time_step: None,
+        }
+    }
 }
 
 impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
@@ -849,14 +657,14 @@ impl Exec {
 }
 
 impl Exec<Compiled> {
-    fn run(&mut self, world: &mut World) -> Result<(), Error> {
+    fn run(&mut self, client: &mut Buffers<PjRtBuffer>) -> Result<(), Error> {
         let mut buffers = BufferArgsRef::default().untuple_result(true);
         for id in &self.metadata.arg_ids {
-            buffers.push(&world.client[id]);
+            buffers.push(&client[id]);
         }
         let ret_bufs = self.state.exec.execute_buffers(buffers)?;
         for (buf, comp_id) in ret_bufs.into_iter().zip(self.metadata.ret_ids.iter()) {
-            world.client.insert(*comp_id, buf);
+            client.insert(*comp_id, buf);
         }
         Ok(())
     }
@@ -864,29 +672,21 @@ impl Exec<Compiled> {
 
 pub struct WorldExec<S: ExecState = Uncompiled> {
     pub world: World,
+    pub client_buffers: Buffers<PjRtBuffer>,
     pub tick_exec: Exec<S>,
     pub startup_exec: Option<Exec<S>>,
-    pub history: Vec<Buffers>,
     pub profiler: Profiler,
 }
 
 impl<S: ExecState> WorldExec<S> {
     pub fn new(world: World, tick_exec: Exec<S>, startup_exec: Option<Exec<S>>) -> Self {
-        let mut world = Self {
+        Self {
             world,
+            client_buffers: Default::default(),
             tick_exec,
             startup_exec,
-            history: Default::default(),
             profiler: Default::default(),
-        };
-        world.push_world();
-        world
-    }
-
-    fn push_world(&mut self) {
-        let start = &mut Instant::now();
-        self.history.push(self.world.host.clone());
-        self.profiler.add_to_history.observe(start);
+        }
     }
 
     pub fn tick(&self) -> u64 {
@@ -902,10 +702,10 @@ impl<S: ExecState> WorldExec<S> {
 
     pub fn fork(&self) -> Self {
         Self {
-            world: self.world.fork(),
+            world: self.world.clone(),
+            client_buffers: Buffers::default(),
             tick_exec: self.tick_exec.clone(),
             startup_exec: self.startup_exec.clone(),
-            history: self.history.clone(),
             profiler: self.profiler.clone(),
         }
     }
@@ -918,7 +718,7 @@ impl<S: ExecState> WorldExec<S> {
         if tick == self.world.tick {
             return self.world.column_by_id(component_id);
         }
-        let column = self.history.get(tick as usize)?.get(&component_id)?;
+        let column = self.world.history.get(tick as usize)?.get(&component_id)?;
         let (archetype_name, metadata) = self.world.component_map.get(&component_id)?;
         let entities = self.world.entity_ids.get(archetype_name)?;
         Some(ColumnRef {
@@ -926,14 +726,6 @@ impl<S: ExecState> WorldExec<S> {
             entities,
             metadata,
         })
-    }
-
-    pub fn polars(&mut self) -> Result<PolarsWorld, Error> {
-        PolarsWorld::new(
-            &self.world.component_map,
-            &self.world.entity_ids,
-            &self.history,
-        )
     }
 
     pub fn write_to_dir(&mut self, dir: impl AsRef<Path>) -> Result<(), Error> {
@@ -944,13 +736,7 @@ impl<S: ExecState> WorldExec<S> {
         if let Some(startup_exec) = &self.startup_exec {
             startup_exec.write_to_dir(dir.join("startup_exec"))?;
         }
-
-        self.polars()?.write_to_dir(&world_dir)?;
-
-        let path = world_dir.join("assets.bin");
-        let file = std::fs::File::create(path)?;
-        postcard::to_io(&self.world.assets, file)?;
-
+        self.world.write_to_dir(&world_dir)?;
         self.profiler.write_to_dir.observe(start);
         Ok(())
     }
@@ -967,9 +753,9 @@ impl WorldExec<Uncompiled> {
         self.profiler.compile.observe(start);
         Ok(WorldExec {
             world: self.world,
+            client_buffers: Default::default(),
             tick_exec,
             startup_exec,
-            history: self.history,
             profiler: self.profiler,
         })
     }
@@ -984,29 +770,12 @@ impl WorldExec<Uncompiled> {
         } else {
             None
         };
-
-        let assets_buf = std::fs::read(world_dir.join("assets.bin"))?;
-        let assets = postcard::from_bytes(&assets_buf)?;
-
-        let polars_world = PolarsWorld::read_from_dir(&world_dir)?;
-        let history = polars_world.history()?;
-        let host = history.last().unwrap().clone();
-        let dirty_components = host.keys().copied().collect();
-        let world = World {
-            host,
-            client: Default::default(),
-            entity_ids: polars_world.entity_ids()?,
-            dirty_components,
-            component_map: polars_world.component_map(),
-            assets,
-            tick: history.len() as u64,
-            entity_len: polars_world.entity_len(),
-        };
+        let world = World::read_from_dir(&world_dir)?;
         let world_exec = Self {
             world,
+            client_buffers: Default::default(),
             tick_exec,
             startup_exec,
-            history,
             profiler: Default::default(),
         };
         Ok(world_exec)
@@ -1016,17 +785,39 @@ impl WorldExec<Uncompiled> {
 impl WorldExec<Compiled> {
     pub fn run(&mut self) -> Result<(), Error> {
         let start = &mut Instant::now();
-        self.world.copy_to_client(&self.tick_exec.state.client)?;
+        self.copy_to_client()?;
         self.profiler.copy_to_client.observe(start);
         if let Some(mut startup_exec) = self.startup_exec.take() {
-            startup_exec.run(&mut self.world)?;
+            startup_exec.run(&mut self.client_buffers)?;
         }
-        self.tick_exec.run(&mut self.world)?;
+        self.tick_exec.run(&mut self.client_buffers)?;
         self.profiler.execute_buffers.observe(start);
-        self.world.copy_to_host(&self.tick_exec.state.client)?;
+        self.copy_to_host()?;
         self.profiler.copy_to_host.observe(start);
-        self.world.tick += 1;
-        self.push_world();
+        self.world.advance_tick();
+        self.profiler.add_to_history.observe(start);
+        Ok(())
+    }
+
+    fn copy_to_client(&mut self) -> Result<(), Error> {
+        let client = &self.tick_exec.state.client;
+        for id in std::mem::take(&mut self.world.dirty_components) {
+            let pjrt_buf = self
+                .world
+                .column_by_id(id)
+                .unwrap()
+                .copy_to_client(client)?;
+            self.client_buffers.insert(id, pjrt_buf);
+        }
+        Ok(())
+    }
+
+    fn copy_to_host(&mut self) -> Result<(), Error> {
+        let client = &self.tick_exec.state.client;
+        for (id, pjrt_buf) in self.client_buffers.iter() {
+            let host_buf = self.world.host.get_mut(id).unwrap();
+            client.copy_into_host_vec(pjrt_buf, host_buf)?;
+        }
         Ok(())
     }
 
@@ -1153,16 +944,10 @@ pub enum Error {
     EntityNotFound,
     #[error("io {0}")]
     Io(#[from] std::io::Error),
-    #[error("polars {0}")]
-    Polars(#[from] ::polars::error::PolarsError),
-    #[error("arrow {0}")]
-    Arrow(#[from] arrow::error::ArrowError),
     #[error("invalid component id")]
     InvalidComponentId,
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
-    #[error("postcard {0}")]
-    Postcard(#[from] postcard::Error),
     #[error("world not found")]
     WorldNotFound,
     #[cfg(feature = "pyo3")]
@@ -1185,9 +970,19 @@ impl<T> From<flume::SendError<T>> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
+        Archetype, World, WorldPos,
+    };
     use conduit::well_known::Glb;
-    use nox::nalgebra::{self, vector};
-    use nox::{Scalar, ScalarExt, Vector};
+    use nox::{
+        nalgebra::{self, vector},
+        Scalar, ScalarExt, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector,
+    };
+    use polars::{
+        chunked_array::builder::{ListBuilderTrait, ListPrimitiveChunkedBuilder},
+        datatypes::{DataType, Float64Type},
+    };
 
     #[test]
     fn test_simple() {
@@ -1347,5 +1142,89 @@ mod tests {
         exec.run().unwrap();
         let c = exec.world.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
+    }
+
+    #[test]
+    fn test_convert_to_df() {
+        let mut world = World::default();
+
+        world.spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        });
+        let polars = world.polars().unwrap();
+        let df = polars.archetypes[&Body::name()].clone();
+        let world_pos = df.column("world_pos").unwrap();
+        let mut expected_world_pos =
+            ListPrimitiveChunkedBuilder::<Float64Type>::new("world_pos", 8, 8, DataType::Float64);
+        expected_world_pos.append_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let expected_world_pos = expected_world_pos.finish().into();
+        assert_eq!(world_pos, &expected_world_pos);
+    }
+
+    #[test]
+    fn test_to_world() {
+        let mut world = World::default();
+
+        world.spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        });
+        let polars = world.polars().unwrap();
+        let buffers = &polars.history().unwrap()[0];
+        assert_eq!(buffers, &world.host);
+    }
+
+    #[test]
+    fn test_write_read_world() {
+        let mut world = World::default();
+        world.spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        world.write_to_dir(dir).unwrap();
+        let new_world = World::read_from_dir(dir).unwrap();
+        assert_eq!(world, new_world);
     }
 }
