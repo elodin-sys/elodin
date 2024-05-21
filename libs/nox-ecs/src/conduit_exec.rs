@@ -1,9 +1,9 @@
-use crate::{assets::Handle, Compiled, Error, WorldExec};
+use crate::{Compiled, Error, WorldExec};
 use bytes::{BufMut, Bytes, BytesMut};
 use conduit::{
     client::{Msg, MsgPair},
     query::MetadataStore,
-    ColumnPayload, ComponentId, ControlMsg, EntityId, Packet, Payload, StreamId,
+    ColumnPayload, ComponentId, ControlMsg, EntityId, Handle, Packet, Payload, StreamId,
 };
 use std::mem;
 use tracing::warn;
@@ -165,7 +165,7 @@ impl ConduitExec {
             Msg::Control(ControlMsg::Rewind(index)) => self.state = State::Replaying { index },
             Msg::Control(ControlMsg::Query { time_range, query }) => {
                 let time_range = time_range.start as usize
-                    ..(time_range.end as usize).min(self.exec.history.len());
+                    ..(time_range.end as usize).min(self.exec.world.history.len());
                 if !query.with_component_ids.is_empty() {
                     return Err(Error::InvalidQuery); // For now we only support ids with len 1
                 }
@@ -250,7 +250,8 @@ fn send_sub(
         ),
         State::Replaying { index } => (
             index,
-            exec.column_at_tick(comp_id, index)
+            exec.world
+                .column_at_tick(comp_id, index)
                 .ok_or(Error::ComponentNotFound)?,
         ),
     };

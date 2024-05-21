@@ -2698,6 +2698,7 @@ dependencies = [
 name = "conduit"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "bevy",
  "big_space",
  "bytemuck",
@@ -2712,8 +2713,11 @@ dependencies = [
  "ndarray",
  "nox",
  "num_enum",
+ "polars",
+ "polars-arrow",
  "postcard",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror",
  "thiserror-no-std",
@@ -2721,6 +2725,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "try_buf",
+ "ustr",
 ]
 
 [[package]]
@@ -6052,7 +6057,6 @@ dependencies = [
 name = "nox-ecs"
 version = "0.1.0"
 dependencies = [
- "arrow",
  "bytemuck",
  "byteorder",
  "bytes",
@@ -6065,8 +6069,6 @@ dependencies = [
  "once_cell",
  "paste",
  "polars",
- "polars-arrow",
- "postcard",
  "pyo3",
  "serde",
  "serde_json",

@@ -25,7 +25,7 @@ impl Exec {
     }
 
     pub fn history(&mut self) -> Result<PyDataFrame, Error> {
-        let polars_world = self.exec.polars()?;
+        let polars_world = self.exec.world.polars()?;
         let df = polars_world.join_archetypes()?;
         Ok(PyDataFrame(df))
     }

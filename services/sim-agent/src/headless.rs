@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atc_entity::events::DbExt;
+use conduit::PolarsWorld;
 use elodin_types::{sandbox::*, Batch, BitVec, BATCH_TOPIC};
 use fred::prelude::*;
 use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
@@ -12,7 +13,7 @@ use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
 use nox::Client as NoxClient;
 use nox_ecs::Compiled;
-use nox_ecs::{polars::PolarsWorld, Seed, WorldExec};
+use nox_ecs::{Seed, WorldExec};
 use sea_orm::{prelude::*, IntoActiveModel, TransactionTrait};
 use tokio::sync::mpsc;
 use tokio::task::block_in_place;
@@ -151,7 +152,7 @@ impl Runner {
             }
             block_in_place(|| self.run_sim(run.max_duration as usize, &mut sample_exec))?;
 
-            let mut history = sample_exec.polars()?;
+            let mut history = sample_exec.world.polars()?;
             history.add_sample_number(sample_no)?;
             batch_world.push(history);
         }
@@ -299,6 +300,8 @@ fn compress(file: &mut File) -> Result<File, Error> {
 enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("conduit error: {0}")]
+    Conduit(#[from] conduit::Error),
     #[error("nox ecs error: {0}")]
     NoxEcs(#[from] nox_ecs::Error),
     #[error("tonic error: {0}")]
