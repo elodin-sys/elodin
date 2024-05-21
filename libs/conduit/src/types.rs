@@ -422,26 +422,34 @@ pub enum ElementValueMut<'a> {
 }
 
 pub trait Component {
-    const NAME: &'static str;
-    const ASSET: bool;
-
-    fn component_id() -> ComponentId {
-        ComponentId::new(Self::NAME)
-    }
+    const ASSET: bool = false;
+    fn name() -> String;
     fn component_type() -> ComponentType;
+}
+
+pub trait ComponentExt: Component {
+    fn component_id() -> ComponentId {
+        ComponentId::new(&Self::name())
+    }
+
+    #[cfg(feature = "std")]
+    fn metadata() -> Metadata {
+        Metadata {
+            name: Self::name(),
+            component_type: Self::component_type(),
+            asset: Self::ASSET,
+            tags: Default::default(),
+        }
+    }
+}
+
+impl<C: Component> ComponentExt for C {}
+
+pub trait ValueRepr {
     fn component_value<'a>(&self) -> ComponentValue<'a>;
     fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
     where
         Self: Sized;
-    #[cfg(feature = "std")]
-    fn metadata() -> Metadata {
-        Metadata {
-            name: Self::NAME.to_string(),
-            component_type: Self::component_type(),
-            tags: HashMap::new(),
-            asset: Self::ASSET,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]

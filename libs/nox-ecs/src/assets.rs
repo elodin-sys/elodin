@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use std::marker::PhantomData;
 
+use crate::Component;
+
 #[derive(Debug)]
 pub struct Handle<T> {
     pub id: u64,
@@ -43,7 +45,9 @@ impl<T> FromBuilder for Handle<T> {
     }
 }
 
-impl<T: Asset> crate::Component for Handle<T> {
+impl<T: Asset> conduit::Component for Handle<T> {
+    const ASSET: bool = true;
+
     fn name() -> String {
         format!("asset_handle_{}", T::ASSET_ID.0)
     }
@@ -51,11 +55,9 @@ impl<T: Asset> crate::Component for Handle<T> {
     fn component_type() -> conduit::ComponentType {
         conduit::ComponentType::u64()
     }
-
-    fn is_asset() -> bool {
-        true
-    }
 }
+
+impl<T: Asset> Component for Handle<T> {}
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct AssetStore {
