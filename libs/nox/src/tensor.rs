@@ -177,6 +177,7 @@ pub trait NonScalarDim {}
 /// Represents constant dimensions, specified at compile-time.
 pub trait ConstDim {}
 
+/// Represents a scalar dimension, which is essentially dimensionless.
 pub type ScalarDim = ();
 impl TensorDim for ScalarDim {}
 impl TensorDim for nalgebra::Dyn {}
@@ -184,7 +185,9 @@ impl NonScalarDim for nalgebra::Dyn {}
 impl<const N: usize> TensorDim for nalgebra::Const<N> {}
 impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
+/// Trait for dimensions compatible with XLA computation, defining shape information.
 pub trait XlaDim {
+    /// Returns the shape of the implementing type.
     fn shape() -> SmallVec<[i64; 4]>;
 }
 
@@ -446,9 +449,12 @@ pub trait MapDim<D> {
     const MAPPED_DIM: usize;
 }
 
+/// Alias for the mapped dimension type of `T` for dimension `D`.
 pub type MappedDim<T, D> = <T as MapDim<D>>::MappedDim;
+/// Alias for the type replacing the mapped dimension `T` for dimension `D` with `R`.
 pub type ReplaceMappedDim<T, D, R> = <T as MapDim<D>>::ReplaceMappedDim<R>;
 
+/// Represents a mapped dimension used for transforming tensor dimensions.
 pub struct Mapped;
 
 impl<D: Dim> MapDim<D> for Mapped {
@@ -468,6 +474,7 @@ where
     type DefaultMapDim: MapDim<Self>;
 }
 
+/// Alias for the default mapped dimension of `D`.
 pub type DefaultMappedDim<D> = <<D as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim;
 
 impl DefaultMap for ScalarDim {
@@ -591,6 +598,7 @@ impl<const N: usize> NonTupleDim for Const<N> {}
 //     type Output = (A, B);
 // }
 
+/// Alias for the dimension resulting from concatenating dimensions `A` and `B`.
 pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 
 impl<T: TensorItem, D: Dim> Tensor<T, D> {
@@ -616,6 +624,7 @@ impl<T: TensorItem, D: Dim> Tensor<T, D> {
     }
 }
 
+/// Alias for the result of adding dimensions `A` and `B`.
 pub type AddDim<A, B> = <A as nalgebra::DimAdd<B>>::Output;
 
 #[allow(clippy::type_complexity)]
@@ -673,6 +682,7 @@ pub trait BroadcastDim<D1, D2> {
     type Output: Dim;
 }
 
+/// Alias for the dimension resulting from broadcasting dimensions `D1` and `D2`.
 pub type BroadcastedDim<D1, D2> = <ShapeConstraint as BroadcastDim<D1, D2>>::Output;
 
 impl<const A: usize> BroadcastDim<Const<A>, Const<A>> for ShapeConstraint {
@@ -695,6 +705,7 @@ impl<D: Dim + NotConst1> BroadcastDim<Const<1>, D> for ShapeConstraint {
     type Output = D;
 }
 
+/// Marker trait for dimension types that are not dynamic, typically used for compile-time fixed dimensions.
 pub trait NotDyn {}
 impl<const N: usize> NotDyn for Const<N> {}
 impl NotDyn for ScalarDim {}
@@ -766,6 +777,7 @@ where
     type Output = (Dyn, BroadcastedDim<Const<A2>, Const<B2>>);
 }
 
+/// Trait for determining the resulting dimension type from a dot product between two tensors with specified dimensions.
 pub trait DotDim<D1, D2> {
     type Output: Dim;
 }
@@ -793,6 +805,8 @@ where
 impl DotDim<Dyn, Dyn> for ShapeConstraint {
     type Output = Dyn;
 }
+
+/// Alias for the dimension resulting from the dot product of dimensions `D1` and `D2`.
 pub type DottedDim<D1, D2> = <ShapeConstraint as DotDim<D1, D2>>::Output;
 
 impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {

@@ -1,3 +1,4 @@
+//! This module provides utilities for converting `Noxpr` expressions to `Jax` operations in Python.
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
@@ -11,12 +12,14 @@ use xla::{ArrayElement, ElementType, Literal};
 use crate::{BinaryOp, CompFn, Error, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode};
 
 impl Noxpr {
+    /// Converts a `Noxpr` expression to a `Jax` operation using a tracer.
     pub fn to_jax(&self) -> Result<PyObject, Error> {
         let mut tracer = JaxTracer::new();
         tracer.visit(self)
     }
 }
 
+/// Traces `Noxpr` expressions and generates corresponding `Jax` operations.
 #[derive(Clone)]
 pub struct JaxTracer {
     lax: PyObject,
@@ -25,6 +28,7 @@ pub struct JaxTracer {
 }
 
 impl JaxTracer {
+    /// Initializes a new tracer with references to the Jax libraries.
     pub fn new() -> Self {
         Python::with_gil(|py| {
             let lax = py.import_bound("jax.lax").unwrap().into();
@@ -37,6 +41,7 @@ impl JaxTracer {
         })
     }
 
+    /// Visits a `Noxpr` expression and recursively translates it into a `Jax` operation.
     pub fn visit(&mut self, expr: &Noxpr) -> Result<PyObject, Error> {
         let id = expr.id();
         if let Some(op) = self.cache.get(&id) {
@@ -234,23 +239,27 @@ impl JaxTracer {
         Ok(op)
     }
 
+    /// Helper function to retrieve operands for a binary operation.
     #[inline]
     fn visit_binary_op(&mut self, op: &BinaryOp) -> Result<(PyObject, PyObject), Error> {
         Ok((self.visit(&op.lhs)?, self.visit(&op.rhs)?))
     }
 
+    /// Helper function to visit binary operations and apply the corresponding Jax method.
     #[inline]
     fn visit_binary_lax(&mut self, op: &BinaryOp, method: &str) -> Result<PyObject, Error> {
         let (lhs, rhs) = self.visit_binary_op(op)?;
         Python::with_gil(|py| self.lax.call_method1(py, method, (lhs, rhs))).map_err(Error::PyO3)
     }
 
+    /// Helper function to visit unary operations and apply the corresponding Jax method.
     #[inline]
     fn visit_unary_lax(&mut self, op: &Noxpr, method: &str) -> Result<PyObject, Error> {
         let inner = self.visit(op)?;
         Python::with_gil(|py| self.lax.call_method1(py, method, (inner,))).map_err(Error::PyO3)
     }
 
+    /// Wraps a `NoxprFn` into a callable Jax representation.
     fn visit_fn(&mut self, op: &NoxprFn) -> JaxNoxprFn {
         JaxNoxprFn {
             tracer: self.clone(),
@@ -259,6 +268,7 @@ impl JaxTracer {
     }
 }
 
+/// A Python callable wrapper for `NoxprFn` to be used in `Jax`.
 #[pyo3::prelude::pyclass]
 struct JaxNoxprFn {
     tracer: JaxTracer,
@@ -267,6 +277,7 @@ struct JaxNoxprFn {
 
 #[pyo3::prelude::pymethods]
 impl JaxNoxprFn {
+    /// Executes the function by translating it to a `Jax` operation.
     #[allow(unused_variables)]
     #[pyo3(signature = (*args, **kwargs))]
     fn __call__(
@@ -291,6 +302,7 @@ impl Default for JaxTracer {
     }
 }
 
+/// Converts a `Literal` to a Jax numpy array.
 fn literal_to_arr<T: ArrayElement + numpy::Element + bytemuck::Pod>(
     data: &Literal,
     shape: &SmallVec<[i64; 4]>,
@@ -309,6 +321,7 @@ fn literal_to_arr<T: ArrayElement + numpy::Element + bytemuck::Pod>(
     })
 }
 
+/// Maps `ElementType` to Python `dtype` strings.
 pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
     match elem {
         ElementType::S8 => Ok("int8"),
@@ -329,6 +342,7 @@ pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
     }
 }
 
+/// Executes a computational function and converts the result to a `Jax` operation.
 pub fn call_comp_fn<T, R: IntoOp>(
     func: impl CompFn<T, R>,
     args: &[PyObject],

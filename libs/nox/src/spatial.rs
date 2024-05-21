@@ -1,3 +1,6 @@
+//! Provides abstractions for rigid body dynamics in 3D space.
+//! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
+//! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::Field;
 use crate::FixedSliceExt;
 use crate::Tensor;
@@ -17,6 +20,7 @@ pub struct SpatialTransform<T: TensorItem> {
 }
 
 impl<T: TensorItem + Field> SpatialTransform<T> {
+    /// Constructs a new spatial transform from an angular component (Quaternion) and a linear component (Vector).
     pub fn new(angular: impl Into<Quaternion<T>>, linear: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
         let linear = linear.into();
@@ -24,32 +28,33 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
         SpatialTransform { inner }
     }
 
-    /// Create a spatial transform from a quaternion
+    /// Creates a spatial transform from a quaternion.
     pub fn from_angular(angular: impl Into<Quaternion<T>>) -> Self {
         let zero = T::zero().broadcast::<Const<3>>();
         SpatialTransform::new(angular, zero)
     }
 
-    /// Create a spatial transform from a linear vector
+    /// Creates a spatial transform from a linear vector.
     pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
         SpatialTransform::new(Quaternion::identity(), linear)
     }
 
-    /// Create a spatial transform from an axis and angle
+    /// Creates a spatial transform from an axis and angle.
     pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
         Self::from_angular(Quaternion::from_axis_angle(axis, angle))
     }
 
-    /// Get the angular part of the spatial transform as a quaternion
+    /// Gets the angular part of the spatial transform as a quaternion.
     pub fn angular(&self) -> Quaternion<T> {
         Quaternion(self.inner.fixed_slice(&[0]))
     }
 
-    /// Get the linear part of the spatial transform as a vector with shape (3,)
+    /// Gets the linear part of the spatial transform as a vector with shape (3,).
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[4])
     }
 
+    /// Creates a zero spatial transform.
     pub fn zero() -> Self {
         SpatialTransform {
             inner: Tensor::zeros(),
@@ -74,6 +79,7 @@ pub struct SpatialForce<T: TensorItem> {
 }
 
 impl<T: Field> SpatialForce<T> {
+    /// Constructs a new spatial force from a torque component (Vector) and a force component (Vector).
     pub fn new(torque: impl Into<Vector<T, 3>>, force: impl Into<Vector<T, 3>>) -> Self {
         let torque = torque.into();
         let force = force.into();
@@ -81,7 +87,7 @@ impl<T: Field> SpatialForce<T> {
         SpatialForce { inner }
     }
 
-    /// Create a spatial force from a linear force vector
+    /// Creates a spatial force from a linear force vector.
     pub fn from_linear(force: impl Into<Vector<T, 3>>) -> Self {
         let force = force.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -89,7 +95,7 @@ impl<T: Field> SpatialForce<T> {
         SpatialForce { inner }
     }
 
-    /// Create a spatial force from a torque vector
+    /// Creates a spatial force from a torque vector.
     pub fn from_torque(torque: impl Into<Vector<T, 3>>) -> Self {
         let torque = torque.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -97,16 +103,17 @@ impl<T: Field> SpatialForce<T> {
         SpatialForce { inner }
     }
 
-    /// Get the torque part of the spatial force as a vector with shape (3,)
+    /// Gets the torque part of the spatial force as a vector with shape (3,).
     pub fn torque(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
 
-    /// Get the linear force part of the spatial force as a vector with shape (3,)
+    /// Gets the linear force part of the spatial force as a vector with shape (3,).
     pub fn force(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[3])
     }
 
+    /// Creates a zero spatial force.
     pub fn zero() -> Self {
         SpatialForce {
             inner: Tensor::zeros(),
@@ -124,12 +131,15 @@ impl<T: Field> Add for SpatialForce<T> {
     }
 }
 
+/// A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space.
+/// The inertia matrix is assumed to be symmetric and represented in its diagonalized form.
 #[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
 pub struct SpatialInertia<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
 impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
+    /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
     pub fn new(
         inertia: impl Into<Vector<T, 3>>,
         momentum: impl Into<Vector<T, 3>>,
@@ -142,6 +152,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         SpatialInertia { inner }
     }
 
+    /// Constructs spatial inertia from a mass, assuming momentum is 0 and the inertia is the same value as the mass along all axes.
     pub fn from_mass(mass: impl Into<Scalar<T>>) -> Self {
         let mass = mass.into();
         SpatialInertia::new(
@@ -151,12 +162,17 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
         )
     }
 
+    /// Returns the diagonal inertia as a diagonalized vector.
     pub fn inertia_diag(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
+
+    /// Returns the momentum as a vector.
     pub fn momentum(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[3])
     }
+
+    /// Returns the mass as a scalar.
     pub fn mass(&self) -> Scalar<T> {
         self.inner.fixed_slice::<Const<1>>(&[6]).reshape()
     }
@@ -192,6 +208,7 @@ pub struct SpatialMotion<T: TensorItem> {
 }
 
 impl<T: Field> SpatialMotion<T> {
+    /// Constructs a new spatial motion from angular and linear components.
     pub fn new(angular: impl Into<Vector<T, 3>>, linear: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
         let linear = linear.into();
@@ -199,7 +216,7 @@ impl<T: Field> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
-    /// Create a spatial motion from a linear vector
+    /// Creates a spatial motion from a linear vector.
     pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
         let linear = linear.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -207,7 +224,7 @@ impl<T: Field> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
-    /// Create a spatial motion from an angular vector
+    /// Creates a spatial motion from an angular vector.
     pub fn from_angular(angular: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
         let zero = T::zero().broadcast::<Const<3>>();
@@ -215,34 +232,38 @@ impl<T: Field> SpatialMotion<T> {
         SpatialMotion { inner }
     }
 
-    /// Get the angular part of the spatial motion as a vector with shape (3,)
+    /// Gets the angular part of the spatial motion as a vector with shape (3,).
     pub fn angular(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[0])
     }
 
-    /// Get the linear part of the spatial motion as a vector with shape (3,)
+    /// Gets the linear part of the spatial motion as a vector with shape (3,).
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[3])
     }
 
+    /// Adjusts spatial motion based on the given spatial transform.
     pub fn offset(&self, pos: SpatialTransform<T>) -> Self {
         let ang_vel = pos.angular() * self.angular();
         let vel = pos.angular() * self.linear() + ang_vel.cross(&pos.linear());
         SpatialMotion::new(ang_vel, vel)
     }
 
+    /// Computes the cross product of two spatial motions.
     pub fn cross(&self, other: &Self) -> Self {
         let ang_vel = self.angular().cross(&other.angular());
         let vel = self.angular().cross(&other.linear()) + self.linear().cross(&other.angular());
         SpatialMotion::new(ang_vel, vel)
     }
 
+    /// Computes the dual cross product of spatial motion and spatial force.
     pub fn cross_dual(&self, other: &SpatialForce<T>) -> SpatialForce<T> {
         let force = self.angular().cross(&other.torque()) + self.linear().cross(&other.force());
         let torque = self.angular().cross(&other.force());
         SpatialForce::new(torque, force)
     }
 
+    /// Creates a zero spatial motion.
     pub fn zero() -> Self {
         SpatialMotion {
             inner: Tensor::zeros(),

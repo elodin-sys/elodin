@@ -1,3 +1,4 @@
+//! Provides functionality for handling vectors in computational tasks, supporting conversion between host and Nox-specific representations, and enabling vector operations like extension, normalization, and cross products.
 use nalgebra::{ArrayStorage, Const, DimMul, Scalar as NalgebraScalar, ToTypenum};
 use num_traits::Zero;
 use smallvec::smallvec;
@@ -9,9 +10,11 @@ use crate::{
     FromHost, MaybeOwned, Noxpr, Op, Repr, Scalar, Tensor, TensorItem, ToHost,
 };
 
+/// Type alias for a tensor that specifically represents a vector.
 pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
 
 impl<T: NativeType + ArrayElement> Vector<T, 3, Op> {
+    /// Extends a 3-dimensional vector to a 4-dimensional vector by appending a given element.
     pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
         let elem = elem.literal();
         let constant = Noxpr::constant(elem, ArrayTy::new(T::TY, smallvec![1]));
@@ -69,6 +72,7 @@ where
 }
 
 impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+    /// Creates a vector from an array of scalar references.
     pub fn from_arr(arr: [&Scalar<T, R>; N]) -> Self
     where
         Const<N>: Dim,
@@ -90,6 +94,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
 }
 
 impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+    /// Returns the individual scalar components of the vector as an array.
     pub fn parts(&self) -> [Scalar<T, R>; N] {
         let mut i = 0;
         [0; N].map(|_| {
@@ -101,6 +106,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
 }
 
 impl<T: Field> Vector<T, 3, Op> {
+    /// Computes the cross product of two 3-dimensional vectors.
     pub fn cross(&self, other: &Self) -> Self {
         let [ax, ay, az] = self.parts();
         let [bx, by, bz] = other.parts();
@@ -112,14 +118,17 @@ impl<T: Field> Vector<T, 3, Op> {
 }
 
 impl<T: Field, const N: usize> Vector<T, N, Op> {
+    /// Computes the norm squared of the vector.
     pub fn norm_squared(&self) -> Scalar<T> {
         self.dot(self)
     }
 
+    /// Computes the norm of the vector, which is the square root of the norm squared.
     pub fn norm(&self) -> Scalar<T> {
         self.dot(self).sqrt()
     }
 
+    /// Normalizes the vector to a unit vector.
     pub fn normalize(&self) -> Self {
         self.clone() / self.norm()
     }

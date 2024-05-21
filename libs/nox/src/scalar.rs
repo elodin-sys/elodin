@@ -1,3 +1,4 @@
+//! Provides functionality for managing scalar tensors, including operations and transformations between host and client representations.
 use crate::TensorItem;
 use crate::{
     Buffer, BufferArg, Literal, MaybeOwned, NoxprScalarExt, Op, ScalarDim, Tensor, ToHost,
@@ -8,6 +9,7 @@ use nalgebra::Scalar as NalgebraScalar;
 use std::{marker::PhantomData, ops::Add};
 use xla::{ArrayElement, NativeType};
 
+/// Type alias for a scalar tensor with a specific type `T`, an underlying representation `P`.
 pub type Scalar<T, P = Op> = Tensor<T, ScalarDim, P>;
 
 impl<T: NativeType + ArrayElement> ToHost for Scalar<T, Buffer> {
@@ -31,10 +33,14 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
     }
 }
 
+/// Extension trait for scalar types, enabling direct conversion into tensor representations.
 pub trait ScalarExt: Sized {
+    /// Converts a scalar value into a literal scalar tensor.
     fn literal(self) -> Scalar<Self, Literal>
     where
         Self: TensorItem;
+
+    /// Converts a scalar value into a constant scalar tensor for computation.
     fn constant(self) -> Scalar<Self, Op>
     where
         Self: TensorItem;

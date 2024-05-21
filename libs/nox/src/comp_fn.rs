@@ -1,11 +1,15 @@
+//! Defines traits and structures for constructing functions and transforming them into computational graphs.
 use crate::{
     ArrayTy, Builder, Comp, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem, XlaDim,
 };
 use std::{any, marker::PhantomData};
 
+/// Represents a computational function that can be converted into an XLA computation.
 pub trait CompFn<T, R>: Send + Sync {
+    /// Computes the result of the function, using a mutable reference to a `Builder` to construct the computation.
     fn compute(&self, builder: &mut Builder) -> R;
 
+    /// Builds the computational graph (`NoxprFn`) of the function.
     fn build_expr(&self) -> Result<NoxprFn, crate::Error>
     where
         R: IntoOp,
@@ -29,6 +33,9 @@ pub trait CompFn<T, R>: Send + Sync {
         })
     }
 
+    /// Converts the computational function into a compiled `Comp` type, which is executable within an XLA environment.
+    ///
+    /// This method is a convenience function that builds the expression and compiles it into a ready-to-execute form.
     fn build(&self) -> Result<Comp<T, R>, crate::Error>
     where
         R: IntoOp,
@@ -43,10 +50,17 @@ pub trait CompFn<T, R>: Send + Sync {
     }
 }
 
+/// Provides functionality to construct an item from a `Builder`.
 pub trait FromBuilder {
+    /// Defines the type of item that can be constructed from a `Builder`.
     type Item<'a>;
 
+    /// Constructs an item from the `Builder`.
     fn from_builder(builder: &Builder) -> Self::Item<'_>;
+
+    /// Indicates whether the constructed item has mutable borrow semantics within the builder context.
+    ///
+    /// Default implementation returns `false`, implying no mutable borrows are made.
     fn is_mut_borrowed() -> bool {
         false
     }

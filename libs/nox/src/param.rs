@@ -1,3 +1,4 @@
+//! Provides definitions and traits for handling operations on tensor dimensions and data types.
 use std::{
     iter,
     mem::MaybeUninit,
@@ -13,20 +14,26 @@ use crate::{
     DottedDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim, XlaDim,
 };
 
+/// Represents a compute operation.
 pub struct Op;
 
+/// Represents a literal value.
 pub struct Literal;
 
+/// Represents a memory buffer.
 pub struct Buffer;
 
+/// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
 pub trait Dim: ArrayDim + TensorDim + XlaDim {}
 impl<D: ArrayDim + TensorDim + XlaDim> Dim for D {}
 
+/// Represents the interface for data representations in tensor operations.
 pub trait Repr {
     type Inner<T, D: Dim>
     where
         T: Copy;
 
+    /// Performs element-wise addition of two tensors, broadcasting as necessary.
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -39,6 +46,8 @@ pub trait Repr {
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
             ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+
+    /// Performs element-wise subtraction of two tensors, broadcasting as necessary.
     fn sub<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -51,6 +60,8 @@ pub trait Repr {
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
             ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+
+    /// Performs element-wise multiplication of two tensors, broadcasting as necessary.
     fn mul<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -64,6 +75,7 @@ pub trait Repr {
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
             ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
 
+    /// Performs element-wise division of two tensors, broadcasting as necessary.
     fn div<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -77,6 +89,7 @@ pub trait Repr {
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
             ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
 
+    /// Computes the dot product of two tensors.
     fn dot<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -90,6 +103,7 @@ pub trait Repr {
         <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
             ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>;
 
+    /// Concatenates multiple tensors along a new dimension.
     fn concat_many<T1: Field, D1, const N: usize>(
         args: [&Self::Inner<T1, D1>; N],
     ) -> Self::Inner<T1, ConcatManyDim<D1, N>>
@@ -103,6 +117,7 @@ pub trait Repr {
         <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
             ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>;
 
+    /// Retrieves a specific tensor based on an index within a dimension.
     fn get<T1: Field, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
         index: usize,
