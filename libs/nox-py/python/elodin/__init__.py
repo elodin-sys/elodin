@@ -418,23 +418,23 @@ Time = Annotated[
 ]
 MeshAsset = Annotated[
     Handle,
-    Component("asset_handle_2240", asset=True, metadata={"priority": -1}),
+    Component("asset_handle_mesh", asset=True, metadata={"priority": -1}),
 ]
 MaterialAsset = Annotated[
     Handle,
-    Component("asset_handle_2241", asset=True, metadata={"priority": -1}),
+    Component("asset_handle_material", asset=True, metadata={"priority": -1}),
 ]
 GlbAsset = Annotated[
     Handle,
-    Component("asset_handle_2242", asset=True, metadata={"priority": -1}),
+    Component("asset_handle_glb", asset=True, metadata={"priority": -1}),
 ]
 GizmoAsset = Annotated[
     Handle,
-    Component("asset_handle_2243", asset=True, metadata={"priority": -1}),
+    Component("asset_handle_gizmo", asset=True, metadata={"priority": -1}),
 ]
 PanelAsset = Annotated[
     Handle,
-    Component("asset_handle_2244", asset=True, metadata={"priority": -1}),
+    Component("asset_handle_panel", asset=True, metadata={"priority": -1}),
 ]
 Camera = Annotated[
     jax.Array,

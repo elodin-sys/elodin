@@ -11,11 +11,8 @@ macro_rules! impl_primitive {
         }
 
         impl Component for $ty {
+            const NAME: &'static str = stringify!($ty);
             const ASSET: bool = false;
-
-            fn name() -> String {
-                stringify!($ty).to_string()
-            }
 
             fn component_type() -> ComponentType {
                 ComponentType {

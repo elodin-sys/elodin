@@ -116,12 +116,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         let mut entities = entities_meta
                             .iter()
                             .filter(|(_, _, values, _)| {
-                                values.0.contains_key(&WorldPos::component_id())
+                                values.0.contains_key(&WorldPos::COMPONENT_ID)
                             })
                             .collect::<Vec<_>>();
                         entities.sort_by(|a, b| a.0.cmp(b.0));
                         for (_, id, values, meta) in entities {
-                            if values.0.contains_key(&WorldPos::component_id()) {
+                            if values.0.contains_key(&WorldPos::COMPONENT_ID) {
                                 ui.selectable_value(
                                     &mut selected_parent,
                                     Some(id),

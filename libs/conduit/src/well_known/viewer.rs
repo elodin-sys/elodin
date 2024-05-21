@@ -1,7 +1,7 @@
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 
-use crate::{Asset, AssetId, ComponentId, EntityId};
+use crate::{Asset, ComponentId, EntityId};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -56,11 +56,7 @@ impl Default for Viewport {
 }
 
 impl Asset for Panel {
-    const ASSET_ID: AssetId = AssetId(2244);
-
-    fn asset_id(&self) -> AssetId {
-        Self::ASSET_ID
-    }
+    const ASSET_NAME: &'static str = "panel";
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

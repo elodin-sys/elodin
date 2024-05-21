@@ -30,8 +30,8 @@ impl Mesh {
         }
     }
 
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::Mesh::ASSET_NAME
     }
 }
 
@@ -54,8 +54,8 @@ impl Material {
             inner: conduit::well_known::Material::color(r, g, b),
         }
     }
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::Material::ASSET_NAME
     }
 }
 
@@ -94,7 +94,7 @@ impl Glb {
         Ok(PyBufBytes { bytes })
     }
 
-    pub fn asset_id(&self) -> u64 {
-        self.inner.asset_id().0
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::Glb::ASSET_NAME
     }
 }

@@ -6,6 +6,7 @@ use smallvec::smallvec;
 use std::ops::Deref;
 
 use crate::{
+    concat_str,
     types::ArchetypeName,
     well_known::{Material, Mesh, Shape},
     world::World,
@@ -80,7 +81,7 @@ impl From<ComponentType> for ArrayTy {
 
 impl<T: Component + IntoOp + 'static> Archetype for T {
     fn name() -> ArchetypeName {
-        ArchetypeName::from(T::name().as_str())
+        ArchetypeName::from(T::NAME)
     }
 
     fn components() -> Vec<Metadata> {
@@ -98,9 +99,7 @@ impl<T: Component + IntoOp + 'static> Archetype for T {
 }
 
 impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
-    fn name() -> String {
-        format!("tensor_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("tensor_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         // If T is an ArrayElement, then it's shape must be ().
         ComponentType {
@@ -111,9 +110,7 @@ impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
 }
 
 impl<T: ArrayElement + NativeType> Component for nox::Quaternion<T> {
-    fn name() -> String {
-        format!("quaternion_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("quaternion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
@@ -123,9 +120,7 @@ impl<T: ArrayElement + NativeType> Component for nox::Quaternion<T> {
 }
 
 impl<T: ArrayElement + NativeType> Component for nox::SpatialTransform<T> {
-    fn name() -> String {
-        format!("spatial_transform_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("spatial_transform_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
@@ -135,9 +130,7 @@ impl<T: ArrayElement + NativeType> Component for nox::SpatialTransform<T> {
 }
 
 impl<T: ArrayElement + NativeType> Component for nox::SpatialMotion<T> {
-    fn name() -> String {
-        format!("spatial_motion_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("spatial_motion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
@@ -147,9 +140,7 @@ impl<T: ArrayElement + NativeType> Component for nox::SpatialMotion<T> {
 }
 
 impl<T: ArrayElement + NativeType> Component for nox::SpatialInertia<T> {
-    fn name() -> String {
-        format!("spatial_inertia_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
@@ -159,9 +150,7 @@ impl<T: ArrayElement + NativeType> Component for nox::SpatialInertia<T> {
 }
 
 impl<T: ArrayElement + NativeType> Component for nox::SpatialForce<T> {
-    fn name() -> String {
-        format!("spatial_force_{}", T::PRIMITIVE_TY)
-    }
+    const NAME: &'static str = concat_str!("spatial_force_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
