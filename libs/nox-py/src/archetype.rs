@@ -1,7 +1,6 @@
 use crate::*;
 
-use conduit::AssetId;
-use nox_ecs::{conduit, ArchetypeName};
+use conduit::{ArchetypeName, AssetId};
 
 use numpy::PyUntypedArray;
 

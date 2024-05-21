@@ -3,12 +3,11 @@ use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use conduit::well_known::GizmoType;
-use conduit::ComponentId;
+use conduit::{ComponentId, PolarsWorld};
 use nox_ecs::conduit::Asset;
 use nox_ecs::{
     conduit,
     nox::{self, Noxpr},
-    polars::PolarsWorld,
     ErasedSystem, System,
 };
 use numpy::PyUntypedArray;

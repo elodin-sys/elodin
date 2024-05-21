@@ -1,5 +1,4 @@
 use arrow::array::ArrayData;
-use conduit::{ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
 use polars::prelude::*;
 use polars::{frame::DataFrame, series::Series};
 use polars_arrow::{
@@ -9,7 +8,45 @@ use polars_arrow::{
 use std::collections::HashMap;
 use std::{fs::File, path::Path};
 
-use crate::{ArchetypeName, Buffers, Error};
+use crate::world::{Buffers, ColumnRef, World};
+use crate::Error;
+use crate::{ArchetypeName, ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
+
+impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
+    pub fn series(&self) -> Result<Series, Error> {
+        to_series(self.column.as_ref(), self.metadata)
+    }
+}
+
+impl World {
+    pub fn polars(&self) -> Result<PolarsWorld, Error> {
+        PolarsWorld::new(
+            &self.component_map,
+            &self.entity_ids,
+            &self.history,
+            &self.host,
+        )
+    }
+
+    pub fn write_to_dir(&mut self, world_dir: &Path) -> Result<(), Error> {
+        self.polars()?.write_to_dir(world_dir)?;
+        let path = world_dir.join("assets.bin");
+        let file = std::fs::File::create(path)?;
+        postcard::to_io(&self.assets, file)?;
+        Ok(())
+    }
+
+    pub fn read_from_dir(world_dir: &Path) -> Result<World, Error> {
+        let assets_buf = std::fs::read(world_dir.join("assets.bin"))?;
+        let assets = postcard::from_bytes(&assets_buf)?;
+        let polars_world = PolarsWorld::read_from_dir(world_dir)?;
+        let history = polars_world.history()?;
+        let entity_ids = polars_world.entity_ids()?;
+        let component_map = polars_world.component_map();
+        let world = World::new(history, entity_ids, component_map, assets);
+        Ok(world)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PolarsWorld {
@@ -22,6 +59,7 @@ impl PolarsWorld {
         component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
         entity_ids: &ustr::UstrMap<Vec<u8>>,
         history: &[Buffers],
+        host: &Buffers,
     ) -> Result<Self, Error> {
         let metadata = component_map.iter().fold(
             ustr::UstrMap::<Vec<Metadata>>::default(),
@@ -33,7 +71,7 @@ impl PolarsWorld {
                 archetype_metadata
             },
         );
-        let ticks = history.len();
+        let ticks = history.len() + 1;
         let mut archetypes = ustr::UstrMap::default();
         for (archetype_name, components) in metadata.iter() {
             let entity_buf = &entity_ids[archetype_name];
@@ -51,6 +89,7 @@ impl PolarsWorld {
                     let component_id = metadata.component_id();
                     let buf = history
                         .iter()
+                        .chain(std::iter::once(host))
                         .map(|buffers| buffers[&component_id].as_slice())
                         .collect::<Vec<&[u8]>>()
                         .concat();
@@ -267,7 +306,7 @@ fn tensor_array(ty: &ComponentType, inner: Box<dyn Array>) -> Box<dyn Array> {
     // (data_type, Some(metadata))
 }
 
-pub trait SeriesExt {
+trait SeriesExt {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
@@ -282,155 +321,11 @@ impl SeriesExt for Series {
     }
 }
 
-pub fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
+fn recurse_array_data(array_data: &ArrayData, out: &mut Vec<u8>) {
     for child in array_data.child_data() {
         recurse_array_data(child, out)
     }
     for buffer in array_data.buffers() {
         out.extend_from_slice(buffer.as_slice())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
-        Archetype, World, WorldPos,
-    };
-    use nox::{
-        nalgebra::{self, vector},
-        SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform,
-    };
-    use polars::prelude::*;
-    use polars_arrow::array::Float64Array;
-
-    use super::*;
-
-    #[test]
-    fn test_convert_to_df() {
-        let mut world = World::default();
-
-        world.spawn(Body {
-            pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-            }),
-            vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-            accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-        });
-        let polars = world.polars().unwrap();
-        let df = polars.archetypes[&Body::name()].clone();
-        let out = df
-            .lazy()
-            .select(&[col(&WorldPos::name())])
-            .collect()
-            .unwrap();
-        let pos = out
-            .iter()
-            .next()
-            .unwrap()
-            .array()
-            .unwrap()
-            .get(0)
-            .unwrap()
-            .as_any()
-            .downcast_ref::<Float64Array>()
-            .unwrap()
-            .iter()
-            .filter_map(|f| f.copied())
-            .collect::<Vec<_>>();
-        assert_eq!(pos, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-    }
-
-    #[test]
-    fn test_write_read_file() {
-        let mut world = World::default();
-        world.spawn(Body {
-            pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-            }),
-            vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-            accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-        });
-        let mut polars = world.polars().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let dir = dir.path();
-        polars.write_to_dir(dir).unwrap();
-        let new_polars = PolarsWorld::read_from_dir(dir).unwrap();
-        assert_eq!(polars.archetypes, new_polars.archetypes);
-    }
-
-    #[test]
-    fn test_to_world() {
-        let mut world = World::default();
-
-        world.spawn(Body {
-            pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-            }),
-            vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-            accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-        });
-        let polars = world.polars().unwrap();
-        let buffers = &polars.history().unwrap()[0];
-        assert_eq!(buffers, &world.host);
-    }
-
-    #[test]
-    fn test_write_read_world() {
-        let mut world = World::default();
-        world.spawn(Body {
-            pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-            }),
-            vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-            accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
-            }),
-        });
-        let mut polars = world.polars().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let dir = dir.path();
-        polars.write_to_dir(dir).unwrap();
-        let new_polars = PolarsWorld::read_from_dir(dir).unwrap();
-        let buffers = &new_polars.history().unwrap()[0];
-        assert_eq!(buffers, &world.host);
     }
 }

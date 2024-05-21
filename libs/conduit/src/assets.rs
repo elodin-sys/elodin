@@ -1,9 +1,9 @@
+use crate::{Asset, AssetId, ComponentType};
+
 use bytes::Bytes;
-use conduit::{Asset, AssetId};
-use nox::{FromBuilder, IntoOp, Noxpr};
 use serde::{Deserialize, Serialize};
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::Component;
 
@@ -30,41 +30,24 @@ impl<T> Handle<T> {
     }
 }
 
-impl<T> IntoOp for Handle<T> {
-    fn into_op(self) -> Noxpr {
-        use nox::NoxprScalarExt;
-        self.id.constant()
-    }
-}
-
-impl<T> FromBuilder for Handle<T> {
-    type Item<'a> = Handle<T>;
-
-    fn from_builder(_builder: &nox::Builder) -> Self::Item<'_> {
-        todo!()
-    }
-}
-
-impl<T: Asset> conduit::Component for Handle<T> {
+impl<T: Asset> Component for Handle<T> {
     const ASSET: bool = true;
 
     fn name() -> String {
         format!("asset_handle_{}", T::ASSET_ID.0)
     }
 
-    fn component_type() -> conduit::ComponentType {
-        conduit::ComponentType::u64()
+    fn component_type() -> ComponentType {
+        ComponentType::u64()
     }
 }
 
-impl<T: Asset> Component for Handle<T> {}
-
-#[derive(Default, Clone, Serialize, Deserialize, Debug)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AssetStore {
     data: Vec<AssetItem>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AssetItem {
     pub generation: usize,
     pub inner: Bytes,
@@ -103,5 +86,25 @@ impl AssetStore {
     pub fn gen<C>(&self, handle: Handle<C>) -> Option<usize> {
         let val = self.data.get(handle.id as usize)?;
         Some(val.generation)
+    }
+}
+
+#[cfg(feature = "nox")]
+mod nox_impl {
+    use super::*;
+    use nox::{FromBuilder, IntoOp, Noxpr, NoxprScalarExt};
+
+    impl<T> IntoOp for Handle<T> {
+        fn into_op(self) -> Noxpr {
+            self.id.constant()
+        }
+    }
+
+    impl<T> FromBuilder for Handle<T> {
+        type Item<'a> = Handle<T>;
+
+        fn from_builder(_builder: &nox::Builder) -> Self::Item<'_> {
+            todo!()
+        }
     }
 }

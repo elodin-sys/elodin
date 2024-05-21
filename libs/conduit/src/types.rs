@@ -9,6 +9,8 @@ use smallvec::SmallVec;
 #[cfg(feature = "std")]
 use crate::query::MetadataStore;
 #[cfg(feature = "std")]
+use crate::world::World;
+#[cfg(feature = "std")]
 type HashSet<T> = std::collections::HashSet<T>;
 #[cfg(feature = "std")]
 type HashMap<K, V> = std::collections::HashMap<K, V>;
@@ -19,6 +21,8 @@ type HashMap<K, V> = std::collections::HashMap<K, V>;
 #[repr(transparent)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct EntityId(pub u64);
+
+pub type ArchetypeName = ustr::Ustr;
 
 impl EntityId {
     pub const NAME: &'static str = "entity_id";
@@ -444,6 +448,13 @@ pub trait ComponentExt: Component {
 }
 
 impl<C: Component> ComponentExt for C {}
+
+#[cfg(feature = "std")]
+pub trait Archetype {
+    fn name() -> ArchetypeName;
+    fn components() -> Vec<Metadata>;
+    fn insert_into_world(self, world: &mut World);
+}
 
 pub trait ValueRepr {
     fn component_value<'a>(&self) -> ComponentValue<'a>;

@@ -55,7 +55,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World};
+    use crate::{Archetype, Component, World, WorldExt};
     use nox::{
         nalgebra::{self, vector},
         Scalar, ScalarExt, SpatialMotion, SpatialTransform,
