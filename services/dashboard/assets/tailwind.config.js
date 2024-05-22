@@ -40,6 +40,7 @@ module.exports = {
           30: "rgba(233, 75, 20, 0.3)",
           5: "rgba(233, 75, 20, 0.05)"
         },
+        "dim-red": "rgb(36, 20, 15)",
         yellow: {
           DEFAULT: "rgb(254, 197, 4)",
           400: "#FEC504",
@@ -71,8 +72,15 @@ module.exports = {
         "primary-onyx": {
           "9": "rgba(46, 45, 44, 1)",
         },
+        "onyx": {
+          DEFAULT: "rgb(23, 22, 21)",
+          "9": "rgba(46, 45, 44, 1)",
+        },
         "primary-smoke": "rgba(13, 13, 13, 1)",
-        "slate": "rgb(127, 113, 255)"
+        "slate": "rgb(127, 113, 255)",
+        "peach": "rgb(255, 215, 179)",
+        "grey": "rgb(51, 51, 51)",
+        "bone": "rgb(228, 217, 195)"
       },
       spacing: {
         'elo-xxs': "4px",
@@ -101,7 +109,8 @@ module.exports = {
       },
       fontFamily: {
         'sans': ["IBM Plex Sans", "ui-sans-serif", "system-ui", "-apple-system", "linkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "Noto Sans", "sans-serif", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"],
-        'mono': ["IBM Plex Mono", "ui-monospace", "mono"]
+        'mono': ["IBM Plex Mono", "ui-monospace", "mono"],
+        'space': ["Space Grotesk", "sans-serif"]
       },
       screens: {
         "elo-grid-xl": "1400px",

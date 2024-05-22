@@ -20,6 +20,11 @@ impl Api {
         txn: &DatabaseTransaction,
     ) -> Result<BillingAccount, Error> {
         let billing_account_id = Uuid::now_v7();
+
+        let existing_accounts = billing_account::Entity::find()
+            .filter(billing_account::Column::OwnerUserId.eq(user.id))
+            .all(txn)
+            .await?;
         let customer = Customer::create(
             &self.stripe,
             CreateCustomer {
@@ -37,10 +42,6 @@ impl Api {
             },
         )
         .await?;
-        let existing_accounts = billing_account::Entity::find()
-            .filter(billing_account::Column::OwnerUserId.eq(user.id))
-            .all(txn)
-            .await?;
         billing_account::ActiveModel {
             id: Set(billing_account_id),
             name: Set(req.name.clone()),
@@ -56,7 +57,6 @@ impl Api {
         }
         .insert_with_event(&self.db, &self.redis)
         .await?;
-
         if existing_accounts.is_empty() {
             let trial_price = match req.trial_license_type() {
                 elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => {
@@ -102,7 +102,7 @@ impl Api {
                 billing_account_id: Set(Some(billing_account_id)),
                 ..Default::default()
             }
-            .update_with_event(txn, &self.redis)
+            .update_with_event(&self.db, &self.redis)
             .await?;
         }
 

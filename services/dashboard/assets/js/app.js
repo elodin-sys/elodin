@@ -36,7 +36,14 @@ Hooks.EditorWasmHook = {
 Hooks.FireworksHook = {
     async mounted() {
       const container = document.querySelector('#fireworks')
-      const fireworks = new Fireworks.default(container)
+      const fireworks = new Fireworks.Fireworks(container, {
+        particles: 200,
+        traceLength: 5,
+        gravity: 2,
+        mouse: {
+          move: true,
+        }
+      })
       fireworks.start()
     }
 }

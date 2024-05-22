@@ -2,6 +2,7 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 @import "../../deps/live_monaco_editor/priv/static/live_monaco_editor.min.css";
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap');
 
 /* This file is for your main application CSS */
 
@@ -54,7 +55,7 @@ html, body, [data-phx-main], main {
   font-family: 'IBM Plex Sans';
   font-style: normal;
   font-weight: 500;
-  src: url(/fonts/IBMPlexSans-Bold.ttf);
+  src: url(/fonts/IBMPlexSans-Medium.ttf);
 }
 
 @font-face {
@@ -68,7 +69,7 @@ html, body, [data-phx-main], main {
   font-family: 'IBM Plex Mono';
   font-style: normal;
   font-weight: 400;
-  font-feature-settings: “ss04” 1;
+  font-feature-settings: "ss04" 1;
   src: url(/fonts/IBMPlexMono-Regular.ttf);
 }
 
@@ -76,7 +77,7 @@ html, body, [data-phx-main], main {
   font-family: 'IBM Plex Mono';
   font-style: normal;
   font-weight: 500;
-  font-feature-settings: “ss04” 1;
+  font-feature-settings: "ss04" 1;
   src: url(/fonts/IBMPlexMono-Medium.ttf);
 }
 
@@ -86,4 +87,41 @@ html, body, [data-phx-main], main {
   font-weight: 600;
   font-feature-settings: "ss04" 1;
   src: url(/fonts/IBMPlexMono-SemiBold.ttf);
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-feature-settings: "ss04" 1;
+  src: url(/fonts/IBMPlexMono-Bold.ttf);
+}
+
+
+.display-on-hover {
+  overflow: hidden;
+}
+.display-on-hover a {
+  width: 0;
+  height: 18px;
+  box-sizing: border-box;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.display-on-hover:hover a {
+  display: flex;
+  width: 205px;
+}
+
+.display-on-hover:hover svg {
+  display: none;
+}
+
+#fireworks canvas {
+  mask-image: url(/images/o-logo.svg);
+  -webkit-mask-image: url(/images/o-logo.svg);
+  background-color: black;
+  mask-repeat: no-repeat;
+  mask-size: 300px 375.652px;
 }
