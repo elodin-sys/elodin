@@ -146,11 +146,12 @@ impl From<Integrator> for nox_ecs::Integrator {
 #[pyo3(signature = (time_step, sys = None, integrator = Integrator::Rk4))]
 pub fn six_dof(time_step: f64, sys: Option<PyObject>, integrator: Integrator) -> RustSystem {
     let integrator = integrator.into();
-    let sys: Arc<dyn System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
-        nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step, integrator)
-    } else {
-        nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
-    };
+    let sys: Arc<dyn System<nox_ecs::PipelineBuilder, Arg = (), Ret = ()> + Send + Sync> =
+        if let Some(sys) = sys {
+            nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step, integrator)
+        } else {
+            nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
+        };
     RustSystem { inner: sys }
 }
 

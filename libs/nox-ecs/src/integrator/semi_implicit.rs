@@ -1,4 +1,4 @@
-use crate::{ComponentGroup, ErasedSystem, IntoSystem, Query};
+use crate::{ComponentGroup, ErasedSystem, IntoSystem, PipelineBuilder, Query};
 use crate::{System, SystemParam};
 use nox::IntoOp;
 use std::ops::Add;
@@ -13,11 +13,13 @@ use std::ops::Mul;
 /// $$\frac{dx}{dt} = v_{t+1}$$
 ///
 /// If for whatever reason that assumption doesn't hold for you, you might have to use another integrator.
-pub fn semi_implicit_euler_with_dt<X, V, A>(dt: f64) -> impl System<Arg = (), Ret = ()>
+pub fn semi_implicit_euler_with_dt<X, V, A>(
+    dt: f64,
+) -> impl System<PipelineBuilder, Arg = (), Ret = ()>
 where
-    Query<X>: SystemParam<Item = Query<X>> + Clone,
-    Query<V>: SystemParam<Item = Query<V>> + Clone,
-    Query<A>: SystemParam<Item = Query<A>> + Clone,
+    Query<X>: SystemParam<PipelineBuilder, Item = Query<X>> + Clone,
+    Query<V>: SystemParam<PipelineBuilder, Item = Query<V>> + Clone,
+    Query<A>: SystemParam<PipelineBuilder, Item = Query<A>> + Clone,
     X: Add<V, Output = X> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = X>,
     V: Add<A, Output = V> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = V>,
     A: ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = A>,
@@ -38,11 +40,11 @@ where
 /// $$\frac{dx}{dt} = v_{t+1}$$
 ///
 /// If for whatever reason that assumption doesn't hold for you, you might have to use another integrator.
-pub fn semi_implicit_euler<X, V, A>() -> impl System<Arg = (), Ret = ()>
+pub fn semi_implicit_euler<X, V, A>() -> impl System<PipelineBuilder, Arg = (), Ret = ()>
 where
-    Query<X>: SystemParam<Item = Query<X>> + Clone,
-    Query<V>: SystemParam<Item = Query<V>> + Clone,
-    Query<A>: SystemParam<Item = Query<A>> + Clone,
+    Query<X>: SystemParam<PipelineBuilder, Item = Query<X>> + Clone,
+    Query<V>: SystemParam<PipelineBuilder, Item = Query<V>> + Clone,
+    Query<A>: SystemParam<PipelineBuilder, Item = Query<A>> + Clone,
     X: Add<V, Output = X> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = X>,
     V: Add<A, Output = V> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = V>,
     A: ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = A>,

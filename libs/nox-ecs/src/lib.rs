@@ -1,7 +1,7 @@
 extern crate self as nox_ecs;
 
 use conduit::well_known::{Material, Mesh};
-use conduit::{Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle};
+use conduit::{Archetype, Builder, ComponentExt, ComponentId, ComponentType, EntityId, Handle};
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
 use profile::Profiler;
@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::iter::once;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -31,7 +30,9 @@ pub mod graph;
 pub mod six_dof;
 
 pub use component::*;
-pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
+pub use conduit::{
+    Buffers, ColumnRef, Entity, IntoSystem, Pipe, PolarsWorld, System, SystemParam, TimeStep, World,
+};
 pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use integrator::*;
@@ -102,7 +103,7 @@ impl<T: conduit::Component + FromOp> ComponentArray<T> {
     }
 }
 
-impl<T: conduit::Component + 'static> SystemParam for ComponentArray<T> {
+impl<T: conduit::Component + 'static> SystemParam<PipelineBuilder> for ComponentArray<T> {
     type Item = ComponentArray<T>;
 
     fn init(builder: &mut PipelineBuilder) -> Result<(), Error> {
@@ -209,242 +210,8 @@ impl PipelineBuilder {
     }
 }
 
-pub trait SystemParam {
-    type Item;
-
-    fn init(builder: &mut PipelineBuilder) -> Result<(), Error>;
-    fn from_builder(builder: &PipelineBuilder) -> Self::Item;
-    fn insert_into_builder(self, builder: &mut PipelineBuilder);
-}
-
-pub trait IntoSystem<Marker, Arg, Ret> {
-    type System: System<Arg = Arg, Ret = Ret>;
-    fn into_system(self) -> Self::System;
-    fn pipe<M2, A2, R2, B: IntoSystem<M2, A2, R2>>(self, other: B) -> Pipe<Self::System, B::System>
-    where
-        Self: Sized,
-    {
-        Pipe {
-            a: self.into_system(),
-            b: other.into_system(),
-        }
-    }
-
-    fn world(self) -> WorldBuilder<Self::System>
-    where
-        Self: Sized,
-        Self::System: Sized,
-    {
-        WorldBuilder::default().tick_pipeline(self.into_system())
-    }
-}
-
-pub trait System {
-    type Arg;
-    type Ret;
-
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error>;
-}
-
-impl<Sys: System> System for Arc<Sys> {
-    type Arg = Sys::Arg;
-    type Ret = Sys::Arg;
-
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.as_ref().add_to_builder(builder)
-    }
-
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.as_ref().init_builder(builder)
-    }
-}
-
-impl System for Arc<dyn System<Arg = (), Ret = ()> + Send + Sync> {
-    type Arg = ();
-    type Ret = ();
-
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.as_ref().add_to_builder(builder)
-    }
-
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.as_ref().init_builder(builder)
-    }
-}
-
-pub struct SystemFn<M, F> {
-    func: F,
-    phantom_data: PhantomData<M>,
-}
-
-macro_rules! impl_system_param {
-      ($($ty:tt),+) => {
-          #[allow(non_snake_case)]
-          impl< $($ty,)* > SystemParam for ($($ty,)*)
-            where $($ty: SystemParam,)*
-          {
-            type Item = ($($ty::Item,)*);
-
-            fn init(builder: &mut PipelineBuilder) -> Result<(), Error> {
-                $(
-                    $ty::init(builder)?;
-                )*
-                Ok(())
-            }
-
-            fn from_builder(builder: &PipelineBuilder) -> Self::Item {
-                ($(
-                    $ty::from_builder(builder),
-                )*)
-            }
-
-            fn insert_into_builder(self, builder: &mut PipelineBuilder) {
-                let ($($ty,)*) = self;
-                $(
-                    $ty.insert_into_builder(builder);
-                )*
-            }
-          }
-
-
-            impl<$($ty,)* Ret, F> IntoSystem<F, ($($ty,)*), Ret> for F
-            where
-                F: Fn($($ty,)*) -> Ret,
-                F: for<'a> Fn($($ty::Item, )*) -> Ret,
-                $($ty: SystemParam,)*
-                Ret: SystemParam,
-            {
-                type System = SystemFn<($($ty,)* Ret,), F>;
-                fn into_system(self) -> Self::System {
-                    SystemFn {
-                        func: self,
-                        phantom_data: PhantomData,
-                    }
-                }
-            }
-
-
-            impl<$($ty,)* Ret, F> System for SystemFn<($($ty,)* Ret,), F>
-            where
-                F: Fn($($ty,)*) -> Ret,
-                F: for<'a> Fn($($ty::Item, )*) -> Ret,
-                $($ty: SystemParam,)*
-                Ret: SystemParam,
-            {
-                type Arg = ($($ty,)*);
-                type Ret = Ret;
-                fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-                    $(
-                        $ty::init(builder)?;
-                    )*
-                    Ok(())
-                }
-                fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-                    let ret = (self.func)(
-                        $(
-                            $ty::from_builder(builder),
-                        )*
-                    );
-                    ret.insert_into_builder(builder);
-                    Ok(())
-                }
-            }
-
-      }
- }
-
-impl_system_param!(T1);
-impl_system_param!(T1, T2);
-impl_system_param!(T1, T2, T3);
-impl_system_param!(T1, T2, T3, T4);
-impl_system_param!(T1, T2, T3, T4, T5);
-impl_system_param!(T1, T2, T3, T4, T5, T6);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17);
-impl_system_param!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18);
-
-impl<Ret, F> System for SystemFn<(Ret,), F>
-where
-    F: Fn() -> Ret,
-    Ret: SystemParam,
-{
-    type Arg = ();
-    type Ret = Ret;
-
-    fn init_builder(&self, _: &mut PipelineBuilder) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        let ret = (self.func)();
-        ret.insert_into_builder(builder);
-        Ok(())
-    }
-}
-
-struct FnMarker;
-
-impl<Ret, F> IntoSystem<FnMarker, (), Ret> for F
-where
-    F: Fn() -> Ret,
-    Ret: SystemParam,
-{
-    type System = SystemFn<(Ret,), F>;
-
-    fn into_system(self) -> Self::System {
-        SystemFn {
-            func: self,
-            phantom_data: PhantomData,
-        }
-    }
-}
-
-pub struct SysMarker<S>(S);
-
-impl<Arg, Ret, Sys> IntoSystem<SysMarker<Sys>, Arg, Ret> for Sys
-where
-    Sys: System<Arg = Arg, Ret = Ret>,
-{
-    type System = Sys;
-
-    fn into_system(self) -> Self::System {
-        self
-    }
-}
-
-pub struct Pipe<A: System, B: System> {
-    a: A,
-    b: B,
-}
-
-impl<A: System, B: System> Pipe<A, B> {
-    pub fn new(a: A, b: B) -> Self {
-        Self { a, b }
-    }
-}
-
-impl<A: System, B: System> System for Pipe<A, B> {
-    type Arg = (A::Arg, B::Arg);
-    type Ret = (A::Ret, B::Ret);
-
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.a.add_to_builder(builder)?;
-        self.b.add_to_builder(builder)
-    }
-
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.a.init_builder(builder)?;
-        self.b.init_builder(builder)
-    }
+impl Builder for PipelineBuilder {
+    type Error = Error;
 }
 
 pub trait WorldExt {
@@ -475,15 +242,15 @@ impl Default for WorldBuilder {
 
 impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
 where
-    Sys: System,
-    StartupSys: System,
+    Sys: System<PipelineBuilder>,
+    StartupSys: System<PipelineBuilder>,
 {
     pub fn world(mut self, world: World) -> Self {
         self.world = world;
         self
     }
 
-    pub fn tick_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+    pub fn tick_pipeline<M, A, R, N: IntoSystem<PipelineBuilder, M, A, R>>(
         self,
         pipe: N,
     ) -> WorldBuilder<N::System, StartupSys> {
@@ -494,7 +261,7 @@ where
         }
     }
 
-    pub fn startup_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+    pub fn startup_pipeline<M, A, R, N: IntoSystem<PipelineBuilder, M, A, R>>(
         self,
         startup: N,
     ) -> WorldBuilder<Sys, N::System> {
@@ -536,11 +303,33 @@ where
     }
 }
 
+pub trait IntoSystemExt<Marker, Arg, Ret> {
+    type System;
+    fn world(self) -> WorldBuilder<Self::System>
+    where
+        Self: Sized,
+        Self::System: Sized;
+}
+
+impl<S: IntoSystem<PipelineBuilder, Marker, Arg, Ret>, Marker, Arg, Ret>
+    IntoSystemExt<Marker, Arg, Ret> for S
+{
+    type System = <Self as IntoSystem<PipelineBuilder, Marker, Arg, Ret>>::System;
+
+    fn world(self) -> WorldBuilder<Self::System>
+    where
+        Self: Sized,
+        Self::System: Sized,
+    {
+        WorldBuilder::default().tick_pipeline(self.into_system())
+    }
+}
+
 pub trait SystemExt {
     fn build(self, world: &mut World) -> Result<Exec, Error>;
 }
 
-impl<S: System> SystemExt for S {
+impl<S: System<PipelineBuilder>> SystemExt for S {
     fn build(self, world: &mut World) -> Result<Exec, Error> {
         let owned_world = std::mem::take(world);
         let mut builder = PipelineBuilder {
@@ -823,19 +612,7 @@ impl<C: Component> ComponentArray<C> {
     }
 }
 
-impl System for () {
-    type Arg = ();
-    type Ret = ();
-    fn add_to_builder(&self, _builder: &mut PipelineBuilder) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn init_builder(&self, _builder: &mut PipelineBuilder) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
-impl SystemParam for () {
+impl SystemParam<PipelineBuilder> for () {
     type Item = ();
 
     fn init(_builder: &mut PipelineBuilder) -> Result<(), Error> {
@@ -861,9 +638,9 @@ impl<Sys, Arg, Ret> ErasedSystem<Sys, Arg, Ret> {
     }
 }
 
-impl<Sys, Arg, Ret> System for ErasedSystem<Sys, Arg, Ret>
+impl<Sys, Arg, Ret> System<PipelineBuilder> for ErasedSystem<Sys, Arg, Ret>
 where
-    Sys: System<Arg = Arg, Ret = Ret>,
+    Sys: System<PipelineBuilder, Arg = Arg, Ret = Ret>,
 {
     type Arg = ();
     type Ret = ();
@@ -874,28 +651,6 @@ where
 
     fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
         self.system.init_builder(builder)
-    }
-}
-
-pub struct JoinSystem {
-    systems: Vec<Box<dyn System<Arg = (), Ret = ()>>>,
-}
-
-impl System for JoinSystem {
-    type Arg = ();
-    type Ret = ();
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        for system in &self.systems {
-            system.add_to_builder(builder)?;
-        }
-        Ok(())
-    }
-
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        for system in &self.systems {
-            system.init_builder(builder)?;
-        }
-        Ok(())
     }
 }
 

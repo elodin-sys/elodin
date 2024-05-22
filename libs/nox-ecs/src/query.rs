@@ -1,4 +1,4 @@
-use crate::{Component, ComponentArray, ComponentExt, Error, SystemParam};
+use crate::{Component, ComponentArray, ComponentExt, Error, PipelineBuilder, SystemParam};
 use conduit::{ComponentId, ComponentType, EntityId};
 use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
 use smallvec::{smallvec, SmallVec};
@@ -108,7 +108,7 @@ macro_rules! impl_group {
 impl<T> ComponentGroup for T
 where
     T: Component,
-    ComponentArray<T>: SystemParam<Item = ComponentArray<T>>,
+    ComponentArray<T>: SystemParam<PipelineBuilder, Item = ComponentArray<T>>,
 {
     type Params = T;
 
@@ -154,7 +154,7 @@ impl_group!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_group!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_group!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
-impl<G: ComponentGroup> SystemParam for Query<G> {
+impl<G: ComponentGroup> SystemParam<PipelineBuilder> for Query<G> {
     type Item = Self;
 
     fn init(builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
@@ -409,7 +409,7 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, IntoSystem};
+    use crate::{Archetype, IntoSystemExt};
     use nox::{Scalar, ScalarExt};
     use nox_ecs_macros::{ComponentGroup, FromBuilder};
 

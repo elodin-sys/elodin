@@ -8,7 +8,7 @@ pub struct PySystem {
     pub sys: PyObject,
 }
 
-impl System for PySystem {
+impl System<nox_ecs::PipelineBuilder> for PySystem {
     type Arg = ();
 
     type Ret = ();
@@ -47,7 +47,7 @@ impl System for PySystem {
 #[pyclass]
 #[derive(Clone)]
 pub struct RustSystem {
-    pub inner: Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>,
+    pub inner: Arc<dyn System<nox_ecs::PipelineBuilder, Arg = (), Ret = ()> + Send + Sync>,
 }
 
 #[pymethods]
@@ -71,7 +71,7 @@ impl RustSystem {
     }
 }
 
-impl System for RustSystem {
+impl System<nox_ecs::PipelineBuilder> for RustSystem {
     type Arg = ();
 
     type Ret = ();
