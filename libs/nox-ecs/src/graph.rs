@@ -3,7 +3,7 @@ use conduit::{ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{Component, ComponentArray, ComponentGroup, Query, SystemParam};
+use crate::{Component, ComponentArray, ComponentGroup, PipelineBuilder, Query, SystemParam};
 
 #[derive(Clone)]
 pub struct GraphQuery<E> {
@@ -92,7 +92,7 @@ impl EdgeComponent for Edge {
 
 pub struct TotalEdge;
 
-impl<E: EdgeComponent + 'static> SystemParam for GraphQuery<E> {
+impl<E: EdgeComponent + 'static> SystemParam<PipelineBuilder> for GraphQuery<E> {
     type Item = Self;
 
     fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
@@ -120,7 +120,7 @@ impl<E: EdgeComponent + 'static> SystemParam for GraphQuery<E> {
     fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
 }
 
-impl SystemParam for GraphQuery<TotalEdge> {
+impl SystemParam<PipelineBuilder> for GraphQuery<TotalEdge> {
     type Item = Self;
 
     fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
@@ -274,7 +274,7 @@ mod tests {
 
     use nox::{Scalar, ScalarExt};
 
-    use crate::IntoSystem;
+    use crate::IntoSystemExt;
 
     use super::*;
 
