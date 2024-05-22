@@ -1,4 +1,4 @@
-use crate::{ComponentGroup, Error, Query};
+use crate::{ComponentGroup, Error, PipelineBuilder, Query};
 use crate::{IntoSystem, System, SystemParam};
 use nox::IntoOp;
 use std::ops::Add;
@@ -32,7 +32,7 @@ pub trait Rk4Ext {
 
 impl<Sys> Rk4Ext for Sys
 where
-    Sys: System,
+    Sys: System<PipelineBuilder>,
 {
     fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
     where
@@ -49,14 +49,14 @@ where
     }
 }
 
-impl<Pipe, U, DU> System for Rk4<U, DU, Pipe>
+impl<Pipe, U, DU> System<PipelineBuilder> for Rk4<U, DU, Pipe>
 where
-    Query<U>: SystemParam<Item = Query<U>> + Clone,
-    Query<DU>: SystemParam<Item = Query<DU>> + Clone,
+    Query<U>: SystemParam<PipelineBuilder, Item = Query<U>> + Clone,
+    Query<DU>: SystemParam<PipelineBuilder, Item = Query<DU>> + Clone,
     U: Add<DU, Output = U> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = U>,
     DU: Add<DU, Output = DU> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = DU>,
     f64: Mul<DU, Output = DU>,
-    Pipe: System,
+    Pipe: System<PipelineBuilder>,
 {
     type Arg = Pipe::Arg;
     type Ret = Pipe::Ret;
