@@ -5,7 +5,10 @@ use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 use std::sync::Arc;
 
-use crate::{semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, Rk4Ext, Time};
+use crate::{
+    semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, PipelineBuilder, Rk4Ext,
+    Time,
+};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -112,7 +115,7 @@ pub struct Body {
     pub mass: Inertia,
 }
 
-pub fn advance_time(time_step: f64) -> impl System {
+pub fn advance_time(time_step: f64) -> impl System<PipelineBuilder> {
     let increment_time = move |query: ComponentArray<Time>| -> ComponentArray<Time> {
         query.map(|time: Time| Time(time.0 + time_step)).unwrap()
     };
@@ -123,13 +126,13 @@ pub fn six_dof<Sys, M, A, R>(
     effectors: impl FnOnce() -> Sys,
     time_step: f64,
     integrator: Integrator,
-) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
+) -> Arc<dyn System<PipelineBuilder, Arg = (), Ret = ()> + Send + Sync>
 where
     M: 'static,
     A: 'static,
     R: 'static,
-    Sys: IntoSystem<M, A, R> + 'static,
-    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
+    Sys: IntoSystem<PipelineBuilder, M, A, R> + 'static,
+    <Sys as IntoSystem<PipelineBuilder, M, A, R>>::System: Send + Sync,
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
     match integrator {
