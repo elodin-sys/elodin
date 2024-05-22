@@ -3,6 +3,30 @@ defmodule ElodinDashboardWeb.IconComponents do
 
   attr(:class, :string, default: "")
 
+  attr(:rest, :global)
+
+  def ologo(assigns) do
+    ~H"""
+    <div class={["w-[24px] height-[24px]", @class]}>
+      <svg
+        class="w-full h-full"
+        width="21"
+        height="26"
+        viewBox="0 0 21 26"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M10.5172 0.5H15.5172C18.2787 0.5 20.5172 2.73858 20.5172 5.5V20.5001C20.5172 23.2615 18.2787 25.5001 15.5172 25.5001H5.51724C2.75577 25.5001 0.517242 23.2615 0.517242 20.5V5.5C0.517242 2.73858 2.75577 0.500002 5.51724 0.500002V5.5V20.5001H15.5172V5.5L5.51724 5.5C5.51724 2.73858 7.75577 0.5 10.5172 0.5Z"
+          fill="currentColor"
+        />
+      </svg>
+    </div>
+    """
+  end
+
+  attr(:class, :string, default: "")
+
   def arrow_left(assigns) do
     ~H"""
     <img src="/images/arrow-left.svg" class={["w-[24px] height-[24px]", @class]} />
@@ -15,7 +39,16 @@ defmodule ElodinDashboardWeb.IconComponents do
 
   def spinner(assigns) do
     ~H"""
-    <img src="/images/spinner.svg" class={["w-[24px] height-[24px]", @class]} {@rest} />
+    <div class={["w-[24px] height-[24px]", @class]}>
+      <svg class="w-full h-full" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          fill-rule="evenodd"
+          clip-rule="evenodd"
+          d="M19.5 11C19.5 15.6944 15.6944 19.5 11 19.5C6.30558 19.5 2.5 15.6944 2.5 11C2.5 6.30558 6.30558 2.5 11 2.5V0C4.92487 0 0 4.92487 0 11C0 17.0751 4.92487 22 11 22C17.0751 22 22 17.0751 22 11H19.5Z"
+          fill="currentColor"
+        />
+      </svg>
+    </div>
     """
   end
 

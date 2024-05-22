@@ -330,6 +330,25 @@ defmodule ElodinDashboardWeb.CoreComponents do
     """
   end
 
+  def button(%{type: "crema", class: class} = assigns) do
+    ~H"""
+    <button
+      class={[
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-crema border-opacity-40 p-[12px] ",
+        "transition-all",
+        "bg-opacity-5 bg-crema",
+        "hover:bg-opacity-10 hover:border-opacity-45",
+        "active:brightness-75",
+        "text-[12px] leading-[8px] font-semibold text-crema",
+        @class
+      ]}
+      {@rest}
+    >
+      <%= render_slot(@inner_block) %>
+    </button>
+    """
+  end
+
   def button(%{type: "invert"} = assigns) do
     ~H"""
     <button
