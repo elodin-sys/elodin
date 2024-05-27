@@ -1,7 +1,8 @@
 //! Defines the `Field` trait for scalar operations and constants, supporting basic arithmetic, matrix multiplication, and associated utilities for numerical types.
-use std::ops::{Add, Div, Mul, Sub};
+use std::marker::PhantomData;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{Scalar, TensorItem};
+use crate::{Repr, Scalar, TensorItem};
 
 /// Represents a mathematical field, supporting basic arithmetic operations,
 /// matrix multiplication, and the generation of standard constants.
@@ -15,17 +16,17 @@ pub trait Field:
     + MatMul
 {
     /// Returns a scalar tensor representing the additive identity (zero).
-    fn zero() -> Scalar<Self>
+    fn zero<R: Repr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
     /// Returns a scalar tensor representing the multiplicative identity (one).
-    fn one() -> Scalar<Self>
+    fn one<R: Repr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
     /// Returns a scalar tensor representing the integer two.
-    fn two() -> Scalar<Self>
+    fn two<R: Repr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
@@ -45,22 +46,58 @@ pub trait Field:
         Self: Sized;
 }
 
+pub trait RealField: Field + Neg<Output = Self> {
+    fn sqrt(self) -> Self;
+    fn cos(self) -> Self;
+    fn sin(self) -> Self;
+}
+
+macro_rules! impl_real_field {
+    ($t:ty) => {
+        impl RealField for $t {
+            fn sqrt(self) -> Self {
+                self.sqrt()
+            }
+
+            fn cos(self) -> Self {
+                self.cos()
+            }
+
+            fn sin(self) -> Self {
+                self.sin()
+            }
+        }
+    };
+}
+
+impl_real_field!(f32);
+impl_real_field!(f64);
+
 macro_rules! impl_real_closed_field {
     ($t:ty, $zero:tt, $one:tt, $two:tt) => {
         impl Field for $t {
-            fn zero() -> Scalar<Self> {
-                use crate::ConstantExt;
-                $zero.constant()
+            fn zero<R: Repr>() -> Scalar<Self, R> {
+                let inner = R::scalar_from_const($zero);
+                Scalar {
+                    inner,
+                    phantom: PhantomData,
+                }
             }
 
-            fn one() -> Scalar<Self> {
-                use crate::ConstantExt;
-                $one.constant()
+            fn one<R: Repr>() -> Scalar<Self, R> {
+                let inner = R::scalar_from_const($one);
+                Scalar {
+                    inner,
+                    phantom: PhantomData,
+                }
             }
 
-            fn two() -> Scalar<Self> {
-                use crate::ConstantExt;
-                $one.constant()
+            fn two<R: Repr>() -> Scalar<Self, R> {
+                let inner = R::scalar_from_const($two);
+                Scalar {
+                    inner,
+                    phantom: PhantomData,
+                }
             }
 
             fn zero_prim() -> Self {
@@ -72,7 +109,7 @@ macro_rules! impl_real_closed_field {
             }
 
             fn two_prim() -> Self {
-                $one
+                $two
             }
         }
     };
