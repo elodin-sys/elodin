@@ -77,8 +77,7 @@ impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
 
     /// Creates a spatial transform from a quaternion.
     pub fn from_angular(angular: impl Into<Quaternion<T, R>>) -> Self {
-        let zero = T::zero::<R>().broadcast::<Const<3>>();
-        Self::new(angular, zero)
+        SpatialTransform::new(angular, Tensor::zeros())
     }
 
     /// Creates a spatial transform from a linear vector.
@@ -96,9 +95,7 @@ impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
 
     /// Creates a zero spatial transform.
     pub fn zero() -> Self {
-        SpatialTransform {
-            inner: Tensor::zeros(),
-        }
+        SpatialTransform::from_linear(Tensor::zeros())
     }
 }
 
