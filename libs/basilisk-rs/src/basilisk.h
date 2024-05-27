@@ -1,5 +1,6 @@
 #include "fswAlgorithms/attControl/mrpSteering/mrpSteering.h"
 #include "fswAlgorithms/attControl/mrpFeedback/mrpFeedback.h"
+#include "fswAlgorithms/attControl/mrpPD/mrpPD.h"
 #include "cMsgCInterface/RWSpeedMsg_C.h"
 #include "cMsgCInterface/RWAvailabilityMsg_C.h"
 #include "cMsgCInterface/RWArrayConfigMsg_C.h"

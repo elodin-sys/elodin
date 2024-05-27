@@ -22,3 +22,6 @@ cc = "1.0.97"
 
 [dev-dependencies]
 approx = "0.5.1"
+roci.path = "../roci"
+roci-macros.path = "../roci/macros"
+tracing-subscriber = "0.3"
