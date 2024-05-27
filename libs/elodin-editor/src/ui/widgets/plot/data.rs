@@ -246,7 +246,7 @@ impl LineData {
     }
 
     fn push_avg(&mut self, tick: usize, value: f64) {
-        if tick >= self.current_range.end + 100 || tick <= self.current_range.start {
+        if tick >= self.averaged_range.end + 200 || tick <= self.current_range.start {
             return;
         }
         let Some(tick) = tick.checked_sub(self.current_range.start) else {
@@ -279,12 +279,11 @@ impl LineData {
             if self.averaged_data[tick].is_nan() {
                 panic!("nan");
             }
-            self.averaged_data[tick] += value as f32;
-            self.averaged_count[tick] += 1;
-        }
-        if self.averaged_count[tick] as usize == self.chunk_size {
-            self.averaged_data[tick] /= self.averaged_count[tick] as f32;
-            self.averaged_count[tick] = 0;
+            let new_count = self.averaged_count[tick] + 1;
+            self.averaged_data[tick] = (self.averaged_data[tick] * averaged_count as f32
+                + value as f32)
+                / new_count as f32;
+            self.averaged_count[tick] = new_count;
         }
         self.averaged_range = self.current_range.clone();
     }
