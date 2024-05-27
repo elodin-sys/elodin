@@ -1,11 +1,16 @@
 //! Provides abstractions for rigid body dynamics in 3D space.
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
+use crate::Field;
 use crate::FixedSliceExt;
+use crate::FromOp;
+use crate::Noxpr;
+use crate::Op;
 use crate::RealField;
+use crate::Repr;
 use crate::Tensor;
 use crate::TensorItem;
-use crate::{Quaternion, Scalar, Vector};
+use crate::{Builder, FromBuilder, Quaternion, Scalar, Vector};
 use nalgebra::Const;
 use nox_ecs_macros::{FromBuilder, FromOp, IntoOp};
 use std::ops::Div;
@@ -14,36 +19,90 @@ use xla::ArrayElement;
 use xla::NativeType;
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
-#[derive(FromBuilder, IntoOp, Clone, Debug, FromOp)]
-pub struct SpatialTransform<T: TensorItem> {
-    pub inner: Vector<T, 7>,
+pub struct SpatialTransform<T: TensorItem, R: Repr = Op> {
+    pub inner: Vector<T, 7, R>,
 }
 
-impl<T: TensorItem + RealField> SpatialTransform<T> {
+impl<T: TensorItem> Clone for SpatialTransform<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T: TensorItem> FromOp for SpatialTransform<T, Op> {
+    fn from_op(op: Noxpr) -> Self {
+        Self {
+            inner: Vector::from_op(op),
+        }
+    }
+}
+
+impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialTransform<T, Op> {
+    type Item<'a> = Self;
+
+    fn from_builder(builder: &Builder) -> Self::Item<'_> {
+        Self {
+            inner: Vector::from_builder(builder),
+        }
+    }
+}
+
+impl<T: Field, R: Repr> std::fmt::Debug for SpatialTransform<T, R>
+where
+    R::Inner<T, Const<7>>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SpatialTransform")
+            .field(&self.inner)
+            .finish()
+    }
+}
+
+impl<T: TensorItem> crate::IntoOp for SpatialTransform<T> {
+    fn into_op(self) -> Noxpr {
+        self.inner.into_op()
+    }
+}
+
+impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
     /// Constructs a new spatial transform from an angular component (Quaternion) and a linear component (Vector).
-    pub fn new(angular: impl Into<Quaternion<T>>, linear: impl Into<Vector<T, 3>>) -> Self {
+    pub fn new(angular: impl Into<Quaternion<T, R>>, linear: impl Into<Vector<T, 3, R>>) -> Self {
         let angular = angular.into();
         let linear = linear.into();
         let inner = angular.0.concat(linear);
-        SpatialTransform { inner }
+        Self { inner }
     }
 
     /// Creates a spatial transform from a quaternion.
-    pub fn from_angular(angular: impl Into<Quaternion<T>>) -> Self {
-        let zero = T::zero().broadcast::<Const<3>>();
-        SpatialTransform::new(angular, zero)
+    pub fn from_angular(angular: impl Into<Quaternion<T, R>>) -> Self {
+        let zero = T::zero::<R>().broadcast::<Const<3>>();
+        Self::new(angular, zero)
     }
 
     /// Creates a spatial transform from a linear vector.
-    pub fn from_linear(linear: impl Into<Vector<T, 3>>) -> Self {
-        SpatialTransform::new(Quaternion::identity(), linear)
+    pub fn from_linear(linear: impl Into<Vector<T, 3, R>>) -> Self {
+        Self::new(Quaternion::identity(), linear)
     }
 
     /// Creates a spatial transform from an axis and angle.
-    pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
+    pub fn from_axis_angle(
+        axis: impl Into<Vector<T, 3, R>>,
+        angle: impl Into<Scalar<T, R>>,
+    ) -> Self {
         Self::from_angular(Quaternion::from_axis_angle(axis, angle))
     }
 
+    /// Creates a zero spatial transform.
+    pub fn zero() -> Self {
+        SpatialTransform {
+            inner: Tensor::zeros(),
+        }
+    }
+}
+
+impl<T: TensorItem + RealField> SpatialTransform<T> {
     /// Gets the angular part of the spatial transform as a quaternion.
     pub fn angular(&self) -> Quaternion<T> {
         Quaternion(self.inner.fixed_slice(&[0]))
@@ -52,13 +111,6 @@ impl<T: TensorItem + RealField> SpatialTransform<T> {
     /// Gets the linear part of the spatial transform as a vector with shape (3,).
     pub fn linear(&self) -> Vector<T, 3> {
         self.inner.fixed_slice(&[4])
-    }
-
-    /// Creates a zero spatial transform.
-    pub fn zero() -> Self {
-        SpatialTransform {
-            inner: Tensor::zeros(),
-        }
     }
 }
 

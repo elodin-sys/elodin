@@ -187,6 +187,7 @@ def test_six_dof_ang_vel_int():
     for _ in range(120):
         exec.run()
     x = exec.column_array(Component.id(WorldPos))
+    # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
         np.array([0.0, 0.0, 0.479425538604203, 0.8775825618903728, 0.0, 0.0, 0.0]),
@@ -206,6 +207,7 @@ def test_six_dof_ang_vel_int():
     for _ in range(120):
         exec.run()
     x = exec.column_array(Component.id(WorldPos))
+    # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
         np.array([0.0, 0.479425538604203, 0.0, 0.8775825618903728, 0.0, 0.0, 0.0]),
@@ -226,13 +228,14 @@ def test_six_dof_ang_vel_int():
         exec.run()
     x = exec.column_array(Component.id(WorldPos))
     print(x.to_numpy()[0])
+    # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
         np.array(
             [0.45936268493243, 0.45936268493243, 0.0, 0.76024459707606, 0.0, 0.0, 0.0]
         ),
         rtol=1e-5,
-    ).all()  # value taken from simulink
+    ).all()
 
 
 def test_six_dof_torque():

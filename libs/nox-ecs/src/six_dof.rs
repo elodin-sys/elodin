@@ -144,3 +144,72 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::World;
+    use crate::WorldExt;
+    use conduit::ComponentId;
+    use nox::nalgebra;
+    use nox::nalgebra::vector;
+    use nox::LocalBackend;
+    use nox::SpatialTransform;
+
+    #[test]
+    fn test_six_dof_ang_vel() {
+        let mut world = World::default();
+        world.spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        });
+
+        let time_step = 1.0 / 120.0;
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world
+            .builder()
+            .tick_pipeline(six_dof(|| (), time_step, Integrator::Rk4))
+            .time_step(std::time::Duration::from_secs_f64(time_step))
+            .build()
+            .unwrap()
+            .compile(client)
+            .unwrap();
+        for _ in 0..120 {
+            exec.run().unwrap();
+        }
+        let column = exec
+            .column_at_tick(ComponentId::new("world_pos"), 120)
+            .unwrap();
+        let (_, pos) = column
+            .typed_iter::<SpatialTransform<f64, LocalBackend>>()
+            .next()
+            .unwrap();
+        // see test-gen/julia/six-dof.jl for the source of these values
+        approx::assert_relative_eq!(
+            &pos.inner.inner().buf[..],
+            &[
+                0.0,
+                0.0,
+                0.479425538604203,
+                0.8775825618903728,
+                0.0,
+                0.0,
+                0.0
+            ][..],
+            epsilon = 1e-5
+        )
+    }
+}

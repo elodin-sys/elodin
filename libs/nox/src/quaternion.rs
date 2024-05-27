@@ -6,7 +6,7 @@ use num_traits::Zero;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, FromBuilder, FromHost, FromOp,
+    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FromBuilder, FromHost, FromOp,
     FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar, TensorItem, ToHost,
     Vector,
 };
@@ -32,9 +32,12 @@ impl<T: TensorItem> FromOp for Quaternion<T, Op> {
     }
 }
 
-impl<T: TensorItem> std::fmt::Debug for Quaternion<T> {
+impl<T: Field, R: Repr> std::fmt::Debug for Quaternion<T, R>
+where
+    R::Inner<T, Const<4>>: std::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Quaternion").finish()
+        f.debug_tuple("Quaternion").field(&self.0).finish()
     }
 }
 

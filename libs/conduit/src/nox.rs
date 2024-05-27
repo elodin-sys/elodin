@@ -1,9 +1,13 @@
+use nalgebra::Const;
 use nox::{
     xla::{ArrayElement, ElementType, NativeType, PjRtBuffer},
-    ArrayTy, Client, Dim, IntoOp, NoxprNode, Tensor,
+    Array, ArrayBufUnit, ArrayDim, ArrayTy, Client, Dim, IntoOp, LocalBackend, NoxprNode, Repr,
+    SpatialTransform, Tensor,
 };
 use smallvec::smallvec;
 use std::ops::Deref;
+
+use core::mem::MaybeUninit;
 
 use crate::{
     concat_str,
@@ -11,7 +15,7 @@ use crate::{
     well_known::{Material, Mesh, Shape},
     world::World,
     Archetype, Component, ComponentExt, ComponentType, ComponentValue, Handle, Metadata,
-    PrimitiveTy,
+    PrimitiveTy, ValueRepr,
 };
 
 impl ComponentValue<'_> {
@@ -98,7 +102,7 @@ impl<T: Component + IntoOp + 'static> Archetype for T {
     }
 }
 
-impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
+impl<T: ArrayElement + NativeType, D: Dim, R: Repr> Component for Tensor<T, D, R> {
     const NAME: &'static str = concat_str!("tensor_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         // If T is an ArrayElement, then it's shape must be ().
@@ -106,6 +110,22 @@ impl<T: ArrayElement + NativeType, D: Dim> Component for Tensor<T, D> {
             primitive_ty: T::PRIMITIVE_TY,
             shape: D::shape(),
         }
+    }
+}
+
+impl<T: ArrayElement + NativeType, D: Dim> ValueRepr for Tensor<T, D, LocalBackend>
+where
+    Array<T, D>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.inner().component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Array::<T, D>::from_component_value(value).map(Tensor::from_inner)
     }
 }
 
@@ -119,13 +139,31 @@ impl<T: ArrayElement + NativeType> Component for nox::Quaternion<T> {
     }
 }
 
-impl<T: ArrayElement + NativeType> Component for nox::SpatialTransform<T> {
+impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialTransform<T, R> {
     const NAME: &'static str = concat_str!("spatial_transform_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
             shape: smallvec![7],
         }
+    }
+}
+
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialTransform<T, LocalBackend>
+where
+    Array<T, Const<7>>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.inner.component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(SpatialTransform {
+            inner: Tensor::from_component_value(value)?,
+        })
     }
 }
 
@@ -173,3 +211,56 @@ impl Archetype for Shape {
         self.material.insert_into_world(world);
     }
 }
+
+macro_rules! impl_array_to_value_repr {
+    ($ty:tt, $prim:tt) => {
+        impl<D: Dim> ValueRepr for nox::Array<$ty, D>
+        where
+            D::Buf<MaybeUninit<$ty>>: nox::ArrayBufUnit<$ty>,
+            <D as ArrayDim>::Buf<MaybeUninit<$ty>>:
+                ArrayBufUnit<$ty, Init = <D as ArrayDim>::Buf<$ty>>,
+        {
+            fn component_value(&self) -> ComponentValue<'_> {
+                use nox::ArrayBuf;
+                let dim = D::dim(&self.buf);
+                let dim = ndarray::IxDyn(dim.as_ref());
+                ndarray::ArrayView::from_shape(dim, &self.buf.as_buf())
+                    .ok()
+                    .map(ndarray::CowArray::from)
+                    .map(ComponentValue::$prim)
+                    .unwrap()
+            }
+
+            fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+            where
+                Self: Sized,
+            {
+                use nox::ArrayBuf;
+                let ComponentValue::$prim(array) = value else {
+                    return None;
+                };
+                let mut uninit = nox::Array::<MaybeUninit<$ty>, D>::uninit(array.shape());
+                let array = array.as_slice()?;
+                if array.len() != uninit.buf.as_buf().len() {
+                    return None;
+                }
+                array
+                    .iter()
+                    .zip(uninit.buf.as_mut_buf())
+                    .for_each(|(a, b)| {
+                        b.write(*a);
+                    });
+                Some(unsafe { uninit.assume_init() })
+            }
+        }
+    };
+}
+
+impl_array_to_value_repr!(f32, F32);
+impl_array_to_value_repr!(f64, F64);
+impl_array_to_value_repr!(i16, I16);
+impl_array_to_value_repr!(i32, I32);
+impl_array_to_value_repr!(i64, I64);
+impl_array_to_value_repr!(u16, U16);
+impl_array_to_value_repr!(u32, U32);
+impl_array_to_value_repr!(u64, U64);
