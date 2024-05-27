@@ -1,123 +1,119 @@
-import pytest
 import jax
 import jax.numpy as np
 from jax import random
-from elodin import *
+import elodin as el
+import typing as ty
 from dataclasses import dataclass
+
+X = ty.Annotated[jax.Array, el.Component("x", el.ComponentType.F64)]
+Y = ty.Annotated[jax.Array, el.Component("y", el.ComponentType.F64)]
+Effect = ty.Annotated[jax.Array, el.Component("e", el.ComponentType.F64)]
+
+E = ty.Annotated[el.Edge, el.Component("test_edge")]
 
 
 def test_basic_system():
-    X = Annotated[jax.Array, Component("x", ComponentType.F32)]
-    Y = Annotated[jax.Array, Component("y", ComponentType.F32)]
-    E = Annotated[jax.Array, Component("e", ComponentType.F32)]
-
-    @system
-    def foo(x: Query[X]) -> Query[X]:
+    @el.system
+    def foo(x: el.Query[X]) -> el.Query[X]:
         return x.map(X, lambda x: x * 2)
 
-    @system
-    def bar(q: Query[X, Y]) -> Query[X]:
+    @el.system
+    def bar(q: el.Query[X, Y]) -> el.Query[X]:
         return q.map(X, lambda x, y: x * y)
 
-    @map
-    def baz(x: X, e: E) -> X:
-        return x + e
+    @el.map
+    def baz(x: X, z: Effect) -> X:
+        return x + z
 
     @dataclass
-    class Test(Archetype):
+    class Test(el.Archetype):
         x: X
         y: Y
 
     @dataclass
-    class Effect(Archetype):
-        e: E
+    class EffectArchetype(el.Archetype):
+        e: Effect
 
     sys = foo.pipe(bar).pipe(baz)
-    w = WorldBuilder()
-    w.spawn(Test(np.array([1.0], dtype="float32"), np.array([500.0], dtype="float32")))
+    w = el.World()
+    w.spawn(Test(np.array([1.0]), np.array([500.0])))
     w.spawn(
         [
-            Test(np.array([15.0], dtype="float32"), np.array([500.0], dtype="float32")),
-            Effect(np.array([15.0], dtype="float32")),
+            Test(np.array([15.0]), np.array([500.0])),
+            EffectArchetype(np.array([15.0])),
         ]
     )
     exec = w.build(sys)
     exec.run()
-    x1 = exec.column_array(Component.id(X))
-    y1 = exec.column_array(Component.id(Y))
+    x1 = exec.column_array(el.Component.id(X))
+    y1 = exec.column_array(el.Component.id(Y))
     assert (x1 == [1000.0, 15015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
     exec.run()
-    x1 = exec.column_array(Component.id(X))
-    y1 = exec.column_array(Component.id(Y))
+    x1 = exec.column_array(el.Component.id(X))
+    y1 = exec.column_array(el.Component.id(Y))
     assert (x1 == [1000000.0, 15015015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
 
 
 def test_six_dof():
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_linear(np.array([1.0, 0.0, 0.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
-    sys = six_dof(1.0 / 60.0)
+    sys = el.six_dof(1.0 / 60.0)
     exec = w.build(sys)
     exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     assert (x == [0.0, 0.0, 0.0, 1.0, 1.0 / 60.0, 0.0, 0.0]).all()
 
 
 def test_graph():
-    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
-    E = Annotated[Edge, Component("test_edge")]
-
     @dataclass
-    class Test(Archetype):
+    class Test(el.Archetype):
         x: X
 
     @dataclass
-    class EdgeArchetype(Archetype):
+    class EdgeArchetype(el.Archetype):
         edge: E
 
-    @system
-    def fold_test(graph: GraphQuery[E], x: Query[X]) -> Query[X]:
+    @el.system
+    def fold_test(graph: el.GraphQuery[E], x: el.Query[X]) -> el.Query[X]:
         return graph.edge_fold(x, x, X, np.array(5.0), lambda x, a, b: x + a + b)
 
-    w = WorldBuilder()
-    a = w.spawn(Test(np.array([1.0], dtype="float64")))
-    b = w.spawn(Test(np.array([2.0], dtype="float64")))
-    c = w.spawn(Test(np.array([2.0], dtype="float64")))
+    w = el.World()
+    a = w.spawn(Test(np.array([1.0])))
+    b = w.spawn(Test(np.array([2.0])))
+    c = w.spawn(Test(np.array([2.0])))
     print(a, b, c)
-    w.spawn(EdgeArchetype(Edge(a, b)))
-    w.spawn(EdgeArchetype(Edge(a, c)))
-    w.spawn(EdgeArchetype(Edge(b, c)))
+    w.spawn(EdgeArchetype(el.Edge(a, b)))
+    w.spawn(EdgeArchetype(el.Edge(a, c)))
+    w.spawn(EdgeArchetype(el.Edge(b, c)))
     exec = w.build(fold_test)
     exec.run()
-    x = exec.column_array(Component.id(X))
+    x = exec.column_array(el.Component.id(X))
     assert (x == [11.0, 9.0, 2.0]).all()
 
 
 def test_seed():
-    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
-    Y = Annotated[jax.Array, Component("y", ComponentType.F64)]
-
-    @system
-    def foo(x: Query[X]) -> Query[X]:
+    @el.system
+    def foo(x: el.Query[X]) -> el.Query[X]:
         return x.map(X, lambda x: x * 2)
 
-    @system
-    def bar(q: Query[X, Y]) -> Query[X]:
+    @el.system
+    def bar(q: el.Query[X, Y]) -> el.Query[X]:
         return q.map(X, lambda x, y: x * y)
 
-    @system
-    def seed_mul(s: Query[Seed], q: Query[X]) -> Query[X]:
+    @el.system
+    def seed_mul(s: el.Query[el.Seed], q: el.Query[X]) -> el.Query[X]:
         return q.map(X, lambda x: x * s[0])
 
-    @system
-    def seed_sample(s: Query[Seed], q: Query[X, Y]) -> Query[Y]:
+    @el.system
+    def seed_sample(s: el.Query[el.Seed], q: el.Query[X, Y]) -> el.Query[Y]:
         def sample_inner(x, y):
             key = random.key(s[0])
             key = random.fold_in(key, x)
@@ -127,49 +123,47 @@ def test_seed():
         return q.map(Y, sample_inner)
 
     @dataclass
-    class Globals(Archetype):
-        seed: Seed
+    class Globals(el.Archetype):
+        seed: el.Seed
 
     @dataclass
-    class Test(Archetype):
+    class Test(el.Archetype):
         x: X
         y: Y
 
     sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(Globals(seed=np.array(2)))
     w.spawn(Test(np.array(1.0), np.array(500.0)))
     w.spawn(Test(np.array(15.0), np.array(500.0)))
     exec = w.build(sys)
     exec.run()
-    x1 = exec.column_array(Component.id(X))
-    y1 = exec.column_array(Component.id(Y))
+    x1 = exec.column_array(el.Component.id(X))
+    y1 = exec.column_array(el.Component.id(Y))
     assert (x1 == [2000.0, 30000.0]).all()
     assert (y1 >= [500.0, 500.0]).all()
     assert (y1 <= [1000.0, 1000.0]).all()
 
 
 def test_archetype_name():
-    X = Annotated[jax.Array, Component("x", ComponentType.F64)]
-
     @dataclass
-    class TestArchetype(Archetype):
+    class TestArchetype(el.Archetype):
         x: X
 
     assert TestArchetype.archetype_name() == "test_archetype"
-    assert Body.archetype_name() == "body"
+    assert el.Body.archetype_name() == "body"
 
 
 def test_spatial_vector_algebra():
-    @map
-    def double_vec(v: WorldVel) -> WorldVel:
+    @el.map
+    def double_vec(v: el.WorldVel) -> el.WorldVel:
         return v + v
 
-    w = WorldBuilder()
-    w.spawn(Body(world_vel=WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
+    w = el.World()
+    w.spawn(el.Body(world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
     exec = w.build(double_vec)
     exec.run()
-    v = exec.column_array(Component.id(WorldVel))
+    v = exec.column_array(el.Component.id(el.WorldVel))
     assert (v[0][3:] == [2.0, 0.0, 0.0]).all()
 
 

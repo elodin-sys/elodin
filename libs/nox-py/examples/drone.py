@@ -1,11 +1,6 @@
 import jax
-import typing
 import elodin as el
 from jax import numpy as np
-from jax import random
-import polars as pl
-from typing import cast
-from jax.numpy import linalg as la
 
 TIME_STEP = 1.0 / 120.0
 
@@ -64,7 +59,10 @@ def spline(_: el.WorldPos, t: el.Time) -> el.WorldPos:
             points[i + 3],
         ]
     )
-    spline = lambda t: get_spline_point(t, points_subset, np.array(0.5))
+
+    def spline(t):
+        return get_spline_point(t, points_subset, np.array(0.5))
+
     grad = jax.jacfwd(spline)
     ang = rot_between(np.array([1.0, 0.0, 0.0]), grad(t - i))
     return el.WorldPos.from_linear(spline(t - i)) + el.WorldPos.from_angular(ang)
