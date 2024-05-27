@@ -39,7 +39,7 @@ impl crate::Component for WorldPos {
 }
 
 impl ValueRepr for WorldPos {
-    fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
+    fn component_value(&self) -> crate::ComponentValue<'_> {
         let arr = array![
             self.att.coords.x,
             self.att.coords.y,
@@ -91,7 +91,7 @@ impl crate::Component for TraceAnchor {
 }
 
 impl ValueRepr for TraceAnchor {
-    fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
+    fn component_value(&self) -> crate::ComponentValue<'_> {
         let arr = array![self.anchor.x, self.anchor.y, self.anchor.z].into_dyn();
         ComponentValue::F64(CowArray::from(arr))
     }

@@ -82,7 +82,15 @@ impl Plugin for SimClient {
                     };
                     let (rx_socket, tx_socket) = socket.into_split();
 
-                    if let Err(err) = handle_socket(c.bevy_tx.clone(), tx_socket, rx_socket).await {
+                    if let Err(err) = handle_socket(
+                        c.bevy_tx.clone(),
+                        tx_socket,
+                        rx_socket,
+                        std::iter::empty(),
+                        std::iter::empty(),
+                    )
+                    .await
+                    {
                         println!("socket error {err:?}");
                     }
                 }
