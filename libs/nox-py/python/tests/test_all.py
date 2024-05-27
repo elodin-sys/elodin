@@ -168,19 +168,19 @@ def test_spatial_vector_algebra():
 
 
 def test_six_dof_ang_vel_int():
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([0.0, 0.0, 1.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 1.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
-    sys = six_dof(1.0 / 120.0)
+    sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
     for _ in range(120):
         exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
@@ -188,19 +188,19 @@ def test_six_dof_ang_vel_int():
         rtol=1e-5,
     ).all()
 
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([0.0, 1.0, 0.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([0.0, 1.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
-    sys = six_dof(1.0 / 120.0)
+    sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
     for _ in range(120):
         exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
@@ -208,19 +208,19 @@ def test_six_dof_ang_vel_int():
         rtol=1e-5,
     ).all()
 
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([1.0, 1.0, 0.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([1.0, 1.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
-    sys = six_dof(1.0 / 120.0)
+    sys = el.six_dof(1.0 / 120.0)
     exec = w.build(sys)
     for _ in range(120):
         exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     print(x.to_numpy()[0])
     # value from Julia and Simulink
     assert np.isclose(
@@ -233,72 +233,72 @@ def test_six_dof_ang_vel_int():
 
 
 def test_six_dof_torque():
-    @map
-    def constant_torque(_: Force) -> Force:
-        return SpatialForce.from_torque(np.array([1.0, 0.0, 0.0]))
+    @el.map
+    def constant_torque(_: el.Force) -> el.Force:
+        return el.SpatialForce.from_torque(np.array([1.0, 0.0, 0.0]))
 
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
-            inertia=SpatialInertia(1.0, np.array([0.5, 0.75, 0.25])),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            inertia=el.SpatialInertia(1.0, np.array([0.5, 0.75, 0.25])),
         )
     )
-    sys = six_dof(1.0 / 120.0, constant_torque)
+    sys = el.six_dof(1.0 / 120.0, constant_torque)
     exec = w.build(sys)
     for _ in range(120):
         exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     assert np.isclose(
         x.to_numpy()[0],
         np.array([0.24740395925454, 0.0, 0.0, 0.96891242171064, 0.0, 0.0, 0.0]),
         rtol=1e-5,
     ).all()  # values taken from simulink
-    x = exec.column_array(Component.id(WorldVel))
+    x = exec.column_array(el.Component.id(el.WorldVel))
     assert np.isclose(
         x.to_numpy()[0], np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]), rtol=1e-5
     ).all()  # values taken from simulink
 
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     print(x.to_numpy()[1])
     assert np.isclose(
         x.to_numpy()[1],
         np.array([0.47942553860408, 0.0, 0.0, 0.87758256189044, 0.0, 0.0, 0.0]),
         rtol=1e-4,
     ).all()  # values taken from simulink
-    x = exec.column_array(Component.id(WorldVel))
+    x = exec.column_array(el.Component.id(el.WorldVel))
     assert np.isclose(
         x.to_numpy()[1], np.array([2.0, 0.0, 0.0, 0.0, 0.0, 0.0]), rtol=1e-5
     ).all()  # values taken from simulink
 
 
 def test_six_dof_force():
-    w = WorldBuilder()
+    w = el.World()
     w.spawn(
-        Body(
-            world_pos=WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
-            inertia=SpatialInertia(1.0),
+        el.Body(
+            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
+            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
         )
     )
 
-    @map
-    def constant_force(_: Force) -> Force:
-        return SpatialForce.from_linear(np.array([1.0, 0.0, 0.0]))
+    @el.map
+    def constant_force(_: el.Force) -> el.Force:
+        return el.SpatialForce.from_linear(np.array([1.0, 0.0, 0.0]))
 
-    sys = six_dof(1.0 / 120.0, constant_force)
+    sys = el.six_dof(1.0 / 120.0, constant_force)
     exec = w.build(sys)
     for _ in range(120):
         exec.run()
-    x = exec.column_array(Component.id(WorldPos))
+    x = exec.column_array(el.Component.id(el.WorldPos))
     assert np.isclose(
         x.to_numpy()[0], np.array([0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0]), rtol=1e-5
     ).all()  # values taken from simulink
