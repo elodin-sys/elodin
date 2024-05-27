@@ -62,3 +62,4 @@ pyo3.optional = true
 
 [dev-dependencies]
 tempfile = "3.10.0"
+approx = "0.5"

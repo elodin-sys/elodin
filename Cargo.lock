@@ -1021,8 +1021,11 @@ dependencies = [
  "bindgen 0.65.1",
  "cc",
  "paste",
+ "roci",
+ "roci-macros",
  "spin 0.9.8",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6078,6 +6081,7 @@ dependencies = [
 name = "nox-ecs"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "bytemuck",
  "byteorder",
  "bytes",
@@ -8039,6 +8043,7 @@ dependencies = [
  "thingbuf",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

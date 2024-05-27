@@ -150,7 +150,7 @@ where
 }
 
 impl<T: TensorItem + Copy, D: Dim, R: Repr> Tensor<T, D, R> {
-    pub(crate) fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
+    pub fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
         Self {
             inner,
             phantom: PhantomData,
@@ -171,7 +171,7 @@ impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
     }
 }
 
-impl<T: Field, D: Dim + NonScalarDim> Tensor<T, D, Op> {
+impl<T: Field, D: Dim + NonScalarDim, R: Repr> Tensor<T, D, R> {
     pub fn zeros() -> Self
     where
         <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
@@ -184,6 +184,12 @@ impl<T: Field, D: Dim + NonScalarDim> Tensor<T, D, Op> {
         <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
     {
         T::one().broadcast()
+    }
+}
+
+impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
+    pub fn inner(&self) -> &R::Inner<T::Elem, D> {
+        &self.inner
     }
 }
 
