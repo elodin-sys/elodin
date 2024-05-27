@@ -1,8 +1,8 @@
 //! Provides abstractions for rigid body dynamics in 3D space.
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
-use crate::Field;
 use crate::FixedSliceExt;
+use crate::RealField;
 use crate::Tensor;
 use crate::TensorItem;
 use crate::{Quaternion, Scalar, Vector};
@@ -19,7 +19,7 @@ pub struct SpatialTransform<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
-impl<T: TensorItem + Field> SpatialTransform<T> {
+impl<T: TensorItem + RealField> SpatialTransform<T> {
     /// Constructs a new spatial transform from an angular component (Quaternion) and a linear component (Vector).
     pub fn new(angular: impl Into<Quaternion<T>>, linear: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
@@ -62,7 +62,7 @@ impl<T: TensorItem + Field> SpatialTransform<T> {
     }
 }
 
-impl<T: TensorItem + ArrayElement + NativeType + Field> Mul for SpatialTransform<T> {
+impl<T: TensorItem + ArrayElement + NativeType + RealField> Mul for SpatialTransform<T> {
     type Output = SpatialTransform<T>;
 
     fn mul(self, rhs: SpatialTransform<T>) -> Self::Output {
@@ -78,7 +78,7 @@ pub struct SpatialForce<T: TensorItem> {
     pub inner: Vector<T, 6>,
 }
 
-impl<T: Field> SpatialForce<T> {
+impl<T: RealField> SpatialForce<T> {
     /// Constructs a new spatial force from a torque component (Vector) and a force component (Vector).
     pub fn new(torque: impl Into<Vector<T, 3>>, force: impl Into<Vector<T, 3>>) -> Self {
         let torque = torque.into();
@@ -121,7 +121,7 @@ impl<T: Field> SpatialForce<T> {
     }
 }
 
-impl<T: Field> Add for SpatialForce<T> {
+impl<T: RealField> Add for SpatialForce<T> {
     type Output = SpatialForce<T>;
 
     fn add(self, rhs: SpatialForce<T>) -> Self::Output {
@@ -138,7 +138,7 @@ pub struct SpatialInertia<T: TensorItem> {
     pub inner: Vector<T, 7>,
 }
 
-impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
+impl<T: TensorItem + RealField + NativeType + ArrayElement> SpatialInertia<T> {
     /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
     pub fn new(
         inertia: impl Into<Vector<T, 3>>,
@@ -178,7 +178,9 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> SpatialInertia<T> {
     }
 }
 
-impl<T: TensorItem + Field + NativeType + ArrayElement> Div<SpatialInertia<T>> for SpatialForce<T> {
+impl<T: TensorItem + RealField + NativeType + ArrayElement> Div<SpatialInertia<T>>
+    for SpatialForce<T>
+{
     type Output = SpatialMotion<T>;
 
     fn div(self, rhs: SpatialInertia<T>) -> Self::Output {
@@ -188,7 +190,7 @@ impl<T: TensorItem + Field + NativeType + ArrayElement> Div<SpatialInertia<T>> f
     }
 }
 
-impl<T: TensorItem + ArrayElement + NativeType + Field> Mul<SpatialMotion<T>>
+impl<T: TensorItem + ArrayElement + NativeType + RealField> Mul<SpatialMotion<T>>
     for SpatialInertia<T>
 {
     type Output = SpatialForce<T>;
@@ -207,7 +209,7 @@ pub struct SpatialMotion<T: TensorItem> {
     pub inner: Vector<T, 6>,
 }
 
-impl<T: Field> SpatialMotion<T> {
+impl<T: RealField> SpatialMotion<T> {
     /// Constructs a new spatial motion from angular and linear components.
     pub fn new(angular: impl Into<Vector<T, 3>>, linear: impl Into<Vector<T, 3>>) -> Self {
         let angular = angular.into();
@@ -291,25 +293,25 @@ impl Mul<SpatialMotion<f32>> for f32 {
 
 impl<T> Add<SpatialMotion<T>> for SpatialTransform<T>
 where
-    T: ArrayElement + NativeType + Field,
+    T: ArrayElement + NativeType + RealField,
     Quaternion<T>: Add<Quaternion<T>, Output = Quaternion<T>>,
     Vector<T, 3>: Add<Vector<T, 3>, Output = Vector<T, 3>>,
 {
     type Output = SpatialTransform<T>;
 
     fn add(self, rhs: SpatialMotion<T>) -> Self::Output {
-        let omega: Vector<T, 3> = rhs.angular() / T::two();
+        let half_omega: Vector<T, 3> = rhs.angular() / T::two();
         let zero = T::zero().reshape::<Const<1>>();
-        let omega = Quaternion(omega.concat(zero));
+        let half_omega = Quaternion(half_omega.concat(zero));
         let q = self.angular();
-        let angular = q.clone() + omega * q;
+        let angular = q.clone() + half_omega * q;
         let angular = angular.normalize();
         let linear = self.linear() + rhs.linear();
         SpatialTransform::new(angular, linear)
     }
 }
 
-impl<T: Field> Add<SpatialMotion<T>> for SpatialMotion<T> {
+impl<T: RealField> Add<SpatialMotion<T>> for SpatialMotion<T> {
     type Output = SpatialMotion<T>;
 
     fn add(self, rhs: SpatialMotion<T>) -> Self::Output {
@@ -319,7 +321,7 @@ impl<T: Field> Add<SpatialMotion<T>> for SpatialMotion<T> {
     }
 }
 
-impl<T: Field> Add<SpatialTransform<T>> for SpatialTransform<T> {
+impl<T: RealField> Add<SpatialTransform<T>> for SpatialTransform<T> {
     type Output = SpatialTransform<T>;
 
     fn add(self, rhs: SpatialTransform<T>) -> Self::Output {
@@ -329,7 +331,7 @@ impl<T: Field> Add<SpatialTransform<T>> for SpatialTransform<T> {
     }
 }
 
-impl<T: Field> Mul<SpatialMotion<T>> for Quaternion<T> {
+impl<T: RealField> Mul<SpatialMotion<T>> for Quaternion<T> {
     type Output = SpatialMotion<T>;
 
     fn mul(self, rhs: SpatialMotion<T>) -> Self::Output {
@@ -337,7 +339,7 @@ impl<T: Field> Mul<SpatialMotion<T>> for Quaternion<T> {
     }
 }
 
-impl<T: Field> Mul<SpatialTransform<T>> for Quaternion<T> {
+impl<T: RealField> Mul<SpatialTransform<T>> for Quaternion<T> {
     type Output = SpatialTransform<T>;
 
     fn mul(self, rhs: SpatialTransform<T>) -> Self::Output {
@@ -345,7 +347,7 @@ impl<T: Field> Mul<SpatialTransform<T>> for Quaternion<T> {
     }
 }
 
-impl<T: Field> Mul<SpatialForce<T>> for Quaternion<T> {
+impl<T: RealField> Mul<SpatialForce<T>> for Quaternion<T> {
     type Output = SpatialForce<T>;
 
     fn mul(self, rhs: SpatialForce<T>) -> Self::Output {
@@ -356,6 +358,7 @@ impl<T: Field> Mul<SpatialForce<T>> for Quaternion<T> {
 #[cfg(test)]
 mod tests {
     use crate::{CompFn, ToHost};
+    use approx::assert_relative_eq;
     use nalgebra::{vector, Vector3};
 
     use super::*;
@@ -415,12 +418,47 @@ mod tests {
             vector![
                 0.0,
                 0.0,
-                0.7071067811865475,
-                0.7071067811865475,
+                0.4472135954999579,
+                0.8944271909999159,
                 0.0,
                 0.0,
                 0.0
             ]
+        )
+    }
+
+    #[test]
+    fn test_spatial_transform_integrate() {
+        let f = || -> Vector<f64, 7> {
+            let a = SpatialTransform::new(
+                nalgebra::UnitQuaternion::identity().into_inner(),
+                nalgebra::Vector3::new(0.0, 0.0, 0.0),
+            );
+            (0..20)
+                .fold(a, |acc, _| {
+                    acc + SpatialMotion::new(
+                        nalgebra::Vector3::new(0.0, 0.0, 0.25 / 20.0),
+                        nalgebra::Vector3::new(0.0, 0.0, 0.0),
+                    )
+                })
+                .inner
+        };
+        let client = crate::Client::cpu().unwrap();
+        let comp = f.build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let res = exec.run(&client).unwrap().to_host();
+        assert_relative_eq!(
+            res,
+            vector![
+                0.0,
+                0.0,
+                0.12467473338522769,
+                0.992197667229329,
+                0.0,
+                0.0,
+                0.0
+            ], // roation of 0.25 around axis angle
+            epsilon = 1e-5
         )
     }
 }

@@ -1,8 +1,8 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::local_backend::{ArrayBufUnit, ArrayDim};
 use crate::{
-    AsBuffer, Buffer, Dim, DimGet, Field, FromOp, GetDim, IntoOp, MatMul, Noxpr, NoxprScalarExt,
-    Op, Repr, Scalar, Vector,
+    AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp, GetDim, IntoOp, MatMul, Noxpr,
+    NoxprScalarExt, Op, Repr, Scalar, Vector,
 };
 use core::mem::MaybeUninit;
 use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
@@ -120,11 +120,40 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim> Clone for Tensor<T, D, Op> {
+impl<T: TensorItem, D: Dim, R: Repr> Clone for Tensor<T, D, R>
+where
+    R::Inner<T::Elem, D>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             phantom: self.phantom,
+        }
+    }
+}
+
+impl<T: Field + crate::RealField, D: Dim, R: Repr> Tensor<T, D, R>
+where
+    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
+{
+    pub fn sqrt(&self) -> Self {
+        Self::from_inner(R::sqrt(&self.inner))
+    }
+
+    pub fn sin(&self) -> Self {
+        Self::from_inner(R::sin(&self.inner))
+    }
+
+    pub fn cos(&self) -> Self {
+        Self::from_inner(R::cos(&self.inner))
+    }
+}
+
+impl<T: TensorItem + Copy, D: Dim, R: Repr> Tensor<T, D, R> {
+    pub(crate) fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
+        Self {
+            inner,
+            phantom: PhantomData,
         }
     }
 }
@@ -137,29 +166,23 @@ impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
         }
     }
 
-    pub fn sqrt(&self) -> Self {
-        Self::from_op(self.inner.clone().sqrt())
-    }
-
     pub fn log(&self) -> Self {
         Self::from_op(self.inner.clone().log())
     }
-
-    pub fn sin(&self) -> Self {
-        Self::from_op(self.inner.clone().sin())
-    }
-
-    pub fn cos(&self) -> Self {
-        Self::from_op(self.inner.clone().cos())
-    }
 }
 
-impl<T: Field, D: Dim> Tensor<T, D, Op> {
-    pub fn zeros() -> Self {
+impl<T: Field, D: Dim + NonScalarDim> Tensor<T, D, Op> {
+    pub fn zeros() -> Self
+    where
+        <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
+    {
         T::zero().broadcast()
     }
 
-    pub fn ones() -> Self {
+    pub fn ones() -> Self
+    where
+        <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
+    {
         T::one().broadcast()
     }
 }
@@ -354,15 +377,24 @@ impl_op! {Mul, mul, *, Field}
 impl_op! {Div, div, /, Field}
 impl_op! {Sub, sub, -, Field}
 
-impl<T: Field, D: Dim> Neg for Tensor<T, D> {
+impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R>
+where
+    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
+{
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Tensor::from_op(self.inner.neg())
+        Tensor {
+            inner: R::neg(&self.inner),
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T: TensorItem + NalgebraScalar + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D> {
+impl<'a, T: Field + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D>
+where
+    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
+{
     type Output = Tensor<T, D>;
 
     fn neg(self) -> Self::Output {
@@ -611,12 +643,18 @@ impl<T: TensorItem, D: Dim> Tensor<T, D> {
             phantom: PhantomData,
         }
     }
+}
 
-    pub fn broadcast<ND>(self) -> Tensor<T, ND>
+impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
+    pub fn broadcast<D2: Dim>(self) -> Tensor<T1, D2, R>
     where
-        ND: Dim + XlaDim,
+        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
+            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2, Output = D2>,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
-        let inner = self.inner.broadcast(ND::shape());
+        let inner = R::broadcast::<D1, D2, T1>(&self.inner);
+        // self.inner.broadcast();
         Tensor {
             inner,
             phantom: PhantomData,
@@ -628,34 +666,37 @@ impl<T: TensorItem, D: Dim> Tensor<T, D> {
 pub type AddDim<A, B> = <A as nalgebra::DimAdd<B>>::Output;
 
 #[allow(clippy::type_complexity)]
-impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
-    pub fn concat<OD: Dim + DefaultMap>(
+impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
+    pub fn concat<D2: Dim + DefaultMap>(
         &self,
-        other: Tensor<T, OD>,
+        other: Tensor<T1, D2, R>,
     ) -> Tensor<
-        T,
-        ReplaceMappedDim<OD::DefaultMapDim, D, AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>>,
+        T1,
+        ReplaceMappedDim<D2::DefaultMapDim, D1, AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>>,
+        R,
     >
     where
-        DefaultMappedDim<D>: nalgebra::DimAdd<DefaultMappedDim<OD>> + nalgebra::Dim,
-        DefaultMappedDim<OD>: nalgebra::Dim,
-        OD::DefaultMapDim: MapDim<D>,
-        D::DefaultMapDim: MapDim<OD>,
-        AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>: Dim,
-        <<OD as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim: nalgebra::Dim,
-        ReplaceMappedDim<OD::DefaultMapDim, D, AddDim<DefaultMappedDim<D>, DefaultMappedDim<OD>>>:
-            Dim,
+        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
+        DefaultMappedDim<D2>: nalgebra::Dim,
+        D2::DefaultMapDim: MapDim<D1>,
+        D1::DefaultMapDim: MapDim<D2>,
+        D1: DefaultMap,
+        AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        ConcatDim<D1, D2>: Dim,
+        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
+            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
-        let inner = Noxpr::concat_in_dim(
-            vec![self.inner.clone(), other.inner.clone()],
-            <D::DefaultMapDim>::MAPPED_DIM,
-        );
+        let inner = R::concat(&self.inner, &other.inner);
         Tensor {
             inner,
             phantom: PhantomData,
         }
     }
+}
 
+#[allow(clippy::type_complexity)]
+impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     pub fn concat_with_dim<OD: Dim, MDim: MapDim<D> + MapDim<OD>>(
         &self,
         other: Tensor<T, OD>,
