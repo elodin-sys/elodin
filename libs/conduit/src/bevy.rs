@@ -115,7 +115,7 @@ pub struct EntityMap(pub HashMap<EntityId, Entity>);
 pub struct ComponentMap(pub HashMap<ComponentId, Box<dyn ComponentAdapter + Send + Sync>>);
 
 pub trait ComponentAdapter {
-    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue>;
+    fn get<'a>(&'a self, world: &'a World, entity: Entity) -> Option<ComponentValue<'a>>;
     fn insert(
         &self,
         commands: &mut Commands,
@@ -138,7 +138,7 @@ impl<C> Default for StaticComponentAdapter<C> {
 }
 
 impl<C: BevyComponent> ComponentAdapter for StaticComponentAdapter<C> {
-    fn get(&self, world: &World, entity: Entity) -> Option<ComponentValue> {
+    fn get<'a>(&'a self, world: &'a World, entity: Entity) -> Option<ComponentValue<'a>> {
         Some(world.get_entity(entity)?.get::<C>()?.component_value())
     }
 
@@ -176,7 +176,7 @@ impl<C> Default for StaticResourceAdapter<C> {
 }
 
 impl<C: Resource + BevyComponent> ComponentAdapter for StaticResourceAdapter<C> {
-    fn get(&self, world: &World, _entity_id: Entity) -> Option<ComponentValue> {
+    fn get<'a>(&'a self, world: &'a World, _entity_id: Entity) -> Option<ComponentValue<'a>> {
         Some(world.get_resource::<C>()?.component_value())
     }
 
@@ -599,9 +599,9 @@ pub fn column_payload_msg(mut reader: EventReader<ColumnPayloadMsg>, sim_peer: R
             let _ = tx.send(Packet::start_stream(
                 stream_id,
                 Metadata {
-                    name: msg.component_name.clone(),
+                    name: msg.component_name.clone().into(),
                     component_type: msg.component_type.clone(),
-                    tags: HashMap::default(),
+                    tags: Some(HashMap::default()),
                     asset: false,
                 },
             ));

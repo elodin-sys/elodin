@@ -59,15 +59,6 @@ impl<B: Buf + Slice> ColumnPayload<B> {
         })
     }
 
-    pub fn as_ref(&self) -> ColumnPayload<&[u8]> {
-        ColumnPayload {
-            time: self.time,
-            len: self.len,
-            entity_buf: self.entity_buf.chunk(),
-            value_buf: self.value_buf.chunk(),
-        }
-    }
-
     pub fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(self.time);
         buf.put_u32(self.len);
@@ -76,14 +67,49 @@ impl<B: Buf + Slice> ColumnPayload<B> {
     }
 }
 
+impl<B: AsRef<[u8]>> ColumnPayload<B> {
+    pub fn as_ref(&self) -> ColumnPayload<&[u8]> {
+        ColumnPayload {
+            time: self.time,
+            len: self.len,
+            entity_buf: self.entity_buf.as_ref(),
+            value_buf: self.value_buf.as_ref(),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
-impl ColumnPayload<Bytes> {
+impl ColumnPayload<BytesMut> {
+    pub fn freeze(self) -> ColumnPayload<Bytes> {
+        ColumnPayload {
+            time: self.time,
+            len: self.len,
+            entity_buf: self.entity_buf.freeze(),
+            value_buf: self.value_buf.freeze(),
+        }
+    }
+}
+
+pub trait Frozen {
+    type Freezable: Default + BufMut;
+    fn freeze(val: Self::Freezable) -> Self;
+}
+
+impl Frozen for Bytes {
+    type Freezable = BytesMut;
+
+    fn freeze(val: Self::Freezable) -> Self {
+        val.freeze()
+    }
+}
+
+impl<F: Frozen> ColumnPayload<F> {
     pub fn try_from_value_iter<'a>(
         time: u64,
         iter: impl Iterator<Item = ColumnValue<'a>> + 'a,
     ) -> Result<Self, Error> {
-        let mut entity_buf = BytesMut::default();
-        let mut value_buf = BytesMut::default();
+        let mut entity_buf = F::Freezable::default();
+        let mut value_buf = F::Freezable::default();
         let mut len = 0;
         for ColumnValue { entity_id, value } in iter {
             entity_buf.put_u64_le(entity_id.0);
@@ -93,8 +119,8 @@ impl ColumnPayload<Bytes> {
         Ok(ColumnPayload {
             time,
             len,
-            entity_buf: entity_buf.freeze(),
-            value_buf: value_buf.freeze(),
+            entity_buf: F::freeze(entity_buf),
+            value_buf: F::freeze(value_buf),
         })
     }
 }
