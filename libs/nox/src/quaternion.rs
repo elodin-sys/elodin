@@ -1,14 +1,14 @@
 //! Provides functionality to handle quaternions, which are constructs used to represent and manipulate spatial orientations and rotations in 3D space.
 use std::ops::{Add, Mul};
 
-use nalgebra::{Const, RealField, Scalar as NalgebraScalar};
+use nalgebra::{Const, Scalar as NalgebraScalar};
 use num_traits::Zero;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FixedSliceExt, FromBuilder,
-    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, Repr, Scalar, TensorItem,
-    ToHost, Vector,
+    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, FromBuilder, FromHost, FromOp,
+    FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar, TensorItem, ToHost,
+    Vector,
 };
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
@@ -38,13 +38,13 @@ impl<T: TensorItem> std::fmt::Debug for Quaternion<T> {
     }
 }
 
-impl<T: Field> Quaternion<T> {
+impl<T: RealField, R: Repr> Quaternion<T, R> {
     /// Constructs a new quaternion from individual scalar components.
     pub fn new(
-        w: impl Into<Scalar<T>>,
-        x: impl Into<Scalar<T>>,
-        y: impl Into<Scalar<T>>,
-        z: impl Into<Scalar<T>>,
+        w: impl Into<Scalar<T, R>>,
+        x: impl Into<Scalar<T, R>>,
+        y: impl Into<Scalar<T, R>>,
+        z: impl Into<Scalar<T, R>>,
     ) -> Self {
         let w = w.into();
         let x = x.into();
@@ -56,26 +56,14 @@ impl<T: Field> Quaternion<T> {
 
     /// Creates a unit quaternion with no rotation.
     pub fn identity() -> Self {
-        let inner = T::zero()
+        let inner = T::zero::<R>()
             .broadcast::<Const<3>>()
-            .concat(T::one().reshape::<Const<1>>());
-        Quaternion(inner)
-    }
-
-    /// Creates a quaternion from an axis and an angle.
-    pub fn from_axis_angle(axis: impl Into<Vector<T, 3>>, angle: impl Into<Scalar<T>>) -> Self {
-        let axis = axis.into();
-        let axis = axis.normalize();
-        let angle = angle.into();
-        let half_angle = angle / (T::two());
-        let sin = half_angle.sin();
-        let cos = half_angle.cos();
-        let inner = (axis * sin).concat(cos.reshape::<Const<1>>());
+            .concat(T::one().broadcast::<Const<1>>());
         Quaternion(inner)
     }
 
     /// Returns the four parts (components) of the quaternion as scalars.
-    fn parts(&self) -> [Scalar<T>; 4] {
+    fn parts(&self) -> [Scalar<T, R>; 4] {
         let Quaternion(v) = self;
         v.parts()
     }
@@ -86,19 +74,34 @@ impl<T: Field> Quaternion<T> {
         Quaternion(Vector::from_arr([&-i, &-j, &-k, &w]))
     }
 
+    /// Normalizes to a unit quaternion.
+    pub fn normalize(&self) -> Self {
+        Quaternion(&self.0 / self.0.norm())
+    }
+
     /// Computes the inverse of the quaternion.
     pub fn inverse(&self) -> Self {
         // TODO: Check for division by zero
         Quaternion(self.conjugate().0 / self.0.norm_squared())
     }
 
-    /// Normalizes to a unit quaternion.
-    pub fn normalize(&self) -> Self {
-        Quaternion(self.0.clone() / self.0.norm())
+    /// Creates a quaternion from an axis and an angle.
+    pub fn from_axis_angle(
+        axis: impl Into<Vector<T, 3, R>>,
+        angle: impl Into<Scalar<T, R>>,
+    ) -> Self {
+        let axis = axis.into();
+        let axis = axis.normalize();
+        let angle = angle.into();
+        let half_angle = angle / (T::two::<R>());
+        let sin = half_angle.sin();
+        let cos = half_angle.cos();
+        let inner = (axis * sin).concat(cos.broadcast::<Const<1>>());
+        Quaternion(inner)
     }
 }
 
-impl<T: Field> Mul for Quaternion<T> {
+impl<T: RealField, R: Repr> Mul for Quaternion<T, R> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -113,18 +116,19 @@ impl<T: Field> Mul for Quaternion<T> {
     }
 }
 
-impl<T: Field> Mul<Vector<T, 3>> for Quaternion<T> {
-    type Output = Vector<T, 3>;
+impl<T: RealField, R: Repr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
+    type Output = Vector<T, 3, R>;
 
-    fn mul(self, rhs: Vector<T, 3>) -> Self::Output {
-        let zero: Vector<T, 1> = T::zero().reshape();
+    fn mul(self, rhs: Vector<T, 3, R>) -> Self::Output {
+        let zero: Vector<T, 1, R> = T::zero().broadcast();
         let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
-        (self * v * inv).0.fixed_slice(&[0])
+        let [x, y, z, _] = (self * v * inv).0.parts();
+        Vector::from_arr([&x, &y, &z]) // TODO: use fixed slice instead
     }
 }
 
-impl<T: Field> Add for Quaternion<T> {
+impl<T: RealField, R: Repr> Add for Quaternion<T, R> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -154,7 +158,7 @@ impl<T: xla::ArrayElement + NativeType> FromBuilder for Quaternion<T, Op> {
 
 impl<T> FromHost for Quaternion<T, Buffer>
 where
-    T: NativeType + Field + NalgebraScalar + ArrayElement,
+    T: NativeType + RealField + NalgebraScalar + ArrayElement,
 {
     type HostTy = nalgebra::Quaternion<T>;
 
@@ -177,7 +181,7 @@ where
 
 impl<T> ToHost for Quaternion<T, Buffer>
 where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField + nalgebra::RealField,
 {
     type HostTy = nalgebra::Quaternion<T>;
 
@@ -197,7 +201,7 @@ impl<T: TensorItem> BufferForm for Quaternion<T, Op> {
 
 impl<T> FromPjrtBuffer for nalgebra::Quaternion<T>
 where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField + nalgebra::RealField,
 {
     fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
         let buf = &pjrt[0];
