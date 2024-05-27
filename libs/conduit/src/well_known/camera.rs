@@ -19,7 +19,7 @@ impl Component for Camera {
 }
 
 impl ValueRepr for Camera {
-    fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
+    fn component_value(&self) -> crate::ComponentValue<'_> {
         let arr = array![0].into_dyn();
         ComponentValue::U64(CowArray::from(arr))
     }

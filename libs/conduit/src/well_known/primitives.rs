@@ -1,12 +1,26 @@
+use crate::{concat_str, ConstComponent};
 use crate::{Component, ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
-use ndarray::array;
-use smallvec::smallvec;
+use ndarray::{array, CowArray};
+use paste::paste;
+use smallvec::SmallVec;
 
 macro_rules! impl_primitive {
     ($ty:tt, $prim_ty:tt) => {
         impl ComponentType {
-            pub fn $ty() -> Self {
-                <$ty>::component_type()
+            pub const fn $ty() -> Self {
+                ComponentType {
+                    primitive_ty: PrimitiveTy::$prim_ty,
+                    shape: SmallVec::new_const(),
+                }
+            }
+
+            paste! {
+                pub const fn [<vec_$ty>]<const N: i64>() -> Self {
+                    ComponentType {
+                        primitive_ty: PrimitiveTy::$prim_ty,
+                        shape: unsafe { SmallVec::from_const_with_len_unchecked([N,0,0,0], 1) }
+                    }
+                }
             }
         }
 
@@ -15,15 +29,16 @@ macro_rules! impl_primitive {
             const ASSET: bool = false;
 
             fn component_type() -> ComponentType {
-                ComponentType {
-                    primitive_ty: PrimitiveTy::$prim_ty,
-                    shape: smallvec![],
-                }
+                ComponentType::$ty()
             }
         }
 
+        impl ConstComponent for $ty {
+            const TY: ComponentType = ComponentType::$ty();
+        }
+
         impl ValueRepr for $ty {
-            fn component_value<'a>(&self) -> crate::ComponentValue<'a> {
+            fn component_value(&self) -> crate::ComponentValue<'_> {
                 let arr = array![*self].into_dyn();
                 ComponentValue::$prim_ty(ndarray::CowArray::from(arr))
             }
@@ -38,6 +53,40 @@ macro_rules! impl_primitive {
                 let arr = arr.into_dimensionality::<ndarray::Ix0>().ok()?;
                 let arr = arr.as_slice()?;
                 arr.get(0).copied()
+            }
+        }
+
+        impl<const N: usize> Component for [$ty; N] {
+            const NAME: &'static str = concat_str!("f32x", stringify!(N));
+
+            fn component_type() -> ComponentType {
+                Self::TY
+            }
+        }
+
+        impl<const N: usize> ConstComponent for [$ty; N] {
+            const TY: ComponentType = ComponentType {
+                primitive_ty: PrimitiveTy::$prim_ty,
+                shape: unsafe { SmallVec::from_const_with_len_unchecked([N as i64, 0, 0, 0], 1) },
+            };
+        }
+
+        impl<const N: usize> ValueRepr for [$ty; N] {
+            fn component_value(&self) -> ComponentValue<'_> {
+                ComponentValue::$prim_ty(CowArray::from(self).into_dyn())
+            }
+
+            fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+            where
+                Self: Sized,
+            {
+                let ComponentValue::$prim_ty(val) = value else {
+                    return None;
+                };
+                if val.len() != N {
+                    return None;
+                }
+                val.as_slice()?.try_into().ok()
             }
         }
     };

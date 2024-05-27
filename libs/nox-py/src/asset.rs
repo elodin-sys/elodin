@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::*;
 
 #[pyclass]
@@ -65,7 +67,7 @@ impl Handle {
     fn metadata() -> Metadata {
         Metadata {
             inner: conduit::Metadata {
-                name: "handle".to_string(),
+                name: Cow::Borrowed("handle"),
                 component_type: conduit::ComponentType::u64(),
                 asset: true,
                 tags: Default::default(),

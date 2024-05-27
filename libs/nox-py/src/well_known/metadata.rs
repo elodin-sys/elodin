@@ -42,9 +42,9 @@ pub struct Metadata {
 impl From<Metadata> for Component {
     fn from(value: Metadata) -> Self {
         Component {
-            name: value.inner.name,
+            name: value.inner.name.to_string(),
             asset: value.inner.asset,
-            metadata: value.inner.tags,
+            metadata: value.inner.tags.unwrap_or_default(),
             ty: Some(value.inner.component_type.into()),
         }
     }
@@ -99,10 +99,10 @@ impl Metadata {
             .ty
             .ok_or(PyValueError::new_err("component type not found"))?;
         let inner = conduit::Metadata {
-            name: component_data.name,
+            name: component_data.name.into(),
             component_type: component_type.into(),
             asset: component_data.asset,
-            tags: component_data.metadata,
+            tags: Some(component_data.metadata),
         };
         Ok(Self { inner })
     }
