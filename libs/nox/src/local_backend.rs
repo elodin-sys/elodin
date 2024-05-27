@@ -15,7 +15,7 @@ use crate::{
 
 /// A struct representing an array with type-safe dimensions and element type.
 pub struct Array<T: Copy, D: ArrayDim> {
-    buf: D::Buf<T>,
+    pub buf: D::Buf<T>,
 }
 
 /// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
@@ -266,14 +266,17 @@ where
     D1::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1>,
 {
     /// Constructs an uninitialized array given dimensions.
-    fn uninit(dims: &[usize]) -> Self {
+    pub fn uninit(dims: &[usize]) -> Self {
         Self {
             buf: D1::Buf::<MaybeUninit<T1>>::uninit(dims),
         }
     }
 
     /// Transitions the array from uninitialized to initialized state, assuming all values are initialized.
-    unsafe fn assume_init(self) -> Array<T1, D1>
+    ///
+    /// # Safety
+    /// This function will cause undefined behavior unless you ensure that every value in the underyling buffer is initialized
+    pub unsafe fn assume_init(self) -> Array<T1, D1>
     where
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
