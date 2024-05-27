@@ -2,8 +2,8 @@ use crate::{
     channel::BskChannel,
     sys::{
         mrpFeedbackConfig, mrpSteeringConfig, AttGuidMsgPayload, CmdTorqueBodyMsgPayload,
-        RWArrayConfigMsgPayload, RWAvailabilityMsgPayload, RWSpeedMsgPayload, RateCmdMsgPayload,
-        VehicleConfigMsgPayload,
+        MrpPDConfig, RWArrayConfigMsgPayload, RWAvailabilityMsgPayload, RWSpeedMsgPayload,
+        RateCmdMsgPayload, Reset_mrpPD, Update_mrpPD, VehicleConfigMsgPayload,
     },
 };
 
@@ -198,6 +198,47 @@ impl From<RWAvailability> for RWAvailabilityMsgPayload {
     }
 }
 
+/// MRP steering control module - a wrapper around `mrpSteering`
+///
+/// See https://hanspeterschaub.info/basilisk/Documentation/fswAlgorithms/attControl/mrpSteering/mrpSteering.html for more info
+pub struct MrpPD {
+    config: MrpPDConfig,
+}
+
+impl MrpPD {
+    pub fn new(
+        k: f64,
+        p: f64,
+        known_torque: [f64; 3],
+        vehicle_config: BskChannel<VehicleConfigMsgPayload>,
+        att_guid: BskChannel<AttGuidMsgPayload>,
+        torque_out: BskChannel<CmdTorqueBodyMsgPayload>,
+    ) -> Self {
+        let mut this = Self {
+            config: MrpPDConfig {
+                K: k,
+                P: p,
+                knownTorquePntB_B: known_torque,
+                ISCPntB_B: [0.0; 9],
+                cmdTorqueOutMsg: torque_out.into(),
+                guidInMsg: att_guid.into(),
+                vehConfigInMsg: vehicle_config.into(),
+                bskLogger: std::ptr::null_mut(),
+            },
+        };
+        this.reset(0);
+        this
+    }
+
+    pub fn reset(&mut self, time: u64) {
+        unsafe { Reset_mrpPD(&mut self.config, time, MODULE_ID) }
+    }
+
+    pub fn update(&mut self, time: u64) {
+        unsafe { Update_mrpPD(&mut self.config, time, MODULE_ID) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
@@ -300,6 +341,42 @@ mod tests {
             cmd_torque,
             CmdTorqueBodyMsgPayload {
                 torqueRequestBody: [-1.0, 0.0, 0.0]
+            }
+        );
+    }
+
+    #[test]
+    fn test_mrp_pd_basic() {
+        let att_guid = BskChannel::pair();
+        let vehicle_config = BskChannel::pair();
+        let cmd_torque = BskChannel::pair();
+        let mut mrp_pd = MrpPD::new(
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            vehicle_config.clone(),
+            att_guid.clone(),
+            cmd_torque.clone(),
+        );
+        att_guid.write(AttGuidMsgPayload {
+            sigma_BR: [1.0, 0.0, 0.0],
+            omega_BR_B: [0.0, 0.0, 0.0],
+            omega_RN_B: [1.0, 1.0, 1.0],
+            domega_RN_B: [1.0, 1.0, 1.0],
+        });
+        vehicle_config.write(VehicleConfigMsgPayload {
+            ISCPntB_B: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            CoM_B: [0.0, 0.0, 0.0],
+            massSC: 100.0,
+            CurrentADCSState: 0,
+        });
+        mrp_pd.reset(0);
+        mrp_pd.update(1);
+        let cmd_torque = cmd_torque.read();
+        assert_eq!(
+            cmd_torque,
+            CmdTorqueBodyMsgPayload {
+                torqueRequestBody: [-0.0, 1.0, 1.0]
             }
         );
     }

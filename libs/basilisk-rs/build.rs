@@ -31,6 +31,7 @@ fn main() {
     cc::Build::new()
         .file("vendor/fswAlgorithms/attControl/mrpSteering/mrpSteering.c")
         .file("vendor/fswAlgorithms/attControl/mrpFeedback/mrpFeedback.c")
+        .file("vendor/fswAlgorithms/attControl/mrpPD/mrpPD.c")
         .file("vendor/architecture/utilities/rigidBodyKinematics.c")
         .file("vendor/architecture/utilities/linearAlgebra.c")
         .cargo_warnings(false)
