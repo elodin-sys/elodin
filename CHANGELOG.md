@@ -1,6 +1,13 @@
 # Changelog
 
 ## [unreleased]
+- **(fix)** Fix misisng 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
+    - In `nox`, the constant `Field::two` returned a `1` constant. This constant was only used in the implementation of `Add` between `SpatialMotion` and `SpatialTransform` and in `Quaternion::from_axis_angle`. Unfortunately, this caused angular velocity integration to return incorrect results. This bug caused the applied angular velocity to be multiplied by a factor of 2.
+    - The most significant impact of this bug is on the stability of any attitude control system. This bug has led to an increase in small oscillations, potentially affecting the performance of PID controllers tuned to work with previous versions of Elodin. PID controllers tuned to work with earlier versions of Elodin will likely need to be re-tuned
+    - We regret not catching this bug earlier. To prevent a bug like this happening ever again, we have taken the following steps:
+        1. We created a set of unit tests for the 6 DOF implementation that compare Elodin's results with Simulink. They have confirmed that our implementation now matched Simulink's [6DOF Quaternion block](https://www.mathworks.com/help/aeroblks/6dofquaternion.html).
+        2. We will expand our set of unit tests to have 100% coverage of our math modules. We will test each module against Simulink and other trusted implementations.
+        3. We will publish documentation on our testing methodology and reports for each module.
 - **(breaking)** Split `el.Pbr` into `el.Mesh`, `el.Material`, `el.Shape`, and `el.Glb`.
   - Use the `el.shape` and `el.glb` helpers instead
     ```python
