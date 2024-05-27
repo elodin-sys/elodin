@@ -7,7 +7,7 @@ use xla::{ArrayElement, NativeType};
 
 use crate::{
     ArrayBufUnit, ArrayDim, ArrayTy, Buffer, BufferArg, Client, ConcatManyDim, Dim, Field,
-    FromHost, MaybeOwned, Noxpr, Op, Repr, Scalar, Tensor, TensorItem, ToHost,
+    FromHost, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar, Tensor, TensorItem, ToHost,
 };
 
 /// Type alias for a tensor that specifically represents a vector.
@@ -117,20 +117,20 @@ impl<T: Field> Vector<T, 3, Op> {
     }
 }
 
-impl<T: Field, const N: usize> Vector<T, N, Op> {
+impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
     /// Computes the norm squared of the vector.
-    pub fn norm_squared(&self) -> Scalar<T> {
+    pub fn norm_squared(&self) -> Scalar<T, R> {
         self.dot(self)
     }
 
     /// Computes the norm of the vector, which is the square root of the norm squared.
-    pub fn norm(&self) -> Scalar<T> {
+    pub fn norm(&self) -> Scalar<T, R> {
         self.dot(self).sqrt()
     }
 
     /// Normalizes the vector to a unit vector.
     pub fn normalize(&self) -> Self {
-        self.clone() / self.norm()
+        self / self.norm()
     }
 }
 

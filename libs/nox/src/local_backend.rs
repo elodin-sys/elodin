@@ -1,10 +1,11 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
+use crate::RealField;
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
     marker::PhantomData,
     mem::MaybeUninit,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 
 use crate::{
@@ -342,10 +343,83 @@ macro_rules! impl_op {
     }
 }
 
+impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn broadcast<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
+    where
+        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
+            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+    {
+        let d1 = D1::dim(&self.buf);
+
+        let mut out: Array<MaybeUninit<T1>, BroadcastedDim<D1, D2>> = Array::uninit(d1.as_ref());
+        let mut broadcast_dims = d1.clone();
+        if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
+            todo!("handle unbroadcastble dims");
+        }
+        for (a, out) in self
+            .broadcast_iter(broadcast_dims)
+            .unwrap()
+            .zip(out.buf.as_mut_buf().iter_mut())
+        {
+            out.write(*a);
+        }
+        unsafe { out.assume_init() }
+    }
+}
+
 impl_op!(*, Mul, mul);
 impl_op!(+, Add, add);
 impl_op!(-, Sub, sub);
 impl_op!(/, Div, div);
+
+macro_rules! impl_unary_op {
+    ($op_trait:tt, $fn_name:tt) => {
+        impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+            pub fn $fn_name(&self) -> Array<T1, D1>
+            where
+                T1: $op_trait,
+                <D1 as ArrayDim>::Buf<MaybeUninit<T1>>:
+                    ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+            {
+                let d1 = D1::dim(&self.buf);
+                let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
+                self.buf
+                    .as_buf()
+                    .iter()
+                    .zip(out.buf.as_mut_buf().iter_mut())
+                    .for_each(|(a, out)| {
+                        out.write($op_trait::$fn_name(*a));
+                    });
+                unsafe { out.assume_init() }
+            }
+        }
+    };
+}
+
+impl_unary_op!(RealField, sqrt);
+impl_unary_op!(RealField, sin);
+impl_unary_op!(RealField, cos);
+
+impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn neg(&self) -> Array<T1, D1>
+    where
+        T1: Neg<Output = T1>,
+        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        let d1 = D1::dim(&self.buf);
+        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
+        self.buf
+            .as_buf()
+            .iter()
+            .zip(out.buf.as_mut_buf().iter_mut())
+            .for_each(|(a, out)| {
+                out.write(-*a);
+            });
+        unsafe { out.assume_init() }
+    }
+}
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     /// Generates an iterator over the elements of the array after broadcasting to new dimensions.
@@ -534,7 +608,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 }
 
 /// Represents a type resulting from combining dimensions of two arrays during concatenation operations.
-type ConcatDim<D1, D2> = ReplaceMappedDim<
+pub type ConcatDim<D1, D2> = ReplaceMappedDim<
     <D2 as DefaultMap>::DefaultMapDim,
     D1,
     AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>,
@@ -739,6 +813,72 @@ impl Repr for LocalBackend {
             ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
     {
         arg.get(index)
+    }
+
+    fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
+    where
+        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
+            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+    {
+        arg.broadcast()
+    }
+
+    fn scalar_from_const<T1: Field + xla::NativeType + xla::ArrayElement>(
+        value: T1,
+    ) -> Self::Inner<T1, ()> {
+        Array { buf: value }
+    }
+
+    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+        left: &Self::Inner<T1, D1>,
+        right: &Self::Inner<T1, D2>,
+    ) -> Self::Inner<T1, ConcatDim<D1, D2>>
+    where
+        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
+        DefaultMappedDim<D2>: nalgebra::Dim,
+        D2::DefaultMapDim: MapDim<D1>,
+        D1::DefaultMapDim: MapDim<D2>,
+        D1: DefaultMap,
+        AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        ConcatDim<D1, D2>: Dim,
+        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
+            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
+    {
+        left.concat(right)
+    }
+
+    fn neg<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    where
+        T1: Neg<Output = T1>,
+        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        arg.neg()
+    }
+
+    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    where
+        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        arg.sqrt()
+    }
+
+    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    where
+        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        arg.sin()
+    }
+
+    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    where
+        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        arg.cos()
     }
 }
 
