@@ -86,7 +86,7 @@ test_steps = [
     ),
     nix_step(
       label = ":python: lint",
-      command = "ruff format --check libs/nox-py",
+      command = "ruff format --check libs/nox-py; ruff check libs/nox-py",
       flake = ".#python",
     ),
     # rust_step(
