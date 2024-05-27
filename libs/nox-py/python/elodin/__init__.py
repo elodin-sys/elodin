@@ -1,3 +1,6 @@
+# ruff: noqa: F403
+# ruff: noqa: F405
+
 from .elodin import *
 import types
 from typing import (
@@ -23,11 +26,10 @@ import code
 import readline
 import rlcompleter
 import re
-import polars as pl
 import pytest
 
 
-__doc__ = elodin.__doc__  # type: ignore
+__doc__ = elodin.__doc__
 
 _called_from_test = False
 _has_df_key = pytest.StashKey[str]()
@@ -118,7 +120,7 @@ def system(func) -> System:
     return inner
 
 
-O = TypeVar("O")
+T = TypeVar("T")
 S = TypeVarTuple("S")
 A = TypeVarTuple("A")
 B = TypeVarTuple("B")
@@ -146,7 +148,7 @@ class Query(Generic[Unpack[A]]):
         out_tps: Union[
             Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]
         ],
-        f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], O]],
+        f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], T]],
     ) -> "Query[Unpack[S]]":
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
@@ -288,9 +290,9 @@ class GraphQuery(Generic[E]):
         from_query: Query[Unpack[A]],
         to_query: Query[Unpack[B]],
         out_tp: Annotated[Any, Component],
-        init_value: O,
-        fn: Callable[..., O],
-    ) -> "Query[O]":
+        init_value: T,
+        fn: Callable[..., T],
+    ) -> "Query[T]":
         out_bufs: list[jax.typing.ArrayLike] = []
         bufs = self.inner.arrays(from_query.inner, to_query.inner)
         init_value_flat, init_value_tree = tree_flatten(init_value)
@@ -533,7 +535,7 @@ class World(WorldBuilder):
         time_step: Optional[float] = None,
         client: Optional[Client] = None,
     ) -> Any:
-        from IPython.display import IFrame, display
+        from IPython.display import IFrame
 
         addr = super().serve(system, True, time_step, client, None)
         return IFrame(f"http://{addr}", width=960, height=540)
