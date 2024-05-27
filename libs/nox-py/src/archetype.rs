@@ -14,7 +14,7 @@ impl Archetype<'_> {
     pub fn component_names(&self) -> Vec<String> {
         self.component_datas
             .iter()
-            .map(|data| data.name.clone())
+            .map(|data| data.name.to_string())
             .collect::<Vec<_>>()
     }
 }

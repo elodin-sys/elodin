@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, iter};
 
 use bytes::{Bytes, BytesMut};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -30,8 +30,14 @@ impl TcpServer {
             tracing::info!(%addr, "accepted connection");
             let (rx_socket, tx_socket) = socket.into_split();
             tokio::spawn(
-                handle_socket(self.tx.clone(), tx_socket, rx_socket)
-                    .instrument(info_span!("conn", %addr).or_current()),
+                handle_socket(
+                    self.tx.clone(),
+                    tx_socket,
+                    rx_socket,
+                    iter::empty(),
+                    iter::empty(),
+                )
+                .instrument(info_span!("conn", %addr).or_current()),
             );
         }
     }
@@ -41,6 +47,8 @@ pub async fn handle_socket(
     incoming_tx: flume::Sender<MsgPair>,
     tx_socket: impl tokio::io::AsyncWrite + Unpin,
     rx_socket: impl tokio::io::AsyncRead + Unpin,
+    initial_msgs: impl Iterator<Item = Packet<Payload<Bytes>>>,
+    initial_incoming_msgs: impl Iterator<Item = Msg<bytes::Bytes>>,
 ) -> Result<(), crate::Error> {
     handle_stream_sink(
         incoming_tx,
@@ -52,6 +60,8 @@ pub async fn handle_socket(
             tokio::io::BufReader::with_capacity(0x8000, rx_socket),
             LengthDelimitedCodec::new(),
         ),
+        initial_msgs,
+        initial_incoming_msgs,
     )
     .await
 }
@@ -60,15 +70,21 @@ pub async fn handle_stream_sink(
     incoming_tx: flume::Sender<MsgPair>,
     tx_socket: impl futures::Sink<Bytes, Error = io::Error> + Unpin,
     rx_socket: impl futures::stream::Stream<Item = Result<BytesMut, io::Error>> + Unpin,
+    initial_msgs: impl Iterator<Item = Packet<Payload<Bytes>>>,
+    initial_incoming_msgs: impl Iterator<Item = Msg<bytes::Bytes>>,
 ) -> Result<(), crate::Error> {
     let (outgoing_tx, outgoing_rx) = flume::unbounded::<Packet<Payload<Bytes>>>();
 
-    let init_msg = Msg::<Bytes>::Control(ControlMsg::Connect);
-    let init_msg_pair = MsgPair {
-        msg: init_msg,
-        tx: outgoing_tx.downgrade(),
-    };
-    incoming_tx.send_async(init_msg_pair).await.unwrap();
+    for msg in initial_msgs {
+        outgoing_tx.send_async(msg).await?;
+    }
+    for init_msg in initial_incoming_msgs.chain(iter::once(Msg::Control(ControlMsg::Connect))) {
+        let init_msg_pair = MsgPair {
+            msg: init_msg,
+            tx: outgoing_tx.downgrade(),
+        };
+        incoming_tx.send_async(init_msg_pair).await.unwrap();
+    }
 
     let rx = async move {
         let mut rx_client = AsyncClient::new(rx_socket);

@@ -1,0 +1,15 @@
+[package]
+name = "roci-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling = "0.20.3"
+proc-macro2 = "1.0.66"
+quote = "1.0.33"
+syn = "2.0.31"
+convert_case = "0.6.0"
+proc-macro-crate = "3.0.0"

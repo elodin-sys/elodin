@@ -60,7 +60,7 @@ impl Component {
 
     #[staticmethod]
     pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
-        Metadata::of(py, component).map(|metadata| metadata.inner.name)
+        Metadata::of(py, component).map(|metadata| metadata.inner.name.to_string())
     }
 
     #[staticmethod]
@@ -79,7 +79,12 @@ impl Component {
             .collect();
         let strides = strides.into_iter().rev().collect();
         let shape = ty.shape.iter().map(|x| *x as usize).collect();
-        Ok(ShapeIndexer::new(metadata.name, shape, vec![], strides))
+        Ok(ShapeIndexer::new(
+            metadata.name.to_string(),
+            shape,
+            vec![],
+            strides,
+        ))
     }
 }
 

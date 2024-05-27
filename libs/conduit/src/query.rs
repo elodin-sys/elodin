@@ -12,9 +12,11 @@ pub struct MetadataStore {
 impl MetadataStore {
     pub fn push(&mut self, metadata: Metadata) {
         let component_id = metadata.component_id();
-        for (key, tag) in &metadata.tags {
-            self.metadata_index
-                .insert(MetadataPair(key.clone(), tag.clone()), component_id);
+        if let Some(tags) = &metadata.tags {
+            for (key, tag) in tags {
+                self.metadata_index
+                    .insert(MetadataPair(key.clone(), tag.clone()), component_id);
+            }
         }
         self.component_index
             .insert(component_id, self.metadata.len());
