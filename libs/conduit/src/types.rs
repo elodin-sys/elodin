@@ -1,3 +1,4 @@
+use alloc::borrow::Cow;
 use bytemuck::{Pod, Zeroable};
 use bytes::Bytes;
 use core::{fmt, hash::Hash, mem::size_of, ops::Range};
@@ -31,10 +32,10 @@ impl EntityId {
     #[cfg(feature = "std")]
     pub fn metadata() -> Metadata {
         let mut metadata = Metadata {
-            name: Self::NAME.to_string(),
+            name: Cow::Borrowed(Self::NAME),
             component_type: ComponentType::u64(),
             asset: false,
-            tags: HashMap::default(),
+            tags: Some(HashMap::default()),
         };
         metadata.set_priority(-1);
         metadata
@@ -422,6 +423,9 @@ pub trait Component {
     const ASSET: bool = false;
     fn component_type() -> ComponentType;
 }
+pub trait ConstComponent: Component {
+    const TY: ComponentType;
+}
 
 pub trait ComponentExt: Component {
     const COMPONENT_ID: ComponentId = ComponentId::new(Self::NAME);
@@ -429,7 +433,7 @@ pub trait ComponentExt: Component {
     #[cfg(feature = "std")]
     fn metadata() -> Metadata {
         Metadata {
-            name: Self::NAME.to_string(),
+            name: Cow::Borrowed(Self::NAME),
             component_type: Self::component_type(),
             asset: Self::ASSET,
             tags: Default::default(),
@@ -447,7 +451,7 @@ pub trait Archetype {
 }
 
 pub trait ValueRepr {
-    fn component_value<'a>(&self) -> ComponentValue<'a>;
+    fn component_value(&self) -> ComponentValue<'_>;
     fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
     where
         Self: Sized;
@@ -475,6 +479,21 @@ impl<T> Packet<Payload<T>> {
         Packet {
             stream_id: StreamId::CONTROL,
             payload,
+        }
+    }
+
+    pub fn subscribe(query: Query) -> Self {
+        let payload = Payload::ControlMsg(ControlMsg::Subscribe { query });
+        Packet {
+            stream_id: StreamId::CONTROL,
+            payload,
+        }
+    }
+
+    pub fn column(stream_id: StreamId, column: ColumnPayload<T>) -> Self {
+        Packet {
+            stream_id,
+            payload: Payload::Column(column),
         }
     }
 }
@@ -541,6 +560,16 @@ pub struct Query {
     pub entity_ids: Vec<EntityId>,
 }
 
+impl Query {
+    pub fn with_id(component_id: ComponentId) -> Self {
+        Self {
+            component_id,
+            with_component_ids: vec![],
+            entity_ids: vec![],
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum MetadataQuery {
@@ -551,9 +580,9 @@ pub enum MetadataQuery {
 #[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
-    pub name: String,
+    pub name: Cow<'static, str>,
     pub component_type: ComponentType,
-    pub tags: HashMap<String, TagValue>,
+    pub tags: Option<HashMap<String, TagValue>>,
     pub asset: bool,
 }
 
@@ -565,7 +594,8 @@ impl Metadata {
 
     pub fn priority(&self) -> i64 {
         self.tags
-            .get("priority")
+            .as_ref()
+            .and_then(|t| t.get("priority"))
             .and_then(|v| match v {
                 TagValue::Int(v) => Some(*v),
                 _ => None,
@@ -574,13 +604,14 @@ impl Metadata {
     }
 
     pub fn set_priority(&mut self, priority: i64) {
-        self.tags
+        self.tags_mut()
             .insert("priority".to_string(), TagValue::Int(priority));
     }
 
     pub fn element_names(&self) -> &str {
         self.tags
-            .get("element_names")
+            .as_ref()
+            .and_then(|t| t.get("element_names"))
             .and_then(TagValue::as_str)
             .unwrap_or_default()
     }
@@ -591,11 +622,15 @@ impl Metadata {
 
     pub fn asset(name: &str) -> Self {
         Metadata {
-            name: format!("asset_handle_{}", name),
+            name: format!("asset_handle_{}", name).into(),
             component_type: ComponentType::u64(),
             tags: Default::default(),
             asset: true,
         }
+    }
+
+    fn tags_mut(&mut self) -> &mut HashMap<String, TagValue> {
+        self.tags.get_or_insert_with(Default::default)
     }
 }
 

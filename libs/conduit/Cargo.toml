@@ -75,7 +75,7 @@ nalgebra.optional = true
 
 # types
 smallvec.version = "1.11.2"
-smallvec.features = ["const_generics", "union", "serde"]
+smallvec.features = ["const_generics", "union", "serde", "const_new"]
 ndarray.version = "0.15"
 ndarray.features = ["serde"]
 ndarray.default_features = false
@@ -99,3 +99,6 @@ polars-arrow.features = ["arrow_rs"]
 polars-arrow.optional = true
 arrow.version = "51.0"
 arrow.optional = true
+
+# macros
+paste = "1.0.14"

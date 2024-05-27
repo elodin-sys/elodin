@@ -18,7 +18,9 @@ members = [
     "services/sim-builder",
     "apps/elodin",
     "libs/unreal-plugin",
-    "libs/basilisk-rs"
+    "libs/basilisk-rs",
+    "libs/roci",
+    "libs/roci/macros"
 ]
 
 [workspace.package]
