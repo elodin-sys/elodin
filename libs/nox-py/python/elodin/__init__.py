@@ -416,7 +416,7 @@ Seed = Annotated[
     jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})
 ]
 Time = Annotated[
-    jax.Array, Component("time", ComponentType.F64, metadata={"priority": 5})
+    jax.Array, Component("time", ComponentType.F64, metadata={"priority": 6})
 ]
 MeshAsset = Annotated[
     Handle,
