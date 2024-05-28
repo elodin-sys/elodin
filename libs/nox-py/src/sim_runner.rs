@@ -91,14 +91,16 @@ impl SimRunner {
         std::thread::spawn(move || -> anyhow::Result<()> {
             let exec: WorldExec<Compiled> = exec_rx.recv()?;
             let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
+            let mut start = Instant::now();
+            let time_step = conduit_exec.time_step();
             loop {
-                let start = Instant::now();
                 if let Err(err) = conduit_exec.run() {
                     error!(?err, "failed to run conduit exec");
                     return Err(err.into());
                 }
-                let sleep_time = conduit_exec.time_step().saturating_sub(start.elapsed());
+                let sleep_time = time_step.saturating_sub(start.elapsed());
                 std::thread::sleep(sleep_time);
+                start += time_step;
 
                 if let Ok(exec) = exec_rx.try_recv() {
                     trace!("received new code, updating sim");
