@@ -193,15 +193,14 @@ pub fn spawn_tcp_server(
         })
         .unwrap();
     });
+    let mut start = Instant::now();
     loop {
-        let start = Instant::now();
         conduit_exec.run()?;
         if check_canceled() {
             break Ok(());
         }
         let sleep_time = time_step.saturating_sub(start.elapsed());
-        if !sleep_time.is_zero() {
-            std::thread::sleep(sleep_time)
-        }
+        std::thread::sleep(sleep_time);
+        start += time_step;
     }
 }
