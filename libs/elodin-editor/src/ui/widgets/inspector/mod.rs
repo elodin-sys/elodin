@@ -8,7 +8,7 @@ use crate::ui::{colors, InspectorAnchor, SelectedObject, SidebarState};
 
 use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
 
-use super::{RootWidgetSystem, WidgetSystem, WidgetSystemExt};
+use super::{WidgetSystem, WidgetSystemExt};
 
 pub mod entity;
 pub mod graph;
@@ -44,7 +44,7 @@ pub struct Inspector<'w> {
 }
 
 impl WidgetSystem for Inspector<'_> {
-    type Args = (InspectorIcons, f32);
+    type Args = (bool, InspectorIcons, f32);
     type Output = ();
 
     fn ui_system(
@@ -55,50 +55,43 @@ impl WidgetSystem for Inspector<'_> {
     ) {
         let state_mut = state.get_mut(world);
 
-        let (icons, width) = args;
+        let (inside_sidebar, icons, width) = args;
         let sidebar_state = state_mut.sidebar_state;
 
-        egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
-            .resizable(false)
-            .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                ..Default::default()
-            })
-            .exact_width(width)
-            .show_animated_inside(ui, sidebar_state.right_open, |ui| {
-                ui.add_widget_with::<InspectorContent>(world, "inspector_content", (icons, false));
-            });
-    }
-}
-
-impl RootWidgetSystem for Inspector<'_> {
-    type Args = (InspectorIcons, f32);
-    type Output = ();
-
-    fn ctx_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-
-        let (icons, width) = args;
-        let sidebar_state = state_mut.sidebar_state;
-
-        egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                ..Default::default()
-            })
-            .min_width(width.min(1280.) * 0.15)
-            .default_width(width.min(1280.) * 0.25)
-            .max_width(width * 0.35)
-            .show_animated(ctx, sidebar_state.right_open, |ui| {
-                ui.add_widget_with::<InspectorContent>(world, "inspector_content", (icons, true));
-            });
+        if inside_sidebar {
+            egui::SidePanel::new(egui::panel::Side::Right, "inspector_bottom")
+                .resizable(false)
+                .frame(egui::Frame {
+                    fill: colors::PRIMARY_SMOKE,
+                    ..Default::default()
+                })
+                .exact_width(width)
+                .show_animated_inside(ui, sidebar_state.right_open, |ui| {
+                    ui.add_widget_with::<InspectorContent>(
+                        world,
+                        "inspector_content",
+                        (icons, false),
+                    );
+                });
+        } else {
+            egui::SidePanel::new(egui::panel::Side::Right, "inspector_side")
+                .resizable(true)
+                .frame(egui::Frame {
+                    fill: colors::PRIMARY_SMOKE,
+                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    ..Default::default()
+                })
+                .min_width(width.min(1280.) * 0.15)
+                .default_width(width.min(1280.) * 0.25)
+                .max_width(width * 0.35)
+                .show_animated_inside(ui, sidebar_state.right_open, |ui| {
+                    ui.add_widget_with::<InspectorContent>(
+                        world,
+                        "inspector_content",
+                        (icons, true),
+                    );
+                });
+        }
     }
 }
 

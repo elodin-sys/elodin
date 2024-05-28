@@ -10,7 +10,7 @@ use crate::ui::{
     utils, EntityData, EntityDataReadOnly, EntityFilter, EntityPair, SelectedObject, SidebarState,
 };
 
-use super::{RootWidgetSystem, WidgetSystem, WidgetSystemExt};
+use super::{WidgetSystem, WidgetSystemExt};
 
 #[derive(SystemParam)]
 pub struct Hierarchy<'w> {
@@ -18,7 +18,7 @@ pub struct Hierarchy<'w> {
 }
 
 impl WidgetSystem for Hierarchy<'_> {
-    type Args = (egui::TextureId, f32);
+    type Args = (bool, egui::TextureId, f32);
     type Output = f32;
 
     fn ui_system(
@@ -29,67 +29,52 @@ impl WidgetSystem for Hierarchy<'_> {
     ) -> f32 {
         let state_mut = state.get_mut(world);
 
-        let (icon_search, width) = args;
+        let (inside_sidebar, icon_search, width) = args;
         let sidebar_state = state_mut.sidebar_state;
 
-        let outline = egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                inner_margin: egui::Margin::same(4.0),
-                ..Default::default()
-            })
-            .min_width(width * 0.25)
-            .default_width(width * 0.4)
-            .max_width(width * 0.75)
-            .show_animated_inside(ui, sidebar_state.left_open, |ui| {
-                ui.add_widget_with::<HierarchyContent>(
-                    world,
-                    "hierarchy_content",
-                    (icon_search, true),
-                );
+        let outline = if inside_sidebar {
+            egui::SidePanel::new(egui::panel::Side::Left, "outline_bottom")
+                .resizable(true)
+                .frame(egui::Frame {
+                    fill: colors::PRIMARY_SMOKE,
+                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    inner_margin: egui::Margin::same(4.0),
+                    ..Default::default()
+                })
+                .min_width(width * 0.25)
+                .default_width(width * 0.4)
+                .max_width(width * 0.75)
+                .show_animated_inside(ui, sidebar_state.left_open, |ui| {
+                    ui.add_widget_with::<HierarchyContent>(
+                        world,
+                        "hierarchy_content",
+                        (icon_search, true),
+                    );
 
-                ui.allocate_space(ui.available_size());
-            });
+                    ui.allocate_space(ui.available_size());
+                })
+        } else {
+            egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
+                .resizable(true)
+                .frame(egui::Frame {
+                    fill: colors::PRIMARY_SMOKE,
+                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
+                    inner_margin: egui::Margin::same(4.0),
+                    ..Default::default()
+                })
+                .min_width(width.min(1280.) * 0.15)
+                .default_width(width.min(1280.) * 0.20)
+                .max_width(width * 0.35)
+                .show_animated_inside(ui, sidebar_state.left_open, |ui| {
+                    ui.add_widget_with::<HierarchyContent>(
+                        world,
+                        "hierarchy_content",
+                        (icon_search, false),
+                    );
+                })
+        };
 
         outline.map(|o| o.response.rect.width()).unwrap_or(0.0)
-    }
-}
-
-impl RootWidgetSystem for Hierarchy<'_> {
-    type Args = (egui::TextureId, f32);
-    type Output = ();
-
-    fn ctx_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-
-        let (icon_search, width) = args;
-        let sidebar_state = state_mut.sidebar_state;
-
-        egui::SidePanel::new(egui::panel::Side::Left, "outline_side")
-            .resizable(true)
-            .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                inner_margin: egui::Margin::same(4.0),
-                ..Default::default()
-            })
-            .min_width(width.min(1280.) * 0.15)
-            .default_width(width.min(1280.) * 0.20)
-            .max_width(width * 0.35)
-            .show_animated(ctx, sidebar_state.left_open, |ui| {
-                ui.add_widget_with::<HierarchyContent>(
-                    world,
-                    "hierarchy_content",
-                    (icon_search, false),
-                );
-            });
     }
 }
 

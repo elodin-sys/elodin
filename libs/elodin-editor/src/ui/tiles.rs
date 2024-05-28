@@ -25,7 +25,7 @@ use super::{
         button::EImageButton,
         plot::{self, GraphBundle, GraphState, Line, Plot},
         timeline::tagged_range::TaggedRanges,
-        RootWidgetSystem,
+        WidgetSystem,
     },
     HdrEnabled, SelectedObject, ViewportRect,
 };
@@ -87,6 +87,18 @@ impl TileState {
         if let Some(parent) = self.tree.root {
             self.tree_actions
                 .push(TreeAction::AddGraph(parent, Some(graph_state)));
+        }
+    }
+
+    pub fn create_graph_tile_empty(&mut self) {
+        if let Some(parent) = self.tree.root {
+            self.tree_actions.push(TreeAction::AddGraph(parent, None));
+        }
+    }
+
+    pub fn create_viewport_tile(&mut self) {
+        if let Some(parent) = self.tree.root {
+            self.tree_actions.push(TreeAction::AddViewport(parent));
         }
     }
 }
@@ -544,14 +556,14 @@ pub struct TileLayout<'w, 's> {
     control_msg: EventWriter<'w, ControlMsg>,
 }
 
-impl RootWidgetSystem for TileLayout<'_, '_> {
+impl WidgetSystem for TileLayout<'_, '_> {
     type Args = ();
     type Output = ();
 
-    fn ctx_system(
+    fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
+        ui: &mut egui::Ui,
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
@@ -590,7 +602,7 @@ impl RootWidgetSystem for TileLayout<'_, '_> {
                 fill: colors::TRANSPARENT,
                 ..Default::default()
             })
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let tab_diffs = std::mem::take(&mut ui_state.tree_actions);
                 let mut behavior = TreeBehavior {
                     icons,

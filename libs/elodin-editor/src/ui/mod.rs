@@ -24,12 +24,16 @@ use egui_tiles::TileId;
 
 use crate::{GridHandle, MainCamera};
 
-use self::widgets::hierarchy::Hierarchy;
 use self::widgets::inspector::Inspector;
 use self::widgets::modal::ModalWithSettings;
 use self::widgets::timeline::tagged_range::{TaggedRangeId, TaggedRangesPanel};
 use self::widgets::timeline::TimelineArgs;
 use self::widgets::timeline::{tagged_range::TaggedRanges, timeline_widget};
+use self::widgets::{
+    command_palette::{self, CommandPalette},
+    hierarchy::Hierarchy,
+    WidgetSystem,
+};
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{
     utils::MarginSides,
@@ -108,16 +112,20 @@ pub struct EntityPair {
     pub conduit: EntityId,
 }
 
+#[derive(Resource, Default)]
+pub struct InputHasFocus(pub bool);
+
 pub fn shortcuts(
     mut show_stats: ResMut<ShowStats>,
     mut paused: ResMut<Paused>,
+    input_has_focus: Res<InputHasFocus>,
     kbd: Res<ButtonInput<KeyCode>>,
 ) {
     if kbd.just_pressed(KeyCode::F12) {
         show_stats.0 = !show_stats.0;
     }
 
-    if kbd.just_pressed(KeyCode::Space) {
+    if !input_has_focus.0 && kbd.just_pressed(KeyCode::Space) {
         paused.0 = !paused.0;
     }
 }
@@ -167,6 +175,8 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<ViewportRange>()
+            .init_resource::<InputHasFocus>()
+            .init_resource::<command_palette::CommandPaletteState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
@@ -250,7 +260,7 @@ impl RootWidgetSystem for Titlebar<'_> {
         let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
         let titlebar_margin = if cfg!(target_os = "macos") { 8.0 } else { 4.0 };
 
-        egui::TopBottomPanel::top("titlebar")
+        egui::TopBottomPanel::top("title_bar")
             .frame(
                 egui::Frame {
                     fill: colors::PRIMARY_ONYX,
@@ -340,7 +350,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         let width = window.resolution.width();
         let height = window.resolution.height();
 
-        theme::set_theme(contexts.ctx_mut());
+        theme::set_theme(ctx);
 
         let icon_search = contexts.add_image(images.icon_search.clone_weak());
 
@@ -358,31 +368,51 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             icon_fullscreen: contexts.add_image(images.icon_fullscreen.clone_weak()),
             icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
         };
+
         world.add_root_widget_with::<Titlebar>("titlebar", titlebar_icons);
 
-        if width * 0.75 > height {
-            world.add_root_widget_with::<Hierarchy>("hierarchy", (icon_search, width));
-
-            world.add_root_widget_with::<Inspector>("inspector", (inspector_icons, width));
-        } else {
-            egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
-                .resizable(true)
-                .frame(egui::Frame::default())
-                .default_height(200.0)
-                .max_height(width * 0.5)
-                .show(ctx, |ui| {
-                    let hierarchy_width =
-                        ui.add_widget_with::<Hierarchy>(world, "hierarchy", (icon_search, width));
-
-                    let inspector_width = width - hierarchy_width;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
+                if width * 0.75 > height {
+                    ui.add_widget_with::<Hierarchy>(
+                        world,
+                        "hierarchy",
+                        (false, icon_search, width),
+                    );
 
                     ui.add_widget_with::<Inspector>(
                         world,
                         "inspector",
-                        (inspector_icons, inspector_width),
+                        (false, inspector_icons, width),
                     );
-                });
-        }
+                } else {
+                    egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
+                        .resizable(true)
+                        .frame(egui::Frame::default())
+                        .default_height(200.0)
+                        .max_height(width * 0.5)
+                        .show_inside(ui, |ui| {
+                            let hierarchy_width = ui.add_widget_with::<Hierarchy>(
+                                world,
+                                "hierarchy",
+                                (true, icon_search, width),
+                            );
+
+                            let inspector_width = width - hierarchy_width;
+
+                            ui.add_widget_with::<Inspector>(
+                                world,
+                                "inspector",
+                                (true, inspector_icons, inspector_width),
+                            );
+                        });
+                }
+
+                ui.add_widget::<TimelinePanel>(world, "timeline_panel");
+
+                ui.add_widget::<tiles::TileLayout>(world, "tile_layout");
+            });
     }
 }
 
@@ -395,14 +425,14 @@ pub struct TimelinePanel<'w, 's> {
     tagged_ranges: Res<'w, TaggedRanges>,
 }
 
-impl RootWidgetSystem for TimelinePanel<'_, '_> {
+impl WidgetSystem for TimelinePanel<'_, '_> {
     type Args = ();
     type Output = ();
 
-    fn ctx_system(
+    fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
-        ctx: &mut egui::Context,
+        ui: &mut egui::Ui,
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
@@ -415,8 +445,6 @@ impl RootWidgetSystem for TimelinePanel<'_, '_> {
 
         let active_range = 0..=max_tick.0;
         let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
-
-        theme::set_theme(ctx);
 
         let timeline_icons = timeline_widget::TimelineIcons {
             jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
@@ -435,7 +463,7 @@ impl RootWidgetSystem for TimelinePanel<'_, '_> {
                 ..Default::default()
             })
             .resizable(false)
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 let available_width = ui.available_width();
                 let timeline_args = TimelineArgs {
                     available_width,
@@ -561,13 +589,11 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
 pub fn render_layout(world: &mut World) {
     world.add_root_widget::<MainLayout>("main_layout");
 
-    world.add_root_widget::<TimelinePanel>("timeline_panel");
-
-    world.add_root_widget::<tiles::TileLayout>("tile_layout");
-
     world.add_root_widget::<ViewportOverlay>("viewport_overlay");
 
     world.add_root_widget::<ModalWithSettings>("modal_graph");
+
+    world.add_root_widget::<CommandPalette>("command_palette");
 }
 
 #[derive(QueryData)]

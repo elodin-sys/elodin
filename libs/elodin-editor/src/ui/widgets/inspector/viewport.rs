@@ -20,7 +20,7 @@ use conduit::{well_known::WorldPos, ComponentExt};
 use crate::ui::widgets::label::buttons_label;
 use crate::ui::widgets::timeline::tagged_range::TaggedRanges;
 use crate::ui::widgets::WidgetSystem;
-use crate::ui::{CameraQuery, HdrEnabled, SettingModal, SettingModalState, ViewportRange};
+use crate::ui::{CameraQuery, SettingModal, SettingModalState, ViewportRange};
 use crate::{
     ui::{
         colors::{self, with_opacity},
@@ -44,7 +44,6 @@ pub struct InspectorViewport<'w, 's> {
     commands: Commands<'w, 's>,
     entity_transform_query: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
-    hdr_enabled: ResMut<'w, HdrEnabled>,
     viewport_range: ResMut<'w, ViewportRange>,
 }
 
@@ -70,7 +69,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let mut commands = state_mut.commands;
         let entity_transform_query = state_mut.entity_transform_query;
         let mut grid_visibility = state_mut.grid_visibility;
-        let mut hdr_enabled = state_mut.hdr_enabled;
         let mut viewport_range = state_mut.viewport_range;
 
         let Ok(mut cam) = camera_query.get_mut(camera) else {
@@ -199,21 +197,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     }
                 });
         }
-
-        egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("HDR ENABLED")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6)),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.checkbox(&mut hdr_enabled.0, "");
-                    });
-                });
-            });
 
         if let Some(&GridHandle { grid }) = cam.grid_handle {
             egui::Frame::none()
