@@ -48,6 +48,7 @@
 - Add visualization of the current tick in the graph views of the editor.
 - Add `TotalEdge`, an edge type that connects every entity to every other entity.
 - Fix issue where stepping backwards or forwards in the editor would sometimes not work.
+- Add Command Palette to the editor
 
 ## [v0.3.20]
 

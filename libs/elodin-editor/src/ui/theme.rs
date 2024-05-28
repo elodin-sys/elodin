@@ -51,7 +51,7 @@ pub fn set_theme(context: &mut egui::Context) {
     context.set_style(style);
 }
 
-fn rounding_xxs() -> Rounding {
+pub fn rounding_xxs() -> Rounding {
     Rounding::same(2.0)
 }
 

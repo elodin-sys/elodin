@@ -5,6 +5,8 @@ pub const WHITE: Color32 = Color32::WHITE;
 pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;
 
 pub const PRIMARY_CREAME: Color32 = Color32::from_rgb(0xFF, 0xFB, 0xF0);
+pub const PRIMARY_CREAME_6: Color32 = Color32::from_rgb(0x99, 0x97, 0x90);
+
 pub const PRIMARY_SMOKE: Color32 = Color32::from_rgb(0x0D, 0x0D, 0x0D);
 
 pub const BLACK_BLACK_600: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x1F);

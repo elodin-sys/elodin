@@ -10,6 +10,7 @@ use bevy_egui::{egui, EguiContext};
 use std::collections::HashMap;
 
 pub mod button;
+pub mod command_palette;
 pub mod hierarchy;
 pub mod inspector;
 pub mod label;

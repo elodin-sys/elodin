@@ -16,6 +16,8 @@ nalgebra = "0.32"
 
 # bevy
 bevy.version = "0.13"
+
+# bevy
 bevy.features = ["wayland", ]
 bevy_egui = "0.27"
 egui.version = "0.27"
@@ -51,6 +53,7 @@ itertools = "0.12.1"
 futures-lite = "2.0"
 
 reqwest = { version = "0.11", features = ["rustls-tls", "gzip"], default-features = false }
+fuzzy-matcher = "0.3.7"
 
 roaring = "0.10.4"
 
