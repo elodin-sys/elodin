@@ -97,9 +97,15 @@ pub struct Force(pub SpatialForce<f64>);
 #[derive(Clone, Component)]
 pub struct Inertia(pub SpatialInertia<f64>);
 
-fn calc_accel(q: Query<(Force, Inertia)>) -> Query<WorldAccel> {
-    q.map(|force: Force, mass: Inertia| WorldAccel(force.0 / mass.0))
-        .unwrap()
+fn calc_accel(q: Query<(Force, Inertia, WorldPos)>) -> Query<WorldAccel> {
+    q.map(|force: Force, inertia: Inertia, pos: WorldPos| {
+        let q = pos.0.angular();
+        let body_frame_force = q.inverse() * force.0;
+        let body_frame_accel = body_frame_force / inertia.0;
+        let world_frame_accel = q * body_frame_accel;
+        WorldAccel(world_frame_accel)
+    })
+    .unwrap()
 }
 
 fn clear_forces(q: ComponentArray<Force>) -> ComponentArray<Force> {
@@ -150,11 +156,13 @@ mod tests {
     use super::*;
     use crate::World;
     use crate::WorldExt;
+    use conduit::ComponentExt;
     use conduit::ComponentId;
     use nox::nalgebra;
-    use nox::nalgebra::vector;
+    use nox::nalgebra::{vector, UnitQuaternion, Vector3};
     use nox::LocalBackend;
     use nox::SpatialTransform;
+    use std::f64::consts::FRAC_PI_2;
 
     #[test]
     fn test_six_dof_ang_vel() {
@@ -211,5 +219,119 @@ mod tests {
             ][..],
             epsilon = 1e-5
         )
+    }
+
+    fn expect_angular_accel(
+        client: &nox::Client,
+        rot: UnitQuaternion<f64>,
+        inertia_diag: [f64; 3],
+        torque: [f64; 3],
+        angular_accel: [f64; 3],
+    ) {
+        let constant_torque = move |q: ComponentArray<WorldPos>| -> ComponentArray<Force> {
+            q.map(|_: WorldPos| {
+                Force(SpatialForce::from_torque(vector![
+                    torque[0], torque[1], torque[2]
+                ]))
+            })
+            .unwrap()
+        };
+
+        let quat_vec = rot.vector();
+        let body = Body {
+            pos: WorldPos(SpatialTransform {
+                inner: vector![quat_vec[0], quat_vec[1], quat_vec[2], rot.w, 0.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: vector![
+                    inertia_diag[0],
+                    inertia_diag[1],
+                    inertia_diag[2],
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ]
+                .into(),
+            }),
+        };
+
+        let mut world = World::default();
+        world.spawn(body);
+
+        let time_step = 1.0 / 120.0;
+        let mut exec = world
+            .builder()
+            .tick_pipeline(six_dof(|| constant_torque, time_step, Integrator::Rk4))
+            .time_step(std::time::Duration::from_secs_f64(time_step))
+            .build()
+            .unwrap()
+            .compile(client.clone())
+            .unwrap();
+        for _ in 0..120 {
+            exec.run().unwrap();
+        }
+        let actual = exec
+            .column_at_tick(WorldAccel::COMPONENT_ID, 120)
+            .unwrap()
+            .typed_buf::<[f64; 6]>()
+            .unwrap()[0];
+        approx::assert_relative_eq!(&actual[..3], &angular_accel[..], epsilon = 1e-5)
+    }
+
+    #[test]
+    fn test_inertia_frame() {
+        let client = nox::Client::cpu().unwrap();
+
+        // test setup:
+        // - body with inertia diag that only allows angular acceleration along x-axis (in body frame)
+
+        // body is not rotated
+        // 1 Nm torque along x-axis
+        // = 1 rad/s^2 angular acceleration along x-axis
+        expect_angular_accel(
+            &client,
+            UnitQuaternion::default(),
+            [1.0, 1e6, 1e6],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        );
+        // body is rotated 90 degrees around y-axis
+        // 1 Nm torque along x-axis
+        // = 0 angular acceleration because inertia frame is rotated
+        expect_angular_accel(
+            &client,
+            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            [1.0, 1e6, 1e6],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        );
+        // body is rotated 90 degrees around y-axis
+        // 1 Nm torque along z-axis
+        // = 1 rad/s^2 angular acceleration along z-axis (in world frame)
+        expect_angular_accel(
+            &client,
+            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            [1.0, 1e6, 1e6],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        );
+        // same as above, but with a torque along multiple axes
+        expect_angular_accel(
+            &client,
+            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            [1.0, 1e6, 1e6],
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
+        );
     }
 }
