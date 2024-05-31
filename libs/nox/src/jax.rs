@@ -360,15 +360,15 @@ pub fn call_comp_fn<T, R: IntoOp>(
 mod tests {
     use numpy::PyArrayLike0;
 
-    use crate::ConstantExt;
+    use crate::{ConstantExt, Scalar};
 
     use super::*;
 
     #[test]
     fn test_add() {
         pyo3::prepare_freethreaded_python();
-        let a = 1.0f32.constant();
-        let b = 2.0f32.constant();
+        let a: Scalar<f32> = 1.0.constant();
+        let b: Scalar<f32> = 2.0.constant();
         let c = a + b;
         let mut tracer = JaxTracer::new();
         let o = tracer.visit(&c.inner).unwrap();

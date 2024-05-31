@@ -182,7 +182,7 @@ where
 mod tests {
     use nalgebra::{matrix, vector};
 
-    use crate::{CompFn, FixedSliceExt, Vector};
+    use crate::{CompFn, Vector};
 
     use super::*;
 
