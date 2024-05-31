@@ -836,7 +836,7 @@ impl Repr for LocalBackend {
         Array { buf: value }
     }
 
-    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
         left: &Self::Inner<T1, D1>,
         right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
@@ -845,7 +845,7 @@ impl Repr for LocalBackend {
         DefaultMappedDim<D2>: nalgebra::Dim,
         D2::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D2>,
-        D1: DefaultMap,
+        D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
@@ -855,9 +855,9 @@ impl Repr for LocalBackend {
         left.concat(right)
     }
 
-    fn neg<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
-        T1: Neg<Output = T1>,
+        T1: Field + Neg<Output = T1>,
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         arg.neg()
