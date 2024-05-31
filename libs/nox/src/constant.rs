@@ -1,5 +1,5 @@
 //! Provides an extension trait for creating constant representations of various data structures like scalars, vectors, matrices, and quaternions in a computational context.
-use crate::{ArrayTy, Matrix, Noxpr, Quaternion, Scalar, Vector};
+use crate::{ArrayTy, Field, Matrix, Noxpr, Quaternion, Repr, Scalar, Vector};
 use nalgebra::{Const, IsContiguous, Storage};
 use smallvec::smallvec;
 use xla::{ArrayElement, NativeType};
@@ -10,16 +10,9 @@ pub trait ConstantExt<Out> {
     fn constant(&self) -> Out;
 }
 
-impl<T: NativeType + ArrayElement + Copy> ConstantExt<Scalar<T>> for T {
-    fn constant(&self) -> Scalar<T> {
-        let lit = T::literal(*self);
-        Scalar::from_op(Noxpr::constant(
-            lit,
-            ArrayTy {
-                element_type: T::TY,
-                shape: smallvec![],
-            },
-        ))
+impl<T: NativeType + ArrayElement + Copy + Field, R: Repr> ConstantExt<Scalar<T, R>> for T {
+    fn constant(&self) -> Scalar<T, R> {
+        Scalar::from_inner(R::scalar_from_const(*self))
     }
 }
 
