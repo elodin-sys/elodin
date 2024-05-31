@@ -5,7 +5,7 @@ use std::{
     ops::{Add, Div, Mul, Neg, Sub},
 };
 
-use crate::RealField;
+use crate::{ConstDim, RealField};
 use nalgebra::{constraint::ShapeConstraint, Const};
 use smallvec::SmallVec;
 use xla::{ArrayElement, NativeType};
@@ -174,6 +174,18 @@ pub trait Repr {
     fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
+
+    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
+        arg: &Self::Inner<T1, D1>,
+        offsets: &[usize],
+    ) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>;
+
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>;
 }
 
 impl Repr for Literal {
@@ -351,6 +363,24 @@ impl Repr for Literal {
     {
         todo!()
     }
+
+    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
+        _arg: &Self::Inner<T1, D1>,
+        _offsets: &[usize],
+    ) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+    {
+        todo!()
+    }
+
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+    {
+        todo!()
+    }
 }
 
 impl Repr for Buffer {
@@ -525,6 +555,24 @@ impl Repr for Buffer {
     fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
+    {
+        todo!()
+    }
+
+    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
+        _arg: &Self::Inner<T1, D1>,
+        _offsets: &[usize],
+    ) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+    {
+        todo!()
+    }
+
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
     {
         todo!()
     }
@@ -728,5 +776,30 @@ impl Repr for Op {
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         arg.clone().cos()
+    }
+
+    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
+        arg: &Self::Inner<T1, D1>,
+        offsets: &[usize],
+    ) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+    {
+        let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
+        let new_offsets = offsets
+            .iter()
+            .zip(D2::shape())
+            .map(|(a, b)| a + b)
+            .collect();
+        let strides = smallvec::smallvec![1i64; offsets.len()]; // TODO(sphw): fix wrong strides
+        arg.clone().slice(offsets, new_offsets, strides)
+    }
+
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+    {
+        arg.clone().reshape(D2::shape())
     }
 }

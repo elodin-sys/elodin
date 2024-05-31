@@ -1,5 +1,5 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
-use crate::RealField;
+use crate::{ConstDim, RealField};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
@@ -16,6 +16,19 @@ use crate::{
 /// A struct representing an array with type-safe dimensions and element type.
 pub struct Array<T: Copy, D: ArrayDim> {
     pub buf: D::Buf<T>,
+}
+
+impl<T1, D1> Default for Array<T1, D1>
+where
+    T1: Copy,
+    D1: ArrayDim,
+    D1::Buf<T1>: Default,
+{
+    fn default() -> Self {
+        Self {
+            buf: Default::default(),
+        }
+    }
 }
 
 /// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
@@ -347,6 +360,29 @@ macro_rules! impl_op {
 }
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn reshape<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        D2: ArrayDim + XlaDim,
+    {
+        let d1 = D1::dim(&self.buf);
+
+        let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(d1.as_ref());
+        let mut broadcast_dims = d1.clone();
+        if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
+            todo!("handle unbroadcastable dims");
+        }
+        for (a, out) in self
+            .broadcast_iter(broadcast_dims)
+            .unwrap()
+            .zip(out.buf.as_mut_buf().iter_mut())
+        {
+            out.write(*a);
+        }
+        unsafe { out.assume_init() }
+    }
+
     pub fn broadcast<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
     where
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
@@ -425,6 +461,27 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 }
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn offset_iter(&self, offsets: &[usize]) -> impl Iterator<Item = &'_ T1> {
+        let dims = D1::dim(&self.buf);
+        let stride = D1::strides(&self.buf);
+        let mut indexes = dims.clone();
+        for (offset, index) in offsets
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(0))
+            .zip(indexes.as_mut().iter_mut())
+        {
+            *index = offset;
+        }
+        StrideIterator {
+            buf: self.buf.as_buf(),
+            stride,
+            indexes,
+            dims,
+            phantom: PhantomData,
+        }
+    }
+
     /// Generates an iterator over the elements of the array after broadcasting to new dimensions.
     pub fn broadcast_iter(
         &self,
@@ -546,7 +603,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         let d1 = D1::dim(&self.buf);
         let d2 = D2::dim(&right.buf);
         let mut out_dims = d2.clone();
-        assert_eq!(d1.as_ref(), d2.as_ref());
+        assert_eq!(d1.as_ref().len(), d2.as_ref().len());
         out_dims.as_mut()[0] = d1.as_ref()[0] + d2.as_ref()[0];
         let mut out: Array<MaybeUninit<T1>, ConcatDim<D1, D2>> = Array::uninit(out_dims.as_ref());
         self.buf
@@ -605,6 +662,20 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         let mut out: Array<MaybeUninit<T1>, GetDim<D1>> = Array::uninit(out_dims);
         for (a, b) in buf.iter().zip(out.buf.as_mut_buf().iter_mut()) {
             b.write(*a);
+        }
+        unsafe { out.assume_init() }
+    }
+
+    pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+    {
+        let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(D2::DIM);
+        for (a, out) in self
+            .offset_iter(offsets)
+            .zip(out.buf.as_mut_buf().iter_mut())
+        {
+            out.write(*a);
         }
         unsafe { out.assume_init() }
     }
@@ -882,6 +953,25 @@ impl Repr for LocalBackend {
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         arg.cos()
+    }
+
+    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
+        arg: &Self::Inner<T1, D1>,
+        offsets: &[usize],
+    ) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+    {
+        arg.copy_fixed_slice(offsets)
+    }
+
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        D2: ArrayDim + XlaDim,
+    {
+        arg.reshape()
     }
 }
 

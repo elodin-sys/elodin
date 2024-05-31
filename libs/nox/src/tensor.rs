@@ -1,8 +1,8 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::local_backend::{ArrayBufUnit, ArrayDim};
 use crate::{
-    AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp, GetDim, IntoOp, MatMul, Noxpr,
-    NoxprScalarExt, Op, Repr, Scalar, Vector,
+    AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp, GetDim, IntoOp, LocalBackend, MatMul,
+    Noxpr, NoxprScalarExt, Op, Repr, Scalar, Vector,
 };
 use core::mem::MaybeUninit;
 use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
@@ -191,6 +191,9 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn inner(&self) -> &R::Inner<T::Elem, D> {
         &self.inner
     }
+    pub fn inner_mut(&mut self) -> &mut R::Inner<T::Elem, D> {
+        &mut self.inner
+    }
 }
 
 impl<T: TensorItem, D: Dim> IntoOp for Tensor<T, D, Op> {
@@ -204,7 +207,9 @@ pub trait TensorDim {}
 /// Represents non-scalar dimensions, i.e., dimensions other than `()`.
 pub trait NonScalarDim {}
 /// Represents constant dimensions, specified at compile-time.
-pub trait ConstDim {}
+pub trait ConstDim {
+    const DIM: &'static [usize];
+}
 
 /// Represents a scalar dimension, which is essentially dimensionless.
 pub type ScalarDim = ();
@@ -226,7 +231,9 @@ impl XlaDim for Dyn {
     }
 }
 
-impl ConstDim for ScalarDim {}
+impl ConstDim for ScalarDim {
+    const DIM: &'static [usize] = &[];
+}
 
 impl XlaDim for ScalarDim {
     fn shape() -> SmallVec<[i64; 4]> {
@@ -234,7 +241,9 @@ impl XlaDim for ScalarDim {
     }
 }
 
-impl<const N: usize> ConstDim for Const<N> {}
+impl<const N: usize> ConstDim for Const<N> {
+    const DIM: &'static [usize] = &[N];
+}
 
 impl<const N: usize> XlaDim for Const<N> {
     fn shape() -> SmallVec<[i64; 4]> {
@@ -256,9 +265,9 @@ macro_rules! impl_tensor_dim {
         {
         }
 
-        impl<$($ty,)*> ConstDim for ($($ty,)*)
-              where $($ty: ConstDim, )*
+        impl<$(const $ty: usize,)*> ConstDim for ($(Const<$ty>,)*)
         {
+            const DIM: &'static [usize] = &[$($ty,)*];
         }
 
         impl<$($ty,)*> XlaDim for ($($ty,)*)
@@ -408,23 +417,13 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim + XlaDim> FixedSliceExt<T, D> for Tensor<T, D, Op> {
-    fn fixed_slice<ND: Dim + XlaDim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op> {
-        let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
-        let new_offsets = offsets
-            .iter()
-            .zip(ND::shape())
-            .map(|(a, b)| a + b)
-            .collect();
-        let strides = smallvec![1i64; offsets.len()];
-        Tensor::from_op(self.inner.clone().slice(offsets, new_offsets, strides))
+impl<T: TensorItem + Field, D: Dim + XlaDim, R: Repr> Tensor<T, D, R> {
+    pub fn fixed_slice<D2: Dim + XlaDim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R>
+    where
+        <D2 as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D2 as ArrayDim>::Buf<T>>,
+    {
+        Tensor::from_inner(R::copy_fixed_slice(&self.inner, offsets))
     }
-}
-
-/// Extension trait for tensors supporting fixed-size slicing operations.
-pub trait FixedSliceExt<T: TensorItem, D: Dim> {
-    /// Returns a tensor slice with dimensions specified by `ND`, starting at the given `offsets`.
-    fn fixed_slice<ND: Dim>(&self, offsets: &[usize]) -> Tensor<T, ND, Op>;
 }
 
 impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: Dim> Mul<T> for Tensor<T, D1> {
@@ -639,19 +638,20 @@ impl<const N: usize> NonTupleDim for Const<N> {}
 /// Alias for the dimension resulting from concatenating dimensions `A` and `B`.
 pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 
-impl<T: TensorItem, D: Dim> Tensor<T, D> {
-    pub fn reshape<ND>(self) -> Tensor<T, ND>
+impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
+    pub fn reshape<D2: Dim>(self) -> Tensor<T1, D2, R>
     where
-        ND: Dim + XlaDim,
+        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        D2: ArrayDim + XlaDim,
     {
+        let inner = R::reshape::<T1, D1, D2>(&self.inner);
         Tensor {
-            inner: self.inner.reshape(ND::shape()),
+            inner,
             phantom: PhantomData,
         }
     }
-}
 
-impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
     pub fn broadcast<D2: Dim>(self) -> Tensor<T1, D2, R>
     where
         <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
@@ -660,7 +660,6 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
         let inner = R::broadcast::<D1, D2, T1>(&self.inner);
-        // self.inner.broadcast();
         Tensor {
             inner,
             phantom: PhantomData,
@@ -936,6 +935,18 @@ where
         );
         Tensor {
             inner,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: TensorItem, D: Dim> Default for Tensor<T, D, LocalBackend>
+where
+    D::Buf<T::Elem>: Default,
+{
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
             phantom: PhantomData,
         }
     }

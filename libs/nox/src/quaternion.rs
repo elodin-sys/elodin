@@ -14,6 +14,12 @@ use crate::{
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 pub struct Quaternion<T: TensorItem, P: Repr = Op>(pub Vector<T, 4, P>);
 
+impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
 impl<T: TensorItem> Clone for Quaternion<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -108,6 +114,30 @@ impl<T: RealField, R: Repr> Mul for Quaternion<T, R> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
+        self * &rhs
+    }
+}
+
+impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for Quaternion<T, R> {
+    type Output = Quaternion<T, R>;
+
+    fn mul(self, rhs: &'a Quaternion<T, R>) -> Self::Output {
+        &self * rhs
+    }
+}
+
+impl<'a, T: RealField, R: Repr> Mul<Quaternion<T, R>> for &'a Quaternion<T, R> {
+    type Output = Quaternion<T, R>;
+
+    fn mul(self, rhs: Quaternion<T, R>) -> Self::Output {
+        self * &rhs
+    }
+}
+
+impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for &'a Quaternion<T, R> {
+    type Output = Quaternion<T, R>;
+
+    fn mul(self, rhs: &Quaternion<T, R>) -> Self::Output {
         let [l_i, l_j, l_k, l_w] = &self.parts();
         let [r_i, r_j, r_k, r_w] = &rhs.parts();
         let i = l_w * r_i + l_i * r_w + l_j * r_k - l_k * r_j;
@@ -131,11 +161,39 @@ impl<T: RealField, R: Repr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
     }
 }
 
+impl<'a, T: RealField, R: Repr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
+    type Output = Vector<T, 3, R>;
+
+    fn mul(self, rhs: Vector<T, 3, R>) -> Self::Output {
+        let zero: Vector<T, 1, R> = T::zero().broadcast();
+        let v = Quaternion(rhs.concat(zero));
+        let inv = self.inverse();
+        let [x, y, z, _] = (self * v * inv).0.parts();
+        Vector::from_arr([&x, &y, &z]) // TODO: use fixed slice instead
+    }
+}
+
 impl<T: RealField, R: Repr> Add for Quaternion<T, R> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
         Quaternion(self.0 + rhs.0)
+    }
+}
+
+impl<'a, T: RealField, R: Repr> Add<Quaternion<T, R>> for &'a Quaternion<T, R> {
+    type Output = Quaternion<T, R>;
+
+    fn add(self, rhs: Quaternion<T, R>) -> Self::Output {
+        Quaternion(&self.0 + rhs.0)
+    }
+}
+
+impl<'a, T: RealField, R: Repr> Add<&'a Quaternion<T, R>> for Quaternion<T, R> {
+    type Output = Quaternion<T, R>;
+
+    fn add(self, rhs: &'a Quaternion<T, R>) -> Self::Output {
+        Quaternion(self.0 + &rhs.0)
     }
 }
 

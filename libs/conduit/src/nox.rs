@@ -1,10 +1,10 @@
 use nalgebra::Const;
 use nox::{
     xla::{ArrayElement, ElementType, NativeType, PjRtBuffer},
-    Array, ArrayBufUnit, ArrayDim, ArrayTy, Client, Dim, IntoOp, LocalBackend, NoxprNode, Repr,
-    SpatialTransform, Tensor,
+    Array, ArrayBufUnit, ArrayDim, ArrayTy, Client, ConstDim, Dim, IntoOp, LocalBackend, NoxprNode,
+    Quaternion, Repr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
-use smallvec::smallvec;
+use smallvec::{smallvec, SmallVec};
 use std::ops::Deref;
 
 use core::mem::MaybeUninit;
@@ -14,8 +14,8 @@ use crate::{
     types::ArchetypeName,
     well_known::{Material, Mesh, Shape},
     world::World,
-    Archetype, Component, ComponentExt, ComponentType, ComponentValue, Handle, Metadata,
-    PrimitiveTy, ValueRepr,
+    Archetype, Component, ComponentExt, ComponentType, ComponentValue, ConstComponent, Handle,
+    Metadata, PrimitiveTy, ValueRepr,
 };
 
 impl ComponentValue<'_> {
@@ -129,13 +129,29 @@ where
     }
 }
 
-impl<T: ArrayElement + NativeType> Component for nox::Quaternion<T> {
+impl<T: ArrayElement + NativeType, R: Repr> Component for nox::Quaternion<T, R> {
     const NAME: &'static str = concat_str!("quaternion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
             shape: smallvec![4],
         }
+    }
+}
+
+impl<T: ArrayElement + NativeType> ValueRepr for Quaternion<T, LocalBackend>
+where
+    Array<T, Const<4>>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.0.component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(Quaternion(Tensor::from_component_value(value)?))
     }
 }
 
@@ -167,7 +183,7 @@ where
     }
 }
 
-impl<T: ArrayElement + NativeType> Component for nox::SpatialMotion<T> {
+impl<T: ArrayElement + NativeType, R: Repr> Component for SpatialMotion<T, R> {
     const NAME: &'static str = concat_str!("spatial_motion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -177,7 +193,25 @@ impl<T: ArrayElement + NativeType> Component for nox::SpatialMotion<T> {
     }
 }
 
-impl<T: ArrayElement + NativeType> Component for nox::SpatialInertia<T> {
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialMotion<T, LocalBackend>
+where
+    Array<T, Const<6>>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.inner.component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(SpatialMotion {
+            inner: Tensor::from_component_value(value)?,
+        })
+    }
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialInertia<T, R> {
     const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -187,13 +221,49 @@ impl<T: ArrayElement + NativeType> Component for nox::SpatialInertia<T> {
     }
 }
 
-impl<T: ArrayElement + NativeType> Component for nox::SpatialForce<T> {
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialInertia<T, LocalBackend>
+where
+    Array<T, Const<7>>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.inner.component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(SpatialInertia {
+            inner: Tensor::from_component_value(value)?,
+        })
+    }
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialForce<T, R> {
     const NAME: &'static str = concat_str!("spatial_force_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
             shape: smallvec![6],
         }
+    }
+}
+
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialForce<T, LocalBackend>
+where
+    Array<T, Const<6>>: ValueRepr,
+{
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.inner.component_value()
+    }
+
+    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        Some(SpatialForce {
+            inner: Tensor::from_component_value(value)?,
+        })
     }
 }
 
@@ -264,3 +334,69 @@ impl_array_to_value_repr!(i64, I64);
 impl_array_to_value_repr!(u16, U16);
 impl_array_to_value_repr!(u32, U32);
 impl_array_to_value_repr!(u64, U64);
+
+#[allow(clippy::len_zero)]
+const fn dim_to_smallvec<Dim: ConstDim>() -> SmallVec<[i64; 4]> {
+    let mut arr = [0i64; 4];
+    let len = Dim::DIM.len();
+    if len > 4 {
+        panic!("dim length must be less than or equal to 4");
+    }
+    arr[0] = if Dim::DIM.len() > 0 {
+        Dim::DIM[0] as i64
+    } else {
+        0
+    };
+    arr[1] = if Dim::DIM.len() > 1 {
+        Dim::DIM[1] as i64
+    } else {
+        0
+    };
+    arr[2] = if Dim::DIM.len() > 2 {
+        Dim::DIM[2] as i64
+    } else {
+        0
+    };
+    arr[3] = if Dim::DIM.len() > 3 {
+        Dim::DIM[3] as i64
+    } else {
+        0
+    };
+
+    unsafe { SmallVec::from_const_with_len_unchecked(arr, len) }
+}
+
+impl<T: ArrayElement + NativeType, D: Dim + ConstDim, R: Repr> ConstComponent for Tensor<T, D, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<D>(),
+    };
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialTransform<T, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<Const<7>>(),
+    };
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialForce<T, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<Const<7>>(),
+    };
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialInertia<T, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<Const<7>>(),
+    };
+}
+
+impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for Quaternion<T, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<Const<4>>(),
+    };
+}
