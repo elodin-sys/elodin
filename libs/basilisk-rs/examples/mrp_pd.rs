@@ -4,20 +4,21 @@ use basilisk_sys::{
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
 use conduit::{ComponentId, EntityId, Metadata, Query, ValueRepr};
+use nox::{ConstantExt, LocalBackend, Quaternion, SpatialForce, SpatialTransform, Vector};
 use roci::*;
 use roci_macros::{Componentize, Decomponentize};
 use std::time::Duration;
 
-#[derive(Default, Debug, Componentize, Decomponentize)]
+#[derive(Default, Componentize, Decomponentize)]
 struct World {
     #[roci(entity_id = 3, component_id = "world_pos")]
-    world_pos: [f64; 7],
+    world_pos: SpatialTransform<f64, LocalBackend>,
     #[roci(entity_id = 3, component_id = "ang_vel_est")]
-    ang_vel_est: [f64; 3],
+    ang_vel_est: Vector<f64, 3, LocalBackend>,
     #[roci(entity_id = 3, component_id = "control_force")]
-    control_force: [f64; 6],
+    control_force: SpatialForce<f64, LocalBackend>,
     #[roci(entity_id = 3, component_id = "goal")]
-    goal: [f64; 4],
+    goal: Quaternion<f64, LocalBackend>,
 }
 
 struct MRPHandler {
@@ -26,12 +27,10 @@ struct MRPHandler {
     cmd_torque: BskChannel<CmdTorqueBodyMsgPayload>,
 }
 
-fn quat_to_mrp(quat: [f64; 4]) -> [f64; 3] {
-    let [i, j, k, w] = quat;
-    let m_x = i / (w + 1.0);
-    let m_y = j / (w + 1.0);
-    let m_z = k / (w + 1.0);
-    [m_x, m_y, m_z]
+fn quat_to_mrp(quat: &Quaternion<f64, LocalBackend>) -> Vector<f64, 3, LocalBackend> {
+    let w = quat.0.get(3);
+    let vec: Vector<f64, 3, LocalBackend> = quat.0.fixed_slice(&[0]);
+    vec / (w + 1.0.constant())
 }
 
 impl MRPHandler {
@@ -40,8 +39,8 @@ impl MRPHandler {
         let vehicle_config = BskChannel::pair();
         let cmd_torque = BskChannel::pair();
         let mrp_pd = MrpPD::new(
-            90.0,
-            90.0,
+            40.0,
+            40.0,
             [0.0, 0.0, 0.0],
             vehicle_config,
             att_guid.clone(),
@@ -58,25 +57,23 @@ impl MRPHandler {
 impl Handler for MRPHandler {
     type World = World;
     fn tick(&mut self, world: &mut Self::World) {
-        let quat: [f64; 4] = world.world_pos[..4].try_into().unwrap();
-        let att_mrp = quat_to_mrp(quat);
-        let goal = quat_to_mrp(world.goal);
-        let ang_vel = world.ang_vel_est;
-        let error_mrp = [
-            att_mrp[0] - goal[0],
-            att_mrp[1] - goal[1],
-            att_mrp[2] - goal[2],
-        ];
+        let quat = world.world_pos.angular();
+        let att_mrp = quat_to_mrp(&quat);
+        let goal = quat_to_mrp(&world.goal);
+        let ang_vel = &world.ang_vel_est;
+        let error_mrp = att_mrp - goal;
+        let error_mrp = error_mrp.inner().buf;
         let att_guid_msg_payload = AttGuidMsgPayload {
             sigma_BR: error_mrp,
-            omega_BR_B: ang_vel,
+            omega_BR_B: ang_vel.inner().buf,
             omega_RN_B: [0.0; 3],
             domega_RN_B: [0.0; 3],
         };
         self.att_guid.write(att_guid_msg_payload);
         self.mrp_pd.update(0);
         let cmd_torque = self.cmd_torque.read();
-        world.control_force[..3].copy_from_slice(&cmd_torque.torqueRequestBody);
+        world.control_force.inner.inner_mut().buf[..3]
+            .copy_from_slice(&cmd_torque.torqueRequestBody);
     }
 }
 

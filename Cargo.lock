@@ -1020,6 +1020,8 @@ dependencies = [
  "approx",
  "bindgen 0.65.1",
  "cc",
+ "conduit",
+ "nox",
  "paste",
  "roci",
  "roci-macros",
