@@ -49,7 +49,7 @@
       name = "elo-node-shell";
       buildInputs = with pkgs;
         [
-          nodejs_21
+          nodejs_22
         ];
       doCheck = false;
     };

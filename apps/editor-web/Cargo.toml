@@ -16,21 +16,21 @@ anyhow = "1.0"
 js-sys = "0.3"
 web-sys.version = "0.3.66"
 web-sys.features = [
-  "console",
-  "CustomEvent",
-  "Window",
-  "Document",
-  "Element",
-  "BinaryType",
-  "Blob",
-  "ErrorEvent",
-  "FileReader",
-  "MessageEvent",
-  "ProgressEvent",
-  "WebSocket",
+    "console",
+    "CustomEvent",
+    "Window",
+    "Document",
+    "Element",
+    "BinaryType",
+    "Blob",
+    "ErrorEvent",
+    "FileReader",
+    "MessageEvent",
+    "ProgressEvent",
+    "WebSocket",
 
 ]
-wasm-bindgen = "=0.2.91"
+wasm-bindgen = "=0.2.92"
 tracing = "0.1"
 flume = "0.11"
 conduit.path = "../../libs/conduit"

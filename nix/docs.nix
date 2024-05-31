@@ -4,7 +4,7 @@ let
 
   node_modules = nl2nix.v2.node_modules {
     src = ../docs/public;
-    nodejs = pkgs.nodejs_21;
+    nodejs = pkgs.nodejs_22;
   };
 
   app = pkgs.stdenv.mkDerivation {
@@ -23,7 +23,7 @@ let
   docker_attrs = {
     name = "elo-docs";
     tag = "latest";
-    contents = [ pkgs.nodejs_21 app pkgs.cacert pkgs.busybox ];
+    contents = [ pkgs.nodejs_22 app pkgs.cacert pkgs.busybox ];
     config = {
       Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
       Cmd = [ "node_modules/.bin/mintlify" "dev" ];
