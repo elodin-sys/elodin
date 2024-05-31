@@ -105,7 +105,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
     }
 }
 
-impl<T: Field> Vector<T, 3, Op> {
+impl<T: Field, R: Repr> Vector<T, 3, R> {
     /// Computes the cross product of two 3-dimensional vectors.
     pub fn cross(&self, other: &Self) -> Self {
         let [ax, ay, az] = self.parts();
