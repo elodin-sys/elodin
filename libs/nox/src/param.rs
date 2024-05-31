@@ -107,7 +107,7 @@ pub trait Repr {
             ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>;
 
     /// Concatenates two arrays along the first dimension.
-    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
         left: &Self::Inner<T1, D1>,
         right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
@@ -116,7 +116,7 @@ pub trait Repr {
         DefaultMappedDim<D2>: nalgebra::Dim,
         D2::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D2>,
-        D1: DefaultMap,
+        D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
@@ -158,9 +158,9 @@ pub trait Repr {
 
     fn scalar_from_const<T1: Field + NativeType + ArrayElement>(value: T1) -> Self::Inner<T1, ()>;
 
-    fn neg<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
-        T1: Neg<Output = T1>,
+        T1: Field + Neg<Output = T1>,
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
 
     fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
@@ -304,7 +304,7 @@ impl Repr for Literal {
         todo!()
     }
 
-    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
         _left: &Self::Inner<T1, D1>,
         _right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
@@ -313,7 +313,7 @@ impl Repr for Literal {
         DefaultMappedDim<D2>: nalgebra::Dim,
         D2::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D2>,
-        D1: DefaultMap,
+        D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
@@ -323,9 +323,9 @@ impl Repr for Literal {
         todo!()
     }
 
-    fn neg<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    fn neg<T1, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
-        T1: Neg<Output = T1>,
+        T1: Field + Neg<Output = T1>,
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         todo!()
@@ -481,7 +481,7 @@ impl Repr for Buffer {
         todo!()
     }
 
-    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
         _left: &Self::Inner<T1, D1>,
         _right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
@@ -490,7 +490,7 @@ impl Repr for Buffer {
         DefaultMappedDim<D2>: nalgebra::Dim,
         D2::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D2>,
-        D1: DefaultMap,
+        D1: DefaultMap + Dim,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
@@ -500,9 +500,9 @@ impl Repr for Buffer {
         todo!()
     }
 
-    fn neg<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
+    fn neg<T1, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
-        T1: Neg<Output = T1>,
+        T1: Field + Neg<Output = T1>,
         <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         todo!()
@@ -683,7 +683,7 @@ impl Repr for Op {
         )
     }
 
-    fn concat<T1: Field, D1: Dim, D2: Dim + DefaultMap>(
+    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
         left: &Self::Inner<T1, D1>,
         right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
@@ -692,7 +692,7 @@ impl Repr for Op {
         DefaultMappedDim<D2>: nalgebra::Dim,
         D2::DefaultMapDim: MapDim<D1>,
         D1::DefaultMapDim: MapDim<D2>,
-        D1: DefaultMap,
+        D1: DefaultMap + Dim,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
