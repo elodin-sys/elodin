@@ -1,4 +1,4 @@
-use nox::{IntoOp, Scalar, ScalarExt};
+use nox::{IntoOp, Scalar};
 
 use nox_ecs_macros::Component;
 
@@ -18,13 +18,13 @@ pub struct Time(pub Scalar<f64>);
 
 impl Seed {
     pub fn zero() -> Self {
-        Seed(0u64.constant())
+        Seed(0u64.into())
     }
 }
 
 impl Time {
     pub fn zero() -> Self {
-        Time(0f64.constant())
+        Time(Scalar::from(0f64))
     }
 }
 

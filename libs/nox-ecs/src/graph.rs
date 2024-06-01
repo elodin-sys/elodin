@@ -272,7 +272,7 @@ impl<E> GraphQuery<E> {
 #[cfg(test)]
 mod tests {
 
-    use nox::{Scalar, ScalarExt};
+    use nox::Scalar;
 
     use crate::IntoSystemExt;
 
@@ -284,16 +284,16 @@ mod tests {
         struct A(Scalar<f64>);
 
         fn fold_system(g: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
-            g.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+            g.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
                 A(acc.0 + b.0)
             })
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A(10.0.constant())).id();
-        let b = world.spawn(A(100.0.constant())).id();
-        let c = world.spawn(A(1000.0.constant())).id();
-        world.spawn(A(10000.0.constant()));
+        let a = world.spawn(A(10.0.into())).id();
+        let b = world.spawn(A(100.0.into())).id();
+        let c = world.spawn(A(1000.0.into())).id();
+        world.spawn(A(10000.0.into()));
         //world.spawn(Edge { from: c, to: d });
         world.spawn(Edge::new(a, b));
         world.spawn(Edge::new(a, c));
@@ -314,16 +314,16 @@ mod tests {
         struct A(Scalar<f64>);
 
         fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
-            query.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+            query.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
                 A(acc.0 + b.0)
             })
         }
 
         let mut world = fold_system.world();
-        let a = world.spawn(A(10.0.constant())).id();
-        let b = world.spawn(A(100.0.constant())).id();
-        world.spawn(A(1000.0.constant()));
-        world.spawn(A(10000.0.constant()));
+        let a = world.spawn(A(10.0.into())).id();
+        let b = world.spawn(A(100.0.into())).id();
+        world.spawn(A(1000.0.into()));
+        world.spawn(A(10000.0.into()));
         world.spawn(Edge::new(a, b));
 
         let world = world.run();
@@ -340,7 +340,7 @@ mod tests {
         struct A(Scalar<f64>);
 
         fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
-            query.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+            query.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
                 A(acc.0 + b.0)
             })
         }
@@ -348,10 +348,10 @@ mod tests {
         // a very specific failure case caused by an old impl of `NoxprId`
         for _ in 0..5000 {
             let mut world = fold_system.world();
-            let c = world.spawn(A(1000.0.constant())).id();
-            let a = world.spawn(A(10.0.constant())).id();
-            let b = world.spawn(A(100.0.constant())).id();
-            let d = world.spawn(A(10000.0.constant())).id();
+            let c = world.spawn(A(1000.0.into())).id();
+            let a = world.spawn(A(10.0.into())).id();
+            let b = world.spawn(A(100.0.into())).id();
+            let d = world.spawn(A(10000.0.into())).id();
             world.spawn(Edge::new(c, d));
             world.spawn(Edge::new(a, b));
             world.spawn(Edge::new(a, c));
@@ -368,15 +368,15 @@ mod tests {
         struct A(Scalar<f64>);
 
         fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
-            g.edge_fold(&a, &a, A(5.0.constant()), |acc: A, (_, b): (A, A)| {
+            g.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
                 A(acc.0 + b.0)
             })
         }
 
         let mut world = fold_system.world();
-        world.spawn(A(10.0.constant())).id();
-        world.spawn(A(100.0.constant())).id();
-        world.spawn(A(1000.0.constant())).id();
+        world.spawn(A(10.0.into())).id();
+        world.spawn(A(100.0.into())).id();
+        world.spawn(A(1000.0.into())).id();
 
         let world = world.run();
         let c = world.column::<A>().unwrap();

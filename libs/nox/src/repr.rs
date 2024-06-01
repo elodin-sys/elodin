@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    local_backend::{ArrayBufUnit, ArrayDim},
+    array::{ArrayBufUnit, ArrayDim},
     AddDim, ArrayTy, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim, DefaultMap,
     DefaultMappedDim, DimGet, DotDim, DottedDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim,
     XlaDim,

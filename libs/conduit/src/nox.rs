@@ -1,7 +1,7 @@
 use nalgebra::Const;
 use nox::{
     xla::{ArrayElement, ElementType, NativeType, PjRtBuffer},
-    Array, ArrayBufUnit, ArrayDim, ArrayTy, Client, ConstDim, Dim, IntoOp, LocalBackend, NoxprNode,
+    Array, ArrayBufUnit, ArrayDim, ArrayRepr, ArrayTy, Client, ConstDim, Dim, IntoOp, NoxprNode,
     Quaternion, Repr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
 use smallvec::{smallvec, SmallVec};
@@ -113,7 +113,7 @@ impl<T: ArrayElement + NativeType, D: Dim, R: Repr> Component for Tensor<T, D, R
     }
 }
 
-impl<T: ArrayElement + NativeType, D: Dim> ValueRepr for Tensor<T, D, LocalBackend>
+impl<T: ArrayElement + NativeType, D: Dim> ValueRepr for Tensor<T, D, ArrayRepr>
 where
     Array<T, D>: ValueRepr,
 {
@@ -139,7 +139,7 @@ impl<T: ArrayElement + NativeType, R: Repr> Component for nox::Quaternion<T, R> 
     }
 }
 
-impl<T: ArrayElement + NativeType> ValueRepr for Quaternion<T, LocalBackend>
+impl<T: ArrayElement + NativeType> ValueRepr for Quaternion<T, ArrayRepr>
 where
     Array<T, Const<4>>: ValueRepr,
 {
@@ -165,7 +165,7 @@ impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialTransform<
     }
 }
 
-impl<T: ArrayElement + NativeType> ValueRepr for SpatialTransform<T, LocalBackend>
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialTransform<T, ArrayRepr>
 where
     Array<T, Const<7>>: ValueRepr,
 {
@@ -193,7 +193,7 @@ impl<T: ArrayElement + NativeType, R: Repr> Component for SpatialMotion<T, R> {
     }
 }
 
-impl<T: ArrayElement + NativeType> ValueRepr for SpatialMotion<T, LocalBackend>
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialMotion<T, ArrayRepr>
 where
     Array<T, Const<6>>: ValueRepr,
 {
@@ -221,7 +221,7 @@ impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialInertia<T,
     }
 }
 
-impl<T: ArrayElement + NativeType> ValueRepr for SpatialInertia<T, LocalBackend>
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialInertia<T, ArrayRepr>
 where
     Array<T, Const<7>>: ValueRepr,
 {
@@ -249,7 +249,7 @@ impl<T: ArrayElement + NativeType, R: Repr> Component for nox::SpatialForce<T, R
     }
 }
 
-impl<T: ArrayElement + NativeType> ValueRepr for SpatialForce<T, LocalBackend>
+impl<T: ArrayElement + NativeType> ValueRepr for SpatialForce<T, ArrayRepr>
 where
     Array<T, Const<6>>: ValueRepr,
 {

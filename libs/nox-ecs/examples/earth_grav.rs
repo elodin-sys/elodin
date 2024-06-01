@@ -1,11 +1,11 @@
 use conduit::well_known::{Material, Mesh};
-use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
-use nox::{nalgebra::vector, SpatialMotion};
+use nox::{tensor, SpatialMotion};
+use nox::{SpatialForce, SpatialInertia, SpatialTransform};
 use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldExt, WorldPos};
 
 fn earth_gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     pos.map(|_, _, _| {
-        let force = SpatialForce::from_linear(vector![0.0f64, -9.8, 0.0]);
+        let force = SpatialForce::from_linear(tensor![0.0f64, -9.8, 0.0]);
         Force(force)
     })
     .unwrap()
@@ -18,19 +18,19 @@ fn main() {
     world
         .spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         })
         .insert(shape);

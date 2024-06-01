@@ -1,9 +1,9 @@
 //! Provides abstractions for rigid body dynamics in 3D space.
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
+use crate::ArrayRepr;
 use crate::Field;
 use crate::FromOp;
-use crate::LocalBackend;
 use crate::Noxpr;
 use crate::Op;
 use crate::RealField;
@@ -22,7 +22,7 @@ pub struct SpatialTransform<T: TensorItem, R: Repr = Op> {
     pub inner: Vector<T, 7, R>,
 }
 
-impl<T: TensorItem> Default for SpatialTransform<T, LocalBackend>
+impl<T: TensorItem> Default for SpatialTransform<T, ArrayRepr>
 where
     T::Elem: Default,
 {
@@ -144,7 +144,7 @@ impl<T: TensorItem> Clone for SpatialForce<T> {
     }
 }
 
-impl<T: TensorItem> Default for SpatialForce<T, LocalBackend>
+impl<T: TensorItem> Default for SpatialForce<T, ArrayRepr>
 where
     T::Elem: Default,
 {
@@ -539,9 +539,9 @@ impl<T: RealField, R: Repr> Mul<SpatialForce<T, R>> for Quaternion<T, R> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CompFn, ToHost};
+    use crate::{tensor, CompFn, ToHost};
     use approx::assert_relative_eq;
-    use nalgebra::{vector, Vector3};
+    use nalgebra::vector;
 
     use super::*;
 
@@ -549,14 +549,18 @@ mod tests {
     fn test_spatial_transform_mul() {
         let f = || -> Vector<f64, 7> {
             let a = SpatialTransform::new(
-                nalgebra::UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 45f64.to_radians())
-                    .into_inner(),
-                nalgebra::Vector3::new(1.0, 0.0, 0.0),
+                Quaternion::<_, ArrayRepr>::from_axis_angle(
+                    tensor![0.0, 0.0, 1.0],
+                    45f64.to_radians(),
+                ),
+                tensor![1.0, 0.0, 0.0],
             );
             let b = SpatialTransform::new(
-                nalgebra::UnitQuaternion::from_axis_angle(&Vector3::z_axis(), -45f64.to_radians())
-                    .into_inner(),
-                nalgebra::Vector3::new(0.0, 2.0, 0.0),
+                Quaternion::<_, ArrayRepr>::from_axis_angle(
+                    tensor![0.0, 0.0, 1.0],
+                    -45f64.to_radians(),
+                ),
+                tensor![0.0, 2.0, 0.0],
             );
             (a * b).inner
         };
@@ -582,13 +586,10 @@ mod tests {
     fn test_spatial_transform_add() {
         let f = || -> Vector<f64, 7> {
             let a = SpatialTransform::new(
-                nalgebra::UnitQuaternion::identity().into_inner(),
-                nalgebra::Vector3::new(0.0, 0.0, 0.0),
+                Quaternion::<_, ArrayRepr>::identity(),
+                tensor![0.0, 0.0, 0.0],
             );
-            let b = SpatialMotion::new(
-                nalgebra::Vector3::new(0.0, 0.0, 1.0),
-                nalgebra::Vector3::new(0.0, 0.0, 0.0),
-            );
+            let b = SpatialMotion::new(tensor![0.0, 0.0, 1.0], tensor![0.0, 0.0, 0.0]);
             (a + b).inner
         };
         let client = crate::Client::cpu().unwrap();
@@ -613,15 +614,12 @@ mod tests {
     fn test_spatial_transform_integrate() {
         let f = || -> Vector<f64, 7> {
             let a = SpatialTransform::new(
-                nalgebra::UnitQuaternion::identity().into_inner(),
-                nalgebra::Vector3::new(0.0, 0.0, 0.0),
+                Quaternion::<_, ArrayRepr>::identity(),
+                tensor![0.0, 0.0, 0.0],
             );
             (0..20)
                 .fold(a, |acc, _| {
-                    acc + SpatialMotion::new(
-                        nalgebra::Vector3::new(0.0, 0.0, 0.25 / 20.0),
-                        nalgebra::Vector3::new(0.0, 0.0, 0.0),
-                    )
+                    acc + SpatialMotion::new(tensor![0.0, 0.0, 0.25 / 20.0], tensor![0.0, 0.0, 0.0])
                 })
                 .inner
         };

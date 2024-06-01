@@ -364,7 +364,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     where
         <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        D2: ArrayDim + XlaDim,
     {
         let d1 = D1::dim(&self.buf);
 
@@ -775,9 +774,9 @@ impl<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
 }
 
 /// Backend implementation for local computation on arrays.
-pub struct LocalBackend;
+pub struct ArrayRepr;
 
-impl Repr for LocalBackend {
+impl Repr for ArrayRepr {
     type Inner<T, D: Dim> = Array<T, D> where T: Copy;
 
     fn add<T, D1, D2>(
@@ -969,7 +968,6 @@ impl Repr for LocalBackend {
     where
         <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        D2: ArrayDim + XlaDim,
     {
         arg.reshape()
     }
@@ -1004,30 +1002,69 @@ fn matmul_dims(a: &'_ [usize], b: &'_ [usize]) -> Option<([usize; 2], usize)> {
     }
 }
 
+impl<T: Field> From<T> for Array<T, ()> {
+    fn from(buf: T) -> Self {
+        Array { buf }
+    }
+}
+
+impl<T: Field, const D1: usize> From<[T; D1]> for Array<T, Const<D1>> {
+    fn from(buf: [T; D1]) -> Self {
+        Array { buf }
+    }
+}
+
+impl<T: Field, const D1: usize, const D2: usize> From<[[T; D2]; D1]>
+    for Array<T, (Const<D1>, Const<D2>)>
+{
+    fn from(buf: [[T; D2]; D1]) -> Self {
+        Array { buf }
+    }
+}
+
+impl<T: Field, const D1: usize, const D2: usize, const D3: usize> From<[[[T; D3]; D2]; D1]>
+    for Array<T, (Const<D1>, Const<D2>, Const<D3>)>
+{
+    fn from(buf: [[[T; D3]; D2]; D1]) -> Self {
+        Array { buf }
+    }
+}
+
+#[macro_export]
+macro_rules! array {
+    ($([$([$($x:expr),* $(,)*]),+ $(,)*]),+ $(,)*) => {{
+        $crate::Array::from([$([$([$($x,)*],)*],)*])
+    }};
+    ($([$($x:expr),* $(,)*]),+ $(,)*) => {{
+        $crate::Array::from([$([$($x,)*],)*])
+    }};
+    ($($x:expr),* $(,)*) => {{
+        $crate::Array::from([$($x,)*])
+    }};
+
+    ($elem:expr; $n:expr) => {{
+        $crate::Array::from([$elem; $n])
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_add_broadcast() {
-        let a: Array<f32, Const<1>> = Array { buf: [1.] };
-        let b: Array<f32, Const<2>> = Array { buf: [1.0; 2] };
+        let a = array![1.];
+        let b = array![1.0; 2];
         let c: Array<f32, Const<2>> = a.add(&b);
         assert_eq!(c.buf, [2.0; 2]);
 
-        let a: Array<f32, (Const<1>, Const<2>)> = Array { buf: [[1.0, 2.0]] };
-        let b: Array<f32, (Const<2>, Const<2>)> = Array {
-            buf: [[1.0, 1.0], [2.0, 2.0]],
-        };
+        let a: Array<f32, (Const<1>, Const<2>)> = array![[1.0, 2.0]];
+        let b: Array<f32, (Const<2>, Const<2>)> = array![[1.0, 1.0], [2.0, 2.0]];
         let c: Array<f32, (Const<2>, Const<2>)> = a.add(&b);
         assert_eq!(c.buf, [[2.0, 3.0], [3.0, 4.0]]);
 
-        let a: Array<f32, (Const<2>, Const<1>, Const<2>)> = Array {
-            buf: [[[1.0, 2.0]], [[1.0, 2.0]]],
-        };
-        let b: Array<f32, (Const<2>, Const<2>, Const<2>)> = Array {
-            buf: [[[1.0, 1.0], [2.0, 2.0]], [[1.0, 1.0], [2.0, 2.0]]],
-        };
+        let a = array![[[1.0, 2.0]], [[1.0, 2.0]]];
+        let b = array![[[1.0, 1.0], [2.0, 2.0]], [[1.0, 1.0], [2.0, 2.0]]];
         let c: Array<f32, (Const<2>, Const<2>, Const<2>)> = a.add(&b);
         assert_eq!(c.buf, [[[2.0, 3.0], [3.0, 4.0]], [[2.0, 3.0], [3.0, 4.0]]]);
     }

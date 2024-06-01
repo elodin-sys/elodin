@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import elodin as el
 from typing import Annotated
 
-initial_angular_vel = np.array([0.5, 0.7, 0.6])
+initial_angular_vel = np.array([10.0, 10.0, 10.0])
 rw_force_clamp = 0.02
 G = 6.6743e-11  #
 M = 5.972e24  # mass of the Earth
@@ -448,12 +448,15 @@ w.spawn(
                         pos=[7.0, 0.0, 0.0],
                         looking_at=[0.0, 0.0, 0.0],
                     ),
-                    el.Panel.viewport(
-                        track_entity=sat,
-                        track_rotation=False,
-                        pos=[7.0, -3.0, 0.0],
-                        fov=20.0,
-                        looking_at=[0.0, 0.0, 0.0],
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(ControlForce)[:3],
+                                ],
+                            )
+                        ]
                     ),
                 ]
             ),

@@ -702,8 +702,7 @@ mod tests {
     };
     use conduit::well_known::Glb;
     use nox::{
-        nalgebra::{self, vector},
-        Scalar, ScalarExt, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector,
+        tensor, Scalar, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector,
     };
     use polars::{
         chunked_array::builder::{ListBuilderTrait, ListPrimitiveChunkedBuilder},
@@ -734,15 +733,15 @@ mod tests {
 
         let mut world = add_system.world();
         world.spawn(Body {
-            a: A(1.0.constant()),
-            b: B(2.0.constant()),
-            c: C((-1.0).constant()),
+            a: A(1.0.into()),
+            b: B(2.0.into()),
+            c: C((-1.0).into()),
         });
 
         world.spawn(Body {
-            a: A(2.0.constant()),
-            b: B(2.0.constant()),
-            c: C((-1.0).constant()),
+            a: A(2.0.into()),
+            b: B(2.0.into()),
+            c: C((-1.0).into()),
         });
         let world = world.run();
         let c = world.column::<C>().unwrap();
@@ -762,16 +761,16 @@ mod tests {
         }
 
         let mut world = add_system.world();
-        world.spawn(Seed(5.0.constant()));
-        world.spawn(Value((-1.0).constant()));
-        world.spawn(Value(7.0.constant()));
+        world.spawn(Seed(5.0.into()));
+        world.spawn(Value((-1.0).into()));
+        world.spawn(Value(7.0.into()));
         let world = world.run();
         let v = world.column::<Value>().unwrap();
         assert_eq!(v.typed_buf::<f64>().unwrap(), &[4.0, 12.0])
     }
 
     #[test]
-    fn test_get_vector() {
+    fn test_get_tensor() {
         #[derive(Component)]
         struct Seed(Vector<f64, 3>);
 
@@ -783,9 +782,9 @@ mod tests {
         }
 
         let mut world = add_system.world();
-        world.spawn(Seed(vector![5.0, 2.0, -3.0].into()));
-        world.spawn(Value(vector![-1.0, 3.5, 6.0].into()));
-        world.spawn(Value(vector![7.0, -1.0, 1.0].into()));
+        world.spawn(Seed(tensor![5.0, 2.0, -3.0].into()));
+        world.spawn(Value(tensor![-1.0, 3.5, 6.0].into()));
+        world.spawn(Value(tensor![7.0, -1.0, 1.0].into()));
         let world = world.run();
         let v = world.column::<Value>().unwrap();
         assert_eq!(
@@ -807,7 +806,7 @@ mod tests {
         let mut world = World::default();
         let body = Body {
             glb: world.insert_asset(Glb("foo-bar".to_string())),
-            a: A(1.0.constant()),
+            a: A(1.0.into()),
         };
         world.spawn(body);
     }
@@ -826,7 +825,7 @@ mod tests {
         }
 
         let mut world = World::default();
-        world.spawn(A(1.0.constant()));
+        world.spawn(A(1.0.into()));
         let world = world
             .builder()
             .tick_pipeline(tick)
@@ -850,7 +849,7 @@ mod tests {
         }
 
         let mut world = World::default();
-        world.spawn(A(1.0.constant()));
+        world.spawn(A(1.0.into()));
         let mut exec = world
             .builder()
             .tick_pipeline(tick)
@@ -876,19 +875,19 @@ mod tests {
 
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
         let polars = world.polars().unwrap();
@@ -907,19 +906,19 @@ mod tests {
 
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
         let polars = world.polars().unwrap();
@@ -932,19 +931,19 @@ mod tests {
         let mut world = World::default();
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
         let dir = tempfile::tempdir().unwrap();
