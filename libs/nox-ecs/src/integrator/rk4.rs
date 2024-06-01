@@ -103,8 +103,8 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::nalgebra::vector;
-    use nox::{nalgebra, Scalar, ScalarExt, SpatialMotion, SpatialTransform};
+    use nox::tensor;
+    use nox::{Scalar, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 
     #[test]
@@ -147,8 +147,8 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(Body {
-            x: X(0.0.constant()),
-            v: V(10.0.constant()),
+            x: X(0.0.into()),
+            v: V(10.0.into()),
         });
         let builder = world.builder().tick_pipeline(().rk4::<X, V>());
         let world = builder.run();
@@ -220,13 +220,13 @@ mod tests {
         let mut world = World::default();
         world.spawn(Body {
             x: X(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             v: V(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             a: A(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
         });
         let builder = world.builder().tick_pipeline(().rk4::<U, DU>());

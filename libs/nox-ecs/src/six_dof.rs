@@ -158,9 +158,9 @@ mod tests {
     use crate::WorldExt;
     use conduit::ComponentExt;
     use conduit::ComponentId;
-    use nox::nalgebra;
-    use nox::nalgebra::{vector, UnitQuaternion, Vector3};
-    use nox::LocalBackend;
+    use nox::nalgebra::{UnitQuaternion, Vector3};
+    use nox::tensor;
+    use nox::ArrayRepr;
     use nox::SpatialTransform;
     use std::f64::consts::FRAC_PI_2;
 
@@ -169,19 +169,19 @@ mod tests {
         let mut world = World::default();
         world.spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         });
 
@@ -202,7 +202,7 @@ mod tests {
             .column_at_tick(ComponentId::new("world_pos"), 120)
             .unwrap();
         let (_, pos) = column
-            .typed_iter::<SpatialTransform<f64, LocalBackend>>()
+            .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
             .next()
             .unwrap();
         // see test-gen/julia/six-dof.jl for the source of these values
@@ -230,7 +230,7 @@ mod tests {
     ) {
         let constant_torque = move |q: ComponentArray<WorldPos>| -> ComponentArray<Force> {
             q.map(|_: WorldPos| {
-                Force(SpatialForce::from_torque(vector![
+                Force(SpatialForce::from_torque(tensor![
                     torque[0], torque[1], torque[2]
                 ]))
             })
@@ -240,19 +240,19 @@ mod tests {
         let quat_vec = rot.vector();
         let body = Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![quat_vec[0], quat_vec[1], quat_vec[2], rot.w, 0.0, 0.0, 0.0].into(),
+                inner: tensor![quat_vec[0], quat_vec[1], quat_vec[2], rot.w, 0.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![
+                inner: tensor![
                     inertia_diag[0],
                     inertia_diag[1],
                     inertia_diag[2],

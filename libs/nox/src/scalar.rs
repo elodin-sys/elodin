@@ -1,8 +1,5 @@
 //! Provides functionality for managing scalar tensors, including operations and transformations between host and client representations.
-use crate::TensorItem;
-use crate::{
-    Buffer, BufferArg, Literal, MaybeOwned, NoxprScalarExt, Op, ScalarDim, Tensor, ToHost,
-};
+use crate::{Buffer, BufferArg, MaybeOwned, NoxprScalarExt, Op, ScalarDim, Tensor, ToHost};
 use nalgebra::ClosedAdd;
 use nalgebra::Scalar as NalgebraScalar;
 
@@ -28,42 +25,6 @@ impl<T: ClosedAdd + ArrayElement + NativeType> Add<T> for Scalar<T, Op> {
         let rhs = NoxprScalarExt::constant(rhs);
         Scalar {
             inner: (self.inner + rhs),
-            phantom: PhantomData,
-        }
-    }
-}
-
-/// Extension trait for scalar types, enabling direct conversion into tensor representations.
-pub trait ScalarExt: Sized {
-    /// Converts a scalar value into a literal scalar tensor.
-    fn literal(self) -> Scalar<Self, Literal>
-    where
-        Self: TensorItem;
-
-    /// Converts a scalar value into a constant scalar tensor for computation.
-    fn constant(self) -> Scalar<Self, Op>
-    where
-        Self: TensorItem;
-}
-
-impl<T> ScalarExt for T
-where
-    T: ArrayElement + Sized + NativeType,
-{
-    fn literal(self) -> Scalar<Self, Literal> {
-        let inner = self.literal();
-        Scalar {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-
-    fn constant(self) -> Scalar<Self, Op> {
-        let inner = NoxprScalarExt::constant(self);
-        //let inner = T::constant_r0(&builder.inner, self);
-
-        Scalar {
-            inner,
             phantom: PhantomData,
         }
     }

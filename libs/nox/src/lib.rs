@@ -1,19 +1,18 @@
 #![recursion_limit = "1024"]
 #![allow(clippy::arc_with_non_send_sync)]
 
+mod array;
 mod builder;
 mod client;
 mod comp;
 mod comp_fn;
-mod constant;
 mod error;
 mod exec;
 mod fields;
-mod local_backend;
 mod matrix;
 mod noxpr;
-mod param;
 mod quaternion;
+mod repr;
 mod scalar;
 mod spatial;
 mod tensor;
@@ -23,19 +22,18 @@ mod vector;
 #[cfg(feature = "jax")]
 pub mod jax;
 
+pub use array::*;
 pub use builder::*;
 pub use client::*;
 pub use comp::*;
 pub use comp_fn::*;
-pub use constant::*;
 pub use error::*;
 pub use exec::*;
 pub use fields::*;
-pub use local_backend::*;
 pub use matrix::*;
 pub use noxpr::*;
-pub use param::*;
 pub use quaternion::*;
+pub use repr::*;
 pub use scalar::*;
 pub use spatial::*;
 pub use tensor::*;

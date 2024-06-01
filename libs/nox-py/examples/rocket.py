@@ -531,7 +531,5 @@ non_effectors = (
     | aero_forces
 )
 effectors = gravity | apply_thrust | apply_aero_forces
-sys = non_effectors | el.six_dof(
-    TIME_STEP, effectors, integrator=el.Integrator.SemiImplicit
-)
+sys = non_effectors | el.six_dof(TIME_STEP, effectors, integrator=el.Integrator.Rk4)
 w.run(sys, time_step=TIME_STEP)
