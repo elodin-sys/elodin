@@ -1,8 +1,8 @@
 //! Provides the core functionality for manipulating tensors.
-use crate::local_backend::{ArrayBufUnit, ArrayDim};
+use crate::array::{ArrayBufUnit, ArrayDim};
 use crate::{
-    AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp, GetDim, IntoOp, LocalBackend, MatMul,
-    Noxpr, NoxprScalarExt, Op, Repr, Scalar, Vector,
+    Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp,
+    GetDim, IntoOp, MatMul, Noxpr, NoxprScalarExt, Op, Repr, Scalar, Vector,
 };
 use core::mem::MaybeUninit;
 use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
@@ -643,7 +643,6 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
     where
         <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        D2: ArrayDim + XlaDim,
     {
         let inner = R::reshape::<T1, D1, D2>(&self.inner);
         Tensor {
@@ -940,7 +939,7 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim> Default for Tensor<T, D, LocalBackend>
+impl<T: TensorItem, D: Dim> Default for Tensor<T, D, ArrayRepr>
 where
     D::Buf<T::Elem>: Default,
 {
@@ -950,4 +949,95 @@ where
             phantom: PhantomData,
         }
     }
+}
+
+impl<T: Field, D: Dim> From<Array<T, D>> for Tensor<T, D, ArrayRepr> {
+    fn from(inner: Array<T, D>) -> Self {
+        Self {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Field, const D1: usize> From<[T; D1]> for Tensor<T, Const<D1>, ArrayRepr> {
+    fn from(buf: [T; D1]) -> Self {
+        Self {
+            inner: buf.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Field, const D1: usize, const D2: usize> From<[[T; D2]; D1]>
+    for Tensor<T, (Const<D1>, Const<D2>), ArrayRepr>
+{
+    fn from(buf: [[T; D2]; D1]) -> Self {
+        Self {
+            inner: buf.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Field, const D1: usize, const D2: usize, const D3: usize> From<[[[T; D3]; D2]; D1]>
+    for Tensor<T, (Const<D1>, Const<D2>, Const<D3>), ArrayRepr>
+{
+    fn from(buf: [[[T; D3]; D2]; D1]) -> Self {
+        Self {
+            inner: buf.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Field + NativeType + ArrayElement, R: Repr> From<T> for Tensor<T, (), R> {
+    fn from(val: T) -> Self {
+        Scalar::from_inner(R::scalar_from_const(val))
+    }
+}
+
+impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Array<T, D>> for Tensor<T, D, Op> {
+    fn from(arr: Array<T, D>) -> Self {
+        let shape = D::shape();
+        let lit = T::create_r1(arr.buf.as_buf())
+            .reshape(&shape)
+            .expect("reshape failed");
+        let inner = Noxpr::constant(
+            lit,
+            ArrayTy {
+                element_type: T::TY,
+                shape,
+            },
+        );
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Tensor<T, D, ArrayRepr>>
+    for Tensor<T, D, Op>
+{
+    fn from(value: Tensor<T, D, ArrayRepr>) -> Self {
+        value.inner.into()
+    }
+}
+
+#[macro_export]
+macro_rules! tensor {
+    ($([$([$($x:expr),* $(,)*]),+ $(,)*]),+ $(,)*) => {{
+        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$([$([$($x,)*],)*],)*])
+    }};
+    ($([$($x:expr),* $(,)*]),+ $(,)*) => {{
+        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$([$($x,)*],)*])
+    }};
+    ($($x:expr),* $(,)*) => {{
+        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$($x,)*])
+    }};
+
+    ($elem:expr; $n:expr) => {{
+        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$elem; $n])
+    }};
 }

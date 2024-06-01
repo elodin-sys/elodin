@@ -1,6 +1,5 @@
 use conduit::well_known::{Material, Mesh};
-use nox::{nalgebra, SpatialForce, SpatialInertia, SpatialTransform};
-use nox::{nalgebra::vector, SpatialMotion};
+use nox::{tensor, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform};
 use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldExt, WorldPos};
 
 fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
@@ -29,19 +28,19 @@ fn main() {
     world
         .spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         })
         .insert(shape);
@@ -49,19 +48,19 @@ fn main() {
     world
         .spawn(Body {
             pos: WorldPos(SpatialTransform {
-                inner: vector![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
             }),
             accel: WorldAccel(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             force: Force(SpatialForce {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             mass: Inertia(SpatialInertia {
-                inner: vector![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
             }),
         })
         .insert(shape_b);

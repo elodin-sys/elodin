@@ -6,9 +6,9 @@ use num_traits::Zero;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FromBuilder, FromHost, FromOp,
-    FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar, TensorItem, ToHost,
-    Vector,
+    ArrayRepr, AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FromBuilder,
+    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar,
+    TensorItem, ToHost, Vector,
 };
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
@@ -273,6 +273,12 @@ where
             .copy_from_slice(literal.typed_buf().unwrap());
         //literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
         out
+    }
+}
+
+impl<T: Field + ArrayElement + NativeType> From<Quaternion<T, ArrayRepr>> for Quaternion<T, Op> {
+    fn from(q: Quaternion<T, ArrayRepr>) -> Self {
+        Quaternion(q.0.into())
     }
 }
 
