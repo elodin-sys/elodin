@@ -58,10 +58,7 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::{
-        nalgebra::{self, vector},
-        Scalar, ScalarExt, SpatialMotion, SpatialTransform,
-    };
+    use nox::{tensor, Scalar, SpatialMotion, SpatialTransform};
 
     #[test]
     fn test_simple_semi_implicit_vertlet() {
@@ -115,9 +112,9 @@ mod tests {
 
         let mut world = World::default();
         world.spawn(Body {
-            x: X(0.0.constant()),
-            v: V(0.0.constant()),
-            a: A(9.8.constant()),
+            x: X(0.0.into()),
+            v: V(0.0.into()),
+            a: A(9.8.into()),
         });
         let builder = world
             .builder()
@@ -178,13 +175,13 @@ mod tests {
         let mut world = World::default();
         world.spawn(Body {
             x: X(SpatialTransform {
-                inner: vector![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
             v: V(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
             }),
             a: A(SpatialMotion {
-                inner: vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
             }),
         });
         let builder = world

@@ -2860,8 +2860,7 @@ mod tests {
     fn test_broadcast_vmap() {
         let client = Client::cpu().unwrap();
         fn add_one(mat: Vector<f32, 5>) -> Vector<f32, 5> {
-            use crate::ScalarExt;
-            mat.vmap(|_| 1.0.constant()).unwrap().collapse()
+            mat.vmap(|_| Scalar::from(1.0)).unwrap().collapse()
         }
         let comp = add_one.build().unwrap();
         println!("{}", comp.to_hlo_text().unwrap());
@@ -2979,8 +2978,7 @@ mod tests {
     fn test_scalar_add_scan() {
         let client = Client::cpu().unwrap();
         fn add_one(mat: Vector<f32, 5>) -> Scalar<f32> {
-            use crate::ScalarExt;
-            mat.scan(0f32.constant(), |acc, x| acc + x).unwrap()
+            mat.scan(Scalar::from(0f32), |acc, x| acc + x).unwrap()
         }
         let comp = add_one.build().unwrap();
         let exec = match comp.compile(&client) {
@@ -3053,8 +3051,7 @@ mod tests {
     fn test_vmap_add_scan() {
         let client = Client::cpu().unwrap();
         fn add_one(mat: Matrix<f32, 3, 2>) -> Vector<f32, 3> {
-            use crate::ScalarExt;
-            mat.vmap(|vec: Vector<f32, 2>| vec.scan(0f32.constant(), |acc, x| acc + x).unwrap())
+            mat.vmap(|vec: Vector<f32, 2>| vec.scan(Scalar::from(0f32), |acc, x| acc + x).unwrap())
                 .unwrap()
                 .collapse()
             // mat.scan(Vector::<f32, 2>::zeros(), |acc, x| acc + x)
