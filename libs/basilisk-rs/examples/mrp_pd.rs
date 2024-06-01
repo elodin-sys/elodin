@@ -4,7 +4,7 @@ use basilisk_sys::{
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
 use conduit::{ComponentId, EntityId, Metadata, Query, ValueRepr};
-use nox::{ConstantExt, LocalBackend, Quaternion, SpatialForce, SpatialTransform, Vector};
+use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
 use roci::*;
 use roci_macros::{Componentize, Decomponentize};
 use std::time::Duration;
@@ -12,13 +12,13 @@ use std::time::Duration;
 #[derive(Default, Componentize, Decomponentize)]
 struct World {
     #[roci(entity_id = 3, component_id = "world_pos")]
-    world_pos: SpatialTransform<f64, LocalBackend>,
+    world_pos: SpatialTransform<f64, ArrayRepr>,
     #[roci(entity_id = 3, component_id = "ang_vel_est")]
-    ang_vel_est: Vector<f64, 3, LocalBackend>,
+    ang_vel_est: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 3, component_id = "control_force")]
-    control_force: SpatialForce<f64, LocalBackend>,
+    control_force: SpatialForce<f64, ArrayRepr>,
     #[roci(entity_id = 3, component_id = "goal")]
-    goal: Quaternion<f64, LocalBackend>,
+    goal: Quaternion<f64, ArrayRepr>,
 }
 
 struct MRPHandler {
@@ -27,10 +27,10 @@ struct MRPHandler {
     cmd_torque: BskChannel<CmdTorqueBodyMsgPayload>,
 }
 
-fn quat_to_mrp(quat: &Quaternion<f64, LocalBackend>) -> Vector<f64, 3, LocalBackend> {
+fn quat_to_mrp(quat: &Quaternion<f64, ArrayRepr>) -> Vector<f64, 3, ArrayRepr> {
     let w = quat.0.get(3);
-    let vec: Vector<f64, 3, LocalBackend> = quat.0.fixed_slice(&[0]);
-    vec / (w + 1.0.constant())
+    let vec: Vector<f64, 3, ArrayRepr> = quat.0.fixed_slice(&[0]);
+    vec / (w + Scalar::from(1.0))
 }
 
 impl MRPHandler {

@@ -410,7 +410,7 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 mod tests {
     use super::*;
     use crate::{Archetype, IntoSystemExt};
-    use nox::{Scalar, ScalarExt};
+    use nox::Scalar;
     use nox_ecs_macros::{ComponentGroup, FromBuilder};
 
     #[test]
@@ -431,30 +431,22 @@ mod tests {
         }
         let mut world = add_e.world();
         world.spawn(Body {
-            x: X((-91.0).constant()),
+            x: X((-91.0).into()),
         });
 
         world
             .spawn(Body {
-                x: X((-55.0).constant()),
+                x: X((-55.0).into()),
             })
-            .insert(E(1000.0.constant()));
+            .insert(E(1000.0.into()));
 
-        world.spawn(Body {
-            x: X(5.0.constant()),
-        });
-        world.spawn(Body {
-            x: X(200.0.constant()),
-        });
+        world.spawn(Body { x: X(5.0.into()) });
+        world.spawn(Body { x: X(200.0.into()) });
 
         world
-            .spawn(Body {
-                x: X(100.0.constant()),
-            })
-            .insert(E((-50000.0).constant()));
-        world.spawn(Body {
-            x: X(400.0.constant()),
-        });
+            .spawn(Body { x: X(100.0.into()) })
+            .insert(E((-50000.0).into()));
+        world.spawn(Body { x: X(400.0.into()) });
 
         let world = world.run();
         let c = world.column::<X>().unwrap();
@@ -494,15 +486,15 @@ mod tests {
 
         let mut world = add_system.world();
         world.spawn(Body {
-            a: A(1.0.constant()),
-            b: B(2.0.constant()),
-            c: C((-1.0).constant()),
+            a: A(1.0.into()),
+            b: B(2.0.into()),
+            c: C((-1.0).into()),
         });
 
         world.spawn(Body {
-            a: A(2.0.constant()),
-            b: B(2.0.constant()),
-            c: C((-1.0).constant()),
+            a: A(2.0.into()),
+            b: B(2.0.into()),
+            c: C((-1.0).into()),
         });
         let world = world.run();
         let c = world.column::<C>().unwrap();
