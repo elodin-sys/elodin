@@ -71,4 +71,3 @@ tokio-util.optional = true
 include_dir = "0.7.3"
 
 walkdir = "2.5.0"
-elodin-types.path = "../elodin-types/rust"
