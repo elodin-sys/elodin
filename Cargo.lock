@@ -6139,7 +6139,6 @@ dependencies = [
  "bytes",
  "clap 4.5.4",
  "conduit",
- "elodin-types",
  "flume",
  "futures",
  "include_dir",
