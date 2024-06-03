@@ -237,8 +237,9 @@ impl<E> GraphQuery<E> {
                 .iter()
                 .map(|e| {
                     let mut shape = e.shape().unwrap();
-                    shape.push(*len as i64);
-                    e.clone().broadcast(shape)
+                    shape.insert(0, *len as i64);
+                    let broadcast_dims = (1..shape.len()).map(|x| x as i64).collect();
+                    e.clone().broadcast_in_dim(shape, broadcast_dims)
                 })
                 .chain(vmap_fn_args[from.exprs.len()..].iter().cloned())
                 .collect::<Vec<_>>();
@@ -272,7 +273,7 @@ impl<E> GraphQuery<E> {
 #[cfg(test)]
 mod tests {
 
-    use nox::Scalar;
+    use nox::{tensor, Matrix, Scalar, Vector};
 
     use crate::IntoSystemExt;
 
@@ -381,5 +382,70 @@ mod tests {
         let world = world.run();
         let c = world.column::<A>().unwrap();
         assert_eq!(c.typed_buf::<f64>().unwrap(), &[1105.0, 1015.0, 115.0,],);
+    }
+
+    #[test]
+    fn test_total_fold_vector_graph() {
+        #[derive(Component)]
+        struct A(Vector<f64, 2>);
+
+        fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
+            g.edge_fold(
+                &a,
+                &a,
+                A(tensor![5.0, 0.0,].into()),
+                |acc: A, (_, b): (A, A)| A(acc.0 + b.0),
+            )
+        }
+
+        let mut world = fold_system.world();
+        world.spawn(A(tensor![10.0, 0.0].into())).id();
+        world.spawn(A(tensor![100.0, 0.0].into())).id();
+        world.spawn(A(tensor![1000.0, 0.0].into())).id();
+        world.spawn(A(tensor![10000.0, 0.0].into())).id();
+        world.spawn(A(tensor![100000.0, 0.0].into())).id();
+
+        let world = world.run();
+        let c = world.column::<A>().unwrap();
+        assert_eq!(
+            c.typed_buf::<f64>().unwrap(),
+            &[111105.0, 0.0, 111015.0, 0.0, 110115.0, 0.0, 101115.0, 0.0, 11115.0, 0.0],
+        );
+    }
+
+    #[test]
+    fn test_total_fold_matrix_graph() {
+        #[derive(Component)]
+        struct A(Matrix<f64, 2, 2>);
+
+        fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
+            g.edge_fold(
+                &a,
+                &a,
+                A(tensor![[5.0, 0.0,], [0.0, 0.0]].into()),
+                |acc: A, (_, b): (A, A)| A(acc.0 + b.0),
+            )
+        }
+
+        let mut world = fold_system.world();
+        world.spawn(A(tensor![[10.0, 0.0], [0.0, 0.0]].into())).id();
+        world.spawn(A(tensor![[100.0, 0.0], [0., 0.]].into())).id();
+        world.spawn(A(tensor![[1000.0, 0.0], [0., 0.]].into())).id();
+        world
+            .spawn(A(tensor![[10000.0, 0.0], [0., 0.]].into()))
+            .id();
+        world
+            .spawn(A(tensor![[100000.0, 0.0], [0., 0.]].into()))
+            .id();
+
+        let world = world.run();
+        let c = world.column::<A>().unwrap();
+        assert_eq!(
+            c.typed_buf::<f64>().unwrap(),
+            &[
+                111105.0, 0.0, 0.0, 0.0, 111015.0, 0.0, 0.0, 0.0, 110115.0, 0.0, 0.0, 0.0,
+                101115.0, 0.0, 0.0, 0.0, 11115.0, 0.0, 0.0, 0.0,
+            ],
+        );
     }
 }

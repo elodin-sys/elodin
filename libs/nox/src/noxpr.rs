@@ -1153,7 +1153,7 @@ impl Noxpr {
         let in_shape = self.shape()?;
         let in_rank = in_shape.len();
         let broadcast_dims = (0..in_rank).map(|x| x as i64).collect();
-        let mut out_shape = in_shape;
+        let mut out_shape = in_shape.clone();
         for _ in in_rank..rank {
             out_shape.push(1);
         }
@@ -1406,7 +1406,7 @@ impl XlaTracer {
                         xs_shape = Some(shape);
                     } else if let Some(xs_shape) = xs_shape.as_mut() {
                         if xs_shape.first() != shape.first() {
-                            return Err(Error::ScanShapeMismatch);
+                            //return Err(Error::ScanShapeMismatch);
                         }
                     }
                 }
@@ -1804,8 +1804,18 @@ impl BatchedExpr {
         };
         match self.batch_axis {
             BatchAxis::NotMapped => {
-                let inner = self.inner.broadcast(smallvec![dest_size as i64]);
-                // TODO: handle non zero broadcast dim
+                let mut new_shape = self.inner.shape()?;
+                if dest_axis > new_shape.len() {
+                    for _ in new_shape.len()..dest_axis {
+                        new_shape.push(1);
+                    }
+                }
+                new_shape.insert(dest_axis, dest_size as i64);
+                let broadcast_dims = (0..new_shape.len())
+                    .filter(|x| *x != dest_axis)
+                    .map(|x| x as i64)
+                    .collect();
+                let inner = self.inner.broadcast_in_dim(new_shape, broadcast_dims);
                 Some(Self {
                     inner,
                     batch_axis: dest,
@@ -2191,13 +2201,20 @@ impl BatchTracer {
                 self.visit(expr)?
             }
             NoxprNode::Scan(s) => {
+                let BatchAxis::Mapped { size: out_size, .. } = self.out_axis else {
+                    panic!();
+                };
+                let axis = BatchAxis::Mapped {
+                    index: 1,
+                    size: out_size,
+                };
                 let mut inputs: Vec<_> = s
                     .inputs
                     .iter()
                     .map(|e| {
                         self.visit(e).and_then(|b| {
                             let out = b
-                                .move_batch_axis(BatchAxis::Mapped { index: 1, size: 1 })
+                                .move_batch_axis(axis.clone())
                                 .ok_or(Error::UnbatchableArgument)?;
                             Ok(out)
                         })
@@ -2231,17 +2248,54 @@ impl BatchTracer {
                                 .ok_or(Error::UnbatchableArgument)?;
                         }
                         let mut inner_batcher = self.clone();
-                        let mut args = vec![];
-                        for arg in s.scan_fn.args.iter() {
+                        let mut args = s.scan_fn.args.clone();
+                        for (arg, input) in args.iter_mut().rev().zip(inputs.iter().rev()) {
                             let id = arg.id();
-                            let arg = BatchedExpr {
-                                inner: arg.clone(),
-                                batch_axis: BatchAxis::NotMapped,
+                            let NoxprNode::Param(p) = arg.node.as_ref() else {
+                                panic!("non param arg in scan function")
+                            };
+                            let mut p = p.clone();
+                            let mut shape =
+                                input.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                            shape.remove(0);
+                            match &mut p.ty {
+                                NoxprTy::Tuple(_) => todo!(),
+                                NoxprTy::ArrayTy(ty) => {
+                                    ty.shape = shape;
+                                }
                             }
-                            .move_batch_axis(batch_axis.clone())
-                            .ok_or(Error::UnbatchableArgument)?;
-                            args.push(arg.inner.clone());
-                            inner_batcher.cache.insert(id, arg);
+                            let inner = Noxpr::parameter(p.number, p.ty, p.name);
+                            let batched_expr = BatchedExpr {
+                                inner,
+                                batch_axis: input.batch_axis.clone(),
+                            }
+                            .move_batch_axis(axis.clone())
+                            .unwrap();
+                            *arg = batched_expr.inner.clone();
+                            inner_batcher.cache.insert(id, batched_expr);
+                        }
+
+                        if let Some(arg) = args.first_mut() {
+                            let input = &initial_state;
+                            let id = arg.id();
+                            let NoxprNode::Param(p) = arg.node.as_ref() else {
+                                panic!("non param arg in scan function")
+                            };
+                            let mut p = p.clone();
+                            let shape = input.inner.shape().ok_or(Error::UnbatchableArgument)?;
+                            match &mut p.ty {
+                                NoxprTy::Tuple(_) => todo!(),
+                                NoxprTy::ArrayTy(ty) => {
+                                    ty.shape = shape;
+                                }
+                            }
+                            let inner = Noxpr::parameter(p.number, p.ty, p.name);
+                            let batched_expr = BatchedExpr {
+                                inner,
+                                batch_axis: axis.clone(),
+                            };
+                            *arg = batched_expr.inner.clone();
+                            inner_batcher.cache.insert(id, batched_expr);
                         }
                         let inner = inner_batcher.visit(&s.scan_fn.inner)?;
                         let scan_fn = NoxprFn {
@@ -2256,6 +2310,8 @@ impl BatchTracer {
                             ),
                             batch_axis: self.out_axis.clone(),
                         }
+                        // .move_batch_axis(self.out_axis.clone())
+                        // .unwrap()
                     }
                 }
             }
@@ -2586,8 +2642,11 @@ impl PrettyPrintTracer {
             }
             NoxprNode::GetTupleElement(t) => {
                 self.visit(&t.expr, writer)?;
+                let Some(&arg_num) = self.printed.get(&t.expr.id()) else {
+                    panic!("tuple element not visited")
+                };
                 let num = self.print_var(id, writer)?;
-                write!(writer, ".{}", t.index)?;
+                write!(writer, "var_{arg_num}.{}", t.index)?;
                 Ok(num)
             }
             NoxprNode::Constant(c) => {
@@ -2781,6 +2840,7 @@ impl PrettyPrintTracer {
                 Ok(num)
             }
         };
+        write!(writer, ": {:?}", expr.shape())?;
         writeln!(writer)?;
         num
     }
