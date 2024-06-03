@@ -1,6 +1,8 @@
 # Changelog
 
 ## [unreleased]
+
+## [v0.3.21]
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
     - In `nox`, the constant `Field::two` returned a `1` constant. This constant was only used in the implementation of `Add` between `SpatialMotion` and `SpatialTransform` and in `Quaternion::from_axis_angle`. Unfortunately, this caused angular velocity integration to return incorrect results. This bug caused the applied angular velocity to be multiplied by a factor of 2.
     - The most significant impact of this bug is on the stability of any attitude control system. This bug has led to an increase in small oscillations, potentially affecting the performance of PID controllers tuned to work with previous versions of Elodin. PID controllers tuned to work with earlier versions of Elodin will likely need to be re-tuned
@@ -153,7 +155,8 @@
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.21...HEAD
+[v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...v0.3.21
 [v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.19...v0.3.20
 [v0.3.19]: https://github.com/elodin-sys/paracosm/compare/v0.3.18...v0.3.19
 [v0.3.18]: https://github.com/elodin-sys/paracosm/compare/v0.3.17...v0.3.18
