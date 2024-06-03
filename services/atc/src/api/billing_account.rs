@@ -7,10 +7,7 @@ use uuid::Uuid;
 
 use crate::error::Error;
 
-use super::{
-    stripe::{COMMERCIAL_PRICE, MONTE_CARLO_PRICE, NON_COMMERCIAL_PRICE},
-    Api, CurrentUser,
-};
+use super::{Api, CurrentUser};
 
 impl Api {
     pub async fn create_billing_account(
@@ -62,8 +59,12 @@ impl Api {
                 elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => {
                     return Err(Error::InvalidLicenseType);
                 }
-                elodin_types::api::LicenseType::NonCommercial => NON_COMMERCIAL_PRICE.to_string(),
-                elodin_types::api::LicenseType::Commercial => COMMERCIAL_PRICE.to_string(),
+                elodin_types::api::LicenseType::NonCommercial => {
+                    self.stripe_plans_config.non_commercial_price.to_string()
+                }
+                elodin_types::api::LicenseType::Commercial => {
+                    self.stripe_plans_config.commercial_price.to_string()
+                }
             };
             let trial_end = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -110,7 +111,7 @@ impl Api {
             &self.stripe,
             stripe::CreateSubscription {
                 items: Some(vec![stripe::CreateSubscriptionItems {
-                    price: Some(MONTE_CARLO_PRICE.to_string()),
+                    price: Some(self.stripe_plans_config.monte_carlo_price.to_string()),
                     ..Default::default()
                 }]),
                 metadata: Some(std::collections::HashMap::from([

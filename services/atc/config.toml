@@ -11,6 +11,11 @@ stripe_secret_key = "sk_test_51NUaAnG68UBhCjJFokYXChtW9vEOOBdVX1z8LZb3jQBn6PmVBh
 stripe_webhook_secret = "whsec_6fb9fd43c282b06cecb7d0bf8ea6e7c453de50d48c371626b376c7e8283b0b9f"
 base_url = "https://app.elodin.dev"
 
+[api.stripe_plans]
+monte_carlo_price = "price_1PBnS5G68UBhCjJFgvwkvQwx"
+commercial_price = "price_1PBnNtG68UBhCjJF82vJsv5n"
+non_commercial_price = "price_1PBnNDG68UBhCjJFLZMvrR92"
+
 [orca]
 vm_namespace = "vms"
 image_name = "elo-sim-agent:23jmxri34x9wjsq2xibc1wqzd1c8dfxi"

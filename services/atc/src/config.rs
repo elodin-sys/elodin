@@ -23,6 +23,14 @@ pub struct ApiConfig {
     pub base_url: String,
     pub stripe_secret_key: String,
     pub stripe_webhook_secret: Option<String>,
+    pub stripe_plans: StripePlansConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StripePlansConfig {
+    pub monte_carlo_price: String,
+    pub commercial_price: String,
+    pub non_commercial_price: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

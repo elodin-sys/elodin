@@ -8,6 +8,11 @@ address = "[::]:50051"
 auth0.domain = "auth.elodin.dev"
 auth0.client_id = "sC8TxakUl2GPeVHyYwbOGj6cuzSIxKYR"
 
+[api.stripe_plans]
+monte_carlo_price = "price_1PBnS5G68UBhCjJFgvwkvQwx"
+commercial_price = "price_1PBnNtG68UBhCjJF82vJsv5n"
+non_commercial_price = "price_1PBnNDG68UBhCjJFLZMvrR92"
+
 [orca]
 vm_namespace = "elodin-vms-$CLUSTER_NAME"
 
