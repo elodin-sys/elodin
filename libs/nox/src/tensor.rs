@@ -1,10 +1,9 @@
 //! Provides the core functionality for manipulating tensors.
-use crate::array::{ArrayBufUnit, ArrayDim};
+use crate::array::ArrayDim;
 use crate::{
     Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp,
     GetDim, IntoOp, MatMul, Noxpr, NoxprScalarExt, Op, Repr, Scalar, Vector,
 };
-use core::mem::MaybeUninit;
 use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
 use simba::scalar::ClosedNeg;
 use smallvec::{smallvec, SmallVec};
@@ -35,8 +34,8 @@ where
 /// Trait for items that can be contained in Tensors (i.e the `T`, in `Tensor<T>`)
 ///
 /// This trait allows `Tensor` to be used like a higher-order container (like a special `Vec` or slice).
-/// In most use cases you only use `Tensor` to hold basic primitives like `f64`, but you can also have a tensor of [`Quaternion`] or even of
-/// another `Tensor`.
+/// In most use cases you only use `Tensor` to hold basic primitives like `f64`,
+/// but you can also have a tensor of [`crate::Quaternion`] or even of another `Tensor`.
 pub trait TensorItem {
     /// The type used when mapping across the `Tensor`.
     /// For example, if you have a `Tensor<f64>` you will get a `Scalar<f64>` when mapping over the tensor
@@ -132,10 +131,7 @@ where
     }
 }
 
-impl<T: Field + crate::RealField, D: Dim, R: Repr> Tensor<T, D, R>
-where
-    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
-{
+impl<T: Field + crate::RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn sqrt(&self) -> Self {
         Self::from_inner(R::sqrt(&self.inner))
     }
@@ -172,17 +168,11 @@ impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
 }
 
 impl<T: Field, D: Dim + NonScalarDim, R: Repr> Tensor<T, D, R> {
-    pub fn zeros() -> Self
-    where
-        <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
-    {
+    pub fn zeros() -> Self {
         T::zero().broadcast()
     }
 
-    pub fn ones() -> Self
-    where
-        <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
-    {
+    pub fn ones() -> Self {
         T::one().broadcast()
     }
 }
@@ -308,8 +298,6 @@ macro_rules! impl_op {
             D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
             <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
-                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
             type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
@@ -330,8 +318,6 @@ macro_rules! impl_op {
             D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
             <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
-                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
             type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
@@ -352,8 +338,6 @@ macro_rules! impl_op {
             D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
             <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
-                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
             type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
@@ -374,8 +358,6 @@ macro_rules! impl_op {
             D2: Dim + ArrayDim,
             ShapeConstraint: BroadcastDim<D1, D2>,
             <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-            <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T::Elem>>:
-                ArrayBufUnit<T::Elem, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T::Elem>>,
         {
             type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 
@@ -392,10 +374,7 @@ impl_op! {Mul, mul, *, Field}
 impl_op! {Div, div, /, Field}
 impl_op! {Sub, sub, -, Field}
 
-impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R>
-where
-    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
-{
+impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -406,10 +385,7 @@ where
     }
 }
 
-impl<'a, T: Field + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D>
-where
-    <D as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D as ArrayDim>::Buf<T>>,
-{
+impl<'a, T: Field + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D> {
     type Output = Tensor<T, D>;
 
     fn neg(self) -> Self::Output {
@@ -418,10 +394,7 @@ where
 }
 
 impl<T: TensorItem + Field, D: Dim + XlaDim, R: Repr> Tensor<T, D, R> {
-    pub fn fixed_slice<D2: Dim + XlaDim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T>>: ArrayBufUnit<T, Init = <D2 as ArrayDim>::Buf<T>>,
-    {
+    pub fn fixed_slice<D2: Dim + XlaDim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R> {
         Tensor::from_inner(R::copy_fixed_slice(&self.inner, offsets))
     }
 }
@@ -641,7 +614,6 @@ pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
     pub fn reshape<D2: Dim>(self) -> Tensor<T1, D2, R>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         let inner = R::reshape::<T1, D1, D2>(&self.inner);
@@ -653,8 +625,6 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
 
     pub fn broadcast<D2: Dim>(self) -> Tensor<T1, D2, R>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2, Output = D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -688,8 +658,6 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         let inner = R::concat(&self.inner, &other.inner);
         Tensor {
@@ -865,8 +833,6 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
         <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Tensor {
             inner: R::dot::<T, D1, D2>(&self.inner, &right.inner),
@@ -877,8 +843,6 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
     pub fn get(&self, index: usize) -> Tensor<T, GetDim<D1>, R>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <GetDim<D1> as ArrayDim>::Buf<T>>,
     {
         let inner = R::get::<T, D1>(&self.inner, index);
         Tensor {
