@@ -1,8 +1,8 @@
 use nalgebra::Const;
 use nox::{
     xla::{ArrayElement, ElementType, NativeType, PjRtBuffer},
-    Array, ArrayBufUnit, ArrayDim, ArrayRepr, ArrayTy, Client, ConstDim, Dim, IntoOp, NoxprNode,
-    Quaternion, Repr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
+    Array, ArrayRepr, ArrayTy, Client, ConstDim, Dim, IntoOp, NoxprNode, Quaternion, Repr,
+    SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
 use smallvec::{smallvec, SmallVec};
 use std::ops::Deref;
@@ -284,12 +284,7 @@ impl Archetype for Shape {
 
 macro_rules! impl_array_to_value_repr {
     ($ty:tt, $prim:tt) => {
-        impl<D: Dim> ValueRepr for nox::Array<$ty, D>
-        where
-            D::Buf<MaybeUninit<$ty>>: nox::ArrayBufUnit<$ty>,
-            <D as ArrayDim>::Buf<MaybeUninit<$ty>>:
-                ArrayBufUnit<$ty, Init = <D as ArrayDim>::Buf<$ty>>,
-        {
+        impl<D: Dim> ValueRepr for nox::Array<$ty, D> {
             fn component_value(&self) -> ComponentValue<'_> {
                 use nox::ArrayBuf;
                 let dim = D::dim(&self.buf);

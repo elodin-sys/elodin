@@ -2,12 +2,12 @@
 use nalgebra::{ArrayStorage, Const, DimMul, Scalar as NalgebraScalar, ToTypenum};
 use num_traits::Zero;
 use smallvec::smallvec;
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    ArrayBufUnit, ArrayDim, ArrayTy, Buffer, BufferArg, Client, ConcatManyDim, Dim, Field,
-    FromHost, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar, Tensor, TensorItem, ToHost,
+    ArrayTy, Buffer, BufferArg, Client, Dim, Field, FromHost, MaybeOwned, Noxpr, Op, RealField,
+    Repr, Scalar, Tensor, TensorItem, ToHost,
 };
 
 /// Type alias for a tensor that specifically represents a vector.
@@ -79,8 +79,6 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
         Const<N>: ToTypenum,
         Const<1>: DimMul<Const<N>, Output = Const<N>>,
         <Const<1> as DimMul<Const<N>>>::Output: Dim,
-        <ConcatManyDim<Const<1>, N> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <ConcatManyDim<Const<1>, N> as ArrayDim>::Buf<T>>,
     {
         let args = arr.map(|v| &v.inner);
         let inner = R::concat_many(args);

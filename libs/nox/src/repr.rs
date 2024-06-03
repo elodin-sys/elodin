@@ -11,9 +11,8 @@ use smallvec::SmallVec;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    array::{ArrayBufUnit, ArrayDim},
-    AddDim, ArrayTy, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim, DefaultMap,
-    DefaultMappedDim, DimGet, DotDim, DottedDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim,
+    array::ArrayDim, AddDim, ArrayTy, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim,
+    DefaultMap, DefaultMappedDim, DimGet, DotDim, Field, GetDim, MapDim, MulDim, Noxpr, TensorDim,
     XlaDim,
 };
 
@@ -46,9 +45,7 @@ pub trait Repr {
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim;
 
     /// Performs element-wise subtraction of two tensors, broadcasting as necessary.
     fn sub<T, D1, D2>(
@@ -60,9 +57,7 @@ pub trait Repr {
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim;
 
     /// Performs element-wise multiplication of two tensors, broadcasting as necessary.
     fn mul<T, D1, D2>(
@@ -74,9 +69,7 @@ pub trait Repr {
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim;
 
     /// Performs element-wise division of two tensors, broadcasting as necessary.
     fn div<T, D1, D2>(
@@ -88,9 +81,7 @@ pub trait Repr {
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>;
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim;
 
     /// Computes the dot product of two tensors.
     fn dot<T, D1, D2>(
@@ -102,9 +93,7 @@ pub trait Repr {
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
-        <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>;
+        <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim;
 
     /// Concatenates two arrays along the first dimension.
     fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
@@ -119,9 +108,7 @@ pub trait Repr {
         D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
-        ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>;
+        ConcatDim<D1, D2>: Dim;
 
     /// Concatenates multiple tensors along a new dimension.
     fn concat_many<T1: Field, D1, const N: usize>(
@@ -133,9 +120,7 @@ pub trait Repr {
         D1: Dim + DefaultMap,
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
-        ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>;
+        ConcatManyDim<D1, N>: Dim;
 
     /// Retrieves a specific tensor based on an index within a dimension.
     fn get<T1: Field, D1: Dim>(
@@ -143,16 +128,12 @@ pub trait Repr {
         index: usize,
     ) -> Self::Inner<T1, GetDim<D1>>
     where
-        ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>;
+        ShapeConstraint: DimGet<D1>;
 
     fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
         arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim;
 
@@ -160,31 +141,21 @@ pub trait Repr {
 
     fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
-        T1: Field + Neg<Output = T1>,
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
+        T1: Field + Neg<Output = T1>;
 
-    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
+    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
-    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
+    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
-    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>;
+    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         arg: &Self::Inner<T1, D1>,
         offsets: &[usize],
-    ) -> Self::Inner<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>;
+    ) -> Self::Inner<T1, D2>;
 
     fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>;
 }
 
@@ -201,8 +172,6 @@ impl Repr for Literal {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -217,8 +186,6 @@ impl Repr for Literal {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -233,8 +200,6 @@ impl Repr for Literal {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -249,8 +214,6 @@ impl Repr for Literal {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -265,8 +228,6 @@ impl Repr for Literal {
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
         <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -282,8 +243,6 @@ impl Repr for Literal {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -294,8 +253,6 @@ impl Repr for Literal {
     ) -> Self::Inner<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -304,8 +261,6 @@ impl Repr for Literal {
         _arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -329,8 +284,6 @@ impl Repr for Literal {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -338,45 +291,31 @@ impl Repr for Literal {
     fn neg<T1, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
         T1: Field + Neg<Output = T1>,
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
 
-    fn sqrt<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sqrt<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
-    fn sin<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sin<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
-    fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         _arg: &Self::Inner<T1, D1>,
         _offsets: &[usize],
-    ) -> Self::Inner<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
-    {
+    ) -> Self::Inner<T1, D2> {
         todo!()
     }
 
     fn reshape<T1: Field, D1: Dim, D2: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         todo!()
@@ -396,8 +335,6 @@ impl Repr for Buffer {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -412,8 +349,6 @@ impl Repr for Buffer {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -428,8 +363,6 @@ impl Repr for Buffer {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -444,8 +377,6 @@ impl Repr for Buffer {
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -460,8 +391,6 @@ impl Repr for Buffer {
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
         <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         todo!()
     }
@@ -477,8 +406,6 @@ impl Repr for Buffer {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -489,8 +416,6 @@ impl Repr for Buffer {
     ) -> Self::Inner<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -499,8 +424,6 @@ impl Repr for Buffer {
         _arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -524,8 +447,6 @@ impl Repr for Buffer {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
@@ -533,45 +454,31 @@ impl Repr for Buffer {
     fn neg<T1, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
         T1: Field + Neg<Output = T1>,
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         todo!()
     }
 
-    fn sqrt<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sqrt<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
-    fn sin<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sin<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
-    fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         todo!()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         _arg: &Self::Inner<T1, D1>,
         _offsets: &[usize],
-    ) -> Self::Inner<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
-    {
+    ) -> Self::Inner<T1, D2> {
         todo!()
     }
 
     fn reshape<T1: Field, D1: Dim, D2: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         todo!()
@@ -591,8 +498,6 @@ impl Repr for Op {
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Noxpr::add(left.clone(), right.clone())
     }
@@ -607,8 +512,6 @@ impl Repr for Op {
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Noxpr::sub(left.clone(), right.clone())
     }
@@ -623,8 +526,6 @@ impl Repr for Op {
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Noxpr::mul(left.clone(), right.clone())
     }
@@ -639,8 +540,6 @@ impl Repr for Op {
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Noxpr::div(left.clone(), right.clone())
     }
@@ -655,8 +554,6 @@ impl Repr for Op {
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
         <ShapeConstraint as DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         Noxpr::dot(left.clone(), right)
     }
@@ -672,8 +569,6 @@ impl Repr for Op {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>,
     {
         Noxpr::concat_in_dim(args.iter().map(|&x| x.clone()).collect(), 0)
     }
@@ -684,8 +579,7 @@ impl Repr for Op {
     ) -> Self::Inner<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
+        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:,
     {
         let shape = D1::shape();
         let offsets = iter::once(index as i64)
@@ -712,8 +606,6 @@ impl Repr for Op {
         arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -744,47 +636,30 @@ impl Repr for Op {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         Noxpr::concat_in_dim(vec![left.clone(), right.clone()], 0)
     }
 
-    fn neg<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn neg<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         -arg.clone()
     }
 
-    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone().sqrt()
     }
 
-    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone().sin()
     }
 
-    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone().cos()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         arg: &Self::Inner<T1, D1>,
         offsets: &[usize],
-    ) -> Self::Inner<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
-    {
+    ) -> Self::Inner<T1, D2> {
         let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
         let new_offsets = offsets
             .iter()
@@ -797,7 +672,6 @@ impl Repr for Op {
 
     fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         arg.clone().reshape(D2::shape())
