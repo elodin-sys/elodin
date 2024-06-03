@@ -4,7 +4,7 @@ use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
     marker::PhantomData,
-    mem::MaybeUninit,
+    mem::{self, MaybeUninit},
     ops::{Add, Div, Mul, Neg, Sub},
 };
 
@@ -33,7 +33,7 @@ where
 
 /// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
 pub trait ArrayDim: TensorDim {
-    type Buf<T>: ArrayBuf<T>
+    type Buf<T>: ArrayBuf<T, Uninit = Self::Buf<MaybeUninit<T>>>
     where
         T: Copy;
     type Dim: AsRef<[usize]> + AsMut<[usize]> + Clone;
@@ -107,14 +107,29 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
 pub trait ArrayBuf<T>: Clone {
     fn as_buf(&self) -> &[T];
     fn as_mut_buf(&mut self) -> &mut [T];
+
+    type Uninit: ArrayBuf<MaybeUninit<T>>;
+    fn uninit(dims: &[usize]) -> Self::Uninit;
+
+    /// Transitions the unitilized buffer to an initialized state
+    ///
+    /// # Safety
+    /// This function will cause undefined behavior
+    /// unless you ensure that every value in the underyling buffer is initialized
+    /// See [`MaybeUninit::assume_init`] for more information.
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self;
 }
 
-/// Extends `ArrayBuf` for uninitialized memory management.
-pub trait ArrayBufUnit<T>: ArrayBuf<MaybeUninit<T>> {
-    fn uninit(dims: &[usize]) -> Self;
-
-    type Init;
-    fn assume_init(self) -> Self::Init;
+// Size-heterogeneous transmutation (seriously unsafe!)
+// We use this for transmuting a [MaybeUninit<T>; N] to a [T; N]
+// without forcing an unnecessary copy.s
+// source: https://crates.io/crates/transmute/0.1.1
+unsafe fn transmute_no_size_check<A, B>(a: A) -> B {
+    debug_assert_eq!(mem::size_of::<A>(), mem::size_of::<B>());
+    debug_assert_eq!(mem::align_of::<A>(), mem::align_of::<B>());
+    let b = core::ptr::read(&a as *const A as *const B);
+    core::mem::forget(a);
+    b
 }
 
 impl<T: Clone + Copy> ArrayBuf<T> for ndarray::ArrayD<T> {
@@ -125,17 +140,15 @@ impl<T: Clone + Copy> ArrayBuf<T> for ndarray::ArrayD<T> {
     fn as_mut_buf(&mut self) -> &mut [T] {
         self.as_slice_mut().expect("ndarray in non-standard order")
     }
-}
 
-impl<T: Clone + Copy> ArrayBufUnit<T> for ndarray::ArrayD<MaybeUninit<T>> {
-    fn uninit(dims: &[usize]) -> Self {
+    type Uninit = ndarray::ArrayD<MaybeUninit<T>>;
+
+    fn uninit(dims: &[usize]) -> Self::Uninit {
         unsafe { ndarray::ArrayD::uninit(dims).assume_init() }
     }
 
-    type Init = ndarray::ArrayD<T>;
-
-    fn assume_init(self) -> Self::Init {
-        unsafe { self.assume_init() }
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
+        uninit.assume_init()
     }
 }
 
@@ -147,17 +160,15 @@ impl<T: Copy + Clone> ArrayBuf<T> for T {
     fn as_mut_buf(&mut self) -> &mut [T] {
         core::slice::from_mut(self)
     }
-}
 
-impl<T: Copy + Clone> ArrayBufUnit<T> for MaybeUninit<T> {
-    fn uninit(_dims: &[usize]) -> Self {
+    type Uninit = MaybeUninit<T>;
+
+    fn uninit(_dims: &[usize]) -> Self::Uninit {
         MaybeUninit::uninit()
     }
 
-    type Init = T;
-
-    fn assume_init(self) -> Self::Init {
-        unsafe { self.assume_init() }
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
+        unsafe { uninit.assume_init() }
     }
 }
 
@@ -169,17 +180,17 @@ impl<const D: usize, T: Copy + Clone> ArrayBuf<T> for [T; D] {
     fn as_mut_buf(&mut self) -> &mut [T] {
         self
     }
-}
 
-impl<const D: usize, T: Copy + Clone> ArrayBufUnit<T> for [MaybeUninit<T>; D] {
-    fn uninit(_dims: &[usize]) -> Self {
+    type Uninit = [MaybeUninit<T>; D];
+
+    fn uninit(_dims: &[usize]) -> Self::Uninit {
+        // Safety: This code is inlined from `MaybeUninit::uninit_array()`, and is
+        // safe because an unitilized array of `MaybeUninit<T>` is valid.
         unsafe { MaybeUninit::<[MaybeUninit<T>; D]>::uninit().assume_init() }
     }
 
-    type Init = [T; D];
-
-    fn assume_init(self) -> Self::Init {
-        unsafe { core::mem::transmute_copy(&self) }
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
+        unsafe { transmute_no_size_check(uninit) }
     }
 }
 
@@ -197,19 +208,17 @@ impl<T: Clone + Copy, const D1: usize, const D2: usize> ArrayBuf<T> for [[T; D1]
 
         unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) }
     }
-}
 
-impl<const D1: usize, const D2: usize, T: Copy + Clone> ArrayBufUnit<T>
-    for [[MaybeUninit<T>; D1]; D2]
-{
-    fn uninit(_dims: &[usize]) -> Self {
+    type Uninit = [[MaybeUninit<T>; D1]; D2];
+
+    fn uninit(_dims: &[usize]) -> Self::Uninit {
+        // Safety: This code is similar to the code in `MaybeUnint::unint_array()`, and is
+        // safe because an unitilized array of `MaybeUninit<T>` is valid.
         unsafe { MaybeUninit::<[[MaybeUninit<T>; D1]; D2]>::uninit().assume_init() }
     }
 
-    type Init = [[T; D1]; D2];
-
-    fn assume_init(self) -> Self::Init {
-        unsafe { core::mem::transmute_copy(&self) }
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
+        unsafe { transmute_no_size_check(uninit) }
     }
 }
 
@@ -229,34 +238,15 @@ impl<T: Clone + Copy, const D1: usize, const D2: usize, const D3: usize> ArrayBu
 
         unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) }
     }
-}
 
-impl<const D1: usize, const D2: usize, const D3: usize, T: Copy + Clone> ArrayBufUnit<T>
-    for [[[MaybeUninit<T>; D1]; D2]; D3]
-{
-    fn uninit(_dims: &[usize]) -> Self {
+    type Uninit = [[[MaybeUninit<T>; D1]; D2]; D3];
+
+    fn uninit(_dims: &[usize]) -> Self::Uninit {
         unsafe { MaybeUninit::<[[[MaybeUninit<T>; D1]; D2]; D3]>::uninit().assume_init() }
     }
 
-    type Init = [[[T; D1]; D2]; D3];
-
-    fn assume_init(self) -> Self::Init {
-        unsafe { core::mem::transmute_copy(&self) }
-    }
-}
-
-/// Trait marking types that can be instantiated as uninitialized memory blocks.
-pub trait MaybeUnitMarker {
-    type Init;
-
-    /// Creates an uninitialized instance of the type.
-    fn uninit() -> Self;
-}
-
-impl<T> MaybeUnitMarker for MaybeUninit<T> {
-    type Init = T;
-    fn uninit() -> Self {
-        Self::uninit()
+    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
+        unsafe { transmute_no_size_check(uninit) }
     }
 }
 
@@ -274,14 +264,11 @@ impl ArrayDim for Dyn {
     }
 }
 
-impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<MaybeUninit<T1>, D1>
-where
-    D1::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1>,
-{
+impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<MaybeUninit<T1>, D1> {
     /// Constructs an uninitialized array given dimensions.
     pub fn uninit(dims: &[usize]) -> Self {
         Self {
-            buf: D1::Buf::<MaybeUninit<T1>>::uninit(dims),
+            buf: D1::Buf::<T1>::uninit(dims),
         }
     }
 
@@ -289,12 +276,12 @@ where
     ///
     /// # Safety
     /// This function will cause undefined behavior unless you ensure that every value in the underyling buffer is initialized
-    pub unsafe fn assume_init(self) -> Array<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
-        Array {
-            buf: self.buf.assume_init(),
+    /// See [`MaybeUninit::assume_init`] for more information.
+    pub unsafe fn assume_init(self) -> Array<T1, D1> {
+        unsafe {
+            Array {
+                buf: <D1::Buf<T1>>::assume_init(self.buf),
+            }
         }
     }
 }
@@ -308,8 +295,6 @@ macro_rules! impl_op {
                 b: &Array<T1, D2>,
             ) -> Array<T1, BroadcastedDim<D1, D2>>
             where
-                <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-                    ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
                 T1: $op_trait<Output = T1>,
                 ShapeConstraint: BroadcastDim<D1, D2>,
                 <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
@@ -362,7 +347,6 @@ macro_rules! impl_op {
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn reshape<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         let d1 = D1::dim(&self.buf);
@@ -384,8 +368,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 
     pub fn broadcast<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -418,8 +400,6 @@ macro_rules! impl_unary_op {
             pub fn $fn_name(&self) -> Array<T1, D1>
             where
                 T1: $op_trait,
-                <D1 as ArrayDim>::Buf<MaybeUninit<T1>>:
-                    ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
             {
                 let d1 = D1::dim(&self.buf);
                 let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
@@ -444,7 +424,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn neg(&self) -> Array<T1, D1>
     where
         T1: Neg<Output = T1>,
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         let d1 = D1::dim(&self.buf);
         let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
@@ -535,8 +514,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
         <ShapeConstraint as crate::DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <crate::DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <crate::DottedDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         let left = self;
         let dim_left = D1::dim(&left.buf);
@@ -596,8 +573,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         let d1 = D1::dim(&self.buf);
         let d2 = D2::dim(&right.buf);
@@ -626,8 +601,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>,
     {
         let mut out_dims = D1::dim(&args[0].buf);
         for arg in args[1..].iter() {
@@ -650,8 +623,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn get(&self, index: usize) -> Array<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
     {
         let arg_dims = D1::dim(&self.buf);
         let stride_dims = D1::strides(&self.buf);
@@ -665,10 +636,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
-    pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
-    {
+    pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
         let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(D2::DIM);
         for (a, out) in self
             .offset_iter(offsets)
@@ -789,8 +757,6 @@ impl Repr for ArrayRepr {
         D2: ArrayDim + TensorDim + XlaDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         left.add(right)
     }
@@ -805,8 +771,6 @@ impl Repr for ArrayRepr {
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         left.sub(right)
     }
@@ -821,8 +785,6 @@ impl Repr for ArrayRepr {
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         left.mul(right)
     }
@@ -837,8 +799,6 @@ impl Repr for ArrayRepr {
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         left.div(right)
     }
@@ -853,8 +813,6 @@ impl Repr for ArrayRepr {
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
         <ShapeConstraint as crate::DotDim<D1, D2>>::Output: Dim + ArrayDim,
-        <crate::DottedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T>>:
-            ArrayBufUnit<T, Init = <crate::DottedDim<D1, D2> as ArrayDim>::Buf<T>>,
     {
         left.dot(right)
     }
@@ -870,8 +828,6 @@ impl Repr for ArrayRepr {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-        <ConcatManyDim<D1, N> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatManyDim<D1, N> as ArrayDim>::Buf<T1>>,
     {
         Array::concat_many(args)
     }
@@ -882,8 +838,6 @@ impl Repr for ArrayRepr {
     ) -> Self::Inner<T1, GetDim<D1>>
     where
         ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <GetDim<D1> as ArrayDim>::Buf<T1>>,
     {
         arg.get(index)
     }
@@ -892,8 +846,6 @@ impl Repr for ArrayRepr {
         arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
-        <BroadcastedDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <BroadcastedDim<D1, D2> as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
     {
@@ -919,8 +871,6 @@ impl Repr for ArrayRepr {
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
-        <ConcatDim<D1, D2> as ArrayDim>::Buf<MaybeUninit<T1>>:
-            ArrayBufUnit<T1, Init = <ConcatDim<D1, D2> as ArrayDim>::Buf<T1>>,
     {
         left.concat(right)
     }
@@ -928,45 +878,31 @@ impl Repr for ArrayRepr {
     fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
         T1: Field + Neg<Output = T1>,
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
     {
         arg.neg()
     }
 
-    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.sqrt()
     }
 
-    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.sin()
     }
 
-    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        <D1 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D1 as ArrayDim>::Buf<T1>>,
-    {
+    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.cos()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         arg: &Self::Inner<T1, D1>,
         offsets: &[usize],
-    ) -> Self::Inner<T1, D2>
-    where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
-    {
+    ) -> Self::Inner<T1, D2> {
         arg.copy_fixed_slice(offsets)
     }
 
     fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
-        <D2 as ArrayDim>::Buf<MaybeUninit<T1>>: ArrayBufUnit<T1, Init = <D2 as ArrayDim>::Buf<T1>>,
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         arg.reshape()
