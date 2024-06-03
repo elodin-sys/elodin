@@ -460,7 +460,7 @@ def spawn_sat(x, y, w: el.World):
 
 
 sat = spawn_sat(0, 0, w)
-count = 500
+count = 80
 bound = int(count**0.5 / 2)
 for x in range(-bound, bound):
     for y in range(-bound, bound):
@@ -468,34 +468,25 @@ for x in range(-bound, bound):
 
 
 w.spawn(
-    el.Panel.viewport(
-        track_entity=sat,
-        track_rotation=False,
-        active=True,
-        pos=[7.0, 0.0, 0.0],
-        looking_at=[0.0, 0.0, 0.0],
-    ),
-    name="Viewport 2",
-)
-
-w.spawn(
-    el.Panel.viewport(
-        track_entity=sat,
-        track_rotation=False,
-        pos=[7.0, -3.0, 0.0],
-        fov=20.0,
-        looking_at=[0.0, 0.0, 0.0],
-    ),
-    name="Viewport 1",
-)
-
-w.spawn(
-    el.Panel.graph(
+    el.Panel.hsplit(
         [
-            el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
-            for sat_id in sat_ids
-        ]
+            el.Panel.viewport(
+                track_entity=sat,
+                track_rotation=False,
+                pos=[100.0, 0.0, 0.0],
+                looking_at=[0.0, 0.0, 0.0],
+                active=True,
+            ),
+            el.Panel.graph(
+                [
+                    el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
+                    for sat_id in sat_ids
+                ]
+            ),
+        ],
+        active=True,
     ),
+    name="Viewport and Graph",
 )
 
 w.spawn(
