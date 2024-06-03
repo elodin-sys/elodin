@@ -3496,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "elodin"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -6132,7 +6132,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "anyhow",
  "axum 0.7.5",
