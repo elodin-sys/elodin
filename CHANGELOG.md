@@ -4,6 +4,7 @@
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
     - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
     The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
+
 ## [v0.3.21]
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
     - In `nox`, the constant `Field::two` returned a `1` constant. This constant was only used in the implementation of `Add` between `SpatialMotion` and `SpatialTransform` and in `Quaternion::from_axis_angle`. Unfortunately, this caused angular velocity integration to return incorrect results. This bug caused the applied angular velocity to be multiplied by a factor of 2.
@@ -32,7 +33,6 @@
     ```
 - **(breaking)** Remove `SpatialInertia.from_mass()`.
   - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.
-
     ```python
     # before:
     inertia=el.SpatialInertia.from_mass(1.0 / G),
@@ -103,7 +103,6 @@
         query: el.Query[el.WorldPos, el.Inertia],
     )
     ```
-
     And then reference it in `edge_fold`:
     ```python
     # before:
@@ -113,7 +112,6 @@
     return graph.edge_fold(query, query, el.Force, ...
     ```
   - To query different components from the left and right entities, use multiple queries:
-
     ```python
     @el.system
     def rw_effector(
@@ -158,7 +156,7 @@
 - Add configurable labels for component elements.
 
 [unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.21...HEAD
-[v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...v0.3.21
+[v0.3.21]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...v0.3.21
 [v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.19...v0.3.20
 [v0.3.19]: https://github.com/elodin-sys/paracosm/compare/v0.3.18...v0.3.19
 [v0.3.18]: https://github.com/elodin-sys/paracosm/compare/v0.3.17...v0.3.18

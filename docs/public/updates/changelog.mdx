@@ -32,7 +32,6 @@ icon: bars-staggered
     ```
 - **(breaking)** Remove `SpatialInertia.from_mass()`.
   - Use the `SpatialInertia()` constructor instead, which now accepts inertia tensor as an optional keyword argument.
-
     ```python
     # before:
     inertia=el.SpatialInertia.from_mass(1.0 / G),
@@ -105,7 +104,6 @@ icon: bars-staggered
         query: el.Query[el.WorldPos, el.Inertia],
     )
     ```
-
     And then reference it in `edge_fold`:
     ```python
     # before:
@@ -115,7 +113,6 @@ icon: bars-staggered
     return graph.edge_fold(query, query, el.Force, ...
     ```
   - To query different components from the left and right entities, use multiple queries:
-
     ```python
     @el.system
     def rw_effector(
