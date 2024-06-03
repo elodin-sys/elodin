@@ -1,6 +1,6 @@
 use crate::{
     api::{multiplex::MultiplexService, sandbox::sim_socket},
-    config::Auth0Config,
+    config::{Auth0Config, StripePlansConfig},
     current_user_route, current_user_route_txn,
     error::Error,
     monte_carlo::SimStorageClient,
@@ -46,6 +46,7 @@ pub struct Api {
     monte_carlo_batch_events: broadcast::Receiver<DbEvent<atc_entity::batches::Model>>,
     stripe: ::stripe::Client,
     stripe_webhook_secret: String,
+    stripe_plans_config: StripePlansConfig,
 }
 
 #[derive(Clone)]
@@ -60,6 +61,7 @@ pub struct AxumContext {
     db: DatabaseConnection,
     redis: RedisClient,
     webhook_secret: String,
+    stripe_plans_config: StripePlansConfig,
 }
 
 impl Api {
@@ -93,6 +95,7 @@ impl Api {
             monte_carlo_batch_events,
             stripe,
             stripe_webhook_secret,
+            stripe_plans_config: config.stripe_plans.clone(),
         })
     }
 
@@ -129,6 +132,7 @@ impl Api {
                 db: self.db.clone(),
                 redis: self.redis.clone(),
                 webhook_secret: self.stripe_webhook_secret.clone(),
+                stripe_plans_config: self.stripe_plans_config.clone(),
             });
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter

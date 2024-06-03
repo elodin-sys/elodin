@@ -7,6 +7,11 @@ address = "[::]:50051"
 auth0.domain = "auth.elodin.systems"
 auth0.client_id = "Fduve612Omqy9gUXGxcZ5RoTP9IJ6gly"
 
+[api.stripe_plans]
+monte_carlo_price = "price_1PNiPIG68UBhCjJFC2y1bniB"
+commercial_price = "price_1PNiPLG68UBhCjJFu1uqwQjz"
+non_commercial_price = "price_1PNiPNG68UBhCjJFUif13UWF"
+
 [monte_carlo]
 sim_artifacts_bucket_name = "sim-artifacts"
 sim_results_bucket_name = "sim-results"

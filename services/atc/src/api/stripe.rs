@@ -14,10 +14,6 @@ use uuid::Uuid;
 
 use super::AxumContext;
 
-pub const MONTE_CARLO_PRICE: &str = "price_1PBnS5G68UBhCjJFgvwkvQwx";
-pub const COMMERCIAL_PRICE: &str = "price_1PBnNtG68UBhCjJF82vJsv5n";
-pub const NON_COMMERCIAL_PRICE: &str = "price_1PBnNDG68UBhCjJFLZMvrR92";
-
 pub struct StripeEvent(Event);
 
 #[async_trait]
@@ -81,9 +77,13 @@ pub async fn stripe_webhook(
                         };
                         let price_id = price.id.to_string();
                         let new_license_type = match price_id.as_str() {
-                            COMMERCIAL_PRICE => LicenseType::Commercial,
-                            NON_COMMERCIAL_PRICE => LicenseType::NonCommercial,
-                            MONTE_CARLO_PRICE => {
+                            id if id == context.stripe_plans_config.commercial_price => {
+                                LicenseType::Commercial
+                            }
+                            id if id == context.stripe_plans_config.non_commercial_price => {
+                                LicenseType::NonCommercial
+                            }
+                            id if id == context.stripe_plans_config.monte_carlo_price => {
                                 warn!("found monte carlo price in seat subscription");
                                 continue;
                             }
@@ -131,7 +131,7 @@ pub async fn stripe_webhook(
                 Some("monte-carlo") => {
                     let monte_carlo_present = sub.items.data.iter().any(|item| {
                         item.price.as_ref().map(|price| price.id.as_str())
-                            == Some(MONTE_CARLO_PRICE)
+                            == Some(&context.stripe_plans_config.monte_carlo_price)
                     });
                     let Some(billing_account) =
                         billing_account::Entity::find_by_id(billing_account_id)
