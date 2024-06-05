@@ -1,5 +1,5 @@
 use bevy::{
-    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
+    diagnostic::DiagnosticsStore,
     ecs::{
         query::QueryData,
         system::{SystemParam, SystemState},
@@ -21,6 +21,7 @@ use conduit::{
     ComponentId, EntityId,
 };
 use egui_tiles::TileId;
+use widgets::status_bar::StatusBar;
 
 use crate::{GridHandle, MainCamera};
 
@@ -52,9 +53,6 @@ pub struct HdrEnabled(pub bool);
 
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
-
-#[derive(Resource, Default)]
-pub struct ShowStats(pub bool);
 
 #[derive(Resource, Default)]
 pub struct ViewportRange(pub Option<TaggedRangeId>);
@@ -116,15 +114,10 @@ pub struct EntityPair {
 pub struct InputHasFocus(pub bool);
 
 pub fn shortcuts(
-    mut show_stats: ResMut<ShowStats>,
     mut paused: ResMut<Paused>,
     input_has_focus: Res<InputHasFocus>,
     kbd: Res<ButtonInput<KeyCode>>,
 ) {
-    if kbd.just_pressed(KeyCode::F12) {
-        show_stats.0 = !show_stats.0;
-    }
-
     if !input_has_focus.0 && kbd.just_pressed(KeyCode::Space) {
         paused.0 = !paused.0;
     }
@@ -163,7 +156,6 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Paused>()
-            .init_resource::<ShowStats>()
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
@@ -371,6 +363,8 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         world.add_root_widget_with::<Titlebar>("titlebar", titlebar_icons);
 
+        world.add_root_widget::<StatusBar>("status_bar");
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
@@ -493,7 +487,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
 pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    show_stats: Res<'w, ShowStats>,
     tick_time: Res<'w, TimeStep>,
     diagnostics: Res<'w, DiagnosticsStore>,
     hovered_entity: Res<'w, HoveredEntity>,
@@ -513,9 +506,8 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
-        let show_stats = state_mut.show_stats;
-        let tick_time = state_mut.tick_time;
-        let diagnostics = state_mut.diagnostics;
+        let _tick_time = state_mut.tick_time;
+        let _diagnostics = state_mut.diagnostics;
         let hovered_entity = state_mut.hovered_entity;
 
         let Ok(window) = window.get_single() else {
@@ -554,34 +546,6 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                         ));
                     });
             }
-        }
-
-        if show_stats.0 {
-            let sim_fps = 1.0 / tick_time.0.as_secs_f64();
-
-            let viewport_left_top = ctx.available_rect().left_top();
-            let viewport_margins = egui::vec2(16.0, 40.0);
-
-            egui::Window::new("stats")
-                .title_bar(false)
-                .resizable(false)
-                .frame(egui::Frame::default())
-                .fixed_pos(viewport_left_top + viewport_margins)
-                .show(ctx, |ui| {
-                    let render_fps_str = diagnostics
-                        .get(&FrameTimeDiagnosticsPlugin::FPS)
-                        .and_then(|diagnostic_fps| diagnostic_fps.smoothed())
-                        .map_or(" N/A".to_string(), |value| format!("{value:>6.2}"));
-
-                    ui.add(Label::new(
-                        RichText::new(format!("FPS [VIEW]: {render_fps_str}"))
-                            .color(Color32::WHITE),
-                    ));
-
-                    ui.add(Label::new(
-                        RichText::new(format!("FPS [SIM]:  {sim_fps:>6.2}")).color(Color32::WHITE),
-                    ));
-                });
         }
     }
 }

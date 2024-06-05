@@ -16,6 +16,7 @@ pub mod inspector;
 pub mod label;
 pub mod modal;
 pub mod plot;
+pub mod status_bar;
 pub mod timeline;
 
 /// world.RootWidget

@@ -24,7 +24,7 @@ pub const PUMPKIN_DEFAULT: Color32 = Color32::from_rgb(0xFF, 0x6F, 0x1E);
 pub const YOLK_DEFAULT: Color32 = Color32::from_rgb(0xFE, 0xC5, 0x04);
 pub const PEACH_DEFAULT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0xB3);
 pub const REDDISH_DEFAULT: Color32 = Color32::from_rgb(0xE9, 0x4B, 0x14);
-pub const HYPERBOLE_DEFAULT: Color32 = Color32::from_rgb(0x14, 0x5F, 0xCF);
+pub const HYPERBLUE_DEFAULT: Color32 = Color32::from_rgb(0x14, 0x5F, 0xCF);
 pub const MINT_DEFAULT: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
 
 pub const TURQUOISE_40: Color32 = Color32::from_rgb(0x38, 0x55, 0x59);
@@ -33,7 +33,7 @@ pub const PUMPKIN_40: Color32 = Color32::from_rgb(0x74, 0x3A, 0x1A);
 pub const YOLK_40: Color32 = Color32::from_rgb(0x73, 0x5C, 0x0D);
 pub const PEACH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
 pub const REDDISH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
-pub const HYPERBOLE_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
+pub const HYPERBLUE_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
 pub const MINT_40: Color32 = Color32::from_rgb(0x43, 0x66, 0x4C);
 
 pub fn get_color_by_index_solid(index: usize) -> Color32 {
@@ -44,7 +44,7 @@ pub fn get_color_by_index_solid(index: usize) -> Color32 {
         YOLK_DEFAULT,
         PEACH_DEFAULT,
         REDDISH_DEFAULT,
-        HYPERBOLE_DEFAULT,
+        HYPERBLUE_DEFAULT,
         MINT_DEFAULT,
     ];
     colors[index % colors.len()]
@@ -58,7 +58,7 @@ pub fn get_color_by_index_all(index: usize) -> Color32 {
         YOLK_DEFAULT,
         PEACH_DEFAULT,
         REDDISH_DEFAULT,
-        HYPERBOLE_DEFAULT,
+        HYPERBLUE_DEFAULT,
         MINT_DEFAULT,
         TURQUOISE_40,
         SLATE_40,
@@ -66,7 +66,7 @@ pub fn get_color_by_index_all(index: usize) -> Color32 {
         YOLK_40,
         PEACH_40,
         REDDISH_40,
-        HYPERBOLE_40,
+        HYPERBLUE_40,
         MINT_40,
     ];
     colors[index % colors.len()]

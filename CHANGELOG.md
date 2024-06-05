@@ -4,6 +4,7 @@
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
     - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
     The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
+- Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
 
 ## [v0.3.21]
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
