@@ -52,16 +52,16 @@ def apply_wind(
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
     return f + el.SpatialForce.from_linear(
-        jnp.array([0.0, inertia.mass() * -9.81, 0.0])
+        jnp.array([0.0, 0.0, -9.81]) * inertia.mass()
     )
 
 
 @el.map
 def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
     return jax.lax.cond(
-        jax.lax.max(p.linear()[1], v.linear()[1]) < 0.0,
+        jax.lax.max(p.linear()[2], v.linear()[2]) < 0.0,
         lambda _: el.SpatialMotion.from_linear(
-            v.linear() * jnp.array([1.0, -1.0, 1.0]) * 0.85
+            v.linear() * jnp.array([1.0, 1.0, -1.0]) * 0.85
         ),
         lambda _: v,
         operand=None,
@@ -74,7 +74,7 @@ def world(seed: int = 0) -> el.World:
     world.spawn(
         [
             el.Body(
-                world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 6.0, 0.0]))
+                world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 6.0]))
             ),
             world.shape(el.Mesh.sphere(0.4), el.Material.color(12.7, 9.2, 0.5)),
         ],
@@ -84,8 +84,8 @@ def world(seed: int = 0) -> el.World:
         el.Panel.viewport(
             track_rotation=False,
             active=True,
-            pos=[6.0, 3.0, 6.0],
-            looking_at=[0.0, 1.0, 0.0],
+            pos=[6.0, 6.0, 3.0],
+            looking_at=[0.0, 0.0, 1.0],
             show_grid=True,
             hdr=True,
         ),
@@ -95,6 +95,6 @@ def world(seed: int = 0) -> el.World:
 
 
 def system() -> el.System:
-    effectors = gravity.pipe(apply_wind)
-    sys = sample_wind.pipe(bounce.pipe(el.six_dof(TIME_STEP, effectors)))
+    effectors = gravity | apply_wind
+    sys = sample_wind | bounce | el.six_dof(TIME_STEP, effectors)
     return sys

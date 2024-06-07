@@ -195,20 +195,12 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     return el.Quaternion(jnp.array([x, y, z, w]))
 
 
-def quat_to_euler(q: el.Quaternion) -> jax.Array:
-    x, y, z, w = q.vector()
-    roll = jnp.arctan2(2 * (w * x + y * z), 1 - 2 * (x**2 + y**2))
-    pitch = jnp.arcsin(2 * (w * y - z * x))
-    yaw = jnp.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
-    return jnp.rad2deg(jnp.array([roll, pitch, yaw]) * 2)
-
-
 def quat_from_vecs(v1: jax.Array, v2: jax.Array) -> el.Quaternion:
     v1 = v1 / la.norm(v1)
     v2 = v2 / la.norm(v2)
     n = jnp.cross(v1, v2)
     w = jnp.dot(v2, v2) * jnp.dot(v1, v1) + jnp.dot(v1, v2)
-    q = el.Quaternion.from_array(jnp.array([n[0], n[1], n[2], w])).normalize()
+    q = el.Quaternion.from_array(jnp.array([*n, w])).normalize()
     return q
 
 
@@ -273,7 +265,7 @@ class Rocket(el.Archetype):
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
     return f + el.SpatialForce.from_linear(
-        jnp.array([0.0, inertia.mass() * -9.81, 0.0])
+        jnp.array([0.0, 0.0, -9.81]) * inertia.mass()
     )
 
 
@@ -285,7 +277,7 @@ def mach(p: el.WorldPos, v: el.WorldVel, w: Wind) -> tuple[Mach, DynamicPressure
         "p": jnp.array([101325.0, 22632.0, 5474.9, 868.02, 110.91, 66.939, 3.9564, 0.]),
         "d": jnp.array([1.225, 0.3639, 0.0880, 0.0132, 0.0014, 0.0009, 0.0001, 0.]),
     }  # fmt: skip
-    altitude = p.linear()[1]
+    altitude = p.linear()[2]
     temperature = jnp.interp(altitude, atmosphere["h"], atmosphere["T"]) + 273.15
     density = jnp.interp(altitude, atmosphere["h"], atmosphere["d"])
     specific_heat_ratio = 1.4
@@ -305,7 +297,7 @@ def angle_of_attack(p: el.WorldPos, v: el.WorldVel, w: Wind) -> AngleOfAttack:
 
     # angle of attack is the angle between the freestream velocity vector and the attitude vector
     angle_of_attack = jnp.dot(u, thrust_vector_body_frame) / jnp.clip(la.norm(u), 1e-6)
-    angle_of_attack = jnp.rad2deg(jnp.arccos(angle_of_attack)) * -jnp.sign(u[1])
+    angle_of_attack = jnp.rad2deg(jnp.arccos(angle_of_attack)) * -jnp.sign(u[2])
     return angle_of_attack
 
 
@@ -357,8 +349,8 @@ def aero_forces(
     CmR = CmR - CZR * (xcg - xmc) / l_ref
     CnR = CnR - CYR * (xcg - xmc) / l_ref
 
-    f_aero_linear = jnp.array([CA, CZR, CYR]) * q * a_ref
-    f_aero_torque = jnp.array([Cl, -CnR, CmR]) * q * a_ref * l_ref
+    f_aero_linear = jnp.array([CA, CYR, CZR]) * q * a_ref
+    f_aero_torque = jnp.array([Cl, -CmR, CnR]) * q * a_ref * l_ref
     f_aero = el.SpatialForce.from_linear(f_aero_linear) + el.SpatialForce.from_torque(
         f_aero_torque
     )
@@ -429,7 +421,7 @@ def pitch_pid_state(
     a_rel: VRelAccelFiltered,
     s: PitchPIDState,
 ) -> PitchPIDState:
-    e = a_rel[1] - a_setpoint[0]
+    e = a_rel[2] - a_setpoint[0]
     i = jnp.clip(s[1] + e * TIME_STEP * 2, -2.0, 2.0)
     d = e - s[0]
     pid_state = jnp.array([e, i, d])
@@ -458,9 +450,9 @@ w = el.World()
 rocket = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 1.0, 0.0]))
+            world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 1.0]))
             + el.SpatialTransform.from_angular(
-                euler_to_quat(jnp.array([0.0, 0.0, -70.0]))
+                euler_to_quat(jnp.array([0.0, 70.0, 0.0]))
             ),
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
@@ -479,7 +471,7 @@ w.spawn(
                     el.Panel.viewport(
                         track_entity=rocket,
                         track_rotation=False,
-                        pos=[5.0, 1.0, 0.0],
+                        pos=[5.0, 0.0, 1.0],
                         looking_at=[0.0, 0.0, 0.0],
                         show_grid=True,
                     ),

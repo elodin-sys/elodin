@@ -31,7 +31,7 @@ a = w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform.from_linear(np.array([0.8822391241, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, 1.0042424155, 0])),
+            world_vel=el.SpatialMotion.from_linear(np.array([0, 0, 1.0042424155])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(25.3, 18.4, 1.0))),
@@ -42,7 +42,7 @@ b = w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform.from_linear(np.array([-0.6432718586, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, -1.6491842814, 0])),
+            world_vel=el.SpatialMotion.from_linear(np.array([0, 0, -1.6491842814])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(10.0, 0.0, 10.0))),
@@ -53,10 +53,10 @@ c = w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform.from_linear(np.array([-0.2389672654, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, 0.6449418659, 0.0])),
+            world_vel=el.SpatialMotion.from_linear(np.array([0, 0, 0.6449418659])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
-        el.Shape(mesh, w.insert_asset(el.Material.color(00.0, 1.0, 10.0))),
+        el.Shape(mesh, w.insert_asset(el.Material.color(0.0, 1.0, 10.0))),
     ],
     name="C",
 )
@@ -65,7 +65,7 @@ w.spawn(
     el.Panel.viewport(
         track_rotation=False,
         active=True,
-        pos=[0.0, 0.0, 5.0],
+        pos=[0.0, 5.0, 0.0],
         looking_at=[0.0, 0.0, 0.0],
         hdr=True,
     ),

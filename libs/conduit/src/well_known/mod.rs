@@ -1,4 +1,4 @@
-use nalgebra::{Quaternion, Vector3};
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use ndarray::{array, CowArray, Ix1};
 use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
@@ -22,7 +22,7 @@ pub use viewer::*;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct WorldPos {
-    pub att: Quaternion<f64>,
+    pub att: UnitQuaternion<f64>,
     pub pos: Vector3<f64>,
 }
 
@@ -66,7 +66,7 @@ impl ValueRepr for WorldPos {
         let arr = arr.into_dimensionality::<Ix1>().ok()?;
         let arr = arr.as_slice()?;
         Some(WorldPos {
-            att: Quaternion::new(arr[3], arr[0], arr[1], arr[2]),
+            att: UnitQuaternion::from_quaternion(Quaternion::new(arr[3], arr[0], arr[1], arr[2])),
             pos: Vector3::new(arr[4], arr[5], arr[6]),
         })
     }
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_world_pos() {
         let world_pos = WorldPos {
-            att: *UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f64::consts::FRAC_PI_2),
+            att: UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f64::consts::FRAC_PI_2),
             pos: Vector3::new(1.0, 2.0, 3.0),
         };
         let val = world_pos.component_value();

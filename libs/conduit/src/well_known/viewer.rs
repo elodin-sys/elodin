@@ -1,4 +1,4 @@
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 
 use crate::{Asset, ComponentId, EntityId};
@@ -27,7 +27,7 @@ pub struct Viewport {
     pub fov: f32,
     pub active: bool,
     pub pos: Vector3<f32>,
-    pub rotation: Quaternion<f32>,
+    pub rotation: UnitQuaternion<f32>,
     pub show_grid: bool,
     pub hdr: bool,
 }
@@ -35,7 +35,7 @@ pub struct Viewport {
 impl Viewport {
     pub fn looking_at(mut self, pos: Vector3<f32>) -> Self {
         let dir = pos - self.pos;
-        self.rotation = *UnitQuaternion::look_at_rh(&dir, &Vector3::y()).inverse();
+        self.rotation = UnitQuaternion::look_at_rh(&dir.xzy(), &Vector3::y()).inverse();
         self
     }
 }
@@ -47,7 +47,7 @@ impl Default for Viewport {
             fov: 45.0,
             active: false,
             pos: Vector3::new(5.0, 5.0, 10.0),
-            rotation: Quaternion::identity(),
+            rotation: UnitQuaternion::identity(),
             track_rotation: true,
             show_grid: false,
             hdr: false,
