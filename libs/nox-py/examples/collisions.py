@@ -9,7 +9,7 @@ TIME_STEP = 1.0 / 240.0
 
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
-    return f + el.Force.from_linear(np.array([0.0, inertia.mass() * -9.81, 0.0]))
+    return f + el.SpatialForce.from_linear(np.array([0.0, 0.0, -9.81]) * inertia.mass())
 
 
 elasticity = 0.85
@@ -18,10 +18,10 @@ elasticity = 0.85
 @el.map
 def bounce(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
     return v + jax.lax.cond(
-        p.linear()[1] <= 0.4,
+        p.linear()[2] <= 0.4,
         lambda: collison_impulse_static(
-            np.array([0.0, 1.0, 0.0]),
-            np.array([0.0, 0.4, 0.0]),
+            np.array([0.0, 0.0, 1.0]),
+            np.array([0.0, 0.0, 0.4]),
             v,
             inertia,
         ),
@@ -42,8 +42,8 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
     walls = [
         Wall(np.array([1.0, 0.0, 0.0]), np.array([5.0, 0.0, 0.0]), 0),
         Wall(np.array([1.0, 0.0, 0.0]), np.array([-5.0, 0.0, 0.0]), 0, True),
-        Wall(np.array([0, 0, 1.0]), np.array([0.0, 0.0, 5.0]), 2),
-        Wall(np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -5.0]), 2, True),
+        Wall(np.array([0.0, 1.0, 0.0]), np.array([0.0, 5.0, 0.0]), 2),
+        Wall(np.array([0.0, 1.0, 0.0]), np.array([0.0, -5.0, 0.0]), 2, True),
     ]
     for wall in walls:
         if wall.leq:
@@ -152,10 +152,10 @@ world = el.World()
 
 balls = []
 mesh = world.insert_asset(el.Mesh.sphere(0.2))
-for i in range(1, 500):
+for i in range(1, 200):
     key = jax.random.key(i)
     pos = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0) + np.array(
-        [0.0, 7.0, 0.0]
+        [0.0, 0.0, 7.0]
     )
     [r, g, b] = jax.random.uniform(key, shape=(3,), minval=0.0, maxval=1.0) * 2.0
     color = world.insert_asset(el.Material.color(r, g, b))
@@ -178,8 +178,8 @@ world.spawn(
     el.Panel.viewport(
         track_rotation=False,
         active=True,
-        pos=[6.0, 3.0, 6.0],
-        looking_at=[0.0, 1.0, 0.0],
+        pos=[6.0, 6.0, 3.0],
+        looking_at=[0.0, 0.0, 1.0],
         show_grid=True,
         hdr=True,
     ),

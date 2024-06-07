@@ -441,12 +441,22 @@ pub fn sync_pos(
         .iter_mut()
         .for_each(|(mut transform, mut grid_cell, pos)| {
             let WorldPos { pos, att } = pos;
+
+            // Convert from Z-up to Y-up
+            let pos = pos.xzy();
+            // Swap Y, Z axes and negate w to fix chirality
+            // https://stackoverflow.com/a/16103717, https://stackoverflow.com/a/39134422
+            let x = att.i as f32;
+            let y = att.k as f32;
+            let z = att.j as f32;
+            let w = -att.w as f32;
+
             let (new_grid_cell, translation) =
                 floating_origin.translation_to_grid(DVec3::from_slice(pos.as_slice()));
             *grid_cell = new_grid_cell;
             *transform = bevy::prelude::Transform {
                 translation,
-                rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
+                rotation: Quat::from_xyzw(x, y, z, w),
                 ..Default::default()
             }
         });
