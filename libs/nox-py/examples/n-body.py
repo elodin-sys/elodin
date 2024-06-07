@@ -28,7 +28,7 @@ def gravity(
 
 w = el.World()
 mesh = w.insert_asset(el.Mesh.sphere(0.2))
-for i in range(1, 1000):
+for i in range(1, 200):
     key = jax.random.key(i)
     pos = jax.random.uniform(key, shape=(3,), minval=-10.0, maxval=10.0)
     # vel = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0)
@@ -50,7 +50,7 @@ w.spawn(
     el.Panel.viewport(
         track_rotation=False,
         active=True,
-        pos=[0.0, 0.0, 5.0],
+        pos=[100.0, 5.0, 100.0],
         looking_at=[0.0, 0.0, 0.0],
         hdr=True,
     ),
