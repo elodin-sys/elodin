@@ -1,7 +1,6 @@
 use clap::Parser;
 use conduit::client::MsgPair;
 use nox_ecs::{Compiled, ConduitExec, WorldExec};
-use pyo3::Python;
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -44,19 +43,32 @@ impl SimSupervisor {
     }
 
     pub fn run(path: PathBuf) -> anyhow::Result<()> {
+        let parent_dir = path.parent().unwrap();
+
         let addr = "0.0.0.0:2240".parse::<SocketAddr>().unwrap();
-        let (notify_tx, notify_rx) = flume::bounded(1);
-        let mut debouncer =
-            notify_debouncer_mini::new_debouncer(Duration::from_millis(500), move |res| {
-                if let Ok(event) = res {
-                    debug!(?event, "received notify");
+        let (notify_tx, notify_rx) = flume::bounded(0);
+        let mut debouncer = notify_debouncer_mini::new_debouncer(
+            Duration::from_millis(500),
+            move |res: Result<Vec<notify_debouncer_mini::DebouncedEvent>, _>| {
+                if let Ok(events) = res {
+                    let pycache_only = events
+                        .iter()
+                        .all(|event| event.path.ancestors().any(|p| p.ends_with("__pycache__")));
+                    if pycache_only {
+                        debug!("ignoring __pycache__ changes");
+                        return;
+                    }
+                    for event in events {
+                        info!(path = %event.path.display(), "detected change");
+                    }
                     let _ = notify_tx.try_send(());
                 }
-            })?;
+            },
+        )?;
 
         debouncer
             .watcher()
-            .watch(&path, notify::RecursiveMode::NonRecursive)?;
+            .watch(parent_dir, notify::RecursiveMode::Recursive)?;
 
         let (tx, rx) = flume::unbounded();
         let sim_runner = SimRunner::new(rx);
@@ -119,16 +131,17 @@ impl SimRunner {
         let tmpdir = tempfile::tempdir()?;
         let mut start = Instant::now();
         info!("building sim");
-        let script = std::fs::read_to_string(path)?;
-        let path_str = path.to_string_lossy().to_string();
-        let build_dir_str = tmpdir.path().to_string_lossy().to_string();
-        let args = vec![&path_str, "build", "--dir", &build_dir_str];
-        Python::with_gil(|py| {
-            py.import_bound("sys")?
-                .into_gil_ref()
-                .setattr("argv", args)?;
-            py.run_bound(&script, None, None)
-        })?;
+
+        let status = std::process::Command::new("python")
+            .arg(path)
+            .arg("build")
+            .arg("--dir")
+            .arg(tmpdir.path())
+            .status()?;
+
+        if !status.success() {
+            anyhow::bail!("failed to build sim: {}", status);
+        }
 
         let exec = nox_ecs::WorldExec::read_from_dir(tmpdir.path())?;
         info!(elapsed = ?start.elapsed(), "built sim");
