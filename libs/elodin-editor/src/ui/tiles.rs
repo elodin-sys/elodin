@@ -818,7 +818,7 @@ fn spawn_panel(
                 }
             };
             camera.insert(Transform {
-                translation: Vec3::new(viewport.pos.x, viewport.pos.y, viewport.pos.z),
+                translation: Vec3::from_slice(viewport.pos.xzy().as_slice()), // Convert from Z-up to Y-up
                 rotation: Quat::from_xyzw(
                     viewport.rotation.i,
                     viewport.rotation.j,
