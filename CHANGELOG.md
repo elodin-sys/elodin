@@ -5,6 +5,8 @@
     - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
     The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
 - Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
+- **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
+- `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
 
 ## [v0.3.21]
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
