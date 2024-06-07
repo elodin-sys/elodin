@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import elodin as el
 from typing import Annotated
 
-initial_angular_vel = np.array([10.0, 10.0, 10.0])
+initial_angular_vel = np.array([2.0, 2.0, 2.0])
 rw_force_clamp = 0.02
 G = 6.6743e-11  #
 M = 5.972e24  # mass of the Earth
@@ -293,12 +293,10 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
 def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     linear = pos.linear()
     r = linear / la.norm(linear)
-    body_axis = np.array([0.0, 0.0, -1.0])
+    body_axis = np.array([0.0, 1.0, 0.0])
     a = np.cross(body_axis, r)
     w = 1 + np.dot(body_axis, r)
-    return (
-        euler_to_quat(deg) * el.Quaternion(np.array([a[0], a[1], a[2], w])).normalize()
-    )
+    return euler_to_quat(deg) * el.Quaternion(np.array([*a, w])).normalize()
 
 
 @el.system
@@ -386,7 +384,7 @@ w = el.World()
 b = el.Body(
     world_pos=el.SpatialTransform.from_linear(np.array([1.0, 0.0, 0.0]) * radius),
     world_vel=el.SpatialMotion(
-        initial_angular_vel, np.array([0.0, 0.0, -1.0]) * velocity
+        initial_angular_vel, np.array([0.0, -1.0, 0.0]) * velocity
     ),
     inertia=el.SpatialInertia(12.0, j),
     # Credit to the OreSat program https://www.oresat.org for the model above
@@ -465,7 +463,7 @@ w.spawn(
                     el.GraphEntity(
                         sat,
                         [
-                            el.Component.index(el.WorldPos)[:3],
+                            el.Component.index(el.WorldPos)[:4],
                             el.Component.index(AttEst),
                         ],
                     )
@@ -481,7 +479,7 @@ w.spawn(
         el.Body(
             world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
             world_vel=el.SpatialMotion.from_angular(
-                np.array([0.0, 1.0, 0.0]) * 7.2921159e-5
+                np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
             ),
             inertia=el.SpatialInertia(1.0),
         ),
