@@ -124,32 +124,33 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                     // TIME
 
-                                    let fps_value = egui::RichText::new(utils::time_label(
+                                    let time_value = egui::RichText::new(utils::time_label(
                                         current_time_sec,
                                         true,
                                     ))
                                     .color(colors::PRIMARY_CREAME);
 
-                                    ui.add(egui::Label::new(fps_value).selectable(false));
+                                    ui.add(egui::Label::new(time_value).selectable(false));
 
-                                    let fps_label = egui::RichText::new("TIME")
+                                    let time_label = egui::RichText::new("TIME")
                                         .color(with_opacity(colors::PRIMARY_CREAME, 0.4));
 
-                                    ui.add(egui::Label::new(fps_label).selectable(false));
+                                    ui.add(egui::Label::new(time_label).selectable(false));
 
                                     ui.add_space(24.0);
 
-                                    // TICK RATE
+                                    // TICK
 
-                                    let tps_value = egui::RichText::new(format!("{:0>10}", tick.0))
-                                        .color(colors::PRIMARY_CREAME);
+                                    let tick_value =
+                                        egui::RichText::new(format!("{:0>10}", tick.0))
+                                            .color(colors::PRIMARY_CREAME);
 
-                                    ui.add(egui::Label::new(tps_value).selectable(false));
+                                    ui.add(egui::Label::new(tick_value).selectable(false));
 
-                                    let tps_label = egui::RichText::new("TICK RATE")
+                                    let tick_label = egui::RichText::new("TICK")
                                         .color(with_opacity(colors::PRIMARY_CREAME, 0.4));
 
-                                    ui.add(egui::Label::new(tps_label).selectable(false));
+                                    ui.add(egui::Label::new(tick_label).selectable(false));
                                 });
                         },
                     );
