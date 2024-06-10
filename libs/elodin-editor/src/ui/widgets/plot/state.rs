@@ -12,7 +12,7 @@ use conduit::ComponentValue;
 use conduit::{ComponentId, EntityId};
 
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
-use crate::ui::widgets::timeline::tagged_range::TaggedRangeId;
+use crate::ui::widgets::timeline::timeline_ranges::TimelineRangeId;
 use crate::ui::{colors, ViewportRect};
 use crate::MainCamera;
 
@@ -31,7 +31,7 @@ pub struct GraphBundle {
 #[derive(Clone, Debug, Component)]
 pub struct GraphState {
     pub entities: BTreeMap<EntityId, GraphStateEntity>,
-    pub range_id: Option<TaggedRangeId>,
+    pub range_id: Option<TimelineRangeId>,
     pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,

@@ -13,7 +13,6 @@ use crate::ui::{
     colors::{self, with_opacity},
     images, theme,
     utils::Shrink4,
-    InputHasFocus,
 };
 
 use self::palette_items::{palette_help_items, palette_viewport_items, PaletteItemWrapper};
@@ -24,15 +23,14 @@ mod palette_items;
 
 #[derive(Resource, Default)]
 pub struct CommandPaletteState {
-    filter: String,
-    show: bool,
-    input_focus: bool,
+    pub filter: String,
+    pub show: bool,
+    pub input_focus: bool,
 }
 
 #[derive(SystemParam)]
 pub struct CommandPalette<'w> {
     command_palette_state: ResMut<'w, CommandPaletteState>,
-    input_has_focus: ResMut<'w, InputHasFocus>,
     kbd: Res<'w, ButtonInput<KeyCode>>,
 }
 
@@ -51,7 +49,6 @@ impl RootWidgetSystem for CommandPalette<'_> {
         let state_mut = state.get_mut(world);
 
         let mut command_palette_state = state_mut.command_palette_state;
-        let mut input_has_focus = state_mut.input_has_focus;
         let kbd = state_mut.kbd;
 
         if kbd.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight])
@@ -70,8 +67,6 @@ impl RootWidgetSystem for CommandPalette<'_> {
         if !command_palette_state.show {
             command_palette_state.filter = "".to_string();
         }
-
-        input_has_focus.0 = command_palette_state.show;
     }
 }
 
@@ -127,7 +122,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .frame(egui::Frame {
                 fill: colors::PRIMARY_SMOKE,
                 stroke: egui::Stroke::new(1.0, with_opacity(colors::PRIMARY_CREAME, 0.005)),
-                rounding: theme::rounding_xxs(),
+                rounding: theme::rounding_xs(),
                 shadow: Shadow {
                     color: colors::PRIMARY_SMOKE,
                     blur: 16.0,

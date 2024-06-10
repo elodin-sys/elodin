@@ -229,13 +229,14 @@ fn inspector_item_multi(
         .map(Option::Some)
         .chain(std::iter::repeat(None));
     let resp = ui.vertical(|ui| {
-        *create_graph = label::label_with_button(
+        let [graph_clicked] = label::label_with_buttons(
             ui,
-            icon_chart,
+            [icon_chart],
             label,
             colors::PRIMARY_CREAME,
             egui::Margin::symmetric(0.0, 4.0).bottom(12.0),
         );
+        *create_graph = graph_clicked;
 
         let item_spacing = egui::vec2(8.0, 8.0);
 

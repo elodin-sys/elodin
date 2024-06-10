@@ -13,7 +13,6 @@ use bevy_egui::{
 };
 
 use big_space::GridCell;
-use conduit::bevy::MaxTick;
 
 use conduit::{
     bevy::{ComponentValueMap, Received, TimeStep},
@@ -21,19 +20,18 @@ use conduit::{
     ComponentId, EntityId,
 };
 use egui_tiles::TileId;
-use widgets::status_bar::StatusBar;
+use widgets::{command_palette::CommandPaletteState, timeline};
+use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
 use crate::{GridHandle, MainCamera};
 
 use self::widgets::inspector::Inspector;
 use self::widgets::modal::ModalWithSettings;
-use self::widgets::timeline::tagged_range::{TaggedRangeId, TaggedRangesPanel};
-use self::widgets::timeline::TimelineArgs;
-use self::widgets::timeline::{tagged_range::TaggedRanges, timeline_widget};
+use self::widgets::timeline::timeline_ranges::TimelineRangeId;
+
 use self::widgets::{
     command_palette::{self, CommandPalette},
     hierarchy::Hierarchy,
-    WidgetSystem,
 };
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{
@@ -55,7 +53,7 @@ pub struct HdrEnabled(pub bool);
 pub struct Paused(pub bool);
 
 #[derive(Resource, Default)]
-pub struct ViewportRange(pub Option<TaggedRangeId>);
+pub struct ViewportRange(pub Option<TimelineRangeId>);
 
 #[derive(Resource, Default, Debug, Clone)]
 pub enum SelectedObject {
@@ -110,15 +108,15 @@ pub struct EntityPair {
     pub conduit: EntityId,
 }
 
-#[derive(Resource, Default)]
-pub struct InputHasFocus(pub bool);
-
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
-    input_has_focus: Res<InputHasFocus>,
+    timeline_ranges_focused: Res<timeline_ranges::TimelineRangesFocused>,
+    command_palette_state: Res<CommandPaletteState>,
     kbd: Res<ButtonInput<KeyCode>>,
 ) {
-    if !input_has_focus.0 && kbd.just_pressed(KeyCode::Space) {
+    let input_has_focus = timeline_ranges_focused.0 || command_palette_state.show;
+
+    if !input_has_focus && kbd.just_pressed(KeyCode::Space) {
         paused.0 = !paused.0;
     }
 }
@@ -163,11 +161,11 @@ impl Plugin for UiPlugin {
             .init_resource::<tiles::TileState>()
             .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
-            .init_resource::<TaggedRanges>()
+            .init_resource::<timeline_ranges::TimelineRanges>()
+            .init_resource::<timeline_ranges::TimelineRangesFocused>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<ViewportRange>()
-            .init_resource::<InputHasFocus>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
@@ -184,7 +182,7 @@ impl Plugin for UiPlugin {
 pub enum SettingModal {
     Graph(Entity, Option<EntityId>, Option<ComponentId>),
     GraphRename(Entity, String),
-    RangeEdit(TaggedRangeId, String, egui::Color32),
+    RangeEdit(TimelineRangeId, String, egui::Color32),
 }
 
 #[derive(Resource, Default, Clone, Debug)]
@@ -363,122 +361,62 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 
         world.add_root_widget_with::<Titlebar>("titlebar", titlebar_icons);
 
+        let landscape_layout = width * 0.75 > height;
+
         world.add_root_widget::<StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
-                if width * 0.75 > height {
-                    ui.add_widget_with::<Hierarchy>(
-                        world,
-                        "hierarchy",
-                        (false, icon_search, width),
-                    );
+                if landscape_layout {
+                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
+                }
 
-                    ui.add_widget_with::<Inspector>(
-                        world,
-                        "inspector",
-                        (false, inspector_icons, width),
-                    );
-                } else {
-                    egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
-                        .resizable(true)
-                        .frame(egui::Frame::default())
-                        .default_height(200.0)
-                        .max_height(width * 0.5)
-                        .show_inside(ui, |ui| {
-                            let hierarchy_width = ui.add_widget_with::<Hierarchy>(
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none())
+                    .show_inside(ui, |ui| {
+                        if landscape_layout {
+                            ui.add_widget_with::<Hierarchy>(
                                 world,
                                 "hierarchy",
-                                (true, icon_search, width),
+                                (false, icon_search, width),
                             );
-
-                            let inspector_width = width - hierarchy_width;
 
                             ui.add_widget_with::<Inspector>(
                                 world,
                                 "inspector",
-                                (true, inspector_icons, inspector_width),
+                                (false, inspector_icons, width),
                             );
-                        });
-                }
+                        } else {
+                            egui::TopBottomPanel::new(
+                                egui::panel::TopBottomSide::Bottom,
+                                "section_bottom",
+                            )
+                            .resizable(true)
+                            .frame(egui::Frame::default())
+                            .default_height(200.0)
+                            .max_height(width * 0.5)
+                            .show_inside(ui, |ui| {
+                                let hierarchy_width = ui.add_widget_with::<Hierarchy>(
+                                    world,
+                                    "hierarchy",
+                                    (true, icon_search, width),
+                                );
 
-                ui.add_widget::<TimelinePanel>(world, "timeline_panel");
+                                let inspector_width = width - hierarchy_width;
 
-                ui.add_widget::<tiles::TileLayout>(world, "tile_layout");
-            });
-    }
-}
+                                ui.add_widget_with::<Inspector>(
+                                    world,
+                                    "inspector",
+                                    (true, inspector_icons, inspector_width),
+                                );
+                            });
 
-#[derive(SystemParam)]
-pub struct TimelinePanel<'w, 's> {
-    contexts: EguiContexts<'w, 's>,
-    images: Local<'s, images::Images>,
-    max_tick: Res<'w, MaxTick>,
-    tick_time: Res<'w, TimeStep>,
-    tagged_ranges: Res<'w, TaggedRanges>,
-}
+                            ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
+                        }
 
-impl WidgetSystem for TimelinePanel<'_, '_> {
-    type Args = ();
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        _args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut contexts = state_mut.contexts;
-        let images = state_mut.images;
-        let max_tick = state_mut.max_tick;
-        let tick_time = state_mut.tick_time;
-
-        let ranges_not_empty = state_mut.tagged_ranges.is_not_empty();
-
-        let active_range = 0..=max_tick.0;
-        let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
-
-        let timeline_icons = timeline_widget::TimelineIcons {
-            jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),
-            jump_to_end: contexts.add_image(images.icon_jump_to_end.clone_weak()),
-            frame_forward: contexts.add_image(images.icon_frame_forward.clone_weak()),
-            frame_back: contexts.add_image(images.icon_frame_back.clone_weak()),
-            play: contexts.add_image(images.icon_play.clone_weak()),
-            pause: contexts.add_image(images.icon_pause.clone_weak()),
-            handle: contexts.add_image(images.icon_scrub.clone_weak()),
-        };
-
-        egui::TopBottomPanel::bottom("timeline_panel")
-            .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
-                stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                ..Default::default()
-            })
-            .resizable(false)
-            .show_inside(ui, |ui| {
-                let available_width = ui.available_width();
-                let timeline_args = TimelineArgs {
-                    available_width,
-                    segment_count: (available_width / 100.0) as u8,
-                    frames_per_second,
-                    active_range,
-                };
-
-                ui.add_widget_with::<timeline_widget::TimelineWithControls>(
-                    world,
-                    "timeline_with_controls",
-                    (timeline_icons, timeline_args.clone()),
-                );
-
-                if ranges_not_empty {
-                    ui.add_widget_with::<TaggedRangesPanel>(
-                        world,
-                        "tagged_ranges_panel",
-                        timeline_args,
-                    );
-                }
+                        ui.add_widget::<tiles::TileLayout>(world, "tile_layout");
+                    });
             });
     }
 }

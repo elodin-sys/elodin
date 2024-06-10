@@ -25,6 +25,7 @@ pub struct Images {
     pub icon_setting: Handle<Image>,
     pub icon_lightning: Handle<Image>,
     pub icon_link: Handle<Image>,
+    pub icon_loop: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -60,6 +61,7 @@ impl FromWorld for Images {
             icon_lightning: asset_server
                 .load("embedded://elodin_editor/assets/icons/lightning.png"),
             icon_link: asset_server.load("embedded://elodin_editor/assets/icons/link.png"),
+            icon_loop: asset_server.load("embedded://elodin_editor/assets/icons/loop.png"),
         }
     }
 }

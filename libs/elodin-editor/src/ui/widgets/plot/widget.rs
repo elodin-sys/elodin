@@ -29,7 +29,7 @@ use crate::{
             plot::gpu::{LineBundle, LineConfig, LineUniform},
             plot::GraphState,
             plot::Line,
-            timeline::tagged_range::TaggedRange,
+            timeline::timeline_ranges::TimelineRange,
         },
     },
 };
@@ -136,7 +136,7 @@ impl Plot {
         ui: &egui::Ui,
         collected_graph_data: &mut CollectedGraphData,
         graph_state: &mut GraphState,
-        tagged_range: Option<&TaggedRange>,
+        timeline_range: Option<&TimelineRange>,
         lines: &mut Assets<Line>,
         commands: &mut Commands,
         graph_id: Entity,
@@ -153,8 +153,8 @@ impl Plot {
         let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
         let max_length = width_in_px.ceil() as usize * 2;
 
-        if let Some(tagged_range) = tagged_range {
-            let (a, b) = tagged_range.values;
+        if let Some(timeline_range) = timeline_range {
+            let (a, b) = timeline_range.values;
             self.tick_range = if a > b { b..a } else { a..b };
         } else {
             self.tick_range = collected_graph_data.tick_range.clone();

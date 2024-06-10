@@ -24,7 +24,7 @@ use super::{
     widgets::{
         button::EImageButton,
         plot::{self, GraphBundle, GraphState, Line, Plot},
-        timeline::tagged_range::TaggedRanges,
+        timeline::timeline_ranges::TimelineRanges,
         WidgetSystem,
     },
     HdrEnabled, SelectedObject, ViewportRect,
@@ -126,7 +126,7 @@ impl Pane {
         current_tick: u64,
         collected_graph_data: &mut CollectedGraphData,
         graphs_state: &mut Query<&mut GraphState>,
-        tagged_ranges: &TaggedRanges,
+        timeline_ranges: &TimelineRanges,
         lines: &mut Assets<Line>,
         lines_query: &Query<&Handle<Line>>,
         commands: &mut Commands,
@@ -147,10 +147,10 @@ impl Pane {
                     return egui_tiles::UiResponse::None;
                 };
 
-                let tagged_range = graph_state
+                let timeline_range = graph_state
                     .range_id
                     .as_ref()
-                    .and_then(|rid| tagged_ranges.0.get(rid));
+                    .and_then(|rid| timeline_ranges.0.get(rid));
 
                 Plot::new()
                     .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
@@ -162,7 +162,7 @@ impl Pane {
                         ui,
                         collected_graph_data,
                         graph_state.as_mut(),
-                        tagged_range,
+                        timeline_range,
                         lines,
                         commands,
                         pane.id,
@@ -262,7 +262,7 @@ struct TreeBehavior<'a, 'w, 's> {
     icons: TileIcons,
     tree_actions: Vec<TreeAction>,
     selected_object: &'a mut SelectedObject,
-    tagged_ranges: &'a TaggedRanges,
+    timeline_ranges: &'a TimelineRanges,
     collected_graph_data: &'a mut CollectedGraphData,
     lines: &'a mut Assets<Line>,
     line_query: &'a Query<'w, 's, &'static Handle<Line>>,
@@ -315,7 +315,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             self.current_tick,
             self.collected_graph_data,
             self.graph_state_query,
-            self.tagged_ranges,
+            self.timeline_ranges,
             self.lines,
             self.line_query,
             self.commands,
@@ -537,7 +537,7 @@ pub struct TileLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     commands: Commands<'w, 's>,
-    tagged_ranges: Res<'w, TaggedRanges>,
+    timeline_ranges: Res<'w, TimelineRanges>,
     selected_object: ResMut<'w, SelectedObject>,
     ui_state: ResMut<'w, TileState>,
     asset_server: Res<'w, AssetServer>,
@@ -573,7 +573,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             images,
             mut commands,
             mut graph_state_query,
-            tagged_ranges,
+            timeline_ranges,
             mut selected_object,
             mut ui_state,
             asset_server,
@@ -608,7 +608,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     icons,
                     tree_actions: tab_diffs,
                     selected_object: selected_object.as_mut(),
-                    tagged_ranges: tagged_ranges.as_ref(),
+                    timeline_ranges: timeline_ranges.as_ref(),
                     collected_graph_data: collected_graph_data.as_mut(),
                     time_step: time_step.0,
                     current_tick: tick.0,

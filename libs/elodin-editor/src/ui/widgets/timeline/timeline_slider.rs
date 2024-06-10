@@ -3,24 +3,17 @@ use std::ops::RangeInclusive;
 use bevy::ecs::{
     change_detection::DetectChangesMut,
     event::EventWriter,
-    system::{Res, ResMut, SystemParam, SystemState},
+    system::{ResMut, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
-use conduit::{
-    bevy::{MaxTick, Tick},
-    ControlMsg,
-};
+use conduit::{bevy::Tick, ControlMsg};
 
-use crate::ui::{
-    colors, utils,
-    widgets::{button::EImageButton, WidgetSystem},
-    Paused, ViewportRange,
-};
+use crate::ui::{colors, utils, widgets::WidgetSystem};
 
 use super::{
-    get_position_range, get_segment_size, position_from_value, tagged_range::TaggedRanges,
-    value_from_position, TimelineArgs,
+    get_position_range, get_segment_size, position_from_value, value_from_position, TimelineArgs,
+    TimelineIcons,
 };
 
 // ----------------------------------------------------------------------------
@@ -216,6 +209,20 @@ impl<'a> Timeline<'a> {
             let visuals = style.interact(response);
             let widget_visuals = &style.visuals.widgets;
 
+            // Trailing fill
+
+            let max_value = self.active_range.end();
+            let max_position_1d = position_from_value(*max_value, self.range(), position_range);
+            let max_center = Timeline::pointer_center(max_position_1d, &rect);
+
+            if self.trailing_fill {
+                ui.painter().rect_filled(
+                    rect.with_max_x(max_center.x),
+                    widget_visuals.inactive.rounding,
+                    colors::PRIMARY_ONYX,
+                );
+            }
+
             // Rail
 
             if self.empty_bg {
@@ -234,24 +241,9 @@ impl<'a> Timeline<'a> {
             let position_1d = position_from_value(value, self.range(), position_range);
             let center = Timeline::pointer_center(position_1d, &rect);
 
-            // Trailing fill
-
-            let max_value = self.active_range.end();
-            let max_position_1d = position_from_value(*max_value, self.range(), position_range);
-            let max_center = Timeline::pointer_center(max_position_1d, &rect);
-
-            if self.trailing_fill {
-                ui.painter().rect_filled(
-                    rect.with_max_x(max_center.x),
-                    widget_visuals.inactive.rounding,
-                    egui::Color32::from_white_alpha(1),
-                );
-            }
-
-            let handle_size = Timeline::get_handle_size(&rect, self.handle_aspect_ratio);
-
             // Fixed Max Handle
 
+            let handle_size = Timeline::get_handle_size(&rect, self.handle_aspect_ratio);
             let max_handle_rect = egui::Rect::from_center_size(max_center, handle_size);
 
             if let Some(image_id) = self.handle_image_id {
@@ -300,7 +292,9 @@ impl<'a> Timeline<'a> {
                         // label
 
                         let segment_label = utils::time_label(segment_size * i, false);
-                        let label_text = egui::RichText::new(segment_label).size(font_size);
+                        let label_text = egui::RichText::new(segment_label)
+                            .color(colors::PRIMARY_CREAME_6)
+                            .size(font_size);
 
                         column.put(column_rect, egui::Label::new(label_text).selectable(false));
 
@@ -316,7 +310,7 @@ impl<'a> Timeline<'a> {
 
                         column.painter().line_segment(
                             [col_center_btm, top_point],
-                            column.style().visuals.widgets.noninteractive.bg_stroke,
+                            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
                         );
                     }
                 });
@@ -353,27 +347,13 @@ impl<'a> egui::Widget for Timeline<'a> {
     }
 }
 
-pub struct TimelineIcons {
-    pub jump_to_start: egui::TextureId,
-    pub jump_to_end: egui::TextureId,
-    pub frame_forward: egui::TextureId,
-    pub frame_back: egui::TextureId,
-    pub play: egui::TextureId,
-    pub pause: egui::TextureId,
-    pub handle: egui::TextureId,
-}
-
 #[derive(SystemParam)]
-pub struct TimelineWithControls<'w> {
+pub struct TimelineSlider<'w> {
     event: EventWriter<'w, ControlMsg>,
-    paused: ResMut<'w, Paused>,
     tick: ResMut<'w, Tick>,
-    max_tick: Res<'w, MaxTick>,
-    tagged_ranges: Res<'w, TaggedRanges>,
-    viewport_range: Res<'w, ViewportRange>,
 }
 
-impl WidgetSystem for TimelineWithControls<'_> {
+impl WidgetSystem for TimelineSlider<'_> {
     type Args = (TimelineIcons, TimelineArgs);
     type Output = ();
 
@@ -386,159 +366,28 @@ impl WidgetSystem for TimelineWithControls<'_> {
         let state_mut = state.get_mut(world);
 
         let (icons, timeline_args) = args;
-
-        let mut paused = state_mut.paused;
-        let max_tick = state_mut.max_tick;
-        let mut tick = state_mut.tick;
-        let mut event = state_mut.event;
-        let viewport_range = state_mut.viewport_range;
-        let tagged_ranges = state_mut.tagged_ranges;
-
         let handle_icon = icons.handle;
 
-        if let Some(viewport_range_id) = &viewport_range.0 {
-            if let Some(viewport_range) = tagged_ranges.0.get(viewport_range_id) {
-                let (a, b) = viewport_range.values;
-                let fixed_range = if a > b { b..a } else { a..b };
+        let mut tick = state_mut.tick;
+        let mut event = state_mut.event;
 
-                if !fixed_range.contains(&tick.0) {
-                    tick.0 = fixed_range.start;
-                    event.send(ControlMsg::Rewind(tick.0));
-                }
-            }
-        }
-
-        ui.vertical(|ui| {
-            let mut tick_changed = false;
-            egui::Frame::none()
-                .inner_margin(egui::Margin::symmetric(16.0, 12.0))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let btn_scale = 1.4;
-                        let btn_default_size = ui.spacing().interact_size.y;
-
-                        ui.spacing_mut().item_spacing.x = 0.0;
-
-                        ui.horizontal_centered(|col_ui| {
-                            egui::Frame::none()
-                                .inner_margin(egui::Margin::symmetric(0.0, 4.0))
-                                .show(col_ui, |ui| {
-                                    let text = egui::RichText::new(format!("{:0>8}", tick.0))
-                                        .color(colors::WHITE);
-
-                                    ui.add(egui::Label::new(text).selectable(false));
-                                });
-                        });
-
-                        ui.horizontal_centered(|col_ui| {
-                            let btn_number = 6.0;
-                            let btn_spacing = 8.0;
-                            let ctrl_width = btn_spacing * (btn_number - 1.0)
-                                + btn_default_size * btn_scale * btn_number;
-                            let padding_left = (col_ui.available_width() - ctrl_width) / 2.0;
-
-                            col_ui.add_space(padding_left);
-
-                            col_ui.style_mut().spacing.item_spacing.x = btn_spacing;
-
-                            let jump_to_start_btn = col_ui.add(
-                                EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
-                            );
-
-                            if jump_to_start_btn.clicked() {
-                                tick.0 = 0;
-                                tick_changed = true;
-                            }
-
-                            let frame_back_btn = col_ui.add(
-                                EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
-                            );
-
-                            if frame_back_btn.clicked() && tick.0 > 0 {
-                                tick.0 -= 1;
-                                tick_changed = true;
-                            }
-
-                            if paused.0 {
-                                let play_btn = col_ui
-                                    .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
-
-                                if play_btn.clicked() {
-                                    paused.0 = false;
-                                }
-                            } else {
-                                let pause_btn = col_ui.add(
-                                    EImageButton::new(icons.pause).scale(btn_scale, btn_scale),
-                                );
-
-                                if pause_btn.clicked() {
-                                    paused.0 = true;
-                                }
-                            }
-
-                            let frame_forward_btn = col_ui.add(
-                                EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
-                            );
-
-                            if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                                tick.0 += 1;
-                                tick_changed = true;
-                            }
-
-                            let jump_to_end_btn = col_ui.add(
-                                EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
-                            );
-
-                            if jump_to_end_btn.clicked() {
-                                tick.0 = max_tick.0 - 1;
-                                tick_changed = true;
-                            }
-                        });
-
-                        ui.allocate_ui_with_layout(
-                            ui.available_size(),
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |col_ui| {
-                                let current_time_sec =
-                                    (tick.0 as f64 / timeline_args.frames_per_second).floor()
-                                        as usize;
-
-                                egui::Frame::none()
-                                    .inner_margin(egui::Margin::symmetric(0.0, 4.0))
-                                    .show(col_ui, |ui| {
-                                        let text = egui::RichText::new(utils::time_label(
-                                            current_time_sec,
-                                            true,
-                                        ))
-                                        .color(colors::WHITE);
-
-                                        ui.add(egui::Label::new(text).selectable(false));
-                                    });
-                            },
-                        );
-                    });
-                });
-
-            ui.add(egui::Separator::default().spacing(0.0));
-
-            ui.horizontal(|ui| {
-                let response = ui
-                    .add(
-                        Timeline::new(
-                            &mut tick.bypass_change_detection().0,
-                            timeline_args.active_range,
-                        )
-                        .width(timeline_args.available_width)
-                        .height(32.0)
-                        .handle_image_id(handle_icon)
-                        .handle_aspect_ratio(12.0 / 30.0)
-                        .segments(timeline_args.segment_count)
-                        .fps(timeline_args.frames_per_second),
+        ui.horizontal(|ui| {
+            let response = ui
+                .add(
+                    Timeline::new(
+                        &mut tick.bypass_change_detection().0,
+                        timeline_args.active_range,
                     )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                tick_changed |= response.changed();
-            });
-            if tick_changed {
+                    .width(timeline_args.available_width)
+                    .height(timeline_args.line_height)
+                    .handle_image_id(handle_icon)
+                    .handle_aspect_ratio(12.0 / 30.0)
+                    .segments(timeline_args.segment_count)
+                    .fps(timeline_args.frames_per_second),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+            if response.changed() {
                 event.send(ControlMsg::Rewind(tick.0));
             }
         });

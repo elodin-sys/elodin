@@ -1,42 +1,44 @@
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
 use bevy::ecs::{
+    event::EventWriter,
     system::{Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath::Numeric, Response};
-use conduit::bevy::Tick;
+use conduit::{bevy::Tick, ControlMsg};
 use nalgebra::clamp;
 
-use crate::ui::colors;
 use crate::ui::widgets::WidgetSystem;
+use crate::ui::{colors, ViewportRange};
 
-use super::{
-    get_position_range, get_segment_size, position_from_value, value_from_position, TimelineArgs,
-};
+use super::{position_from_value, value_from_position};
 
 #[derive(Debug, Clone)]
-pub struct TaggedRange {
+pub struct TimelineRange {
     pub values: (u64, u64),
     pub label: String,
     pub color: egui::Color32,
 }
 
 #[derive(Resource, Debug, Default, Clone)]
-pub struct TaggedRanges(pub BTreeMap<TaggedRangeId, TaggedRange>);
+pub struct TimelineRanges(pub BTreeMap<TimelineRangeId, TimelineRange>);
 
-impl TaggedRanges {
-    pub fn create_range(&mut self, max: u64) -> TaggedRangeId {
+#[derive(Resource, Debug, Default, Clone)]
+pub struct TimelineRangesFocused(pub bool);
+
+impl TimelineRanges {
+    pub fn create_range(&mut self, max: u64) -> TimelineRangeId {
         let new_range_id = self
             .0
             .keys()
             .max()
-            .map_or(TaggedRangeId(0), |lk| TaggedRangeId(lk.0 + 1));
+            .map_or(TimelineRangeId(0), |lk| TimelineRangeId(lk.0 + 1));
 
-        let new_range = TaggedRange {
+        let new_range = TimelineRange {
             values: (0, max),
             label: format!("Range #{:?}", &new_range_id.0),
-            color: colors::PEACH_DEFAULT,
+            color: colors::PRIMARY_CREAME,
         };
 
         self.0.insert(new_range_id.clone(), new_range);
@@ -44,7 +46,7 @@ impl TaggedRanges {
         new_range_id
     }
 
-    pub fn remove_range(&mut self, range_id: &TaggedRangeId) {
+    pub fn remove_range(&mut self, range_id: &TimelineRangeId) {
         self.0.remove(range_id);
     }
 
@@ -55,18 +57,18 @@ impl TaggedRanges {
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct TaggedRangeId(pub u64);
+pub struct TimelineRangeId(pub u64);
 
-impl From<u64> for TaggedRangeId {
+impl From<u64> for TimelineRangeId {
     fn from(val: u64) -> Self {
-        TaggedRangeId(val)
+        TimelineRangeId(val)
     }
 }
 
-pub fn tagged_range(
+pub fn timeline_range(
     ui: &mut egui::Ui,
     full_range: &RangeInclusive<f64>,
-    range: &mut TaggedRange,
+    range: &mut TimelineRange,
     position_range: egui::Rangef,
 ) -> Response {
     let line_width = 4.0;
@@ -197,67 +199,60 @@ pub fn tagged_range(
 }
 
 #[derive(SystemParam)]
-pub struct TaggedRangesPanel<'w> {
-    tagged_ranges: ResMut<'w, TaggedRanges>,
-    tick: Res<'w, Tick>,
+pub struct TimelineRangesPanel<'w> {
+    timeline_ranges: ResMut<'w, TimelineRanges>,
+    tick: ResMut<'w, Tick>,
+    event: EventWriter<'w, ControlMsg>,
+    viewport_range: Res<'w, ViewportRange>,
 }
 
-impl WidgetSystem for TaggedRangesPanel<'_> {
-    type Args = TimelineArgs;
-    type Output = ();
+impl WidgetSystem for TimelineRangesPanel<'_> {
+    type Args = (f32, RangeInclusive<f64>, egui::Rangef);
+    type Output = egui::Rect;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
         args: Self::Args,
-    ) {
-        let timeline_args = args;
+    ) -> Self::Output {
+        let (line_height, full_range, position_range) = args;
 
         let state_mut = state.get_mut(world);
-        let mut tagged_ranges = state_mut.tagged_ranges;
-        let tick = state_mut.tick;
+        let mut timeline_ranges = state_mut.timeline_ranges;
+        let mut tick = state_mut.tick;
+        let mut event = state_mut.event;
+        let viewport_range = state_mut.viewport_range;
 
-        let y_range = ui.available_rect_before_wrap().y_range();
+        if let Some(viewport_range_id) = &viewport_range.0 {
+            if let Some(viewport_range) = timeline_ranges.0.get(viewport_range_id) {
+                let (a, b) = viewport_range.values;
+                let fixed_range = if a > b { b..a } else { a..b };
 
-        egui::Frame::none()
+                if !fixed_range.contains(&tick.0) {
+                    tick.0 = fixed_range.start;
+                    event.send(ControlMsg::Rewind(tick.0));
+                }
+            }
+        }
+
+        let frame = egui::Frame::none()
             .stroke(egui::Stroke::new(1.0, colors::BLACK_BLACK_600))
-            .inner_margin(egui::Margin::symmetric(0.0, 8.0))
             .show(ui, |ui| {
-                let fps = timeline_args.frames_per_second;
-                let segments = timeline_args.segment_count as f64;
-                let active_range_start = timeline_args.active_range.start().to_f64();
-                let active_range_end = timeline_args.active_range.end().to_f64();
-                let full_range = active_range_start..=active_range_end;
-                // NOTE: Replicate same calculation done in timeline widget to be in sync
-                let position_range = get_position_range(
-                    ui.available_rect_before_wrap().x_range(),
-                    fps,
-                    segments,
-                    get_segment_size(fps, segments, active_range_end) as f64,
-                    active_range_start,
-                    active_range_end,
-                );
+                let line_padding = (line_height - ui.spacing().interact_size.y) / 2.0;
 
-                for (_, range) in tagged_ranges.0.iter_mut() {
+                for (_, range) in timeline_ranges.0.iter_mut() {
                     let range_label = range.label.clone();
                     egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(0.0, 8.0))
+                        .inner_margin(egui::Margin::symmetric(0.0, line_padding))
                         .show(ui, |ui| {
-                            tagged_range(ui, &full_range, range, position_range);
+                            timeline_range(ui, &full_range, range, position_range);
                         })
                         .response
                         .on_hover_text_at_pointer(range_label);
                 }
-
-                let x_pos =
-                    position_from_value(active_range_end, full_range.clone(), position_range);
-                let line_stroke = egui::Stroke::new(2.0, colors::WHITE);
-                ui.painter().vline(x_pos, y_range, line_stroke);
-
-                let x_pos = position_from_value(tick.0 as f64, full_range.clone(), position_range);
-                let line_stroke = egui::Stroke::new(2.0, colors::MINT_DEFAULT);
-                ui.painter().vline(x_pos, y_range, line_stroke);
             });
+
+        frame.response.rect
     }
 }
