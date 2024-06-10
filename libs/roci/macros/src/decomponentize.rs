@@ -44,7 +44,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .expect("only named field allowed")
             .to_string()
             .to_case(Case::UpperSnake);
-        let id = field.entity_id;
+        if let Some(id) = field.entity_id {
         let const_name = format!("{name}_ID");
         let const_name = syn::Ident::new(&const_name, Span::call_site());
         quote! {
@@ -53,7 +53,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
                 let payload = payload.as_ref();
                 let mut iter = payload.into_iter(metadata.component_type.clone());
                 while let Some(Ok(#conduit::ser_de::ColumnValue { entity_id, value })) = iter.next() {
-                    if entity_id == EntityId(#id) {
+                    if entity_id == #conduit::EntityId(#id) {
                         if let Some(val) = <#ty>::from_component_value(value) {
                             self.#ident = val;
                         }
@@ -61,10 +61,16 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
                 }
             }
         }
+        }else {
+            quote! {
+                self.#ident.apply_column(metadata, payload);
+            }
+        }
     });
     quote! {
         impl #crate_name::Decomponentize for #ident #generics #where_clause {
             fn apply_column<B: AsRef<[u8]>>(&mut self, metadata: &#conduit::Metadata, payload: &#conduit::ColumnPayload<B>) {
+                use #conduit::ValueRepr;
                 let component_id = metadata.component_id();
                 #(#if_arms)*
             }

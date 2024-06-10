@@ -12,12 +12,18 @@ use crate::sys::*;
 pub struct Mailbox<T>(spin::Mutex<T>);
 
 impl<T: Default + Clone> Mailbox<T> {
-    pub fn write(&self, val: T) {
-        *self.0.lock() = val;
-    }
-
     pub fn read(&self) -> T {
         self.0.lock().clone()
+    }
+}
+
+impl<T: Default + Clone> Mailbox<(T, u64)> {
+    pub fn write(&self, val: T, time: u64) {
+        *self.0.lock() = (val, time);
+    }
+
+    pub fn read_msg(&self) -> T {
+        self.0.lock().clone().0
     }
 }
 
@@ -29,10 +35,10 @@ const CHANNEL_MSG_HEADER: MsgHeader = MsgHeader {
 };
 
 #[derive(Clone, Default)]
-pub struct BskChannel<T>(Arc<Mailbox<T>>);
+pub struct BskChannel<T>(Arc<Mailbox<(T, u64)>>);
 
 impl<T> std::ops::Deref for BskChannel<T> {
-    type Target = Mailbox<T>;
+    type Target = Mailbox<(T, u64)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -44,7 +50,7 @@ impl<T: Default + Clone> BskChannel<T> {
         Self::default()
     }
 
-    fn into_raw(self) -> *const Mailbox<T> {
+    fn into_raw(self) -> *const Mailbox<(T, u64)> {
         Arc::into_raw(self.0)
     }
 
@@ -52,7 +58,7 @@ impl<T: Default + Clone> BskChannel<T> {
     ///
     /// This function is safe to call as long as the pointer is valid.
     /// The raw pointer must have been previously returned by a call to `into_raw`.
-    pub unsafe fn from_raw(ptr: *mut Mailbox<T>) -> Self {
+    pub unsafe fn from_raw(ptr: *mut Mailbox<(T, u64)>) -> Self {
         Self(Arc::from_raw(ptr))
     }
 }
@@ -80,7 +86,7 @@ macro_rules! impl_basilisk_channel {
                 data: *const $payload_name,
                 channel: *mut $msg_name,
                 _module_id: i64,
-                _call_time: u64,
+                call_time: u64
             ) {
                 let channel = channel.as_ref().unwrap();
                 if channel.header != CHANNEL_MSG_HEADER {
@@ -90,8 +96,8 @@ macro_rules! impl_basilisk_channel {
                     tracing::warn!("watcha doin passing null ptrs to write, you know better than that");
                     return;
                 };
-                let mailbox = channel.payloadPointer as *const Mailbox<$payload_name>;
-                mailbox.as_ref().unwrap().write(data.clone());
+                let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
+                mailbox.as_ref().unwrap().write(data.clone(), call_time);
             }
         }
 
@@ -106,8 +112,24 @@ macro_rules! impl_basilisk_channel {
                 if channel.header != CHANNEL_MSG_HEADER {
                     return $payload_name::default();
                 }
-                let mailbox = channel.payloadPointer as *const Mailbox<$payload_name>;
-                mailbox.as_ref().unwrap().read()
+                let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
+                mailbox.as_ref().unwrap().read().0
+            }
+        }
+
+        paste! {
+            /// Basilisk function to read msg from channel
+            ///
+            /// # Safety
+            /// Don't call this yourself, Basilisk will call it for you
+            #[no_mangle]
+            pub unsafe extern "C" fn [<$msg_name _timeWritten>](channel: *mut $msg_name) -> u64 {
+                let channel = channel.as_ref().unwrap();
+                if channel.header != CHANNEL_MSG_HEADER {
+                    return u64::MAX;
+                }
+                let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
+                mailbox.as_ref().unwrap().read().1
             }
         }
 
@@ -121,6 +143,19 @@ macro_rules! impl_basilisk_channel {
                 channel.as_ref().is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
             }
         }
+
+        paste! {
+            /// Basilisk function to check if channel is written
+            ///
+            /// # Safety
+            /// Don't call this yourself, Basilisk will call it for you
+            #[no_mangle]
+            pub unsafe extern "C" fn [<$msg_name _isWritten>](channel: *mut $msg_name) -> bool {
+                channel.as_ref().is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
+            }
+        }
+
+
 
 
         paste! {
@@ -139,3 +174,12 @@ impl_basilisk_channel!(RWAvailabilityMsg_C, RWAvailabilityMsgPayload);
 impl_basilisk_channel!(RWArrayConfigMsg_C, RWArrayConfigMsgPayload);
 impl_basilisk_channel!(CmdTorqueBodyMsg_C, CmdTorqueBodyMsgPayload);
 impl_basilisk_channel!(VehicleConfigMsg_C, VehicleConfigMsgPayload);
+impl_basilisk_channel!(NavAttMsg_C, NavAttMsgPayload);
+impl_basilisk_channel!(SunlineFilterMsg_C, SunlineFilterMsgPayload);
+impl_basilisk_channel!(CSSArraySensorMsg_C, CSSArraySensorMsgPayload);
+impl_basilisk_channel!(CSSConfigMsg_C, CSSConfigMsgPayload);
+impl_basilisk_channel!(AttRefMsg_C, AttRefMsgPayload);
+impl_basilisk_channel!(NavTransMsg_C, NavTransMsgPayload);
+impl_basilisk_channel!(EphemerisMsg_C, EphemerisMsgPayload);
+impl_basilisk_channel!(ArrayMotorTorqueMsg_C, ArrayMotorTorqueMsgPayload);
+impl_basilisk_channel!(ArrayMotorVoltageMsg_C, ArrayMotorVoltageMsgPayload);

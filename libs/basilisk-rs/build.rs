@@ -34,6 +34,11 @@ fn main() {
         .file("vendor/fswAlgorithms/attControl/mrpPD/mrpPD.c")
         .file("vendor/architecture/utilities/rigidBodyKinematics.c")
         .file("vendor/architecture/utilities/linearAlgebra.c")
+        .file("vendor/fswAlgorithms/attGuidance/hillPoint/hillPoint.c")
+        .file("vendor/fswAlgorithms/effectorInterfaces/rwMotorVoltage/rwMotorVoltage.c")
+        .file("vendor/fswAlgorithms/effectorInterfaces/rwMotorTorque/rwMotorTorque.c")
+        .file("vendor/fswAlgorithms/attDetermination/sunlineEKF/sunlineEKF.c")
+        .file("vendor/fswAlgorithms/attGuidance/attTrackingError/attTrackingError.c")
         .cargo_warnings(false)
         .include("vendor")
         .compile("basilisk");

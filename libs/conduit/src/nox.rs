@@ -375,6 +375,13 @@ impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialTransform<
     };
 }
 
+impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialMotion<T, R> {
+    const TY: ComponentType = ComponentType {
+        primitive_ty: T::PRIMITIVE_TY,
+        shape: dim_to_smallvec::<Const<6>>(),
+    };
+}
+
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialForce<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,

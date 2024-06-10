@@ -64,6 +64,7 @@ impl MRPSteering {
 }
 
 /// Enum for MRPFeedback's two possible control laws
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 #[repr(i32)]
 pub enum MRPFeedbackControlLaw {
@@ -76,6 +77,7 @@ pub struct MRPFeedback {
     config: mrpFeedbackConfig,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MRPFeedbackConfig {
     k: f64,
     p: f64,
@@ -152,10 +154,12 @@ impl MRPFeedback {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RWArrayConfig {
     pub wheels: Vec<RWConfig>,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RWConfig {
     pub spin_axis: [f64; 3],
     pub inertia: f64,
@@ -251,14 +255,17 @@ mod tests {
         let rate_cmd = BskChannel::pair();
         let mut mrp_steer =
             MRPSteering::new(1.0, 1.0, 1.0, true, rate_cmd.clone(), att_guid.clone());
-        att_guid.write(AttGuidMsgPayload {
-            sigma_BR: [1.0, 0.0, 0.0],
-            omega_BR_B: [0.0, 0.0, 0.0],
-            omega_RN_B: [1.0, 1.0, 1.0],
-            domega_RN_B: [1.0, 1.0, 1.0],
-        });
+        att_guid.write(
+            AttGuidMsgPayload {
+                sigma_BR: [1.0, 0.0, 0.0],
+                omega_BR_B: [0.0, 0.0, 0.0],
+                omega_RN_B: [1.0, 1.0, 1.0],
+                domega_RN_B: [1.0, 1.0, 1.0],
+            },
+            0,
+        );
         mrp_steer.update(0);
-        let out = rate_cmd.read();
+        let out = rate_cmd.read_msg();
         assert_relative_eq!(
             out.omega_BastR_B.as_ref(),
             [-0.8038134760954126, -0.0, -0.0].as_ref()
@@ -306,6 +313,7 @@ mod tests {
                 ],
             }
             .into(),
+            0,
         );
         let rw_availability_cmd = BskChannel::pair();
         rw_availability_cmd.write(
@@ -313,16 +321,20 @@ mod tests {
                 availability: vec![true, true, true],
             }
             .into(),
+            0,
         );
         let cmd_torque_body = BskChannel::pair();
         let int_feedback = BskChannel::pair();
         let att_guid_cmd = BskChannel::pair();
-        att_guid_cmd.write(AttGuidMsgPayload {
-            sigma_BR: [1.0, 0.0, 0.0],
-            omega_BR_B: [0.0, 0.0, 0.0],
-            omega_RN_B: [1.0, 1.0, 1.0],
-            domega_RN_B: [1.0, 1.0, 1.0],
-        });
+        att_guid_cmd.write(
+            AttGuidMsgPayload {
+                sigma_BR: [1.0, 0.0, 0.0],
+                omega_BR_B: [0.0, 0.0, 0.0],
+                omega_RN_B: [1.0, 1.0, 1.0],
+                domega_RN_B: [1.0, 1.0, 1.0],
+            },
+            0,
+        );
         let vehicle_config = BskChannel::pair();
         let mut mrp_feedback = MRPFeedback::new(
             config,
@@ -336,7 +348,7 @@ mod tests {
         );
         mrp_feedback.reset(0);
         mrp_feedback.update(1);
-        let cmd_torque = cmd_torque_body.read();
+        let cmd_torque = cmd_torque_body.read_msg();
         assert_eq!(
             cmd_torque,
             CmdTorqueBodyMsgPayload {
@@ -358,21 +370,27 @@ mod tests {
             att_guid.clone(),
             cmd_torque.clone(),
         );
-        att_guid.write(AttGuidMsgPayload {
-            sigma_BR: [1.0, 0.0, 0.0],
-            omega_BR_B: [0.0, 0.0, 0.0],
-            omega_RN_B: [1.0, 1.0, 1.0],
-            domega_RN_B: [1.0, 1.0, 1.0],
-        });
-        vehicle_config.write(VehicleConfigMsgPayload {
-            ISCPntB_B: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-            CoM_B: [0.0, 0.0, 0.0],
-            massSC: 100.0,
-            CurrentADCSState: 0,
-        });
+        att_guid.write(
+            AttGuidMsgPayload {
+                sigma_BR: [1.0, 0.0, 0.0],
+                omega_BR_B: [0.0, 0.0, 0.0],
+                omega_RN_B: [1.0, 1.0, 1.0],
+                domega_RN_B: [1.0, 1.0, 1.0],
+            },
+            0,
+        );
+        vehicle_config.write(
+            VehicleConfigMsgPayload {
+                ISCPntB_B: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                CoM_B: [0.0, 0.0, 0.0],
+                massSC: 100.0,
+                CurrentADCSState: 0,
+            },
+            0,
+        );
         mrp_pd.reset(0);
         mrp_pd.update(1);
-        let cmd_torque = cmd_torque.read();
+        let cmd_torque = cmd_torque.read_msg();
         assert_eq!(
             cmd_torque,
             CmdTorqueBodyMsgPayload {

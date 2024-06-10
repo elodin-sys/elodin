@@ -8,21 +8,25 @@ use xla::{ArrayElement, NativeType};
 use crate::{
     ArrayRepr, AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FromBuilder,
     FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar,
-    TensorItem, ToHost, Vector,
+    TensorItem, ToHost, Vector, MRP,
 };
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 pub struct Quaternion<T: TensorItem, P: Repr = Op>(pub Vector<T, 4, P>);
+impl<T: TensorItem + Copy, R: Repr> Clone for Quaternion<T, R>
+where
+    R::Inner<T::Elem, Const<4>>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+impl<T: TensorItem + Copy, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy
+{}
 
 impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
     fn default() -> Self {
         Self::identity()
-    }
-}
-
-impl<T: TensorItem> Clone for Quaternion<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
     }
 }
 
@@ -71,8 +75,8 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
         Quaternion(inner)
     }
 
-    /// Returns the four parts (components) of the quaternion as scalars.
-    fn parts(&self) -> [Scalar<T, R>; 4] {
+    /// Returns the four parts (components) of the quaternion as scalars, in the order [x,y,z, w];
+    pub fn parts(&self) -> [Scalar<T, R>; 4] {
         let Quaternion(v) = self;
         v.parts()
     }
@@ -107,6 +111,10 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
         let cos = half_angle.cos();
         let inner = (axis * sin).concat(cos.broadcast::<Const<1>>());
         Quaternion(inner)
+    }
+
+    pub fn mrp(&self) -> MRP<T, R> {
+        MRP::from(self)
     }
 }
 
