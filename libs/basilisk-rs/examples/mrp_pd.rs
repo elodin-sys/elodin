@@ -1,11 +1,11 @@
-use basilisk_sys::{
+use basilisk::{
     att_control::MrpPD,
     channel::BskChannel,
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
-use conduit::{ComponentId, EntityId, Metadata, Query, ValueRepr};
+use conduit::{ComponentId, Query};
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
-use roci::*;
+use roci::{tokio::Input, *};
 use roci_macros::{Componentize, Decomponentize};
 use std::time::Duration;
 
@@ -69,9 +69,9 @@ impl Handler for MRPHandler {
             omega_RN_B: [0.0; 3],
             domega_RN_B: [0.0; 3],
         };
-        self.att_guid.write(att_guid_msg_payload);
+        self.att_guid.write(att_guid_msg_payload, 0);
         self.mrp_pd.update(0);
-        let cmd_torque = self.cmd_torque.read();
+        let cmd_torque = self.cmd_torque.read_msg();
         world.control_force.inner.inner_mut().buf[..3]
             .copy_from_slice(&cmd_torque.torqueRequestBody);
     }
@@ -79,26 +79,26 @@ impl Handler for MRPHandler {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    roci::tcp::builder(
+    roci::tokio::builder(
         MRPHandler::new(),
         Duration::from_millis(100),
         "127.0.0.1:2242".parse().unwrap(),
     )
-    .output(
+    .tcp_output(
         Query::with_id(ComponentId::new("control_force")),
         "127.0.0.1:2240".parse().unwrap(),
     )
     .subscribe(
         Query::with_id(ComponentId::new("goal")),
-        "127.0.0.1:2240".parse().unwrap(),
+        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
     )
     .subscribe(
         Query::with_id(ComponentId::new("world_pos")),
-        "127.0.0.1:2240".parse().unwrap(),
+        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
     )
     .subscribe(
         Query::with_id(ComponentId::new("ang_vel_est")),
-        "127.0.0.1:2240".parse().unwrap(),
+        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
     )
-    .run()
+    .run();
 }

@@ -18,6 +18,19 @@ pub struct Array<T: Copy, D: ArrayDim> {
     pub buf: D::Buf<T>,
 }
 
+impl<T: Copy, D: ArrayDim> Clone for Array<T, D>
+where
+    D::Buf<T>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.buf.clone(),
+        }
+    }
+}
+
+impl<T: Copy, D: ArrayDim> Copy for Array<T, D> where D::Buf<T>: Copy {}
+
 impl<T1, D1> Default for Array<T1, D1>
 where
     T1: Copy,
@@ -28,6 +41,15 @@ where
         Self {
             buf: Default::default(),
         }
+    }
+}
+
+impl<T: Copy, D: ArrayDim> std::fmt::Debug for Array<T, D>
+where
+    D::Buf<T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.buf.fmt(f)
     }
 }
 
@@ -436,9 +458,40 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             });
         unsafe { out.assume_init() }
     }
+
+    pub fn transpose(&self) -> Array<T1, TransposedDim<D1>>
+    where
+        ShapeConstraint: TransposeDim<D1>,
+        TransposedDim<D1>: ConstDim,
+    {
+        let mut out: Array<MaybeUninit<T1>, TransposedDim<D1>> =
+            Array::uninit(<TransposedDim<D1> as ConstDim>::DIM);
+        self.transpose_iter()
+            .zip(out.buf.as_mut_buf().iter_mut())
+            .for_each(|(a, out)| {
+                out.write(*a);
+            });
+        unsafe { out.assume_init() }
+    }
 }
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn transpose_iter(&self) -> impl Iterator<Item = &'_ T1> {
+        let dims = D1::dim(&self.buf);
+        let stride = RevStridesIter(D1::strides(&self.buf));
+        let mut indexes = dims.clone();
+        for index in indexes.as_mut().iter_mut() {
+            *index = 0;
+        }
+        StrideIterator {
+            buf: self.buf.as_buf(),
+            stride,
+            indexes,
+            dims,
+            phantom: PhantomData,
+        }
+    }
+
     pub fn offset_iter(&self, offsets: &[usize]) -> impl Iterator<Item = &'_ T1> {
         let dims = D1::dim(&self.buf);
         let stride = D1::strides(&self.buf);
@@ -591,7 +644,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         unsafe { out.assume_init() }
     }
 
-    /// Concatenates multiple arrays into a single array along a specified dimension.
+    /// Concatenates multiple arraysinto a single array along a specified dimension.
     pub fn concat_many<const N: usize>(args: [&Array<T1, D1>; N]) -> Array<T1, ConcatManyDim<D1, N>>
     where
         DefaultMappedDim<D1>: nalgebra::DimMul<Const<N>> + nalgebra::Dim,
@@ -603,20 +656,32 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         ConcatManyDim<D1, N>: Dim,
     {
         let mut out_dims = D1::dim(&args[0].buf);
-        for arg in args[1..].iter() {
-            let d = D1::dim(&arg.buf);
-            out_dims.as_mut()[0] += d.as_ref()[0];
-        }
-        let mut out: Array<MaybeUninit<T1>, ConcatManyDim<D1, N>> =
-            Array::uninit(out_dims.as_ref());
-        args.into_iter()
-            .flat_map(|a| a.buf.as_buf().iter())
-            .zip(out.buf.as_mut_buf().iter_mut())
-            .for_each(|(a, b)| {
-                b.write(*a);
-            });
+        if out_dims.as_ref().is_empty() {
+            let mut out: Array<MaybeUninit<T1>, ConcatManyDim<D1, N>> = Array::uninit(&[N]);
+            args.into_iter()
+                .flat_map(|a| a.buf.as_buf().iter())
+                .zip(out.buf.as_mut_buf().iter_mut())
+                .for_each(|(a, b)| {
+                    b.write(*a);
+                });
 
-        unsafe { out.assume_init() }
+            unsafe { out.assume_init() }
+        } else {
+            for arg in args[1..].iter() {
+                let d = D1::dim(&arg.buf);
+                out_dims.as_mut()[0] += d.as_ref().first().unwrap_or(&1);
+            }
+            let mut out: Array<MaybeUninit<T1>, ConcatManyDim<D1, N>> =
+                Array::uninit(out_dims.as_ref());
+            args.into_iter()
+                .flat_map(|a| a.buf.as_buf().iter())
+                .zip(out.buf.as_mut_buf().iter_mut())
+                .for_each(|(a, b)| {
+                    b.write(*a);
+                });
+
+            unsafe { out.assume_init() }
+        }
     }
 
     /// Retrieves a specific element from the array based on an index, effectively slicing the array.
@@ -670,6 +735,20 @@ pub trait DimGet<D: Dim> {
 /// Type alias for the result of a get operation, providing a sliced view of the array.
 pub type GetDim<D> = <ShapeConstraint as DimGet<D>>::Output;
 
+pub trait TransposeDim<D: Dim> {
+    type Output: Dim;
+}
+
+pub type TransposedDim<D> = <ShapeConstraint as TransposeDim<D>>::Output;
+
+impl<D1: Dim, D2: Dim> TransposeDim<(D1, D2)> for ShapeConstraint
+where
+    (D2, D1): Dim,
+    (D1, D2): Dim,
+{
+    type Output = (D2, D1);
+}
+
 impl<const N: usize> DimGet<Const<N>> for ShapeConstraint {
     type Output = ();
 }
@@ -703,8 +782,25 @@ fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     true
 }
 
+pub trait StridesIter {
+    fn stride_iter(&self) -> impl DoubleEndedIterator<Item = usize>;
+}
+
+impl<S: AsRef<[usize]>> StridesIter for S {
+    fn stride_iter(&self) -> impl DoubleEndedIterator<Item = usize> {
+        self.as_ref().iter().copied()
+    }
+}
+
+struct RevStridesIter<S>(S);
+impl<S: StridesIter> StridesIter for RevStridesIter<S> {
+    fn stride_iter(&self) -> impl DoubleEndedIterator<Item = usize> {
+        self.0.stride_iter().rev()
+    }
+}
+
 /// An iterator for striding over an array buffer, providing element-wise access according to specified strides.
-struct StrideIterator<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> {
+struct StrideIterator<'a, T, S: StridesIter, I: AsMut<[usize]>, D: AsRef<[usize]>> {
     buf: &'a [T],
     stride: S,
     indexes: I,
@@ -712,19 +808,18 @@ struct StrideIterator<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usi
     phantom: PhantomData<&'a T>,
 }
 
-impl<'a, T, S: AsRef<[usize]>, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
+impl<'a, T, S: StridesIter, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
     for StrideIterator<'a, T, S, I, D>
 {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let strides = self.stride.as_ref();
         let indexes = self.indexes.as_mut();
         let dims = self.dims.as_ref();
         let i: usize = indexes
             .iter()
-            .zip(strides.iter())
-            .map(|(&i, &s): (&usize, &usize)| i * s)
+            .zip(self.stride.stride_iter())
+            .map(|(&i, s): (&usize, usize)| i * s)
             .sum();
         let mut carry = true;
         for (&dim, index) in dims.iter().zip(indexes.iter_mut()).rev() {
@@ -1006,6 +1101,35 @@ mod tests {
     }
 
     #[test]
+    fn test_matmul_3x3() {
+        let eye: Array<f32, (Const<3>, Const<3>)> = Array {
+            buf: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        let mat: Array<f32, (Const<3>, Const<3>)> = Array {
+            buf: [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+        };
+        assert_eq!(eye.dot(&mat).buf, mat.buf);
+        let a: Array<f32, (Const<3>, Const<3>)> = Array {
+            buf: [
+                [0.7068251811053661, 0.0, -0.7073882691671998],
+                [0.7073882691671998, 0.0, 0.7068251811053661],
+                [0.0, -1.0, 0.0],
+            ],
+        };
+        let b: Array<f32, (Const<3>, Const<3>)> = Array {
+            buf: [[0.0, 1.0, 0.0], [0.0, 0.0, -1.0], [-1.0, 0.0, 0.0]],
+        };
+        let expected_out: Array<f32, (Const<3>, Const<3>)> = Array {
+            buf: [
+                [0.70738827, 0.70682518, 0.],
+                [-0.70682518, 0.70738827, 0.],
+                [0., 0., 1.],
+            ],
+        };
+        assert_eq!(a.dot(&b).buf, expected_out.buf);
+    }
+
+    #[test]
     fn test_matmul_broadcast() {
         let a: Array<f32, (Const<2>, Const<2>)> = Array {
             buf: [[0.0, 1.0], [4.0, 2.0]],
@@ -1050,5 +1174,14 @@ mod tests {
         let c: Array<f32, Const<1>> = Array { buf: [3.0] };
         let d: Array<f32, Const<3>> = Array::concat_many([&a, &b, &c]);
         assert_eq!(d.buf, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_transpose() {
+        let a: Array<f32, (Const<2>, Const<2>)> = Array {
+            buf: [[0.0, 1.0], [2.0, 3.0]],
+        };
+        let b: Array<f32, (Const<2>, Const<2>)> = a.transpose();
+        assert_eq!(b.buf, [[0.0, 2.0], [1.0, 3.0]]);
     }
 }

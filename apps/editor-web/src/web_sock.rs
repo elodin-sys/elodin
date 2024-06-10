@@ -53,7 +53,7 @@ pub(crate) fn spawn_wasm(url: String, bevy_tx: flume::Sender<MsgPair>) -> anyhow
             bevy_tx
                 .send(MsgPair {
                     msg,
-                    tx: out_tx.downgrade(),
+                    tx: Some(out_tx.downgrade()),
                 })
                 .unwrap();
         } else {

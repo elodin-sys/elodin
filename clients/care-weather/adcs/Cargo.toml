@@ -1,0 +1,20 @@
+[package]
+name = "adcs"
+edition = "2021"
+version.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+roci.workspace = true
+nox.workspace = true
+conduit.workspace = true
+conduit.features = ["nox"]
+basilisk.workspace = true
+basilisk.features = ["serde"]
+
+# config
+serde.version = "1.0"
+serde.features = ["derive"]
+toml = "0.8.14"

@@ -20,7 +20,9 @@ members = [
     "libs/unreal-plugin",
     "libs/basilisk-rs",
     "libs/roci",
-    "libs/roci/macros"
+    "libs/roci/macros",
+    "libs/roci/adcs",
+    "clients/care-weather/adcs"
 ]
 
 [workspace.package]
@@ -85,3 +87,10 @@ lto = "thin"
 [patch.crates-io]
 winit.git = "https://github.com/elodin-sys/winit.git"
 winit.branch = "feature/cv-display-link"
+
+[workspace.dependencies]
+roci.path = "libs/roci"
+nox.path = "libs/nox"
+nox-ecs.path = "libs/nox-ecs"
+basilisk.path = "libs/basilisk-rs"
+conduit.path = "libs/conduit"

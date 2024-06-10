@@ -10,7 +10,7 @@ conduit.path = "../conduit"
 conduit.features = ["tokio"]
 
 # datastructures
-heapless = "0.7"
+heapless = "0.8"
 crossbeam = "0.8.4"
 bbqueue = "0.5.1"
 thingbuf = "0.1.6"
@@ -26,6 +26,12 @@ tokio.features = ["full"]
 # logs
 tracing = "0.1.40"
 tracing-subscriber = "0.3"
+
+# math
+nox.path = "../nox"
+
+# macros
+roci-macros.path = "macros"
 
 [dev-dependencies]
 roci-macros.path = "macros"
