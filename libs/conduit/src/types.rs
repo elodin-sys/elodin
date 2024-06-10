@@ -58,6 +58,12 @@ impl ComponentId {
     }
 }
 
+impl<'a> From<&'a str> for ComponentId {
+    fn from(val: &'a str) -> Self {
+        ComponentId::new(val)
+    }
+}
+
 impl From<u64> for ComponentId {
     fn from(val: u64) -> Self {
         ComponentId(val)
@@ -561,9 +567,9 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn with_id(component_id: ComponentId) -> Self {
+    pub fn with_id(component_id: impl Into<ComponentId>) -> Self {
         Self {
-            component_id,
+            component_id: component_id.into(),
             with_component_ids: vec![],
             entity_ids: vec![],
         }

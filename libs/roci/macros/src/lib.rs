@@ -13,7 +13,7 @@ mod decomponentize;
 struct Field {
     ident: Option<syn::Ident>,
     ty: syn::Type,
-    entity_id: u64,
+    entity_id: Option<u64>,
     component_id: Option<String>,
 }
 

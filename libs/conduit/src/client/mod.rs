@@ -19,5 +19,5 @@ use crate::{Packet, Payload};
 #[cfg(feature = "std")]
 pub struct MsgPair {
     pub msg: Msg<bytes::Bytes>,
-    pub tx: flume::WeakSender<Packet<Payload<bytes::Bytes>>>,
+    pub tx: Option<flume::WeakSender<Packet<Payload<bytes::Bytes>>>>,
 }

@@ -20,14 +20,15 @@ pub struct Tensor<T: TensorItem, D: Dim, R: Repr = Op> {
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
+impl<T: TensorItem + Copy, D: Dim, R: Repr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy
+{}
+
 impl<T: TensorItem, D: Dim, P: Repr> std::fmt::Debug for Tensor<T, D, P>
 where
     P::Inner<T::Elem, D>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Tensor")
-            .field("inner", &self.inner)
-            .finish()
+        f.debug_tuple("Tensor").field(&self.inner).finish()
     }
 }
 
@@ -183,6 +184,12 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
     }
     pub fn inner_mut(&mut self) -> &mut R::Inner<T::Elem, D> {
         &mut self.inner
+    }
+}
+
+impl<T: TensorItem + Copy, D: Dim> Tensor<T, D, ArrayRepr> {
+    pub fn into_buf(self) -> D::Buf<T::Elem> {
+        self.inner.buf
     }
 }
 
