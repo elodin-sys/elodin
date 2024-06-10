@@ -8,6 +8,8 @@ edition = "2021"
 [features]
 default = ["jax"]
 jax = ["pyo3", "numpy", "bytemuck"]
+cuda = ["xla/cuda", "shared"]
+shared = ["xla/shared"]
 
 [dependencies]
 nalgebra = "0.32"

@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{mem::ManuallyDrop, pin::Pin};
 
 use crate::{Error, HloModuleProto, Status, XlaOp, XlaOpRaw};
 use cpp::{cpp, cpp_class};
@@ -82,13 +82,16 @@ impl XlaComputation {
     }
 }
 
-cpp_class!(pub unsafe struct CompileOptions as "CompileOptions");
+cpp_class!(pub unsafe struct CompileOptionsRaw as "CompileOptions");
+#[derive(Default, Clone)]
+pub struct CompileOptions(pub ManuallyDrop<CompileOptionsRaw>);
 impl CompileOptions {
     pub fn disable_optimizations(&mut self) {
+        let raw = &mut self.0;
         unsafe {
-            cpp!([self as "CompileOptions*"] {
-                self->executable_build_options.mutable_debug_options()->set_xla_llvm_disable_expensive_passes(true);
-                self->executable_build_options.mutable_debug_options()->set_xla_backend_optimization_level(0);
+            cpp!([raw as "CompileOptions*"] {
+                raw->executable_build_options.mutable_debug_options()->set_xla_llvm_disable_expensive_passes(true);
+                raw->executable_build_options.mutable_debug_options()->set_xla_backend_optimization_level(0);
             })
         };
     }
