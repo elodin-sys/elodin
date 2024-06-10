@@ -444,16 +444,14 @@ pub fn sync_pos(
             let WorldPos { pos, att } = pos;
 
             // Convert from Z-up to Y-up
-            let pos = pos.xzy();
-            // Swap Y, Z axes and negate w to fix chirality
-            // https://stackoverflow.com/a/16103717, https://stackoverflow.com/a/39134422
+            let pos = [pos.x, pos.z, -pos.y];
             let x = att.i as f32;
             let y = att.k as f32;
-            let z = att.j as f32;
-            let w = -att.w as f32;
+            let z = -att.j as f32;
+            let w = att.w as f32;
 
             let (new_grid_cell, translation) =
-                floating_origin.translation_to_grid(DVec3::from_slice(pos.as_slice()));
+                floating_origin.translation_to_grid(DVec3::from_array(pos));
             *grid_cell = new_grid_cell;
             *transform = bevy::prelude::Transform {
                 translation,
