@@ -6,12 +6,27 @@ use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
 use crate::{
-    ArrayTy, Buffer, BufferArg, Client, Dim, Field, FromHost, MaybeOwned, Noxpr, Op, RealField,
-    Repr, Scalar, Tensor, TensorItem, ToHost,
+    tensor, ArrayRepr, ArrayTy, Buffer, BufferArg, Client, Dim, Field, FromHost, MaybeOwned, Noxpr,
+    Op, RealField, Repr, Scalar, Tensor, TensorItem, ToHost,
 };
 
 /// Type alias for a tensor that specifically represents a vector.
 pub type Vector<T, const N: usize, P = Op> = Tensor<T, Const<N>, P>;
+
+impl<T: Field, R: Repr> Vector<T, 3, R>
+where
+    Self: From<Vector<T, 3, ArrayRepr>>,
+{
+    pub fn x_axis() -> Self {
+        tensor![T::one_prim(), T::zero_prim(), T::zero_prim()].into()
+    }
+    pub fn y_axis() -> Self {
+        tensor![T::zero_prim(), T::one_prim(), T::zero_prim()].into()
+    }
+    pub fn z_axis() -> Self {
+        tensor![T::zero_prim(), T::zero_prim(), T::one_prim()].into()
+    }
+}
 
 impl<T: NativeType + ArrayElement> Vector<T, 3, Op> {
     /// Extends a 3-dimensional vector to a 4-dimensional vector by appending a given element.

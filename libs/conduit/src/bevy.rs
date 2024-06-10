@@ -311,7 +311,9 @@ fn recv_system(args: RecvSystemArgs) {
     } = args;
 
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
-        let Some(tx) = tx.upgrade() else { continue };
+        let Some(tx) = tx.and_then(|tx| tx.upgrade()) else {
+            continue;
+        };
         match &msg {
             Msg::Control(ControlMsg::StartSim {
                 metadata_store: new_metadata_store,

@@ -10,6 +10,7 @@ use crate::RealField;
 use crate::Repr;
 use crate::Tensor;
 use crate::TensorItem;
+use crate::MRP;
 use crate::{Builder, FromBuilder, Quaternion, Scalar, Vector};
 use nalgebra::Const;
 use std::ops::Div;
@@ -111,6 +112,11 @@ impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
     /// Gets the angular part of the spatial transform as a quaternion.
     pub fn angular(&self) -> Quaternion<T, R> {
         Quaternion(self.inner.fixed_slice(&[0]))
+    }
+
+    /// Gets the angular part of the spatial transform as a quaternion.
+    pub fn mrp(&self) -> MRP<T, R> {
+        MRP::from(self.angular())
     }
 
     /// Gets the linear part of the spatial transform as a vector with shape (3,).
@@ -350,6 +356,17 @@ impl<T: TensorItem + ArrayElement + NativeType + RealField, R: Repr> Mul<Spatial
             self.mass() * rhs.linear() - self.momentum().cross(&rhs.angular());
         let torque = self.inertia_diag() * rhs.angular() + self.momentum().cross(&rhs.linear());
         SpatialForce::new(torque, force)
+    }
+}
+
+impl<T: TensorItem> Default for SpatialMotion<T, ArrayRepr>
+where
+    T::Elem: Default,
+{
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
     }
 }
 

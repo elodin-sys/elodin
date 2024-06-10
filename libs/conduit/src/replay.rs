@@ -82,7 +82,7 @@ impl Proxy {
             };
             self.mp_tx.send(MsgPair {
                 msg,
-                tx: self.in_tx.downgrade(),
+                tx: Some(self.in_tx.downgrade()),
             })?;
         }
         Ok(())

@@ -81,7 +81,7 @@ pub async fn handle_stream_sink(
     for init_msg in initial_incoming_msgs.chain(iter::once(Msg::Control(ControlMsg::Connect))) {
         let init_msg_pair = MsgPair {
             msg: init_msg,
-            tx: outgoing_tx.downgrade(),
+            tx: Some(outgoing_tx.downgrade()),
         };
         incoming_tx.send_async(init_msg_pair).await.unwrap();
     }
@@ -100,7 +100,7 @@ pub async fn handle_stream_sink(
             incoming_tx
                 .send_async(MsgPair {
                     msg,
-                    tx: outgoing_tx.downgrade(),
+                    tx: Some(outgoing_tx.downgrade()),
                 })
                 .await
                 .map_err(|_| Error::EOF)?;
