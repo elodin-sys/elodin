@@ -111,7 +111,7 @@ impl ConduitExec {
     }
 
     fn process_msg_pair(&mut self, MsgPair { msg, tx }: MsgPair) -> Result<(), Error> {
-        let Some(tx) = tx.upgrade() else {
+        let Some(tx) = tx.and_then(|tx| tx.upgrade()) else {
             tracing::debug!("channel closed");
             return Ok(());
         };

@@ -110,7 +110,7 @@ pub trait Repr {
         <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim;
 
-    /// Concatenates multiple tensors along a new dimension.
+    /// Concatenates multiple tensors along the first dimension
     fn concat_many<T1: Field, D1, const N: usize>(
         args: [&Self::Inner<T1, D1>; N],
     ) -> Self::Inner<T1, ConcatManyDim<D1, N>>
