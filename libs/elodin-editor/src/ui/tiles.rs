@@ -817,8 +817,10 @@ fn spawn_panel(
                     camera.set_parent(*parent);
                 }
             };
+            // Convert from Z-up to Y-up
+            let pos = [viewport.pos.x, viewport.pos.z, -viewport.pos.y];
             camera.insert(Transform {
-                translation: Vec3::from_slice(viewport.pos.xzy().as_slice()), // Convert from Z-up to Y-up
+                translation: Vec3::from_array(pos),
                 rotation: Quat::from_xyzw(
                     viewport.rotation.i,
                     viewport.rotation.j,
