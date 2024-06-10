@@ -4,6 +4,12 @@ icon: bars-staggered
 ---
 
 
+## v0.3.22
+- **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
+    - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
+    The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
+
+
 ## v0.3.21
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
     - In `nox`, the constant `Field::two` returned a `1` constant. This constant was only used in the implementation of `Add` between `SpatialMotion` and `SpatialTransform` and in `Quaternion::from_axis_angle`. Unfortunately, this caused angular velocity integration to return incorrect results. This bug caused the applied angular velocity to be multiplied by a factor of 2.
