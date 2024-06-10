@@ -35,7 +35,8 @@ pub struct Viewport {
 impl Viewport {
     pub fn looking_at(mut self, pos: Vector3<f32>) -> Self {
         let dir = pos - self.pos;
-        self.rotation = UnitQuaternion::look_at_rh(&dir.xzy(), &Vector3::y()).inverse();
+        let dir = Vector3::new(dir.x, dir.z, -dir.y);
+        self.rotation = UnitQuaternion::look_at_rh(&dir, &Vector3::y()).inverse();
         self
     }
 }

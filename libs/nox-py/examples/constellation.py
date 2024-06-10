@@ -292,7 +292,7 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
 def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     linear = pos.linear()
     r = linear / la.norm(linear)
-    body_axis = np.array([0.0, 1.0, 0.0])
+    body_axis = np.array([0.0, -1.0, 0.0])
     a = np.cross(body_axis, r)
     w = 1 + np.dot(body_axis, r)
     return euler_to_quat(deg) * el.Quaternion(np.array([*a, w])).normalize()
@@ -425,9 +425,7 @@ def spawn_sat(x, y, w: el.World):
         world_pos=el.SpatialTransform.from_linear(
             rot @ np.array([1.0, 0.0, 0.0]) * radius
         ),
-        world_vel=el.SpatialMotion(
-            ang_vel, rot @ np.array([0.0, -1.0, 0.0]) * velocity
-        ),
+        world_vel=el.SpatialMotion(ang_vel, rot @ np.array([0.0, 1.0, 0.0]) * velocity),
         inertia=el.SpatialInertia(12.0, j),
         # Credit to the OreSat program https://www.oresat.org for the model above
     )
