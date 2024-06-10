@@ -69,8 +69,8 @@ fn test_exec() {
 fn add_op() -> Result<()> {
     let client = crate::PjRtClient::cpu()?;
     let builder = crate::XlaBuilder::new("test");
-    let cst42 = builder.constant(42f32);
-    let cst43 = builder.constant_vector(&[43f32; 2]);
+    let cst42 = builder.constant(42f64);
+    let cst43 = builder.constant_vector(&[43f64; 2]);
     let sum = cst42 + cst43;
     let computation = sum.build()?;
     let result = client.compile_with_default_options(&computation)?;
@@ -79,9 +79,9 @@ fn add_op() -> Result<()> {
     assert_eq!(result.element_count(), 2);
     assert_eq!(
         result.shape()?,
-        crate::Shape::Array(crate::ArrayShape::new::<f32>(vec![2]))
+        crate::Shape::Array(crate::ArrayShape::new::<f64>(vec![2]))
     );
-    assert_eq!(result.typed_buf::<f32>()?, [85., 85.]);
+    assert_eq!(result.typed_buf::<f64>()?, [85., 85.]);
     Ok(())
 }
 

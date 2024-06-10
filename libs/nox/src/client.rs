@@ -24,7 +24,7 @@ impl Client {
     fn new(pjrt_client: xla::PjRtClient) -> Self {
         Client {
             pjrt_client,
-            compile_options: xla::CompileOptions::default(),
+            compile_options: Default::default(),
         }
     }
 
@@ -51,8 +51,9 @@ impl Client {
     /// By default the backend is either CUDA or Metal depending on your OS.
     ///
     /// This function uses a default memory fraction of `0.95` and does not preallocate any memory.
+    #[cfg(feature = "cuda")]
     pub fn gpu() -> Result<Self, Error> {
-        const DEFAULT_MEMORY_PERCENT: f64 = 0.95;
+        const DEFAULT_MEMORY_PERCENT: f64 = 0.25;
         xla::PjRtClient::gpu(DEFAULT_MEMORY_PERCENT, false)
             .map(Client::new)
             .map_err(Error::from)
@@ -64,6 +65,7 @@ impl Client {
     /// # Parameters
     /// - `mem_limit`: Memory limit in the range [0..1.0].
     /// - `prealloc`: Whether to preallocate memory or not.
+    #[cfg(feature = "cuda")]
     pub fn gpu_with_memory_limit(mem_limit: f64, prealloc: bool) -> Result<Self, Error> {
         xla::PjRtClient::gpu(mem_limit, prealloc)
             .map(Client::new)

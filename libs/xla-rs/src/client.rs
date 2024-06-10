@@ -6,6 +6,7 @@ use cpp::{cpp, cpp_class};
 use std::pin::Pin;
 
 cpp! {{
+    #pragma GCC diagnostic ignored "-Wignored-attributes"
     #include "xla/pjrt/pjrt_api.h"
     #include "xla/pjrt/pjrt_c_api_client.h"
     #include "xla/pjrt/pjrt_client.h"
@@ -13,9 +14,24 @@ cpp! {{
     #include "xla/pjrt/tfrt_cpu_pjrt_client.h"
     #include "xla/pjrt/gpu/gpu_helpers.h"
     #include "xla/pjrt/gpu/se_gpu_pjrt_client.h"
+    #include "xla/service/custom_call_target_registry.h"
     #include "jaxlib/cpu/lapack_kernels.h"
     #include "xla/service/custom_call_target_registry.h"
     #include "tsl/platform/cpu_info.h"
+
+    #ifdef EL_CUDA
+    #include "xla/ffi/api/api.h"
+    #include "xla/ffi/ffi_api.h"
+    #include "jaxlib/gpu/blas_kernels.h"
+    #include "jaxlib/gpu/cholesky_update_kernel.h"
+    #include "jaxlib/gpu/lu_pivot_kernels.h"
+    #include "jaxlib/gpu/prng_kernels.h"
+    #include "jaxlib/gpu/rnn_kernels.h"
+    #include "jaxlib/gpu/solver_kernels.h"
+    #include "jaxlib/gpu/sparse_kernels.h"
+    //#include "jaxlib/gpu/triton_kernels.h"
+    //#include "jaxlib/gpu/vendor.h"
+    #endif
     using namespace xla;
 
     #pragma clang diagnostic ignored "-Wundefined-var-template"
@@ -217,6 +233,30 @@ fn init_cpu_lapack() {
         XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM(
             "lapack_zgees", ComplexGees<std::complex<double>>::Kernel, "Host");
         }
+        #ifdef EL_CUDA
+        namespace jax::cuda {
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cublas_getrf_batched", GetrfBatched,
+            "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cublas_geqrf_batched", GeqrfBatched,
+            "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cudnn_rnn", RNNForward, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cudnn_rnn_bwd", RNNBackward, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cu_cholesky_update",
+            CholeskyUpdate, "CUDA");
+            //XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cu_lu_pivots_to_permutation", LuPivotsToPermutation, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cu_threefry2x32", ThreeFry2x32,
+            "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_getrf", Getrf, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_geqrf", Geqrf, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_csrlsvqr", Csrlsvqr, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_orgqr", Orgqr, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_syevd", Syevd, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_syevj", Syevj, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_sytrd", Sytrd, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_gesvd", Gesvd, "CUDA");
+            XLA_REGISTER_CUSTOM_CALL_TARGET_WITH_SYM("cusolver_gesvdj", Gesvdj, "CUDA");
+        }
+        #endif
     }}
 }
 
@@ -246,19 +286,39 @@ impl PjRtClient {
         Ok(client)
     }
 
+    #[cfg(feature = "cuda")]
+    #[allow(unused_variables)]
     pub fn gpu(memory_fraction: f64, preallocate: bool) -> Result<Self> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
+        init_cpu_lapack();
         let client = unsafe {
-            cpp!([out_status as "Status*", memory_fraction as "double", preallocate as "bool"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
+            cpp!([out_status as "__attribute__((unused)) Status*", memory_fraction as "__attribute__((unused)) double", preallocate as "__attribute__((unused)) bool"] -> PjRtClient as "std::shared_ptr<PjRtClient>" {
+                #ifdef EL_CUDA
+                auto reg = CustomCallTargetRegistry::Global();
+                xla::ffi::Ffi::RegisterStaticHandler(
+                    xla::ffi::GetXlaFfiApi(),
+                    "cu_lu_pivots_to_permutation",
+                    "CUDA",
+                    reinterpret_cast<XLA_FFI_Handler*>(jax::cuda::LuPivotsToPermutation)
+                );
+                auto syms = reg->registered_symbols("CUDA");
+                auto is_null = CustomCallTargetRegistry::Global()->Lookup("cu_lu_pivots_to_permutation", std::string("CUDA"));
                 GpuAllocatorConfig allocator = {.memory_fraction = memory_fraction,
                                        .preallocate = preallocate};
-                auto status = GetStreamExecutorGpuClient(false, allocator, 0, 0);
+                GpuClientOptions options = {
+                    .allocator_config = allocator,
+                    .platform_name = "CUDA"
+                };
+                auto status = GetStreamExecutorGpuClient(options);
                 if (status.ok()) {
                     return std::shared_ptr(std::move(status.value()));
                 }else{
                     *out_status = Status(status.status());
                     return std::shared_ptr<PjRtClient>();
                 }
+                #else
+                return std::shared_ptr<PjRtClient>();
+                #endif
             })
         };
         out_status.to_result()?;
@@ -391,11 +451,12 @@ impl PjRtClient {
     pub fn compile_with_options(
         &self,
         comp: &XlaComputation,
-        mut options: CompileOptions,
+        options: CompileOptions,
     ) -> Result<PjRtLoadedExecutable> {
         let out_status: Pin<&mut Status> = std::pin::pin!(Status::ok());
+        let mut options = options.0;
         let exec = unsafe {
-            cpp!([self as "std::shared_ptr<PjRtClient>*", comp as "const XlaComputation*", mut options as "CompileOptions", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
+            cpp!([self as "std::shared_ptr<PjRtClient>*", mut options as "CompileOptions", comp as "const XlaComputation*", out_status as "Status*"] -> PjRtLoadedExecutable as "std::shared_ptr<PjRtLoadedExecutable>" {
                 auto client = *self;
                 auto thread_pool = std::make_unique<tsl::thread::ThreadPool>(tsl::Env::Default(), "", tsl::port::MaxParallelism());
                 options.executable_build_options.set_compile_thread_pool(thread_pool.get());
@@ -423,8 +484,7 @@ impl PjRtClient {
         &self,
         comp: &XlaComputation,
     ) -> Result<PjRtLoadedExecutable> {
-        let options = CompileOptions::default();
-        self.compile_with_options(comp, options)
+        self.compile_with_options(comp, Default::default())
     }
 
     pub(crate) fn is_null(&self) -> bool {

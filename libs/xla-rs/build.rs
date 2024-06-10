@@ -37,18 +37,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let xla_dir = env_var_rerun("XLA_EXTENSION_DIR")
         .map_or_else(|| out_dir.join("xla_extension"), PathBuf::from);
     if !xla_dir.exists() {
-        download_xla(&out_dir).await?;
+        if cfg!(feature = "shared") {
+            download_shared_xla(&out_dir).await?;
+        } else {
+            download_xla(&out_dir).await?;
+        }
     }
 
-    cpp_build::Config::new()
+    let mut config = cpp_build::Config::new();
+    config
         .flag("-std=c++17")
         .flag("-DLLVM_ON_UNIX=1")
         .flag("-DLLVM_VERSION_STRING=")
         .flag(&format!("-isystem{}", xla_dir.join("include").display()))
         .file("./vendor/jaxlib/cpu/cpu_kernels.cc")
         .file("./vendor/jaxlib/cpu/lapack_kernels.cc")
-        .include("./vendor")
-        .build("src/lib.rs");
+        .include("./vendor");
+    if cfg!(feature = "cuda") {
+        find_cuda_helper::include_cuda();
+        let cuda = find_cuda_helper::find_cuda_root().unwrap();
+        config
+            .include(&cuda.join("include"))
+            .include(&cuda)
+            .define("JAX_GPU_CUDA", Some("1"))
+            .define("EL_CUDA", Some("1"))
+            .file("./vendor/jaxlib/gpu/cholesky_update_kernel.cc")
+            .file("./vendor/jaxlib/gpu/lu_pivot_kernels.cc")
+            .file("./vendor/jaxlib/gpu/prng_kernels.cc");
+        let mut cuda_config = cc::Build::new();
+        cuda_config
+            .flag("-std=c++17")
+            .flag("-DLLVM_ON_UNIX=1")
+            .flag("-DLLVM_VERSION_STRING=")
+            .include(xla_dir.join("include"))
+            .include("./vendor");
+        cuda_config
+            .flag("--disable-warnings")
+            .cuda(true)
+            .cudart("static")
+            .include(cuda)
+            .flag("-gencode")
+            .flag("arch=compute_89,code=sm_89")
+            .file("./vendor/jaxlib/gpu/blas_kernels.cc")
+            .file("./vendor/jaxlib/gpu/cholesky_update_kernel.cu")
+            .file("./vendor/jaxlib/gpu/gpu_kernel_helpers.cc")
+            .file("./vendor/jaxlib/gpu/gpu_kernels.cc")
+            .file("./vendor/jaxlib/gpu/lu_pivot_kernels.cu")
+            .file("./vendor/jaxlib/gpu/prng_kernels.cu")
+            .file("./vendor/jaxlib/gpu/rnn_kernels.cc")
+            .file("./vendor/jaxlib/gpu/solver_kernels.cc")
+            .file("./vendor/jaxlib/gpu/sparse_kernels.cc")
+            .define("JAX_GPU_CUDA", Some("1"));
+        cuda_config.compile("jaxlib_cuda");
+    }
+    config.build("src/lib.rs");
     println!("cargo:rerun-if-changed=src/executable.rs");
     println!("cargo:rerun-if-changed=src/literal.rs");
     println!("cargo:rerun-if-changed=src/op.rs");
@@ -80,11 +122,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rustc-link-arg=-Wl,-lstdc++");
     }
 
-    println!(
-        "cargo:rustc-link-search=native={}",
-        xla_dir.join("lib").display()
-    );
-    println!("cargo:rustc-link-lib=static=xla_extension");
+    if cfg!(feature = "shared") {
+        println!("cargo:rustc-link-search={}", xla_dir.join("lib").display());
+        println!("cargo:rustc-link-lib=dylib=xla_extension");
+    } else {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            xla_dir.join("lib").display()
+        );
+        println!("cargo:rustc-link-lib=static=xla_extension");
+    }
     if os == OS::MacOS {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=SystemConfiguration");
@@ -100,6 +147,32 @@ async fn download_jax_metal(jax_dir: &Path) -> Result<(), Box<dyn std::error::Er
     let res = reqwest::get(url).await?;
     let bytes = io::Cursor::new(res.bytes().await?);
     zip_extract::extract(bytes, jax_dir, true)?;
+    Ok(())
+}
+
+async fn download_shared_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
+    let url = match (os.as_str(), arch.as_str()) {
+        ("macos", arch) => format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz", arch),
+        ("linux", arch) => {
+            if true {
+              format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz", arch)
+            }else{
+              format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz", arch)
+            }
+        }
+
+        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch)
+    };
+
+    let res = reqwest::get(url).await?;
+    let mut bytes = io::Cursor::new(res.bytes().await?);
+
+    let tar = GzDecoder::new(&mut bytes);
+    let mut archive = Archive::new(tar);
+    archive.unpack(xla_dir)?;
+
     Ok(())
 }
 

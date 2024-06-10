@@ -208,7 +208,7 @@ impl<E> GraphQuery<E> {
         let mut output_array: Option<ComponentArray<I>> = None;
         let exprs = exprs_from_edges_queries(&self.edges, from_query.clone(), to_query.clone());
         for (len, (from, to)) in exprs.iter() {
-            let axis = std::iter::repeat(0)
+            let axis: Vec<usize> = std::iter::repeat(0)
                 .take(from.exprs.len() + to.exprs.len())
                 .collect::<Vec<_>>();
             let vmap_args = from

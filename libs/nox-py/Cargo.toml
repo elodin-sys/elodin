@@ -7,6 +7,8 @@ readme = "README.md"
 [features]
 publish = ["pyo3/extension-module"]
 server = ["axum", "futures", "tokio-util"]
+cuda = ["nox-ecs/cuda"]
+shared = ["nox-ecs/shared"]
 
 [package.metadata.maturin]
 name = "elodin"

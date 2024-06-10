@@ -2265,12 +2265,15 @@ impl BatchTracer {
                                 }
                             }
                             let inner = Noxpr::parameter(p.number, p.ty, p.name);
-                            let batched_expr = BatchedExpr {
+                            let mut batched_expr = BatchedExpr {
                                 inner,
                                 batch_axis: input.batch_axis.clone(),
                             }
                             .move_batch_axis(axis.clone())
                             .unwrap();
+                            if let BatchAxis::Mapped { index, .. } = &mut batched_expr.batch_axis {
+                                *index = 0;
+                            }
                             *arg = batched_expr.inner.clone();
                             inner_batcher.cache.insert(id, batched_expr);
                         }
@@ -2290,10 +2293,14 @@ impl BatchTracer {
                                 }
                             }
                             let inner = Noxpr::parameter(p.number, p.ty, p.name);
-                            let batched_expr = BatchedExpr {
+                            let mut batched_expr = BatchedExpr {
                                 inner,
                                 batch_axis: axis.clone(),
                             };
+                            if let BatchAxis::Mapped { index, .. } = &mut batched_expr.batch_axis {
+                                *index = 0;
+                            }
+
                             *arg = batched_expr.inner.clone();
                             inner_batcher.cache.insert(id, batched_expr);
                         }
