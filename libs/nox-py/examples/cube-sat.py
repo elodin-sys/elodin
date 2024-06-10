@@ -49,38 +49,38 @@ class Sensors(el.Archetype):
 
 
 @el.map
-def fake_magnetometer_ref(pos: el.WorldPos) -> MagReadingRef:
-    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
-    noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-        [1.0, 0.0, 0.0]
-    )
-
-
-@el.map
-def fake_magnetometer_body(_: el.WorldPos) -> MagReadingBody:
+def fake_magnetometer_ref(_: el.WorldPos) -> MagReadingRef:
     return np.array([1.0, 0.0, 0.0])
 
 
 @el.map
-def fake_star_ref(pos: el.WorldPos) -> StarReadingRef:
-    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
+def fake_magnetometer_body(pos: el.WorldPos) -> MagReadingBody:
+    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
     noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-        [0.0, 0.0, 1.0]
-    )
+    return el.Quaternion(
+        pos.angular().vector() + noise
+    ).normalize().inverse() @ np.array([1.0, 0.0, 0.0])
 
 
 @el.map
-def fake_star_body(_: el.WorldPos) -> StarReadingBody:
+def fake_star_ref(_: el.WorldPos) -> StarReadingRef:
     return np.array([0.0, 0.0, 1.0])
 
 
 @el.map
-def gyro_omega(vel: el.WorldVel) -> GyroOmega:
+def fake_star_body(pos: el.WorldPos) -> StarReadingBody:
+    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
+    noise = 0.01 * jax.random.normal(key, shape=(4,))
+    return el.Quaternion(
+        pos.angular().vector() + noise
+    ).normalize().inverse() @ np.array([0.0, 0.0, 1.0])
+
+
+@el.map
+def gyro_omega(pos: el.WorldPos, vel: el.WorldVel) -> GyroOmega:
     key = jax.random.key(jax.lax.convert_element_type(vel.linear()[0], "int64"))
     noise = 3.16e-7 * jax.random.normal(key, shape=(3,))
-    return vel.angular() + noise
+    return (pos.angular().inverse() @ vel.angular()) + noise + 2.0
 
 
 sensors = (
@@ -107,7 +107,7 @@ def calculate_covariance(
 
 
 Q = calculate_covariance(
-    np.array([0.1, 0.1, 0.1]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
+    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
 )
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
@@ -140,7 +140,7 @@ def propogate_quaternion(q: Quaternion, omega: jax.Array, dt: float) -> Quaterni
 def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
     a = 0.5 * delta_alpha
     qa = Quaternion(np.array([a[0], a[1], a[2], 0.0]))
-    q_hat = q + qa * q
+    q_hat = q + q * qa
     return q_hat.normalize()
 
 
@@ -155,12 +155,19 @@ def propogate_state_covariance(
     r = (omega_norm * dt - s) / (omega_norm**3)
     omega_cross = skew_symmetric_cross(omega)
     omega_cross_square = omega_cross @ omega_cross
-    phi_00 = np.eye(3) - omega_cross * p + omega_cross_square * q
-    phi_01 = omega_cross * q - np.eye(3) * dt - omega_cross_square * r
+    phi_00 = jax.lax.select(
+        omega_norm > 1e-5,
+        np.eye(3) - omega_cross * p + omega_cross_square * q,
+        np.eye(3),
+    )
+    phi_01 = jax.lax.select(
+        omega_norm > 1e-5,
+        omega_cross * q - np.eye(3) * dt - omega_cross_square * r,
+        np.eye(3) * -1.0 / 120.0,
+    )
     phi_10 = np.zeros((3, 3))
     phi_11 = np.eye(3)
     phi = np.block([[phi_00, phi_01], [phi_10, phi_11]])
-    # TODO(sphw): handle steady state eq 7.51b
     return (phi @ big_p @ phi.T) + YQY
 
 
@@ -172,7 +179,8 @@ def estimate_attitude(
     measured_bodys: jax.Array,
     measured_references: jax.Array,
     dt: float,
-) -> tuple[Quaternion, jax.Array, jax.Array]:
+) -> tuple[Quaternion, jax.Array, jax.Array, jax.Array]:
+    omega = omega - b_hat
     q_hat = propogate_quaternion(q_hat, omega, dt)
     p = propogate_state_covariance(p, omega, dt)
     delta_x_hat = np.zeros(6)
@@ -180,18 +188,18 @@ def estimate_attitude(
     for i in range(0, sensor_count):
         measured_reference = measured_references[i]
         measured_body = measured_bodys[i]
-        body_r = q_hat @ measured_reference
+        body_r = q_hat.inverse() @ measured_reference
+        e = measured_body - body_r
         H = np.block([skew_symmetric_cross(body_r), np.zeros((3, 3))])
         H_trans = H.T
         K = p @ H_trans @ la.inv(H @ p @ H_trans + var_r)
-        e = measured_body - body_r
-        delta_x_hat = delta_x_hat + K @ (e - H @ delta_x_hat)
         p = (np.eye(6) - K @ H) @ p
+        delta_x_hat = delta_x_hat + K @ (e - H @ delta_x_hat)
     delta_alpha = delta_x_hat[0:3]
     delta_beta = delta_x_hat[3:6]
     q_hat = update_quaternion(q_hat, delta_alpha)
     b_hat = b_hat + delta_beta
-    return (q_hat, b_hat, p)
+    return (q_hat, b_hat, p, omega)
 
 
 def skew_symmetric_cross(a: jax.Array) -> jax.Array:
@@ -209,7 +217,7 @@ def kalman_filter(
     b_hat: BiasEst,
     p: P,
 ) -> tuple[AttEst, AngVelEst, BiasEst, P]:
-    q_hat, b_hat, big_p = estimate_attitude(
+    q_hat, b_hat, big_p, omega_hat = estimate_attitude(
         att_est,
         b_hat,
         omega,
@@ -218,7 +226,6 @@ def kalman_filter(
         np.array([mag_ref, star_ref]),
         1 / 120.0,
     )
-    omega_hat = omega
     return (q_hat, omega_hat, b_hat, big_p)
 
 
@@ -300,9 +307,7 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
 
 
 @el.system
-def control(
-    sensor: el.Query[AttEst, AngVelEst, Goal], rw: el.Query[RWAxis, RWForce]
-) -> el.Query[ControlForce]:
+def control(sensor: el.Query[AttEst, AngVelEst, Goal]) -> el.Query[ControlForce]:
     return sensor.map(
         ControlForce,
         lambda p, v, i: el.SpatialForce.from_torque(
@@ -353,7 +358,7 @@ class ReactionWheel(el.Archetype):
 @el.system
 def rw_effector(
     rw_force: el.GraphQuery[RWEdge],
-    force_query: el.Query[el.Force],
+    force_query: el.Query[el.WorldPos],
     rw_query: el.Query[RWForce],
 ) -> el.Query[el.Force]:
     return rw_force.edge_fold(
@@ -361,7 +366,8 @@ def rw_effector(
         rw_query,
         el.Force,
         el.SpatialForce.zero(),
-        lambda f, _, force: f + force,
+        lambda f, pos, force: f
+        + el.SpatialForce.from_torque(pos.angular() @ force.torque()),
     )
 
 
@@ -451,7 +457,8 @@ w.spawn(
                             el.GraphEntity(
                                 sat,
                                 [
-                                    el.Component.index(ControlForce)[:3],
+                                    el.Component.index(GyroOmega)[:3],
+                                    el.Component.index(el.WorldVel)[:3],
                                 ],
                             )
                         ]
