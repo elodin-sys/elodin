@@ -2956,8 +2956,7 @@ dependencies = [
 [[package]]
 name = "cpp"
 version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa65869ef853e45c60e9828aa08cdd1398cb6e13f3911d9cb2a079b144fcd64"
+source = "git+https://github.com/mystor/rust-cpp.git#58c8c46c731d1b2340580f7ea6b2fd8d57128483"
 dependencies = [
  "cpp_macros",
 ]
@@ -2965,8 +2964,7 @@ dependencies = [
 [[package]]
 name = "cpp_build"
 version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e361fae2caf9758164b24da3eedd7f7d7451be30d90d8e7b5d2be29a2f0cf5b"
+source = "git+https://github.com/mystor/rust-cpp.git#58c8c46c731d1b2340580f7ea6b2fd8d57128483"
 dependencies = [
  "cc",
  "cpp_common",
@@ -2980,8 +2978,7 @@ dependencies = [
 [[package]]
 name = "cpp_common"
 version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1a2532e4ed4ea13031c13bc7bc0dbca4aae32df48e9d77f0d1e743179f2ea1"
+source = "git+https://github.com/mystor/rust-cpp.git#58c8c46c731d1b2340580f7ea6b2fd8d57128483"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -2991,8 +2988,7 @@ dependencies = [
 [[package]]
 name = "cpp_macros"
 version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47ec9cc90633446f779ef481a9ce5a0077107dd5b87016440448d908625a83fd"
+source = "git+https://github.com/mystor/rust-cpp.git#58c8c46c731d1b2340580f7ea6b2fd8d57128483"
 dependencies = [
  "aho-corasick",
  "byteorder",
@@ -3870,6 +3866,15 @@ dependencies = [
  "libc",
  "redox_syscall 0.4.1",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "find_cuda_helper"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9f9e65c593dd01ac77daad909ea4ad17f0d6d1776193fc8ea766356177abdad"
+dependencies = [
+ "glob",
 ]
 
 [[package]]
@@ -11360,6 +11365,7 @@ dependencies = [
  "cpp",
  "cpp_build",
  "cxx",
+ "find_cuda_helper",
  "flate2",
  "lapack-src",
  "lapack-sys",
