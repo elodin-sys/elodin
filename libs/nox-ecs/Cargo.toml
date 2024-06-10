@@ -8,6 +8,8 @@ edition = "2021"
 [features]
 default = ["tokio"]
 tokio = ["dep:tokio", "futures", "conduit/tokio"]
+cuda = ["nox/cuda"]
+shared = ["nox/shared"]
 
 [dependencies]
 # nox
