@@ -15,6 +15,7 @@ pub const BORDER_GREY: Color32 = Color32::from_rgb(0x20, 0x20, 0x20); // white *
 
 pub const PRIMARY_ONYX: Color32 = Color32::from_rgb(0x17, 0x16, 0x15);
 pub const PRIMARY_ONYX_5: Color32 = Color32::from_rgb(0x97, 0x96, 0x96);
+pub const PRIMARY_ONYX_6: Color32 = Color32::from_rgb(0x74, 0x73, 0x73);
 pub const PRIMARY_ONYX_8: Color32 = Color32::from_rgb(0x45, 0x45, 0x44);
 pub const PRIMARY_ONYX_9: Color32 = Color32::from_rgb(0x2E, 0x2D, 0x2C);
 

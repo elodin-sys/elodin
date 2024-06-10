@@ -14,13 +14,11 @@ use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::bevy::MaxTick;
 use conduit::{well_known::WorldPos, ComponentExt};
 
-use crate::ui::widgets::label::buttons_label;
-use crate::ui::widgets::timeline::tagged_range::TaggedRanges;
+use crate::ui::widgets::label::label_with_buttons;
 use crate::ui::widgets::WidgetSystem;
-use crate::ui::{CameraQuery, SettingModal, SettingModalState, ViewportRange};
+use crate::ui::CameraQuery;
 use crate::{
     ui::{
         colors::{self, with_opacity},
@@ -38,13 +36,9 @@ use super::{empty_inspector, InspectorIcons};
 pub struct InspectorViewport<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
-    setting_modal_state: ResMut<'w, SettingModalState>,
-    tagged_ranges: ResMut<'w, TaggedRanges>,
-    max_tick: Res<'w, MaxTick>,
     commands: Commands<'w, 's>,
     entity_transform_query: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
-    viewport_range: ResMut<'w, ViewportRange>,
 }
 
 impl WidgetSystem for InspectorViewport<'_, '_> {
@@ -63,13 +57,9 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         let entities_meta = state_mut.entities;
         let mut camera_query = state_mut.camera_query;
-        let mut setting_modal_state = state_mut.setting_modal_state;
-        let mut tagged_ranges = state_mut.tagged_ranges;
-        let max_tick = state_mut.max_tick;
         let mut commands = state_mut.commands;
         let entity_transform_query = state_mut.entity_transform_query;
         let mut grid_visibility = state_mut.grid_visibility;
-        let mut viewport_range = state_mut.viewport_range;
 
         let Ok(mut cam) = camera_query.get_mut(camera) else {
             ui.add(empty_inspector());
@@ -97,7 +87,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             .show(ui, |ui| {
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
 
-                reset_focus = buttons_label(
+                reset_focus = label_with_buttons(
                     ui,
                     [icons.search],
                     "TRACK ENTITY",
@@ -221,67 +211,5 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
                 });
         }
-
-        egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
-            .show(ui, |ui| {
-                let selected_range_label = viewport_range
-                    .0
-                    .as_ref()
-                    .and_then(|rid| tagged_ranges.0.get(rid))
-                    .map_or("Default", |r| &r.label)
-                    .to_owned();
-
-                let ro_tagged_ranges = tagged_ranges.0.clone();
-
-                let [add_clicked, settings_clicked, subtract_clicked] = buttons_label(
-                    ui,
-                    [icons.add, icons.setting, icons.subtract],
-                    "RANGE",
-                    colors::PRIMARY_CREAME,
-                    egui::Margin::same(0.0).bottom(8.0),
-                );
-
-                if add_clicked {
-                    viewport_range.0 = Some(tagged_ranges.create_range(max_tick.0));
-                }
-                if settings_clicked {
-                    if let Some(current_range_id) = &viewport_range.0 {
-                        if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
-                            setting_modal_state.0 = Some(SettingModal::RangeEdit(
-                                current_range_id.clone(),
-                                current_range.label.to_owned(),
-                                current_range.color.to_owned(),
-                            ));
-                        }
-                    }
-                }
-                if subtract_clicked {
-                    if let Some(current_range_id) = &viewport_range.0 {
-                        tagged_ranges.remove_range(current_range_id);
-                        viewport_range.0 = None;
-                    }
-                }
-
-                ui.scope(|ui| {
-                    theme::configure_combo_box(ui.style_mut());
-                    egui::ComboBox::from_id_source("RANGE")
-                        .width(ui.available_width())
-                        .selected_text(selected_range_label)
-                        .show_ui(ui, |ui| {
-                            theme::configure_combo_item(ui.style_mut());
-
-                            ui.selectable_value(&mut viewport_range.0, None, "Default");
-
-                            for (range_id, range) in ro_tagged_ranges {
-                                ui.selectable_value(
-                                    &mut viewport_range.0,
-                                    Some(range_id),
-                                    range.label,
-                                );
-                            }
-                        });
-                });
-            });
     }
 }

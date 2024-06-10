@@ -30,8 +30,8 @@ pub fn set_theme(context: &mut egui::Context) {
     style.visuals.widgets.open.weak_bg_fill = colors::PRIMARY_SMOKE;
     style.visuals.widgets.inactive.weak_bg_fill = colors::PRIMARY_SMOKE;
 
-    style.visuals.menu_rounding = rounding_xxs();
-    style.visuals.window_rounding = rounding_xxs();
+    style.visuals.menu_rounding = rounding_xs();
+    style.visuals.window_rounding = rounding_xs();
     style.visuals.window_stroke = Stroke::new(1.0, colors::PRIMARY_ONYX_8);
     style.visuals.window_shadow = Shadow {
         color: colors::with_opacity(colors::BLACK_BLACK_600, 0.25),
@@ -51,8 +51,12 @@ pub fn set_theme(context: &mut egui::Context) {
     context.set_style(style);
 }
 
-pub fn rounding_xxs() -> Rounding {
+pub fn rounding_xs() -> Rounding {
     Rounding::same(2.0)
+}
+
+pub fn rounding_xxs() -> Rounding {
+    Rounding::same(1.0)
 }
 
 fn configure_default_fonts() -> FontDefinitions {

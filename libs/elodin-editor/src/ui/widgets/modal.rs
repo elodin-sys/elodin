@@ -19,7 +19,7 @@ use super::{
     button::{EButton, EImageButton},
     label::{self, ELabel},
     plot::{default_component_values, GraphState},
-    timeline::tagged_range::TaggedRanges,
+    timeline::timeline_ranges::TimelineRanges,
     RootWidgetSystem, WidgetSystem, WidgetSystemExt,
 };
 
@@ -111,7 +111,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalUpdateRangeName<'w> {
     setting_modal_state: ResMut<'w, SettingModalState>,
-    tagged_ranges: ResMut<'w, TaggedRanges>,
+    timeline_ranges: ResMut<'w, TimelineRanges>,
 }
 
 impl WidgetSystem for ModalUpdateRangeName<'_> {
@@ -128,7 +128,7 @@ impl WidgetSystem for ModalUpdateRangeName<'_> {
         let (color_icon, close_icon) = args;
 
         let mut setting_modal_state = state_mut.setting_modal_state;
-        let mut tagged_ranges = state_mut.tagged_ranges;
+        let mut timeline_ranges = state_mut.timeline_ranges;
 
         let Some(setting_modal) = setting_modal_state.0.as_mut() else {
             return;
@@ -138,19 +138,20 @@ impl WidgetSystem for ModalUpdateRangeName<'_> {
             return;
         };
 
-        let Some(current_range) = tagged_ranges.0.get_mut(m_range_id) else {
+        let Some(current_range) = timeline_ranges.0.get_mut(m_range_id) else {
             // Reset modal if Range was removed
             setting_modal_state.0 = None;
             return;
         };
 
-        if label::label_with_button(
+        let [close_clicked] = label::label_with_buttons(
             ui,
-            close_icon,
+            [close_icon],
             "Range Settings",
             colors::PRIMARY_CREAME,
             egui::Margin::same(8.0).bottom(16.0),
-        ) {
+        );
+        if close_clicked {
             setting_modal_state.0 = None;
             return;
         }
@@ -245,13 +246,14 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         };
 
         let title_margin = egui::Margin::same(8.0).bottom(16.0);
-        if label::label_with_button(
+        let [close_clicked] = label::label_with_buttons(
             ui,
-            close_icon,
+            [close_icon],
             "Add Component",
             colors::PRIMARY_CREAME,
             title_margin,
-        ) {
+        );
+        if close_clicked {
             setting_modal_state.0 = None;
             return;
         }

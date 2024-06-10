@@ -8,20 +8,13 @@ use bevy::{
 };
 use bevy_egui::egui;
 
-use conduit::{bevy::MaxTick, query::MetadataStore, ComponentId, EntityId};
+use conduit::{query::MetadataStore, ComponentId, EntityId};
 use egui::Align;
 
 use crate::ui::{
     colors::{self, with_opacity},
-    theme,
     utils::MarginSides,
-    widgets::{
-        button::ECheckboxButton,
-        label::{buttons_label, label_with_button},
-        plot::GraphState,
-        timeline::tagged_range::TaggedRanges,
-        WidgetSystem,
-    },
+    widgets::{button::ECheckboxButton, label::label_with_buttons, plot::GraphState, WidgetSystem},
     EntityData, SettingModal, SettingModalState,
 };
 
@@ -31,8 +24,6 @@ use super::InspectorIcons;
 pub struct InspectorGraph<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     setting_modal_state: ResMut<'w, SettingModalState>,
-    tagged_ranges: ResMut<'w, TaggedRanges>,
-    max_tick: Res<'w, MaxTick>,
     metadata_store: Res<'w, MetadataStore>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
 }
@@ -54,14 +45,12 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let InspectorGraph {
             entities,
             mut setting_modal_state,
-            mut tagged_ranges,
-            max_tick,
             metadata_store,
             mut graph_states,
         } = state_mut;
 
         let graph_label_margin = egui::Margin::same(0.0).top(10.0).bottom(14.0);
-        let [add_clicked] = buttons_label(
+        let [add_clicked] = label_with_buttons(
             ui,
             [icons.add],
             label,
@@ -77,59 +66,6 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
             return;
         };
-        let selected_range_label = graph_state
-            .range_id
-            .as_ref()
-            .and_then(|rid| tagged_ranges.0.get(rid))
-            .map_or("Default", |r| &r.label)
-            .to_owned();
-
-        let ro_tagged_ranges = tagged_ranges.0.clone();
-
-        let [add_clicked, settings_clicked, subtract_clicked] = buttons_label(
-            ui,
-            [icons.add, icons.setting, icons.subtract],
-            "RANGE",
-            colors::PRIMARY_CREAME,
-            egui::Margin::same(0.0).top(18.0).bottom(4.0),
-        );
-
-        if add_clicked {
-            graph_state.range_id = Some(tagged_ranges.create_range(max_tick.0));
-        }
-        if settings_clicked {
-            if let Some(current_range_id) = &graph_state.range_id {
-                if let Some(current_range) = ro_tagged_ranges.get(current_range_id) {
-                    setting_modal_state.0 = Some(SettingModal::RangeEdit(
-                        current_range_id.clone(),
-                        current_range.label.to_owned(),
-                        current_range.color.to_owned(),
-                    ));
-                }
-            }
-        }
-        if subtract_clicked {
-            if let Some(current_range_id) = &graph_state.range_id {
-                tagged_ranges.remove_range(current_range_id);
-                graph_state.range_id = None;
-            }
-        }
-
-        ui.scope(|ui| {
-            theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("RANGE")
-                .width(ui.available_width())
-                .selected_text(selected_range_label)
-                .show_ui(ui, |ui| {
-                    theme::configure_combo_item(ui.style_mut());
-
-                    ui.selectable_value(&mut graph_state.range_id, None, "Default");
-
-                    for (range_id, range) in ro_tagged_ranges {
-                        ui.selectable_value(&mut graph_state.range_id, Some(range_id), range.label);
-                    }
-                });
-        });
 
         egui::Frame::none()
             .inner_margin(egui::Margin::symmetric(8.0, 8.0))
@@ -156,13 +92,14 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
             if let Some((_, _, _, entity_metadata)) = entity {
                 let entity_label_margin = egui::Margin::same(0.0).top(18.0).bottom(4.0);
-                if label_with_button(
+                let [add_clicked] = label_with_buttons(
                     ui,
-                    icons.add,
+                    [icons.add],
                     &entity_metadata.name,
                     colors::PRIMARY_CREAME,
                     entity_label_margin,
-                ) {
+                );
+                if add_clicked {
                     setting_modal_state.0 =
                         Some(SettingModal::Graph(graph_id, Some(*entity_id), None));
                 }
@@ -175,13 +112,14 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     let element_names = metadata.element_names();
 
                     let component_label_margin = egui::Margin::symmetric(0.0, 18.0);
-                    if label_with_button(
+                    let [subtract_clicked] = label_with_buttons(
                         ui,
-                        icons.subtract,
+                        [icons.subtract],
                         component_label,
                         with_opacity(colors::PRIMARY_CREAME, 0.3),
                         component_label_margin,
-                    ) {
+                    );
+                    if subtract_clicked {
                         remove_list.push((*entity_id, *component_id));
                     }
 
