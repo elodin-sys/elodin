@@ -5,6 +5,7 @@ use crate::Result;
 use crate::{PrimitiveType, Status};
 use crate::{XlaBuilder, XlaComputation};
 use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 use std::ops::{Add, Div, Mul, Sub};
 use std::pin::Pin;
 
@@ -19,7 +20,7 @@ cpp! {{
 
 cpp_class!(pub unsafe struct XlaOpRaw as "XlaOp");
 cpp_class!(pub unsafe struct DotDimensionNumbers as "DotDimensionNumbers");
-cpp_class!(pub unsafe struct ScatterDimensionNumbers as "ScatterDimensionNumbers");
+cpp_class!(pub unsafe struct ScatterDimensionNumbers as "std::unique_ptr<ScatterDimensionNumbers>");
 
 #[derive(Clone)]
 pub struct XlaOp {
@@ -209,6 +210,7 @@ impl XlaOp {
 
     pub fn dot_general(&self, rhs: &Self, dims: DotDimensionNumbers) -> Self {
         let op = &self.raw;
+        let dims = ManuallyDrop::new(dims);
         let raw = unsafe {
             cpp!([op as "const XlaOp*", rhs as "const XlaOp*", dims as "DotDimensionNumbers"] -> XlaOpRaw as "XlaOp" {
                 try {
@@ -1096,7 +1098,7 @@ impl XlaOp {
         scatter_indices: &XlaOp,
         updates: &[XlaOpRef<'_>],
         update_comp: &XlaComputation,
-        scatter_dimension_numbers: &ScatterDimensionNumbers,
+        scatter_dimension_numbers: ScatterDimensionNumbers,
         indices_are_sorted: bool,
         unique_indices: bool,
     ) -> XlaOp {
@@ -1111,7 +1113,7 @@ impl XlaOp {
                 scatter_indices as "XlaOp*",
                 update_comp as "const XlaComputation*",
                 updates_ptr as "const XlaOp*", updates_len as "size_t",
-                scatter_dimension_numbers as "ScatterDimensionNumbers*",
+                scatter_dimension_numbers as "std::unique_ptr<ScatterDimensionNumbers>",
                 indices_are_sorted as "bool",
                 unique_indices as "bool"
             ] -> XlaOpRaw as "XlaOp" {
@@ -1121,7 +1123,7 @@ impl XlaOp {
                         *scatter_indices,
                         absl::Span(updates_ptr, updates_len),
                         *update_comp,
-                        *scatter_dimension_numbers,
+                        *scatter_dimension_numbers.get(),
                         indices_are_sorted,
                         unique_indices
                     )
@@ -1207,40 +1209,40 @@ impl DotDimensionNumbers {
 impl ScatterDimensionNumbers {
     pub fn new() -> ScatterDimensionNumbers {
         unsafe {
-            cpp!([] -> ScatterDimensionNumbers as "ScatterDimensionNumbers" {
-                return ScatterDimensionNumbers();
+            cpp!([] -> ScatterDimensionNumbers as "std::unique_ptr<ScatterDimensionNumbers>" {
+                return std::make_unique<ScatterDimensionNumbers>();
             })
         }
     }
 
     pub fn add_window_dim(&mut self, dim: i64) {
         unsafe {
-            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
-                self->add_update_window_dims(dim);
+            cpp!([self as "std::unique_ptr<ScatterDimensionNumbers>*", dim as "int64_t"] {
+                self->get()->add_update_window_dims(dim);
             })
         }
     }
 
     pub fn add_inserted_window_dim(&mut self, dim: i64) {
         unsafe {
-            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
-                self->add_inserted_window_dims(dim);
+            cpp!([self as "std::unique_ptr<ScatterDimensionNumbers>*", dim as "int64_t"] {
+                self->get()->add_inserted_window_dims(dim);
             })
         }
     }
 
     pub fn add_scatter_dims_to_operand_dims(&mut self, dim: i64) {
         unsafe {
-            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
-                self->add_scatter_dims_to_operand_dims(dim);
+            cpp!([self as "std::unique_ptr<ScatterDimensionNumbers>*", dim as "int64_t"] {
+                self->get()->add_scatter_dims_to_operand_dims(dim);
             })
         }
     }
 
     pub fn set_index_vector_dim(&mut self, dim: i64) {
         unsafe {
-            cpp!([self as "ScatterDimensionNumbers*", dim as "int64_t"] {
-                self->set_index_vector_dim(dim);
+            cpp!([self as "std::unique_ptr<ScatterDimensionNumbers>*", dim as "int64_t"] {
+                self->get()->set_index_vector_dim(dim);
             })
         }
     }
