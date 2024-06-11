@@ -8,18 +8,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--ticks", type=int, default=1200)
 parser.add_argument("--export-dir", type=str, default=None)
-parser.add_argument("--plot", action="store_true")
 args = parser.parse_args()
 
 exec = world(args.seed).build(system())
 exec.run(args.ticks)
-df = exec.history()
 
 if args.export_dir:
     exec.write_to_dir(args.export_dir)
-
-if args.plot:
+else:
     fig, ax = plt.subplots()
+    df = exec.history()
     df = df.sort("tick").select(["tick", "world_pos"]).drop_nulls()
     df = df.with_columns(
         pl.col("world_pos").arr.get(4).alias("x"),
