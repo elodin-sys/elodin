@@ -1,6 +1,8 @@
 # Changelog
 
 ## [unreleased]
+
+## [v0.3.23]
 - Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
 - **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
 - `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
@@ -162,7 +164,8 @@
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.22...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.23...HEAD
+[v0.3.23]: https://github.com/elodin-sys/paracosm/compare/v0.3.22...v0.3.23
 [v0.3.22]: https://github.com/elodin-sys/paracosm/compare/v0.3.21...v0.3.22
 [v0.3.21]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...v0.3.21
 [v0.3.20]: https://github.com/elodin-sys/paracosm/compare/v0.3.19...v0.3.20
