@@ -4,6 +4,7 @@
 - Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
 - **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
 - `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
+- Export simulation data to a directory using `exec.write_to_dir(path)`.
 
 ## [v0.3.22]
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
