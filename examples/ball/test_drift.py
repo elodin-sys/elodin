@@ -10,7 +10,7 @@ def test_origin_drift(df: pl.DataFrame):
         pl.col("world_pos").arr.get(5).alias("y"),
         pl.col("world_pos").arr.get(6).alias("z"),
     )
-    distance = np.linalg.norm(df.select(["x", "z"]).to_numpy(), axis=1)
+    distance = np.linalg.norm(df.select(["x", "y"]).to_numpy(), axis=1)
     df = df.with_columns(pl.Series(distance).alias("distance"))
     max_dist = cast(int, df["distance"].max())
     assert max_dist < 2
