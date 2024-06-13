@@ -61,12 +61,9 @@ pub struct Test {
 
 impl Test {
     fn sample_number(&self) -> Option<usize> {
-        for keyword in &self.keywords {
-            if keyword.starts_with("sample_number") {
-                return keyword.split('=').last().and_then(|s| s.parse().ok());
-            }
-        }
-        None
+        let keyword = self.keywords.first()?;
+        // Given a keyword like "test_function[0]", extract the sample number in the brackets
+        keyword.split('[').last()?.split(']').next()?.parse().ok()
     }
 }
 
