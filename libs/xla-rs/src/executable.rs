@@ -47,7 +47,7 @@ impl PjRtLoadedExecutable {
                         for (auto& replica_bufs : bufs) {
                              for (auto& buf : replica_bufs) {
                                  auto out_buf_ptr = rust!(push_out_buf_loaded_exec [out_ptr : &mut Vec<PjRtBuffer> as "void*"] -> *mut PjRtBuffer as "std::unique_ptr<PjRtBuffer>*" {
-                                     out_ptr.push(std::mem::transmute(std::ptr::null::<()>()));
+                                     out_ptr.push(PjRtBuffer::default());
                                      let i = out_ptr.len() - 1;
                                      let ptr = &mut out_ptr[i];
                                      ptr as *mut PjRtBuffer
