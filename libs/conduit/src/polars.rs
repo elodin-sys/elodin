@@ -127,10 +127,7 @@ impl PolarsWorld {
     pub fn join_archetypes(&self) -> Result<DataFrame, Error> {
         let mut tables = self.archetypes.values();
         let init = tables.next().cloned().unwrap_or_default();
-        let mut keys = vec![EntityId::NAME, "tick"];
-        if init.get_column_names().contains(&"sample_number") {
-            keys.push("sample_number");
-        }
+        let keys = vec![EntityId::NAME, "tick"];
         tables
             .try_fold(init, |agg, df| {
                 agg.join(
