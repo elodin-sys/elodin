@@ -110,7 +110,7 @@ pub fn format_num(mut num: f64) -> String {
     // need 2 characters for the sign and the decimal point
     let digit_width = width - 2;
     let digits = (num.abs().log10().ceil() as usize).saturating_add(1);
-    let precision = digit_width.saturating_sub(digits).min(3).max(1);
+    let precision = digit_width.saturating_sub(digits).clamp(1, 3);
     // round to the nearest multiple of 10^(-precision)
     num = (num * 10.0_f64.powi(precision as i32)).round() / 10.0_f64.powi(precision as i32);
     // -0.0 is wierd, just make it 0.0

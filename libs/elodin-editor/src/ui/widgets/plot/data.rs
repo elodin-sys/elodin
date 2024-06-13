@@ -14,7 +14,6 @@ use conduit::{
 use itertools::Itertools;
 use roaring::RoaringBitmap;
 
-use std::f64::NAN;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use super::GraphState;
@@ -303,7 +302,7 @@ pub struct Chunk {
 impl Chunk {
     pub fn unhydrated(range: Range<usize>) -> Self {
         Chunk {
-            data: range.clone().map(|_| NAN).collect(),
+            data: range.clone().map(|_| f64::NAN).collect(),
             range: range.clone(),
             unfetched: range.map(|x| x as u32).collect(),
         }
@@ -350,7 +349,7 @@ impl CachedData {
                 let i = tick - last.range.start;
                 if i > last.data.len() {
                     for j in last.data.len()..i {
-                        last.data.insert(j, NAN);
+                        last.data.insert(j, f64::NAN);
                     }
                 }
                 if i == last.data.len() {
