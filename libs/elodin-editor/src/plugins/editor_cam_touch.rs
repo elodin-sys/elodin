@@ -52,6 +52,7 @@ pub struct TwoFingerGestures {
     pub pinch: f32,
     /// The delta angle of the two touches.
     /// Positive values correspond to rotating clockwise.
+    #[allow(dead_code)]
     pub rotation: f32,
 
     pub midpoint: Vec2,
