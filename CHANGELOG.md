@@ -1,18 +1,18 @@
 # Changelog
 
 ## [unreleased]
+- **(fix)** If there were pytest failures in a  Monte Carlo sample, the sample would still be reported as a pass. This is now fixed.
 
 ## [v0.3.23]
-- Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
+- **(breaking)** Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
 - **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
+- Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status).
 - `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
 - Export simulation data to a directory using `exec.write_to_dir(path)`.
-- Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
 
 ## [v0.3.22]
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
-    - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
-    The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
+    - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap. The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
 
 ## [v0.3.21]
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .

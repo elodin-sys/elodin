@@ -26,52 +26,52 @@
       "outcome": "passed",
       "result": [
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=0]",
+          "nodeid": "examples/ball.py::test_origin_drift[0]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=1]",
+          "nodeid": "examples/ball.py::test_origin_drift[1]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=2]",
+          "nodeid": "examples/ball.py::test_origin_drift[2]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=3]",
+          "nodeid": "examples/ball.py::test_origin_drift[3]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=4]",
+          "nodeid": "examples/ball.py::test_origin_drift[4]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=5]",
+          "nodeid": "examples/ball.py::test_origin_drift[5]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=6]",
+          "nodeid": "examples/ball.py::test_origin_drift[6]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=7]",
+          "nodeid": "examples/ball.py::test_origin_drift[7]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=8]",
+          "nodeid": "examples/ball.py::test_origin_drift[8]",
           "type": "Function",
           "lineno": 80
         },
         {
-          "nodeid": "examples/ball.py::test_origin_drift[sample_number=9]",
+          "nodeid": "examples/ball.py::test_origin_drift[9]",
           "type": "Function",
           "lineno": 80
         }
@@ -80,12 +80,12 @@
   ],
   "tests": [
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=0]",
+      "nodeid": "examples/ball.py::test_origin_drift[0]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=0]",
-        "sample_number=0",
+        "test_origin_drift[0]",
+        "0",
         "ball.py",
         "examples",
         "nox-py",
@@ -105,12 +105,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=1]",
+      "nodeid": "examples/ball.py::test_origin_drift[1]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=1]",
-        "sample_number=1",
+        "test_origin_drift[1]",
+        "1",
         "ball.py",
         "examples",
         "nox-py",
@@ -130,12 +130,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=2]",
+      "nodeid": "examples/ball.py::test_origin_drift[2]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=2]",
-        "sample_number=2",
+        "test_origin_drift[2]",
+        "2",
         "ball.py",
         "examples",
         "nox-py",
@@ -155,12 +155,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=3]",
+      "nodeid": "examples/ball.py::test_origin_drift[3]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=3]",
-        "sample_number=3",
+        "test_origin_drift[3]",
+        "3",
         "ball.py",
         "examples",
         "nox-py",
@@ -180,12 +180,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=4]",
+      "nodeid": "examples/ball.py::test_origin_drift[4]",
       "lineno": 80,
       "outcome": "failed",
       "keywords": [
-        "test_origin_drift[sample_number=4]",
-        "sample_number=4",
+        "test_origin_drift[4]",
+        "4",
         "ball.py",
         "examples",
         "nox-py",
@@ -218,12 +218,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=5]",
+      "nodeid": "examples/ball.py::test_origin_drift[5]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=5]",
-        "sample_number=5",
+        "test_origin_drift[5]",
+        "5",
         "ball.py",
         "examples",
         "nox-py",
@@ -243,12 +243,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=6]",
+      "nodeid": "examples/ball.py::test_origin_drift[6]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=6]",
-        "sample_number=6",
+        "test_origin_drift[6]",
+        "6",
         "ball.py",
         "examples",
         "nox-py",
@@ -268,12 +268,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=7]",
+      "nodeid": "examples/ball.py::test_origin_drift[7]",
       "lineno": 80,
       "outcome": "failed",
       "keywords": [
-        "test_origin_drift[sample_number=7]",
-        "sample_number=7",
+        "test_origin_drift[7]",
+        "7",
         "ball.py",
         "examples",
         "nox-py",
@@ -306,12 +306,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=8]",
+      "nodeid": "examples/ball.py::test_origin_drift[8]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=8]",
-        "sample_number=8",
+        "test_origin_drift[8]",
+        "8",
         "ball.py",
         "examples",
         "nox-py",
@@ -331,12 +331,12 @@
       }
     },
     {
-      "nodeid": "examples/ball.py::test_origin_drift[sample_number=9]",
+      "nodeid": "examples/ball.py::test_origin_drift[9]",
       "lineno": 80,
       "outcome": "passed",
       "keywords": [
-        "test_origin_drift[sample_number=9]",
-        "sample_number=9",
+        "test_origin_drift[9]",
+        "9",
         "ball.py",
         "examples",
         "nox-py",
