@@ -96,7 +96,15 @@ async fn sim_socket(ws: WebSocketUpgrade, State(context): State<WSContext>) -> i
             );
         let ws_tx = Box::pin(ws_tx);
 
-        if let Err(_) = handle_stream_sink(context.socket.clone(), ws_tx, ws_rx).await {
+        if let Err(_) = handle_stream_sink(
+            context.socket.clone(),
+            ws_tx,
+            ws_rx,
+            std::iter::empty(),
+            std::iter::empty(),
+        )
+        .await
+        {
             if let Some(cancel_token) = context.cancel_token.as_ref() {
                 cancel_token.cancel();
             }

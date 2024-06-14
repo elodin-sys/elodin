@@ -1,6 +1,5 @@
 use crate::{concat_str, ConstComponent};
 use crate::{Component, ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
-use ndarray::{array, CowArray};
 use paste::paste;
 use smallvec::SmallVec;
 
@@ -35,18 +34,20 @@ macro_rules! impl_primitive {
 
         impl ConstComponent for $ty {
             const TY: ComponentType = ComponentType::$ty();
+            const MAX_SIZE: usize = core::mem::size_of::<$ty>();
         }
 
         impl ValueRepr for $ty {
-            fn component_value(&self) -> crate::ComponentValue<'_> {
-                let arr = array![*self].into_dyn();
+            type ValueDim = ndarray::Ix0;
+
+            fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+                let arr = ndarray::arr0(*self);
                 ComponentValue::$prim_ty(ndarray::CowArray::from(arr))
             }
 
-            fn from_component_value(value: crate::ComponentValue<'_>) -> Option<Self>
-            where
-                Self: Sized,
-            {
+            fn from_component_value<D: ndarray::Dimension>(
+                value: crate::ComponentValue<'_, D>,
+            ) -> Option<Self> {
                 let ComponentValue::$prim_ty(arr) = value else {
                     return None;
                 };
@@ -69,17 +70,20 @@ macro_rules! impl_primitive {
                 primitive_ty: PrimitiveTy::$prim_ty,
                 shape: unsafe { SmallVec::from_const_with_len_unchecked([N as i64, 0, 0, 0], 1) },
             };
+
+            const MAX_SIZE: usize = core::mem::size_of::<[$ty; N]>();
         }
 
         impl<const N: usize> ValueRepr for [$ty; N] {
-            fn component_value(&self) -> ComponentValue<'_> {
-                ComponentValue::$prim_ty(CowArray::from(self).into_dyn())
+            type ValueDim = ndarray::Ix1;
+
+            fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+                ComponentValue::$prim_ty(ndarray::CowArray::from(self))
             }
 
-            fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
-            where
-                Self: Sized,
-            {
+            fn from_component_value<D: ndarray::Dimension>(
+                value: crate::ComponentValue<'_, D>,
+            ) -> Option<Self> {
                 let ComponentValue::$prim_ty(val) = value else {
                     return None;
                 };

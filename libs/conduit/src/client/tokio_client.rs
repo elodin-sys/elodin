@@ -1,5 +1,4 @@
 use bytes::{Buf, Bytes, BytesMut};
-use futures::Sink;
 use std::io;
 use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -35,8 +34,12 @@ where
         use futures::stream::StreamExt;
         let buf = match self.inner.next().await {
             Some(Ok(m)) => m,
-            Some(Err(err)) => return Err(err.into()),
-            None => return Err(Error::ConnectionClosed),
+            Some(Err(err)) => {
+                return Err(err.into());
+            }
+            None => {
+                return Err(Error::ConnectionClosed);
+            }
         };
         let buf = buf.freeze();
         let packet = Packet::parse(buf)?;
@@ -46,7 +49,7 @@ where
 
 impl<T> AsyncClient<T>
 where
-    T: Sink<Bytes, Error = io::Error> + Unpin,
+    T: futures::Sink<Bytes, Error = io::Error> + Unpin,
 {
     pub async fn send(&mut self, packet: Packet<Payload<impl Buf + Slice>>) -> Result<(), Error> {
         use futures::SinkExt;
