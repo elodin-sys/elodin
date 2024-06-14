@@ -26,12 +26,12 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     let conduit = quote! { #crate_name::conduit };
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
+        let ty = &field.ty;
         let component_id = match &field.component_id {
             Some(c) => quote! {
                 #crate_name::conduit::ComponentId::new(#c)
             },
             None => {
-                let ty = &field.ty;
                 quote! {
                     #crate_name::conduit::ComponentId::new(<#ty as #crate_name::conduit::Component>::NAME)
                 }
@@ -40,14 +40,11 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         let ident = field.ident.as_ref().expect("only named fields allowed");
         if let Some(id) = field.entity_id {
             quote! {
-                output.sink_column(#component_id,
-                #conduit::ColumnPayload::try_from_value_iter(0,
-                core::iter::once(
-                    #conduit::ser_de::ColumnValue {
-                        entity_id: #conduit::EntityId(#id),
-                        value: self.#ident.component_value()
-                    }
-                )).unwrap());
+                output.apply_value(
+                    #component_id,
+                     #conduit::EntityId(#id),
+                    self.#ident.fixed_dim_component_value().clone(),
+                );
             }
         }else{
             quote! {
@@ -122,9 +119,47 @@ pub fn componentize(input: TokenStream) -> TokenStream {
             quote! {}
         }
     });
+    let count_arms = fields.fields.iter().map(|field| {
+        let ty = &field.ty;
+        if field.entity_id.is_some() {
+            quote! {
+                <#ty as #crate_name::conduit::ConstComponent>::MAX_SIZE +
+            }
+        } else {
+            quote! {
+                <#ty as #crate_name::Componentize>::MAX_SIZE +
+            }
+        }
+    });
+
+    let metadata_items = fields.fields.iter().map(|field| {
+        if field.entity_id.is_some() {
+            let ty = &field.ty;
+            let component_name = match &field.component_id {
+                Some(c) => quote! {
+                    #c
+                },
+                None => {
+                    quote! {
+                        <#ty as #crate_name::conduit::Component>::NAME
+                    }
+                }
+            };
+            quote! {
+                #conduit::Metadata {
+                    name: std::borrow::Cow::Borrowed(#component_name),
+                    component_type: <#ty as #conduit::ConstComponent>::TY,
+                    tags: None,
+                    asset: false,
+                },
+            }
+        } else {
+            quote! {}
+        }
+    });
     quote! {
         impl #crate_name::Componentize for #ident #generics #where_clause {
-            fn sink_columns<Buf: #conduit::ser_de::Frozen>(&self, output: &mut impl #crate_name::ColumnSink<Buf>) {
+            fn sink_columns(&self, output: &mut impl #crate_name::Decomponentize) {
                 use #conduit::ValueRepr;
                 #(#sink_calls)*
             }
@@ -136,6 +171,14 @@ pub fn componentize(input: TokenStream) -> TokenStream {
                     #(#match_arms)*
                     _ => None
                 }
+            }
+
+            const MAX_SIZE: usize = #(#count_arms)* 0;
+
+            fn metadata() -> impl Iterator<Item = #conduit::Metadata> {
+                [
+                    #(#metadata_items)*
+                ].into_iter()
             }
         }
     }.into()

@@ -58,6 +58,7 @@ pub struct RWMotorVoltage {
 }
 
 impl RWMotorVoltage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: VoltageConfig,
         motor_voltage_out: BskChannel<ArrayMotorVoltageMsgPayload>,

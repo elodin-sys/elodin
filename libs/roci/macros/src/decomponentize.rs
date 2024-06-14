@@ -49,29 +49,26 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         let const_name = syn::Ident::new(&const_name, Span::call_site());
         quote! {
             const #const_name: #conduit::ComponentId = #component_id;
-            if component_id == #const_name {
-                let payload = payload.as_ref();
-                let mut iter = payload.into_iter(metadata.component_type.clone());
-                while let Some(Ok(#conduit::ser_de::ColumnValue { entity_id, value })) = iter.next() {
-                    if entity_id == #conduit::EntityId(#id) {
-                        if let Some(val) = <#ty>::from_component_value(value) {
-                            self.#ident = val;
-                        }
+            if component_id == #const_name && entity_id == #conduit::EntityId(#id) {
+                if let Some(val) = <#ty>::from_component_value(value.clone()) {
+                    self.#ident = val;
                     }
-                }
             }
         }
         }else {
             quote! {
-                self.#ident.apply_column(metadata, payload);
+                self.#ident.apply_value(component_id, entity_id, value.clone());
             }
         }
     });
     quote! {
         impl #crate_name::Decomponentize for #ident #generics #where_clause {
-            fn apply_column<B: AsRef<[u8]>>(&mut self, metadata: &#conduit::Metadata, payload: &#conduit::ColumnPayload<B>) {
+            fn apply_value<D: #conduit::ComponentValueDim>(&mut self,
+                            component_id: #conduit::ComponentId,
+                            entity_id: #conduit::EntityId,
+                            value: #conduit::ComponentValue<'_, D>
+            ) {
                 use #conduit::ValueRepr;
-                let component_id = metadata.component_id();
                 #(#if_arms)*
             }
         }
