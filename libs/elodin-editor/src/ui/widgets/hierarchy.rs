@@ -4,10 +4,11 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use conduit::well_known::EntityMetadata;
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 use crate::ui::{
     colors::{self, EColor},
-    utils, EntityData, EntityDataReadOnly, EntityFilter, EntityPair, SelectedObject, SidebarState,
+    utils, EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
 };
 
 use super::{WidgetSystem, WidgetSystemExt};
@@ -164,19 +165,23 @@ pub fn entity_list(
     egui::ScrollArea::both()
         .show(ui, |ui| {
             ui.vertical(|ui| {
+                let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
                 // TODO: Improve filter & sorting efficiency
                 let mut filtered_entities = entities
                     .into_iter()
-                    .filter(|(_, _, _, metadata)| {
-                        metadata
-                            .name
-                            .to_lowercase()
-                            .contains(&entity_filter.to_lowercase())
+                    .filter_map(|(id, entity, value_map, metadata)| {
+                        if entity_filter.is_empty() {
+                            Some((id.0 as i64, id, entity, value_map, metadata))
+                        } else {
+                            matcher
+                                .fuzzy_match(&metadata.name, entity_filter)
+                                .map(|score| (score, id, entity, value_map, metadata))
+                        }
                     })
-                    .collect::<Vec<EntityDataReadOnly>>();
-                filtered_entities.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+                    .collect::<Vec<_>>();
+                filtered_entities.sort_by(|a, b| a.0.cmp(&b.0));
 
-                for (entity_id, entity, _, metadata) in filtered_entities {
+                for (_, entity_id, entity, _, metadata) in filtered_entities {
                     let selected = selected_object.is_entity_selected(*entity_id);
                     let list_item = ui.add(list_item(selected, metadata));
 

@@ -2,10 +2,11 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
     event::EventWriter,
-    system::{Query, Res, ResMut, SystemParam, SystemState},
+    system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 use conduit::{
     bevy::ColumnPayloadMsg,
@@ -39,6 +40,7 @@ pub struct InspectorEntity<'w, 's> {
     metadata_store: Res<'w, MetadataStore>,
     column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    filter: ResMut<'w, ComponentFilter>,
 }
 
 impl WidgetSystem for InspectorEntity<'_, '_> {
@@ -51,7 +53,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
         let (icons, pair) = args;
 
@@ -60,7 +62,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let metadata_store = state_mut.metadata_store;
         let mut column_payload_writer = state_mut.column_payload_writer;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
-
         let Ok((entity_id, _, mut map, metadata)) = entities.get_mut(pair.bevy) else {
             ui.add(empty_inspector());
             return;
@@ -69,35 +70,37 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let icon_chart = icons.chart;
         let entity_id = *entity_id;
 
-        ui.add(
-            label::ELabel::new(&metadata.name)
-                .padding(egui::Margin::same(0.0).bottom(24.0))
-                .bottom_stroke(label::ELabel::DEFAULT_STROKE)
-                .margin(egui::Margin::same(0.0).bottom(26.0)),
-        );
-
         let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
         egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(0.0, 8.0))
+            .inner_margin(egui::Margin::ZERO.top(8.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("ENTITY ID")
-                            .color(with_opacity(colors::PRIMARY_CREAME, 0.6))
-                            .font(mono_font.clone()),
+                    ui.add(
+                        label::ELabel::new(&metadata.name)
+                            .padding(egui::Margin::same(0.0).bottom(24.0))
+                            .bottom_stroke(label::ELabel::DEFAULT_STROKE)
+                            .margin(egui::Margin::same(0.0).bottom(26.0)),
                     );
-                    ui.vertical(|ui| {
-                        ui.add_space(3.0);
-                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                            ui.label(
-                                RichText::new(entity_id.0.to_string())
-                                    .color(colors::PRIMARY_CREAME)
-                                    .font(mono_font),
-                            )
-                        });
+
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        ui.label(
+                            RichText::new(entity_id.0.to_string())
+                                .color(colors::PRIMARY_CREAME)
+                                .font(mono_font.clone()),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("ENTITY ID")
+                                .color(with_opacity(colors::PRIMARY_CREAME, 0.6))
+                                .font(mono_font.clone()),
+                        );
                     });
                 });
             });
+
+        search(ui, state_mut.filter.as_mut(), icons.search);
+
+        let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
 
         let mut components = map
             .0
@@ -107,10 +110,21 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                 let priority = metadata.priority();
                 Some((*id, priority, metadata))
             })
+            .filter_map(|(id, priority, metadata)| {
+                if state_mut.filter.0.is_empty() {
+                    Some((id, priority, metadata))
+                } else {
+                    matcher
+                        .fuzzy_match(metadata.component_name(), &state_mut.filter.0)
+                        .map(|score| (id, score, metadata))
+                }
+            })
             .filter(|(_, _, metadata)| !metadata.asset)
             .filter(|(_, priority, _)| *priority >= 0)
             .collect::<Vec<_>>();
         components.sort_by_key(|(id, priority, _)| (*priority, *id));
+
+        ui.add_space(10.0);
 
         for (component_id, _, metadata) in components.into_iter().rev() {
             let component_value = map.0.get_mut(&component_id).unwrap();
@@ -156,6 +170,38 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             }
         }
     }
+}
+
+#[derive(Resource, Default)]
+pub struct ComponentFilter(pub String);
+
+pub fn search(
+    ui: &mut egui::Ui,
+    component_filter: &mut ComponentFilter,
+    search_icon: egui::TextureId,
+) -> egui::Response {
+    ui.vertical(|ui| {
+        egui::Frame::none()
+            .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
+            .rounding(egui::Rounding::same(3.0))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
+
+                    ui.add(
+                        egui::widgets::Image::new(egui::load::SizedTexture::new(
+                            search_icon,
+                            [ui.spacing().interact_size.y, ui.spacing().interact_size.y],
+                        ))
+                        .tint(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
+                    );
+
+                    ui.add(egui::TextEdit::singleline(&mut component_filter.0).frame(false));
+                });
+            });
+    })
+    .response
 }
 
 fn inspector_item_value_ui(

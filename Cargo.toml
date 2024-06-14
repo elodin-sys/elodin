@@ -84,10 +84,6 @@ strip = "debuginfo"
 inherits = "release"
 lto = "thin"
 
-[patch.crates-io]
-winit.git = "https://github.com/elodin-sys/winit.git"
-winit.branch = "feature/cv-display-link"
-
 [workspace.dependencies]
 roci.path = "libs/roci"
 nox.path = "libs/nox"

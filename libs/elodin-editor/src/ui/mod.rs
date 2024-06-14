@@ -25,7 +25,7 @@ use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
 use crate::{GridHandle, MainCamera};
 
-use self::widgets::inspector::Inspector;
+use self::widgets::inspector::{entity::ComponentFilter, Inspector};
 use self::widgets::modal::ModalWithSettings;
 use self::widgets::timeline::timeline_ranges::TimelineRangeId;
 
@@ -157,6 +157,7 @@ impl Plugin for UiPlugin {
             .init_resource::<SelectedObject>()
             .init_resource::<HoveredEntity>()
             .init_resource::<EntityFilter>()
+            .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
             .init_resource::<SidebarState>()

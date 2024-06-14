@@ -16,8 +16,6 @@ nalgebra = "0.32"
 
 # bevy
 bevy.version = "0.13"
-
-# bevy
 bevy.features = ["wayland", ]
 bevy_egui = "0.27"
 egui.version = "0.27"
@@ -38,6 +36,7 @@ big_space.branch = "no_prop_rot"
 bevy_editor_cam.git = "https://github.com/elodin-sys/bevy_editor_cam.git"
 bevy_editor_cam.branch = "fix-wasm-crash"
 bevy_tweening = "0.10"
+bevy_framepace = "0.16"
 
 # rand
 fastrand.version = "2"
@@ -45,17 +44,23 @@ fastrand.version = "2"
 # channel
 flume = "0.11"
 
-conduit.path = "../../libs/conduit"
-postcard.version = "1.0.8"
-itertools = "0.12.1"
 
 # futures
 futures-lite = "2.0"
 
+# protocols
+postcard.version = "1.0.8"
 reqwest = { version = "0.11", features = ["rustls-tls", "gzip"], default-features = false }
+conduit.path = "../../libs/conduit"
+
+# search
 fuzzy-matcher = "0.3.7"
 
+# data-structures
 roaring = "0.10.4"
+
+# helpers
+itertools = "0.12.1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
