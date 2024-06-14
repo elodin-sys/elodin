@@ -41,6 +41,7 @@ pub struct SunlineConfig {
 }
 
 impl SunlineEKF {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         nav_state_out: BskChannel<NavAttMsgPayload>,
         filter_data_out: BskChannel<SunlineFilterMsgPayload>,

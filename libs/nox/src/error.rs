@@ -37,6 +37,7 @@ pub enum Error {
     OutOfBoundsAccess,
 
     /// Error propagated from Python operations via PyO3.
+    #[cfg(feature = "jax")]
     #[error("pyo3 error {0}")]
     PyO3(#[from] pyo3::PyErr),
 

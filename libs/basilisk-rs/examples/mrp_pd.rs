@@ -3,13 +3,16 @@ use basilisk::{
     channel::BskChannel,
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
-use conduit::{ComponentId, Query};
+use conduit::Query;
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
-use roci::{tokio::Input, *};
+use roci::{
+    combinators::PipeExt,
+    drivers::{os_sleep_driver, Driver, Hz},
+    *,
+};
 use roci_macros::{Componentize, Decomponentize};
-use std::time::Duration;
 
-#[derive(Default, Componentize, Decomponentize)]
+#[derive(Debug, Default, Componentize, Decomponentize)]
 struct World {
     #[roci(entity_id = 3, component_id = "world_pos")]
     world_pos: SpatialTransform<f64, ArrayRepr>,
@@ -54,9 +57,10 @@ impl MRPHandler {
     }
 }
 
-impl Handler for MRPHandler {
+impl System for MRPHandler {
     type World = World;
-    fn tick(&mut self, world: &mut Self::World) {
+    type Driver = Hz<10>;
+    fn update(&mut self, world: &mut Self::World) {
         let quat = world.world_pos.angular();
         let att_mrp = quat_to_mrp(&quat);
         let goal = quat_to_mrp(&world.goal);
@@ -79,26 +83,24 @@ impl Handler for MRPHandler {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    roci::tokio::builder(
-        MRPHandler::new(),
-        Duration::from_millis(100),
-        "127.0.0.1:2242".parse().unwrap(),
-    )
-    .tcp_output(
-        Query::with_id(ComponentId::new("control_force")),
+    let (server_tx, server_rx) =
+        tokio::tcp_listen::<Hz<10>>("127.0.0.1:2241".parse().unwrap(), &[], World::metadata());
+    let (sim_tx, sim_rx) = tokio::tcp_connect::<Hz<10>>(
         "127.0.0.1:2240".parse().unwrap(),
-    )
-    .subscribe(
-        Query::with_id(ComponentId::new("goal")),
-        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
-    )
-    .subscribe(
-        Query::with_id(ComponentId::new("world_pos")),
-        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
-    )
-    .subscribe(
-        Query::with_id(ComponentId::new("ang_vel_est")),
-        Input::Tcp("127.0.0.1:2240".parse().unwrap()),
+        &[
+            Query::with_id("goal"),
+            Query::with_id("world_pos"),
+            Query::with_id("ang_vel_est"),
+        ],
+        World::metadata().filter(|m| m.name == "control_force"),
+    );
+
+    os_sleep_driver(
+        server_rx
+            .pipe(sim_rx)
+            .pipe(MRPHandler::new())
+            .pipe(sim_tx)
+            .pipe(server_tx),
     )
     .run();
 }

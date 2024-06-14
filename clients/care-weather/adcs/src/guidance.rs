@@ -3,7 +3,7 @@ use basilisk::{
     sys::{AttGuidMsgPayload, EphemerisMsgPayload, NavAttMsgPayload, NavTransMsgPayload},
 };
 use nox::{ArrayRepr, SpatialTransform};
-use roci::{Componentize, Decomponentize, Handler};
+use roci::{Componentize, Decomponentize, System};
 use serde::{Deserialize, Serialize};
 
 use crate::NavData;
@@ -75,10 +75,11 @@ impl Guidance {
     }
 }
 
-impl Handler for Guidance {
+impl System for Guidance {
     type World = World;
+    type Driver = roci::drivers::Hz<100>;
 
-    fn tick(&mut self, world: &mut Self::World) {
+    fn update(&mut self, world: &mut Self::World) {
         // let att = world.inertial_pos.angular().inverse();
         // let ang_vel = att * world.inertial_vel.angular();
         self.nav_att_in.write(

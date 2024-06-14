@@ -1,9 +1,8 @@
 use basilisk::att_determination::SunlineConfig;
 use basilisk::sys::CSSArraySensorMsgPayload;
 use basilisk::sys::NavAttMsgPayload;
-
 use basilisk::{att_determination::SunlineEKF, channel::BskChannel};
-use roci::Handler;
+use roci::System;
 use roci::{Componentize, Decomponentize};
 
 use crate::NavData;
@@ -52,10 +51,11 @@ impl Determination {
     }
 }
 
-impl Handler for Determination {
+impl System for Determination {
     type World = World;
+    type Driver = roci::drivers::Hz<100>;
 
-    fn tick(&mut self, world: &mut Self::World) {
+    fn update(&mut self, world: &mut Self::World) {
         let mut css_cos_values = [0.0; 32];
         css_cos_values[0] = world.css_inputs.css_0;
         css_cos_values[1] = world.css_inputs.css_1;

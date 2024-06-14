@@ -39,7 +39,9 @@ impl crate::Component for WorldPos {
 }
 
 impl ValueRepr for WorldPos {
-    fn component_value(&self) -> crate::ComponentValue<'_> {
+    type ValueDim = ndarray::Ix1;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
         let arr = array![
             self.att.coords.x,
             self.att.coords.y,
@@ -48,12 +50,13 @@ impl ValueRepr for WorldPos {
             self.pos.x,
             self.pos.y,
             self.pos.z
-        ]
-        .into_dyn();
+        ];
         ComponentValue::F64(CowArray::from(arr))
     }
 
-    fn from_component_value(value: crate::ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<D: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, D>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -91,15 +94,16 @@ impl crate::Component for TraceAnchor {
 }
 
 impl ValueRepr for TraceAnchor {
-    fn component_value(&self) -> crate::ComponentValue<'_> {
-        let arr = array![self.anchor.x, self.anchor.y, self.anchor.z].into_dyn();
+    type ValueDim = Ix1;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        let arr = array![self.anchor.x, self.anchor.y, self.anchor.z];
         ComponentValue::F64(CowArray::from(arr))
     }
 
-    fn from_component_value(value: crate::ComponentValue<'_>) -> Option<Self>
-    where
-        Self: Sized,
-    {
+    fn from_component_value<D: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, D>,
+    ) -> Option<Self> {
         let crate::ComponentValue::F64(arr) = value else {
             return None;
         };

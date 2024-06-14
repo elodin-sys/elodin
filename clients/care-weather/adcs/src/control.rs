@@ -6,7 +6,7 @@ use basilisk::{
         ArrayMotorVoltageMsgPayload, AttGuidMsgPayload, RWSpeedMsgPayload, VehicleConfigMsgPayload,
     },
 };
-use roci::{Componentize, Decomponentize, Handler};
+use roci::{Componentize, Decomponentize, System};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Componentize, Decomponentize)]
@@ -141,10 +141,11 @@ impl Control {
     }
 }
 
-impl Handler for Control {
+impl System for Control {
     type World = World;
+    type Driver = roci::drivers::Hz<100>;
 
-    fn tick(&mut self, world: &mut Self::World) {
+    fn update(&mut self, world: &mut Self::World) {
         let World {
             att_err,
             rw_speed,

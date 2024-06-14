@@ -1,10 +1,11 @@
-use std::time::Duration;
-
 use basilisk::att_determination::SunlineConfig;
-use conduit::Query;
 use determination::Determination;
 use guidance::{Guidance, GuidanceConfig};
-use roci::{Componentize, Decomponentize};
+use roci::{
+    combinators::PipeExt,
+    drivers::{os_sleep_driver, Driver, Hz},
+    tokio, Componentize, Decomponentize, System,
+};
 use serde::{Deserialize, Serialize};
 
 mod control;
@@ -54,30 +55,10 @@ fn main() {
     let det = Determination::new(sunline);
     let guidance = Guidance::new(guidance.sigma_r0r);
     let control = control::Control::new(control);
-    let (det_handle, det_channel) = roci::tokio::builder(
-        det,
-        Duration::from_secs_f64(1.0 / 100.0),
+    let (tx, rx) = tokio::tcp_listen::<Hz<100>>(
         "127.0.0.1:2241".parse().unwrap(),
-    )
-    .run();
-    let (guidance_handle, guidance_channel) = roci::tokio::builder(
-        guidance,
-        Duration::from_secs_f64(1.0 / 100.0),
-        "127.0.0.1:2242".parse().unwrap(),
-    )
-    .subscribe(Query::with_id("att_mrp_bn"), det_channel.clone())
-    .subscribe(Query::with_id("omega_bn_b"), det_channel.clone())
-    .subscribe(Query::with_id("sun_vec_b"), det_channel.clone())
-    .run();
-    roci::tokio::builder(
-        control,
-        Duration::from_secs_f64(1.0 / 100.0),
-        "127.0.0.1:2243".parse().unwrap(),
-    )
-    .subscribe(Query::with_id("att_err_mrp"), guidance_channel.clone())
-    .subscribe(Query::with_id("omega_err_br_p"), guidance_channel.clone())
-    .subscribe(Query::with_id("omega_err_rn_b"), guidance_channel.clone())
-    .subscribe(Query::with_id("domega_rn_b"), guidance_channel);
-    det_handle.join().unwrap();
-    guidance_handle.join().unwrap();
+        &[],
+        <Determination as System>::World::metadata(),
+    );
+    os_sleep_driver(rx.pipe(det).pipe(guidance).pipe(control).pipe(tx)).run();
 }
