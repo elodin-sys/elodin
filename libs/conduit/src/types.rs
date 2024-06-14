@@ -176,22 +176,24 @@ impl ComponentType {
     }
 }
 
+pub use ndarray::Dimension as ComponentValueDim;
+
 #[derive(Clone, Debug, PartialEq)]
-pub enum ComponentValue<'a> {
-    U8(ndarray::CowArray<'a, u8, IxDyn>),
-    U16(ndarray::CowArray<'a, u16, IxDyn>),
-    U32(ndarray::CowArray<'a, u32, IxDyn>),
-    U64(ndarray::CowArray<'a, u64, IxDyn>),
-    I8(ndarray::CowArray<'a, i8, IxDyn>),
-    I16(ndarray::CowArray<'a, i16, IxDyn>),
-    I32(ndarray::CowArray<'a, i32, IxDyn>),
-    I64(ndarray::CowArray<'a, i64, IxDyn>),
-    Bool(ndarray::CowArray<'a, bool, IxDyn>),
-    F32(ndarray::CowArray<'a, f32, IxDyn>),
-    F64(ndarray::CowArray<'a, f64, IxDyn>),
+pub enum ComponentValue<'a, D: ndarray::Dimension = IxDyn> {
+    U8(ndarray::CowArray<'a, u8, D>),
+    U16(ndarray::CowArray<'a, u16, D>),
+    U32(ndarray::CowArray<'a, u32, D>),
+    U64(ndarray::CowArray<'a, u64, D>),
+    I8(ndarray::CowArray<'a, i8, D>),
+    I16(ndarray::CowArray<'a, i16, D>),
+    I32(ndarray::CowArray<'a, i32, D>),
+    I64(ndarray::CowArray<'a, i64, D>),
+    Bool(ndarray::CowArray<'a, bool, D>),
+    F32(ndarray::CowArray<'a, f32, D>),
+    F64(ndarray::CowArray<'a, f64, D>),
 }
 
-impl<'a> ComponentValue<'a> {
+impl<'a, D: ndarray::Dimension> ComponentValue<'a, D> {
     pub fn primitive_ty(&self) -> PrimitiveTy {
         match self {
             ComponentValue::U8(_) => PrimitiveTy::U8,
@@ -234,7 +236,23 @@ impl<'a> ComponentValue<'a> {
         }
     }
 
-    pub fn into_owned(self) -> ComponentValue<'static> {
+    pub fn into_dyn(self) -> ComponentValue<'a, IxDyn> {
+        match self {
+            ComponentValue::U8(a) => ComponentValue::U8(a.into_dyn()),
+            ComponentValue::U16(a) => ComponentValue::U16(a.into_dyn()),
+            ComponentValue::U32(a) => ComponentValue::U32(a.into_dyn()),
+            ComponentValue::U64(a) => ComponentValue::U64(a.into_dyn()),
+            ComponentValue::I8(a) => ComponentValue::I8(a.into_dyn()),
+            ComponentValue::I16(a) => ComponentValue::I16(a.into_dyn()),
+            ComponentValue::I32(a) => ComponentValue::I32(a.into_dyn()),
+            ComponentValue::I64(a) => ComponentValue::I64(a.into_dyn()),
+            ComponentValue::Bool(a) => ComponentValue::Bool(a.into_dyn()),
+            ComponentValue::F32(a) => ComponentValue::F32(a.into_dyn()),
+            ComponentValue::F64(a) => ComponentValue::F64(a.into_dyn()),
+        }
+    }
+
+    pub fn into_owned(self) -> ComponentValue<'static, D> {
         match self {
             ComponentValue::U8(a) => ComponentValue::U8(CowArray::from(a.into_owned())),
             ComponentValue::U16(a) => ComponentValue::U16(CowArray::from(a.into_owned())),
@@ -247,6 +265,25 @@ impl<'a> ComponentValue<'a> {
             ComponentValue::Bool(a) => ComponentValue::Bool(CowArray::from(a.into_owned())),
             ComponentValue::F32(a) => ComponentValue::F32(CowArray::from(a.into_owned())),
             ComponentValue::F64(a) => ComponentValue::F64(CowArray::from(a.into_owned())),
+        }
+    }
+
+    pub fn borrow<'b>(&'b self) -> ComponentValue<'b, D>
+    where
+        'a: 'b,
+    {
+        match self {
+            ComponentValue::U8(a) => ComponentValue::U8(CowArray::from(a)),
+            ComponentValue::U16(a) => ComponentValue::U16(CowArray::from(a)),
+            ComponentValue::U32(a) => ComponentValue::U32(CowArray::from(a)),
+            ComponentValue::U64(a) => ComponentValue::U64(CowArray::from(a)),
+            ComponentValue::I8(a) => ComponentValue::I8(CowArray::from(a)),
+            ComponentValue::I16(a) => ComponentValue::I16(CowArray::from(a)),
+            ComponentValue::I32(a) => ComponentValue::I32(CowArray::from(a)),
+            ComponentValue::I64(a) => ComponentValue::I64(CowArray::from(a)),
+            ComponentValue::Bool(a) => ComponentValue::Bool(CowArray::from(a)),
+            ComponentValue::F32(a) => ComponentValue::F32(CowArray::from(a)),
+            ComponentValue::F64(a) => ComponentValue::F64(CowArray::from(a)),
         }
     }
 
@@ -303,7 +340,7 @@ impl<'a> ComponentValue<'a> {
     #[cfg(feature = "std")]
     pub fn indexed_iter_mut<'i>(
         &'i mut self,
-    ) -> Box<dyn Iterator<Item = (IxDyn, ElementValueMut<'i>)> + 'i> {
+    ) -> Box<dyn Iterator<Item = (D::Pattern, ElementValueMut<'i>)> + 'i> {
         match self {
             ComponentValue::U8(u8) => Box::new(
                 u8.indexed_iter_mut()
@@ -431,6 +468,7 @@ pub trait Component {
 }
 pub trait ConstComponent: Component {
     const TY: ComponentType;
+    const MAX_SIZE: usize;
 }
 
 pub trait ComponentExt: Component {
@@ -457,8 +495,13 @@ pub trait Archetype {
 }
 
 pub trait ValueRepr {
-    fn component_value(&self) -> ComponentValue<'_>;
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    type ValueDim: ComponentValueDim;
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim>;
+
+    fn component_value(&self) -> ComponentValue<'_> {
+        self.fixed_dim_component_value().into_dyn()
+    }
+    fn from_component_value<D: ndarray::Dimension>(value: ComponentValue<'_, D>) -> Option<Self>
     where
         Self: Sized;
 }
@@ -478,10 +521,14 @@ pub enum Payload<B> {
 impl<T> Packet<Payload<T>> {
     #[cfg(feature = "std")]
     pub fn start_stream(stream_id: StreamId, metadata: Metadata) -> Self {
-        let payload = Payload::ControlMsg(ControlMsg::OpenStream {
+        Self::control(ControlMsg::OpenStream {
             stream_id,
             metadata,
-        });
+        })
+    }
+
+    pub fn control(control_msg: ControlMsg) -> Self {
+        let payload = Payload::ControlMsg(control_msg);
         Packet {
             stream_id: StreamId::CONTROL,
             payload,
@@ -489,11 +536,7 @@ impl<T> Packet<Payload<T>> {
     }
 
     pub fn subscribe(query: Query) -> Self {
-        let payload = Payload::ControlMsg(ControlMsg::Subscribe { query });
-        Packet {
-            stream_id: StreamId::CONTROL,
-            payload,
-        }
+        Self::control(ControlMsg::Subscribe { query })
     }
 
     pub fn column(stream_id: StreamId, column: ColumnPayload<T>) -> Self {
@@ -573,6 +616,11 @@ impl Query {
             with_component_ids: vec![],
             entity_ids: vec![],
         }
+    }
+
+    pub fn matches(&self, component_id: ComponentId, entity_id: EntityId) -> bool {
+        self.component_id == component_id
+            && (self.entity_ids.is_empty() || self.entity_ids.contains(&entity_id))
     }
 }
 

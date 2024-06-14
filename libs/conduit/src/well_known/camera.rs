@@ -1,5 +1,4 @@
 use crate::{Component, ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
-use ndarray::{array, CowArray};
 use smallvec::smallvec;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -19,15 +18,15 @@ impl Component for Camera {
 }
 
 impl ValueRepr for Camera {
-    fn component_value(&self) -> crate::ComponentValue<'_> {
-        let arr = array![0].into_dyn();
-        ComponentValue::U64(CowArray::from(arr))
+    type ValueDim = ndarray::Ix0;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        ComponentValue::U64(ndarray::CowArray::from(ndarray::arr0(0)))
     }
 
-    fn from_component_value(_: crate::ComponentValue<'_>) -> Option<Self>
-    where
-        Self: Sized,
-    {
+    fn from_component_value<D: ndarray::Dimension>(
+        _value: crate::ComponentValue<'_, D>,
+    ) -> Option<Self> {
         Some(Self)
     }
 }
