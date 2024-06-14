@@ -21,8 +21,27 @@ impl From<nox::SpatialTransform<f64>> for SpatialTransform {
 #[pymethods]
 impl SpatialTransform {
     #[new]
-    fn new(arr: PyObject) -> Self {
-        nox::SpatialTransform::from_op(Noxpr::jax(arr)).into()
+    fn new(
+        arr: Option<PyObject>,
+        angular: Option<Quaternion>,
+        linear: Option<PyObject>,
+    ) -> PyResult<Self> {
+        if let Some(arr) = arr {
+            if linear.is_some() || angular.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Cannot specify both array and linear/angular",
+                ));
+            }
+            Ok(nox::SpatialTransform::from_op(Noxpr::jax(arr)).into())
+        } else {
+            let linear = linear
+                .map(|arr| Vector::from_op(Noxpr::jax(arr)))
+                .unwrap_or_else(Vector::zeros);
+            let angular = angular.unwrap_or_else(Quaternion::identity);
+            Ok(Self {
+                inner: nox::SpatialTransform::new(angular.inner, linear),
+            })
+        }
     }
 
     #[staticmethod]

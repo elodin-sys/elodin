@@ -1142,6 +1142,7 @@ impl Noxpr {
             NoxprNode::DynamicSlice(_) => "DynamicSlice",
             NoxprNode::DynamicUpdateSlice(_) => "DynamicUpdateSlice",
             NoxprNode::Scan(_) => "Scan",
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(_) => "Jax",
             NoxprNode::Sin(_) => "Sin",
             NoxprNode::Cos(_) => "Cos",
@@ -1389,6 +1390,7 @@ impl XlaTracer {
                     .collect::<SmallVec<[XlaOpRef<'_>; 4]>>();
                 inner.dynamic_update_slice(&update, &start)
             }
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(_) => {
                 unimplemented!()
             }
@@ -1677,6 +1679,7 @@ impl ReplacementTracer {
                 initial_state: self.visit(&s.initial_state),
                 scan_fn: s.scan_fn.clone(),
             })),
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(j) => Noxpr::new(NoxprNode::Jax(j.clone())),
         };
         self.cache.insert(id, expr.clone());
@@ -2190,6 +2193,7 @@ impl BatchTracer {
                 // TODO: dynamic update slice is a special case of scatter, add this when we add scatter
                 todo!()
             }
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(_) => {
                 unimplemented!()
             }
@@ -2841,6 +2845,7 @@ impl PrettyPrintTracer {
                 write!(writer, ")")?;
                 Ok(num)
             }
+            #[cfg(feature = "jax")]
             NoxprNode::Jax(j) => {
                 let num = self.print_var(id, writer)?;
                 write!(writer, "jax({:?})", j)?;

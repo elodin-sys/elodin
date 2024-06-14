@@ -195,6 +195,20 @@ def euler_to_quat(angles: jax.Array) -> el.Quaternion:
     return el.Quaternion(jnp.array([x, y, z, w]))
 
 
+def quat_to_euler(q: el.Quaternion) -> jax.Array:
+    x, y, z, w = q.vector()
+    roll = jnp.arctan2(2 * (w * x + y * z), 1 - 2 * (x**2 + y**2))
+    pitch = (
+        2
+        * jnp.atan2(
+            jnp.sqrt(1 + 2 * (w * y - x * z)), jnp.sqrt(1 - 2 * (w * y - x * z))
+        )
+        - jnp.pi / 2
+    )
+    yaw = jnp.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
+    return jnp.rad2deg(jnp.array([roll, pitch, yaw]))
+
+
 def quat_from_vecs(v1: jax.Array, v2: jax.Array) -> el.Quaternion:
     v1 = v1 / la.norm(v1)
     v2 = v2 / la.norm(v2)
@@ -450,9 +464,8 @@ w = el.World()
 rocket = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 1.0]))
-            + el.SpatialTransform.from_angular(
-                euler_to_quat(jnp.array([0.0, 70.0, 0.0]))
+            world_pos=el.SpatialTransform(
+                euler_to_quat(jnp.array([0.0, 70.0, 0.0])), jnp.array([0.0, 0.0, 1.0])
             ),
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),

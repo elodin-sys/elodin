@@ -1,13 +1,13 @@
-use nalgebra::Const;
+use nalgebra::{Const, Dyn};
 use nox::{
     xla::{ArrayElement, ElementType, NativeType, PjRtBuffer},
-    Array, ArrayRepr, ArrayTy, Client, ConstDim, Dim, IntoOp, NoxprNode, Quaternion, Repr,
-    SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
+    Array, ArrayDim, ArrayRepr, ArrayTy, Client, ConstDim, Dim, IntoOp, NoxprNode, Quaternion,
+    Repr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
 use smallvec::{smallvec, SmallVec};
 use std::ops::Deref;
 
-use core::mem::MaybeUninit;
+use core::mem::{self, MaybeUninit};
 
 use crate::{
     concat_str,
@@ -117,11 +117,19 @@ impl<T: ArrayElement + NativeType, D: Dim> ValueRepr for Tensor<T, D, ArrayRepr>
 where
     Array<T, D>: ValueRepr,
 {
+    type ValueDim = <Array<T, D> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.inner().fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.inner().component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -143,11 +151,19 @@ impl<T: ArrayElement + NativeType> ValueRepr for Quaternion<T, ArrayRepr>
 where
     Array<T, Const<4>>: ValueRepr,
 {
+    type ValueDim = <Array<T, Const<4>> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.0.fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.0.component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -169,11 +185,19 @@ impl<T: ArrayElement + NativeType> ValueRepr for SpatialTransform<T, ArrayRepr>
 where
     Array<T, Const<7>>: ValueRepr,
 {
+    type ValueDim = <Array<T, Const<7>> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.inner.fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.inner.component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -197,11 +221,19 @@ impl<T: ArrayElement + NativeType> ValueRepr for SpatialMotion<T, ArrayRepr>
 where
     Array<T, Const<6>>: ValueRepr,
 {
+    type ValueDim = <Array<T, Const<6>> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.inner.fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.inner.component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -225,11 +257,19 @@ impl<T: ArrayElement + NativeType> ValueRepr for SpatialInertia<T, ArrayRepr>
 where
     Array<T, Const<7>>: ValueRepr,
 {
+    type ValueDim = <Array<T, Const<7>> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.inner.fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.inner.component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -253,11 +293,19 @@ impl<T: ArrayElement + NativeType> ValueRepr for SpatialForce<T, ArrayRepr>
 where
     Array<T, Const<6>>: ValueRepr,
 {
+    type ValueDim = <Array<T, Const<6>> as ValueRepr>::ValueDim;
+
+    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
+        self.inner.fixed_dim_component_value()
+    }
+
     fn component_value(&self) -> ComponentValue<'_> {
         self.inner.component_value()
     }
 
-    fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_component_value<Dim: ndarray::Dimension>(
+        value: crate::ComponentValue<'_, Dim>,
+    ) -> Option<Self>
     where
         Self: Sized,
     {
@@ -282,21 +330,72 @@ impl Archetype for Shape {
     }
 }
 
+pub trait ComponentValueDimable: ArrayDim {
+    type ValueDim: ndarray::Dimension;
+
+    fn value_dim(dim: Self::Dim) -> Self::ValueDim;
+}
+
+impl ComponentValueDimable for () {
+    type ValueDim = ndarray::Ix0;
+
+    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+        ndarray::Ix0()
+    }
+}
+
+impl<const N: usize> ComponentValueDimable for Const<N> {
+    type ValueDim = ndarray::Ix1;
+
+    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+        ndarray::Ix1(N)
+    }
+}
+
+impl<const D1: usize, const D2: usize> ComponentValueDimable for (Const<D1>, Const<D2>) {
+    type ValueDim = ndarray::Ix2;
+
+    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+        ndarray::Ix2(D1, D2)
+    }
+}
+
+impl<const D1: usize, const D2: usize, const D3: usize> ComponentValueDimable
+    for (Const<D1>, Const<D2>, Const<D3>)
+{
+    type ValueDim = ndarray::Ix3;
+
+    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+        ndarray::Ix3(D1, D2, D3)
+    }
+}
+
+impl ComponentValueDimable for Dyn {
+    type ValueDim = ndarray::IxDyn;
+
+    fn value_dim(dim: Self::Dim) -> Self::ValueDim {
+        ndarray::IxDyn(dim.as_ref())
+    }
+}
+
 macro_rules! impl_array_to_value_repr {
     ($ty:tt, $prim:tt) => {
-        impl<D: Dim> ValueRepr for nox::Array<$ty, D> {
-            fn component_value(&self) -> ComponentValue<'_> {
+        impl<D: Dim + ComponentValueDimable> ValueRepr for nox::Array<$ty, D> {
+            type ValueDim = D::ValueDim;
+
+            fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
                 use nox::ArrayBuf;
                 let dim = D::dim(&self.buf);
-                let dim = ndarray::IxDyn(dim.as_ref());
-                ndarray::ArrayView::from_shape(dim, &self.buf.as_buf())
+                ndarray::ArrayView::from_shape(D::value_dim(dim), &self.buf.as_buf())
                     .ok()
                     .map(ndarray::CowArray::from)
                     .map(ComponentValue::$prim)
                     .unwrap()
             }
 
-            fn from_component_value(value: ComponentValue<'_>) -> Option<Self>
+            fn from_component_value<Dim: ndarray::Dimension>(
+                value: crate::ComponentValue<'_, Dim>,
+            ) -> Option<Self>
             where
                 Self: Sized,
             {
@@ -366,6 +465,30 @@ impl<T: ArrayElement + NativeType, D: Dim + ConstDim, R: Repr> ConstComponent fo
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<D>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, D>();
+}
+
+const fn size_of_dim<T: Sized, Dim: ConstDim>() -> usize {
+    let size = mem::size_of::<T>();
+    let len = Dim::DIM.len();
+    if len > 4 {
+        panic!("dim length must be less than or equal to 4");
+    }
+    let mut len = 0;
+    if !Dim::DIM.is_empty() {
+        len += Dim::DIM[0];
+    }
+    if Dim::DIM.len() > 1 {
+        len += Dim::DIM[1];
+    }
+    if Dim::DIM.len() > 2 {
+        len += Dim::DIM[2];
+    }
+    if Dim::DIM.len() > 3 {
+        len += Dim::DIM[3];
+    }
+    len * size
 }
 
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialTransform<T, R> {
@@ -373,6 +496,8 @@ impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialTransform<
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<7>>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, Const<7>>();
 }
 
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialMotion<T, R> {
@@ -380,13 +505,17 @@ impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialMotion<T, 
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<6>>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, Const<6>>();
 }
 
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialForce<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
-        shape: dim_to_smallvec::<Const<7>>(),
+        shape: dim_to_smallvec::<Const<6>>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, Const<6>>();
 }
 
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialInertia<T, R> {
@@ -394,6 +523,8 @@ impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for SpatialInertia<T,
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<7>>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, Const<7>>();
 }
 
 impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for Quaternion<T, R> {
@@ -401,4 +532,6 @@ impl<T: ArrayElement + NativeType, R: Repr> ConstComponent for Quaternion<T, R> 
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<4>>(),
     };
+
+    const MAX_SIZE: usize = size_of_dim::<T, Const<4>>();
 }
