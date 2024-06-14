@@ -90,8 +90,8 @@ impl Plugin for EditorPlugin {
                     .set(WindowPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
-                            title: "Elodin Editor".into(),
-                            present_mode: PresentMode::AutoVsync,
+                            title: "Elodin".into(),
+                            present_mode: PresentMode::AutoNoVsync,
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -111,18 +111,14 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .insert_resource(WinitSettings {
-                // On MacOS we use a special winit fork that requests a redraw every screen refresh,
-                // I believe other platforms have similar behavior, but I have not fully tested them yet
-                #[cfg(target_os = "macos")]
                 focused_mode: bevy::winit::UpdateMode::Reactive {
-                    wait: Duration::MAX,
+                    wait: Duration::from_millis(16),
                 },
-                #[cfg(not(target_os = "macos"))]
-                focused_mode: bevy::winit::UpdateMode::Continuous,
                 unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
                     wait: Duration::from_millis(16),
                 },
             })
+            .add_plugins(bevy_framepace::FramepacePlugin)
             .add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
