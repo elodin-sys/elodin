@@ -3,6 +3,7 @@ use crate::{
     ArrayTy, Builder, Comp, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem, XlaDim,
 };
 use std::{any, marker::PhantomData};
+use xla::ArrayElement;
 
 /// Represents a computational function that can be converted into an XLA computation.
 pub trait CompFn<T, R>: Send + Sync {
@@ -21,7 +22,7 @@ pub trait CompFn<T, R>: Send + Sync {
             let res_op = res.into_op();
             tuple.push(res_op);
             for o in builder.mut_params.into_iter() {
-                tuple.insert(1, o.into_inner().into_op());
+                tuple.insert(1, o.into_inner().inner);
             }
             Noxpr::tuple(tuple)
         } else {
@@ -77,6 +78,7 @@ impl<'b> FromBuilder for &'b Builder {
 impl<T: TensorItem, D: Dim> FromBuilder for Tensor<T, D, Op>
 where
     T::Dim: Dim,
+    T::Elem: ArrayElement,
 {
     type Item<'a> = Self;
 
@@ -88,7 +90,7 @@ where
         let inner = Noxpr::parameter(
             i,
             NoxprTy::ArrayTy(ArrayTy {
-                element_type: T::ELEM,
+                element_type: T::Elem::TY,
                 shape,
             }),
             format!("param_{}", i),
