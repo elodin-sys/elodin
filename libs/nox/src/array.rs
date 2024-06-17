@@ -947,9 +947,7 @@ impl Repr for ArrayRepr {
         arg.broadcast()
     }
 
-    fn scalar_from_const<T1: Field + xla::NativeType + xla::ArrayElement>(
-        value: T1,
-    ) -> Self::Inner<T1, ()> {
+    fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
         Array { buf: value }
     }
 
