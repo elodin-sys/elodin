@@ -1,21 +1,17 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
-use crate::{
-    Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDim, Dim, DimGet, Field, FromOp,
-    GetDim, IntoOp, MatMul, Noxpr, NoxprScalarExt, Op, Repr, Scalar, Vector,
-};
-use nalgebra::{constraint::ShapeConstraint, ClosedMul, Const, Dyn, Scalar as NalgebraScalar};
-use simba::scalar::ClosedNeg;
+use crate::DefaultRepr;
+use crate::{Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, GetDim, MatMul, Repr, Scalar};
+use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::{smallvec, SmallVec};
 use std::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
 };
-use xla::{ArrayElement, ElementType, NativeType};
 
 /// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
-pub struct Tensor<T: TensorItem, D: Dim, R: Repr = Op> {
+pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
     pub(crate) inner: R::Inner<T::Elem, D>,
     pub(crate) phantom: PhantomData<(T, D)>,
 }
@@ -40,7 +36,7 @@ where
 pub trait TensorItem {
     /// The type used when mapping across the `Tensor`.
     /// For example, if you have a `Tensor<f64>` you will get a `Scalar<f64>` when mapping over the tensor
-    type Item: FromOp;
+    type Item;
 
     /// A helper type that allows you to get a new Tensor with this `TensorItem`, and the specified dimension
     type Tensor<D>
@@ -50,74 +46,16 @@ pub trait TensorItem {
     /// The dimension of the underyling item. For example `f64` will be `ScalarDim`
     type Dim: Dim;
 
-    /// The `ElemenetType` for the underyling element. This is always a primitive (f64, f32, etc).
-    const ELEM: ElementType;
-
     /// The primitive element that will be stored in actual memory
     type Elem: Copy;
 }
 
-impl<T: NativeType + ArrayElement + Copy> TensorItem for T {
+impl<T: Copy> TensorItem for T {
     type Item = Scalar<T>;
     type Tensor<D> = Tensor<T, D> where D: Dim;
     type Dim = ();
 
-    const ELEM: ElementType = T::TY;
-
     type Elem = T;
-}
-
-impl<T: TensorItem, D: Dim> TensorItem for Tensor<T, D, Op> {
-    type Item = T::Item; // NOTE: this bound might be wrong
-
-    type Dim = D;
-    type Tensor<TD: Dim> = Tensor<T, TD>;
-
-    const ELEM: ElementType = T::ELEM;
-
-    type Elem = T::Elem;
-}
-
-impl<T: TensorItem, D: Dim> FromOp for Tensor<T, D> {
-    fn from_op(inner: Noxpr) -> Self {
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
-/// Trait for collapsing a tensor into a simpler form, typically by reducing its dimensionality.
-pub trait Collapse {
-    type Out;
-    /// Collapses the tensor into a simpler form.
-    fn collapse(self) -> Self::Out;
-}
-
-impl<T: TensorItem> Collapse for Scalar<T, Op>
-where
-    T::Item: IntoOp,
-{
-    type Out = <T as TensorItem>::Item;
-
-    fn collapse(self) -> Self::Out {
-        T::Item::from_op(self.inner)
-    }
-}
-
-impl<T: TensorItem, InnerDim: Dim, D: Dim + NonScalarDim> Collapse
-    for Tensor<Tensor<T, InnerDim>, D, Op>
-where
-    (D, InnerDim): DimConcat<D, InnerDim>,
-    <(D, InnerDim) as DimConcat<D, InnerDim>>::Output: Dim,
-{
-    type Out = Tensor<T, ConcatDims<D, InnerDim>>;
-    fn collapse(self) -> Self::Out {
-        Tensor {
-            inner: self.inner,
-            phantom: PhantomData,
-        }
-    }
 }
 
 impl<T: TensorItem, D: Dim, R: Repr> Clone for Tensor<T, D, R>
@@ -155,19 +93,6 @@ impl<T: TensorItem + Copy, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
-    pub(crate) fn from_op(inner: Noxpr) -> Self {
-        Self {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn log(&self) -> Self {
-        Self::from_op(self.inner.clone().log())
-    }
-}
-
 impl<T: Field, D: Dim + NonScalarDim, R: Repr> Tensor<T, D, R> {
     pub fn zeros() -> Self {
         T::zero().broadcast()
@@ -190,12 +115,6 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
 impl<T: TensorItem + Copy, D: Dim> Tensor<T, D, ArrayRepr> {
     pub fn into_buf(self) -> D::Buf<T::Elem> {
         self.inner.buf
-    }
-}
-
-impl<T: TensorItem, D: Dim> IntoOp for Tensor<T, D, Op> {
-    fn into_op(self) -> Noxpr {
-        self.inner
     }
 }
 
@@ -392,11 +311,14 @@ impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R> {
     }
 }
 
-impl<'a, T: Field + ClosedNeg, D: Dim> Neg for &'a Tensor<T, D> {
-    type Output = Tensor<T, D>;
+impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for &'_ Tensor<T, D, R> {
+    type Output = Tensor<T, D, R>;
 
     fn neg(self) -> Self::Output {
-        Tensor::from_op(self.inner.clone().neg())
+        Tensor {
+            inner: R::neg(&self.inner),
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -406,39 +328,63 @@ impl<T: TensorItem + Field, D: Dim + XlaDim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: Dim> Mul<T> for Tensor<T, D1> {
-    type Output = Tensor<T, D1>;
+impl<T: Field, D1: Dim, R: Repr> Mul<T> for Tensor<T, D1, R>
+where
+    ShapeConstraint: BroadcastDim<(), D1>,
+{
+    type Output = Tensor<T, BroadcastedDim<(), D1>, R>;
 
     fn mul(self, rhs: T) -> Self::Output {
-        Tensor::from_op(self.inner.clone() * rhs.constant())
+        Tensor {
+            inner: R::mul(&R::scalar_from_const(rhs), &self.inner),
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T: NalgebraScalar + ClosedMul + NativeType + ArrayElement, D1: Dim> Mul<T>
-    for &'a Tensor<T, D1>
+impl<T: Field, D1: Dim, R: Repr> Mul<T> for &'_ Tensor<T, D1, R>
+where
+    ShapeConstraint: BroadcastDim<(), D1>,
 {
-    type Output = Tensor<T, D1>;
+    type Output = Tensor<T, BroadcastedDim<(), D1>, R>;
 
     fn mul(self, rhs: T) -> Self::Output {
-        Tensor::from_op(self.inner.clone() * rhs.constant())
+        Tensor {
+            inner: R::mul(&R::scalar_from_const(rhs), &self.inner),
+            phantom: PhantomData,
+        }
     }
 }
 
 macro_rules! impl_prim {
     ($ty:tt) => {
-        impl<D: Dim> Mul<Tensor<$ty, D>> for $ty {
-            type Output = Tensor<$ty, D>;
+        impl<D: Dim, R: Repr> Mul<Tensor<$ty, D, R>> for $ty
+        where
+            ShapeConstraint: BroadcastDim<(), D>,
+        {
+            type Output = Tensor<$ty, BroadcastedDim<(), D>, R>;
 
-            fn mul(self, rhs: Tensor<$ty, D>) -> Self::Output {
-                Tensor::from_op((self.constant() * rhs.inner))
+            fn mul(self, rhs: Tensor<$ty, D, R>) -> Self::Output {
+                let inner = R::mul(&R::scalar_from_const(self), &rhs.inner);
+                Tensor {
+                    inner,
+                    phantom: PhantomData,
+                }
             }
         }
 
-        impl<'a, D: Dim> Mul<&'a Tensor<$ty, D>> for $ty {
-            type Output = Tensor<$ty, D>;
+        impl<'a, D: Dim, R: Repr> Mul<&'a Tensor<$ty, D, R>> for $ty
+        where
+            ShapeConstraint: BroadcastDim<(), D>,
+        {
+            type Output = Tensor<$ty, BroadcastedDim<(), D>, R>;
 
-            fn mul(self, rhs: &Tensor<$ty, D>) -> Self::Output {
-                Tensor::from_op((self.constant() * rhs.inner.clone()))
+            fn mul(self, rhs: &Tensor<$ty, D, R>) -> Self::Output {
+                let inner = R::mul(&R::scalar_from_const(self), &rhs.inner);
+                Tensor {
+                    inner,
+                    phantom: PhantomData,
+                }
             }
         }
     };
@@ -450,12 +396,6 @@ impl_prim!(u64);
 impl_prim!(u32);
 impl_prim!(i64);
 impl_prim!(i32);
-
-impl<T: TensorItem, D: Dim> AsBuffer for Tensor<T, D, Buffer> {
-    fn as_buffer(&self) -> &xla::PjRtBuffer {
-        &self.inner
-    }
-}
 
 /// Trait for mapping dimensions in tensor operations.
 /// Allows for transforming and replacing dimensions in tensor types.
@@ -674,29 +614,6 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
     }
 }
 
-#[allow(clippy::type_complexity)]
-impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
-    pub fn concat_with_dim<OD: Dim, MDim: MapDim<D> + MapDim<OD>>(
-        &self,
-        other: Tensor<T, OD>,
-    ) -> Tensor<T, ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>>
-    where
-        MappedDim<MDim, D>: nalgebra::DimAdd<MappedDim<MDim, OD>> + nalgebra::Dim,
-        MappedDim<MDim, OD>: nalgebra::Dim,
-        AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>: Dim,
-        ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>: Dim,
-    {
-        let inner = Noxpr::concat_in_dim(
-            vec![self.inner.clone(), other.inner.clone()],
-            <MDim as MapDim<D>>::MAPPED_DIM,
-        );
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
 /// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
 pub trait BroadcastDim<D1, D2> {
     type Output: Dim;
@@ -866,50 +783,6 @@ seq_macro::seq!(N in 2..99 {
     impl NotConst1 for Const<N> {}
 });
 
-impl<T: TensorItem, D: Dim> Tensor<T, D> {
-    pub fn index<I: TensorIndex<T, D>>(&self, index: I) -> I::Output {
-        index.index(self.clone())
-    }
-}
-
-/// Trait for indexing into tensors, allowing for the extraction of sub-tensors or elements based on indices.
-pub trait TensorIndex<T: TensorItem, D: Dim> {
-    type Output;
-
-    /// Performs the indexing operation on a tensor, returning the result.
-    fn index(self, tensor: Tensor<T, D>) -> Self::Output;
-}
-
-impl<T: TensorItem, D: Dim + DefaultMap, IT: TensorItem, const N: usize> TensorIndex<T, D>
-    for Vector<IT, N>
-where
-    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: Dim,
-    ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>: Dim,
-{
-    type Output = Tensor<T, ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>>;
-
-    fn index(self, tensor: Tensor<T, D>) -> Self::Output {
-        let indices = self
-            .inner
-            .broadcast_in_dim(smallvec![N as i64, 1], smallvec![0]);
-        let slice_shape = ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::shape();
-
-        let offset_dims = (1..slice_shape.len() as i64).collect();
-        let inner = tensor.inner.gather(
-            indices,
-            offset_dims,
-            smallvec![0],
-            smallvec![0],
-            slice_shape,
-            1,
-        );
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
 impl<T: TensorItem, D: Dim> Default for Tensor<T, D, ArrayRepr>
 where
     D::Buf<T::Elem>: Default,
@@ -959,40 +832,6 @@ impl<T: Field, const D1: usize, const D2: usize, const D3: usize> From<[[[T; D3]
             inner: buf.into(),
             phantom: PhantomData,
         }
-    }
-}
-
-impl<T: Field + NativeType + ArrayElement, R: Repr> From<T> for Tensor<T, (), R> {
-    fn from(val: T) -> Self {
-        Scalar::from_inner(R::scalar_from_const(val))
-    }
-}
-
-impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Array<T, D>> for Tensor<T, D, Op> {
-    fn from(arr: Array<T, D>) -> Self {
-        let shape = D::shape();
-        let lit = T::create_r1(arr.buf.as_buf())
-            .reshape(&shape)
-            .expect("reshape failed");
-        let inner = Noxpr::constant(
-            lit,
-            ArrayTy {
-                element_type: T::TY,
-                shape,
-            },
-        );
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Tensor<T, D, ArrayRepr>>
-    for Tensor<T, D, Op>
-{
-    fn from(value: Tensor<T, D, ArrayRepr>) -> Self {
-        value.inner.into()
     }
 }
 

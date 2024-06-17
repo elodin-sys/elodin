@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["jax"]
-jax = ["pyo3", "numpy", "bytemuck"]
-cuda = ["xla/cuda", "shared"]
-shared = ["xla/shared"]
+default = ["jax", "noxpr"]
+jax = ["pyo3", "numpy", "bytemuck", "noxpr"]
+cuda = ["shared"]
+noxpr = ["xla"]
+shared = []
 
 [dependencies]
 nalgebra = "0.32"
@@ -28,6 +29,7 @@ matrixmultiply = "0.3"
 
 # xla-rs - a wrapper around raw xla
 xla.path = "../xla-rs"
+xla.optional = true
 
 # jax
 pyo3.version = "0.21.0"

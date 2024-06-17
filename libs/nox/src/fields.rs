@@ -2,6 +2,9 @@
 use std::marker::PhantomData;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+#[cfg(feature = "xla")]
+use xla::Literal;
+
 use crate::{Repr, Scalar, TensorItem};
 
 /// Represents a mathematical field, supporting basic arithmetic operations,
@@ -44,6 +47,12 @@ pub trait Field:
     fn two_prim() -> Self
     where
         Self: Sized;
+
+    #[cfg(feature = "xla")]
+    fn literal(self) -> Literal;
+
+    #[cfg(feature = "xla")]
+    const ELEMENT_TY: xla::ElementType;
 }
 
 pub trait RealField: Field + Neg<Output = Self> {
@@ -111,6 +120,14 @@ macro_rules! impl_real_closed_field {
             fn two_prim() -> Self {
                 $two
             }
+
+            #[cfg(feature = "xla")]
+            fn literal(self) -> Literal {
+                xla::NativeType::literal(self)
+            }
+
+            #[cfg(feature = "xla")]
+            const ELEMENT_TY: xla::ElementType = <$t as xla::ArrayElement>::TY;
         }
     };
 }

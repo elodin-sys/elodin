@@ -1,18 +1,12 @@
 //! Provides functionality to handle quaternions, which are constructs used to represent and manipulate spatial orientations and rotations in 3D space.
+use crate::DefaultRepr;
+use nalgebra::Const;
 use std::ops::{Add, Mul};
 
-use nalgebra::{Const, Scalar as NalgebraScalar};
-use num_traits::Zero;
-use xla::{ArrayElement, NativeType};
-
-use crate::{
-    ArrayRepr, AsBuffer, Buffer, BufferArg, BufferForm, Builder, Client, Field, FromBuilder,
-    FromHost, FromOp, FromPjrtBuffer, IntoOp, MaybeOwned, Noxpr, Op, RealField, Repr, Scalar,
-    TensorItem, ToHost, Vector, MRP,
-};
+use crate::{Field, RealField, Repr, Scalar, TensorItem, Vector, MRP};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
-pub struct Quaternion<T: TensorItem, P: Repr = Op>(pub Vector<T, 4, P>);
+pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(pub Vector<T, 4, P>);
 impl<T: TensorItem + Copy, R: Repr> Clone for Quaternion<T, R>
 where
     R::Inner<T::Elem, Const<4>>: Clone,
@@ -27,18 +21,6 @@ impl<T: TensorItem + Copy, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::
 impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
     fn default() -> Self {
         Self::identity()
-    }
-}
-
-impl<T: TensorItem> FromPjrtBuffer for Quaternion<T, Buffer> {
-    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
-        Self(Vector::from_pjrt(pjrt))
-    }
-}
-
-impl<T: TensorItem> FromOp for Quaternion<T, Op> {
-    fn from_op(op: Noxpr) -> Self {
-        Self(Vector::from_op(op))
     }
 }
 
@@ -205,95 +187,9 @@ impl<'a, T: RealField, R: Repr> Add<&'a Quaternion<T, R>> for Quaternion<T, R> {
     }
 }
 
-impl<T: TensorItem> IntoOp for Quaternion<T> {
-    fn into_op(self) -> Noxpr {
-        self.0.into_op()
-    }
-}
-
-impl<T: TensorItem> AsBuffer for Quaternion<T, Buffer> {
-    fn as_buffer(&self) -> &xla::PjRtBuffer {
-        &self.0.inner
-    }
-}
-
-impl<T: xla::ArrayElement + NativeType> FromBuilder for Quaternion<T, Op> {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        Quaternion(Vector::from_builder(builder))
-    }
-}
-
-impl<T> FromHost for Quaternion<T, Buffer>
-where
-    T: NativeType + RealField + NalgebraScalar + ArrayElement,
-{
-    type HostTy = nalgebra::Quaternion<T>;
-
-    fn from_host(client: &Client, native: Self::HostTy) -> Self {
-        Quaternion(Vector::<T, 4, Buffer>::from_host(client, native.coords))
-    }
-}
-
-impl<T> BufferArg<Quaternion<T, Buffer>> for nalgebra::Quaternion<T>
-where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField,
-{
-    fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
-        let inner = client
-            .copy_host_buffer(self.coords.as_slice(), &[4])
-            .unwrap();
-        MaybeOwned::Owned(inner)
-    }
-}
-
-impl<T> ToHost for Quaternion<T, Buffer>
-where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField + nalgebra::RealField,
-{
-    type HostTy = nalgebra::Quaternion<T>;
-
-    fn to_host(&self) -> Self::HostTy {
-        let literal = self.0.inner.to_literal_sync().unwrap();
-        let mut out = nalgebra::Quaternion::zero();
-        out.coords
-            .as_mut_slice()
-            .copy_from_slice(literal.typed_buf::<T>().unwrap());
-        out
-    }
-}
-
-impl<T: TensorItem> BufferForm for Quaternion<T, Op> {
-    type BufferTy = Quaternion<T, Buffer>;
-}
-
-impl<T> FromPjrtBuffer for nalgebra::Quaternion<T>
-where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + RealField + nalgebra::RealField,
-{
-    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
-        let buf = &pjrt[0];
-        let literal = buf.to_literal_sync().unwrap();
-        let mut out = nalgebra::Quaternion::zero();
-        out.coords
-            .as_mut_slice()
-            .copy_from_slice(literal.typed_buf().unwrap());
-        //literal.copy_raw_to(out.coords.as_mut_slice()).unwrap();
-        out
-    }
-}
-
-impl<T: Field + ArrayElement + NativeType> From<Quaternion<T, ArrayRepr>> for Quaternion<T, Op> {
-    fn from(q: Quaternion<T, ArrayRepr>) -> Self {
-        Quaternion(q.0.into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::Client;
-    use crate::CompFn;
+    use crate::{Client, CompFn, ToHost};
     use nalgebra::vector;
     use nalgebra::{UnitQuaternion, Vector3};
 
