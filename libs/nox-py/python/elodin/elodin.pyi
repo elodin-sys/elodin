@@ -73,7 +73,12 @@ class Client:
 
 class SpatialTransform:
     __metadata__: ClassVar[Tuple[Component,]]
-    def __init__(self, arr: jax.typing.ArrayLike): ...
+    def __init__(
+        self,
+        arr: Optional[jax.typing.ArrayLike] = None,
+        angular: Optional[Quaternion] = None,
+        linear: Optional[jax.typing.ArrayLike] = None,
+    ): ...
     @staticmethod
     def from_linear(linear: jax.typing.ArrayLike) -> SpatialTransform: ...
     @staticmethod
