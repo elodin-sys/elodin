@@ -2,15 +2,18 @@ use std::{collections::BTreeMap, ops::RangeInclusive};
 
 use bevy::ecs::{
     event::EventWriter,
-    system::{Res, ResMut, Resource, SystemParam, SystemState},
+    system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath::Numeric, Response};
 use conduit::{bevy::Tick, ControlMsg};
 use nalgebra::clamp;
 
-use crate::ui::widgets::WidgetSystem;
 use crate::ui::{colors, ViewportRange};
+use crate::ui::{
+    widgets::{plot::GraphState, WidgetSystem},
+    SelectedObject,
+};
 
 use super::{position_from_value, value_from_position};
 
@@ -41,7 +44,7 @@ impl TimelineRanges {
             color: colors::PRIMARY_CREAME,
         };
 
-        self.0.insert(new_range_id.clone(), new_range);
+        self.0.insert(new_range_id, new_range);
 
         new_range_id
     }
@@ -55,7 +58,7 @@ impl TimelineRanges {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct TimelineRangeId(pub u64);
 
@@ -69,6 +72,7 @@ pub fn timeline_range(
     ui: &mut egui::Ui,
     full_range: &RangeInclusive<f64>,
     range: &mut TimelineRange,
+    range_color: egui::Color32,
     position_range: egui::Rangef,
 ) -> Response {
     let line_width = 4.0;
@@ -76,7 +80,6 @@ pub fn timeline_range(
     let circle_border_width = 2.0;
 
     let (start, end) = range.values;
-    let range_color = range.color;
     let start_f64 = start.to_f64();
     let end_f64 = end.to_f64();
     let full_range_min = full_range.start();
@@ -199,14 +202,16 @@ pub fn timeline_range(
 }
 
 #[derive(SystemParam)]
-pub struct TimelineRangesPanel<'w> {
+pub struct TimelineRangesPanel<'w, 's> {
     timeline_ranges: ResMut<'w, TimelineRanges>,
     tick: ResMut<'w, Tick>,
     event: EventWriter<'w, ControlMsg>,
     viewport_range: Res<'w, ViewportRange>,
+    selected_object: Res<'w, SelectedObject>,
+    graph_states: Query<'w, 's, &'static GraphState>,
 }
 
-impl WidgetSystem for TimelineRangesPanel<'_> {
+impl WidgetSystem for TimelineRangesPanel<'_, '_> {
     type Args = (f32, RangeInclusive<f64>, egui::Rangef);
     type Output = egui::Rect;
 
@@ -223,6 +228,26 @@ impl WidgetSystem for TimelineRangesPanel<'_> {
         let mut tick = state_mut.tick;
         let mut event = state_mut.event;
         let viewport_range = state_mut.viewport_range;
+        let graph_states = state_mut.graph_states;
+
+        let selected_graph_range_id = match state_mut.selected_object.to_owned() {
+            SelectedObject::Graph { graph_id, .. } => {
+                if let Ok(graph_state) = graph_states.get(graph_id) {
+                    if let Some(range_id) = graph_state.range_id {
+                        if timeline_ranges.0.contains_key(&range_id) {
+                            Some(range_id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
 
         if let Some(viewport_range_id) = &viewport_range.0 {
             if let Some(viewport_range) = timeline_ranges.0.get(viewport_range_id) {
@@ -241,12 +266,23 @@ impl WidgetSystem for TimelineRangesPanel<'_> {
             .show(ui, |ui| {
                 let line_padding = (line_height - ui.spacing().interact_size.y) / 2.0;
 
-                for (_, range) in timeline_ranges.0.iter_mut() {
+                for (range_id, range) in timeline_ranges.0.iter_mut() {
                     let range_label = range.label.clone();
+                    let range_color = if let Some(selected_graph_range_id) = selected_graph_range_id
+                    {
+                        if selected_graph_range_id == *range_id {
+                            colors::PRIMARY_CREAME
+                        } else {
+                            colors::PRIMARY_CREAME_6
+                        }
+                    } else {
+                        colors::PRIMARY_CREAME
+                    };
+
                     egui::Frame::none()
                         .inner_margin(egui::Margin::symmetric(0.0, line_padding))
                         .show(ui, |ui| {
-                            timeline_range(ui, &full_range, range, position_range);
+                            timeline_range(ui, &full_range, range, range_color, position_range);
                         })
                         .response
                         .on_hover_text_at_pointer(range_label);

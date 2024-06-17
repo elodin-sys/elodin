@@ -12,17 +12,19 @@ use crate::ui::{
     SelectedObject, ViewportRange,
 };
 
-use super::timeline_ranges::{TimelineRanges, TimelineRangesFocused};
+use super::{
+    timeline_ranges::{TimelineRanges, TimelineRangesFocused},
+    TimelineIcons,
+};
 
 #[derive(SystemParam)]
 pub struct TimelineRangeListHeader<'w> {
     timeline_ranges: ResMut<'w, TimelineRanges>,
-    viewport_range: ResMut<'w, ViewportRange>,
     max_tick: Res<'w, MaxTick>,
 }
 
 impl WidgetSystem for TimelineRangeListHeader<'_> {
-    type Args = (egui::TextureId, egui::TextureId, egui::Vec2);
+    type Args = (TimelineIcons, egui::Vec2);
     type Output = ();
 
     fn ui_system(
@@ -31,11 +33,10 @@ impl WidgetSystem for TimelineRangeListHeader<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let (icon_loop, icon_add, desired_size) = args;
+        let (icons, desired_size) = args;
 
         let state_mut = state.get_mut(world);
         let mut timeline_ranges = state_mut.timeline_ranges;
-        let mut viewport_range = state_mut.viewport_range;
         let max_tick = state_mut.max_tick;
 
         let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
@@ -73,7 +74,7 @@ impl WidgetSystem for TimelineRangeListHeader<'_> {
                 .shrink(3.0);
 
                 ui.painter()
-                    .image(icon_loop, image_rect, default_uv, label_color);
+                    .image(icons.range_loop, image_rect, default_uv, label_color);
 
                 ui.painter().vline(
                     inner_rect.left() + button_side + (item_spacing / 2.0),
@@ -102,14 +103,14 @@ impl WidgetSystem for TimelineRangeListHeader<'_> {
                 ui.allocate_ui_at_rect(inner_rect, |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = ui.add(
-                            EImageButton::new(icon_add)
+                            EImageButton::new(icons.add)
                                 .scale(button_size_scale, button_size_scale)
                                 .image_tint(colors::PRIMARY_CREAME)
                                 .bg_color(colors::TRANSPARENT),
                         );
 
                         if btn.clicked() {
-                            viewport_range.0 = Some(timeline_ranges.create_range(max_tick.0));
+                            timeline_ranges.create_range(max_tick.0);
                         }
                     });
                 });
@@ -124,11 +125,11 @@ pub struct TimelineRangeList<'w, 's> {
     timeline_ranges_focused: ResMut<'w, TimelineRangesFocused>,
     viewport_range: ResMut<'w, ViewportRange>,
     selected_object: Res<'w, SelectedObject>,
-    graph_states: Query<'w, 's, &'static mut GraphState>,
+    graph_states: Query<'w, 's, &'static GraphState>,
 }
 
 impl WidgetSystem for TimelineRangeList<'_, '_> {
-    type Args = (egui::TextureId, egui::TextureId, egui::Vec2);
+    type Args = (TimelineIcons, egui::Vec2);
     type Output = ();
 
     fn ui_system(
@@ -137,18 +138,18 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let (icon_loop, icon_remove, desired_size) = args;
+        let (icons, desired_size) = args;
 
         let state_mut = state.get_mut(world);
         let mut timeline_ranges = state_mut.timeline_ranges;
         let mut timeline_ranges_focused = state_mut.timeline_ranges_focused;
         let mut viewport_range = state_mut.viewport_range;
-        let mut graph_states = state_mut.graph_states;
+        let graph_states = state_mut.graph_states;
 
-        let selected_graph_state = match state_mut.selected_object.to_owned() {
+        let selected_graph_range_id = match state_mut.selected_object.to_owned() {
             SelectedObject::Graph { graph_id, .. } => {
-                if let Ok(graph_state) = graph_states.get_mut(graph_id) {
-                    Some(graph_state)
+                if let Ok(graph_state) = graph_states.get(graph_id) {
+                    graph_state.range_id
                 } else {
                     None
                 }
@@ -157,8 +158,6 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
         };
 
         let mut has_focus = false;
-        let mut select_range_click = false;
-        let mut selected_range_id = None;
 
         let item_spacing = 16.0;
         let button_size_scale = 1.2;
@@ -175,14 +174,31 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
                 false
             };
 
+            let loop_is_on = viewport_range.0 == Some(*range_id);
+
+            let (bg_color, bg_hover_color, text_color, btn_bg_color, btn_bg_hover_color) =
+                if selected_graph_range_id.is_some_and(|rid| rid == *range_id) {
+                    (
+                        colors::PRIMARY_CREAME,
+                        colors::PRIMARY_CREAME_9,
+                        colors::PRIMARY_ONYX,
+                        colors::PRIMARY_CREAME_8,
+                        colors::PRIMARY_CREAME_6,
+                    )
+                } else {
+                    (
+                        colors::TRANSPARENT,
+                        colors::PRIMARY_ONYX,
+                        colors::PRIMARY_CREAME,
+                        colors::BLACK_BLACK_600,
+                        colors::PRIMARY_ONYX_9,
+                    )
+                };
+
             ui.painter().rect(
                 rect,
                 egui::Rounding::ZERO,
-                if hovered {
-                    colors::PRIMARY_ONYX
-                } else {
-                    colors::TRANSPARENT
-                },
+                if hovered { bg_hover_color } else { bg_color },
                 ui.style().visuals.widgets.noninteractive.bg_stroke,
             );
 
@@ -195,41 +211,32 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
 
                     ui.allocate_ui_at_rect(inner_rect, |ui| {
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            let is_on = if let Some(selected_graph_state) = &selected_graph_state {
-                                selected_graph_state.range_id == Some(range_id.clone())
-                            } else {
-                                viewport_range.0 == Some(range_id.clone())
-                            };
-
-                            let image_color = if is_on {
-                                colors::PRIMARY_CREAME
-                            } else {
-                                colors::TRANSPARENT
-                            };
-
                             let btn = ui.add(
-                                EImageButton::new(icon_loop)
+                                EImageButton::new(icons.range_loop)
                                     .scale(button_size_scale, button_size_scale)
-                                    .image_tint(image_color)
+                                    .image_tint(if loop_is_on {
+                                        text_color
+                                    } else {
+                                        colors::TRANSPARENT
+                                    })
+                                    .hovered_bg_color(btn_bg_hover_color)
                                     .bg_color(if hovered {
-                                        colors::BLACK_BLACK_600
+                                        btn_bg_color
                                     } else {
                                         colors::TRANSPARENT
                                     }),
                             );
 
                             if btn.clicked() {
-                                select_range_click = true;
-                                selected_range_id =
-                                    if is_on { None } else { Some(range_id.clone()) };
+                                viewport_range.0 = if loop_is_on { None } else { Some(*range_id) };
                             }
 
                             ui.add_space(item_spacing);
 
                             let style = ui.style_mut();
-                            style.visuals.selection.stroke.color = colors::PRIMARY_CREAME;
+                            style.visuals.selection.stroke.color = text_color;
                             style.visuals.widgets.hovered.bg_stroke.color =
-                                with_opacity(colors::PRIMARY_CREAME, 0.2);
+                                with_opacity(text_color, 0.2);
                             style.visuals.widgets.hovered.rounding = rounding_xxs();
                             style.visuals.widgets.active.rounding = rounding_xxs();
                             style.visuals.extreme_bg_color = colors::TRANSPARENT;
@@ -237,6 +244,7 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
                             let response = ui.add(
                                 egui::TextEdit::singleline(&mut range.label)
                                     .char_limit(32)
+                                    .text_color(text_color)
                                     .desired_width(
                                         inner_rect.width() - ((button_side + item_spacing) * 2.0),
                                     )
@@ -254,13 +262,10 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
                     ui.allocate_ui_at_rect(inner_rect, |ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let remove_btn = ui.add(
-                                EImageButton::new(icon_remove)
+                                EImageButton::new(icons.remove)
                                     .scale(button_size_scale, button_size_scale)
-                                    .image_tint(if hovered {
-                                        colors::PRIMARY_CREAME
-                                    } else {
-                                        colors::TRANSPARENT
-                                    })
+                                    .image_tint(text_color)
+                                    .hovered_bg_color(btn_bg_hover_color)
                                     .bg_color(colors::TRANSPARENT),
                             );
 
@@ -274,14 +279,6 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
 
             retain
         });
-
-        if select_range_click {
-            if let Some(mut selected_graph_state) = selected_graph_state {
-                selected_graph_state.range_id = selected_range_id;
-            } else {
-                viewport_range.0 = selected_range_id;
-            }
-        }
 
         timeline_ranges_focused.0 = has_focus;
     }

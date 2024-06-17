@@ -188,13 +188,13 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                         ui.add_widget_with::<timeline_range_list::TimelineRangeListHeader>(
                             world,
                             "range_list_header",
-                            (timeline_icons.range_loop, timeline_icons.add, line_size),
+                            (timeline_icons, line_size),
                         );
 
                         ui.add_widget_with::<timeline_range_list::TimelineRangeList>(
                             world,
                             "range_list_items",
-                            (timeline_icons.range_loop, timeline_icons.remove, line_size),
+                            (timeline_icons, line_size),
                         );
                     });
 

@@ -16,10 +16,9 @@ use crate::ui::{
 };
 
 use super::{
-    button::{EButton, EImageButton},
+    button::EButton,
     label::{self, ELabel},
     plot::{default_component_values, GraphState},
-    timeline::timeline_ranges::TimelineRanges,
     RootWidgetSystem, WidgetSystem, WidgetSystemExt,
 };
 
@@ -70,7 +69,6 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
 
         if let Some(setting_modal_state) = setting_modal_state.0.clone() {
             let close_icon = contexts.add_image(images.icon_close.clone_weak());
-            let color_icon = contexts.add_image(images.icon_lightning.clone_weak());
 
             egui::Window::new("SETTING_MODAL")
                 .title_bar(false)
@@ -95,111 +93,8 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                         SettingModal::GraphRename(_, _) => {
                             // TODO: Rename graph
                         }
-                        SettingModal::RangeEdit(_, _, _) => {
-                            ui.add_widget_with::<ModalUpdateRangeName>(
-                                world,
-                                "modal_update_range_name",
-                                (color_icon, close_icon),
-                            );
-                        }
                     }
                 });
-        }
-    }
-}
-
-#[derive(SystemParam)]
-pub struct ModalUpdateRangeName<'w> {
-    setting_modal_state: ResMut<'w, SettingModalState>,
-    timeline_ranges: ResMut<'w, TimelineRanges>,
-}
-
-impl WidgetSystem for ModalUpdateRangeName<'_> {
-    type Args = (egui::TextureId, egui::TextureId);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let (color_icon, close_icon) = args;
-
-        let mut setting_modal_state = state_mut.setting_modal_state;
-        let mut timeline_ranges = state_mut.timeline_ranges;
-
-        let Some(setting_modal) = setting_modal_state.0.as_mut() else {
-            return;
-        };
-        let SettingModal::RangeEdit(m_range_id, m_range_label, m_range_color) = setting_modal
-        else {
-            return;
-        };
-
-        let Some(current_range) = timeline_ranges.0.get_mut(m_range_id) else {
-            // Reset modal if Range was removed
-            setting_modal_state.0 = None;
-            return;
-        };
-
-        let [close_clicked] = label::label_with_buttons(
-            ui,
-            [close_icon],
-            "Range Settings",
-            colors::PRIMARY_CREAME,
-            egui::Margin::same(8.0).bottom(16.0),
-        );
-        if close_clicked {
-            setting_modal_state.0 = None;
-            return;
-        }
-
-        ui.add(egui::Separator::default().spacing(0.0));
-
-        ui.add(
-            ELabel::new("RANGE")
-                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
-        );
-
-        ui.horizontal(|ui| {
-            egui::Frame::none()
-                .outer_margin(egui::Margin::symmetric(8.0, 16.0))
-                .show(ui, |ui| {
-                    let color_btn = EImageButton::new(color_icon)
-                        .scale(1.4, 1.4)
-                        .image_tint(*m_range_color);
-
-                    if ui.add(color_btn).clicked() {
-                        *m_range_color =
-                            colors::get_color_by_index_solid(fastrand::u32(1..) as usize);
-                    }
-                });
-
-            ui.scope(|ui| {
-                theme::configure_input_with_border(ui.style_mut());
-                ui.add(egui::TextEdit::singleline(m_range_label).margin(egui::vec2(16.0, 16.0)));
-            })
-        });
-
-        ui.add_space(16.0);
-
-        let rename_btn = ui.add(
-            EButton::new("UPDATE")
-                .color(colors::MINT_DEFAULT)
-                .bg_color(with_opacity(colors::MINT_DEFAULT, 0.05))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    with_opacity(colors::MINT_DEFAULT, 0.4),
-                )),
-        );
-
-        if rename_btn.clicked() {
-            current_range.label = m_range_label.to_string();
-            current_range.color = *m_range_color;
-            setting_modal_state.0 = None;
         }
     }
 }
