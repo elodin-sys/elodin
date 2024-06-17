@@ -1,5 +1,4 @@
 use bevy::{
-    diagnostic::DiagnosticsStore,
     ecs::{
         query::QueryData,
         system::{SystemParam, SystemState},
@@ -15,7 +14,7 @@ use bevy_egui::{
 use big_space::GridCell;
 
 use conduit::{
-    bevy::{ComponentValueMap, Received, TimeStep},
+    bevy::{ComponentValueMap, Received},
     well_known::EntityMetadata,
     ComponentId, EntityId,
 };
@@ -183,7 +182,6 @@ impl Plugin for UiPlugin {
 pub enum SettingModal {
     Graph(Entity, Option<EntityId>, Option<ComponentId>),
     GraphRename(Entity, String),
-    RangeEdit(TimelineRangeId, String, egui::Color32),
 }
 
 #[derive(Resource, Default, Clone, Debug)]
@@ -426,8 +424,6 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
 pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    tick_time: Res<'w, TimeStep>,
-    diagnostics: Res<'w, DiagnosticsStore>,
     hovered_entity: Res<'w, HoveredEntity>,
 }
 
@@ -445,8 +441,6 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
-        let _tick_time = state_mut.tick_time;
-        let _diagnostics = state_mut.diagnostics;
         let hovered_entity = state_mut.hovered_entity;
 
         let Ok(window) = window.get_single() else {
