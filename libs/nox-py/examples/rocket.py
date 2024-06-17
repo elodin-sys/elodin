@@ -465,7 +465,8 @@ rocket = w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform(
-                euler_to_quat(jnp.array([0.0, 70.0, 0.0])), jnp.array([0.0, 0.0, 1.0])
+                angular=euler_to_quat(jnp.array([0.0, 70.0, 0.0])),
+                linear=jnp.array([0.0, 0.0, 1.0]),
             ),
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
