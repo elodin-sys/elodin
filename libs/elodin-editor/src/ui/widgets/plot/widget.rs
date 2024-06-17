@@ -5,7 +5,7 @@ use bevy::{
         event::EventWriter,
         system::{Commands, Query},
     },
-    math::{Rect, Vec2},
+    math::{DVec2, Rect},
     render::camera::{OrthographicProjection, Projection, ScalingMode},
 };
 use bevy_egui::egui::{self, Align, Layout};
@@ -20,17 +20,15 @@ use std::{
     ops::{Range, RangeInclusive},
 };
 
-use crate::{
-    ui::widgets::plot::CollectedGraphData,
-    ui::{
-        colors::{self, with_opacity, ColorExt},
-        utils::{self, format_num},
-        widgets::{
-            plot::gpu::{LineBundle, LineConfig, LineUniform},
-            plot::GraphState,
-            plot::Line,
-            timeline::timeline_ranges::TimelineRange,
+use crate::ui::{
+    colors::{self, with_opacity, ColorExt},
+    utils::{self, format_num, MarginSides},
+    widgets::{
+        plot::{
+            gpu::{LineBundle, LineConfig, LineUniform},
+            CollectedGraphData, GraphState, Line,
         },
+        timeline::timeline_ranges::TimelineRange,
     },
 };
 
@@ -79,9 +77,8 @@ fn range_y_from_rect(rect: &egui::Rect, invert: bool) -> RangeInclusive<f32> {
 }
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
-    use crate::ui::utils::MarginSides;
-    let adding: egui::Margin = egui::Margin::same(0.0).left(20.0).bottom(20.0);
-    let margin: egui::Margin = egui::Margin::same(60.0).left(85.0).top(40.0);
+    let adding: egui::Margin = egui::Margin::same(0.0).left(0.0).bottom(0.0);
+    let margin: egui::Margin = egui::Margin::same(30.0).right(0.0).left(60.0).bottom(40.0);
     egui::Rect {
         min: egui::pos2(
             rect.min.x + (margin.left + adding.left),
@@ -114,11 +111,11 @@ impl Plot {
             invert_y: true,
             steps_x: 6,
             steps_y: 6,
+            padding: egui::Margin::same(0.0).left(0.0).bottom(0.0),
+            margin: egui::Margin::same(30.0).left(60.0).bottom(40.0).right(0.0),
 
-            padding: egui::Margin::same(20.0),
-            margin: egui::Margin::same(60.0),
             notch_length: 10.0,
-            axis_label_margin: 10.0,
+            axis_label_margin: 5.0,
 
             text_color: colors::PRIMARY_CREAME,
             border_stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
@@ -184,25 +181,35 @@ impl Plot {
                 }
             }
         }
+        self.steps_y = ((self.inner_rect.height() / 50.0) as usize).max(1);
+        if self.steps_y % 2 != 0 {
+            self.steps_y += 1;
+        }
+        self.steps_x = ((self.inner_rect.width() / 50.0) as usize).max(1);
 
         self.bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
         let y_range = self.bounds.max_y - self.bounds.min_y;
+        let full_y_range = (self.rect.height() / self.inner_rect.height()) as f64 * y_range;
+        let y_delta = full_y_range - y_range;
+        let mut new_bounds = self.bounds.clone();
+        new_bounds.min_y -= y_delta / 2.0;
+        new_bounds.max_y -= y_delta / 2.0;
         commands
             .entity(graph_id)
             .insert(Projection::Orthographic(OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
-                viewport_origin: Vec2::new(0.0, -(self.bounds.min_y / y_range) as f32),
+                viewport_origin: DVec2::new(0.0, -(new_bounds.min_y / full_y_range)).as_vec2(),
                 scaling_mode: ScalingMode::Fixed {
-                    width: (self.bounds.max_x - self.bounds.min_x) as f32,
-                    height: (self.bounds.max_y - self.bounds.min_y) as f32,
+                    width: (new_bounds.max_x - new_bounds.min_x) as f32,
+                    height: full_y_range as f32,
                 },
                 scale: 1.0,
                 area: Rect::new(
-                    self.bounds.min_x as f32,
-                    self.bounds.min_y as f32,
-                    self.bounds.max_x as f32,
-                    self.bounds.max_y as f32,
+                    new_bounds.min_x as f32,
+                    new_bounds.min_y as f32,
+                    new_bounds.max_x as f32,
+                    new_bounds.max_y as f32,
                 ),
             }));
 
@@ -365,12 +372,6 @@ impl Plot {
         self
     }
 
-    pub fn steps(mut self, x: usize, y: usize) -> Self {
-        self.steps_x = x;
-        self.steps_y = y;
-        self
-    }
-
     pub fn text_color(mut self, color: egui::Color32) -> Self {
         self.text_color = color;
         self
@@ -420,14 +421,8 @@ impl Plot {
     }
 
     fn draw_y_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        let step_size = self.bounds.height() / self.steps_y as f64;
-        let steps_y = (0..=self.steps_y)
-            .map(|i| self.bounds.min_y + (i as f64) * step_size)
-            .collect::<Vec<f64>>();
-
-        for y_step in steps_y {
-            let y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, y_step).pos2;
-
+        let draw_tick = |tick| {
+            let y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, tick).pos2;
             ui.painter().line_segment(
                 [
                     egui::pos2(y_position.x - self.padding.left, y_position.y),
@@ -445,10 +440,34 @@ impl Plot {
                     y_position.y,
                 ),
                 egui::Align2::RIGHT_CENTER,
-                format_num(y_step),
+                format_num(tick),
                 font_id.clone(),
                 self.text_color,
             );
+        };
+        if self.bounds.min_y <= 0.0 {
+            let step_size = (self.bounds.max_y - self.bounds.min_y) / self.steps_y as f64;
+            let mut i = 0.0;
+
+            while i <= self.bounds.max_y {
+                draw_tick(i);
+                i += step_size;
+            }
+
+            let mut i = 0.0;
+            while i >= self.bounds.min_y {
+                draw_tick(i);
+                i -= step_size;
+            }
+        } else {
+            let step_size = self.bounds.height() / self.steps_y as f64;
+            let steps_y = (0..=self.steps_y)
+                .map(|i| self.bounds.min_y + (i as f64) * step_size)
+                .collect::<Vec<f64>>();
+
+            for y_step in steps_y {
+                draw_tick(y_step);
+            }
         }
     }
 
@@ -495,13 +514,13 @@ impl Plot {
     ) {
         ui.painter().vline(
             x_offset + border_rect.min.x,
-            border_rect.min.y..=border_rect.max.y,
+            0.0..=self.inner_rect.max.y + self.padding.bottom,
             egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
 
         // NOTE: HLine is not attached to points
         ui.painter().hline(
-            border_rect.min.x..=border_rect.max.x,
+            border_rect.min.x - self.padding.left..=border_rect.max.x,
             pointer_pos.y,
             egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
@@ -688,8 +707,7 @@ impl Plot {
 
         // Style
 
-        let style = ui.style();
-        let font_id = egui::TextStyle::Button.resolve(style);
+        let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
         // Draw inner container
 
@@ -704,6 +722,8 @@ impl Plot {
 
             return;
         }
+
+        font_id.size = 11.0;
 
         // Draw borders
 
@@ -846,7 +866,8 @@ impl PlotBounds {
             MinMaxResult::OneElement(y) => (*y, *y),
             _ => (0.0, 0.0),
         };
-
+        let min_y = sigfig_round(min_y, 2);
+        let max_y = sigfig_round(max_y, 2);
         Self::new(min_x, min_y, max_x, max_y)
     }
 
@@ -865,6 +886,16 @@ impl PlotBounds {
     pub fn range_y_f32(&self) -> RangeInclusive<f32> {
         (self.min_y as f32)..=(self.max_y as f32)
     }
+}
+
+fn sigfig_round(x: f64, mut digits: i32) -> f64 {
+    if x == 0.0 || !x.is_finite() {
+        return x;
+    }
+
+    digits -= x.abs().log10().ceil() as i32;
+    let y = (10.0f64).powi(digits);
+    (y * x).round() / y
 }
 
 #[derive(Debug, Clone)]

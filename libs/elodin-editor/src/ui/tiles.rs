@@ -139,7 +139,10 @@ impl Pane {
         let content_rect = ui.available_rect_before_wrap();
         match self {
             Pane::Graph(pane) => {
-                pane.rect = Some(plot::get_inner_rect(content_rect));
+                let mut rect = plot::get_inner_rect(content_rect);
+                rect.min.y = content_rect.min.y - 5.0;
+                rect.max.y = content_rect.max.y - 5.0;
+                pane.rect = Some(rect);
                 // ui.painter()
                 //     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
@@ -153,9 +156,6 @@ impl Pane {
                     .and_then(|rid| timeline_ranges.0.get(rid));
 
                 Plot::new()
-                    .padding(egui::Margin::same(0.0).left(20.0).bottom(20.0))
-                    .margin(egui::Margin::same(60.0).left(85.0).top(40.0))
-                    .steps(7, 4)
                     .time_step(time_step)
                     .current_tick(current_tick)
                     .calculate_lines(
