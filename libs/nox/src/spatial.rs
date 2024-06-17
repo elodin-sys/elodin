@@ -2,24 +2,20 @@
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::ArrayRepr;
+use crate::DefaultRepr;
 use crate::Field;
-use crate::FromOp;
-use crate::Noxpr;
-use crate::Op;
 use crate::RealField;
 use crate::Repr;
 use crate::Tensor;
 use crate::TensorItem;
 use crate::MRP;
-use crate::{Builder, FromBuilder, Quaternion, Scalar, Vector};
+use crate::{Quaternion, Scalar, Vector};
 use nalgebra::Const;
 use std::ops::Div;
 use std::ops::{Add, Mul};
-use xla::ArrayElement;
-use xla::NativeType;
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
-pub struct SpatialTransform<T: TensorItem, R: Repr = Op> {
+pub struct SpatialTransform<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
 
@@ -42,24 +38,6 @@ impl<T: TensorItem> Clone for SpatialTransform<T> {
     }
 }
 
-impl<T: TensorItem> FromOp for SpatialTransform<T, Op> {
-    fn from_op(op: Noxpr) -> Self {
-        Self {
-            inner: Vector::from_op(op),
-        }
-    }
-}
-
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialTransform<T, Op> {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        Self {
-            inner: Vector::from_builder(builder),
-        }
-    }
-}
-
 impl<T: Field, R: Repr> std::fmt::Debug for SpatialTransform<T, R>
 where
     R::Inner<T, Const<7>>: std::fmt::Debug,
@@ -68,12 +46,6 @@ where
         f.debug_tuple("SpatialTransform")
             .field(&self.inner)
             .finish()
-    }
-}
-
-impl<T: TensorItem> crate::IntoOp for SpatialTransform<T> {
-    fn into_op(self) -> Noxpr {
-        self.inner.into_op()
     }
 }
 
@@ -125,9 +97,7 @@ impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
     }
 }
 
-impl<T: TensorItem + ArrayElement + NativeType + RealField, R: Repr> Mul
-    for SpatialTransform<T, R>
-{
+impl<T: TensorItem + RealField, R: Repr> Mul for SpatialTransform<T, R> {
     type Output = SpatialTransform<T, R>;
 
     fn mul(self, rhs: SpatialTransform<T, R>) -> Self::Output {
@@ -138,7 +108,7 @@ impl<T: TensorItem + ArrayElement + NativeType + RealField, R: Repr> Mul
 }
 
 /// A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
-pub struct SpatialForce<T: TensorItem, R: Repr = Op> {
+pub struct SpatialForce<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }
 
@@ -161,36 +131,12 @@ where
     }
 }
 
-impl<T: TensorItem> FromOp for SpatialForce<T, Op> {
-    fn from_op(op: Noxpr) -> Self {
-        Self {
-            inner: Vector::from_op(op),
-        }
-    }
-}
-
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialForce<T> {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        Self {
-            inner: Vector::from_builder(builder),
-        }
-    }
-}
-
 impl<T: Field, R: Repr> std::fmt::Debug for SpatialForce<T, R>
 where
     R::Inner<T, Const<6>>: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SpatialForce").field(&self.inner).finish()
-    }
-}
-
-impl<T: TensorItem> crate::IntoOp for SpatialForce<T> {
-    fn into_op(self) -> Noxpr {
-        self.inner.into_op()
     }
 }
 
@@ -249,7 +195,7 @@ impl<T: RealField, R: Repr> Add for SpatialForce<T, R> {
 
 /// A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space.
 /// The inertia matrix is assumed to be symmetric and represented in its diagonalized form.
-pub struct SpatialInertia<T: TensorItem, R: Repr = Op> {
+pub struct SpatialInertia<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
 
@@ -257,30 +203,6 @@ impl<T: TensorItem> Clone for SpatialInertia<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<T: TensorItem> crate::IntoOp for SpatialInertia<T> {
-    fn into_op(self) -> Noxpr {
-        self.inner.into_op()
-    }
-}
-
-impl<T: TensorItem> FromOp for SpatialInertia<T, Op> {
-    fn from_op(op: Noxpr) -> Self {
-        Self {
-            inner: Vector::from_op(op),
-        }
-    }
-}
-
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialInertia<T> {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        Self {
-            inner: Vector::from_builder(builder),
         }
     }
 }
@@ -294,7 +216,7 @@ where
     }
 }
 
-impl<T: TensorItem + RealField + NativeType + ArrayElement, R: Repr> SpatialInertia<T, R> {
+impl<T: TensorItem + RealField, R: Repr> SpatialInertia<T, R> {
     /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
     pub fn new(
         inertia: impl Into<Vector<T, 3, R>>,
@@ -334,9 +256,7 @@ impl<T: TensorItem + RealField + NativeType + ArrayElement, R: Repr> SpatialIner
     }
 }
 
-impl<T: TensorItem + RealField + NativeType + ArrayElement, R: Repr> Div<SpatialInertia<T, R>>
-    for SpatialForce<T, R>
-{
+impl<T: TensorItem + RealField, R: Repr> Div<SpatialInertia<T, R>> for SpatialForce<T, R> {
     type Output = SpatialMotion<T, R>;
 
     fn div(self, rhs: SpatialInertia<T, R>) -> Self::Output {
@@ -346,9 +266,7 @@ impl<T: TensorItem + RealField + NativeType + ArrayElement, R: Repr> Div<Spatial
     }
 }
 
-impl<T: TensorItem + ArrayElement + NativeType + RealField, R: Repr> Mul<SpatialMotion<T, R>>
-    for SpatialInertia<T, R>
-{
+impl<T: TensorItem + RealField, R: Repr> Mul<SpatialMotion<T, R>> for SpatialInertia<T, R> {
     type Output = SpatialForce<T, R>;
 
     fn mul(self, rhs: SpatialMotion<T, R>) -> Self::Output {
@@ -371,38 +289,17 @@ where
 }
 
 /// A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
-pub struct SpatialMotion<T: TensorItem, R: Repr = Op> {
+pub struct SpatialMotion<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }
 
-impl<T: TensorItem> Clone for SpatialMotion<T> {
+impl<T: TensorItem + Copy, R: Repr> Clone for SpatialMotion<T, R>
+where
+    R::Inner<T::Elem, Const<6>>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<T: TensorItem> FromOp for SpatialMotion<T, Op> {
-    fn from_op(op: Noxpr) -> Self {
-        Self {
-            inner: Vector::from_op(op),
-        }
-    }
-}
-
-impl<T: TensorItem> crate::IntoOp for SpatialMotion<T> {
-    fn into_op(self) -> Noxpr {
-        self.inner.into_op()
-    }
-}
-
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialMotion<T> {
-    type Item<'a> = Self;
-
-    fn from_builder(builder: &Builder) -> Self::Item<'_> {
-        Self {
-            inner: Vector::from_builder(builder),
         }
     }
 }
@@ -471,18 +368,18 @@ impl<T: RealField, R: Repr> SpatialMotion<T, R> {
     }
 }
 
-impl Mul<SpatialMotion<f64>> for f64 {
-    type Output = SpatialMotion<f64>;
-    fn mul(self, rhs: SpatialMotion<f64>) -> Self::Output {
+impl<R: Repr> Mul<SpatialMotion<f64, R>> for f64 {
+    type Output = SpatialMotion<f64, R>;
+    fn mul(self, rhs: SpatialMotion<f64, R>) -> Self::Output {
         SpatialMotion {
             inner: self * rhs.inner,
         }
     }
 }
 
-impl Mul<SpatialMotion<f32>> for f32 {
-    type Output = SpatialMotion<f32>;
-    fn mul(self, rhs: SpatialMotion<f32>) -> Self::Output {
+impl<R: Repr> Mul<SpatialMotion<f32, R>> for f32 {
+    type Output = SpatialMotion<f32, R>;
+    fn mul(self, rhs: SpatialMotion<f32, R>) -> Self::Output {
         SpatialMotion {
             inner: self * rhs.inner,
         }
@@ -492,7 +389,7 @@ impl Mul<SpatialMotion<f32>> for f32 {
 impl<T, R> Add<SpatialMotion<T, R>> for SpatialTransform<T, R>
 where
     R: Repr,
-    T: ArrayElement + NativeType + RealField,
+    T: RealField,
     Quaternion<T, R>: Add<Quaternion<T, R>, Output = Quaternion<T, R>>,
     Vector<T, 3, R>: Add<Vector<T, 3, R>, Output = Vector<T, 3, R>>,
 {
