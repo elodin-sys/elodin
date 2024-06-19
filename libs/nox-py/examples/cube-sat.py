@@ -6,9 +6,11 @@ from dataclasses import dataclass
 import elodin as el
 from typing import Annotated
 
-initial_angular_vel = np.array([2.0, 2.0, 2.0])
-rw_force_clamp = 0.02
-G = 6.6743e-11  #
+angular_vel_axis = np.array([1.0, 1.0, 1.0])
+angular_vel_axis = angular_vel_axis / la.norm(angular_vel_axis)
+initial_angular_vel = angular_vel_axis * np.radians(80)
+rw_force_clamp = 0.002
+G = 6.6743e-11  # gravitational constant
 M = 5.972e24  # mass of the Earth
 earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
@@ -29,13 +31,14 @@ MagReadingRef = Annotated[
     el.Component("mag_reading_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
-StarReadingBody = Annotated[
+CssReading = Annotated[
     jax.Array,
-    el.Component("star_reading_body", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component("css_reading", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
-StarReadingRef = Annotated[
+
+SunPos = Annotated[
     jax.Array,
-    el.Component("star_reading_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component("sun_pos", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
 
@@ -44,36 +47,107 @@ class Sensors(el.Archetype):
     gyro_omega: GyroOmega
     mag_reading_body: MagReadingBody
     mag_reading_ref: MagReadingRef
-    star_reading_body: StarReadingBody
-    star_reading_ref: StarReadingRef
+    star_reading_ref: CssReading
+    sun_pos: SunPos
+
+
+CssValue = Annotated[
+    jax.Array,
+    el.Component("css_value", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+
+CssFov = Annotated[
+    jax.Array,
+    el.Component("css_fov", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+
+CssNormal = Annotated[
+    jax.Array,
+    el.Component("css_normal", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
+CSSEdge = Annotated[el.Edge, el.Component("css_edge")]
+
+
+@dataclass
+class CSSRel(el.Archetype):
+    edge: CSSEdge
+
+
+@dataclass
+class SunSensor(el.Archetype):
+    value: CssValue
+    fov: CssFov
+    normal: CssNormal
 
 
 @el.map
-def fake_magnetometer_ref(_: el.WorldPos) -> MagReadingRef:
-    return np.array([1.0, 0.0, 0.0])
+def sun_pos(pos: el.WorldPos) -> SunPos:
+    pos = pos.linear()
+    return pos / la.norm(pos)
+
+
+@el.system
+def sun_sensor(
+    sensor: el.GraphQuery[CSSEdge],
+    css_normal: el.Query[CssNormal, CssFov],
+    sun_pos: el.Query[SunPos, el.WorldPos],
+) -> el.Query[CssValue]:
+    def inner(acc, css_normal, fov, sun_pos, world_pos):
+        key = jax.random.key(
+            jax.lax.convert_element_type(world_pos.linear()[1], "int64")
+        )
+        noise = 0.01 * jax.random.normal(key, shape=())
+        sun_pos_b = world_pos.angular().inverse() @ sun_pos
+        cos = np.dot(css_normal, sun_pos_b)
+        return (
+            acc + jax.lax.select((np.abs(np.acos(cos)) < fov).all(), cos, 0.0) + noise
+        )
+
+    return sensor.edge_fold(css_normal, sun_pos, CssValue, np.array(0.0), inner)
+
+
+@el.system
+def sun_sensor_value(
+    graph: el.GraphQuery[Annotated[CSSEdge, el.RevEdge]],
+    css: el.Query[CssValue, CssNormal],
+    sat: el.Query[el.WorldPos],
+) -> el.Query[CssReading]:
+    value = graph.edge_fold(
+        sat,
+        css,
+        CssReading,
+        np.array([0.0, 0.0, 0.0]),
+        lambda acc, _, value, norm: acc + value * norm,
+    )
+    return value.map(CssReading, lambda x: x / la.norm(x))
+
+
+sun_sensor_sys = sun_pos.pipe(sun_sensor).pipe(sun_sensor_value)
+
+k_0 = np.array(
+    [
+        -30926.00e-9,
+        5817.00e-9,
+        -2318.00e-9,
+    ]
+)
 
 
 @el.map
-def fake_magnetometer_body(pos: el.WorldPos) -> MagReadingBody:
+def fake_magnetometer_ref(pos: el.WorldPos) -> MagReadingRef:
+    pos = pos.linear()
+    pos_norm = la.norm(pos)
+    e_hat = pos / pos_norm
+    B = ((earth_radius / pos_norm) ** 3) * (3 * np.dot(k_0, e_hat) * e_hat - k_0)
+    return B / la.norm(B)
+
+
+@el.map
+def fake_magnetometer_body(pos: el.WorldPos, mag_ref: MagReadingRef) -> MagReadingBody:
     key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
-    noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(
-        pos.angular().vector() + noise
-    ).normalize().inverse() @ np.array([1.0, 0.0, 0.0])
-
-
-@el.map
-def fake_star_ref(_: el.WorldPos) -> StarReadingRef:
-    return np.array([0.0, 0.0, 1.0])
-
-
-@el.map
-def fake_star_body(pos: el.WorldPos) -> StarReadingBody:
-    key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
-    noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(
-        pos.angular().vector() + noise
-    ).normalize().inverse() @ np.array([0.0, 0.0, 1.0])
+    noise = 0.01 * jax.random.normal(key, shape=(3,))
+    return pos.angular().inverse() @ mag_ref + noise
 
 
 @el.map
@@ -84,9 +158,8 @@ def gyro_omega(pos: el.WorldPos, vel: el.WorldVel) -> GyroOmega:
 
 
 sensors = (
-    fake_magnetometer_body.pipe(fake_magnetometer_ref)
-    .pipe(fake_star_body)
-    .pipe(fake_star_ref)
+    sun_sensor_sys.pipe(fake_magnetometer_body)
+    .pipe(fake_magnetometer_ref)
     .pipe(gyro_omega)
 )
 
@@ -211,8 +284,8 @@ def kalman_filter(
     omega: GyroOmega,
     mag_body: MagReadingBody,
     mag_ref: MagReadingRef,
-    star_body: StarReadingBody,
-    star_ref: StarReadingRef,
+    sun_body: CssReading,
+    sun_ref: SunPos,
     att_est: AttEst,
     b_hat: BiasEst,
     p: P,
@@ -222,8 +295,8 @@ def kalman_filter(
         b_hat,
         omega,
         p,
-        np.array([mag_body, star_body]),
-        np.array([mag_ref, star_ref]),
+        np.array([mag_body, sun_body]),
+        np.array([mag_ref, sun_ref]),
         1 / 120.0,
     )
     return (q_hat, omega_hat, b_hat, big_p)
@@ -243,11 +316,6 @@ UserGoal = Annotated[
     jax.Array, el.Component("euler_input", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
 
-RWAxis = Annotated[
-    jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))
-]
-
-RWForce = Annotated[el.SpatialForce, el.Component("rw_force")]
 
 ControlForce = Annotated[el.SpatialForce, el.Component("control_force")]
 
@@ -274,7 +342,7 @@ def lqr_control_mat(j, q, r):
     return (d_diag, k_diag)
 
 
-j = np.array([0.13, 0.10, 0.05])
+j = np.array([15204079.70002, 14621352.61765, 6237758.3131]) * 1e-9
 q = np.array([5, 5, 5, 5, 5, 5])
 r = np.array([8.0, 8.0, 8.0])
 (d, k) = lqr_control_mat(j, q, r)
@@ -316,7 +384,19 @@ def control(sensor: el.Query[AttEst, AngVelEst, Goal]) -> el.Query[ControlForce]
     )
 
 
+# effectors
+
 RWEdge = Annotated[el.Edge, el.Component("rw_edge")]
+
+RWAxis = Annotated[
+    jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]
+
+RWForce = Annotated[el.SpatialForce, el.Component("rw_force")]
+RWAngMomentum = Annotated[
+    jax.Array,
+    el.Component("rw_ang_momentum", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
 
 
 @el.system
@@ -324,8 +404,9 @@ def actuator_allocator(
     q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
     rw_query: el.Query[RWAxis],
     control_query: el.Query[ControlForce],
-) -> el.Query[RWForce]:
-    return q.edge_fold(
+    force_ang_momentum: el.Query[RWForce, RWAngMomentum],
+) -> el.Query[RWForce, RWAngMomentum]:
+    torque = q.edge_fold(
         rw_query,
         control_query,
         RWForce,
@@ -340,8 +421,14 @@ def actuator_allocator(
         ),
     )
 
+    def rw_force(force, _, ang_momentum):
+        new_ang_momentum = ang_momentum + force.torque() * 1 / 60.0
+        torque = jax.lax.select(
+            np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
+        )
+        return (el.SpatialForce.from_torque(torque), ang_momentum + torque * 1 / 60.0)
 
-# effectors
+    return torque.join(force_ang_momentum).map((RWForce, RWAngMomentum), rw_force)
 
 
 @dataclass
@@ -353,6 +440,7 @@ class RWRel(el.Archetype):
 class ReactionWheel(el.Archetype):
     rw_force: RWForce
     axis: RWAxis
+    ang_momentum: RWAngMomentum
 
 
 @el.system
@@ -392,13 +480,14 @@ b = el.Body(
     world_vel=el.SpatialMotion(
         initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity
     ),
-    inertia=el.SpatialInertia(12.0, j),
+    inertia=el.SpatialInertia(2825.2 / 1000.0, j),
     # Credit to the OreSat program https://www.oresat.org for the model above
 )
 rw_1 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([1.0, 0.0, 0.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
     ),
     name="Reaction Wheel 1",
 )
@@ -408,6 +497,7 @@ rw_2 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([0.0, 1.0, 0.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
     ),
     name="Reaction Wheel 2",
 )
@@ -416,6 +506,7 @@ rw_3 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
         axis=np.array([0.0, 0.0, 1.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
     ),
     name="Reaction Wheel 3",
 )
@@ -441,6 +532,66 @@ w.spawn(RWRel(el.Edge(sat, rw_1)), name="Sat -> RW 1")
 w.spawn(RWRel(el.Edge(sat, rw_2)), name="Sat -> RW 2")
 w.spawn(RWRel(el.Edge(sat, rw_3)), name="Sat -> RW 3")
 
+css_0 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([0.0, 0.0, 1.0]),
+    ),
+    name="Course Sun Sensor 0",
+)
+
+css_1 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([0.0, 1.0, 0.0]),
+    ),
+    name="Course Sun Sensor 1",
+)
+
+css_2 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([1.0, 0.0, 0.0]),
+    ),
+    name="Course Sun Sensor 2",
+)
+css_3 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([0.0, 0.0, -1.0]),
+    ),
+    name="Course Sun Sensor 3",
+)
+
+css_4 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([0.0, -1.0, 0.0]),
+    ),
+    name="Course Sun Sensor 4",
+)
+
+css_5 = w.spawn(
+    SunSensor(
+        value=0.0,
+        fov=np.radians(90),
+        normal=np.array([-1.0, 0.0, 0.0]),
+    ),
+    name="Course Sun Sensor 5",
+)
+
+w.spawn(CSSRel(el.Edge(css_0, sat)), name="CSS 0 -> Sat")
+w.spawn(CSSRel(el.Edge(css_1, sat)), name="CSS 1 -> Sat")
+w.spawn(CSSRel(el.Edge(css_2, sat)), name="CSS 2 -> Sat")
+w.spawn(CSSRel(el.Edge(css_3, sat)), name="CSS 3 -> Sat")
+w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
+w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
+
 w.spawn(
     el.Panel.vsplit(
         [
@@ -455,12 +606,12 @@ w.spawn(
                     el.Panel.graph(
                         [
                             el.GraphEntity(
-                                sat,
+                                css,
                                 [
-                                    el.Component.index(GyroOmega)[:3],
-                                    el.Component.index(el.WorldVel)[:3],
+                                    el.Component.index(CssValue)[0],
                                 ],
                             )
+                            for css in [css_0, css_1, css_2, css_3, css_4, css_5]
                         ]
                     ),
                 ]
@@ -498,7 +649,7 @@ w.spawn(
 
 exec = w.run(
     system=el.six_dof(
-        1 / 120.0,
+        1.0 / 60.0,
         sensors
         | kalman_filter
         | control
