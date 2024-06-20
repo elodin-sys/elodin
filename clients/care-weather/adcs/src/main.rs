@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 mod control;
 mod determination;
 mod guidance;
+pub mod mcu;
 
 #[derive(Default, Componentize, Decomponentize)]
 pub struct NavData {
