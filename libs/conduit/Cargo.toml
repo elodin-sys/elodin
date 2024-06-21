@@ -6,14 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["bevy", "rand", "std", "embedded-io-async"]
-tokio = ["dep:tokio", "tokio-util", "futures", "tracing"]
+default = ["rand", "std", "embedded-io-async"]
+tokio = ["dep:tokio", "tokio-util", "futures", "tracing", "flume"]
 bevy = ["dep:bevy", "flume", "big_space", "tracing"]
 nox = ["dep:nox"]
 rand = ["fastrand"]
 well-known = ["nalgebra"]
 std = ["bytes/std", "postcard/use-std", "ndarray/std", "well-known"]
-polars = ["dep:polars", "polars-arrow", "arrow"]
+xla = ["nox/xla"]
+polars = ["dep:polars", "polars-arrow", "arrow", "xla", "std"]
 
 [dependencies]
 # serialize
@@ -61,7 +62,8 @@ thiserror-no-std = "2.0.2"
 thiserror = "1"
 
 # nox
-nox.path = "../nox"
+nox.workspace = true
+nox.default-features = false
 nox.optional = true
 
 # rand

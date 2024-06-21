@@ -84,14 +84,16 @@ dependencies = [
 
 [[package]]
 name = "adcs"
-version = "0.3.23"
+version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrayvec",
  "basilisk",
  "conduit",
  "enumflags2",
  "nox",
  "roci",
+ "roci-adcs",
  "serde",
  "serialport",
  "thiserror",
@@ -5575,6 +5577,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lapack"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad676a6b4df7e76a9fd80a0c50c619a3948d6105b62a0ab135f064d99c51d207"
+dependencies = [
+ "lapack-sys",
+ "libc",
+ "num-complex",
+]
+
+[[package]]
 name = "lapack-src"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6281,6 +6294,7 @@ dependencies = [
  "fn-traits",
  "indent_write",
  "itertools",
+ "lapack",
  "matrixmultiply",
  "nalgebra",
  "ndarray",
@@ -11573,6 +11587,15 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wmm"
+version = "0.3.23"
+dependencies = [
+ "approx",
+ "bindgen 0.65.1",
+ "cc",
 ]
 
 [[package]]

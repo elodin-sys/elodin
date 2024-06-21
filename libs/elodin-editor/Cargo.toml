@@ -52,6 +52,7 @@ futures-lite = "2.0"
 postcard.version = "1.0.8"
 reqwest = { version = "0.11", features = ["rustls-tls", "gzip"], default-features = false }
 conduit.path = "../../libs/conduit"
+conduit.features = ["bevy"]
 
 # search
 fuzzy-matcher = "0.3.7"

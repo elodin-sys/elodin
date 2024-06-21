@@ -65,7 +65,7 @@ test_steps = [
     ),
     rust_step(
       label = "cargo test",
-      command = "cargo test -- -Z unstable-options --format json --report-time | buildkite-test-collector",
+      command = "cargo test --release -- -Z unstable-options --format json --report-time | buildkite-test-collector",
       env = {
         "RUSTC_BOOTSTRAP": "1",
         "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo"

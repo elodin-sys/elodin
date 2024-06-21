@@ -16,7 +16,6 @@ pub trait Field:
     + Add<Output = Self>
     + Sub<Output = Self>
     + Div<Output = Self>
-    + MatMul
 {
     /// Returns a scalar tensor representing the additive identity (zero).
     fn zero<R: Repr>() -> Scalar<Self, R>
@@ -55,7 +54,7 @@ pub trait Field:
     const ELEMENT_TY: xla::ElementType;
 }
 
-pub trait RealField: Field + Neg<Output = Self> {
+pub trait RealField: Field + Neg<Output = Self> + MatMul + LU {
     fn sqrt(self) -> Self;
     fn cos(self) -> Self;
     fn sin(self) -> Self;
@@ -209,128 +208,57 @@ impl MatMul for f32 {
     }
 }
 
-impl MatMul for i16 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
+pub trait LU: Sized {
+    /// # Safety
+    /// When using these functions you need to ensure that the n, lda, work, and ipiv values are correct
+    /// or else there could be weird memory issues.
+    unsafe fn getrf(m: i32, n: i32, a: &mut [Self], lda: i32, ipiv: &mut [i32], info: &mut i32);
+    /// # Safety
+    /// When using these functions you need to ensure that the n, lda, work, and ipiv values are correct
+    /// or else there could be weird memory issues.
+    unsafe fn getri(
+        n: i32,
+        a: &mut [Self],
+        lda: i32,
+        ipiv: &[i32],
+        work: &mut [Self],
+        lwork: i32,
+        info: &mut i32,
+    );
+}
+
+impl LU for f64 {
+    unsafe fn getrf(m: i32, n: i32, a: &mut [f64], lda: i32, ipiv: &mut [i32], info: &mut i32) {
+        lapack::dgetrf(m, n, a, lda, ipiv, info)
+    }
+
+    unsafe fn getri(
+        n: i32,
+        a: &mut [Self],
+        lda: i32,
+        ipiv: &[i32],
+        work: &mut [Self],
+        lwork: i32,
+        info: &mut i32,
     ) {
-        todo!()
+        lapack::dgetri(n, a, lda, ipiv, work, lwork, info)
     }
 }
 
-impl MatMul for i32 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
-    ) {
-        todo!()
+impl LU for f32 {
+    unsafe fn getrf(m: i32, n: i32, a: &mut [Self], lda: i32, ipiv: &mut [i32], info: &mut i32) {
+        lapack::sgetrf(m, n, a, lda, ipiv, info)
     }
-}
 
-impl MatMul for i64 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
+    unsafe fn getri(
+        n: i32,
+        a: &mut [Self],
+        lda: i32,
+        ipiv: &[i32],
+        work: &mut [Self],
+        lwork: i32,
+        info: &mut i32,
     ) {
-        todo!()
-    }
-}
-
-impl MatMul for u16 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
-    ) {
-        todo!()
-    }
-}
-
-impl MatMul for u32 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
-    ) {
-        todo!()
-    }
-}
-
-impl MatMul for u64 {
-    unsafe fn gemm(
-        _m: usize,
-        _k: usize,
-        _n: usize,
-        _alpha: Self,
-        _a: *const Self,
-        _rsa: isize,
-        _csa: isize,
-        _b: *const Self,
-        _rsb: isize,
-        _csb: isize,
-        _beta: Self,
-        _c: *mut Self,
-        _rsc: isize,
-        _csc: isize,
-    ) {
-        todo!()
+        lapack::sgetri(n, a, lda, ipiv, work, lwork, info)
     }
 }
