@@ -5,19 +5,19 @@ use nox::{
     SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
 use smallvec::{smallvec, SmallVec};
-use std::ops::Deref;
 
 #[cfg(feature = "xla")]
-use crate::Archetype;
-#[cfg(feature = "xla")]
-use nox::{xla::ElementType, ArrayTy, Client, IntoOp, NoxprNode};
+use nox::{xla::ElementType, ArrayTy, Client, NoxprNode};
 
 use crate::{
-    concat_str,
+    concat_str, Component, ComponentType, ComponentValue, ConstComponent, PrimitiveTy, ValueRepr,
+};
+
+#[cfg(feature = "xla")]
+use crate::{
     types::ArchetypeName,
     well_known::{Material, Mesh, Shape},
-    Component, ComponentExt, ComponentType, ComponentValue, ConstComponent, Handle, Metadata,
-    PrimitiveTy, ValueRepr,
+    ComponentExt, Handle, Metadata,
 };
 
 #[cfg(feature = "xla")]
@@ -89,7 +89,7 @@ impl From<ComponentType> for ArrayTy {
 }
 
 #[cfg(feature = "xla")]
-impl<T: Component + IntoOp + 'static> Archetype for T {
+impl<T: Component + nox::IntoOp + 'static> crate::Archetype for T {
     fn name() -> ArchetypeName {
         ArchetypeName::from(T::NAME)
     }
@@ -99,6 +99,7 @@ impl<T: Component + IntoOp + 'static> Archetype for T {
     }
 
     fn insert_into_world(self, world: &mut crate::World) {
+        use std::ops::Deref;
         let mut col = world.column_mut::<T>().unwrap();
         let op = self.into_op();
         let NoxprNode::Constant(c) = op.deref() else {
