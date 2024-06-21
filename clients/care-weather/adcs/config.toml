@@ -1,0 +1,63 @@
+[sunline]
+q_obs_val = 1.0
+q_proc_val = 1.0
+covar = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+sensor_use_threshold = 0.0
+ekf_switch = 1.0
+
+
+[[sunline.css]]
+normal_b = [1.0, 0.0, 0.0]
+coefficent = 1.0
+
+[[sunline.css]]
+normal_b = [0.0, 1.0, 0.0]
+coefficent = 1.0
+
+[[sunline.css]]
+normal_b = [0.0, 0.0, 1.0]
+coefficent = 1.0
+
+[guidance]
+sigma_r0r = [0.0, 0.0, 0.0]
+
+[control]
+control_axes_body = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+[control.feedback_config]
+p = 4.0
+k = 4.0
+k_i = 0.0
+integral_limit = 500
+control_law = 'A'
+prior_time = 0
+z = [0.0, 0.0, 0.0]
+int_sigma = [0.0, 0.0, 0.0]
+known_torque_pnt_b_b = [0.0, 0.0, 0.0]
+inertia = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+[[control.rw_config.wheels]]
+spin_axis = [1.0, 0.0, 0.0]
+inertia = 5.781250000000001e-05
+max_torque = 0.04
+
+[[control.rw_config.wheels]]
+spin_axis = [0.0, 1.0, 0.0]
+inertia = 5.781250000000001e-05
+max_torque = 0.04
+
+[[control.rw_config.wheels]]
+spin_axis = [0.0, 0.0, 1.0]
+inertia = 5.781250000000001e-05
+max_torque = 0.04
+
+[control.voltage_config]
+voltage_max = 10.0
+voltage_min = 0.0
+k = -1.0
+
+
+[control.vehicle_config]
+spacecraft_inertia_b = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+com_b = [0.0, 0.0, 0.0]
+spacecraft_mass = 2.5

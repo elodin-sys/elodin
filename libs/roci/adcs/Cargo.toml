@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nox.workspace = true
+nox.path = "../../nox"
+nox.default-features = false
 
 [dev-dependencies]
 approx = "0.5"

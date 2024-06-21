@@ -3,7 +3,8 @@ use basilisk::{
     channel::BskChannel,
     effector_interfaces::{RWMotorTorque, RWMotorVoltage, VoltageConfig},
     sys::{
-        ArrayMotorVoltageMsgPayload, AttGuidMsgPayload, RWSpeedMsgPayload, VehicleConfigMsgPayload,
+        ArrayMotorTorqueMsgPayload, ArrayMotorVoltageMsgPayload, AttGuidMsgPayload,
+        CmdTorqueBodyMsgPayload, RWSpeedMsgPayload, VehicleConfigMsgPayload,
     },
 };
 use roci::{Componentize, Decomponentize, System};
@@ -17,33 +18,33 @@ pub struct World {
 }
 #[derive(Default, Componentize, Decomponentize)]
 pub struct RWSpeed {
-    #[roci(entity_id = 0, component_id = "rw_speed")]
-    rw_speed_0: f64,
     #[roci(entity_id = 1, component_id = "rw_speed")]
-    rw_speed_1: f64,
+    rw_speed_0: f64,
     #[roci(entity_id = 2, component_id = "rw_speed")]
+    rw_speed_1: f64,
+    #[roci(entity_id = 3, component_id = "rw_speed")]
     rw_speed_2: f64,
 }
 
-#[derive(Default, Componentize, Decomponentize)]
+#[derive(Default, Componentize, Decomponentize, Debug)]
 pub struct RWVoltage {
-    #[roci(entity_id = 0, component_id = "rw_voltage")]
-    rw_voltage_0: f64,
     #[roci(entity_id = 1, component_id = "rw_voltage")]
-    rw_voltage_1: f64,
+    rw_voltage_0: f64,
     #[roci(entity_id = 2, component_id = "rw_voltage")]
+    rw_voltage_1: f64,
+    #[roci(entity_id = 3, component_id = "rw_voltage")]
     rw_voltage_2: f64,
 }
 
-#[derive(Default, Componentize, Decomponentize)]
+#[derive(Default, Componentize, Decomponentize, Debug)]
 pub struct AttErrInput {
-    #[roci(entity_id = 3, component_id = "att_err_mrp")]
+    #[roci(entity_id = 0, component_id = "att_err_mrp")]
     pub att_err_mrp: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "omega_err_br_b")]
+    #[roci(entity_id = 0, component_id = "omega_err_br_b")]
     pub omega_err_br_b: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "omega_rn_b")]
+    #[roci(entity_id = 0, component_id = "omega_rn_b")]
     pub omega_rn_b: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "domega_rn_b")]
+    #[roci(entity_id = 0, component_id = "domega_rn_b")]
     pub domega_rn_b: [f64; 3usize],
 }
 
@@ -55,6 +56,11 @@ pub struct Control {
     att_guid_in: BskChannel<AttGuidMsgPayload>,
     rw_speed_in: BskChannel<RWSpeedMsgPayload>,
     motor_voltage_out: BskChannel<ArrayMotorVoltageMsgPayload>,
+
+    #[allow(dead_code)]
+    cmd_torque: BskChannel<CmdTorqueBodyMsgPayload>,
+    #[allow(dead_code)]
+    motor_torque_out: BskChannel<ArrayMotorTorqueMsgPayload>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -117,7 +123,7 @@ impl Control {
         let motor_torque = RWMotorTorque::new(
             control_axes_body,
             motor_torque_out.clone(),
-            cmd_torque,
+            cmd_torque.clone(),
             rw_array_config.clone(),
             rw_availability_cmd.clone(),
         );
@@ -125,7 +131,7 @@ impl Control {
         let motor_voltage = RWMotorVoltage::new(
             voltage_config,
             motor_voltage_out.clone(),
-            motor_torque_out,
+            motor_torque_out.clone(),
             rw_speed_in.clone(),
             rw_availability_cmd,
             rw_array_config.clone(),
@@ -137,6 +143,8 @@ impl Control {
             att_guid_in,
             rw_speed_in,
             motor_voltage_out,
+            motor_torque_out,
+            cmd_torque,
         }
     }
 }

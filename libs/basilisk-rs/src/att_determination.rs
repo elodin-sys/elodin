@@ -32,10 +32,7 @@ pub struct SunlineConfig {
     css: Vec<CSSConfig>,
     q_obs_val: f64,
     q_proc_val: f64,
-    state: [f64; 6],
-    x: [f64; 6],
     covar: Vec<f64>,
-    post_fit_residuals: [f64; 32],
     sensor_use_threshold: f64,
     ekf_switch: f64,
 }
@@ -53,13 +50,11 @@ impl SunlineEKF {
             css,
             q_obs_val,
             q_proc_val,
-            state,
-            x,
-            covar,
-            post_fit_residuals,
+            mut covar,
             sensor_use_threshold,
             ekf_switch,
         } = config;
+        let post_fit_residuals = [0.1; 32];
         let mut css_vals = [CSSUnitConfigMsgPayload::default(); 32];
         let css_len = css.len();
         for (i, css) in css.into_iter().enumerate() {
@@ -72,7 +67,7 @@ impl SunlineEKF {
             },
             0,
         );
-
+        covar.resize(36, 0.1);
         let covar = covar.as_slice().try_into().expect("covar array must be 36");
         let mut this = Self {
             config: sunlineEKFConfig {
@@ -82,28 +77,28 @@ impl SunlineEKF {
                 cssConfigInMsg: css_config.into(),
                 qObsVal: q_obs_val,
                 qProcVal: q_proc_val,
-                dt: 0.0,
+                dt: 0.1,
                 timeTag: f64::NAN,
-                state,
-                x,
-                xBar: [0.0; 6],
-                covarBar: [0.0; 36],
+                state: [0.1; 6],
+                x: [0.1; 6],
+                xBar: [0.1; 6],
+                covarBar: [0.1; 36],
                 covar,
-                stateTransition: [0.0; 36],
-                kalmanGain: [0.0; 192],
-                dynMat: [0.0; 36],
-                measMat: [0.0; 192],
-                obs: [0.0; 32],
-                yMeas: [0.0; 32],
-                procNoise: [0.0; 9],
-                measNoise: [0.0; 1024],
+                stateTransition: [0.1; 36],
+                kalmanGain: [0.1; 192],
+                dynMat: [0.1; 36],
+                measMat: [0.1; 192],
+                obs: [0.1; 32],
+                yMeas: [0.1; 32],
+                procNoise: [0.1; 9],
+                measNoise: [0.1; 1024],
                 postFits: post_fit_residuals,
-                cssNHat_B: [0.0; 96],
-                CBias: [0.0; 32],
-                numStates: 0,
-                numObs: 0,
-                numActiveCss: 0,
-                numCSSTotal: 0,
+                cssNHat_B: [0.1; 96],
+                CBias: [0.1; 32],
+                numStates: 1,
+                numObs: 1,
+                numActiveCss: 3,
+                numCSSTotal: 3,
                 sensorUseThresh: sensor_use_threshold,
                 eKFSwitch: ekf_switch,
                 outputSunline: NavAttMsgPayload::default(),

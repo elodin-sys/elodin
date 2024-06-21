@@ -272,9 +272,9 @@ impl WorldBuilder {
         if let Some(ts) = time_step {
             let ts = Duration::from_secs_f64(ts);
             // 1ms (~1000 ticks/sec) is the minimum time step
-            if ts <= Duration::from_millis(1) {
-                return Err(Error::InvalidTimeStep(ts));
-            }
+            // if ts <= Duration::from_millis(1) {
+            //     return Err(Error::InvalidTimeStep(ts));
+            // }
             self.world.time_step = TimeStep(ts);
         }
 

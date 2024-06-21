@@ -1,18 +1,13 @@
-use std::{
-    iter,
-    mem::MaybeUninit,
-    ops::{Add, Div, Mul, Neg, Sub},
-};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{ConstDim, RealField};
+use crate::{ConstDim, Error, RealField, SquareDim};
 use nalgebra::{constraint::ShapeConstraint, Const};
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 
 use crate::ArrayTy;
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim, DefaultMap,
-    DefaultMappedDim, Dim, DimGet, DotDim, Field, GetDim, MapDim, MulDim, Noxpr, Repr, TensorDim,
-    XlaDim,
+    DefaultMappedDim, Dim, DimGet, DotDim, Field, MapDim, MulDim, Noxpr, Repr, TensorDim, XlaDim,
 };
 
 /// Represents a compute operation.
@@ -88,7 +83,7 @@ impl Repr for Literal {
         _right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: Field + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -108,16 +103,6 @@ impl Repr for Literal {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-    {
-        todo!()
-    }
-
-    fn get<T1: Field, D1: Dim>(
-        _arg: &Self::Inner<T1, D1>,
-        _index: usize,
-    ) -> Self::Inner<T1, GetDim<D1>>
-    where
-        ShapeConstraint: DimGet<D1>,
     {
         todo!()
     }
@@ -183,6 +168,25 @@ impl Repr for Literal {
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
+        todo!()
+    }
+
+    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
+        _arg: &Self::Inner<T1, D1>,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        todo!()
+    }
+
+    fn get<T1: Field, D1: Dim + DimGet>(
+        _arg: &Self::Inner<T1, D1>,
+        _index: D1::Index,
+    ) -> Self::Inner<T1, ()> {
+        todo!()
+    }
+
+    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+        _iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1> {
         todo!()
     }
 }
@@ -251,7 +255,7 @@ impl Repr for Buffer {
         _right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: Field + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -271,16 +275,6 @@ impl Repr for Buffer {
         MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
         <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatManyDim<D1, N>: Dim,
-    {
-        todo!()
-    }
-
-    fn get<T1: Field, D1: Dim>(
-        _arg: &Self::Inner<T1, D1>,
-        _index: usize,
-    ) -> Self::Inner<T1, GetDim<D1>>
-    where
-        ShapeConstraint: DimGet<D1>,
     {
         todo!()
     }
@@ -346,6 +340,25 @@ impl Repr for Buffer {
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
+        todo!()
+    }
+
+    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
+        _arg: &Self::Inner<T1, D1>,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        todo!()
+    }
+
+    fn get<T1: Field, D1: Dim + DimGet>(
+        _arg: &Self::Inner<T1, D1>,
+        _index: D1::Index,
+    ) -> Self::Inner<T1, ()> {
+        todo!()
+    }
+
+    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+        _iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1> {
         todo!()
     }
 }
@@ -414,7 +427,7 @@ impl Repr for Op {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: Field + Copy,
+        T: RealField + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -438,23 +451,17 @@ impl Repr for Op {
         Noxpr::concat_in_dim(args.iter().map(|&x| x.clone()).collect(), 0)
     }
 
-    fn get<T1: Field, D1: Dim>(
+    fn get<T1: Field, D1: Dim + DimGet>(
         arg: &Self::Inner<T1, D1>,
-        index: usize,
-    ) -> Self::Inner<T1, GetDim<D1>>
-    where
-        ShapeConstraint: DimGet<D1>,
-        <GetDim<D1> as ArrayDim>::Buf<MaybeUninit<T1>>:,
-    {
-        let shape = D1::shape();
-        let offsets = iter::once(index as i64)
-            .chain((1..shape.len()).map(|_| 0))
-            .collect::<SmallVec<[i64; 4]>>();
-        let new_offsets = offsets
+        index: D1::Index,
+    ) -> Self::Inner<T1, ()> {
+        let offsets = D1::index_as_array(index)
+            .as_ref()
             .iter()
-            .zip(std::iter::once(&1).chain(shape.iter().skip(1)))
-            .map(|(a, b)| a + b)
-            .collect();
+            .map(|&x| x as i64)
+            .collect::<SmallVec<[i64; 4]>>();
+        let new_offsets = offsets.iter().map(|&x| x + 1).collect();
+        let shape = D1::shape();
         let strides = shape
             .iter()
             .rev()
@@ -464,7 +471,9 @@ impl Repr for Op {
                 Some(res)
             })
             .collect::<SmallVec<[i64; 4]>>();
-        arg.clone().slice(offsets, new_offsets, strides)
+        arg.clone()
+            .slice(offsets, new_offsets, strides)
+            .reshape(smallvec![])
     }
 
     fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
@@ -540,5 +549,18 @@ impl Repr for Op {
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         arg.clone().reshape(D2::shape())
+    }
+
+    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
+        _arg: &Self::Inner<T1, D1>,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        // TODO: We will need to use a combination of an XLA custom call and `TriangularSolve` to mimick this
+        todo!()
+    }
+
+    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+        _iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1> {
+        todo!()
     }
 }

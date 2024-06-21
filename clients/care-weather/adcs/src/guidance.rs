@@ -11,20 +11,20 @@ use crate::NavData;
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
     // inputs
-    #[roci(entity_id = 3, component_id = "world_pos")]
+    #[roci(entity_id = 0, component_id = "world_pos")]
     inertial_pos: SpatialTransform<f64, ArrayRepr>,
-    #[roci(entity_id = 3, component_id = "world_vel")]
+    #[roci(entity_id = 0, component_id = "world_vel")]
     inertial_vel: SpatialTransform<f64, ArrayRepr>,
     nav_in: NavData,
 
     // outputs
-    #[roci(entity_id = 3, component_id = "att_err_mrp")]
+    #[roci(entity_id = 0, component_id = "att_err_mrp")]
     pub att_err_mrp: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "omega_err_br_b")]
+    #[roci(entity_id = 0, component_id = "omega_err_br_b")]
     pub omega_err_br_b: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "omega_rn_b")]
+    #[roci(entity_id = 0, component_id = "omega_rn_b")]
     pub omega_rn_b: [f64; 3usize],
-    #[roci(entity_id = 3, component_id = "domega_rn_b")]
+    #[roci(entity_id = 0, component_id = "domega_rn_b")]
     pub domega_rn_b: [f64; 3usize],
 }
 

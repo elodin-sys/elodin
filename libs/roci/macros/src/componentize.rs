@@ -133,8 +133,8 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     });
 
     let metadata_items = fields.fields.iter().map(|field| {
+        let ty = &field.ty;
         if field.entity_id.is_some() {
-            let ty = &field.ty;
             let component_name = match &field.component_id {
                 Some(c) => quote! {
                     #c
@@ -146,15 +146,17 @@ pub fn componentize(input: TokenStream) -> TokenStream {
                 }
             };
             quote! {
-                #conduit::Metadata {
+                .chain(std::iter::once(#conduit::Metadata {
                     name: std::borrow::Cow::Borrowed(#component_name),
                     component_type: <#ty as #conduit::ConstComponent>::TY,
                     tags: None,
                     asset: false,
-                },
+                }))
             }
         } else {
-            quote! {}
+            quote! {
+                .chain(<#ty as #crate_name::Componentize>::metadata())
+            }
         }
     });
     quote! {
@@ -176,9 +178,8 @@ pub fn componentize(input: TokenStream) -> TokenStream {
             const MAX_SIZE: usize = #(#count_arms)* 0;
 
             fn metadata() -> impl Iterator<Item = #conduit::Metadata> {
-                [
-                    #(#metadata_items)*
-                ].into_iter()
+                std::iter::empty()
+                #(#metadata_items)*
             }
         }
     }.into()

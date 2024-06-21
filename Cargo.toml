@@ -22,7 +22,8 @@ members = [
     "libs/roci",
     "libs/roci/macros",
     "libs/roci/adcs",
-    "clients/care-weather/adcs"
+    "libs/wmm",
+    "clients/care-weather/adcs",
 ]
 
 [workspace.package]
@@ -86,7 +87,11 @@ lto = "thin"
 
 [workspace.dependencies]
 roci.path = "libs/roci"
+roci.default-features = false
+roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
+nox.default-features = false
 nox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
 conduit.path = "libs/conduit"
+conduit.default-features = false

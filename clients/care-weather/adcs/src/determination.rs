@@ -2,6 +2,8 @@ use basilisk::att_determination::SunlineConfig;
 use basilisk::sys::CSSArraySensorMsgPayload;
 use basilisk::sys::NavAttMsgPayload;
 use basilisk::{att_determination::SunlineEKF, channel::BskChannel};
+use nox::Tensor;
+use nox::MRP;
 use roci::System;
 use roci::{Componentize, Decomponentize};
 
@@ -9,9 +11,17 @@ use crate::NavData;
 
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
-    nav_out: NavData,
-
+    // inputs
     css_inputs: CssInputs,
+    #[roci(entity_id = 0, component_id = "mag_ref")]
+    mag_ref: [f64; 3],
+    #[roci(entity_id = 0, component_id = "sun_ref")]
+    sun_ref: [f64; 3],
+    #[roci(entity_id = 7, component_id = "mag_value")]
+    mag_value: [f64; 3],
+
+    // outputs
+    nav_out: NavData,
 }
 
 #[derive(Default, Componentize, Decomponentize)]
@@ -68,7 +78,14 @@ impl System for Determination {
         );
         self.sunline_ekf.update(0);
         let nav_state = self.nav_state_out.read_msg();
-        world.nav_out.att_mrp_bn = nav_state.sigma_BN;
+        let body_1 = Tensor::from_buf(nav_state.vehSunPntBdy);
+        let body_2 = Tensor::from_buf(world.mag_value);
+        let ref_1 = Tensor::from_buf(world.sun_ref);
+        let ref_2 = Tensor::from_buf(world.mag_ref);
+        let att = roci_adcs::triad(body_1, body_2, ref_1, ref_2);
+        let att_mrp_bn = MRP::from_rot_matrix(att).0.into_buf();
+
+        world.nav_out.att_mrp_bn = att_mrp_bn;
         world.nav_out.omega_bn_b = nav_state.omega_BN_B;
         world.nav_out.sun_vec_b = nav_state.vehSunPntBdy;
     }

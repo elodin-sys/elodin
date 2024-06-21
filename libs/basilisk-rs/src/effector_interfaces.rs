@@ -21,7 +21,7 @@ impl RWMotorTorque {
         rw_params: BskChannel<RWArrayConfigMsgPayload>,
         rw_availability: BskChannel<RWAvailabilityMsgPayload>,
     ) -> Self {
-        Self {
+        let mut this = Self {
             config: rwMotorTorqueConfig {
                 controlAxes_B: control_axes_body,
                 numControlAxes: 0,
@@ -35,7 +35,9 @@ impl RWMotorTorque {
                 rwAvailInMsg: rw_availability.into(),
                 bskLogger: std::ptr::null_mut(),
             },
-        }
+        };
+        this.reset();
+        this
     }
 
     pub fn reset(&mut self) {
@@ -74,8 +76,8 @@ impl RWMotorVoltage {
         } = config;
         let mut this = Self {
             config: rwMotorVoltageConfig {
-                VMin: voltage_max,
-                VMax: voltage_min,
+                VMin: voltage_min,
+                VMax: voltage_max,
                 voltageOutMsg: motor_voltage_out.into(),
                 torqueInMsg: torque_in.into(),
                 rwParamsInMsg: rw_config.into(),
