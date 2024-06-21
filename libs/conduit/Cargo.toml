@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["rand", "std", "embedded-io-async"]
+default = ["rand", "std", "embedded-io-async", "flume"]
 tokio = ["dep:tokio", "tokio-util", "futures", "tracing", "flume"]
 bevy = ["dep:bevy", "flume", "big_space", "tracing"]
 nox = ["dep:nox"]

@@ -44,7 +44,7 @@ pub struct Entity<'a> {
 }
 
 impl Entity<'_> {
-    #[cfg(feature = "nox")]
+    #[cfg(feature = "xla")]
     pub fn metadata(self, metadata: crate::well_known::EntityMetadata) -> Self {
         let metadata = self.world.insert_asset(metadata);
         self.world.insert_with_id(metadata, self.id);
@@ -300,7 +300,7 @@ impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {
     }
 }
 
-#[cfg(feature = "nox")]
+#[cfg(feature = "xla")]
 mod nox_impl {
     use super::*;
     use ::nox::{xla, Client};
