@@ -90,7 +90,7 @@ impl AssetStore {
     }
 }
 
-#[cfg(feature = "nox")]
+#[cfg(feature = "xla")]
 mod nox_impl {
     use super::*;
     use nox::{FromBuilder, IntoOp, Noxpr, NoxprScalarExt};

@@ -1,7 +1,7 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
-use crate::DefaultRepr;
-use crate::{Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, GetDim, MatMul, Repr, Scalar};
+use crate::{Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, MatMul, Repr, Scalar};
+use crate::{DefaultRepr, RealField};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -25,6 +25,15 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Tensor").field(&self.inner).finish()
+    }
+}
+
+impl<T: TensorItem, D: Dim, R: Repr> PartialEq for Tensor<T, D, R>
+where
+    R::Inner<T::Elem, D>: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 
@@ -113,6 +122,13 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
 }
 
 impl<T: TensorItem + Copy, D: Dim> Tensor<T, D, ArrayRepr> {
+    pub fn from_buf(buf: D::Buf<T::Elem>) -> Self {
+        Self {
+            inner: Array { buf },
+            phantom: PhantomData,
+        }
+    }
+
     pub fn into_buf(self) -> D::Buf<T::Elem> {
         self.inner.buf
     }
@@ -746,7 +762,7 @@ impl DotDim<Dyn, Dyn> for ShapeConstraint {
 /// Alias for the dimension resulting from the dot product of dimensions `D1` and `D2`.
 pub type DottedDim<D1, D2> = <ShapeConstraint as DotDim<D1, D2>>::Output;
 
-impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
+impl<T: RealField, D1: Dim, R: Repr> Tensor<T, D1, R> {
     pub fn dot<D2>(
         &self,
         right: &Tensor<T, D2, R>,
@@ -763,12 +779,25 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
             phantom: PhantomData,
         }
     }
+}
 
-    pub fn get(&self, index: usize) -> Tensor<T, GetDim<D1>, R>
+impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
+    pub fn get(&self, index: D1::Index) -> Tensor<T, (), R>
     where
-        ShapeConstraint: DimGet<D1>,
+        D1: DimGet,
     {
         let inner = R::get::<T, D1>(&self.inner, index);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn from_scalars(parts: impl IntoIterator<Item = Tensor<T, (), R>>) -> Tensor<T, D1, R>
+    where
+        D1: ConstDim,
+    {
+        let inner = R::from_scalars(parts.into_iter().map(|t| t.inner));
         Tensor {
             inner,
             phantom: PhantomData,

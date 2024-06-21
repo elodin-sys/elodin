@@ -82,7 +82,12 @@ impl ConduitExec {
     pub fn recv(&mut self) {
         while let Ok(pair) = self.rx.try_recv() {
             if let Err(err) = self.process_msg_pair(pair) {
-                tracing::warn!(?err, "error processing msg pair");
+                match err {
+                    Error::ComponentNotFound => tracing::debug!("component not found"),
+                    err => {
+                        tracing::warn!(?err, "error processing msg pair");
+                    }
+                }
             }
         }
     }
@@ -177,7 +182,7 @@ pub fn spawn_tcp_server(
     client: nox::Client,
     check_canceled: impl Fn() -> bool,
 ) -> Result<(), Error> {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use conduit::server::TcpServer;
 
@@ -199,8 +204,10 @@ pub fn spawn_tcp_server(
         if check_canceled() {
             break Ok(());
         }
-        let sleep_time = time_step.saturating_sub(start.elapsed());
-        std::thread::sleep(sleep_time);
-        start += time_step;
+        if time_step > Duration::ZERO {
+            let sleep_time = time_step.saturating_sub(start.elapsed());
+            std::thread::sleep(sleep_time);
+            start += time_step;
+        }
     }
 }

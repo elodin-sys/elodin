@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use crate::{Field, Quaternion, RealField, Repr, Scalar, Vector};
+use crate::{Field, Matrix, Quaternion, RealField, Repr, Scalar, Vector};
 
 /// Modified Rodrigues Parameters
 pub struct MRP<T: Field, R: Repr>(pub Vector<T, 3, R>);
@@ -26,7 +26,7 @@ impl<T: Field, R: Repr> From<Quaternion<T, R>> for MRP<T, R> {
     }
 }
 
-impl<T: Field, R: Repr> MRP<T, R> {
+impl<T: RealField, R: Repr> MRP<T, R> {
     /// Constructs a new MRP from individual scalar components.
     pub fn new(
         x: impl Into<Scalar<T, R>>,
@@ -43,6 +43,20 @@ impl<T: Field, R: Repr> MRP<T, R> {
     /// Returns the four parts (components) of the quaternion as scalars.
     pub fn parts(&self) -> [Scalar<T, R>; 3] {
         self.0.parts()
+    }
+
+    pub fn from_rot_matrix(mat: Matrix<T, 3, 3, R>) -> Self {
+        // source: Analytical Mechanics of Space Systems, Fourth Edition, Hanspeter Schaub, John L. Junkins
+        // eq (3.154)
+        let trace = mat.get((0, 0)) + mat.get((1, 1)) + mat.get((2, 2));
+        let zeta = (T::one() + trace).sqrt();
+        let vec = Vector::from_scalars([
+            mat.get((1, 2)) - mat.get((2, 1)),
+            mat.get((2, 0)) - mat.get((0, 2)),
+            mat.get((0, 1)) - mat.get((1, 0)),
+        ]);
+        let inner = -vec / (&zeta * (&zeta + T::two()));
+        MRP(inner)
     }
 }
 
@@ -67,5 +81,35 @@ impl<'a, T: RealField, R: Repr> Add<&'a MRP<T, R>> for MRP<T, R> {
 
     fn add(self, rhs: &'a MRP<T, R>) -> Self::Output {
         MRP(self.0 + &rhs.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_relative_eq;
+
+    use crate::{array, tensor, ArrayRepr, Tensor};
+
+    use super::*;
+
+    #[test]
+    fn test_mrp_from_rot() {
+        // value from mrp2rot.m - https://github.com/mlourakis/MRPs/blob/master/mrp2rot.m
+        let rot = tensor![
+            [-0.3061, 0.4898, 0.8163],
+            [0.8163, -0.3061, 0.4898],
+            [0.4898, 0.8163, -0.3061]
+        ];
+        let mrp: MRP<f64, ArrayRepr> = MRP::from_rot_matrix(rot);
+        assert_relative_eq!(mrp.0.inner(), &array![0.5, 0.5, 0.5], epsilon = 1e-3);
+        // value from mrp2rot.m
+        let rot = tensor![
+            [1.0, 0.0, 0.0],
+            [0.0, -0.7041, 0.7101],
+            [0.0, -0.7101, -0.7041],
+        ];
+        let mrp: MRP<f64, ArrayRepr> = MRP::from_rot_matrix(rot);
+        assert_relative_eq!(mrp.0.inner(), &array![-0.6666, 0.0, 0.0], epsilon = 1e-4);
+        // value from rot2mrp
     }
 }
