@@ -34,14 +34,14 @@ pub use const_fnv1a_hash;
 pub use bytes;
 pub use ndarray;
 
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 mod world;
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 pub use world::*;
 
-#[cfg(all(feature = "std", feature = "xla", feature = "polars"))]
+#[cfg(all(feature = "std", feature = "polars"))]
 mod polars;
-#[cfg(all(feature = "std", feature = "xla", feature = "polars"))]
+#[cfg(all(feature = "std", feature = "polars"))]
 pub use polars::PolarsWorld;
 
 #[cfg(all(feature = "std", feature = "xla"))]
