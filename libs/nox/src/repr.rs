@@ -1,13 +1,12 @@
 //! Provides definitions and traits for handling operations on tensor dimensions and data types.
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{ConstDim, RealField};
-use nalgebra::{constraint::ShapeConstraint, Const};
-
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim, DefaultMap,
-    DefaultMappedDim, DimGet, DotDim, Field, GetDim, MapDim, MulDim, TensorDim, XlaDim,
+    DefaultMappedDim, DimGet, DotDim, Field, MapDim, MulDim, TensorDim, XlaDim,
 };
+use crate::{ConstDim, Error, RealField, SquareDim};
+use nalgebra::{constraint::ShapeConstraint, Const};
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
 pub trait Dim: ArrayDim + TensorDim + XlaDim {}
@@ -73,7 +72,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: Field + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -107,12 +106,10 @@ pub trait Repr {
         ConcatManyDim<D1, N>: Dim;
 
     /// Retrieves a specific tensor based on an index within a dimension.
-    fn get<T1: Field, D1: Dim>(
+    fn get<T1: Field, D1: Dim + DimGet>(
         arg: &Self::Inner<T1, D1>,
-        index: usize,
-    ) -> Self::Inner<T1, GetDim<D1>>
-    where
-        ShapeConstraint: DimGet<D1>;
+        index: D1::Index,
+    ) -> Self::Inner<T1, ()>;
 
     fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
         arg: &Self::Inner<T1, D1>,
@@ -141,4 +138,12 @@ pub trait Repr {
     fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
     where
         ShapeConstraint: BroadcastDim<D1, D2>;
+
+    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> Result<Self::Inner<T1, D1>, Error>;
+
+    fn from_scalars<T1: Field, D1: ConstDim + Dim>(
+        iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1>;
 }

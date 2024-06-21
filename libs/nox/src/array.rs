@@ -1,5 +1,5 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
-use crate::{ConstDim, RealField};
+use approx::{AbsDiffEq, RelativeEq};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::{
@@ -9,8 +9,8 @@ use std::{
 };
 
 use crate::{
-    AddDim, BroadcastDim, BroadcastedDim, DefaultMap, DefaultMappedDim, Dim, DottedDim, Field,
-    MapDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
+    AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
+    Error, Field, MapDim, RealField, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
 };
 
 /// A struct representing an array with type-safe dimensions and element type.
@@ -562,7 +562,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         right: &Array<T1, D2>,
     ) -> Array<T1, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
     where
-        T1: Field + Copy,
+        T1: RealField + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
@@ -685,20 +685,12 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     /// Retrieves a specific element from the array based on an index, effectively slicing the array.
-    pub fn get(&self, index: usize) -> Array<T1, GetDim<D1>>
+    pub fn get(&self, index: D1::Index) -> Array<T1, ()>
     where
-        ShapeConstraint: DimGet<D1>,
+        D1: DimGet,
     {
-        let arg_dims = D1::dim(&self.buf);
-        let stride_dims = D1::strides(&self.buf);
-        let stride = stride_dims.as_ref().last().copied().unwrap();
-        let out_dims = &arg_dims.as_ref()[1..];
-        let buf = &self.buf.as_buf()[index * stride..];
-        let mut out: Array<MaybeUninit<T1>, GetDim<D1>> = Array::uninit(out_dims);
-        for (a, b) in buf.iter().zip(out.buf.as_mut_buf().iter_mut()) {
-            b.write(*a);
-        }
-        unsafe { out.assume_init() }
+        let buf = D1::get(index, &self.buf);
+        Array { buf }
     }
 
     pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
@@ -710,6 +702,103 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             out.write(*a);
         }
         unsafe { out.assume_init() }
+    }
+
+    pub fn try_lu_inverse_mut(&mut self) -> Result<(), Error>
+    where
+        T1: RealField,
+        D1: SquareDim,
+    {
+        let mut work: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::dim(&self.buf).as_ref());
+        work.buf.as_mut_buf().iter_mut().for_each(|a| {
+            a.write(T1::zero_prim());
+        });
+        let mut work = unsafe { work.assume_init() };
+        let mut ipiv = D1::ipiv(&self.buf);
+        let mut info = 0;
+        let n = D1::order(&self.buf) as i32;
+        unsafe {
+            T1::getrf(n, n, self.buf.as_mut_buf(), n, ipiv.as_mut(), &mut info);
+        }
+        if info < 0 {
+            return Err(Error::InvertFailed(-info));
+        }
+        unsafe {
+            T1::getri(
+                n,
+                self.buf.as_mut_buf(),
+                n,
+                ipiv.as_mut(),
+                work.buf.as_mut_buf(),
+                n * n,
+                &mut info,
+            );
+        }
+        if info < 0 {
+            return Err(Error::InvertFailed(-info));
+        }
+        Ok(())
+    }
+
+    pub fn try_lu_inverse(&self) -> Result<Self, Error>
+    where
+        T1: RealField,
+        D1: SquareDim,
+    {
+        let mut out = self.clone();
+        out.try_lu_inverse_mut()?;
+        Ok(out)
+    }
+
+    pub fn from_scalars(iter: impl IntoIterator<Item = Array<T1, ()>>) -> Self
+    where
+        D1: ConstDim,
+        T1: Field,
+    {
+        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::DIM);
+        out.buf
+            .as_mut_buf()
+            .iter_mut()
+            .zip(
+                iter.into_iter()
+                    .map(|a| a.buf)
+                    .chain(std::iter::repeat(T1::zero_prim())),
+            )
+            .for_each(|(a, b)| {
+                a.write(b);
+            });
+        unsafe { out.assume_init() }
+    }
+}
+
+pub trait SquareDim: ArrayDim {
+    type IPIV: AsMut<[i32]>;
+    fn ipiv<T: Copy>(_buf: &Self::Buf<T>) -> Self::IPIV;
+    fn order<T: Copy>(buf: &Self::Buf<T>) -> usize;
+}
+
+impl SquareDim for Dyn {
+    type IPIV = Vec<i32>;
+
+    fn ipiv<T: Copy>(buf: &Self::Buf<T>) -> Self::IPIV {
+        let n = buf.shape()[0];
+        vec![0; n]
+    }
+
+    fn order<T: Copy>(buf: &Self::Buf<T>) -> usize {
+        buf.shape()[0]
+    }
+}
+
+impl<const N: usize> SquareDim for (Const<N>, Const<N>) {
+    type IPIV = [i32; N];
+
+    fn ipiv<T: Copy>(_buf: &Self::Buf<T>) -> Self::IPIV {
+        [0; N]
+    }
+
+    fn order<T: Copy>(_buf: &Self::Buf<T>) -> usize {
+        N
     }
 }
 
@@ -727,14 +816,6 @@ pub type ConcatManyDim<D1, const N: usize> =
 /// Represents a type resulting from multiplication operations between two dimensions.
 pub type MulDim<A, B> = <A as nalgebra::DimMul<B>>::Output;
 
-/// Trait to enable retrieving a specified dimension type from a composite dimension.
-pub trait DimGet<D: Dim> {
-    type Output: Dim;
-}
-
-/// Type alias for the result of a get operation, providing a sliced view of the array.
-pub type GetDim<D> = <ShapeConstraint as DimGet<D>>::Output;
-
 pub trait TransposeDim<D: Dim> {
     type Output: Dim;
 }
@@ -749,24 +830,41 @@ where
     type Output = (D2, D1);
 }
 
-impl<const N: usize> DimGet<Const<N>> for ShapeConstraint {
-    type Output = ();
+/// Trait to enable retrieving a specified dimension type from a composite dimension.
+pub trait DimGet: Dim {
+    type Index;
+
+    fn get<T: Copy>(index: Self::Index, buf: &Self::Buf<T>) -> T;
+
+    type IndexArray: AsRef<[usize]>;
+    fn index_as_array(index: Self::Index) -> Self::IndexArray;
 }
 
-macro_rules! impl_dim_get {
-    ($($dim:tt),*) => {
-        #[allow(unused_parens)]
-        impl<D: Dim, $($dim: Dim),*> DimGet<(D, $($dim,)*)> for ShapeConstraint
-        where (D, $($dim,)*): Dim,
-        ($($dim,)*): Dim,
-        {
-            type Output = ($($dim),*);
-        }
-    };
+impl<const N: usize> DimGet for Const<N> {
+    type Index = usize;
+
+    fn get<T: Copy>(index: Self::Index, buf: &Self::Buf<T>) -> T {
+        buf[index]
+    }
+
+    type IndexArray = [usize; 1];
+    fn index_as_array(index: Self::Index) -> Self::IndexArray {
+        [index]
+    }
 }
 
-impl_dim_get!(D1);
-impl_dim_get!(D1, D2);
+impl<const A: usize, const B: usize> DimGet for (Const<A>, Const<B>) {
+    type Index = (usize, usize);
+
+    fn get<T: Copy>((a, b): Self::Index, buf: &Self::Buf<T>) -> T {
+        buf[a][b]
+    }
+
+    type IndexArray = [usize; 2];
+    fn index_as_array(index: Self::Index) -> Self::IndexArray {
+        [index.0, index.1]
+    }
+}
 
 fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     for (output, other) in output.iter_mut().zip(other.iter()) {
@@ -903,7 +1001,7 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
     where
-        T: Field + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Copy,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
@@ -927,13 +1025,10 @@ impl Repr for ArrayRepr {
         Array::concat_many(args)
     }
 
-    fn get<T1: Field, D1: Dim>(
+    fn get<T1: Field, D1: Dim + DimGet>(
         arg: &Self::Inner<T1, D1>,
-        index: usize,
-    ) -> Self::Inner<T1, GetDim<D1>>
-    where
-        ShapeConstraint: DimGet<D1>,
-    {
+        index: D1::Index,
+    ) -> Self::Inner<T1, ()> {
         arg.get(index)
     }
 
@@ -999,6 +1094,18 @@ impl Repr for ArrayRepr {
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         arg.reshape()
+    }
+
+    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        arg.try_lu_inverse()
+    }
+
+    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+        iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1> {
+        Array::from_scalars(iter)
     }
 }
 
@@ -1076,8 +1183,50 @@ macro_rules! array {
     }};
 }
 
+impl<T: Copy + PartialEq, D: Dim> PartialEq for Array<T, D> {
+    fn eq(&self, other: &Self) -> bool {
+        self.buf.as_buf() == other.buf.as_buf()
+    }
+}
+
+impl<T: AbsDiffEq, D: Dim> AbsDiffEq for Array<T, D>
+where
+    T: Copy,
+
+    T::Epsilon: Copy,
+{
+    type Epsilon = T::Epsilon;
+
+    fn default_epsilon() -> Self::Epsilon {
+        T::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.buf.as_buf().abs_diff_eq(other.buf.as_buf(), epsilon)
+    }
+}
+
+impl<T: RelativeEq, D: Dim> RelativeEq for Array<T, D>
+where
+    T: Copy,
+    T::Epsilon: Copy,
+{
+    fn default_max_relative() -> T::Epsilon {
+        T::default_max_relative()
+    }
+
+    fn relative_eq(&self, other: &Self, epsilon: T::Epsilon, max_relative: T::Epsilon) -> bool {
+        self.buf
+            .as_buf()
+            .relative_eq(other.buf.as_buf(), epsilon, max_relative)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[test]
@@ -1176,10 +1325,49 @@ mod tests {
 
     #[test]
     fn test_transpose() {
-        let a: Array<f32, (Const<2>, Const<2>)> = Array {
-            buf: [[0.0, 1.0], [2.0, 3.0]],
-        };
+        let a: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
         let b: Array<f32, (Const<2>, Const<2>)> = a.transpose();
-        assert_eq!(b.buf, [[0.0, 2.0], [1.0, 3.0]]);
+        assert_eq!(b, array![[0.0, 2.0], [1.0, 3.0]]);
     }
+
+    // #[test]
+    // fn test_lu_inverse() {
+    //     let mut a = array![[1.0, 2.0], [3.0, 4.0]];
+    //     a.try_lu_inverse_mut().unwrap();
+    //     assert_eq!(a, array![[-2.0, 1.0], [1.5, -0.5]]);
+
+    //     let mut a = array![[1.0, 0.0], [0.0, 1.0]];
+    //     a.try_lu_inverse_mut().unwrap();
+    //     assert_eq!(a, array![[1.0, 0.0], [0.0, 1.0]]);
+
+    //     #[rustfmt::skip]
+    //     let mut a: Array<f64, (Const<10>, Const<10>)> = array![
+    //         [24570.1, 76805.1, 43574.6, 18894.2, -7640.97, 2261.34, 22776.7, 24861.4, 81641., 34255.6],
+    //         [12354.1, 78957.6, 5642.45, -4702.81, 63301.7, 35105.5, 35568.9, 58708.1, 45157., 65454.5],
+    //         [8302.27, 65510.6, 20473.5, 55808.1, 39832.5, 92954.5, 79581.3, 35383.3, 96110.3, 34361.5],
+    //         [30932.6, 67202.2, 21617.7, 75088.7, 71295.8, 42937.1, 26957.5, 59796.5, 35418.6, 26217.4],
+    //         [77307.7, 39452.7, 75145.5, 44098.6, 12566.9, 16471.8, 71774.6, -4106.6, 53838.2, 36685.3],
+    //         [83757.9, 17360., 8921.7, 65612.8, 90126.7, 86641.8, 21293.4, 20590.5, 13033.9, 76379.3],
+    //         [83768.9, 46348.9, 16581.3, 31374.9, 9137.27, 37604.4, 32564., 15644.9, -4805.73, 49756.],
+    //         [12081.9, 85443.3, 88681.9, 64841.1, 51603.8, 53034.5, 7805.68, 39358.2, -140.273, 84237.4],
+    //         [40253.6, 69906.9, 38533.1, 60614., 57636.5, 82128.6, 68686.8, 37255.3, 33246.1, 52798.4],
+    //         [16576.6, 37261.4, 38658.7, 91431.4, 40354.5, 9395.03, 62509.4, 28617.7, 33828.6, 60181.7]
+    //     ];
+    //     a.try_lu_inverse_mut().unwrap();
+
+    //     #[rustfmt::skip]
+    //     let  expected_inverse: Array<f64, (Const<10>, Const<10>)> = array![
+    //         [-0.0000100226, 3.34899e-6, 8.88045e-6, 9.55701e-6, 0.0000103527, -4.59573e-7, 0.000013572, 2.24482e-6, -0.0000248319, -5.47633e-6],
+    //         [0.0000858703, -0.000028404, -0.0000867496, -0.0000302066, -0.0000451287, 0.0000168553, -0.0000504144, -0.000040719, 0.000163731, 5.85461e-6],
+    //         [-0.000043415, 0.0000132544, 0.0000398965, 0.0000175089, 0.0000308841, -0.0000127083, 0.0000196943, 0.0000276474, -0.0000772964, -9.97593e-6],
+    //         [0.0000195235, -0.0000152707, -0.0000151017, -2.35467e-6, -0.0000144411, 5.44407e-6, -8.03035e-6, -8.26637e-6, 0.0000293996, 9.4548e-6],
+    //         [0.0000395083, -9.01866e-6, -0.0000518759, -0.0000126334, -0.0000150054, 0.0000164758, -0.0000424713, -0.0000239907, 0.0000884494, 1.77583e-6],
+    //         [-0.0000213967, 2.21527e-6, 0.0000281531, 4.94374e-6, 6.72697e-6, -3.5336e-6, 0.000015341, 0.0000136699, -0.0000350585, -9.13423e-6],
+    //         [-9.60105e-6, 5.4443e-6, 7.88212e-7, -3.35387e-6, 5.25609e-6, -7.54644e-6, 2.13287e-6, -4.36139e-6, 6.954e-6, 5.16871e-6],
+    //         [-0.000125344, 0.0000464253, 0.000126716, 0.0000579426, 0.0000603612, -0.0000382841, 0.0000876006, 0.0000614865, -0.000240183, -0.0000127178],
+    //         [9.00549e-7, 2.22589e-6, 0.0000120239, 2.6913e-6, 5.10871e-6, 3.9984e-6, -1.12099e-6, 1.35222e-6, -0.0000214447, -1.312e-6],
+    //         [-6.26086e-6, 8.06916e-6, 0.0000111363, -9.48246e-6, -8.31803e-7, 2.88266e-6, 9.86769e-6, 7.87647e-6, -0.0000243396, 8.19543e-6]
+    //     ];
+    //     assert_relative_eq!(a, expected_inverse, epsilon = 1e-4);
+    // }
 }

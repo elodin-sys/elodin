@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-conduit.path = "../conduit"
-conduit.features = ["tokio"]
+conduit.workspace = true
+conduit.default-features = false
+conduit.features = ["tokio", "std", "rand"]
 
 # datastructures
 heapless = "0.8"
@@ -32,7 +33,7 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3"
 
 # math
-nox.path = "../nox"
+nox.workspace = true
 nox.default-features = false
 
 # macros
