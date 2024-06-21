@@ -60,7 +60,7 @@ impl From<try_buf::ErrorKind> for Error {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "flume"))]
 impl<T> From<flume::SendError<T>> for Error {
     fn from(_: flume::SendError<T>) -> Self {
         Self::SendError

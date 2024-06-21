@@ -13,11 +13,8 @@ mod demux;
 #[cfg(feature = "std")]
 pub use demux::*;
 
-#[cfg(feature = "std")]
-use crate::{Packet, Payload};
-
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "flume"))]
 pub struct MsgPair {
     pub msg: Msg<bytes::Bytes>,
-    pub tx: Option<flume::WeakSender<Packet<Payload<bytes::Bytes>>>>,
+    pub tx: Option<flume::WeakSender<crate::Packet<crate::Payload<bytes::Bytes>>>>,
 }

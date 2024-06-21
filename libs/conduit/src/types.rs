@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 #[cfg(feature = "std")]
 use crate::query::MetadataStore;
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 use crate::world::World;
 use crate::Handle;
 #[cfg(feature = "std")]
@@ -487,7 +487,7 @@ pub trait ComponentExt: Component {
 
 impl<C: Component> ComponentExt for C {}
 
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 pub trait Archetype {
     fn name() -> ArchetypeName;
     fn components() -> Vec<Metadata>;
