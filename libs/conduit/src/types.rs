@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 #[cfg(feature = "std")]
 use crate::query::MetadataStore;
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "xla"))]
 use crate::world::World;
 use crate::Handle;
 #[cfg(feature = "std")]
@@ -487,7 +487,7 @@ pub trait ComponentExt: Component {
 
 impl<C: Component> ComponentExt for C {}
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "xla"))]
 pub trait Archetype {
     fn name() -> ArchetypeName;
     fn components() -> Vec<Metadata>;
@@ -535,6 +535,7 @@ impl<T> Packet<Payload<T>> {
         }
     }
 
+    #[cfg(feature = "std")]
     pub fn subscribe(query: Query) -> Self {
         Self::control(ControlMsg::Subscribe { query })
     }
@@ -579,6 +580,7 @@ pub enum ControlMsg {
         time_step: std::time::Duration,
         entity_ids: HashSet<EntityId>,
     },
+    #[cfg(feature = "std")]
     Query {
         time_range: Range<u64>,
         query: Query,
@@ -609,6 +611,7 @@ pub struct Query {
     pub entity_ids: Vec<EntityId>,
 }
 
+#[cfg(feature = "std")]
 impl Query {
     pub fn with_id(component_id: impl Into<ComponentId>) -> Self {
         Self {

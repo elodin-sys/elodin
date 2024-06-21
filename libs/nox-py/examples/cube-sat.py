@@ -24,11 +24,11 @@ GyroOmega = Annotated[
 
 MagReadingBody = Annotated[
     jax.Array,
-    el.Component("mag_reading_body", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component("mag_value", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 MagReadingRef = Annotated[
     jax.Array,
-    el.Component("mag_reading_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component("mag_ref", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
 CssReading = Annotated[
@@ -53,7 +53,7 @@ class Sensors(el.Archetype):
 
 CssValue = Annotated[
     jax.Array,
-    el.Component("css_value", el.ComponentType(el.PrimitiveType.F64, (1,))),
+    el.Component("css_value", el.ComponentType(el.PrimitiveType.F64, ())),
 ]
 
 CssFov = Annotated[
@@ -397,6 +397,14 @@ RWAngMomentum = Annotated[
     jax.Array,
     el.Component("rw_ang_momentum", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
+RWSpeed = Annotated[
+    jax.Array,
+    el.Component("rw_speed", el.ComponentType(el.PrimitiveType.F64, ())),
+]
+RWVoltage = Annotated[
+    jax.Array,
+    el.Component("rw_voltage", el.ComponentType(el.PrimitiveType.F64, ())),
+]
 
 
 @el.system
@@ -404,31 +412,38 @@ def actuator_allocator(
     q: el.GraphQuery[Annotated[RWEdge, el.RevEdge]],
     rw_query: el.Query[RWAxis],
     control_query: el.Query[ControlForce],
-    force_ang_momentum: el.Query[RWForce, RWAngMomentum],
-) -> el.Query[RWForce, RWAngMomentum]:
-    torque = q.edge_fold(
+) -> el.Query[RWForce]:
+    return q.edge_fold(
         rw_query,
         control_query,
         RWForce,
         el.SpatialForce.zero(),
         lambda xs, axis, control_force: xs
-        + el.SpatialForce.from_torque(
-            np.clip(
-                np.dot(control_force.torque(), axis) * axis,
-                -rw_force_clamp,
-                rw_force_clamp,
-            )
-        ),
+        + el.SpatialForce.from_torque(np.dot(control_force.torque(), axis) * axis),
     )
 
-    def rw_force(force, _, ang_momentum):
-        new_ang_momentum = ang_momentum + force.torque() * 1 / 60.0
-        torque = jax.lax.select(
-            np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
-        )
-        return (el.SpatialForce.from_torque(torque), ang_momentum + torque * 1 / 60.0)
 
-    return torque.join(force_ang_momentum).map((RWForce, RWAngMomentum), rw_force)
+@el.map
+def calculate_speed(ang_momentum: RWAngMomentum) -> RWSpeed:
+    i = 0.185 * (0.05 / 2) ** 2 / 2
+    return np.array(la.norm(ang_momentum) / i)
+
+
+@el.map
+def calculate_torque(voltage: RWVoltage, axis: RWAxis) -> RWForce:
+    return el.SpatialForce.from_torque((voltage / 10 * -0.04) * axis)
+
+
+@el.map
+def saturate_force(
+    force: RWForce, ang_momentum: RWAngMomentum
+) -> tuple[RWForce, RWAngMomentum]:
+    new_ang_momentum = ang_momentum + force.torque() * 1 / 60.0
+    torque = jax.lax.select(
+        np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
+    )
+    torque = np.clip(torque, -rw_force_clamp, rw_force_clamp)
+    return (el.SpatialForce.from_torque(torque), ang_momentum + torque * 1 / 60.0)
 
 
 @dataclass
@@ -441,6 +456,8 @@ class ReactionWheel(el.Archetype):
     rw_force: RWForce
     axis: RWAxis
     ang_momentum: RWAngMomentum
+    speed: RWSpeed
+    voltage: RWVoltage
 
 
 @el.system
@@ -475,45 +492,18 @@ def gravity_effector(
 
 w = el.World()
 
-b = el.Body(
-    world_pos=el.SpatialTransform.from_linear(np.array([1.0, 0.0, 0.0]) * radius),
-    world_vel=el.SpatialMotion(
-        initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity
-    ),
-    inertia=el.SpatialInertia(2825.2 / 1000.0, j),
-    # Credit to the OreSat program https://www.oresat.org for the model above
-)
-rw_1 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([1.0, 0.0, 0.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-    ),
-    name="Reaction Wheel 1",
-)
-
-
-rw_2 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([0.0, 1.0, 0.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-    ),
-    name="Reaction Wheel 2",
-)
-
-rw_3 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([0.0, 0.0, 1.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-    ),
-    name="Reaction Wheel 3",
-)
-
 sat = w.spawn(
     [
-        b,
+        el.Body(
+            world_pos=el.SpatialTransform.from_linear(
+                np.array([1.0, 0.0, 0.0]) * radius
+            ),
+            world_vel=el.SpatialMotion(
+                initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity
+            ),
+            inertia=el.SpatialInertia(2825.2 / 1000.0, j),
+            # Credit to the OreSat program https://www.oresat.org for the model above
+        ),
         ControlInput(
             el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
             el.SpatialForce.zero(),
@@ -528,9 +518,40 @@ sat = w.spawn(
     name="OreSat",
 )
 
-w.spawn(RWRel(el.Edge(sat, rw_1)), name="Sat -> RW 1")
-w.spawn(RWRel(el.Edge(sat, rw_2)), name="Sat -> RW 2")
-w.spawn(RWRel(el.Edge(sat, rw_3)), name="Sat -> RW 3")
+rw_1 = w.spawn(
+    ReactionWheel(
+        rw_force=el.SpatialForce.zero(),
+        axis=np.array([1.0, 0.0, 0.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
+        speed=np.zeros(()),
+        voltage=np.zeros(()),
+    ),
+    name="Reaction Wheel 1",
+)
+
+
+rw_2 = w.spawn(
+    ReactionWheel(
+        rw_force=el.SpatialForce.zero(),
+        axis=np.array([0.0, 1.0, 0.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
+        speed=np.zeros(()),
+        voltage=np.zeros(()),
+    ),
+    name="Reaction Wheel 2",
+)
+
+rw_3 = w.spawn(
+    ReactionWheel(
+        rw_force=el.SpatialForce.zero(),
+        axis=np.array([0.0, 0.0, 1.0]),
+        ang_momentum=np.array([0.0, 0.0, 0.0]),
+        speed=np.zeros(()),
+        voltage=np.zeros(()),
+    ),
+    name="Reaction Wheel 3",
+)
+
 
 css_0 = w.spawn(
     SunSensor(
@@ -585,6 +606,10 @@ css_5 = w.spawn(
     name="Course Sun Sensor 5",
 )
 
+w.spawn(RWRel(el.Edge(sat, rw_1)), name="Sat -> RW 1")
+w.spawn(RWRel(el.Edge(sat, rw_2)), name="Sat -> RW 2")
+w.spawn(RWRel(el.Edge(sat, rw_3)), name="Sat -> RW 3")
+
 w.spawn(CSSRel(el.Edge(css_0, sat)), name="CSS 0 -> Sat")
 w.spawn(CSSRel(el.Edge(css_1, sat)), name="CSS 1 -> Sat")
 w.spawn(CSSRel(el.Edge(css_2, sat)), name="CSS 2 -> Sat")
@@ -608,7 +633,7 @@ w.spawn(
                             el.GraphEntity(
                                 css,
                                 [
-                                    el.Component.index(CssValue)[0],
+                                    el.Component.index(CssValue),
                                 ],
                             )
                             for css in [css_0, css_1, css_2, css_3, css_4, css_5]
@@ -646,14 +671,16 @@ w.spawn(
     name="Earth",
 )
 
-
 exec = w.run(
     system=el.six_dof(
         1.0 / 60.0,
         sensors
         | kalman_filter
-        | control
-        | actuator_allocator
+        # | control
+        # | actuator_allocator
+        | calculate_torque
+        | saturate_force
+        | calculate_speed
         | rw_effector
         | gravity_effector
         | earth_point,
