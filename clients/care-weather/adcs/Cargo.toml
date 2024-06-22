@@ -16,6 +16,8 @@ nox.default-features = false
 roci-adcs.workspace = true
 basilisk.workspace = true
 basilisk.features = ["serde"]
+nox-frames.workspace = true
+wmm.workspace = true
 
 # config
 serde.version = "1.0"
@@ -30,3 +32,6 @@ serialport = "4.3.0"
 # errors
 thiserror = "1.0.61"
 anyhow = "1"
+
+# time
+hifitime = "3.9"

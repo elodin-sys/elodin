@@ -9,6 +9,7 @@ members = [
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
     "libs/nox-py",
+    "libs/nox-frames",
     "libs/xla-rs",
     "libs/atc/migration",
     "libs/atc/entity",
@@ -95,3 +96,5 @@ nox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
 conduit.path = "libs/conduit"
 conduit.default-features = false
+nox-frames.path = "libs/nox-frames"
+wmm.path = "libs/wmm"
