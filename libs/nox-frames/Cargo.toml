@@ -1,0 +1,23 @@
+[package]
+name = "nox-frames"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["earth"]
+earth = ["dep:rsofa", "hifitime"]
+
+[dependencies]
+nox.path = "../nox"
+nox.default-features = false
+
+rsofa.version = "0.5.0"
+rsofa.optional = true
+
+# time
+hifitime.version = "3.9"
+hifitime.optional = true
+
+[dev-dependencies]
+approx = "0.5"

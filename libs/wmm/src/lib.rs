@@ -1,3 +1,4 @@
+use hifitime::Epoch;
 use sys::MAG_SetDefaults;
 
 mod coef;
@@ -15,6 +16,9 @@ pub struct MagneticModel {
     timed_model: Box<sys::MAGtype_MagneticModel>,
     ellipsoid: Ellipsoid,
 }
+
+unsafe impl Send for MagneticModel {}
+unsafe impl Sync for MagneticModel {}
 
 impl Default for MagneticModel {
     fn default() -> Self {
@@ -40,6 +44,15 @@ impl Date {
                 DecimalYear: decimal_year,
             },
         }
+    }
+}
+
+impl From<Epoch> for Date {
+    fn from(val: Epoch) -> Self {
+        let (y, m, d, _, _, _, _) = val.to_gregorian_utc();
+        let wmm_epoch = Epoch::from_gregorian_utc(2020, 1, 1, 0, 0, 0, 0);
+        let decimal_year = (val - wmm_epoch).to_seconds() / hifitime::SECONDS_PER_YEAR;
+        Date::new(y, m as i32, d as i32, decimal_year)
     }
 }
 
@@ -129,9 +142,10 @@ pub struct ErrorBars(pub Elements);
 impl MagneticModel {
     pub fn calculate_field(
         &mut self,
-        date: Date,
+        date: impl Into<Date>,
         geodetic: GeodeticCoords,
     ) -> (Elements, ErrorBars) {
+        let date = date.into();
         let mut sphere_coords = sys::MAGtype_CoordSpherical::default();
         let mut elements = sys::MAGtype_GeoMagneticElements::default();
         let mut error_bars = sys::MAGtype_GeoMagneticElements::default();
@@ -191,9 +205,10 @@ mod tests {
     #[test]
     fn test_get_field_strength() {
         let mut model = MagneticModel::default();
-        let date = Date::new(2024, 1, 1, 4.0);
+        //let date = Date::new(2024, 1, 1, 4.0);
+        let epoch = Epoch::from_gregorian_utc(2024, 1, 1, 0, 0, 0, 0);
         let geodetic = GeodeticCoords::with_geoid_height(37.760283, -122.388016, 0.0);
-        let (elements, _) = model.calculate_field(date, geodetic);
+        let (elements, _) = model.calculate_field(epoch, geodetic);
         println!("elements: {:#?}", elements);
         assert_relative_eq!(
             elements.b_field()[..],

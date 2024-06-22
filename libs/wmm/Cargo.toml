@@ -7,7 +7,7 @@ repository.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
+hifitime = "3.9"
 
 [dev-dependencies]
 approx = "0.5"
