@@ -100,6 +100,22 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
     }
 }
 
+impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
+    fn from(mrp: &'a MRP<T, R>) -> Self {
+        let MRP(mrp) = mrp;
+        let magsq = mrp.norm_squared();
+        let [m1, m2, m3] = mrp.parts();
+        let w = T::one::<R>() - &magsq;
+        let inner = Vector::<T, 4, R>::from_arr([
+            &(m1 * T::two::<R>()),
+            &(m2 * T::two::<R>()),
+            &(m3 * T::two::<R>()),
+            &w,
+        ]);
+        Quaternion(inner / (T::one::<R>() + magsq))
+    }
+}
+
 impl<T: RealField, R: Repr> Mul for Quaternion<T, R> {
     type Output = Self;
 
@@ -275,5 +291,18 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(nalgebra::Quaternion::new(0.0, 0.0, 0.0, 1.0), out);
+    }
+
+    #[test]
+    fn test_quat_mrp_conversion() {
+        let client = Client::cpu().unwrap();
+        let comp = (|q: Quaternion<f32>| -> Quaternion<f32> { Quaternion::from(&q.mrp()) })
+            .build()
+            .unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let q = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1.0);
+        let out = exec.run(&client, q.into_inner()).unwrap().to_host();
+        let correct_out = q.into_inner();
+        approx::assert_relative_eq!(out, correct_out, epsilon = 1.0e-6);
     }
 }
