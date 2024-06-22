@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::Duration;
 use std::{borrow::Cow, io::Write};
 
 use arrayvec::ArrayVec;
@@ -8,7 +9,7 @@ use roci::drivers::Hz;
 use roci::System;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 
-use crate::determination::World;
+use crate::determination::{GpsInputs, World};
 
 pub struct McuDriver {
     port: Box<dyn SerialPort>,
@@ -61,7 +62,7 @@ impl McuDriver {
 
     pub fn print_info(&mut self) -> std::io::Result<()> {
         writeln!(&mut self.port, "info")?;
-        self.port.set_timeout(std::time::Duration::from_secs(1))?;
+        self.port.set_timeout(Duration::from_secs(1))?;
         loop {
             for line in self.try_read_lines()? {
                 println!("{}", line);
@@ -81,7 +82,7 @@ impl McuDriver {
     ) -> std::io::Result<()> {
         let cmd = adcs_init_command(update_interval, cycle_duration, cycle_interval, adcs_format);
         writeln!(&mut self.port, "{}", cmd)?;
-        self.port.set_timeout(std::time::Duration::from_secs(1))?;
+        self.port.set_timeout(Duration::from_secs(1))?;
         let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
         loop {
             for line in self.try_read_lines()? {
@@ -92,18 +93,23 @@ impl McuDriver {
         }
     }
 
-    pub fn try_get_sensor_data(&mut self) -> std::io::Result<Option<SensorData>> {
-        self.port.set_timeout(std::time::Duration::from_secs(0))?;
-        self.try_read_lines()?
-            .into_iter()
-            .filter(|l| l.starts_with("[FILE][adcs]"))
-            .filter(|l| !l.starts_with("[FILE][adcs]#"))
-            .last()
-            .map(|l| {
-                SensorData::from_str(&l)
-                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
-            })
-            .transpose()
+    pub fn init_gps(
+        &mut self,
+        update_interval: u32,
+        cycle_duration: u32,
+        cycle_interval: u32,
+    ) -> std::io::Result<()> {
+        let cmd = gps_init_command(update_interval, cycle_duration, cycle_interval);
+        writeln!(&mut self.port, "{}", cmd)?;
+        self.port.set_timeout(Duration::from_secs(1))?;
+        let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
+        loop {
+            for line in self.try_read_lines()? {
+                if line == ack_msg {
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
@@ -117,13 +123,37 @@ impl System for McuDriver {
             mag_value: [0.0, 0.0, 1.0],
             sun_ref: Tensor::from_buf([0.0, 1.0, 0.0]),
             mag_ref: Tensor::from_buf([0.0, 0.0, 1.0]),
+            gps_inputs: GpsInputs {
+                lat: 40.1,
+                long: -111.8,
+                alt: 800.0,
+            },
             ..Default::default()
         }
     }
 
     fn update(&mut self, world: &mut Self::World) {
-        match self.try_get_sensor_data() {
-            Ok(Some(sensor_data)) => {
+        self.port.set_timeout(Duration::from_secs(0)).unwrap();
+        let lines = match self.try_read_lines() {
+            Ok(lines) => lines,
+            Err(err) => {
+                eprintln!("error reading from MCU: {}", err);
+                return;
+            }
+        };
+        for line in lines {
+            if let Some(msg) = line.strip_prefix("[FILE][adcs]") {
+                if msg.starts_with('#') {
+                    continue;
+                }
+                let sensor_data = match SensorData::from_str(msg) {
+                    Ok(sensor_data) => sensor_data,
+                    Err(err) => {
+                        eprintln!("error parsing sensor data: {}", err);
+                        continue;
+                    }
+                };
+
                 let side_lum = sensor_data
                     .css_side_avg
                     .map(|v| v / 2u64.pow(12) as f64) // 12-bit ADC
@@ -141,10 +171,22 @@ impl System for McuDriver {
                     .normalize()
                     .into_buf();
                 println!("<- received mag: {:?}", world.mag_value);
-            }
-            Ok(None) => {}
-            Err(err) => {
-                eprintln!("error getting sensor data: {}", err);
+            } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
+                println!("<- received gps message: {}", msg);
+                let gps_data = match GpsData::from_str(msg) {
+                    Ok(gps_data) => gps_data,
+                    Err(err) => {
+                        eprintln!("error parsing gps data: {}", err);
+                        continue;
+                    }
+                };
+                println!(
+                    "<- received gps, lat: {}, long: {}, alt: {}",
+                    gps_data.latitute, gps_data.longitude, gps_data.altitude
+                );
+                world.gps_inputs.lat = gps_data.latitute;
+                world.gps_inputs.long = gps_data.longitude;
+                world.gps_inputs.alt = gps_data.altitude;
             }
         }
     }
@@ -170,6 +212,14 @@ pub struct SensorData {
     pub css_vertex_avg: [f64; 8],
     pub reaction_wheel_rpm: [i64; 3],
     pub adcs_format: BitFlags<AdcsFormat>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct GpsData {
+    pub latitute: f64,
+    pub longitude: f64,
+    pub altitude: f64,
+    pub unix_time: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -275,6 +325,41 @@ impl FromStr for SensorData {
     }
 }
 
+impl FromStr for GpsData {
+    type Err = SensorParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // skip any leading tags in the string such as "[GPS]"
+        // the tags are assumed to always be enclosed in square brackets
+        let last_tag = s.rfind(']').map(|i| i + 1).unwrap_or(0);
+        let (_tags, s) = s.split_at(last_tag);
+
+        let mut s = s.split(',');
+        let latitute = s
+            .next()
+            .ok_or(SensorParseError::InsufficientParts)?
+            .parse()?;
+        let longitude = s
+            .next()
+            .ok_or(SensorParseError::InsufficientParts)?
+            .parse()?;
+        let altitude = s
+            .next()
+            .ok_or(SensorParseError::InsufficientParts)?
+            .parse()?;
+        let unix_time = s
+            .next()
+            .ok_or(SensorParseError::InsufficientParts)?
+            .parse()?;
+
+        Ok(GpsData {
+            latitute,
+            longitude,
+            altitude,
+            unix_time,
+        })
+    }
+}
+
 // update_interval (msec) - how often ADCS sensor values are sent by the MCU during an active cycle
 // cycle_duration (sec) - how long the ADCS cycle lasts
 // cycle_interval (sec) - how long the ADCS cycle is inactive before the next cycle starts
@@ -293,6 +378,18 @@ pub fn adcs_init_command(
         update_interval,
         cycle_duration,
         cycle_interval
+    )
+}
+
+// update_interval (msec) - how often GPS sensor values are sent by the MCU during an active cycle
+// cycle_duration (sec) - how long the GPS cycle lasts
+// cycle_interval (sec) - how long the GPS cycle is inactive before the next cycle starts
+// Returns a MCU command string that configures the GPS cycle.
+// E.g: g.fmt=0;g.upd=1000;g.dur=10;g.int=100
+pub fn gps_init_command(update_interval: u32, cycle_duration: u32, cycle_interval: u32) -> String {
+    format!(
+        "g.fmt=0;g.upd={};g.dur={};g.int={}",
+        update_interval, cycle_duration, cycle_interval
     )
 }
 
@@ -323,6 +420,14 @@ mod tests {
                     | AdcsFormat::IncludeCss
             ),
             "a.fmt=39;a.upd=1000;a.dur=10;a.int=100"
+        );
+    }
+
+    #[test]
+    fn test_config_gps_cycle() {
+        assert_eq!(
+            gps_init_command(1000, 10, 100),
+            "g.fmt=0;g.upd=1000;g.dur=10;g.int=100"
         );
     }
 
@@ -369,5 +474,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(sensor_data, expected_sensor_data);
+    }
+
+    #[test]
+    fn test_parse_gps_data() {
+        let gps_data = "0,0,0,0".parse::<GpsData>().unwrap();
+        let expected_gps_data = GpsData::default();
+        assert_eq!(gps_data, expected_gps_data);
+
+        let gps_data = "40.1,-111.8,800.0,1719068896".parse::<GpsData>().unwrap();
+        let expected_gps_data = GpsData {
+            latitute: 40.1,
+            longitude: -111.8,
+            altitude: 800.0,
+            unix_time: 1719068896,
+        };
+        assert_eq!(gps_data, expected_gps_data);
     }
 }

@@ -63,13 +63,14 @@ fn main() -> anyhow::Result<()> {
         &[],
         sim_adapter::TxWorld::metadata(),
     );
-    let mut mcu_driver = mcu::McuDriver::new(mcu.path, mcu.baud_rate).unwrap();
+    let mut mcu_driver = mcu::McuDriver::new(mcu.path, mcu.baud_rate)?;
     let adcs_format = mcu::AdcsFormat::IncludeMag
         | mcu::AdcsFormat::IncludeGyro
         | mcu::AdcsFormat::IncludeAccel
         | mcu::AdcsFormat::IncludeCss;
     mcu_driver.print_info().unwrap();
-    mcu_driver.init_adcs(200, 20, 10, adcs_format).unwrap();
+    mcu_driver.init_adcs(200, 20, 10, adcs_format)?;
+    mcu_driver.init_gps(200, 20, 10)?;
     let sim_adapter = sim_adapter::SimAdapter;
     os_sleep_driver(mcu_driver.pipe(det).pipe(sim_adapter).pipe(tx)).run();
     Ok(())

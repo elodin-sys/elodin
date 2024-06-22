@@ -37,11 +37,11 @@ pub struct World {
 #[derive(Debug, Default, Componentize, Decomponentize)]
 pub struct GpsInputs {
     #[roci(entity_id = 0, component_id = "lat")]
-    lat: f64,
+    pub lat: f64,
     #[roci(entity_id = 0, component_id = "long")]
-    long: f64,
+    pub long: f64,
     #[roci(entity_id = 0, component_id = "alt")]
-    alt: f64,
+    pub alt: f64,
 }
 
 pub struct Determination {
