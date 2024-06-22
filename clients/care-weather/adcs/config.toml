@@ -11,11 +11,23 @@ normal_b = [1.0, 0.0, 0.0]
 coefficent = 1.0
 
 [[sunline.css]]
+normal_b = [-1.0, 0.0, 0.0]
+coefficent = 1.0
+
+[[sunline.css]]
 normal_b = [0.0, 1.0, 0.0]
 coefficent = 1.0
 
 [[sunline.css]]
+normal_b = [0.0, -1.0, 0.0]
+coefficent = 1.0
+
+[[sunline.css]]
 normal_b = [0.0, 0.0, 1.0]
+coefficent = 1.0
+
+[[sunline.css]]
+normal_b = [0.0, 0.0, -1.0]
 coefficent = 1.0
 
 [guidance]

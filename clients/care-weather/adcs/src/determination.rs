@@ -20,7 +20,8 @@ use crate::NavData;
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
     // inputs
-    pub css_inputs: CssInputs,
+    #[roci(entity_id = 4, component_id = "css_value")]
+    pub css_inputs: [f64; 6],
     #[roci(entity_id = 0, component_id = "mag_ref")]
     pub mag_ref: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 0, component_id = "sun_ref")]
@@ -41,16 +42,6 @@ pub struct GpsInputs {
     long: f64,
     #[roci(entity_id = 0, component_id = "alt")]
     alt: f64,
-}
-
-#[derive(Debug, Default, Componentize, Decomponentize)]
-pub struct CssInputs {
-    #[roci(entity_id = 4, component_id = "css_value")]
-    pub css_0: f64,
-    #[roci(entity_id = 5, component_id = "css_value")]
-    pub css_1: f64,
-    #[roci(entity_id = 6, component_id = "css_value")]
-    pub css_2: f64,
 }
 
 pub struct Determination {
@@ -93,9 +84,7 @@ impl System for Determination {
     fn update(&mut self, world: &mut Self::World) {
         let elapsed = self.start.elapsed().as_nanos() as u64;
         let mut css_cos_values = [0.0; 32];
-        css_cos_values[0] = world.css_inputs.css_0;
-        css_cos_values[1] = world.css_inputs.css_1;
-        css_cos_values[2] = world.css_inputs.css_2;
+        css_cos_values[..world.css_inputs.len()].copy_from_slice(&world.css_inputs);
         self.css_input.write(
             CSSArraySensorMsgPayload {
                 CosValue: css_cos_values,

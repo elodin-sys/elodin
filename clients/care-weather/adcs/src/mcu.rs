@@ -112,14 +112,13 @@ impl System for McuDriver {
     type Driver = Hz<100>;
 
     fn init_world(&mut self) -> Self::World {
-        let mut world = World::default();
-        world.css_inputs.css_0 = 0.0;
-        world.css_inputs.css_1 = 1.0;
-        world.css_inputs.css_2 = 0.0;
-        world.mag_value = [0.0, 0.0, 1.0];
-        world.sun_ref = Tensor::from_buf([0.0, 1.0, 0.0]);
-        world.mag_ref = Tensor::from_buf([0.0, 0.0, 1.0]);
-        world
+        World {
+            css_inputs: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            mag_value: [0.0, 0.0, 1.0],
+            sun_ref: Tensor::from_buf([0.0, 1.0, 0.0]),
+            mag_ref: Tensor::from_buf([0.0, 0.0, 1.0]),
+            ..Default::default()
+        }
     }
 
     fn update(&mut self, world: &mut Self::World) {
@@ -129,17 +128,11 @@ impl System for McuDriver {
                     .css_side_avg
                     .map(|v| v / 2u64.pow(12) as f64) // 12-bit ADC
                     .map(|v| v.clamp(0.0, 1.0));
+                println!("<- received css: {:?}", side_lum);
 
-                let [x_p, x_n, y_p, y_n, z_p, z_n] = side_lum;
-                // high delta = facing sum = low cosine
-                let xyz_lum = [x_p - x_n, y_p - y_n, z_p - z_n];
-                println!("<- received css: {:?}", xyz_lum);
-
-                let max_cos = xyz_lum.iter().copied().fold(-f64::INFINITY, f64::max);
+                let max_cos = side_lum.iter().copied().fold(0.0, f64::max);
                 if max_cos > f64::EPSILON {
-                    world.css_inputs.css_0 = xyz_lum[0];
-                    world.css_inputs.css_1 = xyz_lum[1];
-                    world.css_inputs.css_2 = xyz_lum[2];
+                    world.css_inputs = side_lum;
                 } else {
                     println!("-> no sun detected");
                 }
