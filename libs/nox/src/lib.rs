@@ -1,6 +1,8 @@
 #![recursion_limit = "1024"]
 #![allow(clippy::arc_with_non_send_sync)]
 
+extern crate lapack_src as _;
+
 mod array;
 mod error;
 mod fields;

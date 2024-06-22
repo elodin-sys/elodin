@@ -880,3 +880,9 @@ macro_rules! tensor {
         $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$elem; $n])
     }};
 }
+
+impl<T: Field, R: Repr> From<T> for Tensor<T, (), R> {
+    fn from(val: T) -> Self {
+        Scalar::from_inner(R::scalar_from_const(val))
+    }
+}

@@ -9,6 +9,16 @@ use std::marker::PhantomData;
 /// Type alias for a tensor that specifically represents a vector.
 pub type Vector<T, const N: usize, P = DefaultRepr> = Tensor<T, Const<N>, P>;
 
+impl<T: Field, R: Repr> Vector<T, 3, R> {
+    pub fn new(
+        x: impl Into<Scalar<T, R>>,
+        y: impl Into<Scalar<T, R>>,
+        z: impl Into<Scalar<T, R>>,
+    ) -> Self {
+        Self::from_arr([&x.into(), &y.into(), &z.into()])
+    }
+}
+
 impl<T: Field, R: Repr> Vector<T, 3, R>
 where
     Self: From<Vector<T, 3, ArrayRepr>>,
