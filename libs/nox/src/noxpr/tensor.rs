@@ -2,18 +2,12 @@ use crate::XlaDim;
 use crate::{
     AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDims, DefaultMap, Dim,
     DimConcat, Field, FromOp, IntoOp, MapDim, MappedDim, NonScalarDim, Noxpr, Op, ReplaceMappedDim,
-    Repr, Scalar, Tensor, TensorItem, Vector,
+    Scalar, Tensor, TensorItem, Vector,
 };
 use nalgebra::Const;
 use smallvec::smallvec;
 use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
-
-impl<T: Field + NativeType + ArrayElement, R: Repr> From<T> for Tensor<T, (), R> {
-    fn from(val: T) -> Self {
-        Scalar::from_inner(R::scalar_from_const(val))
-    }
-}
 
 impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Array<T, D>> for Tensor<T, D, Op> {
     fn from(arr: Array<T, D>) -> Self {
