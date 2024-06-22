@@ -1,37 +1,159 @@
-use std::io::BufRead;
 use std::str::FromStr;
 use std::{borrow::Cow, io::Write};
 
 use arrayvec::ArrayVec;
 use enumflags2::{bitflags, BitFlags};
+use nox::Tensor;
+use roci::drivers::Hz;
+use roci::System;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 
+use crate::determination::World;
+
 pub struct McuDriver {
-    serial_port: Box<dyn SerialPort>,
+    port: Box<dyn SerialPort>,
+    read_buf: Vec<u8>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct McuConfig {
+    pub path: String,
+    pub baud_rate: Option<u32>,
 }
 
 impl McuDriver {
-    pub fn new<'a>(
-        path: impl Into<Cow<'a, str>>,
-        baud_rate: Option<u32>,
-    ) -> Result<Self, serialport::Error> {
+    pub fn new<'a>(path: impl Into<Cow<'a, str>>, baud_rate: Option<u32>) -> std::io::Result<Self> {
         let mut port = serialport::new(path.into(), baud_rate.unwrap_or(9600)).open()?;
         port.set_data_bits(DataBits::Eight)?;
         port.set_flow_control(FlowControl::Software)?;
         port.set_parity(Parity::None)?;
         port.set_stop_bits(StopBits::One)?;
-        port.set_timeout(std::time::Duration::from_secs(1))?;
-        Ok(Self { serial_port: port })
+        let read_buf = Vec::with_capacity(1024);
+        Ok(Self { port, read_buf })
     }
 
-    pub fn info(&mut self) -> std::io::Result<String> {
-        writeln!(&mut self.serial_port, "info")?;
-        let mut buf_reader = std::io::BufReader::new(&mut self.serial_port);
-        let mut info = String::new();
-        while !info.trim().ends_with("|info|") {
-            buf_reader.read_line(&mut info)?;
+    pub fn try_read_lines(&mut self) -> std::io::Result<Vec<String>> {
+        let mut lines = Vec::default();
+        let mut buf = [0u8; 1024];
+        let bytes_read = match self.port.read(&mut buf) {
+            Ok(n) => n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => 0,
+            Err(e) => return Err(e),
+        };
+        if bytes_read > 0 {
+            self.read_buf.extend_from_slice(&buf[..bytes_read]);
+            while let Some(pos) = self.read_buf.iter().position(|&b| b == b'\n') {
+                let line = std::str::from_utf8(&self.read_buf[..pos + 1])
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Could not parse line as UTF-8 string",
+                        )
+                    })?
+                    .trim_end()
+                    .to_string();
+                lines.push(line);
+                self.read_buf.drain(..pos + 1);
+            }
         }
-        Ok(info)
+        Ok(lines)
+    }
+
+    pub fn print_info(&mut self) -> std::io::Result<()> {
+        writeln!(&mut self.port, "info")?;
+        self.port.set_timeout(std::time::Duration::from_secs(1))?;
+        loop {
+            for line in self.try_read_lines()? {
+                println!("{}", line);
+                if line == "|info|" {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    pub fn init_adcs(
+        &mut self,
+        update_interval: u32,
+        cycle_duration: u32,
+        cycle_interval: u32,
+        adcs_format: BitFlags<AdcsFormat>,
+    ) -> std::io::Result<()> {
+        let cmd = adcs_init_command(update_interval, cycle_duration, cycle_interval, adcs_format);
+        writeln!(&mut self.port, "{}", cmd)?;
+        self.port.set_timeout(std::time::Duration::from_secs(1))?;
+        let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
+        loop {
+            for line in self.try_read_lines()? {
+                if line == ack_msg {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    pub fn try_get_sensor_data(&mut self) -> std::io::Result<Option<SensorData>> {
+        self.port.set_timeout(std::time::Duration::from_secs(0))?;
+        self.try_read_lines()?
+            .into_iter()
+            .filter(|l| l.starts_with("[FILE][adcs]"))
+            .filter(|l| !l.starts_with("[FILE][adcs]#"))
+            .last()
+            .map(|l| {
+                SensorData::from_str(&l)
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+            })
+            .transpose()
+    }
+}
+
+impl System for McuDriver {
+    type World = World;
+    type Driver = Hz<100>;
+
+    fn init_world(&mut self) -> Self::World {
+        let mut world = World::default();
+        world.css_inputs.css_0 = 0.0;
+        world.css_inputs.css_1 = 1.0;
+        world.css_inputs.css_2 = 0.0;
+        world.mag_value = [0.0, 0.0, 1.0];
+        world.sun_ref = Tensor::from_buf([0.0, 1.0, 0.0]);
+        world.mag_ref = Tensor::from_buf([0.0, 0.0, 1.0]);
+        world
+    }
+
+    fn update(&mut self, world: &mut Self::World) {
+        match self.try_get_sensor_data() {
+            Ok(Some(sensor_data)) => {
+                let side_lum = sensor_data
+                    .css_side_avg
+                    .map(|v| v / 2u64.pow(12) as f64) // 12-bit ADC
+                    .map(|v| v.clamp(0.0, 1.0));
+
+                let [x_p, x_n, y_p, y_n, z_p, z_n] = side_lum;
+                // high delta = facing sum = low cosine
+                let xyz_lum = [x_p - x_n, y_p - y_n, z_p - z_n];
+                println!("<- received css: {:?}", xyz_lum);
+
+                let max_cos = xyz_lum.iter().copied().fold(-f64::INFINITY, f64::max);
+                if max_cos > f64::EPSILON {
+                    world.css_inputs.css_0 = xyz_lum[0];
+                    world.css_inputs.css_1 = xyz_lum[1];
+                    world.css_inputs.css_2 = xyz_lum[2];
+                } else {
+                    println!("-> no sun detected");
+                }
+
+                world.mag_value = Tensor::<f64, _, _>::from_buf(sensor_data.mag.map(|v| v as f64))
+                    .normalize()
+                    .into_buf();
+                println!("<- received mag: {:?}", world.mag_value);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("error getting sensor data: {}", err);
+            }
+        }
     }
 }
 
@@ -43,7 +165,7 @@ pub enum AdcsFormat {
     IncludeGyro = 0b00000010,
     IncludeAccel = 0b00000100,
     IncludeCss = 0b00100000,
-    IncludeReactionWheelRpm = 0b10000000,
+    IncludeReactionWheelRpm = 0b1_00000000,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -53,6 +175,7 @@ pub struct SensorData {
     pub accel: [f64; 3],
     pub css_side_avg: [f64; 6],
     pub css_vertex_avg: [f64; 8],
+    pub reaction_wheel_rpm: [i64; 3],
     pub adcs_format: BitFlags<AdcsFormat>,
 }
 
@@ -148,6 +271,23 @@ impl FromStr for SensorData {
                 .into_inner()
                 .map_err(|_| SensorParseError::InsufficientParts)?;
         }
+
+        if sensor_data
+            .adcs_format
+            .contains(AdcsFormat::IncludeReactionWheelRpm)
+        {
+            sensor_data.reaction_wheel_rpm = s
+                .next()
+                .ok_or(SensorParseError::InsufficientParts)?
+                .split(',')
+                .take(3)
+                .map(|v| if v.is_empty() { "0" } else { v })
+                .map(str::parse)
+                .collect::<Result<ArrayVec<_, 3>, _>>()?
+                .into_inner()
+                .map_err(|_| SensorParseError::InsufficientParts)?;
+        }
+
         Ok(sensor_data)
     }
 }
@@ -158,7 +298,7 @@ impl FromStr for SensorData {
 // adcs_format - a bitfield that specifies which sensor values are included in the ADCS cycle
 // Returns a MCU command string that configures the ADCS cycle.
 // E.g: a.fmt=7;a.upd=1000;a.dur=10;a.int=100
-pub fn config_adcs_cycle(
+pub fn adcs_init_command(
     update_interval: u32,
     cycle_duration: u32,
     cycle_interval: u32,
@@ -180,7 +320,7 @@ mod tests {
     #[test]
     fn test_config_adcs_cycle() {
         assert_eq!(
-            config_adcs_cycle(
+            adcs_init_command(
                 1000,
                 10,
                 100,
@@ -190,7 +330,7 @@ mod tests {
         );
 
         assert_eq!(
-            config_adcs_cycle(
+            adcs_init_command(
                 1000,
                 10,
                 100,
@@ -243,6 +383,7 @@ mod tests {
             accel: [0.21, 0.01, 9.91],
             css_side_avg: [0.0, 0.0, 0.0, 0.0, 65535.0, 65535.0],
             css_vertex_avg: [0.0; 8],
+            ..Default::default()
         };
         assert_eq!(sensor_data, expected_sensor_data);
     }

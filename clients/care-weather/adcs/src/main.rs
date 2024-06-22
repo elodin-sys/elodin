@@ -1,14 +1,11 @@
 use basilisk::att_determination::SunlineConfig;
-use conduit::Query;
 use determination::Determination;
-use guidance::{Guidance, GuidanceConfig};
 use roci::{
     combinators::PipeExt,
     drivers::{os_sleep_driver, Driver, Hz},
-    tokio, Componentize, Decomponentize, System,
+    tokio, Componentize, Decomponentize,
 };
 use serde::{Deserialize, Serialize};
-use sim_adapter::SimAdapter;
 
 mod control;
 mod determination;
@@ -29,8 +26,9 @@ pub struct NavData {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     sunline: SunlineConfig,
-    guidance: GuidanceConfig,
+    guidance: guidance::GuidanceConfig,
     control: control::ControlConfig,
+    mcu: mcu::McuConfig,
 }
 
 impl Config {
@@ -55,35 +53,24 @@ fn main() -> anyhow::Result<()> {
         sunline,
         guidance,
         control,
+        mcu,
     } = Config::parse()?;
     let det = Determination::new(sunline);
-    let guidance = Guidance::new(guidance.sigma_r0r);
-    let control = control::Control::new(control);
-    let (tx, rx) = tokio::tcp_listen::<Hz<100>>(
-        "127.0.0.1:2241".parse()?,
-        &[],
-        <Determination as System>::World::metadata(),
-    );
-    let (sim_tx, sim_rx) = tokio::tcp_connect::<Hz<100>>(
+    let _guidance = guidance::Guidance::new(guidance.sigma_r0r);
+    let _control = control::Control::new(control);
+    let (tx, _) = tokio::tcp_connect::<Hz<100>>(
         "127.0.0.1:2240".parse().unwrap(),
-        &[
-            Query::with_id("css_value"),
-            Query::with_id("rw_speed"),
-            Query::with_id("world_pos"),
-            Query::with_id("world_vel"),
-        ],
-        control::World::metadata(),
+        &[],
+        sim_adapter::TxWorld::metadata(),
     );
-
-    os_sleep_driver(
-        tx.pipe(sim_rx)
-            .pipe(SimAdapter)
-            .pipe(det)
-            .pipe(guidance)
-            .pipe(control)
-            .pipe(sim_tx)
-            .pipe(rx),
-    )
-    .run();
+    let mut mcu_driver = mcu::McuDriver::new(mcu.path, mcu.baud_rate).unwrap();
+    let adcs_format = mcu::AdcsFormat::IncludeMag
+        | mcu::AdcsFormat::IncludeGyro
+        | mcu::AdcsFormat::IncludeAccel
+        | mcu::AdcsFormat::IncludeCss;
+    mcu_driver.print_info().unwrap();
+    mcu_driver.init_adcs(200, 20, 10, adcs_format).unwrap();
+    let sim_adapter = sim_adapter::SimAdapter;
+    os_sleep_driver(mcu_driver.pipe(det).pipe(sim_adapter).pipe(tx)).run();
     Ok(())
 }

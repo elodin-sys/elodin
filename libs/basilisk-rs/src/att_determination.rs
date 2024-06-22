@@ -50,7 +50,7 @@ impl SunlineEKF {
             css,
             q_obs_val,
             q_proc_val,
-            mut covar,
+            covar,
             sensor_use_threshold,
             ekf_switch,
         } = config;
@@ -67,7 +67,6 @@ impl SunlineEKF {
             },
             0,
         );
-        covar.resize(36, 0.1);
         let covar = covar.as_slice().try_into().expect("covar array must be 36");
         let mut this = Self {
             config: sunlineEKFConfig {
@@ -79,7 +78,7 @@ impl SunlineEKF {
                 qProcVal: q_proc_val,
                 dt: 0.1,
                 timeTag: f64::NAN,
-                state: [0.1; 6],
+                state: [0.0, 1.0, 0.0, 0.0, 0.01, 0.0],
                 x: [0.1; 6],
                 xBar: [0.1; 6],
                 covarBar: [0.1; 36],

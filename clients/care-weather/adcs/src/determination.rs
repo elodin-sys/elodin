@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use basilisk::att_determination::SunlineConfig;
 use basilisk::sys::CSSArraySensorMsgPayload;
 use basilisk::sys::NavAttMsgPayload;
@@ -18,21 +20,21 @@ use crate::NavData;
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
     // inputs
-    css_inputs: CssInputs,
+    pub css_inputs: CssInputs,
     #[roci(entity_id = 0, component_id = "mag_ref")]
-    mag_ref: Vector<f64, 3, ArrayRepr>,
+    pub mag_ref: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 0, component_id = "sun_ref")]
-    sun_ref: Vector<f64, 3, ArrayRepr>,
+    pub sun_ref: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 7, component_id = "mag_value")]
-    mag_value: [f64; 3],
-    gps_inputs: GpsInputs,
+    pub mag_value: [f64; 3],
+    pub gps_inputs: GpsInputs,
 
     // outputs
-    nav_out: NavData,
+    pub nav_out: NavData,
 }
 
-#[derive(Default, Componentize, Decomponentize)]
-struct GpsInputs {
+#[derive(Debug, Default, Componentize, Decomponentize)]
+pub struct GpsInputs {
     #[roci(entity_id = 0, component_id = "lat")]
     lat: f64,
     #[roci(entity_id = 0, component_id = "long")]
@@ -41,17 +43,18 @@ struct GpsInputs {
     alt: f64,
 }
 
-#[derive(Default, Componentize, Decomponentize)]
-struct CssInputs {
+#[derive(Debug, Default, Componentize, Decomponentize)]
+pub struct CssInputs {
     #[roci(entity_id = 4, component_id = "css_value")]
-    css_0: f64,
+    pub css_0: f64,
     #[roci(entity_id = 5, component_id = "css_value")]
-    css_1: f64,
+    pub css_1: f64,
     #[roci(entity_id = 6, component_id = "css_value")]
-    css_2: f64,
+    pub css_2: f64,
 }
 
 pub struct Determination {
+    start: Instant,
     sunline_ekf: SunlineEKF,
     // input
     css_input: BskChannel<CSSArraySensorMsgPayload>,
@@ -74,6 +77,7 @@ impl Determination {
             sunline,
         );
         Determination {
+            start: Instant::now(),
             sunline_ekf,
             css_input,
             nav_state_out,
@@ -87,6 +91,7 @@ impl System for Determination {
     type Driver = roci::drivers::Hz<100>;
 
     fn update(&mut self, world: &mut Self::World) {
+        let elapsed = self.start.elapsed().as_nanos() as u64;
         let mut css_cos_values = [0.0; 32];
         css_cos_values[0] = world.css_inputs.css_0;
         css_cos_values[1] = world.css_inputs.css_1;
@@ -95,9 +100,9 @@ impl System for Determination {
             CSSArraySensorMsgPayload {
                 CosValue: css_cos_values,
             },
-            0,
+            elapsed,
         );
-        self.sunline_ekf.update(0);
+        self.sunline_ekf.update(elapsed);
         let nav_state = self.nav_state_out.read_msg();
         if let Ok(time) = Epoch::now() {
             world.mag_ref = get_wmm_eci(
@@ -117,6 +122,13 @@ impl System for Determination {
         let ref_2 = world.mag_ref;
         let att = roci_adcs::triad(body_1, body_2, ref_1, ref_2);
         let att_mrp_bn = MRP::from_rot_matrix(att).0.into_buf();
+
+        // println!("css_inp: {:?}", world.css_inputs);
+        // println!("sun_val: {:?}", nav_state.vehSunPntBdy);
+        // println!("mag_val: {:?}", world.mag_value);
+        // println!("sun_ref: {:?}", world.sun_ref);
+        // println!("mag_ref: {:?}", world.mag_ref);
+        // println!("att_mrp: {:?}", att_mrp_bn);
 
         world.nav_out.att_mrp_bn = att_mrp_bn;
         world.nav_out.omega_bn_b = nav_state.omega_BN_B;
