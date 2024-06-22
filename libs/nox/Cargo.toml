@@ -27,7 +27,6 @@ itertools = "0.12.0"
 seq-macro = "0.3.5"
 fn-traits = "0.1.2"
 matrixmultiply = "0.3"
-lapack = "0.19"
 
 # xla-rs - a wrapper around raw xla
 xla.path = "../xla-rs"
@@ -48,4 +47,11 @@ nox-ecs-macros.path = "../nox-ecs-macros"
 indent_write = "2.2.0"
 approx = "0.5"
 
-[dev-dependencies]
+lapack = "0.19"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+lapack-src = { version = "0.8", features = ["openblas"] }
+openblas-src.version = "0.10"
+openblas-src.features = ["system"]
+[target.'cfg(target_os = "macos")'.dependencies]
+lapack-src = { version = "0.8", features = ["accelerate"] }
