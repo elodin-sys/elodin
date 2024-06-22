@@ -243,24 +243,14 @@ impl FromStr for SensorData {
         }
 
         if sensor_data.adcs_format.contains(AdcsFormat::IncludeCss) {
-            let css_data = s
+            sensor_data.css_side_avg = s
                 .next()
                 .ok_or(SensorParseError::InsufficientParts)?
                 .split(',')
-                .map(|v| if v.is_empty() { "0" } else { v })
-                .map(str::parse);
-
-            sensor_data.css_side_avg = css_data
-                .clone()
                 .take(6)
+                .map(|v| if v.is_empty() { "0" } else { v })
+                .map(str::parse)
                 .collect::<Result<ArrayVec<_, 6>, _>>()?
-                .into_inner()
-                .map_err(|_| SensorParseError::InsufficientParts)?;
-
-            sensor_data.css_vertex_avg = css_data
-                .skip(6)
-                .take(8)
-                .collect::<Result<ArrayVec<_, 8>, _>>()?
                 .into_inner()
                 .map_err(|_| SensorParseError::InsufficientParts)?;
         }

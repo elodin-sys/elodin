@@ -44,8 +44,8 @@ impl IERS {
     }
 
     pub fn get_pm(&self, mjd: f64) -> Option<[f64; 2]> {
-        let a = dbg!(self.get_floor(mjd)?);
-        let b = dbg!(self.get_ceil(mjd)?);
+        let a = self.get_floor(mjd)?;
+        let b = self.get_ceil(mjd)?;
         if a.mjd == b.mjd {
             return Some([a.pm.x, a.pm.y]);
         }
