@@ -5533,6 +5533,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lapack-src"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a960a9d20df9abedf2e136c087c8fcc29f693ed985349bb03fe00816de8b00d2"
+dependencies = [
+ "openblas-src",
+]
+
+[[package]]
 name = "lapack-sys"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6212,7 +6221,8 @@ dependencies = [
  "indent_write",
  "itertools",
  "lapack",
- "lapack-src",
+ "lapack-src 0.10.0",
+ "lapack-src 0.8.0",
  "matrixmultiply",
  "nalgebra",
  "ndarray",
@@ -11637,7 +11647,7 @@ dependencies = [
  "cxx",
  "find_cuda_helper",
  "flate2",
- "lapack-src",
+ "lapack-src 0.8.0",
  "lapack-sys",
  "libc",
  "num-derive",

@@ -29,7 +29,7 @@
           fontconfig
           maturin
           cmake
-          openblas
+          openblasCompat
           lapack
           openssl
           libclang
