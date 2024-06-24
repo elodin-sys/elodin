@@ -741,7 +741,7 @@ impl Plot {
         // Draw lines
 
         if let Some(pointer_pos) = pointer_pos {
-            if self.inner_rect.contains(pointer_pos) {
+            if self.inner_rect.contains(pointer_pos) && ui.ui_contains_pointer() {
                 let pointer_plot_point = PlotPoint::from_plot_pos2(self, pointer_pos);
 
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);

@@ -41,7 +41,7 @@ use self::{
 pub mod colors;
 pub mod images;
 mod theme;
-mod tiles;
+pub mod tiles;
 pub mod utils;
 pub mod widgets;
 
@@ -159,6 +159,7 @@ impl Plugin for UiPlugin {
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
+            .init_resource::<tiles::NewTileState>()
             .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
             .init_resource::<timeline_ranges::TimelineRanges>()
@@ -171,7 +172,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::sync_viewports.after(render_layout))
-            .add_systems(Update, tiles::setup_default_tiles.after(render_layout))
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, set_camera_viewport.after(render_layout))
             .add_systems(Update, sync_camera_grid_cell.after(render_layout));
@@ -414,7 +414,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
                             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
                         }
 
-                        ui.add_widget::<tiles::TileLayout>(world, "tile_layout");
+                        ui.add_widget::<tiles::TileSystem>(world, "tile_system");
                     });
             });
     }

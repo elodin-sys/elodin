@@ -32,7 +32,7 @@ use conduit::{
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use traces::TracesPlugin;
-use ui::{EntityPair, HoveredEntity};
+use ui::{tiles, EntityPair, HoveredEntity};
 
 use crate::plugins::editor_cam_touch;
 
@@ -65,6 +65,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/lightning.png");
         embedded_asset!(app, "assets/icons/link.png");
         embedded_asset!(app, "assets/icons/loop.png");
+        embedded_asset!(app, "assets/icons/tile_3d_viewer.png");
+        embedded_asset!(app, "assets/icons/tile_graph.png");
     }
 }
 
@@ -118,6 +120,7 @@ impl Plugin for EditorPlugin {
                     wait: Duration::from_millis(16),
                 },
             })
+            .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
             .add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
@@ -179,7 +182,7 @@ fn spawn_main_camera(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
     viewport: &Viewport,
-) -> Entity {
+) -> (Entity, Option<Entity>, Option<Entity>) {
     // For adding features incompatible with wasm:
     if cfg!(not(target_arch = "wasm32")) {
         // .insert(ScreenSpaceAmbientOcclusionBundle {
@@ -266,8 +269,9 @@ fn spawn_main_camera(
 
     let camera = camera.id();
 
-    spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
-    camera
+    let (nav_gizmo, nav_gizmo_camera) =
+        spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
+    (camera, nav_gizmo, nav_gizmo_camera)
 }
 
 #[allow(clippy::type_complexity)]
@@ -419,11 +423,17 @@ fn make_entities_selectable(
             ),
             On::<Pointer<Over>>::run(
                 move |_event: Listener<Pointer<Over>>,
-                      mut hovered_entity: ResMut<HoveredEntity>| {
-                    hovered_entity.0 = Some(EntityPair {
-                        bevy: entity,
-                        conduit: entity_id,
-                    })
+                      mut hovered_entity: ResMut<HoveredEntity>,
+                      viewport_contains_pointer: Res<tiles::ViewportContainsPointer>| {
+                    hovered_entity.0 = if viewport_contains_pointer.0 {
+                        Some(EntityPair {
+                            bevy: entity,
+                            conduit: entity_id,
+                        })
+                    }
+                    else {
+                        None
+                    };
                 },
             ),
         ));

@@ -156,3 +156,73 @@ pub fn label_with_buttons<const N: usize>(
 
     clicked
 }
+
+#[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
+pub struct EImageLabel {
+    image_id: egui::TextureId,
+    image_tint: egui::Color32,
+    bg_color: egui::Color32,
+    frame_size: egui::Vec2,
+    margin: egui::Margin,
+    rounding: egui::Rounding,
+}
+
+impl EImageLabel {
+    pub fn new(image_id: egui::TextureId) -> Self {
+        Self {
+            image_id,
+            image_tint: colors::WHITE,
+            bg_color: colors::PRIMARY_SMOKE,
+            frame_size: egui::vec2(40.0, 40.0),
+            margin: egui::Margin::same(2.0),
+            rounding: egui::Rounding::same(4.0),
+        }
+    }
+
+    pub fn frame_size(mut self, width: f32, height: f32) -> Self {
+        self.frame_size = egui::vec2(width, height);
+        self
+    }
+
+    pub fn margin(mut self, margin: egui::Margin) -> Self {
+        self.margin = margin;
+        self
+    }
+
+    pub fn bg_color(mut self, bg_color: egui::Color32) -> Self {
+        self.bg_color = bg_color;
+        self
+    }
+
+    pub fn image_tint(mut self, image_tint: egui::Color32) -> Self {
+        self.image_tint = image_tint;
+        self
+    }
+
+    fn render(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        // Set widget size and allocate space
+        let (rect, response) = ui.allocate_exact_size(self.frame_size, egui::Sense::hover());
+
+        // Paint the UI
+        if ui.is_rect_visible(rect) {
+            // Background
+            ui.painter()
+                .rect(rect, self.rounding, self.bg_color, egui::Stroke::NONE);
+
+            // Icon
+            let default_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            let image_rect = rect.shrink4(self.margin);
+
+            ui.painter()
+                .image(self.image_id, image_rect, default_uv, self.image_tint);
+        }
+
+        response
+    }
+}
+
+impl egui::Widget for EImageLabel {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        self.render(ui)
+    }
+}

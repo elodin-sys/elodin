@@ -26,6 +26,8 @@ pub struct Images {
     pub icon_lightning: Handle<Image>,
     pub icon_link: Handle<Image>,
     pub icon_loop: Handle<Image>,
+    pub icon_tile_3d_viewer: Handle<Image>,
+    pub icon_tile_graph: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -62,6 +64,10 @@ impl FromWorld for Images {
                 .load("embedded://elodin_editor/assets/icons/lightning.png"),
             icon_link: asset_server.load("embedded://elodin_editor/assets/icons/link.png"),
             icon_loop: asset_server.load("embedded://elodin_editor/assets/icons/loop.png"),
+            icon_tile_3d_viewer: asset_server
+                .load("embedded://elodin_editor/assets/icons/tile_3d_viewer.png"),
+            icon_tile_graph: asset_server
+                .load("embedded://elodin_editor/assets/icons/tile_graph.png"),
         }
     }
 }
