@@ -50,7 +50,7 @@ approx = "0.5"
 lapack = "0.19"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-lapack-src = { version = "0.8", features = ["openblas"] }
+lapack-src = { version = "0.10", features = ["openblas"] }
 openblas-src.version = "0.10"
 openblas-src.features = ["system"]
 [target.'cfg(target_os = "macos")'.dependencies]

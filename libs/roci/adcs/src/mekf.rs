@@ -151,7 +151,7 @@ impl State {
     }
 }
 
-fn skew_symmetric_cross(a: &Vector<f64, 3, ArrayRepr>) -> Matrix<f64, 3, 3, ArrayRepr> {
+fn skew_symmetric_cross(a: &Vector<f64, 3, ArrayRepr>) -> Matrix3<f64, ArrayRepr> {
     let [x, y, z] = a.parts();
     let zero = 0.0.into();
     Matrix::from_scalars([zero, -z, y, z, zero, -x, -y, x, zero])
