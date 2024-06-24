@@ -2,11 +2,11 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::{
-    array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, ConcatManyDim, DefaultMap,
-    DefaultMappedDim, DimGet, DotDim, Field, MapDim, MulDim, TensorDim, XlaDim,
+    array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
+    DimGet, DotDim, Field, MapDim, TensorDim, XlaDim,
 };
-use crate::{ConstDim, Error, RealField, SquareDim};
-use nalgebra::{constraint::ShapeConstraint, Const};
+use crate::{ConstDim, Error, RealField, SquareDim, TransposeDim, TransposedDim};
+use nalgebra::constraint::ShapeConstraint;
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
 pub trait Dim: ArrayDim + TensorDim + XlaDim {}
@@ -94,16 +94,10 @@ pub trait Repr {
         ConcatDim<D1, D2>: Dim;
 
     /// Concatenates multiple tensors along the first dimension
-    fn concat_many<T1: Field, D1, const N: usize>(
-        args: [&Self::Inner<T1, D1>; N],
-    ) -> Self::Inner<T1, ConcatManyDim<D1, N>>
-    where
-        DefaultMappedDim<D1>: nalgebra::DimMul<Const<N>> + nalgebra::Dim,
-        D1::DefaultMapDim: MapDim<D1>,
-        D1: Dim + DefaultMap,
-        MulDim<DefaultMappedDim<D1>, Const<N>>: Dim,
-        <<D1 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
-        ConcatManyDim<D1, N>: Dim;
+    fn concat_many<T1: Field, D1: Dim, D2: Dim>(
+        args: &[Self::Inner<T1, D1>],
+        dim: usize,
+    ) -> Self::Inner<T1, D2>;
 
     /// Retrieves a specific tensor based on an index within a dimension.
     fn get<T1: Field, D1: Dim + DimGet>(
@@ -145,5 +139,18 @@ pub trait Repr {
 
     fn from_scalars<T1: Field, D1: ConstDim + Dim>(
         iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+    ) -> Self::Inner<T1, D1>;
+
+    fn transpose<T1: Field, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> Self::Inner<T1, TransposedDim<D1>>
+    where
+        ShapeConstraint: TransposeDim<D1>,
+        TransposedDim<D1>: ConstDim;
+
+    fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1>;
+
+    fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
+        diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1>;
 }

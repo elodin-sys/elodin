@@ -15,7 +15,7 @@ impl<T: Field, R: Repr> Vector<T, 3, R> {
         y: impl Into<Scalar<T, R>>,
         z: impl Into<Scalar<T, R>>,
     ) -> Self {
-        Self::from_arr([&x.into(), &y.into(), &z.into()])
+        Self::from_arr([x.into(), y.into(), z.into()])
     }
 }
 
@@ -36,17 +36,15 @@ where
 
 impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
     /// Creates a vector from an array of scalar references.
-    pub fn from_arr(arr: [&Scalar<T, R>; N]) -> Self
+    pub fn from_arr(arr: [Scalar<T, R>; N]) -> Self
     where
         Const<N>: Dim,
         Const<N>: ToTypenum,
         Const<1>: DimMul<Const<N>, Output = Const<N>>,
         <Const<1> as DimMul<Const<N>>>::Output: Dim,
     {
-        let args = arr.map(|v| &v.inner);
-        let inner = R::concat_many(args);
-        //let nodes = arr.map(|v| v.inner).to_vec();
-        //let inner = Noxpr::concat_in_dim(nodes, 0);
+        let arr = arr.map(|x| x.inner);
+        let inner = R::concat_many(&arr[..], 0);
         Vector {
             inner,
             phantom: PhantomData,
@@ -74,7 +72,7 @@ impl<T: Field, R: Repr> Vector<T, 3, R> {
         let x = &ay * &bz - &az * &by;
         let y = &az * &bx - &ax * &bz;
         let z = &ax * &by - &ay * &bx;
-        Vector::from_arr([&x, &y, &z])
+        Vector::from_arr([x, y, z])
     }
 }
 
@@ -107,7 +105,7 @@ mod tests {
     fn test_vector_from_arr() {
         let client = Client::cpu().unwrap();
         fn from_arr(a: Scalar<f32>, b: Scalar<f32>, c: Scalar<f32>) -> Vector<f32, 3> {
-            Vector::from_arr([&a, &b, &c])
+            Vector::from_arr([a, b, c])
         }
         let comp = from_arr.build().unwrap();
         let exec = comp.compile(&client).unwrap();
