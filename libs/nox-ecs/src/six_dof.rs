@@ -207,8 +207,8 @@ mod tests {
             .unwrap();
         // see test-gen/julia/six-dof.jl for the source of these values
         approx::assert_relative_eq!(
-            &pos.inner.inner().buf[..],
-            &[
+            pos.inner,
+            tensor![
                 0.0,
                 0.0,
                 0.479425538604203,
@@ -216,7 +216,7 @@ mod tests {
                 0.0,
                 0.0,
                 0.0
-            ][..],
+            ],
             epsilon = 1e-5
         )
     }

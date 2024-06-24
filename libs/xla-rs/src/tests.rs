@@ -125,6 +125,23 @@ fn tuple_op() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_iota() {
+    let client = PjRtClient::cpu().expect("client create failed");
+    let builder = XlaBuilder::new("test");
+    let a = builder.iota(&[3, 3], ElementType::F64, 0);
+    let comp = builder.build(&a).unwrap();
+    let exec = client.compile_with_default_options(&comp).unwrap();
+    let args = BufferArgsRef::default();
+    let mut res = exec.execute_buffers(&args).unwrap();
+    let out = res.pop().unwrap();
+    let lit = out.to_literal_sync().unwrap();
+    assert_eq!(
+        lit.typed_buf::<f64>().unwrap(),
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+    );
+}
+
 // #[test]
 // fn tuple_literal() -> Result<()> {
 //     let x = crate::Literal::scalar(3.1f32);
