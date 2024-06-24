@@ -157,7 +157,7 @@ impl XlaBuilder {
         };
         XlaOp {
             raw,
-            builder: XlaBuilder::default(),
+            builder: self.clone(),
         }
     }
 }

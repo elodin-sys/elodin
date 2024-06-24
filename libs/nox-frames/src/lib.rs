@@ -57,7 +57,7 @@ impl<T: RealField, A: Frame, B: Frame, C: Frame, R: Repr> Mul<DCM<T, A, B, R>> f
 impl<T: RealField, A: Frame, B: Frame, R: Repr> Transform<T, A, B, R> {
     fn inverse(&self) -> Transform<T, B, A, R> {
         Transform {
-            dcm: self.dcm.try_inverse().unwrap(),
+            dcm: self.dcm.transpose(),
             phantom: std::marker::PhantomData,
         }
     }

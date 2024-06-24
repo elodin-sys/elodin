@@ -6,6 +6,13 @@ use nalgebra::Const;
 pub type Matrix<T, const R: usize, const C: usize, P = DefaultRepr> =
     Tensor<T, (Const<R>, Const<C>), P>;
 
+pub type Matrix3<T, R = DefaultRepr> = Matrix<T, 3, 3, R>;
+pub type Matrix3x6<T, R = DefaultRepr> = Matrix<T, 3, 6, R>;
+pub type Matrix4<T, R = DefaultRepr> = Matrix<T, 4, 4, R>;
+pub type Matrix5<T, R = DefaultRepr> = Matrix<T, 5, 5, R>;
+pub type Matrix6<T, R = DefaultRepr> = Matrix<T, 6, 6, R>;
+pub type Matrix6x3<T, R = DefaultRepr> = Matrix<T, 6, 3, R>;
+
 impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
     pub fn try_inverse(&self) -> Result<Self, Error> {
         match N {
@@ -167,6 +174,65 @@ mod tests {
             out,
             matrix![0., 1., 2.;
                     7., 8., 9.]
+        );
+    }
+
+    #[test]
+    fn test_eye() {
+        let client = Client::cpu().unwrap();
+        let comp = (|| Matrix::<f32, 3, 3, _>::eye()).build().unwrap();
+        println!("got comp");
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec.run(&client).unwrap().to_host();
+        assert_eq!(out, nalgebra::Matrix3::identity());
+
+        let comp = (|| Matrix::<f32, 10, 10, _>::eye()).build().unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec.run(&client).unwrap().to_host();
+        assert_eq!(
+            out,
+            nalgebra::OMatrix::<f32, Const<10>, Const<10>>::identity()
+        )
+    }
+
+    #[test]
+    fn test_diag() {
+        let client = Client::cpu().unwrap();
+        let comp = (|| Matrix::<f32, 3, 3, _>::from_diag(tensor![1.0, 4.0, 8.0].into()))
+            .build()
+            .unwrap();
+        let exec = match comp.compile(&client) {
+            Ok(exec) => exec,
+            Err(xla::Error::XlaError { msg, .. }) => {
+                println!("{}", msg);
+                panic!();
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        };
+        let out = exec.run(&client).unwrap().to_host();
+        assert_eq!(
+            out,
+            nalgebra::Matrix3::from_diagonal(&vector![1.0, 4.0, 8.0])
         );
     }
 

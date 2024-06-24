@@ -57,4 +57,7 @@ pub enum Error {
     /// Error when matrix inversion failed
     #[error("matrix inversion failed with {0} arg illegal")]
     InvertFailed(i32),
+
+    #[error("concat dim failed with dims")]
+    InvalidConcatDims,
 }
