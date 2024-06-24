@@ -145,7 +145,7 @@ mod tests {
         let x_ecef = eci_to_ecef.dot(&x_eci);
         let expected = tensor![-5762648.74320628, -1682708.43849581, 3156027.93288401];
 
-        assert_relative_eq!(x_ecef.inner(), expected.inner(), epsilon = 1e-2);
+        assert_relative_eq!(x_ecef, expected, epsilon = 1e-2);
     }
 
     #[test]
@@ -157,7 +157,7 @@ mod tests {
             [0.97209801, 0.23457505, 0.],
             [0., 0., 1.]
         ];
-        assert_relative_eq!(earth_rot.dcm.inner(), expected_rot.inner(), epsilon = 1e-5);
+        assert_relative_eq!(earth_rot.dcm, expected_rot, epsilon = 1e-5);
     }
 
     #[test]
@@ -182,6 +182,6 @@ mod tests {
         ]
         .normalize(); // source astropy
 
-        assert_relative_eq!(sun_vec.inner(), expected.inner(), epsilon = 1e-2)
+        assert_relative_eq!(sun_vec, expected, epsilon = 1e-2)
     }
 }
