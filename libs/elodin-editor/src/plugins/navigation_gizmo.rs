@@ -106,9 +106,9 @@ pub fn spawn_gizmo(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
-) {
+) -> (Option<Entity>, Option<Entity>) {
     let Some(render_layer) = render_layer_alloc.alloc() else {
-        return;
+        return (None, None);
     };
     let render_layers = RenderLayers::layer(render_layer as u8);
     let sphere = meshes.add(Mesh::from(Sphere::new(0.075)));
@@ -209,24 +209,28 @@ pub fn spawn_gizmo(
             .set_parent(nav_gizmo);
     }
 
-    commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
-            camera: Camera {
-                order: 2,
-                hdr: false,
-                // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
-                clear_color: ClearColorConfig::None,
+    let nav_gizmo_camera = commands
+        .spawn((
+            Camera3dBundle {
+                transform: Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
+                camera: Camera {
+                    order: 2,
+                    hdr: false,
+                    // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
+                    clear_color: ClearColorConfig::None,
 
-                ..Default::default()
+                    ..Default::default()
+                },
+                camera_3d: Camera3d { ..default() },
+                ..default()
             },
-            camera_3d: Camera3d { ..default() },
-            ..default()
-        },
-        render_layers,
-        NavGizmoParent { main_camera },
-        NavGizmoCamera,
-    ));
+            render_layers,
+            NavGizmoParent { main_camera },
+            NavGizmoCamera,
+        ))
+        .id();
+
+    (Some(nav_gizmo), Some(nav_gizmo_camera))
 }
 
 #[derive(Component)]

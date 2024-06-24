@@ -9,6 +9,8 @@ use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
 use std::ops::{Add, Sub};
 
+use crate::ui::tiles;
+
 pub struct EditorCamTouchPlugin;
 
 impl Plugin for EditorCamTouchPlugin {
@@ -183,6 +185,7 @@ impl Midpoint for Vec2 {
 pub fn touch_editor_cam(
     touch_tracker: Res<TouchTracker>,
     mut cams: Query<(&mut EditorCam, &Transform, &Camera)>,
+    viewport_contains_pointer: Res<tiles::ViewportContainsPointer>,
 ) {
     let touch_gestures = touch_tracker.get_touch_gestures();
     let midpoint = match touch_gestures {
@@ -194,7 +197,7 @@ pub fn touch_editor_cam(
         let Some(viewport_rect) = cam.logical_viewport_rect() else {
             continue;
         };
-        if !viewport_rect.contains(midpoint) {
+        if !viewport_rect.contains(midpoint) || !viewport_contains_pointer.0 {
             continue;
         }
         match touch_gestures {

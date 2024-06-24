@@ -62,7 +62,8 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let metadata_store = state_mut.metadata_store;
         let mut column_payload_writer = state_mut.column_payload_writer;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
-        let Ok((entity_id, _, mut map, metadata)) = entities.get_mut(pair.bevy) else {
+        let Ok((entity_id, _, mut component_value_map, metadata)) = entities.get_mut(pair.bevy)
+        else {
             ui.add(empty_inspector());
             return;
         };
@@ -102,7 +103,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
         let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
 
-        let mut components = map
+        let mut components = component_value_map
             .0
             .keys()
             .filter_map(|id| {
@@ -127,7 +128,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         ui.add_space(10.0);
 
         for (component_id, _, metadata) in components.into_iter().rev() {
-            let component_value = map.0.get_mut(&component_id).unwrap();
+            let component_value = component_value_map.0.get_mut(&component_id).unwrap();
             let label = metadata.component_name();
             let element_names = metadata.element_names();
 
@@ -165,7 +166,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     entity_id,
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
-                let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
+                let bundle = GraphBundle::new(&mut render_layer_alloc, entities, None);
                 tile_state.create_graph_tile(bundle);
             }
         }

@@ -42,6 +42,7 @@ impl GraphBundle {
         //commands: &mut Commands,
         render_layer_alloc: &mut RenderLayerAlloc,
         entities: BTreeMap<EntityId, GraphStateEntity>,
+        range_id: Option<TimelineRangeId>,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
@@ -69,7 +70,7 @@ impl GraphBundle {
         };
         let graph_state = GraphState {
             entities,
-            range_id: None,
+            range_id,
             enabled_lines: BTreeMap::new(),
             render_layers,
             line_width: 2.0,

@@ -10,7 +10,8 @@ use bevy_infinite_grid::InfiniteGrid;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 use crate::ui::{
-    colors, tiles,
+    colors,
+    tiles::{self, NewTileState},
     widgets::{WidgetSystem, WidgetSystemExt},
     HdrEnabled,
 };
@@ -365,7 +366,7 @@ pub enum PaletteItemCreateTileType {
 #[derive(SystemParam)]
 pub struct PaletteItemViewportCreateTile<'w> {
     command_palette_state: ResMut<'w, CommandPaletteState>,
-    tile_state: ResMut<'w, tiles::TileState>,
+    new_tile_state: ResMut<'w, tiles::NewTileState>,
 }
 
 impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
@@ -386,7 +387,7 @@ impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
     ) {
         let state_mut = state.get_mut(world);
         let mut command_palette_state = state_mut.command_palette_state;
-        let mut tile_state = state_mut.tile_state;
+        let mut new_tile_state = state_mut.new_tile_state;
 
         let ((request_focus, use_item), tile_type, row_margin, item_label, matched_char_indices) =
             args;
@@ -399,8 +400,12 @@ impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
 
         if btn.clicked() || use_item {
             match tile_type {
-                PaletteItemCreateTileType::Viewport => tile_state.create_viewport_tile(),
-                PaletteItemCreateTileType::Graph => tile_state.create_graph_tile_empty(),
+                PaletteItemCreateTileType::Viewport => {
+                    *new_tile_state = NewTileState::Viewport(None, None)
+                }
+                PaletteItemCreateTileType::Graph => {
+                    *new_tile_state = NewTileState::Graph(None, None, None)
+                }
             }
 
             command_palette_state.show = false;

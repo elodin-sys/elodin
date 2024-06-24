@@ -1,6 +1,9 @@
 use bevy_egui::egui::{self, Stroke};
 
-use crate::ui::{colors, utils::Shrink4};
+use crate::ui::{
+    colors::{self, with_opacity},
+    utils::Shrink4,
+};
 
 #[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
 pub struct EImageButton {
@@ -196,25 +199,37 @@ impl egui::Widget for ECheckboxButton {
 #[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
 pub struct EButton {
     label: String,
+    disabled: bool,
     color: egui::Color32,
     bg_color: egui::Color32,
     margin: egui::Margin,
     rounding: egui::Rounding,
     stroke: egui::Stroke,
-    full_width: bool,
+    width: Option<f32>,
 }
 
 impl EButton {
     pub fn new(label: impl ToString) -> Self {
         Self {
             label: label.to_string(),
+            disabled: false,
             color: colors::WHITE,
             bg_color: colors::PRIMARY_SMOKE,
             stroke: egui::Stroke::new(1.0, colors::WHITE),
             rounding: egui::Rounding::same(2.0),
             margin: egui::Margin::same(8.0),
-            full_width: true,
+            width: None,
         }
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
     }
 
     pub fn color(mut self, color: egui::Color32) -> Self {
@@ -240,21 +255,32 @@ impl EButton {
             ui.painter()
                 .layout_no_wrap(self.label.to_string(), font_id.clone(), self.color);
 
-        let desired_width = if self.full_width {
-            ui.available_width()
-        } else {
-            galley.size().x + self.margin.sum().x
-        };
-
+        let desired_width = self.width.unwrap_or(ui.available_width());
         let desired_size = egui::vec2(desired_width, galley.size().y + self.margin.sum().y);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
         // Paint the UI
         if ui.is_rect_visible(rect) {
+            ui.set_enabled(!self.disabled);
+
+            let style = ui.style_mut();
+            style.visuals.widgets.inactive.bg_fill = self.bg_color;
+            style.visuals.widgets.active.bg_fill = if self.disabled {
+                self.bg_color
+            } else {
+                with_opacity(self.bg_color, 0.6)
+            };
+            style.visuals.widgets.hovered.bg_fill = if self.disabled {
+                self.bg_color
+            } else {
+                with_opacity(self.bg_color, 0.9)
+            };
+            let visuals = ui.style().interact(&response);
+
             // Background
 
             ui.painter()
-                .rect(rect, self.rounding, self.bg_color, self.stroke);
+                .rect(rect, self.rounding, visuals.bg_fill, self.stroke);
 
             // Label
 
@@ -273,6 +299,129 @@ impl EButton {
 }
 
 impl egui::Widget for EButton {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        self.render(ui).on_hover_cursor(if self.disabled {
+            egui::CursorIcon::Default
+        } else {
+            egui::CursorIcon::PointingHand
+        })
+    }
+}
+
+#[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
+pub struct ETileButton {
+    label: String,
+    description: Option<String>,
+    image_id: egui::TextureId,
+    width: Option<f32>,
+    height: Option<f32>,
+}
+
+impl ETileButton {
+    pub fn new(label: impl ToString, image_id: egui::TextureId) -> Self {
+        Self {
+            label: label.to_string(),
+            description: None,
+            image_id,
+            width: None,
+            height: None,
+        }
+    }
+
+    pub fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    pub fn description(mut self, description: impl ToString) -> Self {
+        self.description = Some(description.to_string());
+        self
+    }
+
+    fn render(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        // Set widget size and allocate space
+        let desired_size = egui::vec2(
+            self.width.unwrap_or(ui.available_width()),
+            self.height.unwrap_or(ui.available_height()),
+        );
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+        // Paint the UI
+        if ui.is_rect_visible(rect) {
+            let font_id = egui::TextStyle::Button.resolve(ui.style());
+
+            let style = ui.style_mut();
+            style.visuals.widgets.inactive.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.35);
+            style.visuals.widgets.active.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.6);
+            style.visuals.widgets.hovered.bg_fill = with_opacity(colors::PRIMARY_ONYX, 0.9);
+            let visuals = ui.style().interact(&response);
+
+            // Background
+
+            ui.painter().rect(
+                rect,
+                egui::Rounding::same(1.0),
+                visuals.bg_fill,
+                egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+            );
+
+            // Label
+
+            let label_rect = ui.painter().text(
+                egui::pos2(
+                    rect.center().x,
+                    rect.center().y + (ui.spacing().interact_size.y / 2.0),
+                ),
+                egui::Align2::CENTER_CENTER,
+                self.label.to_uppercase(),
+                font_id.clone(),
+                colors::PRIMARY_CREAME,
+            );
+
+            let label_rect = label_rect.expand(8.0);
+
+            // Image
+
+            let default_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            let image_side = ui.spacing().interact_size.y;
+            let image_rect = egui::Rect::from_center_size(
+                egui::pos2(
+                    label_rect.center_top().x,
+                    label_rect.center_top().y - image_side,
+                ),
+                egui::vec2(image_side, image_side),
+            );
+
+            ui.painter().image(
+                self.image_id,
+                image_rect,
+                default_uv,
+                colors::PRIMARY_CREAME,
+            );
+
+            // Description
+
+            if let Some(description) = &self.description {
+                ui.painter().text(
+                    label_rect.center_bottom(),
+                    egui::Align2::CENTER_TOP,
+                    description.to_string(),
+                    font_id,
+                    colors::PRIMARY_ONYX_6,
+                );
+            }
+        }
+
+        response
+    }
+}
+
+impl egui::Widget for ETileButton {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         self.render(ui)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
