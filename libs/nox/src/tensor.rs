@@ -1,7 +1,11 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
-use crate::{Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, MatMul, Repr, Scalar};
+use crate::{
+    Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, MatMul, Repr, Scalar, SquareDim, TransposeDim,
+    TransposedDim,
+};
 use crate::{DefaultRepr, RealField};
+use approx::{AbsDiffEq, RelativeEq};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -628,6 +632,22 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
             phantom: PhantomData,
         }
     }
+
+    pub fn concat_in_dim<D2, const N: usize>(
+        args: [Tensor<T1, D1, R>; N],
+        dim: usize,
+    ) -> Tensor<T1, D2, R>
+    where
+        D1: Dim,
+        D2: Dim,
+    {
+        let args = args.map(|t| t.inner);
+        let inner = R::concat_many(&args, dim);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
 }
 
 /// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
@@ -803,6 +823,40 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
             phantom: PhantomData,
         }
     }
+
+    pub fn eye() -> Tensor<T, D1, R>
+    where
+        D1: SquareDim + ConstDim,
+    {
+        let inner = R::eye();
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn transpose(&self) -> Tensor<T, TransposedDim<D1>, R>
+    where
+        ShapeConstraint: TransposeDim<D1>,
+        TransposedDim<D1>: ConstDim,
+    {
+        let inner = R::transpose::<T, D1>(&self.inner);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn from_diag(diag: Tensor<T, D1::SideDim, R>) -> Tensor<T, D1, R>
+    where
+        D1: SquareDim + ConstDim + SquareDim,
+    {
+        let inner = R::from_diag(diag.inner);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
 }
 
 /// Marker trait for types not equivalent to `Const<1>`, used in broadcasting logic.
@@ -884,5 +938,41 @@ macro_rules! tensor {
 impl<T: Field, R: Repr> From<T> for Tensor<T, (), R> {
     fn from(val: T) -> Self {
         Scalar::from_inner(R::scalar_from_const(val))
+    }
+}
+
+impl<T: TensorItem, D: Dim, R: Repr> AbsDiffEq for Tensor<T, D, R>
+where
+    T: Copy,
+    R::Inner<T::Elem, D>: AbsDiffEq,
+{
+    type Epsilon = <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon;
+
+    fn default_epsilon() -> <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon {
+        <R::Inner<T::Elem, D> as AbsDiffEq>::default_epsilon()
+    }
+
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        self.inner.abs_diff_eq(&other.inner, epsilon)
+    }
+}
+
+impl<T: TensorItem, D: Dim, R: Repr> RelativeEq for Tensor<T, D, R>
+where
+    T: Copy,
+    R::Inner<T::Elem, D>: RelativeEq + AbsDiffEq,
+    <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon: Copy,
+{
+    fn default_max_relative() -> <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon {
+        <R::Inner<T::Elem, D> as RelativeEq>::default_max_relative()
+    }
+
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon,
+        max_relative: <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon,
+    ) -> bool {
+        self.inner.relative_eq(&other.inner, epsilon, max_relative)
     }
 }

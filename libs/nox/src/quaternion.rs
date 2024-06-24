@@ -45,7 +45,7 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
         let x = x.into();
         let y = y.into();
         let z = z.into();
-        let inner = Vector::from_arr([&x, &y, &z, &w]);
+        let inner = Vector::from_arr([x, y, z, w]);
         Quaternion(inner)
     }
 
@@ -66,7 +66,7 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
     /// Returns the conjugate of the quaternion.
     pub fn conjugate(&self) -> Self {
         let [i, j, k, w] = self.parts();
-        Quaternion(Vector::from_arr([&-i, &-j, &-k, &w]))
+        Quaternion(Vector::from_arr([-i, -j, -k, w]))
     }
 
     /// Normalizes to a unit quaternion.
@@ -98,6 +98,14 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
     pub fn mrp(&self) -> MRP<T, R> {
         MRP::from(self)
     }
+
+    pub fn integrate_body(&self, body_delta: Vector<T, 3, R>) -> Self {
+        let half_omega: Vector<T, 3, R> = body_delta / T::two::<R>();
+        let zero = T::zero().broadcast::<Const<1>>();
+        let half_omega = Quaternion(half_omega.concat(zero));
+        let q = self + self * half_omega;
+        q.normalize()
+    }
 }
 
 impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
@@ -107,10 +115,10 @@ impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
         let [m1, m2, m3] = mrp.parts();
         let w = T::one::<R>() - &magsq;
         let inner = Vector::<T, 4, R>::from_arr([
-            &(m1 * T::two::<R>()),
-            &(m2 * T::two::<R>()),
-            &(m3 * T::two::<R>()),
-            &w,
+            (m1 * T::two::<R>()),
+            (m2 * T::two::<R>()),
+            (m3 * T::two::<R>()),
+            w,
         ]);
         Quaternion(inner / (T::one::<R>() + magsq))
     }
@@ -151,7 +159,7 @@ impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for &'a Quaternion<T, 
         let k = l_w * r_k + l_i * r_j - l_j * r_i + l_k * r_w;
         let w = l_w * r_w - l_i * r_i - l_j * r_j - l_k * r_k;
 
-        Quaternion(Vector::from_arr([&i, &j, &k, &w]))
+        Quaternion(Vector::from_arr([i, j, k, w]))
     }
 }
 
@@ -163,7 +171,7 @@ impl<T: RealField, R: Repr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
         let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
         let [x, y, z, _] = (self * v * inv).0.parts();
-        Vector::from_arr([&x, &y, &z]) // TODO: use fixed slice instead
+        Vector::from_arr([x, y, z]) // TODO: use fixed slice instead
     }
 }
 
@@ -175,7 +183,7 @@ impl<'a, T: RealField, R: Repr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
         let v = Quaternion(rhs.concat(zero));
         let inv = self.inverse();
         let [x, y, z, _] = (self * v * inv).0.parts();
-        Vector::from_arr([&x, &y, &z]) // TODO: use fixed slice instead
+        Vector::from_arr([x, y, z]) // TODO: use fixed slice instead
     }
 }
 

@@ -36,7 +36,7 @@ impl<T: RealField, R: Repr> MRP<T, R> {
         let x = x.into();
         let y = y.into();
         let z = z.into();
-        let inner = Vector::from_arr([&x, &y, &z]);
+        let inner = Vector::from_arr([x, y, z]);
         MRP(inner)
     }
 
@@ -88,7 +88,7 @@ impl<'a, T: RealField, R: Repr> Add<&'a MRP<T, R>> for MRP<T, R> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{array, tensor, ArrayRepr, Tensor};
+    use crate::{array, tensor, ArrayRepr};
 
     use super::*;
 

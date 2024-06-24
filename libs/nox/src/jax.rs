@@ -86,6 +86,7 @@ impl JaxTracer {
             NoxprNode::Or(op) => self.visit_binary_lax(op, "bitwise_or")?,
             NoxprNode::Dot(op) => self.visit_binary_lax(op, "dot")?,
             NoxprNode::GreaterOrEqual(op) => self.visit_binary_lax(op, "ge")?,
+            NoxprNode::Equal(op) => self.visit_binary_lax(op, "eq")?,
             NoxprNode::LessOrEqual(op) => self.visit_binary_lax(op, "le")?,
             NoxprNode::Less(op) => self.visit_binary_lax(op, "lt")?,
             NoxprNode::DotGeneral(d) => {
@@ -234,6 +235,25 @@ impl JaxTracer {
                 })?
             }
             NoxprNode::Jax(o) => o.clone(),
+            NoxprNode::Convert(conv) => {
+                let expr = self.visit(&conv.arg)?;
+                let dtype = dtype(&conv.ty)?;
+                Python::with_gil(|py| {
+                    self.lax
+                        .call_method1(py, "convert_element_type", (expr, dtype))
+                        .map_err(Error::PyO3)
+                })?
+            }
+            NoxprNode::Select(s) => {
+                let pred = self.visit(&s.cond)?;
+                let on_true = self.visit(&s.on_true)?;
+                let on_false = self.visit(&s.on_false)?;
+                Python::with_gil(|py| {
+                    self.lax
+                        .call_method1(py, "select", (pred, on_true, on_false))
+                        .map_err(Error::PyO3)
+                })?
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
