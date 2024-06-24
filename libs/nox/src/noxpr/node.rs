@@ -40,6 +40,7 @@ pub enum NoxprNode {
     GreaterOrEqual(BinaryOp),
     LessOrEqual(BinaryOp),
     Less(BinaryOp),
+    Equal(BinaryOp),
 
     // Matrix Multiplication
     Dot(BinaryOp),
@@ -69,6 +70,10 @@ pub enum NoxprNode {
 
     // Control Flow
     Scan(Scan),
+    Select(Select),
+
+    // Cast
+    Convert(Convert),
 
     #[cfg(feature = "jax")]
     Jax(pyo3::PyObject),
@@ -454,6 +459,21 @@ pub struct Scan {
     pub scan_fn: NoxprFn,
 }
 
+/// Represents a scan operation, a form of reduction across one dimension.
+#[derive(Debug, Clone)]
+pub struct Select {
+    pub cond: Noxpr,
+    pub on_true: Noxpr,
+    pub on_false: Noxpr,
+}
+
+/// Represents a scan operation, a form of reduction across one dimension.
+#[derive(Debug, Clone)]
+pub struct Convert {
+    pub arg: Noxpr,
+    pub ty: ElementType,
+}
+
 /// A unique identifier for `Noxpr` expressions to facilitate caching and optimization.
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct NoxprId(usize);
@@ -604,6 +624,11 @@ impl Noxpr {
         Self::new(NoxprNode::Less(BinaryOp { lhs: self, rhs }))
     }
 
+    /// Creates a equality comparison between two `Noxpr`.
+    pub fn eq(self, rhs: Noxpr) -> Self {
+        Self::new(NoxprNode::Equal(BinaryOp { lhs: self, rhs }))
+    }
+
     /// Reshapes an `Noxpr` to a new size.
     pub fn reshape(self, new_sizes: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Reshape(Reshape {
@@ -671,7 +696,8 @@ impl Noxpr {
             | NoxprNode::Or(ref b)
             | NoxprNode::GreaterOrEqual(ref b)
             | NoxprNode::LessOrEqual(ref b)
-            | NoxprNode::Less(ref b) => b.ty(),
+            | NoxprNode::Less(ref b)
+            | NoxprNode::Equal(ref b) => b.ty(),
 
             NoxprNode::Dot(b) => {
                 let NoxprTy::ArrayTy(lhs_ty) = b.lhs.ty()? else {
@@ -870,6 +896,16 @@ impl Noxpr {
                     element_type,
                 }))
             }),
+            NoxprNode::Convert(c) => {
+                let NoxprTy::ArrayTy(ty) = c.arg.ty()? else {
+                    return None;
+                };
+                Some(NoxprTy::ArrayTy(ArrayTy {
+                    element_type: c.ty,
+                    shape: ty.shape,
+                }))
+            }
+            NoxprNode::Select(select) => select.on_true.ty(),
         }
     }
 
@@ -887,9 +923,10 @@ impl Noxpr {
             | NoxprNode::Mul(ref b)
             | NoxprNode::And(ref b)
             | NoxprNode::Or(ref b) => b.rhs.element_type(),
-            NoxprNode::GreaterOrEqual(_) | NoxprNode::LessOrEqual(_) | NoxprNode::Less(_) => {
-                Some(ElementType::Pred)
-            }
+            NoxprNode::GreaterOrEqual(_)
+            | NoxprNode::LessOrEqual(_)
+            | NoxprNode::Less(_)
+            | NoxprNode::Equal(_) => Some(ElementType::Pred),
             NoxprNode::Dot(b) => b.rhs.element_type(),
             NoxprNode::DotGeneral(s) => s.rhs.element_type(),
             NoxprNode::Sqrt(expr)
@@ -931,6 +968,8 @@ impl Noxpr {
                     .ok()?;
                 ElementType::from_str(&element_type).ok()
             }),
+            NoxprNode::Convert(c) => Some(c.ty),
+            NoxprNode::Select(c) => c.on_true.element_type(),
         }
     }
 
@@ -950,7 +989,8 @@ impl Noxpr {
             | NoxprNode::Or(ref b)
             | NoxprNode::GreaterOrEqual(ref b)
             | NoxprNode::LessOrEqual(ref b)
-            | NoxprNode::Less(ref b) => b.shape(),
+            | NoxprNode::Less(ref b)
+            | NoxprNode::Equal(ref b) => b.shape(),
 
             NoxprNode::Dot(b) => {
                 let lhs_shape = b.lhs.shape()?;
@@ -1074,6 +1114,8 @@ impl Noxpr {
                 let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
                 Some(SmallVec::from_vec(shape))
             }),
+            NoxprNode::Convert(c) => c.arg.shape(),
+            NoxprNode::Select(c) => c.on_true.shape(),
         }
     }
 
@@ -1127,6 +1169,7 @@ impl Noxpr {
             NoxprNode::GreaterOrEqual(_) => "GreaterOrEqual",
             NoxprNode::LessOrEqual(_) => "LessOrEqual",
             NoxprNode::Less(_) => "Less",
+            NoxprNode::Equal(_) => "Equal",
             NoxprNode::Dot(_) => "Dot",
             NoxprNode::DotGeneral(_) => "DotGeneral",
             NoxprNode::Sqrt(_) => "Sqrt",
@@ -1146,6 +1189,8 @@ impl Noxpr {
             NoxprNode::Jax(_) => "Jax",
             NoxprNode::Sin(_) => "Sin",
             NoxprNode::Cos(_) => "Cos",
+            NoxprNode::Convert(_) => "Convert",
+            NoxprNode::Select(_) => "Select",
         }
     }
 
@@ -1159,6 +1204,21 @@ impl Noxpr {
             out_shape.push(1);
         }
         Some(self.broadcast_in_dim(out_shape, broadcast_dims))
+    }
+
+    pub fn convert(&self, ty: ElementType) -> Noxpr {
+        Noxpr::new(NoxprNode::Convert(Convert {
+            arg: self.clone(),
+            ty,
+        }))
+    }
+
+    pub fn select(&self, on_true: Noxpr, on_false: Noxpr) -> Noxpr {
+        Noxpr::new(NoxprNode::Select(Select {
+            cond: self.clone(),
+            on_true,
+            on_false,
+        }))
     }
 }
 
@@ -1289,6 +1349,11 @@ impl XlaTracer {
                 let (lhs, rhs) = self.visit_binary_op(b)?;
                 lhs.lt(&rhs)
             }
+            NoxprNode::Equal(b) => {
+                let (lhs, rhs) = self.visit_binary_op(b)?;
+                lhs.eq(&rhs)
+            }
+
             NoxprNode::Sqrt(expr) => {
                 let expr = self.visit(expr)?;
                 expr.sqrt()
@@ -1481,6 +1546,16 @@ impl XlaTracer {
                 let out = cond.stmt_while(&scan_fn, &initial_state);
                 out.get_tuple_element(last_elem as i64)
             }
+            NoxprNode::Convert(c) => {
+                let arg = self.visit(&c.arg)?;
+                arg.convert_element_type(c.ty.primitive_type())
+            }
+            NoxprNode::Select(s) => {
+                let cond = self.visit(&s.cond)?;
+                let on_true = self.visit(&s.on_true)?;
+                let on_false = self.visit(&s.on_false)?;
+                cond.select(&on_true, &on_false)
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -1614,6 +1689,7 @@ impl ReplacementTracer {
                 Noxpr::new(NoxprNode::LessOrEqual(self.visit_binary_op(x)))
             }
             NoxprNode::Less(x) => Noxpr::new(NoxprNode::Less(self.visit_binary_op(x))),
+            NoxprNode::Equal(x) => Noxpr::new(NoxprNode::Equal(self.visit_binary_op(x))),
             NoxprNode::Or(x) => Noxpr::new(NoxprNode::Or(self.visit_binary_op(x))),
             NoxprNode::Dot(x) => Noxpr::new(NoxprNode::Dot(self.visit_binary_op(x))),
             NoxprNode::DotGeneral(d) => Noxpr::new(NoxprNode::DotGeneral(DotGeneral {
@@ -1681,6 +1757,20 @@ impl ReplacementTracer {
             })),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(j) => Noxpr::new(NoxprNode::Jax(j.clone())),
+            NoxprNode::Convert(c) => {
+                let arg = self.visit(&c.arg);
+                Noxpr::new(NoxprNode::Convert(Convert { arg, ty: c.ty }))
+            }
+            NoxprNode::Select(s) => {
+                let cond = self.visit(&s.cond);
+                let on_true = self.visit(&s.on_true);
+                let on_false = self.visit(&s.on_false);
+                Noxpr::new(NoxprNode::Select(Select {
+                    cond,
+                    on_true,
+                    on_false,
+                }))
+            }
         };
         self.cache.insert(id, expr.clone());
         expr
@@ -1892,6 +1982,7 @@ impl BatchTracer {
             NoxprNode::GreaterOrEqual(b) => self.visit_binary_op(b, Noxpr::greater_or_equal)?,
             NoxprNode::LessOrEqual(b) => self.visit_binary_op(b, Noxpr::less_or_equal)?,
             NoxprNode::Less(b) => self.visit_binary_op(b, Noxpr::less)?,
+            NoxprNode::Equal(b) => self.visit_binary_op(b, Noxpr::eq)?,
             NoxprNode::Sqrt(e) => self.visit_unary_op(e, Noxpr::sqrt)?,
             NoxprNode::Neg(e) => self.visit_unary_op(e, Noxpr::neg)?,
             NoxprNode::Log(e) => self.visit_unary_op(e, Noxpr::log)?,
@@ -2326,6 +2417,32 @@ impl BatchTracer {
                     }
                 }
             }
+            NoxprNode::Convert(c) => {
+                let arg = self.visit(&c.arg)?;
+                BatchedExpr {
+                    inner: arg.inner.convert(c.ty),
+                    batch_axis: arg.batch_axis,
+                }
+            }
+            NoxprNode::Select(s) => {
+                let cond = self
+                    .visit(&s.cond)?
+                    .move_batch_axis(self.out_axis.clone())
+                    .ok_or(Error::UnbatchableArgument)?;
+                let on_true = self
+                    .visit(&s.on_true)?
+                    .move_batch_axis(self.out_axis.clone())
+                    .ok_or(Error::UnbatchableArgument)?;
+                let on_false = self
+                    .visit(&s.on_false)?
+                    .move_batch_axis(self.out_axis.clone())
+                    .ok_or(Error::UnbatchableArgument)?;
+                // TODO: handle confliting batch axises
+                BatchedExpr {
+                    inner: Noxpr::select(&cond.inner, on_true.inner, on_false.inner),
+                    batch_axis: cond.batch_axis,
+                }
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -2683,6 +2800,7 @@ impl PrettyPrintTracer {
             NoxprNode::GreaterOrEqual(g) => self.visit_binary_op(id, g, ">=", writer),
             NoxprNode::LessOrEqual(le) => self.visit_binary_op(id, le, "<=", writer),
             NoxprNode::Less(l) => self.visit_binary_op(id, l, "<", writer),
+            NoxprNode::Equal(l) => self.visit_binary_op(id, l, "==", writer),
             NoxprNode::Dot(d) => self.visit_binary_op(id, d, ".", writer),
             NoxprNode::DotGeneral(d) => {
                 let lhs = self.visit(&d.lhs, writer)?;
@@ -2849,6 +2967,19 @@ impl PrettyPrintTracer {
             NoxprNode::Jax(j) => {
                 let num = self.print_var(id, writer)?;
                 write!(writer, "jax({:?})", j)?;
+                Ok(num)
+            }
+            NoxprNode::Convert(c) => self.visit(&c.arg, writer),
+            NoxprNode::Select(s) => {
+                let cond = self.visit(&s.cond, writer)?;
+                let on_true = self.visit(&s.on_true, writer)?;
+                let on_false = self.visit(&s.on_false, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(
+                    writer,
+                    "select(cond = var_{}, on_true = var_{}, on_false = var_{}",
+                    cond, on_true, on_false
+                )?;
                 Ok(num)
             }
         };
