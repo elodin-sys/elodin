@@ -487,17 +487,25 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         StrideIterator {
             buf: self.buf.as_buf(),
             stride,
+            offsets: indexes.clone(),
             indexes,
             dims,
             phantom: PhantomData,
+            bump_index: false,
         }
     }
 
-    pub fn offset_iter(
+    pub fn offset_iter<'o>(
         &self,
-        offsets: &[usize],
-    ) -> StrideIterator<'_, T1, impl StridesIter, impl AsMut<[usize]> + Clone, impl AsRef<[usize]>>
-    {
+        offsets: &'o [usize],
+    ) -> StrideIterator<
+        '_,
+        T1,
+        impl StridesIter,
+        impl AsRef<[usize]> + AsMut<[usize]> + Clone,
+        impl AsRef<[usize]>,
+        &'o [usize],
+    > {
         let dims = D1::dim(&self.buf);
         let stride = D1::strides(&self.buf);
         let mut indexes = dims.clone();
@@ -513,8 +521,10 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             buf: self.buf.as_buf(),
             stride,
             indexes,
+            offsets,
             dims,
             phantom: PhantomData,
+            bump_index: false,
         }
     }
 
@@ -552,10 +562,10 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     /// Generates an iterator over the elements of the array after broadcasting to new dimensions.
-    pub fn broadcast_iter(
-        &self,
-        new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
-    ) -> Option<impl Iterator<Item = &'_ T1>> {
+    pub fn broadcast_iter<'a>(
+        &'a self,
+        new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone + 'a,
+    ) -> Option<impl Iterator<Item = &'a T1>> {
         let existing_dims = D1::dim(&self.buf);
         let existing_strides = D1::strides(&self.buf);
         let mut new_strides = new_dims.clone();
@@ -588,9 +598,11 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         Some(StrideIterator {
             buf: self.buf.as_buf(),
             stride: new_strides,
+            offsets: indexes.clone(),
             indexes,
             dims: out_dims,
             phantom: PhantomData,
+            bump_index: false,
         })
     }
 
@@ -780,10 +792,17 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 
     pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
         let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(D2::DIM);
-        for (a, out) in self
-            .offset_iter(offsets)
-            .zip(out.buf.as_mut_buf().iter_mut())
-        {
+        let iter = self.offset_iter(offsets);
+        let iter = StrideIterator {
+            buf: iter.buf,
+            stride: iter.stride,
+            indexes: iter.indexes,
+            offsets: iter.offsets,
+            dims: D2::DIM,
+            phantom: PhantomData,
+            bump_index: false,
+        };
+        for (a, out) in iter.zip(out.buf.as_mut_buf().iter_mut()) {
             out.write(*a);
         }
         unsafe { out.assume_init() }
@@ -1028,39 +1047,78 @@ impl<S: StridesIter> StridesIter for RevStridesIter<S> {
 }
 
 /// An iterator for striding over an array buffer, providing element-wise access according to specified strides.
-pub struct StrideIterator<'a, T, S: StridesIter, I: AsMut<[usize]>, D: AsRef<[usize]>> {
+pub struct StrideIterator<
+    'a,
+    T,
+    S: StridesIter,
+    I: AsMut<[usize]>,
+    D: AsRef<[usize]>,
+    O: AsRef<[usize]>,
+> {
     buf: &'a [T],
     stride: S,
     indexes: I,
     dims: D,
     phantom: PhantomData<&'a T>,
+    offsets: O,
+    bump_index: bool,
 }
 
-impl<'a, T, S: StridesIter, I: AsMut<[usize]>, D: AsRef<[usize]>> Iterator
-    for StrideIterator<'a, T, S, I, D>
+impl<'a, T, S, I, D, O> Iterator for StrideIterator<'a, T, S, I, D, O>
+where
+    S: StridesIter,
+    I: AsMut<[usize]> + AsRef<[usize]> + 'a,
+    D: AsRef<[usize]>,
+    O: AsRef<[usize]>,
 {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         let indexes = self.indexes.as_mut();
         let dims = self.dims.as_ref();
+        if self.bump_index {
+            let mut carry = true;
+            for ((&dim, index), offset) in dims
+                .iter()
+                .zip(indexes.iter_mut())
+                .zip(self.offsets.as_ref().iter())
+                .rev()
+            {
+                if carry {
+                    *index += 1;
+                }
+                carry = *index >= dim + offset;
+                if carry {
+                    *index = *offset;
+                }
+            }
+        }
+        self.bump_index = true;
         let i: usize = indexes
             .iter()
             .zip(self.stride.stride_iter())
             .map(|(&i, s): (&usize, usize)| i * s)
             .sum();
-        let mut carry = true;
-        for (&dim, index) in dims.iter().zip(indexes.iter_mut()).rev() {
-            if carry {
-                *index += 1;
-            }
-            carry = *index >= dim;
-            if carry {
-                *index = 0;
-            }
-        }
-
         self.buf.get(i)
+        // let indexes = self.indexes.as_mut();
+        // let dims = self.dims.as_ref();
+        // let i: usize = indexes
+        //     .iter()
+        //     .zip(self.stride.stride_iter())
+        //     .map(|(&i, s): (&usize, usize)| i * s)
+        //     .sum();
+        // let mut carry = true;
+        // for (&dim, index) in dims.iter().zip(indexes.iter_mut()).rev() {
+        //     if carry {
+        //         *index += 1;
+        //     }
+        //     carry = *index >= dim;
+        //     if carry {
+        //         *index = 0;
+        //     }
+        // }
+
+        // self.buf.get(i)
     }
 }
 
@@ -1156,9 +1214,12 @@ impl<
     type Item = (&'a I, &'a mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0
-            .next()
-            .map(|x| (unsafe { std::mem::transmute(&self.0.indexes) }, x))
+        self.0.next().map(|x| {
+            (
+                unsafe { std::mem::transmute::<&I, &'a I>(&self.0.indexes) },
+                x,
+            )
+        })
     }
 }
 
