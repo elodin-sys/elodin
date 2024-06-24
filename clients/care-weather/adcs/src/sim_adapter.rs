@@ -1,5 +1,4 @@
-use nox::ArrayRepr;
-use nox::SpatialTransform;
+use nox::{ArrayRepr, SpatialTransform};
 use roci::{drivers::Hz, Componentize, Decomponentize, System};
 
 use crate::NavData;
@@ -16,6 +15,16 @@ pub struct TxWorld {
     // out
     #[roci(entity_id = 0, component_id = "world_pos")]
     inertial_pos: SpatialTransform<f64, ArrayRepr>,
+    #[roci(entity_id = 0, component_id = "css_value")]
+    pub css_inputs: [f64; 6],
+    #[roci(entity_id = 0, component_id = "mag_ref")]
+    pub mag_ref: [f64; 3],
+    #[roci(entity_id = 0, component_id = "sun_ref")]
+    pub sun_ref: [f64; 3],
+    #[roci(entity_id = 0, component_id = "mag_value")]
+    pub mag_value: [f64; 3],
+    #[roci(entity_id = 0, component_id = "sun_vec_b")]
+    pub sun_vec_b: [f64; 3],
 }
 
 pub struct SimAdapter;

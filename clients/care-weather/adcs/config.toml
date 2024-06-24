@@ -75,4 +75,4 @@ com_b = [0.0, 0.0, 0.0]
 spacecraft_mass = 2.5
 
 [mcu]
-path = "/dev/cu.usbmodem2065328538311"
+path = "/dev/cu.usbmodem70A4923233351"

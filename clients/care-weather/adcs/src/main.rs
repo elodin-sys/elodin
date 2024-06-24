@@ -19,7 +19,7 @@ pub struct NavData {
     pub att_mrp_bn: [f64; 3],
     #[roci(entity_id = 3, component_id = "omega_bn_b")]
     pub omega_bn_b: [f64; 3],
-    #[roci(entity_id = 3, component_id = "sun_vec_b")]
+    #[roci(entity_id = 0, component_id = "sun_vec_b")]
     pub sun_vec_b: [f64; 3],
 }
 
@@ -69,8 +69,10 @@ fn main() -> anyhow::Result<()> {
         | mcu::AdcsFormat::IncludeAccel
         | mcu::AdcsFormat::IncludeCss;
     mcu_driver.print_info().unwrap();
-    mcu_driver.init_adcs(200, 20, 10, adcs_format)?;
-    mcu_driver.init_gps(200, 20, 10)?;
+    mcu_driver.init_adcs(100, 20, 10, adcs_format)?;
+    if let Err(err) = mcu_driver.init_gps(1000, 20, 10) {
+        eprintln!("failed to initialize GPS: {}", err);
+    }
     let sim_adapter = sim_adapter::SimAdapter;
     os_sleep_driver(mcu_driver.pipe(det).pipe(sim_adapter).pipe(tx)).run();
     Ok(())

@@ -1,9 +1,59 @@
 import jax.numpy as np
 import elodin as el
+import typing as ty
+import jax
+from dataclasses import dataclass, field
 
 TIME_STEP = 1.0 / 60.0
 
 j = np.array([15204079.70002, 14621352.61765, 6237758.3131]) * 1e-9
+
+MagRef = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "mag_ref",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+SunRef = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "sun_ref",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+
+MagValue = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "mag_value",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+SunPos = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "sun_vec_b",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+SunSensors = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "css_value",
+        el.ComponentType(el.PrimitiveType.F64, (6,)),
+    ),
+]
+
+
+@dataclass
+class Determination(el.Archetype):
+    mag_ref: MagRef = field(default_factory=lambda: np.array([0.0, 1.0, 0.0]))
+    sun_ref: SunRef = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
+    mag_value: MagValue = field(default_factory=lambda: np.array([0.0, 1.0, 0.0]))
+    sun_pos: SunPos = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
+    sun_sensors: SunSensors = field(default_factory=lambda: np.zeros(6))
+
 
 world = el.World()
 sat = world.spawn(
@@ -12,58 +62,115 @@ sat = world.spawn(
         world.glb(
             "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
         ),
+        Determination(),
         # Credit to the OreSat program https://www.oresat.org for the model above
     ],
     name="OreSat",
 )
 
 world.spawn(
-    el.Panel.vsplit(
+    el.Panel.hsplit(
         [
-            el.Panel.hsplit(
-                [
-                    el.Panel.viewport(
-                        track_entity=sat,
-                        track_rotation=False,
-                        pos=[7.0, 0.0, 2.0],
-                        looking_at=[0.0, 0.0, 0.0],
-                        show_grid=True,
-                    ),
-                ]
+            el.Panel.viewport(
+                track_entity=sat,
+                track_rotation=False,
+                pos=[7.0, 0.0, 2.0],
+                looking_at=[0.0, 0.0, 0.0],
+                show_grid=True,
             ),
-            el.Panel.graph(
+            el.Panel.vsplit(
                 [
-                    el.GraphEntity(
-                        sat,
+                    el.Panel.graph(
                         [
-                            el.Component.index(el.WorldPos)[:4],
-                        ],
-                    )
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(el.WorldPos)[:4],
+                                ],
+                            )
+                        ]
+                    ),
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(SunPos),
+                                ],
+                            )
+                        ]
+                    ),
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(MagValue),
+                                ],
+                            )
+                        ]
+                    ),
                 ]
             ),
         ],
         active=True,
     )
 )
-
 world.spawn(
-    [
-        el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.SpatialMotion.from_angular(
-                np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
+    el.Panel.hsplit(
+        [
+            el.Panel.vsplit(
+                [
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(SunRef),
+                                ],
+                            )
+                        ]
+                    ),
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(MagRef),
+                                ],
+                            )
+                        ]
+                    ),
+                ]
             ),
-            inertia=el.SpatialInertia(1.0),
-        ),
-        world.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb"),
-    ],
-    name="Earth",
+            el.Panel.vsplit(
+                [
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(SunSensors),
+                                ],
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    ),
 )
 
 
 @el.map
-def noop(pos: el.WorldPos) -> el.WorldPos:
-    return pos
+def noop(
+    pos: el.WorldPos,
+    mag_ref: MagRef,
+    sun_ref: SunRef,
+    mag_value: MagValue,
+    sun_pos: SunPos,
+) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, SunPos]:
+    return pos, mag_ref, sun_ref, mag_value, sun_pos
 
 
 exec = world.run(

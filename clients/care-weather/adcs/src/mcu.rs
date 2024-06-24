@@ -7,11 +7,12 @@ use enumflags2::{bitflags, BitFlags};
 use nox::Tensor;
 use roci::drivers::Hz;
 use roci::System;
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
+use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits};
 
 use crate::determination::{GpsInputs, World};
 
 pub struct McuDriver {
+    port_builder: SerialPortBuilder,
     port: Box<dyn SerialPort>,
     read_buf: Vec<u8>,
 }
@@ -24,13 +25,18 @@ pub struct McuConfig {
 
 impl McuDriver {
     pub fn new<'a>(path: impl Into<Cow<'a, str>>, baud_rate: Option<u32>) -> std::io::Result<Self> {
-        let mut port = serialport::new(path.into(), baud_rate.unwrap_or(9600)).open()?;
-        port.set_data_bits(DataBits::Eight)?;
-        port.set_flow_control(FlowControl::Software)?;
-        port.set_parity(Parity::None)?;
-        port.set_stop_bits(StopBits::One)?;
+        let port_builder = serialport::new(path.into(), baud_rate.unwrap_or(9600))
+            .data_bits(DataBits::Eight)
+            .flow_control(FlowControl::Software)
+            .parity(Parity::None)
+            .stop_bits(StopBits::One);
+        let port = port_builder.clone().open()?;
         let read_buf = Vec::with_capacity(1024);
-        Ok(Self { port, read_buf })
+        Ok(Self {
+            port_builder,
+            port,
+            read_buf,
+        })
     }
 
     pub fn try_read_lines(&mut self) -> std::io::Result<Vec<String>> {
@@ -81,13 +87,22 @@ impl McuDriver {
         adcs_format: BitFlags<AdcsFormat>,
     ) -> std::io::Result<()> {
         let cmd = adcs_init_command(update_interval, cycle_duration, cycle_interval, adcs_format);
+        println!("-> {}", cmd);
         writeln!(&mut self.port, "{}", cmd)?;
         self.port.set_timeout(Duration::from_secs(1))?;
         let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
+        let nack_msg = "|!KEY|";
         loop {
             for line in self.try_read_lines()? {
+                println!("<- {}", line);
                 if line == ack_msg {
+                    println!("ADCS initialized success");
                     return Ok(());
+                } else if line == nack_msg {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "received NACK from MCU",
+                    ));
                 }
             }
         }
@@ -100,13 +115,22 @@ impl McuDriver {
         cycle_interval: u32,
     ) -> std::io::Result<()> {
         let cmd = gps_init_command(update_interval, cycle_duration, cycle_interval);
+        println!("-> {}", cmd);
         writeln!(&mut self.port, "{}", cmd)?;
         self.port.set_timeout(Duration::from_secs(1))?;
         let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
+        let nack_msg = "|!KEY|";
         loop {
             for line in self.try_read_lines()? {
+                println!("<- {}", line);
                 if line == ack_msg {
+                    println!("GPS initialized success");
                     return Ok(());
+                } else if line == nack_msg {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "received NACK from MCU",
+                    ));
                 }
             }
         }
@@ -126,7 +150,7 @@ impl System for McuDriver {
             gps_inputs: GpsInputs {
                 lat: 40.1,
                 long: -111.8,
-                alt: 800.0,
+                alt: 0.0,
             },
             ..Default::default()
         }
@@ -136,12 +160,25 @@ impl System for McuDriver {
         self.port.set_timeout(Duration::from_secs(0)).unwrap();
         let lines = match self.try_read_lines() {
             Ok(lines) => lines,
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
+                eprintln!("broken pipe, attempting to reopen port");
+                let port = match self.port_builder.clone().open() {
+                    Ok(port) => port,
+                    Err(err) => {
+                        eprintln!("error reopening port: {}", err);
+                        return;
+                    }
+                };
+                self.port = port;
+                return;
+            }
             Err(err) => {
                 eprintln!("error reading from MCU: {}", err);
                 return;
             }
         };
         for line in lines {
+            // println!("<- {}", line);
             if let Some(msg) = line.strip_prefix("[FILE][adcs]") {
                 if msg.starts_with('#') {
                     continue;
@@ -158,19 +195,15 @@ impl System for McuDriver {
                     .css_side_avg
                     .map(|v| v / 2u64.pow(12) as f64) // 12-bit ADC
                     .map(|v| v.clamp(0.0, 1.0));
-                println!("<- received css: {:?}", side_lum);
 
                 let max_cos = side_lum.iter().copied().fold(0.0, f64::max);
                 if max_cos > f64::EPSILON {
                     world.css_inputs = side_lum;
-                } else {
-                    println!("-> no sun detected");
                 }
 
                 world.mag_value = Tensor::<f64, _, _>::from_buf(sensor_data.mag.map(|v| v as f64))
                     .normalize()
                     .into_buf();
-                println!("<- received mag: {:?}", world.mag_value);
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
                 println!("<- received gps message: {}", msg);
                 let gps_data = match GpsData::from_str(msg) {
@@ -385,10 +418,10 @@ pub fn adcs_init_command(
 // cycle_duration (sec) - how long the GPS cycle lasts
 // cycle_interval (sec) - how long the GPS cycle is inactive before the next cycle starts
 // Returns a MCU command string that configures the GPS cycle.
-// E.g: g.fmt=0;g.upd=1000;g.dur=10;g.int=100
+// E.g: gps.fmt=0;gps.upd=1000;gps.dur=10;gps.int=100
 pub fn gps_init_command(update_interval: u32, cycle_duration: u32, cycle_interval: u32) -> String {
     format!(
-        "g.fmt=0;g.upd={};g.dur={};g.int={}",
+        "gps.fmt=0;gps.upd={};gps.dur={};gps.int={}",
         update_interval, cycle_duration, cycle_interval
     )
 }
@@ -427,7 +460,7 @@ mod tests {
     fn test_config_gps_cycle() {
         assert_eq!(
             gps_init_command(1000, 10, 100),
-            "g.fmt=0;g.upd=1000;g.dur=10;g.int=100"
+            "gps.fmt=0;gps.upd=1000;gps.dur=10;gps.int=100"
         );
     }
 

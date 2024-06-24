@@ -20,13 +20,13 @@ use crate::NavData;
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
     // inputs
-    #[roci(entity_id = 4, component_id = "css_value")]
+    #[roci(entity_id = 0, component_id = "css_value")]
     pub css_inputs: [f64; 6],
     #[roci(entity_id = 0, component_id = "mag_ref")]
     pub mag_ref: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 0, component_id = "sun_ref")]
     pub sun_ref: Vector<f64, 3, ArrayRepr>,
-    #[roci(entity_id = 7, component_id = "mag_value")]
+    #[roci(entity_id = 0, component_id = "mag_value")]
     pub mag_value: [f64; 3],
     pub gps_inputs: GpsInputs,
 
@@ -100,8 +100,9 @@ impl System for Determination {
                 world.gps_inputs.long,
                 world.gps_inputs.alt,
                 time,
-            );
-            world.sun_ref = nox_frames::earth::sun_vec(time);
+            )
+            .normalize();
+            world.sun_ref = nox_frames::earth::sun_vec(time).normalize();
         } else {
             println!("failed to get current time");
         }
