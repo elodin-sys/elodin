@@ -15,7 +15,9 @@ use crate::ui::{
     utils::Shrink4,
 };
 
-use self::palette_items::{palette_help_items, palette_viewport_items, PaletteItemWrapper};
+use self::palette_items::{
+    palette_help_items, palette_sim_items, palette_viewport_items, PaletteItemWrapper,
+};
 
 use super::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystem, WidgetSystemExt};
 
@@ -228,10 +230,14 @@ impl WidgetSystem for PaletteItems<'_> {
 
         let filter = command_palette_state.filter.clone();
 
-        let palette_items_filtered = [palette_help_items(&filter), palette_viewport_items(&filter)]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<PaletteItemWrapper>>();
+        let palette_items_filtered = [
+            palette_help_items(&filter),
+            palette_viewport_items(&filter),
+            palette_sim_items(&filter),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<PaletteItemWrapper>>();
 
         let row_margin = egui::Margin::symmetric(16.0, 12.0);
         let row_height = ui.spacing().interact_size.y + row_margin.sum().y;
