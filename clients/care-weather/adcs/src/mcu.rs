@@ -1,10 +1,11 @@
+use std::f64::consts::PI;
 use std::str::FromStr;
 use std::time::Duration;
 use std::{borrow::Cow, io::Write};
 
 use arrayvec::ArrayVec;
 use enumflags2::{bitflags, BitFlags};
-use nox::Tensor;
+use nox::{ArrayRepr, Tensor, Vector};
 use roci::drivers::Hz;
 use roci::System;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits};
@@ -204,6 +205,8 @@ impl System for McuDriver {
                 world.mag_value = Tensor::<f64, _, _>::from_buf(sensor_data.mag.map(|v| v as f64))
                     .normalize()
                     .into_buf();
+                world.omega =
+                    Vector::<f64, 3, ArrayRepr>::from_buf(sensor_data.gyro) * (PI / 180.0f64);
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
                 println!("<- received gps message: {}", msg);
                 let gps_data = match GpsData::from_str(msg) {

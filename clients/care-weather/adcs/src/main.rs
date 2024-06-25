@@ -1,5 +1,5 @@
 use basilisk::att_determination::SunlineConfig;
-use determination::Determination;
+use determination::{Determination, MagCal};
 use roci::{
     combinators::PipeExt,
     drivers::{os_sleep_driver, Driver, Hz},
@@ -29,6 +29,9 @@ pub struct Config {
     guidance: guidance::GuidanceConfig,
     control: control::ControlConfig,
     mcu: mcu::McuConfig,
+    mekf: Option<determination::MEKFConfig>,
+    #[serde(default)]
+    mag_cal: MagCal,
 }
 
 impl Config {
@@ -54,8 +57,10 @@ fn main() -> anyhow::Result<()> {
         guidance,
         control,
         mcu,
+        mekf,
+        mag_cal,
     } = Config::parse()?;
-    let det = Determination::new(sunline);
+    let det = Determination::new(sunline, mag_cal, mekf);
     let _guidance = guidance::Guidance::new(guidance.sigma_r0r);
     let _control = control::Control::new(control);
     let (tx, _) = tokio::tcp_connect::<Hz<100>>(

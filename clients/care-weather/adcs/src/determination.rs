@@ -6,6 +6,7 @@ use basilisk::sys::NavAttMsgPayload;
 use basilisk::{att_determination::SunlineEKF, channel::BskChannel};
 use hifitime::Epoch;
 use nox::ArrayRepr;
+use nox::Matrix3;
 use nox::Tensor;
 use nox::Vector;
 use nox::MRP;
@@ -13,6 +14,9 @@ use nox_frames::earth::ecef_to_eci;
 use nox_frames::earth::ned_to_ecef;
 use roci::System;
 use roci::{Componentize, Decomponentize};
+use roci_adcs::mekf;
+use serde::Deserialize;
+use serde::Serialize;
 use wmm::GeodeticCoords;
 
 use crate::NavData;
@@ -29,6 +33,8 @@ pub struct World {
     #[roci(entity_id = 0, component_id = "mag_value")]
     pub mag_value: [f64; 3],
     pub gps_inputs: GpsInputs,
+    #[roci(entity_id = 0, component_id = "gyro_omega")]
+    pub omega: Vector<f64, 3, ArrayRepr>,
 
     // outputs
     pub nav_out: NavData,
@@ -44,6 +50,28 @@ pub struct GpsInputs {
     pub alt: f64,
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct MEKFConfig {
+    sigma_g: [f64; 3],
+    sigma_b: [f64; 3],
+    dt: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MagCal {
+    pub t: [[f64; 3]; 3],
+    pub h: [f64; 3],
+}
+
+impl Default for MagCal {
+    fn default() -> Self {
+        MagCal {
+            t: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            h: [0.0; 3],
+        }
+    }
+}
+
 pub struct Determination {
     start: Instant,
     sunline_ekf: SunlineEKF,
@@ -54,10 +82,13 @@ pub struct Determination {
 
     // magnetic model
     mag_model: wmm::MagneticModel,
+
+    mekf_state: Option<mekf::State>,
+    mag_cal: MagCal,
 }
 
 impl Determination {
-    pub fn new(sunline: SunlineConfig) -> Self {
+    pub fn new(sunline: SunlineConfig, mag_cal: MagCal, mekf_config: Option<MEKFConfig>) -> Self {
         let nav_state_out = BskChannel::default();
         let filter_data_out = BskChannel::default();
         let css_input = BskChannel::default();
@@ -67,12 +98,21 @@ impl Determination {
             css_input.clone(),
             sunline,
         );
+        let mekf_state = mekf_config.map(|config| {
+            mekf::State::new(
+                Tensor::from_buf(config.sigma_g),
+                Tensor::from_buf(config.sigma_b),
+                config.dt,
+            )
+        });
         Determination {
             start: Instant::now(),
             sunline_ekf,
             css_input,
             nav_state_out,
             mag_model: wmm::MagneticModel::default(),
+            mekf_state,
+            mag_cal,
         }
     }
 }
@@ -107,11 +147,20 @@ impl System for Determination {
             println!("failed to get current time");
         }
         let body_1 = Tensor::from_buf(nav_state.vehSunPntBdy);
-        let body_2 = Tensor::from_buf(world.mag_value);
+        let body_2 = (Matrix3::from_buf(self.mag_cal.t)
+            .dot(&(Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h))))
+        .normalize();
         let ref_1 = world.sun_ref;
         let ref_2 = world.mag_ref;
-        let att = roci_adcs::triad(body_1, body_2, ref_1, ref_2);
-        let att_mrp_bn = MRP::from_rot_matrix(att).0.into_buf();
+        let att_mrp_bn = if let Some(mut mekf_state) = self.mekf_state.take() {
+            mekf_state.omega = world.omega;
+            let mekf_state = mekf_state.estimate_attitude([body_1, body_2], [ref_1, ref_2]);
+            let mekf_state = self.mekf_state.insert(mekf_state);
+            MRP::from(mekf_state.q_hat).0.into_buf()
+        } else {
+            let att = roci_adcs::triad(body_1, body_2, ref_1, ref_2);
+            MRP::from_rot_matrix(att).0.into_buf()
+        };
 
         // println!("css_inp: {:?}", world.css_inputs);
         // println!("sun_val: {:?}", nav_state.vehSunPntBdy);
