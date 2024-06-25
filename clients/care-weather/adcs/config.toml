@@ -1,34 +1,44 @@
-[sunline]
+[determination.sunline]
 q_obs_val = 0.001
 q_proc_val = 0.001
 covar = [0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.004]
 sensor_use_threshold = 0.0
 ekf_switch = 5.0
 
-
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [1.0, 0.0, 0.0]
 coefficent = 1.0
 
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [-1.0, 0.0, 0.0]
 coefficent = 1.0
 
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [0.0, 1.0, 0.0]
 coefficent = 1.0
 
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [0.0, -1.0, 0.0]
 coefficent = 1.0
 
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [0.0, 0.0, 1.0]
 coefficent = 1.0
 
-[[sunline.css]]
+[[determination.sunline.css]]
 normal_b = [0.0, 0.0, -1.0]
 coefficent = 1.0
+
+[determination.mekf]
+dt = 0.01
+sigma_b = [0.01, 0.01, 0.01]
+sigma_g = [0.01, 0.01, 0.01]
+
+[determination.mag_cal]
+t = [[ 1.9203215e-03, -6.2749350e-05,  8.8365946e-04],
+     [ 8.0907519e-04,  1.8392554e-03, -9.3289115e-04],
+     [-4.2906895e-04,  1.2010682e-03,  1.5906866e-03]]
+h = [-281.0209, 87.63812, 408.10947]
 
 [guidance]
 sigma_r0r = [0.0, 0.0, 0.0]
@@ -77,20 +87,9 @@ spacecraft_mass = 2.5
 [mcu]
 path = "/dev/cu.usbmodem70A4923233351"
 adcs_format = 39
-adcs_update_interval = 10
+adcs_update_interval = 100
 adcs_cycle_duration = 20
 adcs_cycle_interval = 10
 gps_update_interval = 1000
 gps_cycle_duration = 20
 gps_cycle_interval = 10
-
-[mekf]
-dt = 0.01
-sigma_b = [0.01, 0.01, 0.01]
-sigma_g = [0.01, 0.01, 0.01]
-
-[mag_cal]
-t = [[ 1.9203215e-03, -6.2749350e-05,  8.8365946e-04],
-     [ 8.0907519e-04,  1.8392554e-03, -9.3289115e-04],
-     [-4.2906895e-04,  1.2010682e-03,  1.5906866e-03]]
-h = [-281.0209, 87.63812, 408.10947]

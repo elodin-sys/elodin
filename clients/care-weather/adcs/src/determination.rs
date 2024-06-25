@@ -52,6 +52,16 @@ pub struct GpsInputs {
     pub alt: f64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeterminationConfig {
+    sunline: SunlineConfig,
+    mekf: Option<MEKFConfig>,
+    #[serde(default)]
+    mag_cal: MagCal,
+    override_mag_ref: Option<[f64; 3]>,
+    override_sun_ref: Option<[f64; 3]>,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MEKFConfig {
     sigma_g: [f64; 3],
@@ -74,7 +84,7 @@ impl Default for MagCal {
     }
 }
 
-pub struct Determination {
+pub struct Determination<const HZ: usize> {
     start: Instant,
     sunline_ekf: SunlineEKF,
     // input
@@ -89,10 +99,20 @@ pub struct Determination {
     mag_cal: MagCal,
     use_sunline_ekf: bool,
     css: Vec<CSSConfig>,
+
+    override_mag_ref: Option<[f64; 3]>,
+    override_sun_ref: Option<[f64; 3]>,
 }
 
-impl Determination {
-    pub fn new(sunline: SunlineConfig, mag_cal: MagCal, mekf_config: Option<MEKFConfig>) -> Self {
+impl<const HZ: usize> Determination<HZ> {
+    pub fn new(config: DeterminationConfig) -> Self {
+        let DeterminationConfig {
+            sunline,
+            mekf,
+            mag_cal,
+            override_mag_ref,
+            override_sun_ref,
+        } = config;
         let nav_state_out = BskChannel::default();
         let filter_data_out = BskChannel::default();
         let css_input = BskChannel::default();
@@ -103,7 +123,7 @@ impl Determination {
             css_input.clone(),
             sunline,
         );
-        let mekf_state = mekf_config.map(|config| {
+        let mekf_state = mekf.map(|config| {
             mekf::State::new(
                 Tensor::from_buf(config.sigma_g),
                 Tensor::from_buf(config.sigma_b),
@@ -120,13 +140,15 @@ impl Determination {
             mag_cal,
             use_sunline_ekf: false,
             css,
+            override_mag_ref,
+            override_sun_ref,
         }
     }
 }
 
-impl System for Determination {
+impl<const HZ: usize> System for Determination<HZ> {
     type World = World;
-    type Driver = roci::drivers::Hz<100>;
+    type Driver = roci::drivers::Hz<HZ>;
 
     fn update(&mut self, world: &mut Self::World) {
         let elapsed = self.start.elapsed().as_nanos() as u64;
@@ -149,19 +171,29 @@ impl System for Determination {
                 .fold(Vector::<f64, 3, ArrayRepr>::zeros(), |acc, (css, val)| {
                     acc + Vector::from_buf(css.normal_b) * *val
                 })
+                .normalize()
         };
         let nav_state = self.nav_state_out.read_msg();
 
         if let Ok(time) = Epoch::now() {
-            world.mag_ref = get_wmm_eci(
-                &mut self.mag_model,
-                world.gps_inputs.lat,
-                world.gps_inputs.long,
-                world.gps_inputs.alt,
-                time,
-            )
-            .normalize();
-            world.sun_ref = nox_frames::earth::sun_vec(time).normalize();
+            world.mag_ref = self
+                .override_mag_ref
+                .map(Tensor::from_buf)
+                .unwrap_or_else(|| {
+                    get_wmm_eci(
+                        &mut self.mag_model,
+                        world.gps_inputs.lat,
+                        world.gps_inputs.long,
+                        world.gps_inputs.alt,
+                        time,
+                    )
+                })
+                .normalize();
+            world.sun_ref = self
+                .override_sun_ref
+                .map(Tensor::from_buf)
+                .unwrap_or_else(|| nox_frames::earth::sun_vec(time))
+                .normalize();
         } else {
             println!("failed to get current time");
         }
@@ -192,7 +224,7 @@ impl System for Determination {
 
         world.nav_out.att_mrp_bn = att_mrp_bn;
         world.nav_out.omega_bn_b = nav_state.omega_BN_B;
-        world.nav_out.sun_vec_b = nav_state.vehSunPntBdy;
+        world.nav_out.sun_vec_b = body_1.into_buf();
     }
 }
 

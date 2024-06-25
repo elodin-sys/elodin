@@ -48,7 +48,7 @@ impl RWMotorTorque {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 pub struct VoltageConfig {
     pub voltage_max: f64,
     pub voltage_min: f64,

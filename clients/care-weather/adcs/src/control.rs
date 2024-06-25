@@ -48,7 +48,7 @@ pub struct AttErrInput {
     pub domega_rn_b: [f64; 3usize],
 }
 
-pub struct Control {
+pub struct Control<const HZ: usize> {
     mrp_feedback: MRPFeedback,
     motor_torque: RWMotorTorque,
     motor_voltage: RWMotorVoltage,
@@ -63,7 +63,7 @@ pub struct Control {
     motor_torque_out: BskChannel<ArrayMotorTorqueMsgPayload>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ControlConfig {
     control_axes_body: [f64; 9],
     feedback_config: MRPFeedbackConfig,
@@ -72,14 +72,14 @@ pub struct ControlConfig {
     vehicle_config: VehicleConfig,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct VehicleConfig {
     pub spacecraft_inertia_b: [f64; 9usize],
     pub com_b: [f64; 3usize],
     pub spacecraft_mass: f64,
 }
 
-impl Control {
+impl<const HZ: usize> Control<HZ> {
     pub fn new(control_config: ControlConfig) -> Self {
         let ControlConfig {
             control_axes_body,
@@ -149,9 +149,9 @@ impl Control {
     }
 }
 
-impl System for Control {
+impl<const HZ: usize> System for Control<HZ> {
     type World = World;
-    type Driver = roci::drivers::Hz<100>;
+    type Driver = roci::drivers::Hz<HZ>;
 
     fn update(&mut self, world: &mut Self::World) {
         let World {

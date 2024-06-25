@@ -12,14 +12,14 @@ use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, S
 
 use crate::determination::{GpsInputs, World};
 
-pub struct McuDriver {
+pub struct McuDriver<const HZ: usize> {
     port_builder: SerialPortBuilder,
     port: Box<dyn SerialPort>,
     read_buf: Vec<u8>,
     config: McuConfig,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct McuConfig {
     pub path: String,
     pub baud_rate: Option<u32>,
@@ -32,7 +32,7 @@ pub struct McuConfig {
     pub gps_cycle_interval: u32,
 }
 
-impl McuDriver {
+impl<const HZ: usize> McuDriver<HZ> {
     pub fn new(config: McuConfig) -> std::io::Result<Self> {
         let port_builder = serialport::new(&config.path, config.baud_rate.unwrap_or(9600))
             .data_bits(DataBits::Eight)
@@ -172,9 +172,9 @@ impl McuDriver {
     }
 }
 
-impl System for McuDriver {
+impl<const HZ: usize> System for McuDriver<HZ> {
     type World = World;
-    type Driver = Hz<100>;
+    type Driver = Hz<HZ>;
 
     fn init_world(&mut self) -> Self::World {
         World {

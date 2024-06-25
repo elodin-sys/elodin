@@ -64,7 +64,7 @@ impl MRPSteering {
 }
 
 /// Enum for MRPFeedback's two possible control laws
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 #[derive(Default)]
 #[repr(i32)]
 pub enum MRPFeedbackControlLaw {
@@ -77,7 +77,7 @@ pub struct MRPFeedback {
     config: mrpFeedbackConfig,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 pub struct MRPFeedbackConfig {
     k: f64,
     p: f64,
@@ -154,12 +154,12 @@ impl MRPFeedback {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 pub struct RWArrayConfig {
     pub wheels: Vec<RWConfig>,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 pub struct RWConfig {
     pub spin_axis: [f64; 3],
     pub inertia: f64,

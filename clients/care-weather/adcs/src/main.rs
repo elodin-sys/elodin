@@ -1,5 +1,3 @@
-use basilisk::att_determination::SunlineConfig;
-use determination::{Determination, MagCal};
 use roci::{
     combinators::PipeExt,
     drivers::{os_sleep_driver, Driver, Hz},
@@ -13,6 +11,8 @@ mod guidance;
 pub mod mcu;
 mod sim_adapter;
 
+const HZ: usize = 10;
+
 #[derive(Default, Componentize, Decomponentize, Debug)]
 pub struct NavData {
     #[roci(entity_id = 3, component_id = "att_mrp_bn")]
@@ -23,15 +23,12 @@ pub struct NavData {
     pub sun_vec_b: [f64; 3],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    sunline: SunlineConfig,
+    determination: determination::DeterminationConfig,
     guidance: guidance::GuidanceConfig,
     control: control::ControlConfig,
     mcu: mcu::McuConfig,
-    mekf: Option<determination::MEKFConfig>,
-    #[serde(default)]
-    mag_cal: MagCal,
 }
 
 impl Config {
@@ -52,18 +49,17 @@ impl Config {
 }
 
 fn main() -> anyhow::Result<()> {
+    let config = Config::parse()?;
     let Config {
-        sunline,
+        determination,
         guidance,
         control,
         mcu,
-        mekf,
-        mag_cal,
-    } = Config::parse()?;
-    let det = Determination::new(sunline, mag_cal, mekf);
-    let _guidance = guidance::Guidance::new(guidance.sigma_r0r);
-    let _control = control::Control::new(control);
-    let (tx, _) = tokio::tcp_connect::<Hz<100>>(
+    } = config;
+    let det = determination::Determination::new(determination);
+    let _guidance = guidance::Guidance::<HZ>::new(guidance.sigma_r0r);
+    let _control = control::Control::<HZ>::new(control);
+    let (tx, _) = tokio::tcp_connect::<Hz<HZ>>(
         "127.0.0.1:2240".parse().unwrap(),
         &[],
         sim_adapter::TxWorld::metadata(),

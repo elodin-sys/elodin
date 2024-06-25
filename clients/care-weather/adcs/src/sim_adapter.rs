@@ -31,12 +31,12 @@ pub struct TxWorld {
     pub omega: [f64; 3],
 }
 
-pub struct SimAdapter;
+pub struct SimAdapter<const HZ: usize>;
 
-impl System for SimAdapter {
+impl<const HZ: usize> System for SimAdapter<HZ> {
     type World = World;
 
-    type Driver = Hz<100>;
+    type Driver = Hz<HZ>;
 
     fn update(&mut self, world: &mut Self::World) {
         let mrp = world.nav_out.att_mrp_bn;

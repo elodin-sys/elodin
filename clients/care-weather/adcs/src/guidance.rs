@@ -28,12 +28,12 @@ pub struct World {
     pub domega_rn_b: [f64; 3usize],
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GuidanceConfig {
     pub sigma_r0r: [f64; 3],
 }
 
-pub struct Guidance {
+pub struct Guidance<const HZ: usize> {
     hill_point: basilisk::att_guidance::HillPoint,
     tracking_error: basilisk::att_guidance::AttTrackingError,
 
@@ -46,7 +46,7 @@ pub struct Guidance {
     att_guid_out: BskChannel<AttGuidMsgPayload>,
 }
 
-impl Guidance {
+impl<const HZ: usize> Guidance<HZ> {
     pub fn new(sigma_r0r: [f64; 3]) -> Self {
         let att_ref = BskChannel::pair();
         let nav_trans_in = BskChannel::pair();
@@ -75,9 +75,9 @@ impl Guidance {
     }
 }
 
-impl System for Guidance {
+impl<const HZ: usize> System for Guidance<HZ> {
     type World = World;
-    type Driver = roci::drivers::Hz<100>;
+    type Driver = roci::drivers::Hz<HZ>;
 
     fn update(&mut self, world: &mut Self::World) {
         // let att = world.inertial_pos.angular().inverse();
