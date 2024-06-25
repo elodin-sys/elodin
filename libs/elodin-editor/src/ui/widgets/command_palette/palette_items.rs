@@ -4,9 +4,11 @@ use bevy::{
         system::{Query, ResMut, SystemParam, SystemState},
         world::World,
     },
+    prelude::*,
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
+use conduit::ControlMsg;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 use crate::ui::{
@@ -152,6 +154,42 @@ pub fn palette_viewport_items(filter: &str) -> Vec<PaletteItemWrapper> {
                             PaletteItemCreateTileType::Graph,
                             row_margin,
                             String::from("Create Graph"),
+                            matched_char_indices,
+                        ),
+                    );
+                },
+            ),
+        },
+    ];
+
+    filter_palette_items(palette_items, filter)
+}
+
+pub fn palette_sim_items(filter: &str) -> Vec<PaletteItemWrapper> {
+    let palette_items = vec![
+        PaletteItemWrapper {
+            label: String::from("Simulation"),
+            group_label: true,
+            match_indices: vec![],
+            widget: Box::new(|ui, _, _, _, _, row_margin| {
+                egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
+                    ui.label(egui::RichText::new("Simulation").color(colors::PRIMARY_CREAME_6));
+                });
+            }),
+        },
+        PaletteItemWrapper {
+            label: String::from("Save Replay"),
+            group_label: false,
+            match_indices: vec![],
+            widget: Box::new(
+                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
+                    ui.add_widget_with::<PaletteItemSaveReplay>(
+                        world,
+                        "save_replay",
+                        (
+                            (request_focus, use_item),
+                            row_margin,
+                            String::from("Save Replay"),
                             matched_char_indices,
                         ),
                     );
@@ -408,6 +446,41 @@ impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
                 }
             }
 
+            command_palette_state.show = false;
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct PaletteItemSaveReplay<'w> {
+    command_palette_state: ResMut<'w, CommandPaletteState>,
+    event: EventWriter<'w, ControlMsg>,
+}
+
+impl WidgetSystem for PaletteItemSaveReplay<'_> {
+    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+        let mut command_palette_state = state_mut.command_palette_state;
+        let mut event = state_mut.event;
+
+        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
+
+        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
+
+        if request_focus {
+            btn.request_focus();
+        }
+
+        if btn.clicked() || use_item {
+            event.send(ControlMsg::SaveReplay);
             command_palette_state.show = false;
         }
     }

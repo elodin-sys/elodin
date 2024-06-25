@@ -564,6 +564,7 @@ pub enum ControlMsg {
         tick: u64,
         max_tick: u64,
     },
+    SaveReplay,
     Exit,
     #[cfg(feature = "std")]
     Subscribe {
