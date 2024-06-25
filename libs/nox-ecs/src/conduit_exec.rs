@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{Compiled, Error, WorldExec};
 use conduit::{
     client::{Msg, MsgPair},
@@ -12,6 +14,7 @@ pub struct ConduitExec {
     exec: WorldExec<Compiled>,
     playing: bool,
     state: State,
+    replay_dir: PathBuf,
 }
 
 impl ConduitExec {
@@ -20,6 +23,8 @@ impl ConduitExec {
         for (_, metadata) in exec.world.component_map.values() {
             metadata_store.push(metadata.clone());
         }
+        let dirs = directories::ProjectDirs::from("systems", "elodin", "cli").unwrap();
+        let replay_dir = dirs.data_dir().join("replays");
         Self {
             sub_manager: SubscriptionManager::new(metadata_store),
             connections: Vec::new(),
@@ -27,6 +32,7 @@ impl ConduitExec {
             exec,
             playing: true,
             state: State::default(),
+            replay_dir,
         }
     }
 
@@ -130,6 +136,12 @@ impl ConduitExec {
             Msg::Control(ControlMsg::Query { time_range, query }) => {
                 self.sub_manager
                     .query(time_range, query, &self.exec.world, tx)?;
+            }
+            Msg::Control(ControlMsg::SaveReplay) => {
+                let date_time = chrono::Local::now().to_rfc3339();
+                let replay_dir = self.replay_dir.join(date_time);
+                tracing::info!(?replay_dir, "writing replay");
+                self.exec.write_to_dir(replay_dir)?;
             }
             Msg::Control(_) => {}
             Msg::Column(new_col) => {
