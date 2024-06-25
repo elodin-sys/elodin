@@ -30,6 +30,20 @@ MagValue = ty.Annotated[
         el.ComponentType(el.PrimitiveType.F64, (3,)),
     ),
 ]
+MagPostCal = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "mag_postcal_value",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+Gyro = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "gyro_omega",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
 SunPos = ty.Annotated[
     jax.Array,
     el.Component(
@@ -51,6 +65,8 @@ class Determination(el.Archetype):
     mag_ref: MagRef = field(default_factory=lambda: np.array([0.0, 1.0, 0.0]))
     sun_ref: SunRef = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     mag_value: MagValue = field(default_factory=lambda: np.array([0.0, 1.0, 0.0]))
+    mag_postcal: MagPostCal = field(default_factory=lambda: np.array([0.0, 1.0, 0.0]))
+    gyro: Gyro = field(default_factory=lambda: np.zeros(3))
     sun_pos: SunPos = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     sun_sensors: SunSensors = field(default_factory=lambda: np.zeros(6))
 
@@ -106,6 +122,7 @@ world.spawn(
                                 sat,
                                 [
                                     el.Component.index(MagValue),
+                                    el.Component.index(MagPostCal),
                                 ],
                             )
                         ]
@@ -155,6 +172,16 @@ world.spawn(
                             )
                         ]
                     ),
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(Gyro),
+                                ],
+                            )
+                        ]
+                    ),
                 ]
             ),
         ]
@@ -168,9 +195,12 @@ def noop(
     mag_ref: MagRef,
     sun_ref: SunRef,
     mag_value: MagValue,
+    mag_postcal: MagPostCal,
     sun_pos: SunPos,
-) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, SunPos]:
-    return pos, mag_ref, sun_ref, mag_value, sun_pos
+    gyro: Gyro,
+    sun_sensor: SunSensors,
+) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, MagPostCal, SunPos, Gyro, SunSensors]:
+    return pos, mag_ref, sun_ref, mag_value, mag_postcal, sun_pos, gyro, sun_sensor
 
 
 exec = world.run(

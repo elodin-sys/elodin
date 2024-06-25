@@ -6,7 +6,6 @@ use basilisk::sys::NavAttMsgPayload;
 use basilisk::{att_determination::SunlineEKF, channel::BskChannel};
 use hifitime::Epoch;
 use nox::ArrayRepr;
-use nox::Matrix3;
 use nox::Tensor;
 use nox::Vector;
 use nox::MRP;
@@ -32,6 +31,8 @@ pub struct World {
     pub sun_ref: Vector<f64, 3, ArrayRepr>,
     #[roci(entity_id = 0, component_id = "mag_value")]
     pub mag_value: [f64; 3],
+    #[roci(entity_id = 0, component_id = "mag_postcal_value")]
+    pub mag_postcal_value: [f64; 3],
     pub gps_inputs: GpsInputs,
     #[roci(entity_id = 0, component_id = "gyro_omega")]
     pub omega: Vector<f64, 3, ArrayRepr>,
@@ -147,9 +148,12 @@ impl System for Determination {
             println!("failed to get current time");
         }
         let body_1 = Tensor::from_buf(nav_state.vehSunPntBdy);
-        let body_2 = (Matrix3::from_buf(self.mag_cal.t)
-            .dot(&(Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h))))
-        .normalize();
+        let hard_iron_cal: Tensor<f64, _, _> =
+            Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h);
+        let body_2 = hard_iron_cal.normalize();
+        // let soft_iron_cal = nox::Matrix3::from_buf(self.mag_cal.t).dot(&hard_iron_cal);
+        // let body_2 = soft_iron_cal;
+        world.mag_postcal_value = body_2.into_buf();
         let ref_1 = world.sun_ref;
         let ref_2 = world.mag_ref;
         let att_mrp_bn = if let Some(mut mekf_state) = self.mekf_state.take() {

@@ -239,6 +239,8 @@ impl System for McuDriver {
                 }
 
                 world.mag_value = sensor_data.mag.map(|v| v as f64);
+                // swap x and y
+                world.mag_value = [world.mag_value[1], world.mag_value[0], world.mag_value[2]];
                 world.omega =
                     Vector::<f64, 3, ArrayRepr>::from_buf(sensor_data.gyro) * (PI / 180.0f64);
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {

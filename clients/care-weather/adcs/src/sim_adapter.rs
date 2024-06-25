@@ -23,8 +23,12 @@ pub struct TxWorld {
     pub sun_ref: [f64; 3],
     #[roci(entity_id = 0, component_id = "mag_value")]
     pub mag_value: [f64; 3],
+    #[roci(entity_id = 0, component_id = "mag_postcal_value")]
+    pub mag_postcal_value: [f64; 3],
     #[roci(entity_id = 0, component_id = "sun_vec_b")]
     pub sun_vec_b: [f64; 3],
+    #[roci(entity_id = 0, component_id = "gyro_omega")]
+    pub omega: [f64; 3],
 }
 
 pub struct SimAdapter;
