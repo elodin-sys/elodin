@@ -58,6 +58,9 @@ polars.features = ["parquet", "dtype-array", "lazy"]
 serde.version = "1.0"
 serde_json = "1.0"
 
+chrono = "0.4.38"
+directories = "5.0.1"
+
 # python
 pyo3.version = "0.21.0"
 pyo3.optional = true
