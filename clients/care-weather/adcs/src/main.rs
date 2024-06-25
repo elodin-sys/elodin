@@ -68,16 +68,8 @@ fn main() -> anyhow::Result<()> {
         &[],
         sim_adapter::TxWorld::metadata(),
     );
-    let mut mcu_driver = mcu::McuDriver::new(mcu.path, mcu.baud_rate)?;
-    let adcs_format = mcu::AdcsFormat::IncludeMag
-        | mcu::AdcsFormat::IncludeGyro
-        | mcu::AdcsFormat::IncludeAccel
-        | mcu::AdcsFormat::IncludeCss;
+    let mut mcu_driver = mcu::McuDriver::new(mcu)?;
     mcu_driver.print_info().unwrap();
-    mcu_driver.init_adcs(100, 20, 10, adcs_format)?;
-    if let Err(err) = mcu_driver.init_gps(1000, 20, 10) {
-        eprintln!("failed to initialize GPS: {}", err);
-    }
     let sim_adapter = sim_adapter::SimAdapter;
     os_sleep_driver(mcu_driver.pipe(det).pipe(sim_adapter).pipe(tx)).run();
     Ok(())

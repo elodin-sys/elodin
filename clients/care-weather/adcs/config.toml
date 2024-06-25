@@ -76,6 +76,13 @@ spacecraft_mass = 2.5
 
 [mcu]
 path = "/dev/cu.usbmodem70A4923233351"
+adcs_format = 39
+adcs_update_interval = 10
+adcs_cycle_duration = 20
+adcs_cycle_interval = 10
+gps_update_interval = 1000
+gps_cycle_duration = 20
+gps_cycle_interval = 10
 
 [mekf]
 dt = 0.01

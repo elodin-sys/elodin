@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
+use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
-use std::{borrow::Cow, io::Write};
 
 use arrayvec::ArrayVec;
 use enumflags2::{bitflags, BitFlags};
@@ -16,28 +16,39 @@ pub struct McuDriver {
     port_builder: SerialPortBuilder,
     port: Box<dyn SerialPort>,
     read_buf: Vec<u8>,
+    config: McuConfig,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct McuConfig {
     pub path: String,
     pub baud_rate: Option<u32>,
+    pub adcs_format: BitFlags<AdcsFormat>,
+    pub adcs_update_interval: u32,
+    pub adcs_cycle_duration: u32,
+    pub adcs_cycle_interval: u32,
+    pub gps_update_interval: u32,
+    pub gps_cycle_duration: u32,
+    pub gps_cycle_interval: u32,
 }
 
 impl McuDriver {
-    pub fn new<'a>(path: impl Into<Cow<'a, str>>, baud_rate: Option<u32>) -> std::io::Result<Self> {
-        let port_builder = serialport::new(path.into(), baud_rate.unwrap_or(9600))
+    pub fn new(config: McuConfig) -> std::io::Result<Self> {
+        let port_builder = serialport::new(&config.path, config.baud_rate.unwrap_or(9600))
             .data_bits(DataBits::Eight)
             .flow_control(FlowControl::Software)
             .parity(Parity::None)
             .stop_bits(StopBits::One);
         let port = port_builder.clone().open()?;
         let read_buf = Vec::with_capacity(1024);
-        Ok(Self {
+        let mut mcu_driver = Self {
             port_builder,
             port,
             read_buf,
-        })
+            config,
+        };
+        mcu_driver.init_mcu();
+        Ok(mcu_driver)
     }
 
     pub fn try_read_lines(&mut self) -> std::io::Result<Vec<String>> {
@@ -80,12 +91,35 @@ impl McuDriver {
         }
     }
 
-    pub fn init_adcs(
+    fn init_mcu(&mut self) {
+        let McuConfig {
+            adcs_format,
+            adcs_update_interval,
+            adcs_cycle_duration,
+            adcs_cycle_interval,
+            gps_update_interval,
+            gps_cycle_duration,
+            gps_cycle_interval,
+            ..
+        } = self.config.clone();
+        self.init_adcs(
+            adcs_format,
+            adcs_update_interval,
+            adcs_cycle_duration,
+            adcs_cycle_interval,
+        )
+        .unwrap();
+        if let Err(e) = self.init_gps(gps_update_interval, gps_cycle_duration, gps_cycle_interval) {
+            eprintln!("Failed to initialize GPS: {}", e);
+        }
+    }
+
+    fn init_adcs(
         &mut self,
+        adcs_format: BitFlags<AdcsFormat>,
         update_interval: u32,
         cycle_duration: u32,
         cycle_interval: u32,
-        adcs_format: BitFlags<AdcsFormat>,
     ) -> std::io::Result<()> {
         let cmd = adcs_init_command(update_interval, cycle_duration, cycle_interval, adcs_format);
         println!("-> {}", cmd);
@@ -109,7 +143,7 @@ impl McuDriver {
         }
     }
 
-    pub fn init_gps(
+    fn init_gps(
         &mut self,
         update_interval: u32,
         cycle_duration: u32,
@@ -170,7 +204,9 @@ impl System for McuDriver {
                         return;
                     }
                 };
+                eprintln!("port reopened successfully");
                 self.port = port;
+                self.init_mcu();
                 return;
             }
             Err(err) => {
@@ -202,9 +238,7 @@ impl System for McuDriver {
                     world.css_inputs = side_lum;
                 }
 
-                world.mag_value = Tensor::<f64, _, _>::from_buf(sensor_data.mag.map(|v| v as f64))
-                    .normalize()
-                    .into_buf();
+                world.mag_value = sensor_data.mag.map(|v| v as f64);
                 world.omega =
                     Vector::<f64, 3, ArrayRepr>::from_buf(sensor_data.gyro) * (PI / 180.0f64);
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
