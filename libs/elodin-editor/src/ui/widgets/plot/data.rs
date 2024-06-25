@@ -275,9 +275,6 @@ impl LineData {
             self.averaged_data[tick] = value as f32;
             self.averaged_count[tick] = 1;
         } else if averaged_count < self.chunk_size {
-            if self.averaged_data[tick].is_nan() {
-                panic!("nan");
-            }
             let new_count = self.averaged_count[tick] + 1;
             self.averaged_data[tick] = (self.averaged_data[tick] * averaged_count as f32
                 + value as f32)
