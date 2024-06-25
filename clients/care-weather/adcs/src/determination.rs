@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use basilisk::att_determination::CSSConfig;
 use basilisk::att_determination::SunlineConfig;
 use basilisk::sys::CSSArraySensorMsgPayload;
 use basilisk::sys::NavAttMsgPayload;
@@ -86,6 +87,8 @@ pub struct Determination {
 
     mekf_state: Option<mekf::State>,
     mag_cal: MagCal,
+    use_sunline_ekf: bool,
+    css: Vec<CSSConfig>,
 }
 
 impl Determination {
@@ -93,6 +96,7 @@ impl Determination {
         let nav_state_out = BskChannel::default();
         let filter_data_out = BskChannel::default();
         let css_input = BskChannel::default();
+        let css = sunline.css.clone();
         let sunline_ekf = SunlineEKF::new(
             nav_state_out.clone(),
             filter_data_out,
@@ -114,6 +118,8 @@ impl Determination {
             mag_model: wmm::MagneticModel::default(),
             mekf_state,
             mag_cal,
+            use_sunline_ekf: false,
+            css,
         }
     }
 }
@@ -124,16 +130,28 @@ impl System for Determination {
 
     fn update(&mut self, world: &mut Self::World) {
         let elapsed = self.start.elapsed().as_nanos() as u64;
-        let mut css_cos_values = [0.0; 32];
-        css_cos_values[..world.css_inputs.len()].copy_from_slice(&world.css_inputs);
-        self.css_input.write(
-            CSSArraySensorMsgPayload {
-                CosValue: css_cos_values,
-            },
-            elapsed,
-        );
-        self.sunline_ekf.update(elapsed);
+        let body_1 = if self.use_sunline_ekf {
+            let mut css_cos_values = [0.0; 32];
+            css_cos_values[..world.css_inputs.len()].copy_from_slice(&world.css_inputs);
+            self.css_input.write(
+                CSSArraySensorMsgPayload {
+                    CosValue: css_cos_values,
+                },
+                elapsed,
+            );
+            self.sunline_ekf.update(elapsed);
+            let nav_state = self.nav_state_out.read_msg();
+            Tensor::from_buf(nav_state.vehSunPntBdy)
+        } else {
+            self.css
+                .iter()
+                .zip(world.css_inputs.iter())
+                .fold(Vector::<f64, 3, ArrayRepr>::zeros(), |acc, (css, val)| {
+                    acc + Vector::from_buf(css.normal_b) * *val
+                })
+        };
         let nav_state = self.nav_state_out.read_msg();
+
         if let Ok(time) = Epoch::now() {
             world.mag_ref = get_wmm_eci(
                 &mut self.mag_model,
@@ -147,7 +165,6 @@ impl System for Determination {
         } else {
             println!("failed to get current time");
         }
-        let body_1 = Tensor::from_buf(nav_state.vehSunPntBdy);
         let hard_iron_cal: Tensor<f64, _, _> =
             Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h);
         let body_2 = hard_iron_cal.normalize();

@@ -12,10 +12,11 @@ pub struct SunlineEKF {
     config: sunlineEKFConfig,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct CSSConfig {
-    normal_b: [f64; 3],
-    coefficent: f64,
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy)]
+pub struct CSSConfig {
+    pub normal_b: [f64; 3],
+    pub coefficent: f64,
 }
 
 impl From<CSSConfig> for CSSUnitConfigMsgPayload {
@@ -27,9 +28,9 @@ impl From<CSSConfig> for CSSUnitConfigMsgPayload {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Debug, serde::Serialize, serde::Deserialize))]
 pub struct SunlineConfig {
-    css: Vec<CSSConfig>,
+    pub css: Vec<CSSConfig>,
     q_obs_val: f64,
     q_proc_val: f64,
     covar: Vec<f64>,
