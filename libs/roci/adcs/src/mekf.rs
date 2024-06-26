@@ -104,7 +104,8 @@ impl State {
     pub fn estimate_attitude<const N: usize>(
         self,
         measured_bodys: [Vector<f64, 3, ArrayRepr>; N],
-        measured_references: [Vector<f64, 3, ArrayRepr>; N],
+        references: [Vector<f64, 3, ArrayRepr>; N],
+        sigma_r: [f64; N],
     ) -> Self {
         let Self {
             q_hat,
@@ -118,11 +119,13 @@ impl State {
         let q_hat = propogate_quaternion(q_hat, omega, dt);
         let mut p = propogate_state_covariance(p, omega, yqy, dt);
         let mut delta_x_hat: Vector<f64, 6, ArrayRepr> = Vector::zeros();
-        let var_r = Matrix::<f64, 3, 3, ArrayRepr>::eye() * 0.001;
-        for i in 0..N {
-            let measured_reference = measured_references[i];
-            let measured_body = measured_bodys[i];
-            let body_r = q_hat.inverse() * measured_reference;
+        for ((reference, measured_body), sigma) in references
+            .into_iter()
+            .zip(measured_bodys.into_iter())
+            .zip(sigma_r.into_iter())
+        {
+            let var_r = Matrix::<f64, 3, 3, ArrayRepr>::eye() * sigma.powi(2);
+            let body_r = q_hat.inverse() * reference;
             let e = measured_body - body_r;
             let skew_sym = skew_symmetric_cross(&body_r);
             let h: Matrix<f64, 3, 6, ArrayRepr> =
@@ -252,7 +255,7 @@ mod tests {
         assert_relative_eq!(state.yqy, expected_yqy, epsilon = 1e-4);
         for _ in 0..180 {
             state.omega = Default::default();
-            state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b]);
+            state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b], [0.03, 0.03]);
         }
         assert_relative_eq!(state.q_hat.0, q.0, epsilon = 1e-3);
         for _ in 0..120 {
@@ -260,7 +263,7 @@ mod tests {
             let body_a = (q.inverse() * ref_a).normalize();
             let body_b = (q.inverse() * ref_b).normalize();
             state.omega = tensor![1.0, 0.0, 0.0];
-            state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b]);
+            state = state.estimate_attitude([body_a, body_b], [ref_a, ref_b], [0.03, 0.03]);
         }
         assert_relative_eq!(
             state.b_hat.inner(),
