@@ -442,7 +442,12 @@ impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
                     *new_tile_state = NewTileState::Viewport(None, None)
                 }
                 PaletteItemCreateTileType::Graph => {
-                    *new_tile_state = NewTileState::Graph(None, None, None)
+                    *new_tile_state = NewTileState::Graph {
+                        entity_id: None,
+                        component_id: None,
+                        range_id: None,
+                        parent_id: None,
+                    }
                 }
             }
 
