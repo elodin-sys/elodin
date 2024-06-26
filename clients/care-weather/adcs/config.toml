@@ -33,6 +33,8 @@ coefficent = 1.0
 dt = 0.01
 sigma_b = [0.01, 0.01, 0.01]
 sigma_g = [0.01, 0.01, 0.01]
+sigma_sun = 0.1
+sigma_mag = 0.1
 
 [determination.mag_cal]
 t = [[ 1.9203215e-03, -6.2749350e-05,  8.8365946e-04],

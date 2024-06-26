@@ -62,10 +62,12 @@ pub struct DeterminationConfig {
     override_sun_ref: Option<[f64; 3]>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct MEKFConfig {
     sigma_g: [f64; 3],
     sigma_b: [f64; 3],
+    sigma_sun: f64,
+    sigma_mag: f64,
     dt: f64,
 }
 
@@ -97,6 +99,7 @@ pub struct Determination<const HZ: usize> {
 
     mekf_state: Option<mekf::State>,
     mag_cal: MagCal,
+    mekf_config: Option<MEKFConfig>,
     use_sunline_ekf: bool,
     css: Vec<CSSConfig>,
 
@@ -142,6 +145,7 @@ impl<const HZ: usize> Determination<HZ> {
             css,
             override_mag_ref,
             override_sun_ref,
+            mekf_config: mekf,
         }
     }
 }
@@ -152,7 +156,7 @@ impl<const HZ: usize> System for Determination<HZ> {
 
     fn update(&mut self, world: &mut Self::World) {
         let elapsed = self.start.elapsed().as_nanos() as u64;
-        let body_1 = if self.use_sunline_ekf {
+        let sun_body = if self.use_sunline_ekf {
             let mut css_cos_values = [0.0; 32];
             css_cos_values[..world.css_inputs.len()].copy_from_slice(&world.css_inputs);
             self.css_input.write(
@@ -199,19 +203,23 @@ impl<const HZ: usize> System for Determination<HZ> {
         }
         let hard_iron_cal: Tensor<f64, _, _> =
             Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h);
-        let body_2 = hard_iron_cal.normalize();
-        // let soft_iron_cal = nox::Matrix3::from_buf(self.mag_cal.t).dot(&hard_iron_cal);
-        // let body_2 = soft_iron_cal;
-        world.mag_postcal_value = body_2.into_buf();
-        let ref_1 = world.sun_ref;
-        let ref_2 = world.mag_ref;
+        let mag_body = hard_iron_cal.normalize();
+        world.mag_postcal_value = mag_body.into_buf();
         let att_mrp_bn = if let Some(mut mekf_state) = self.mekf_state.take() {
+            let config = self
+                .mekf_config
+                .as_ref()
+                .expect("no mekf config with mekf_state");
             mekf_state.omega = world.omega;
-            let mekf_state = mekf_state.estimate_attitude([body_1, body_2], [ref_1, ref_2]);
+            let mekf_state = mekf_state.estimate_attitude(
+                [sun_body, mag_body],
+                [world.sun_ref, world.mag_ref],
+                [config.sigma_sun, config.sigma_mag],
+            );
             let mekf_state = self.mekf_state.insert(mekf_state);
             MRP::from(mekf_state.q_hat).0.into_buf()
         } else {
-            let att = roci_adcs::triad(body_1, body_2, ref_1, ref_2);
+            let att = roci_adcs::triad(sun_body, mag_body, world.sun_ref, world.mag_ref);
             MRP::from_rot_matrix(att).0.into_buf()
         };
 
@@ -224,7 +232,7 @@ impl<const HZ: usize> System for Determination<HZ> {
 
         world.nav_out.att_mrp_bn = att_mrp_bn;
         world.nav_out.omega_bn_b = nav_state.omega_BN_B;
-        world.nav_out.sun_vec_b = body_1.into_buf();
+        world.nav_out.sun_vec_b = sun_body.into_buf();
     }
 }
 
