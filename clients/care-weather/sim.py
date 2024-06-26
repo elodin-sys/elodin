@@ -1,6 +1,7 @@
 import jax.numpy as np
 import elodin as el
 import typing as ty
+import os
 import jax
 from dataclasses import dataclass, field
 
@@ -75,9 +76,7 @@ world = el.World()
 sat = world.spawn(
     [
         el.Body(inertia=el.SpatialInertia(2825.2 / 1000.0, j)),
-        world.glb(
-            "https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"
-        ),
+        world.glb(os.path.abspath("./clients/care-weather/veery.glb")),
         Determination(),
         # Credit to the OreSat program https://www.oresat.org for the model above
     ],
@@ -90,7 +89,7 @@ world.spawn(
             el.Panel.viewport(
                 track_entity=sat,
                 track_rotation=False,
-                pos=[7.0, 0.0, 2.0],
+                pos=[0.5, -0.05, 0.1],
                 looking_at=[0.0, 0.0, 0.0],
                 show_grid=True,
             ),
