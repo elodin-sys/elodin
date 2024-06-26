@@ -167,7 +167,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
                 let bundle = GraphBundle::new(&mut render_layer_alloc, entities, None);
-                tile_state.create_graph_tile(bundle);
+                tile_state.create_graph_tile(None, bundle);
             }
         }
     }

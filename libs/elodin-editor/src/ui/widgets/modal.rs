@@ -312,7 +312,7 @@ impl WidgetSystem for ModalNewTile<'_> {
                             icons,
                         );
                     }
-                    tiles::NewTileState::Graph(_, _, _) => {
+                    tiles::NewTileState::Graph { .. } => {
                         ui.add_widget_with::<ModalNewGraphTile>(
                             world,
                             "modal_new_graph_tile",
@@ -357,8 +357,12 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
         let mut render_layer_alloc = state_mut.render_layer_alloc;
         let mut tile_state = state_mut.tile_state;
 
-        let tiles::NewTileState::Graph(m_entity_id, m_component_id, m_range_id) =
-            new_tile_state.as_mut()
+        let tiles::NewTileState::Graph {
+            entity_id: m_entity_id,
+            component_id: m_component_id,
+            range_id: m_range_id,
+            parent_id,
+        } = new_tile_state.as_mut()
         else {
             *new_tile_state = tiles::NewTileState::None;
             return;
@@ -550,7 +554,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
                 let bundle = GraphBundle::new(&mut render_layer_alloc, entities, *m_range_id);
-                tile_state.create_graph_tile(bundle);
+                tile_state.create_graph_tile(*parent_id, bundle);
 
                 close_modal = true;
             }

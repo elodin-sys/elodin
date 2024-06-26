@@ -86,9 +86,9 @@ impl TileState {
         Some(tile_id)
     }
 
-    pub fn create_graph_tile(&mut self, graph_state: GraphBundle) {
+    pub fn create_graph_tile(&mut self, parent_id: Option<TileId>, graph_state: GraphBundle) {
         self.tree_actions
-            .push(TreeAction::AddGraph(None, Some(graph_state)));
+            .push(TreeAction::AddGraph(parent_id, Some(graph_state)));
     }
 
     pub fn create_graph_tile_empty(&mut self) {
@@ -270,6 +270,7 @@ struct TreeBehavior<'a, 'w, 's> {
     entity_metadata: &'a Query<'w, 's, &'static EntityMetadata>,
     metadata_store: &'a MetadataStore,
     control_msg: &'a mut EventWriter<'w, ControlMsg>,
+    new_tile_state: ResMut<'w, NewTileState>,
 }
 
 pub enum TreeAction {
@@ -517,8 +518,12 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                self.tree_actions
-                    .push(TreeAction::AddGraph(Some(tile_id), None));
+                *self.new_tile_state = NewTileState::Graph {
+                    entity_id: None,
+                    component_id: None,
+                    range_id: None,
+                    parent_id: Some(tile_id),
+                };
                 ui.close_menu();
             }
         });
@@ -594,11 +599,12 @@ pub enum NewTileState {
     #[default]
     None,
     Viewport(Option<EntityId>, Option<TimelineRangeId>),
-    Graph(
-        Option<EntityId>,
-        Option<ComponentId>,
-        Option<TimelineRangeId>,
-    ),
+    Graph {
+        entity_id: Option<EntityId>,
+        component_id: Option<ComponentId>,
+        range_id: Option<TimelineRangeId>,
+        parent_id: Option<TileId>,
+    },
 }
 
 #[derive(SystemParam)]
@@ -653,7 +659,12 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_graph_btn.clicked() {
-                        *new_tile_state = NewTileState::Graph(None, None, None);
+                        *new_tile_state = NewTileState::Graph {
+                            entity_id: None,
+                            component_id: None,
+                            range_id: None,
+                            parent_id: None,
+                        };
                     }
                 });
             },
@@ -684,6 +695,7 @@ pub struct TileLayout<'w, 's> {
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam_query: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
+    new_tile_state: ResMut<'w, NewTileState>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -720,6 +732,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             mut viewport_contains_pointer,
             mut editor_cam_query,
             grid_cell,
+            new_tile_state,
         } = state_mut;
 
         let icons = args;
@@ -751,6 +764,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             entity_metadata: &entity_metadata,
             metadata_store: &metadata_store,
             control_msg: &mut control_msg,
+            new_tile_state,
         };
         ui_state.tree.ui(&mut behavior, ui);
         for diff in behavior.tree_actions.drain(..) {
