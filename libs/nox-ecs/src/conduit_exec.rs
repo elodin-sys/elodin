@@ -140,8 +140,9 @@ impl ConduitExec {
             Msg::Control(ControlMsg::SaveReplay) => {
                 let date_time = chrono::Local::now().to_rfc3339();
                 let replay_dir = self.replay_dir.join(date_time);
-                tracing::info!(?replay_dir, "writing replay");
-                self.exec.write_to_dir(replay_dir)?;
+                tracing::info!(dir=%replay_dir.display(), "writing replay");
+                self.exec.write_to_dir(&replay_dir)?;
+                tracing::info!(dir=%replay_dir.display(), "replay written");
             }
             Msg::Control(_) => {}
             Msg::Column(new_col) => {

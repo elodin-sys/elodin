@@ -3,37 +3,25 @@ use basilisk::{
     channel::BskChannel,
     effector_interfaces::{RWMotorTorque, RWMotorVoltage, VoltageConfig},
     sys::{
-        ArrayMotorTorqueMsgPayload, ArrayMotorVoltageMsgPayload, AttGuidMsgPayload,
-        CmdTorqueBodyMsgPayload, RWSpeedMsgPayload, VehicleConfigMsgPayload,
+        ArrayMotorTorqueMsgPayload, AttGuidMsgPayload, CmdTorqueBodyMsgPayload, RWSpeedMsgPayload,
+        VehicleConfigMsgPayload,
     },
 };
+use nox::{ArrayRepr, Vector};
 use roci::{Componentize, Decomponentize, System};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
     att_err: AttErrInput,
-    rw_speed: RWSpeed,
-    rw_voltage: RWVoltage,
-}
-#[derive(Default, Componentize, Decomponentize)]
-pub struct RWSpeed {
-    #[roci(entity_id = 1, component_id = "rw_speed")]
-    rw_speed_0: f64,
-    #[roci(entity_id = 2, component_id = "rw_speed")]
-    rw_speed_1: f64,
-    #[roci(entity_id = 3, component_id = "rw_speed")]
-    rw_speed_2: f64,
-}
-
-#[derive(Default, Componentize, Decomponentize, Debug)]
-pub struct RWVoltage {
-    #[roci(entity_id = 1, component_id = "rw_voltage")]
-    rw_voltage_0: f64,
-    #[roci(entity_id = 2, component_id = "rw_voltage")]
-    rw_voltage_1: f64,
-    #[roci(entity_id = 3, component_id = "rw_voltage")]
-    rw_voltage_2: f64,
+    // inputs
+    #[roci(entity_id = 0, component_id = "rw_speed")]
+    rw_speed: Vector<f64, 3, ArrayRepr>,
+    // outputs
+    #[roci(entity_id = 0, component_id = "rw_torque")]
+    rw_torque: Vector<f64, 3, ArrayRepr>,
+    #[roci(entity_id = 0, component_id = "rw_speed_setpoint")]
+    rw_speed_setpoint: Vector<f64, 3, ArrayRepr>,
 }
 
 #[derive(Default, Componentize, Decomponentize, Debug)]
@@ -53,9 +41,10 @@ pub struct Control<const HZ: usize> {
     motor_torque: RWMotorTorque,
     motor_voltage: RWMotorVoltage,
 
+    rw_inertia: Vector<f64, 3, ArrayRepr>,
+
     att_guid_in: BskChannel<AttGuidMsgPayload>,
     rw_speed_in: BskChannel<RWSpeedMsgPayload>,
-    motor_voltage_out: BskChannel<ArrayMotorVoltageMsgPayload>,
 
     #[allow(dead_code)]
     cmd_torque: BskChannel<CmdTorqueBodyMsgPayload>,
@@ -93,6 +82,14 @@ impl<const HZ: usize> Control<HZ> {
         let rw_avail = RWAvailability {
             availability: rw_config.wheels.iter().map(|_| true).collect(),
         };
+        let mut rw_inertia = [0.0; 3];
+        rw_inertia
+            .iter_mut()
+            .zip(rw_config.wheels.iter().map(|wheel| wheel.inertia))
+            .for_each(|(rw_inertia, inertia)| {
+                *rw_inertia = inertia;
+            });
+
         rw_array_config.write(rw_config.into(), 0);
         let rw_availability_cmd = BskChannel::pair();
         rw_availability_cmd.write(rw_avail.into(), 0);
@@ -130,7 +127,7 @@ impl<const HZ: usize> Control<HZ> {
         let motor_voltage_out = BskChannel::pair();
         let motor_voltage = RWMotorVoltage::new(
             voltage_config,
-            motor_voltage_out.clone(),
+            motor_voltage_out,
             motor_torque_out.clone(),
             rw_speed_in.clone(),
             rw_availability_cmd,
@@ -142,9 +139,9 @@ impl<const HZ: usize> Control<HZ> {
             motor_voltage,
             att_guid_in,
             rw_speed_in,
-            motor_voltage_out,
             motor_torque_out,
             cmd_torque,
+            rw_inertia: Vector::from_buf(rw_inertia),
         }
     }
 }
@@ -157,7 +154,8 @@ impl<const HZ: usize> System for Control<HZ> {
         let World {
             att_err,
             rw_speed,
-            rw_voltage,
+            rw_torque,
+            rw_speed_setpoint,
         } = world;
         self.att_guid_in.write(
             AttGuidMsgPayload {
@@ -169,9 +167,7 @@ impl<const HZ: usize> System for Control<HZ> {
             0,
         );
         let mut wheel_speeds = [0.0; 36];
-        wheel_speeds[0] = rw_speed.rw_speed_0;
-        wheel_speeds[1] = rw_speed.rw_speed_1;
-        wheel_speeds[2] = rw_speed.rw_speed_2;
+        wheel_speeds[..3].copy_from_slice(&rw_speed.into_buf());
         self.rw_speed_in.write(
             RWSpeedMsgPayload {
                 wheelSpeeds: wheel_speeds,
@@ -182,9 +178,9 @@ impl<const HZ: usize> System for Control<HZ> {
         self.mrp_feedback.update(0);
         self.motor_torque.update(0);
         self.motor_voltage.update(0);
-        let voltage = self.motor_voltage_out.read_msg();
-        rw_voltage.rw_voltage_0 = voltage.voltage[0];
-        rw_voltage.rw_voltage_1 = voltage.voltage[1];
-        rw_voltage.rw_voltage_2 = voltage.voltage[2];
+        let motor_torques = self.motor_torque_out.read_msg().motorTorque;
+        *rw_torque = Vector::from_buf((&motor_torques[..3]).try_into().unwrap());
+        let rw_accel = *rw_torque / self.rw_inertia;
+        *rw_speed_setpoint = *rw_speed_setpoint + rw_accel * (1.0 / HZ as f64);
     }
 }

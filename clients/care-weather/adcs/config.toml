@@ -1,3 +1,7 @@
+[determination]
+# override_sun_ref = [-1.0, 0.0, 0.0]
+# override_mag_ref = [0.0, 0.0, 1.0]
+
 [determination.sunline]
 q_obs_val = 0.001
 q_proc_val = 0.001
@@ -30,17 +34,17 @@ normal_b = [0.0, 0.0, -1.0]
 coefficent = 1.0
 
 [determination.mekf]
-dt = 0.01
+dt = 0.1
 sigma_b = [0.01, 0.01, 0.01]
 sigma_g = [0.01, 0.01, 0.01]
-sigma_sun = 0.1
-sigma_mag = 0.1
+sigma_sun = 0.01
+sigma_mag = 0.002
 
 [determination.mag_cal]
 t = [[ 1.9203215e-03, -6.2749350e-05,  8.8365946e-04],
      [ 8.0907519e-04,  1.8392554e-03, -9.3289115e-04],
      [-4.2906895e-04,  1.2010682e-03,  1.5906866e-03]]
-h = [-281.0209, 87.63812, 408.10947]
+h = [26.5769, -213.0922, 517.9383]
 
 [guidance]
 sigma_r0r = [0.0, 0.0, 0.0]
@@ -62,17 +66,17 @@ inertia = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 [[control.rw_config.wheels]]
 spin_axis = [1.0, 0.0, 0.0]
-inertia = 5.781250000000001e-05
+inertia = 5.3516e-06
 max_torque = 0.04
 
 [[control.rw_config.wheels]]
 spin_axis = [0.0, 1.0, 0.0]
-inertia = 5.781250000000001e-05
+inertia = 5.3516e-06
 max_torque = 0.04
 
 [[control.rw_config.wheels]]
 spin_axis = [0.0, 0.0, 1.0]
-inertia = 5.781250000000001e-05
+inertia = 5.3516e-06
 max_torque = 0.04
 
 [control.voltage_config]
@@ -82,13 +86,14 @@ k = -1.0
 
 
 [control.vehicle_config]
-spacecraft_inertia_b = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+spacecraft_inertia_b = [0.00189933, 0.0, 0.0, 0.0, 0.00189933, 0.0, 0.0, 0.0, 0.00189933]
 com_b = [0.0, 0.0, 0.0]
-spacecraft_mass = 2.5
+spacecraft_mass = 1.0
 
 [mcu]
 path = "/dev/cu.usbmodem70A4923233351"
-adcs_format = 39
+adcs_format = 39 # all sensors - reaction wheel RPMs
+# adcs_format = 295 # enable all sensors
 adcs_update_interval = 100
 adcs_cycle_duration = 20
 adcs_cycle_interval = 10

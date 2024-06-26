@@ -37,6 +37,8 @@ pub struct World {
     pub gps_inputs: GpsInputs,
     #[roci(entity_id = 0, component_id = "gyro_omega")]
     pub omega: Vector<f64, 3, ArrayRepr>,
+    #[roci(entity_id = 0, component_id = "rw_speed")]
+    pub rw_speed: [f64; 3],
 
     // outputs
     pub nav_out: NavData,

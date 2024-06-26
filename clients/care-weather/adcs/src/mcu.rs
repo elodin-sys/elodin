@@ -6,21 +6,24 @@ use std::time::Duration;
 use arrayvec::ArrayVec;
 use enumflags2::{bitflags, BitFlags};
 use nox::{ArrayRepr, Tensor, Vector};
-use roci::drivers::Hz;
 use roci::System;
+use roci::{drivers::Hz, Componentize, Decomponentize};
 use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits};
 
-use crate::determination::{GpsInputs, World};
+use crate::determination;
 
-pub struct McuDriver<const HZ: usize> {
+pub struct McuDriver<const HZ: usize, H: System> {
     port_builder: SerialPortBuilder,
     port: Box<dyn SerialPort>,
     read_buf: Vec<u8>,
     config: McuConfig,
+    gnc_system: H,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct McuConfig {
+    #[serde(default)]
+    pub arm_reaction_wheels: bool,
     pub path: String,
     pub baud_rate: Option<u32>,
     pub adcs_format: BitFlags<AdcsFormat>,
@@ -32,8 +35,14 @@ pub struct McuConfig {
     pub gps_cycle_interval: u32,
 }
 
-impl<const HZ: usize> McuDriver<HZ> {
-    pub fn new(config: McuConfig) -> std::io::Result<Self> {
+#[derive(Default, Componentize, Decomponentize)]
+pub struct ControlWorld {
+    #[roci(entity_id = 0, component_id = "rw_speed_setpoint")]
+    rw_speed_setpoint: [f64; 3],
+}
+
+impl<const HZ: usize, H: System> McuDriver<HZ, H> {
+    pub fn new(config: McuConfig, gnc_system: H) -> std::io::Result<Self> {
         let port_builder = serialport::new(&config.path, config.baud_rate.unwrap_or(9600))
             .data_bits(DataBits::Eight)
             .flow_control(FlowControl::Software)
@@ -46,6 +55,7 @@ impl<const HZ: usize> McuDriver<HZ> {
             port,
             read_buf,
             config,
+            gnc_system,
         };
         mcu_driver.init_mcu();
         Ok(mcu_driver)
@@ -170,29 +180,22 @@ impl<const HZ: usize> McuDriver<HZ> {
             }
         }
     }
-}
 
-impl<const HZ: usize> System for McuDriver<HZ> {
-    type World = World;
-    type Driver = Hz<HZ>;
-
-    fn init_world(&mut self) -> Self::World {
-        World {
-            css_inputs: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-            mag_value: [0.0, 0.0, 1.0],
-            sun_ref: Tensor::from_buf([0.0, 1.0, 0.0]),
-            mag_ref: Tensor::from_buf([0.0, 0.0, 1.0]),
-            gps_inputs: GpsInputs {
-                lat: 40.1,
-                long: -111.8,
-                alt: 0.0,
-            },
-            ..Default::default()
+    fn set_controls(&mut self, control_world: &mut ControlWorld) {
+        // map rad/sec to RPM
+        let rpms = control_world
+            .rw_speed_setpoint
+            .map(|v| (v * 60.0 / (2.0 * PI)).round() as i32);
+        let cmd = set_rw_rpm_command(rpms);
+        // println!("-> {}", cmd);
+        if self.config.arm_reaction_wheels {
+            writeln!(&mut self.port, "{}", cmd).unwrap();
+        } else {
+            // println!("skipping command because RWs are disabled");
         }
     }
 
-    fn update(&mut self, world: &mut Self::World) {
-        self.port.set_timeout(Duration::from_secs(0)).unwrap();
+    fn read_sensor_data(&mut self, world: &mut determination::World) {
         let lines = match self.try_read_lines() {
             Ok(lines) => lines,
             Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
@@ -243,6 +246,15 @@ impl<const HZ: usize> System for McuDriver<HZ> {
                 world.mag_value = [world.mag_value[1], world.mag_value[0], world.mag_value[2]];
                 world.omega =
                     Vector::<f64, 3, ArrayRepr>::from_buf(sensor_data.gyro) * (PI / 180.0f64);
+
+                // convert RPM to rad/sec
+                if self
+                    .config
+                    .adcs_format
+                    .contains(AdcsFormat::IncludeReactionWheelRpm)
+                {
+                    world.rw_speed = sensor_data.reaction_wheel_rpm.map(|v| v * 2.0 * PI / 60.0);
+                }
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
                 println!("<- received gps message: {}", msg);
                 let gps_data = match GpsData::from_str(msg) {
@@ -264,6 +276,39 @@ impl<const HZ: usize> System for McuDriver<HZ> {
     }
 }
 
+impl<const HZ: usize, H: System<Driver = Hz<{ HZ }>>> System for McuDriver<HZ, H> {
+    type World = (determination::World, H::World, ControlWorld);
+    type Driver = Hz<HZ>;
+
+    fn init_world(&mut self) -> Self::World {
+        let world = determination::World {
+            css_inputs: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            mag_value: [0.0, 0.0, 1.0],
+            sun_ref: Tensor::from_buf([0.0, 1.0, 0.0]),
+            mag_ref: Tensor::from_buf([0.0, 0.0, 1.0]),
+            gps_inputs: determination::GpsInputs {
+                lat: 40.1,
+                long: -111.8,
+                alt: 0.0,
+            },
+            rw_speed: [0.01, 0.01, 0.01],
+            ..Default::default()
+        };
+        let gnc_world = self.gnc_system.init_world();
+        let control_world = ControlWorld::default();
+        (world, gnc_world, control_world)
+    }
+
+    fn update(&mut self, (world, gnc_world, control_world): &mut Self::World) {
+        self.port.set_timeout(Duration::from_secs(0)).unwrap();
+        self.read_sensor_data(world);
+        world.sink_columns(gnc_world);
+        self.gnc_system.update(gnc_world);
+        gnc_world.sink_columns(control_world);
+        self.set_controls(control_world);
+    }
+}
+
 #[bitflags]
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -282,7 +327,7 @@ pub struct SensorData {
     pub accel: [f64; 3],
     pub css_side_avg: [f64; 6],
     pub css_vertex_avg: [f64; 8],
-    pub reaction_wheel_rpm: [i64; 3],
+    pub reaction_wheel_rpm: [f64; 3],
     pub adcs_format: BitFlags<AdcsFormat>,
 }
 
@@ -463,6 +508,11 @@ pub fn gps_init_command(update_interval: u32, cycle_duration: u32, cycle_interva
         "gps.fmt=0;gps.upd={};gps.dur={};gps.int={}",
         update_interval, cycle_duration, cycle_interval
     )
+}
+
+// Returns a MCU command string that sets the reaction wheel RPM values.
+pub fn set_rw_rpm_command(rpm: [i32; 3]) -> String {
+    format!("rw.rpm={},{},{};rw.setrpm", rpm[0], rpm[1], rpm[2])
 }
 
 #[cfg(test)]

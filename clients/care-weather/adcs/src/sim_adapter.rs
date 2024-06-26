@@ -29,6 +29,10 @@ pub struct TxWorld {
     pub sun_vec_b: [f64; 3],
     #[roci(entity_id = 0, component_id = "gyro_omega")]
     pub omega: [f64; 3],
+    #[roci(entity_id = 0, component_id = "rw_speed")]
+    pub rw_speed: [f64; 3],
+    #[roci(entity_id = 0, component_id = "rw_speed_setpoint")]
+    pub rw_speed_setpoint: [f64; 3],
 }
 
 pub struct SimAdapter<const HZ: usize>;

@@ -57,16 +57,17 @@ fn main() -> anyhow::Result<()> {
         mcu,
     } = config;
     let det = determination::Determination::new(determination);
-    let _guidance = guidance::Guidance::<HZ>::new(guidance.sigma_r0r);
-    let _control = control::Control::<HZ>::new(control);
+    let guidance = guidance::Guidance::new(guidance.sigma_r0r);
+    let control = control::Control::new(control);
     let (tx, _) = tokio::tcp_connect::<Hz<HZ>>(
         "127.0.0.1:2240".parse().unwrap(),
         &[],
         sim_adapter::TxWorld::metadata(),
     );
-    let mut mcu_driver = mcu::McuDriver::new(mcu)?;
+    let gnc_system = det.pipe(guidance).pipe(control);
+    let mut mcu_driver = mcu::McuDriver::new(mcu, gnc_system)?;
     mcu_driver.print_info().unwrap();
     let sim_adapter = sim_adapter::SimAdapter;
-    os_sleep_driver(mcu_driver.pipe(det).pipe(sim_adapter).pipe(tx)).run();
+    os_sleep_driver(mcu_driver.pipe(sim_adapter).pipe(tx)).run();
     Ok(())
 }

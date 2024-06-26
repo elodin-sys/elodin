@@ -59,6 +59,21 @@ SunSensors = ty.Annotated[
         el.ComponentType(el.PrimitiveType.F64, (6,)),
     ),
 ]
+RWSpeed = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "rw_speed",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+
+RWSpeedSetpoint = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "rw_speed_setpoint",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
 
 
 @dataclass
@@ -70,6 +85,11 @@ class Determination(el.Archetype):
     gyro: Gyro = field(default_factory=lambda: np.zeros(3))
     sun_pos: SunPos = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     sun_sensors: SunSensors = field(default_factory=lambda: np.zeros(6))
+    rw_speed: RWSpeed = field(default_factory=lambda: np.zeros(3))
+
+@dataclass
+class Control(el.Archetype):
+    rw_speed_setpoint: RWSpeedSetpoint = field(default_factory=lambda: np.zeros(3))
 
 
 world = el.World()
@@ -77,8 +97,9 @@ sat = world.spawn(
     [
         el.Body(inertia=el.SpatialInertia(2825.2 / 1000.0, j)),
         world.glb(os.path.abspath("./clients/care-weather/veery.glb")),
-        Determination(),
         # Credit to the OreSat program https://www.oresat.org for the model above
+        Determination(),
+        Control(),
     ],
     name="OreSat",
 )
@@ -120,7 +141,7 @@ world.spawn(
                             el.GraphEntity(
                                 sat,
                                 [
-                                    el.Component.index(MagValue),
+                                    # el.Component.index(MagValue),
                                     el.Component.index(MagPostCal),
                                 ],
                             )
@@ -186,6 +207,36 @@ world.spawn(
         ]
     ),
 )
+world.spawn(
+    el.Panel.hsplit(
+        [
+            el.Panel.vsplit(
+                [
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(RWSpeed),
+                                ],
+                            )
+                        ]
+                    ),
+                    el.Panel.graph(
+                        [
+                            el.GraphEntity(
+                                sat,
+                                [
+                                    el.Component.index(RWSpeedSetpoint),
+                                ],
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    ),
+)
 
 
 @el.map
@@ -198,8 +249,10 @@ def noop(
     sun_pos: SunPos,
     gyro: Gyro,
     sun_sensor: SunSensors,
-) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, MagPostCal, SunPos, Gyro, SunSensors]:
-    return pos, mag_ref, sun_ref, mag_value, mag_postcal, sun_pos, gyro, sun_sensor
+    rw_speed: RWSpeed,
+    rw_speed_setpoint: RWSpeedSetpoint,
+) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, MagPostCal, SunPos, Gyro, SunSensors, RWSpeed, RWSpeedSetpoint]:
+    return pos, mag_ref, sun_ref, mag_value, mag_postcal, sun_pos, gyro, sun_sensor, rw_speed, rw_speed_setpoint
 
 
 exec = world.run(
