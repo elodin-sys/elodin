@@ -34,3 +34,21 @@ where
         self.1.apply_value(component_id, entity_id, value);
     }
 }
+
+impl<T1, T2, T3> Decomponentize for (T1, T2, T3)
+where
+    T1: Decomponentize,
+    T2: Decomponentize,
+    T3: Decomponentize,
+{
+    fn apply_value<D: ComponentValueDim>(
+        &mut self,
+        component_id: ComponentId,
+        entity_id: EntityId,
+        value: ComponentValue<'_, D>,
+    ) {
+        self.0.apply_value(component_id, entity_id, value.clone());
+        self.1.apply_value(component_id, entity_id, value.clone());
+        self.2.apply_value(component_id, entity_id, value);
+    }
+}
