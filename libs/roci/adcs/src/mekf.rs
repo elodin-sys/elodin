@@ -1,4 +1,6 @@
-use nox::{tensor, ArrayRepr, Field, Matrix, Matrix3, Matrix3x6, Matrix6, Quaternion, Vector};
+use nox::{
+    tensor, ArrayBuf, ArrayRepr, Field, Matrix, Matrix3, Matrix3x6, Matrix6, Quaternion, Vector,
+};
 
 pub fn calculate_covariance(
     sigma_g: Vector<f64, 3, ArrayRepr>,
@@ -150,6 +152,37 @@ impl State {
             omega,
             yqy,
             dt,
+        }
+    }
+}
+
+impl State {
+    /// Checks if the estimation paremters are all finite (i.e not NaN or infinite)
+    pub fn is_non_finite(&self) -> bool {
+        self.q_hat.0.into_buf().iter().any(|x| !x.is_finite())
+            || self.b_hat.into_buf().iter().any(|x| !x.is_finite())
+            || self
+                .p
+                .into_buf()
+                .as_buf()
+                .iter()
+                .any(|&x: &f64| !x.is_finite())
+            || self
+                .omega
+                .into_buf()
+                .as_buf()
+                .iter()
+                .any(|&x: &f64| !x.is_finite())
+    }
+
+    /// Resets the state if any parameter is non-finite
+    pub fn reset_if_invalid(&mut self) {
+        if self.is_non_finite() {
+            println!("reset");
+            self.q_hat = Quaternion::identity();
+            self.b_hat = Vector::zeros();
+            self.p = Matrix::eye();
+            self.omega = Vector::zeros();
         }
     }
 }
