@@ -194,7 +194,7 @@ impl<const HZ: usize> System for Determination<HZ> {
                         time,
                     )
                 })
-                .normalize();
+                * 1e-2; // convert to milligauss
             world.sun_ref = self
                 .override_sun_ref
                 .map(Tensor::from_buf)
@@ -216,13 +216,14 @@ impl<const HZ: usize> System for Determination<HZ> {
             mekf_state.omega = world.omega;
             let mekf_state = mekf_state.estimate_attitude(
                 [sun_body, mag_body],
-                [world.sun_ref, world.mag_ref],
+                [world.sun_ref, world.mag_ref.normalize()],
                 [config.sigma_sun, config.sigma_mag],
             );
             let mekf_state = self.mekf_state.insert(mekf_state);
             MRP::from(mekf_state.q_hat).0.into_buf()
         } else {
-            let att = roci_adcs::triad(sun_body, mag_body, world.sun_ref, world.mag_ref);
+            let att =
+                roci_adcs::triad(sun_body, mag_body, world.sun_ref, world.mag_ref.normalize());
             MRP::from_rot_matrix(att).0.into_buf()
         };
 
