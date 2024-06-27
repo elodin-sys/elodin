@@ -106,6 +106,9 @@ impl MarginSides for egui::Margin {
 }
 
 pub fn format_num(mut num: f64) -> String {
+    if !num.is_finite() {
+        return format!("{}", num);
+    }
     let width: usize = 8;
     // need 2 characters for the sign and the decimal point
     let digit_width = width - 2;

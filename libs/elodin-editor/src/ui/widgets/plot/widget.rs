@@ -391,6 +391,10 @@ impl Plot {
             .filter(|x| *x <= self.bounds.max_x)
             .collect::<Vec<f64>>();
 
+        if !self.bounds.min_y.is_finite() || !self.bounds.max_y.is_finite() {
+            return;
+        }
+
         for x_step in steps_x {
             let x_position = PlotPoint::from_plot_point(self, x_step, self.bounds.min_y).pos2;
 
@@ -445,8 +449,14 @@ impl Plot {
                 self.text_color,
             );
         };
+        if !self.bounds.min_y.is_finite() || !self.bounds.max_y.is_finite() {
+            return;
+        }
         if self.bounds.min_y <= 0.0 {
             let step_size = (self.bounds.max_y - self.bounds.min_y) / self.steps_y as f64;
+            if !step_size.is_normal() {
+                return;
+            }
             let mut i = 0.0;
 
             while i <= self.bounds.max_y {
