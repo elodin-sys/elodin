@@ -208,6 +208,7 @@ impl<const HZ: usize> System for Determination<HZ> {
         let mag_body = hard_iron_cal.normalize();
         world.mag_postcal_value = mag_body.into_buf();
         let att_mrp_bn = if let Some(mut mekf_state) = self.mekf_state.take() {
+            mekf_state.reset_if_invalid();
             let config = self
                 .mekf_config
                 .as_ref()

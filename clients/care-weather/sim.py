@@ -256,6 +256,6 @@ def noop(
 
 
 exec = world.run(
-    system=el.six_dof(TIME_STEP, noop, el.Integrator.SemiImplicit),
+    system=noop,
     time_step=TIME_STEP,
 )

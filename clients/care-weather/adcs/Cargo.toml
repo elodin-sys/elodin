@@ -27,7 +27,8 @@ toml = "0.8.14"
 # mcu
 arrayvec = "0.7.4"
 enumflags2 = { version = "0.7.10", features = ["serde"] }
-serialport = "4.3.0"
+serialport.version = "4.3.0"
+serialport.default-features = false
 
 # errors
 thiserror = "1.0.61"

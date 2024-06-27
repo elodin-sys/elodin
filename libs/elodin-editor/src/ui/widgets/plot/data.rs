@@ -296,10 +296,12 @@ pub struct Chunk {
     pub unfetched: RoaringBitmap,
 }
 
+const UNLOADED: u64 = 0b111111111111000000000000000000000000000000000000000000011111111;
+
 impl Chunk {
     pub fn unhydrated(range: Range<usize>) -> Self {
         Chunk {
-            data: range.clone().map(|_| f64::NAN).collect(),
+            data: range.clone().map(|_| f64::from_bits(UNLOADED)).collect(),
             range: range.clone(),
             unfetched: range.map(|x| x as u32).collect(),
         }
@@ -346,7 +348,7 @@ impl CachedData {
                 let i = tick - last.range.start;
                 if i > last.data.len() {
                     for j in last.data.len()..i {
-                        last.data.insert(j, f64::NAN);
+                        last.data.insert(j, f64::from_bits(UNLOADED));
                     }
                 }
                 if i == last.data.len() {
