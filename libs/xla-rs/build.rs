@@ -1,6 +1,8 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{env, io};
 
+use anyhow::Context;
 use flate2::read::GzDecoder;
 use tar::Archive;
 
@@ -29,8 +31,7 @@ fn env_var_rerun(name: &str) -> Option<String> {
     env::var(name).ok()
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("missing out dir"));
     let os = OS::get();
 
@@ -38,9 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_or_else(|| out_dir.join("xla_extension"), PathBuf::from);
     if !xla_dir.exists() {
         if cfg!(feature = "shared") {
-            download_shared_xla(&out_dir).await?;
+            download_shared_xla(&out_dir)?;
         } else {
-            download_xla(&out_dir).await?;
+            download_xla(&out_dir)?;
         }
     }
 
@@ -106,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jax_metal_dir =
         env_var_rerun("JAX_METAL_DIR").map_or_else(|| out_dir.join("jax_metal"), PathBuf::from);
     if !jax_metal_dir.exists() && cfg!(target_os = "macos") {
-        download_jax_metal(&jax_metal_dir).await?;
+        download_jax_metal(&jax_metal_dir)?;
     }
 
     // Exit early on docs.rs as the C++ library would not be available.
@@ -141,16 +142,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn download_jax_metal(jax_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn download_jax_metal(jax_dir: &Path) -> anyhow::Result<()> {
     let url = "https://files.pythonhosted.org/packages/7e/59/ff91dc65e7f945479b08509185d07de0c947e81c07705367b018cb072ee9/jax_metal-0.0.4-py3-none-macosx_11_0_arm64.whl";
-
-    let res = reqwest::get(url).await?;
-    let bytes = io::Cursor::new(res.bytes().await?);
-    zip_extract::extract(bytes, jax_dir, true)?;
+    let buf = download_file(url)?;
+    let mut archive = zip::ZipArchive::new(io::Cursor::new(buf))?;
+    archive.extract(jax_dir)?;
     Ok(())
 }
 
-async fn download_shared_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn download_shared_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
@@ -166,8 +166,8 @@ async fn download_shared_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::E
         (os, arch) => panic!("{}-{} is an unsupported platform", os, arch)
     };
 
-    let res = reqwest::get(url).await?;
-    let mut bytes = io::Cursor::new(res.bytes().await?);
+    let buf = download_file(&url)?;
+    let mut bytes = io::Cursor::new(buf);
 
     let tar = GzDecoder::new(&mut bytes);
     let mut archive = Archive::new(tar);
@@ -176,7 +176,7 @@ async fn download_shared_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-async fn download_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn download_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
@@ -184,12 +184,26 @@ async fn download_xla(xla_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
         ("linux", arch) => format!("https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-linux-gnu-cpu.tar.gz", arch),
         (os, arch) => panic!("{}-{} is an unsupported platform", os, arch)
     };
-    let res = reqwest::get(url).await?;
-    let mut bytes = io::Cursor::new(res.bytes().await?);
+    let buf = download_file(&url)?;
+    let mut bytes = io::Cursor::new(buf);
 
     let tar = GzDecoder::new(&mut bytes);
     let mut archive = Archive::new(tar);
     archive.unpack(xla_dir)?;
 
     Ok(())
+}
+
+fn download_file(url: &str) -> anyhow::Result<Vec<u8>> {
+    let res = ureq::get(url).call()?;
+    let content_length = res
+        .header("Content-Length")
+        .context("Content-Length header not found")?
+        .parse::<usize>()?;
+    let mut buf = Vec::with_capacity(content_length);
+    res.into_reader()
+        .take(content_length as u64)
+        .read_to_end(&mut buf)
+        .context("Failed to read response")?;
+    Ok(buf)
 }
