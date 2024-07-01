@@ -85,10 +85,6 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
-    /// Zip file format error.
-    #[error(transparent)]
-    Zip(#[from] zip::result::ZipError),
-
     /// Integer parse error.
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
