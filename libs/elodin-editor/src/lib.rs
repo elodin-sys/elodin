@@ -25,7 +25,7 @@ use bevy_egui::EguiPlugin;
 use bevy_mod_picking::prelude::*;
 use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
-use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
+use big_space::{reference_frame::RootReferenceFrame, FloatingOrigin, GridCell};
 use conduit::{
     well_known::{Viewport, WorldPos},
     ControlMsg, EntityId,
@@ -442,7 +442,7 @@ fn make_entities_selectable(
 
 pub fn sync_pos(
     mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
-    floating_origin: Res<FloatingOriginSettings>,
+    floating_origin: Res<RootReferenceFrame<i128>>,
 ) {
     query
         .iter_mut()
