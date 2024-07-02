@@ -2,6 +2,25 @@
 
 ## [unreleased]
 - **(fix)** If there were pytest failures in a  Monte Carlo sample, the sample would still be reported as a pass. This is now fixed.
+- **(fix)** Fix line pixelation in long-running plots.
+- Add `SpatialTransform()` constructor that replaces `SpatialTransform.zero()`, `SpatialTransform.from_linear(linear)`, and `SpatialTransform.from_angular(quaternion)` by making use of optional arguments. The old methods are still available but deprecated.
+  ```python
+  # before
+  world_pos = el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 1.0])) + el.SpatialTransform.from_angular(euler_to_quat(jnp.array([0.0, 70.0, 0.0])))
+
+  # after
+  world_pos = el.SpatialTransform(linear=jnp.array([0.0, 0.0, 1.0]), angular=euler_to_quat(jnp.array([0.0, 70.0, 0.0])))
+
+  # before
+  world_pos = el.SpatialTransform.zero()
+
+  # after
+  world_pos = el.SpatialTransform()
+  ```
+- Add filtered search for entities and components.
+- Always include zero as a tick in the y-axis of plots.
+- Replace "Welcome" panel with a new UI for creating viewports and graphs.
+- Add "Save Replay" command to command palette (Cmd + P).
 
 ## [v0.3.23]
 - **(breaking)** Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
