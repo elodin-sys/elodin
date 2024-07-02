@@ -23,21 +23,18 @@ use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
 use bevy_mod_picking::prelude::*;
-use bevy_polyline::PolylinePlugin;
 use bevy_tweening::TweeningPlugin;
-use big_space::{reference_frame::RootReferenceFrame, FloatingOrigin, GridCell};
+use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
     well_known::{Viewport, WorldPos},
     ControlMsg, EntityId,
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
-use traces::TracesPlugin;
 use ui::{tiles, EntityPair, HoveredEntity};
 
 use crate::plugins::editor_cam_touch;
 
 mod plugins;
-pub(crate) mod traces;
 pub mod ui;
 
 struct EmbeddedAssetPlugin;
@@ -128,8 +125,6 @@ impl Plugin for EditorPlugin {
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
-            .add_plugins(PolylinePlugin)
-            .add_plugins(TracesPlugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
@@ -442,7 +437,7 @@ fn make_entities_selectable(
 
 pub fn sync_pos(
     mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
-    floating_origin: Res<RootReferenceFrame<i128>>,
+    floating_origin: Res<FloatingOriginSettings>,
 ) {
     query
         .iter_mut()
