@@ -1719,15 +1719,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_polyline"
-version = "0.9.0"
-source = "git+https://github.com/elodin-sys/bevy_polyline.git?tag=v0.9.0-use-vecdeque#23edfaa8331dec2dd76b12d32fd370a0bb52dd26"
-dependencies = [
- "bevy",
- "bitflags 2.6.0",
-]
-
-[[package]]
 name = "bevy_ptr"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2043,8 +2034,8 @@ dependencies = [
 
 [[package]]
 name = "big_space"
-version = "0.6.0"
-source = "git+https://github.com/elodin-sys/big_space.git?tag=v0.6.0-no-prop-rot#596f061f44962ded7736de57f5cbf3dab15e85f5"
+version = "0.5.0"
+source = "git+https://github.com/elodin-sys/big_space.git?branch=no_prop_rot#b8e7469f4475b4955a6c4527e32cdde65ecc21c8"
 dependencies = [
  "bevy",
 ]
@@ -3608,7 +3599,6 @@ dependencies = [
  "bevy_framepace",
  "bevy_infinite_grid",
  "bevy_mod_picking",
- "bevy_polyline",
  "bevy_tweening",
  "big_space",
  "cocoa",
