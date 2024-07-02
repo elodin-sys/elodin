@@ -7,8 +7,7 @@ use crate::{
     },
     client::MsgPair,
     well_known::{
-        self, EntityMetadata, Gizmo, Glb, Material, Mesh as ConduitMesh, Panel, TraceAnchor,
-        WorldPos,
+        self, EntityMetadata, Gizmo, Glb, Material, Mesh as ConduitMesh, Panel, WorldPos,
     },
     EntityId,
 };
@@ -46,7 +45,6 @@ impl Plugin for SyncPlugin {
             .add_conduit_component::<well_known::Camera>()
             .add_conduit_asset::<Gizmo>(Box::new(SyncPostcardAdapter::<Gizmo>::new(None)))
             .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
-            .add_conduit_component::<TraceAnchor>()
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
             ))

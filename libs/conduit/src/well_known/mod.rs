@@ -1,6 +1,5 @@
 use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use ndarray::{array, CowArray, Ix1};
-use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
 use crate::{ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
@@ -71,49 +70,6 @@ impl ValueRepr for WorldPos {
         Some(WorldPos {
             att: UnitQuaternion::from_quaternion(Quaternion::new(arr[3], arr[0], arr[1], arr[2])),
             pos: Vector3::new(arr[4], arr[5], arr[6]),
-        })
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct TraceAnchor {
-    pub anchor: Vector3<f64>,
-}
-
-impl crate::Component for TraceAnchor {
-    const NAME: &'static str = "trace_anchor";
-    const ASSET: bool = false;
-
-    fn component_type() -> ComponentType {
-        ComponentType {
-            primitive_ty: PrimitiveTy::F64,
-            shape: smallvec![3],
-        }
-    }
-}
-
-impl ValueRepr for TraceAnchor {
-    type ValueDim = Ix1;
-
-    fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
-        let arr = array![self.anchor.x, self.anchor.y, self.anchor.z];
-        ComponentValue::F64(CowArray::from(arr))
-    }
-
-    fn from_component_value<D: ndarray::Dimension>(
-        value: crate::ComponentValue<'_, D>,
-    ) -> Option<Self> {
-        let crate::ComponentValue::F64(arr) = value else {
-            return None;
-        };
-        if arr.shape() != [3] {
-            return None;
-        }
-        let arr = arr.into_dimensionality::<Ix1>().ok()?;
-        let arr = arr.as_slice()?;
-        Some(TraceAnchor {
-            anchor: Vector3::new(arr[0], arr[1], arr[2]),
         })
     }
 }
