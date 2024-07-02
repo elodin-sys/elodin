@@ -80,11 +80,17 @@ class SpatialTransform:
         linear: Optional[jax.typing.ArrayLike] = None,
     ): ...
     @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialTransform: ...
+    def from_linear(linear: jax.typing.ArrayLike) -> SpatialTransform:
+        """
+        DEPRECATED: Use `SpatialTransform(linear=...)` instead.
+        """
     @staticmethod
     def from_angular(
         quaternion: jax.typing.ArrayLike | Quaternion,
-    ) -> SpatialTransform: ...
+    ) -> SpatialTransform:
+        """
+        DEPRECATED: Use `SpatialTransform(angular=...)` instead.
+        """
     @staticmethod
     def from_axis_angle(
         axis: jax.typing.ArrayLike, angle: jax.typing.ArrayLike
@@ -95,7 +101,10 @@ class SpatialTransform:
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialTransform: ...
     @staticmethod
-    def zero() -> SpatialTransform: ...
+    def zero() -> SpatialTransform:
+        """
+        DEPRECATED: Use `SpatialTransform()` instead.
+        """
     def linear(self) -> jax.Array: ...
     def angular(self) -> Quaternion: ...
     def asarray(self) -> jax.typing.ArrayLike: ...
