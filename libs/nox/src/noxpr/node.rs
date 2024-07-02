@@ -4,7 +4,6 @@ use std::{
     fmt::Display,
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
-    str::FromStr,
     sync::Arc,
 };
 
@@ -890,7 +889,7 @@ impl Noxpr {
                     .ok()?
                     .extract::<String>(py)
                     .ok()?;
-                let element_type = ElementType::from_str(&element_type).ok()?;
+                let element_type = element_type.parse().ok()?;
                 Some(NoxprTy::ArrayTy(ArrayTy {
                     shape,
                     element_type,
@@ -966,7 +965,7 @@ impl Noxpr {
                     .ok()?
                     .extract::<String>(py)
                     .ok()?;
-                ElementType::from_str(&element_type).ok()
+                element_type.parse().ok()
             }),
             NoxprNode::Convert(c) => Some(c.ty),
             NoxprNode::Select(c) => c.on_true.element_type(),
