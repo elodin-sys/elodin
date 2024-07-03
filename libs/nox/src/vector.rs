@@ -95,6 +95,8 @@ impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::FRAC_PI_4;
+
     use nalgebra::vector;
 
     use super::*;
@@ -185,5 +187,31 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, vector![2.0, 1.0, 2.0, 1.0])
+    }
+
+    #[test]
+    fn test_abs() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Vector<f32, 3>| a.abs()).build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec
+            .run(&client, vector![-2.0f32, 1.0, -2.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![2.0, 1.0, 2.0])
+    }
+
+    #[test]
+    fn test_atan2() {
+        let client = Client::cpu().unwrap();
+        let comp = (|x: Vector<f64, 2>, y: Vector<f64, 2>| y.atan2(&x))
+            .build()
+            .unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec
+            .run(&client, vector![3.0, -3.0], vector![-3.0, 3.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![-FRAC_PI_4, 3.0 * FRAC_PI_4])
     }
 }

@@ -120,9 +120,16 @@ pub trait Repr {
 
     fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
+    fn atan2<T1: Field + RealField, D1: Dim>(
+        left: &Self::Inner<T1, D1>,
+        right: &Self::Inner<T1, D1>,
+    ) -> Self::Inner<T1, D1>;
+
     fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
     fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
+
+    fn abs<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         arg: &Self::Inner<T1, D1>,
