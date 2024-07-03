@@ -87,6 +87,7 @@ impl JaxTracer {
             NoxprNode::Dot(op) => self.visit_binary_lax(op, "dot")?,
             NoxprNode::GreaterOrEqual(op) => self.visit_binary_lax(op, "ge")?,
             NoxprNode::Equal(op) => self.visit_binary_lax(op, "eq")?,
+            NoxprNode::Atan2(op) => self.visit_binary_lax(op, "atan2")?,
             NoxprNode::LessOrEqual(op) => self.visit_binary_lax(op, "le")?,
             NoxprNode::Less(op) => self.visit_binary_lax(op, "lt")?,
             NoxprNode::DotGeneral(d) => {
@@ -108,6 +109,7 @@ impl JaxTracer {
             NoxprNode::Log(op) => self.visit_unary_lax(op, "log")?,
             NoxprNode::Sin(op) => self.visit_unary_lax(op, "sin")?,
             NoxprNode::Cos(op) => self.visit_unary_lax(op, "cos")?,
+            NoxprNode::Abs(op) => self.visit_unary_lax(op, "abs")?,
             NoxprNode::Concat(c) => {
                 let nodes = c
                     .nodes

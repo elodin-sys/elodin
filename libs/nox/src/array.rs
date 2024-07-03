@@ -441,6 +441,7 @@ macro_rules! impl_unary_op {
 impl_unary_op!(RealField, sqrt);
 impl_unary_op!(RealField, sin);
 impl_unary_op!(RealField, cos);
+impl_unary_op!(RealField, abs);
 
 impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn neg(&self) -> Array<T1, D1>
@@ -473,9 +474,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             });
         unsafe { out.assume_init() }
     }
-}
 
-impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn transpose_iter(&self) -> impl Iterator<Item = &'_ T1> {
         let mut dims = D1::dim(&self.buf);
         dims.as_mut().reverse();
@@ -914,6 +913,21 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                 }
             });
         unsafe { out.assume_init() }
+    }
+
+    pub fn atan2(&self, other: &Self) -> Self
+    where
+        T1: RealField,
+    {
+        let mut out = self.clone();
+        out.buf
+            .as_mut_buf()
+            .iter_mut()
+            .zip(other.buf.as_buf().iter())
+            .for_each(|(a, b)| {
+                *a = a.atan2(*b);
+            });
+        out
     }
 }
 
@@ -1355,12 +1369,23 @@ impl Repr for ArrayRepr {
         arg.sqrt()
     }
 
+    fn atan2<T1: Field + RealField, D1: Dim>(
+        left: &Self::Inner<T1, D1>,
+        right: &Self::Inner<T1, D1>,
+    ) -> Self::Inner<T1, D1> {
+        left.atan2(right)
+    }
+
     fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.sin()
     }
 
     fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.cos()
+    }
+
+    fn abs<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.abs()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
@@ -1526,6 +1551,10 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::f64::consts::FRAC_PI_4;
+
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[test]
@@ -1669,6 +1698,19 @@ mod tests {
             Array::from_diag(array![1.0, 4.0, 5.0]),
             array![[1.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]]
         );
+    }
+
+    #[test]
+    fn test_abs() {
+        let a = array![[1.0, -2.0], [-3.0, 4.0]];
+        assert_eq!(a.abs(), array![[1.0, 2.0], [3.0, 4.0]]);
+    }
+
+    #[test]
+    fn test_atan2() {
+        let x = array![3.0, -3.0];
+        let y = array![-3.0, 3.0];
+        assert_relative_eq!(y.atan2(&x), array![-FRAC_PI_4, 3.0 * FRAC_PI_4]);
     }
 
     // #[test]
