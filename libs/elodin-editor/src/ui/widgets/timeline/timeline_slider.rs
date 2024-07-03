@@ -187,6 +187,8 @@ impl<'a> Timeline<'a> {
             *active_range_end,
         );
 
+        let value = self.get_value();
+
         if let Some(pointer_position_2d) = response.interact_pointer_pos() {
             let position = pointer_position_2d.x;
             let aim_radius = ui.input(|i| i.aim_radius());
@@ -201,8 +203,6 @@ impl<'a> Timeline<'a> {
 
         // Paint the UI
         if ui.is_rect_visible(response.rect) {
-            let value = self.get_value();
-
             // Default Styles
 
             let style = (*ui.style()).clone();
@@ -238,9 +238,6 @@ impl<'a> Timeline<'a> {
                 );
             }
 
-            let position_1d = position_from_value(value, self.range(), position_range);
-            let center = Timeline::pointer_center(position_1d, &rect);
-
             // Fixed Max Handle
 
             let handle_size = Timeline::get_handle_size(&rect, self.handle_aspect_ratio);
@@ -256,6 +253,9 @@ impl<'a> Timeline<'a> {
             }
 
             // Handle
+
+            let position_1d = position_from_value(value, self.range(), position_range);
+            let center = Timeline::pointer_center(position_1d, &rect);
 
             let handle_rect = egui::Rect::from_center_size(center, handle_size);
 
