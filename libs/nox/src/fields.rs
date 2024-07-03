@@ -58,6 +58,8 @@ pub trait RealField: Field + Neg<Output = Self> + MatMul + LU {
     fn sqrt(self) -> Self;
     fn cos(self) -> Self;
     fn sin(self) -> Self;
+    fn abs(self) -> Self;
+    fn atan2(self, other: Self) -> Self;
 }
 
 macro_rules! impl_real_field {
@@ -73,6 +75,14 @@ macro_rules! impl_real_field {
 
             fn sin(self) -> Self {
                 self.sin()
+            }
+
+            fn abs(self) -> Self {
+                self.abs()
+            }
+
+            fn atan2(self, other: Self) -> Self {
+                self.atan2(other)
             }
         }
     };

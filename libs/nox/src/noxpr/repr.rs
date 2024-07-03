@@ -143,11 +143,22 @@ macro_rules! dummy_impl_repr {
                 todo!()
             }
 
+            fn atan2<T1: Field, D1: Dim>(
+                _left: &Self::Inner<T1, D1>,
+                _right: &Self::Inner<T1, D1>,
+            ) -> Self::Inner<T1, D1> {
+                todo!()
+            }
+
             fn sin<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
                 todo!()
             }
 
             fn cos<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+                todo!()
+            }
+
+            fn abs<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
                 todo!()
             }
 
@@ -363,12 +374,23 @@ impl Repr for Op {
         arg.clone().sqrt()
     }
 
+    fn atan2<T1: Field + RealField, D1: Dim>(
+        left: &Self::Inner<T1, D1>,
+        right: &Self::Inner<T1, D1>,
+    ) -> Self::Inner<T1, D1> {
+        left.clone().atan2(right.clone())
+    }
+
     fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone().sin()
     }
 
     fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone().cos()
+    }
+
+    fn abs<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.clone().abs()
     }
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
