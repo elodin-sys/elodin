@@ -83,7 +83,7 @@ where
     }
 }
 
-impl<T: Field + crate::RealField, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn sqrt(&self) -> Self {
         Self::from_inner(R::sqrt(&self.inner))
     }
@@ -94,6 +94,14 @@ impl<T: Field + crate::RealField, D: Dim, R: Repr> Tensor<T, D, R> {
 
     pub fn cos(&self) -> Self {
         Self::from_inner(R::cos(&self.inner))
+    }
+
+    pub fn abs(&self) -> Self {
+        Self::from_inner(R::abs(&self.inner))
+    }
+
+    pub fn atan2(&self, other: &Self) -> Self {
+        Self::from_inner(R::atan2(&self.inner, &other.inner))
     }
 }
 
