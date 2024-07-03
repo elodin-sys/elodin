@@ -32,17 +32,19 @@ defmodule ElodinDashboardWeb.CoreComponents do
     """
   end
 
-  attr(:value, :float, default: 50.0)
+  attr(:value, :float, default: 1.0)
   attr(:color, :string, default: "bg-green")
 
   def progress_bar(assigns) do
     ~H"""
     <div class="w-full h-6 flex mb-elo-xl">
-      <div
-        class={["h-full rounded-elo-xs", @color, if(1.0 > @value, do: "mr-2", else: "")]}
-        style={"width: #{@value * 100.0}%;"}
-      />
-      <%= if 1.0 > @value  do %>
+      <%= if @value > 0.0 do %>
+        <div
+          class={["h-full rounded-elo-xs", @color, if(@value < 1.0, do: "mr-2", else: "")]}
+          style={"width: #{@value * 100.0}%;"}
+        />
+      <% end %>
+      <%= if @value < 1.0 do %>
         <div
           class="border border-crema-60 h-full rounded-elo-xs"
           style={"width: #{(1.0 - @value) * 100}%;"}
