@@ -694,11 +694,26 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     /// Concatenates multiple arraysinto a single array along a specified dimension.
-    pub fn concat_many<D2: Dim>(
+    pub fn concat_many<D2: Dim + ConstDim>(
         args: &[Array<T1, D1>],
         dim: usize,
     ) -> Result<Array<T1, D2>, Error> {
-        let mut out_dims = D1::dim(&args[0].buf);
+        let get_d1_dim = |buf: &D1::Buf<T1>| {
+            let d1_dim = D1::dim(buf);
+            let d1_dim = d1_dim.as_ref();
+            let mut d = D2::const_dim();
+            for x in d.as_mut() {
+                *x = 1;
+            }
+            let start = d.as_ref().len() - d1_dim.len();
+            d.as_mut()
+                .get_mut(start..)
+                .ok_or(Error::InvalidConcatDims)?
+                .copy_from_slice(d1_dim);
+            Ok::<_, Error>(d)
+        };
+
+        let mut out_dims = D2::const_dim();
         if out_dims.as_ref().is_empty() {
             if dim != 0 {
                 return Err(Error::InvalidConcatDims);
@@ -717,7 +732,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                 *x = 0;
             }
             for arg in args {
-                let d = D1::dim(&arg.buf);
+                let d = get_d1_dim(&arg.buf)?;
                 if d.as_ref().len() != out_dims.as_ref().len() {
                     return Err(Error::InvalidConcatDims);
                 }
@@ -735,17 +750,15 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                 }
             }
             let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(out_dims.as_ref());
-            let mut current_offsets = out_dims.clone();
+            let mut current_offsets = D2::const_dim();
             let current_offsets = current_offsets.as_mut();
             current_offsets.iter_mut().for_each(|a| *a = 0);
             if dim >= current_offsets.len() {
                 return Err(Error::InvalidConcatDims);
             }
             for arg in args.iter() {
-                let d = D1::dim(&arg.buf);
-                if d.as_ref().len() != current_offsets.len() {
-                    return Err(Error::InvalidConcatDims);
-                }
+                let d = get_d1_dim(&arg.buf)?;
+                let offset = d.as_ref()[dim];
                 for (i, (a, b)) in out_dims.as_ref().iter().zip(d.as_ref().iter()).enumerate() {
                     if dim != i && a != b {
                         return Err(Error::InvalidConcatDims);
@@ -756,7 +769,6 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                         *a = 0;
                     }
                 }
-                let offset = d.as_ref()[dim];
                 let iter = out.offset_iter_mut(current_offsets.as_ref());
                 let iter = StrideIteratorMut {
                     buf: iter.buf,
@@ -770,10 +782,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                 iter.zip(arg.buf.as_buf().iter()).for_each(|(a, b)| {
                     a.write(*b);
                 });
-                current_offsets[dim] += offset;
-            }
-            if current_offsets[dim] != out_dims.as_ref()[dim] {
-                return Err(Error::InvalidConcatDims);
+                current_offsets[dim] += offset; // TODO: replace with appropriate stride I think
             }
 
             Ok(unsafe { out.assume_init() })
@@ -1313,7 +1322,7 @@ impl Repr for ArrayRepr {
         left.dot(right)
     }
 
-    fn concat_many<T1: Field, D1: Dim, D2: Dim>(
+    fn concat_many<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         args: &[Self::Inner<T1, D1>],
         dim: usize,
     ) -> Self::Inner<T1, D2> {
@@ -1677,6 +1686,23 @@ mod tests {
         let b: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
         let c: Array<f32, (Const<2>, Const<4>)> = Array::concat_many(&[a, b], 1).unwrap();
         assert_eq!(c, array![[0.0, 1.0, 0.0, 1.0], [2.0, 3.0, 2.0, 3.0]]);
+
+        let a: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
+        let b: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
+        let c: Array<f32, (Const<4>, Const<2>)> = Array::concat_many(&[a, b], 0).unwrap();
+        assert_eq!(c, array![[0., 1.], [2., 3.], [0., 1.], [2., 3.]]);
+
+        let a: Array<f32, Const<3>> = Array {
+            buf: [1.0, 2.0, 3.0],
+        };
+        let b: Array<f32, Const<3>> = Array {
+            buf: [4.0, 5.0, 6.0],
+        };
+        let c: Array<f32, Const<3>> = Array {
+            buf: [7.0, 8.0, 9.0],
+        };
+        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many(&[a, b, c], 0).unwrap();
+        assert_eq!(d.buf, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0],]);
     }
 
     #[test]
