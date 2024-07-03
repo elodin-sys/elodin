@@ -153,6 +153,9 @@ pub trait NonScalarDim {}
 /// Represents constant dimensions, specified at compile-time.
 pub trait ConstDim {
     const DIM: &'static [usize];
+
+    type DimArr: AsRef<[usize]> + AsMut<[usize]>;
+    fn const_dim() -> Self::DimArr;
 }
 
 /// Represents a scalar dimension, which is essentially dimensionless.
@@ -177,6 +180,10 @@ impl XlaDim for Dyn {
 
 impl ConstDim for ScalarDim {
     const DIM: &'static [usize] = &[];
+    type DimArr = [usize; 0];
+    fn const_dim() -> Self::DimArr {
+        []
+    }
 }
 
 impl XlaDim for ScalarDim {
@@ -187,6 +194,12 @@ impl XlaDim for ScalarDim {
 
 impl<const N: usize> ConstDim for Const<N> {
     const DIM: &'static [usize] = &[N];
+
+    type DimArr = [usize; 1];
+
+    fn const_dim() -> Self::DimArr {
+        [N]
+    }
 }
 
 impl<const N: usize> XlaDim for Const<N> {
@@ -212,6 +225,11 @@ macro_rules! impl_tensor_dim {
         impl<$(const $ty: usize,)*> ConstDim for ($(Const<$ty>,)*)
         {
             const DIM: &'static [usize] = &[$($ty,)*];
+
+            type DimArr = [usize; $num];
+            fn const_dim() -> Self::DimArr {
+                [$($ty,)*]
+            }
         }
 
         impl<$($ty,)*> XlaDim for ($($ty,)*)
@@ -647,7 +665,7 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
     ) -> Tensor<T1, D2, R>
     where
         D1: Dim,
-        D2: Dim,
+        D2: Dim + ConstDim,
     {
         let args = args.map(|t| t.inner);
         let inner = R::concat_many(&args, dim);

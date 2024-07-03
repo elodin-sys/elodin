@@ -94,7 +94,7 @@ pub trait Repr {
         ConcatDim<D1, D2>: Dim;
 
     /// Concatenates multiple tensors along the first dimension
-    fn concat_many<T1: Field, D1: Dim, D2: Dim>(
+    fn concat_many<T1: Field, D1: Dim, D2: Dim + ConstDim>(
         args: &[Self::Inner<T1, D1>],
         dim: usize,
     ) -> Self::Inner<T1, D2>;
