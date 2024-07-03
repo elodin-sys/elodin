@@ -236,6 +236,8 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                             let stroke_width =
                                 ((timeline_args.line_height / handle_size.y) * handle_size.x) / 6.0;
 
+                            // Max Tick
+
                             let x_pos = position_from_value(
                                 active_range_end,
                                 full_range.clone(),
@@ -243,6 +245,8 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                             );
                             let line_stroke = egui::Stroke::new(stroke_width, colors::WHITE);
                             ui.painter().vline(x_pos, y_range, line_stroke);
+
+                            // Current Tick
 
                             let x_pos = position_from_value(tick_value, full_range, position_range);
                             let line_stroke = egui::Stroke::new(stroke_width, colors::MINT_DEFAULT);
