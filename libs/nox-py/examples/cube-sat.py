@@ -520,6 +520,7 @@ sat = w.spawn(
 
 # w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
 # w.spawn(el.VectorArrow(sat, "world_vel", offset=3, body_frame=False, scale=1/2000.0))
+w.spawn(el.BodyAxes(sat, scale=1.0))
 
 rw_1 = w.spawn(
     ReactionWheel(

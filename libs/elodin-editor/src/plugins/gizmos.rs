@@ -10,7 +10,7 @@ use bevy::{
 };
 use conduit::{
     bevy::{ComponentValueMap, EntityMap},
-    well_known::{VectorArrow, WorldPos},
+    well_known::{BodyAxes, VectorArrow, WorldPos},
 };
 use nalgebra::{UnitQuaternion, Vector3};
 
@@ -19,7 +19,8 @@ pub struct GizmoPlugin;
 impl Plugin for GizmoPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, gizmo_setup);
-        app.add_systems(Update, render_gizmo);
+        app.add_systems(Update, render_vector_arrow);
+        app.add_systems(Update, render_body_axis);
     }
 }
 
@@ -30,7 +31,7 @@ fn gizmo_setup(mut config_store: ResMut<GizmoConfigStore>) {
     config.enabled = true;
 }
 
-fn render_gizmo(
+fn render_vector_arrow(
     entity_map: Res<EntityMap>,
     query: Query<(Option<&Transform>, &ComponentValueMap)>,
     arrows: Query<&VectorArrow>,
@@ -96,5 +97,26 @@ fn render_gizmo(
             (Vec3::ZERO, vec * *scale)
         };
         gizmos.arrow(start, end, *color);
+    }
+}
+
+fn render_body_axis(
+    entity_map: Res<EntityMap>,
+    query: Query<&Transform>,
+    arrows: Query<&BodyAxes>,
+    mut gizmos: Gizmos,
+) {
+    for gizmo in arrows.iter() {
+        let BodyAxes { entity_id, scale } = gizmo;
+
+        let Some(entity_id) = entity_map.get(entity_id) else {
+            println!("entity not found");
+            continue;
+        };
+
+        let Ok(&transform) = query.get(*entity_id) else {
+            continue;
+        };
+        gizmos.axes(transform, *scale)
     }
 }
