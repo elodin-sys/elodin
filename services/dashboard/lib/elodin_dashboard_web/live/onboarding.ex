@@ -65,6 +65,10 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     {:noreply, push_redirect(socket, to: "/onboard/#{page}")}
   end
 
+  def handle_event("set_page", %{"page" => page}, socket) do
+    {:noreply, push_redirect(socket, to: "/onboard/#{page}")}
+  end
+
   def handle_event("poll_results", %{"selected_industries" => selected_industries}, socket) do
     send(self(), {:poll_results, selected_industries})
     {:noreply, assign(socket, :loading, true)}
@@ -272,25 +276,37 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def questions(assigns) do
+  def onboarding_steps(assigns) do
     ~H"""
     <div class="w-full flex-col flex">
-      <div :for={question <- @questions} class="w-full mt-20 flex items-center">
-        <div class={[
-          "rounded-full w-12 h-12 flex items-center justify-center font-bold font-mono text-xl",
-          if(question.index <= @selected,
-            do: "text-bone bg-primary-smoke",
-            else: "text-primary-smoke border-primary-smoke border"
-          )
-        ]}>
-          <%= question.number %>
+      <div :for={onboarding_step <- @onboarding_steps} class="w-full mt-20 flex items-center">
+        <div
+          class={[
+            "rounded-full w-12 h-12 flex items-center justify-center font-bold font-mono text-xl",
+            if(onboarding_step.index <= @selected,
+              do: "text-bone bg-primary-smoke",
+              else: "text-primary-smoke border-primary-smoke border"
+            ),
+            if(onboarding_step.index <= @selected && onboarding_step.index != 1,
+              do: "cursor-pointer",
+              else: ""
+            )
+          ]}
+          phx-click={
+            if(onboarding_step.index <= @selected && onboarding_step.index != 1,
+              do: JS.push("set_page", value: %{page: onboarding_step.index + 1}),
+              else: nil
+            )
+          }
+        >
+          <%= onboarding_step.number %>
         </div>
         <div style="position:relative;">
-          <%= if question.index < @selected do %>
+          <%= if onboarding_step.index < @selected do %>
             <div style="width: 2px; height: 85px; background: #0D0D0D; position: absolute; left: -25.5px; top: 23px;">
             </div>
           <% end %>
-          <%= if question.index == @selected && @selected != Enum.count(@questions) do %>
+          <%= if onboarding_step.index == @selected && @selected != Enum.count(@onboarding_steps) do %>
             <svg
               width="16"
               height="44"
@@ -308,10 +324,10 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <div class="flex flex-col text-primary-smoke ml-8">
           <div class="font-mono text-sm font-medium">
-            <%= question.title %>
+            <%= onboarding_step.title %>
           </div>
           <div>
-            <%= question.prompt %>
+            <%= onboarding_step.prompt %>
           </div>
         </div>
       </div>
@@ -405,7 +421,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def default_onboard_questions() do
+  def default_onboard_steps() do
     [
       %{
         index: 1,
@@ -514,7 +530,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="w-full text-2xl text-space text-black font-medium mt-2">
           Introduction to Elodin
         </div>
-        <.questions questions={default_onboard_questions()} selected={1} />
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
       </div>
       <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
         <div class="w-full flex flex-col items-end">
@@ -584,7 +600,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="w-full text-2xl text-space text-black font-medium mt-2">
           Introduction to Elodin
         </div>
-        <.questions questions={default_onboard_questions()} selected={1} />
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
       </div>
       <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
         <div class="w-full flex flex-col items-end">
@@ -654,7 +670,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="w-full text-2xl text-space text-black font-medium mt-2">
           Introduction to Elodin
         </div>
-        <.questions questions={default_onboard_questions()} selected={2} />
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={2} />
       </div>
       <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
         <div class="w-full flex flex-col items-end">
@@ -733,7 +749,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="w-full text-2xl text-space text-black font-medium mt-2">
           Introduction to Elodin
         </div>
-        <.questions questions={default_onboard_questions()} selected={3} />
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={3} />
       </div>
       <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
         <div class="w-full flex flex-col items-end">
@@ -827,7 +843,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="w-full text-2xl text-space text-black font-medium mt-2">
           Introduction to Elodin
         </div>
-        <.questions questions={default_onboard_questions()} selected={4} />
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={4} />
       </div>
       <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
         <div class="w-full flex flex-col items-end">
