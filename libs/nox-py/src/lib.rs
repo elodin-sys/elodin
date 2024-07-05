@@ -175,6 +175,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Component>()?;
     m.add_class::<conduit_client::Conduit>()?;
     m.add_class::<VectorArrow>()?;
+    m.add_class::<BodyAxes>()?;
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_class::<Integrator>()?;

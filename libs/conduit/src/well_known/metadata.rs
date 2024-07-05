@@ -29,3 +29,14 @@ pub struct VectorArrow {
 impl Asset for VectorArrow {
     const ASSET_NAME: &'static str = "arrow";
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct BodyAxes {
+    pub entity_id: EntityId,
+    pub scale: f32,
+}
+
+impl Asset for BodyAxes {
+    const ASSET_NAME: &'static str = "body_axes";
+}
