@@ -4,6 +4,7 @@ use crate::client::MsgPair;
 use crate::query::MetadataStore;
 use crate::ser_de::ColumnValue;
 use crate::well_known::EntityMetadata;
+use crate::well_known::WorldPos;
 use crate::Asset;
 use crate::ColumnPayload;
 use crate::ComponentExt;
@@ -15,6 +16,8 @@ use crate::{
     Component, ComponentId, ComponentValue, ControlMsg, EntityId, Packet, Payload, StreamId,
 };
 use bevy::ecs::system::SystemParam;
+use bevy::math::DQuat;
+use bevy::math::DVec3;
 use bevy::prelude::*;
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
@@ -231,12 +234,12 @@ impl AppExt for bevy::app::App {
         adapter: Box<dyn ComponentAdapter + Send + Sync>,
     ) -> &mut Self {
         let mut metadata = self
-            .world
+            .world_mut()
             .get_resource_or_insert_with(MetadataStore::default);
         metadata.push(C::metadata());
 
         let mut map = self
-            .world
+            .world_mut()
             .get_resource_or_insert_with(|| ComponentMap(HashMap::default()));
 
         map.0.insert(C::COMPONENT_ID, adapter);
@@ -249,7 +252,9 @@ impl AppExt for bevy::app::App {
         &mut self,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self {
-        let mut map = self.world.get_resource_or_insert_with(AssetMap::default);
+        let mut map = self
+            .world_mut()
+            .get_resource_or_insert_with(AssetMap::default);
         map.0.insert(R::COMPONENT_ID, adapter);
         self.add_systems(Update, sync_asset::<R>);
         self.add_systems(Update, query_asset::<R>);
@@ -387,7 +392,7 @@ fn recv_system(args: RecvSystemArgs) {
                 );
             }
             Msg::Control(ControlMsg::Exit) => {
-                exit.send(AppExit);
+                exit.send(AppExit::Success);
             }
             Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
                 max_tick_res.0 = *max_tick;
@@ -656,4 +661,20 @@ pub struct Subscription {
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SimPeer {
     tx: Option<flume::Sender<Packet<Payload<Bytes>>>>,
+}
+
+impl WorldPos {
+    pub fn bevy_pos(&self) -> DVec3 {
+        let pos = self.pos;
+        DVec3::new(pos.x, pos.z, -pos.y)
+    }
+
+    pub fn bevy_att(&self) -> DQuat {
+        let att = self.att;
+        let x = att.i;
+        let y = att.k;
+        let z = -att.j;
+        let w = att.w;
+        DQuat::from_xyzw(x, y, z, w)
+    }
 }

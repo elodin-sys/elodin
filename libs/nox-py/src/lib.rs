@@ -4,9 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use conduit::well_known::GizmoType;
 use conduit::{ComponentId, PolarsWorld};
-use nox_ecs::conduit::Asset;
 use nox_ecs::{
     conduit,
     nox::{self, Noxpr},
@@ -63,37 +61,6 @@ impl PyUntypedArrayExt for PyUntypedArray {
         let len = self.shape().iter().product::<usize>() * elem_size;
         let obj = &*self.as_array_ptr();
         std::slice::from_raw_parts(obj.data as *const u8, len)
-    }
-}
-
-#[pyclass]
-#[derive(Clone)]
-pub struct Gizmo {
-    inner: conduit::well_known::Gizmo,
-}
-
-#[pymethods]
-impl Gizmo {
-    #[staticmethod]
-    fn vector(name: String, offset: usize, color: Color) -> Self {
-        Self {
-            inner: conduit::well_known::Gizmo {
-                id: ComponentId::new(&name),
-                ty: GizmoType::Vector {
-                    range: offset..offset + 3,
-                    color: color.inner,
-                },
-            },
-        }
-    }
-
-    pub fn asset_name(&self) -> &'static str {
-        conduit::well_known::Gizmo::ASSET_NAME
-    }
-
-    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
-        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
-        Ok(PyBufBytes { bytes })
     }
 }
 
@@ -207,7 +174,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
     m.add_class::<conduit_client::Conduit>()?;
-    m.add_class::<Gizmo>()?;
+    m.add_class::<VectorArrow>()?;
     m.add_class::<Color>()?;
     m.add_class::<Panel>()?;
     m.add_class::<Integrator>()?;

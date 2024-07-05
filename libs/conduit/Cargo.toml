@@ -40,12 +40,12 @@ futures.version = "0.3.29"
 futures.optional = true
 
 # bevy
-bevy.version = "0.13"
+bevy.version = "0.14"
 bevy.default-features = false
 bevy.features = ["bevy_pbr", "bevy_scene"]
 bevy.optional = true
 big_space.git = "https://github.com/elodin-sys/big_space.git"
-big_space.branch = "no_prop_rot"
+big_space.branch = "no_prop_rot_v0.14"
 big_space.optional = true
 flume.version = "0.11"
 flume.optional = true
