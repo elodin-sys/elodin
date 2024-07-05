@@ -60,7 +60,7 @@ impl PlotDataComponent {
                     ..Default::default()
                 })
             });
-            let line = assets.get_mut(line.clone()).expect("missing line asset");
+            let line = assets.get_mut(line.id()).expect("missing line asset");
             line.data.push(tick as usize, new_value);
             if line.min > new_value {
                 line.min = new_value;

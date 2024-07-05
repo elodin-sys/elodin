@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{well_known::Color, Asset, ComponentId};
+use crate::{well_known::Color, Asset, ComponentId, EntityId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -16,16 +16,16 @@ impl Asset for EntityMetadata {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Gizmo {
+pub struct VectorArrow {
     pub id: ComponentId,
-    pub ty: GizmoType,
+    pub entity_id: EntityId,
+    pub range: Range<usize>,
+    pub color: Color,
+    pub attached: bool,
+    pub body_frame: bool,
+    pub scale: f32,
 }
 
-impl Asset for Gizmo {
-    const ASSET_NAME: &'static str = "gizmo";
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum GizmoType {
-    Vector { range: Range<usize>, color: Color },
+impl Asset for VectorArrow {
+    const ASSET_NAME: &'static str = "arrow";
 }

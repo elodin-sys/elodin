@@ -8,7 +8,7 @@ metadata.dist.dist = false
 
 [dependencies]
 elodin-editor.path = "../../libs/elodin-editor"
-bevy.version = "0.13"
+bevy.version = "0.14"
 bevy.features = []
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]

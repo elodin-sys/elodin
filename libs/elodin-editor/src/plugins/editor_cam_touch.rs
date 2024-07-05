@@ -7,7 +7,6 @@ use bevy::prelude::{Res, ResMut, Resource, Touches};
 use bevy::render::camera::Camera;
 use bevy::transform::components::Transform;
 use bevy_editor_cam::controller::component::EditorCam;
-use std::ops::{Add, Sub};
 
 use crate::ui::tiles;
 
@@ -161,24 +160,6 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
             touch_tracker.curr_pressed = (Some(*touch1), Some(*touch2));
         }
         _ => {}
-    }
-}
-
-pub trait Midpoint {
-    type V: Add + Sub;
-
-    /// Return the value exact halfway between two values
-    fn midpoint(&self, other: Self::V) -> Self::V;
-}
-
-impl Midpoint for Vec2 {
-    type V = Vec2;
-
-    /// Return the vector exact halfway between two vectors
-    fn midpoint(&self, other: Self::V) -> Self::V {
-        let vec_to_other = other - *self;
-        let half = vec_to_other / 2.0;
-        *self + half
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
     },
     client::MsgPair,
     well_known::{
-        self, EntityMetadata, Gizmo, Glb, Material, Mesh as ConduitMesh, Panel, WorldPos,
+        self, EntityMetadata, Glb, Material, Mesh as ConduitMesh, Panel, VectorArrow, WorldPos,
     },
     EntityId,
 };
@@ -34,16 +34,18 @@ impl SyncPlugin {
 
 impl Plugin for SyncPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        let sync_mesh = app.world.register_system(sync_mesh_to_bevy);
-        let sync_material = app.world.register_system(sync_material_to_bevy);
-        let sync_glb = app.world.register_system(sync_glb_to_bevy);
+        let sync_mesh = app.world_mut().register_system(sync_mesh_to_bevy);
+        let sync_material = app.world_mut().register_system(sync_material_to_bevy);
+        let sync_glb = app.world_mut().register_system(sync_glb_to_bevy);
         app.add_plugins(self.plugin.clone())
             .insert_resource(SimPeer::default())
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
             .add_conduit_component::<WorldPos>()
             .add_conduit_component::<well_known::Camera>()
-            .add_conduit_asset::<Gizmo>(Box::new(SyncPostcardAdapter::<Gizmo>::new(None)))
+            .add_conduit_asset::<VectorArrow>(Box::new(SyncPostcardAdapter::<VectorArrow>::new(
+                None,
+            )))
             .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),

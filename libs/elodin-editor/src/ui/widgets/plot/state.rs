@@ -47,7 +47,7 @@ impl GraphBundle {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
         };
-        let render_layers = RenderLayers::layer(layer as u8);
+        let render_layers = RenderLayers::layer(layer);
         let camera = Camera3dBundle {
             camera: Camera {
                 order: 1,
@@ -72,7 +72,7 @@ impl GraphBundle {
             entities,
             range_id,
             enabled_lines: BTreeMap::new(),
-            render_layers,
+            render_layers: render_layers.clone(),
             line_width: 2.0,
         };
         GraphBundle {

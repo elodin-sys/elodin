@@ -156,19 +156,50 @@ impl From<Mesh> for bevy::prelude::Mesh {
     }
 }
 
+impl From<Color> for bevy::prelude::LinearRgba {
+    fn from(val: Color) -> Self {
+        let srgb: bevy::prelude::Srgba = val.into();
+        bevy::prelude::Color::Srgba(srgb).to_linear()
+    }
+}
+
+impl From<Color> for bevy::prelude::Srgba {
+    fn from(val: Color) -> Self {
+        bevy::prelude::Srgba::new(val.r, val.g, val.b, 1.0)
+    }
+}
+
 impl From<Color> for bevy::prelude::Color {
     fn from(val: Color) -> Self {
-        bevy::prelude::Color::rgb(val.r, val.g, val.b)
+        bevy::prelude::Color::srgb(val.r, val.g, val.b)
     }
 }
 
 impl From<bevy::prelude::Color> for Color {
     fn from(value: bevy::prelude::Color) -> Self {
+        let linear = value.to_srgba();
         Self {
-            r: value.r(),
-            g: value.g(),
-            b: value.b(),
+            r: linear.red,
+            g: linear.green,
+            b: linear.blue,
         }
+    }
+}
+
+impl From<bevy::prelude::Srgba> for Color {
+    fn from(value: bevy::prelude::Srgba) -> Self {
+        Self {
+            r: value.red,
+            g: value.green,
+            b: value.blue,
+        }
+    }
+}
+
+impl From<bevy::prelude::LinearRgba> for Color {
+    fn from(value: bevy::prelude::LinearRgba) -> Self {
+        let srgba: bevy::prelude::Srgba = value.into();
+        srgba.into()
     }
 }
 
@@ -181,6 +212,7 @@ impl From<AlphaMode> for bevy::prelude::AlphaMode {
             AlphaMode::Premultiplied => bevy::prelude::AlphaMode::Premultiplied,
             AlphaMode::Add => bevy::prelude::AlphaMode::Add,
             AlphaMode::Multiply => bevy::prelude::AlphaMode::Multiply,
+            AlphaMode::AlphaToCoverage => bevy::prelude::AlphaMode::AlphaToCoverage,
         }
     }
 }
@@ -194,6 +226,7 @@ impl From<bevy::prelude::AlphaMode> for AlphaMode {
             bevy::prelude::AlphaMode::Premultiplied => AlphaMode::Premultiplied,
             bevy::prelude::AlphaMode::Add => AlphaMode::Add,
             bevy::prelude::AlphaMode::Multiply => AlphaMode::Multiply,
+            bevy::prelude::AlphaMode::AlphaToCoverage => AlphaMode::AlphaToCoverage,
         }
     }
 }
@@ -586,6 +619,7 @@ impl Material {
             opaque_render_method: self.opaque_render_method.into(),
             deferred_lighting_pass_id: self.deferred_lighting_pass_id,
             lightmap_exposure: 0.0,
+            ..Default::default()
         }
     }
 }
@@ -599,20 +633,20 @@ impl Material {
             base_color: value.base_color.into(),
             base_color_texture: value
                 .base_color_texture
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             emissive: value.emissive.into(),
             emissive_texture: value
                 .emissive_texture
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             perceptual_roughness: value.perceptual_roughness,
             metallic: value.metallic,
             metallic_roughness_texture: value
                 .metallic_roughness_texture
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             reflectance: value.reflectance,
@@ -624,13 +658,13 @@ impl Material {
             attenuation_color: value.attenuation_color.into(),
             normal_map_texture: value
                 .normal_map_texture
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             flip_normal_map_y: value.flip_normal_map_y,
             occlusion_texture: value
                 .occlusion_texture
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             double_sided: value.double_sided,
@@ -641,7 +675,7 @@ impl Material {
             depth_bias: value.depth_bias,
             depth_map: value
                 .depth_map
-                .and_then(|id| images.get(id))
+                .and_then(|id| images.get(&id))
                 .cloned()
                 .map(Image::from),
             parallax_depth_scale: value.parallax_depth_scale,

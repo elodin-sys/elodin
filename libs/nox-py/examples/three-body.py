@@ -72,5 +72,8 @@ w.spawn(
     name="Viewport 1",
 )
 
+
+w.spawn(el.VectorArrow(a, "world_vel", offset=3, body_frame=False, scale=1.0))
+
 sys = el.six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)

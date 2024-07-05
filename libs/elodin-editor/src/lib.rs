@@ -1,15 +1,11 @@
 use std::time::Duration;
 
 use bevy::{
-    asset::{embedded_asset, AssetMetaCheck},
+    asset::embedded_asset,
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
-    math::DVec3,
-    pbr::{
-        DirectionalLightShadowMap, ScreenSpaceAmbientOcclusionQualityLevel,
-        ScreenSpaceAmbientOcclusionSettings,
-    },
+    pbr::DirectionalLightShadowMap,
     prelude::*,
     render::{
         camera::{Exposure, PhysicalCameraParameters},
@@ -23,7 +19,6 @@ use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
 use bevy_mod_picking::prelude::*;
-use bevy_tweening::TweeningPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use conduit::{
     well_known::{Viewport, WorldPos},
@@ -82,7 +77,8 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AssetMetaCheck::Never)
+        app
+            //.insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(
                 DefaultPlugins
@@ -112,9 +108,15 @@ impl Plugin for EditorPlugin {
             .insert_resource(WinitSettings {
                 focused_mode: bevy::winit::UpdateMode::Reactive {
                     wait: Duration::from_millis(16),
+                    react_to_device_events: true,
+                    react_to_user_events: true,
+                    react_to_window_events: true,
                 },
-                unfocused_mode: bevy::winit::UpdateMode::ReactiveLowPower {
-                    wait: Duration::from_millis(16),
+                unfocused_mode: bevy::winit::UpdateMode::Reactive {
+                    wait: Duration::from_millis(32),
+                    react_to_device_events: false,
+                    react_to_user_events: true,
+                    react_to_window_events: true,
                 },
             })
             .init_resource::<tiles::ViewportContainsPointer>()
@@ -129,7 +131,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
-            .add_plugins(TweeningPlugin)
+            //.add_plugins(TweeningPlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::widgets::plot::PlotPlugin)
             .add_systems(Startup, setup_floating_origin)
@@ -138,7 +140,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
             .add_systems(Update, set_floating_origin)
-            .insert_resource(ClearColor(Color::hex("#0C0C0C").unwrap()));
+            .insert_resource(ClearColor(Color::Srgba(Srgba::hex("#0C0C0C").unwrap())));
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
@@ -179,25 +181,12 @@ fn spawn_main_camera(
     viewport: &Viewport,
 ) -> (Entity, Option<Entity>, Option<Entity>) {
     // For adding features incompatible with wasm:
-    if cfg!(not(target_arch = "wasm32")) {
-        // .insert(ScreenSpaceAmbientOcclusionBundle {
-        //     settings: ScreenSpaceAmbientOcclusionSettings {
-        //         quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
-        //     },
-        //     ..Default::default()
-        // });
-        // NOTE: Crashes custom camera viewport
-        // camera.insert(TemporalAntiAliasBundle::default());
 
-        commands.spawn(ScreenSpaceAmbientOcclusionSettings {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium,
-        });
-    }
     let mut main_camera_layers = RenderLayers::default();
     let mut grid_layers = RenderLayers::none();
     if let Some(grid_layer) = render_layer_alloc.alloc() {
-        main_camera_layers = main_camera_layers.with(grid_layer as u8);
-        grid_layers = grid_layers.with(grid_layer as u8);
+        main_camera_layers = main_camera_layers.with(grid_layer);
+        grid_layers = grid_layers.with(grid_layer);
     }
     let grid_visibility = if viewport.show_grid {
         Visibility::Visible
@@ -208,13 +197,12 @@ fn spawn_main_camera(
         .spawn((
             bevy_infinite_grid::InfiniteGridBundle {
                 settings: bevy_infinite_grid::InfiniteGridSettings {
-                    minor_line_color: Color::rgba(1.0, 1.0, 1.0, 0.02),
-                    major_line_color: Color::rgba(1.0, 1.0, 1.0, 0.05),
-                    z_axis_color: Color::hex("#264FFF").unwrap(),
-                    x_axis_color: Color::hex("#EE3A43").unwrap(),
+                    minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+                    major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+                    z_axis_color: Color::Srgba(Srgba::hex("#264FFF").unwrap()),
+                    x_axis_color: Color::Srgba(Srgba::hex("#EE3A43").unwrap()),
                     fadeout_distance: 50_000.0,
                     scale: 0.1,
-                    shadow_color: None,
                     ..Default::default()
                 },
                 visibility: grid_visibility,
@@ -236,6 +224,8 @@ fn spawn_main_camera(
                 aperture_f_stops: 2.8,
                 shutter_speed_s: 1.0 / 200.0,
                 sensitivity_iso: 400.0,
+                // full frame sensor height
+                sensor_height: 24.0 / 1000.0,
             }),
             ..default()
         },
@@ -255,7 +245,6 @@ fn spawn_main_camera(
     ));
 
     camera.insert(BloomSettings { ..default() });
-
     camera.insert(EnvironmentMapLight {
         diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
         specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
@@ -441,22 +430,15 @@ pub fn sync_pos(
 ) {
     query
         .iter_mut()
-        .for_each(|(mut transform, mut grid_cell, pos)| {
-            let WorldPos { pos, att } = pos;
-
-            // Convert from Z-up to Y-up
-            let pos = [pos.x, pos.z, -pos.y];
-            let x = att.i as f32;
-            let y = att.k as f32;
-            let z = -att.j as f32;
-            let w = att.w as f32;
-
-            let (new_grid_cell, translation) =
-                floating_origin.translation_to_grid(DVec3::from_array(pos));
+        .for_each(|(mut transform, mut grid_cell, world_pos)| {
+            // Converts from Z-up to Y-up
+            let pos = world_pos.bevy_pos();
+            let att = world_pos.bevy_att();
+            let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
             *grid_cell = new_grid_cell;
             *transform = bevy::prelude::Transform {
                 translation,
-                rotation: Quat::from_xyzw(x, y, z, w),
+                rotation: att.as_quat(),
                 ..Default::default()
             }
         });

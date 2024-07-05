@@ -1,14 +1,14 @@
 use crate::MainCamera;
-use bevy::math::DVec3;
+use bevy::animation::{AnimationTarget, AnimationTargetId};
+use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
 use bevy::render::view::RenderLayers;
 use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use bevy_egui::EguiContexts;
 use bevy_mod_picking::prelude::*;
-use bevy_tweening::lens::TransformScaleLens;
-use bevy_tweening::{EaseFunction, Lens, Tween};
-use std::{f32::consts, time::Duration};
+use std::f32::consts;
 
 pub struct NavigationGizmoPlugin;
 
@@ -26,54 +26,84 @@ pub struct NavGizmoCamera;
 fn cube_color_highlight(
     event: Listener<Pointer<Over>>,
     mut target_query: Query<Entity>,
+    mut animations: ResMut<Assets<AnimationClip>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
     if let Ok(entity) = target_query.get_mut(event.target) {
-        let tween = Tween::new(
-            EaseFunction::SineInOut,
-            Duration::from_millis(100),
-            TransformScaleLens {
-                start: Vec3::splat(1.0),
-                end: Vec3::splat(1.3),
+        let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
+        let mut animation = AnimationClip::default();
+
+        animation.add_curve_to_target(
+            target,
+            VariableCurve {
+                keyframe_timestamps: vec![0.0, 0.1],
+                keyframes: Keyframes::Scale(vec![Vec3::splat(1.0), Vec3::splat(1.3)]),
+                interpolation: Interpolation::Linear,
             },
         );
+        let (graph, animation_index) = AnimationGraph::from_clip(animations.add(animation));
+
+        let mut player = AnimationPlayer::default();
+
+        player.play(animation_index);
         commands
             .entity(entity)
-            .insert(bevy_tweening::Animator::new(tween));
+            .insert(graphs.add(graph))
+            .insert(player)
+            .insert(AnimationTarget {
+                id: target,
+                player: entity,
+            });
     }
 }
 
 fn cube_color_reset(
     event: Listener<Pointer<Out>>,
     mut target_query: Query<Entity>,
+    mut animations: ResMut<Assets<AnimationClip>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
     if let Ok(entity) = target_query.get_mut(event.target) {
-        let tween = Tween::new(
-            EaseFunction::SineInOut,
-            Duration::from_millis(100),
-            TransformScaleLens {
-                start: Vec3::splat(1.3),
-                end: Vec3::splat(1.0),
+        let target = AnimationTargetId::from_name(&Name::new(entity.to_string()));
+        let mut animation = AnimationClip::default();
+
+        animation.add_curve_to_target(
+            target,
+            VariableCurve {
+                keyframe_timestamps: vec![0.0, 0.1],
+                keyframes: Keyframes::Scale(vec![Vec3::splat(1.3), Vec3::splat(1.0)]),
+                interpolation: Interpolation::Linear,
             },
         );
+        let (graph, animation_index) = AnimationGraph::from_clip(animations.add(animation));
+
+        let mut player = AnimationPlayer::default();
+
+        player.play(animation_index);
         commands
             .entity(entity)
-            .insert(bevy_tweening::Animator::new(tween));
+            .insert(graphs.add(graph))
+            .insert(player)
+            .insert(AnimationTarget {
+                id: target,
+                player: entity,
+            });
     }
 }
 
 #[derive(Resource, Debug)]
-pub struct RenderLayerAlloc(u32);
+pub struct RenderLayerAlloc(usize);
 
 impl Default for RenderLayerAlloc {
     fn default() -> Self {
-        Self(!1u32)
+        Self(!1usize)
     }
 }
 
 impl RenderLayerAlloc {
-    pub fn alloc(&mut self) -> Option<u32> {
+    pub fn alloc(&mut self) -> Option<usize> {
         let bits = self.0;
         let mut mask = 1;
         for i in 0..32 {
@@ -87,7 +117,7 @@ impl RenderLayerAlloc {
     }
 
     #[allow(dead_code)]
-    pub fn free(&mut self, layer: u32) {
+    pub fn free(&mut self, layer: usize) {
         self.0 |= 1 << layer;
     }
 }
@@ -110,7 +140,7 @@ pub fn spawn_gizmo(
     let Some(render_layer) = render_layer_alloc.alloc() else {
         return (None, None);
     };
-    let render_layers = RenderLayers::layer(render_layer as u8);
+    let render_layers = RenderLayers::layer(render_layer);
     let sphere = meshes.add(Mesh::from(Sphere::new(0.075)));
 
     let nav_gizmo = commands
@@ -131,41 +161,41 @@ pub fn spawn_gizmo(
             crate::ui::colors::bevy::GREEN,
             Transform::from_xyz(0.0, distance, 0.0)
                 .with_rotation(Quat::from_rotation_x(consts::PI * 1.5)),
-            side_clicked_cb(0.0, consts::PI / 2.0),
+            side_clicked_cb(Dir3::NEG_Y),
         ),
         // bottom
         (
             crate::ui::colors::bevy::GREY_900,
             Transform::from_xyz(0.0, -distance, 0.0)
                 .with_rotation(Quat::from_rotation_x(consts::PI / 2.0)),
-            side_clicked_cb(0.0, consts::PI * 1.5),
+            side_clicked_cb(Dir3::Y),
         ),
         // front
         (
             crate::ui::colors::bevy::BLUE,
             Transform::from_xyz(0.0, 0.0, distance),
-            side_clicked_cb(0.0, 0.0),
+            side_clicked_cb(Dir3::NEG_Z),
         ),
         // back
         (
             crate::ui::colors::bevy::GREY_900,
             Transform::from_xyz(0.0, 0.0, -distance)
                 .with_rotation(Quat::from_rotation_y(consts::PI)),
-            side_clicked_cb(consts::PI, 0.0),
+            side_clicked_cb(Dir3::Z),
         ),
         // right
         (
             crate::ui::colors::bevy::RED,
             Transform::from_xyz(distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI / 2.0)),
-            side_clicked_cb(consts::PI / 2.0, 0.0),
+            side_clicked_cb(Dir3::NEG_X),
         ),
         // left
         (
             crate::ui::colors::bevy::GREY_900,
             Transform::from_xyz(-distance, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(consts::PI * 1.5)),
-            side_clicked_cb(consts::PI * 1.5, 0.0),
+            side_clicked_cb(Dir3::X),
         ),
     ];
 
@@ -189,7 +219,7 @@ pub fn spawn_gizmo(
                     ..default()
                 },
                 NavGizmoParent { main_camera },
-                render_layers,
+                render_layers.clone(),
             ))
             .set_parent(nav_gizmo);
         commands
@@ -204,7 +234,7 @@ pub fn spawn_gizmo(
                 On::<Pointer<Over>>::run(cube_color_highlight),
                 On::<Pointer<Out>>::run(cube_color_reset),
                 On::<Pointer<Click>>::run(cb),
-                render_layers,
+                render_layers.clone(),
             ))
             .set_parent(nav_gizmo);
     }
@@ -224,7 +254,7 @@ pub fn spawn_gizmo(
                 camera_3d: Camera3d { ..default() },
                 ..default()
             },
-            render_layers,
+            render_layers.clone(),
             NavGizmoParent { main_camera },
             NavGizmoCamera,
         ))
@@ -270,24 +300,23 @@ pub fn drag_nav_gizmo(
 }
 
 fn side_clicked_cb(
-    yaw: f32,
-    pitch: f32,
+    direction: Dir3,
 ) -> impl Fn(
     Listener<Pointer<Click>>,
-    Query<(Entity, &Transform), With<MainCamera>>,
+    Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
-    Commands,
+    EventWriter<LookToTrigger>,
 ) {
     move |click: Listener<Pointer<Click>>,
-          query: Query<(Entity, &Transform), With<MainCamera>>,
+          query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
-          mut commands: Commands| {
+          mut look_to: EventWriter<LookToTrigger>| {
         let Ok(nav_gizmo) = nav_gizmo.get(click.target) else {
             return;
         };
-        let Ok((entity, old_transform)) = query.get(nav_gizmo.main_camera) else {
+        let Ok((entity, transform, editor_cam)) = query.get(nav_gizmo.main_camera) else {
             return;
         };
 
@@ -295,25 +324,9 @@ fn side_clicked_cb(
             return;
         }
         if click.button == PointerButton::Primary {
-            let mut new_transform = *old_transform;
-            let anchor = Vec3::ZERO;
-            let yaw = Quat::from_rotation_y(yaw);
-            let pitch = Quat::from_rotation_x(-pitch);
-            let radius = (new_transform.translation - anchor).length();
-            new_transform.rotation = yaw * pitch;
-            let tween = Tween::new(
-                EaseFunction::SineInOut,
-                Duration::from_millis(250),
-                OrbitLens {
-                    start: *old_transform,
-                    end: new_transform,
-                    radius,
-                    anchor,
-                },
-            );
-            commands
-                .entity(entity)
-                .insert(bevy_tweening::Animator::new(tween));
+            look_to.send(LookToTrigger::auto_snap_up_direction(
+                direction, entity, transform, editor_cam,
+            ));
         }
     }
 }
@@ -376,20 +389,20 @@ pub fn set_camera_viewport(
     }
 }
 
-struct OrbitLens {
-    start: Transform,
-    end: Transform,
-    radius: f32,
-    anchor: Vec3,
-}
+// struct OrbitLens {
+//     start: Transform,
+//     end: Transform,
+//     radius: f32,
+//     anchor: Vec3,
+// }
 
-impl Lens<Transform> for OrbitLens {
-    fn lerp(&mut self, target: &mut Transform, ratio: f32) {
-        target.rotation = self.start.rotation.slerp(self.end.rotation, ratio);
-        let rot_matrix = Mat3::from_quat(target.rotation);
-        target.translation = self.anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, self.radius));
-    }
-}
+// impl Lens<Transform> for OrbitLens {
+//     fn lerp(&mut self, target: &mut Transform, ratio: f32) {
+//         target.rotation = self.start.rotation.slerp(self.end.rotation, ratio);
+//         let rot_matrix = Mat3::from_quat(target.rotation);
+//         target.translation = self.anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, self.radius));
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

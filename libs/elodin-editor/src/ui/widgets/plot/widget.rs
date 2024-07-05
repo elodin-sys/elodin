@@ -305,7 +305,7 @@ impl Plot {
                                         color.into_bevy(),
                                     ),
                                     config: LineConfig {
-                                        render_layers: graph_state.render_layers,
+                                        render_layers: graph_state.render_layers.clone(),
                                     },
                                 })
                                 .id();
