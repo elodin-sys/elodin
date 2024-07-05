@@ -518,6 +518,9 @@ sat = w.spawn(
     name="OreSat",
 )
 
+# w.spawn(el.VectorArrow(sat, "control_force", color = el.Color(1.0, 0.0, 0.0), scale=2.0))
+# w.spawn(el.VectorArrow(sat, "world_vel", offset=3, body_frame=False, scale=1/2000.0))
+
 rw_1 = w.spawn(
     ReactionWheel(
         rw_force=el.SpatialForce.zero(),
@@ -676,9 +679,9 @@ exec = w.run(
         1.0 / 60.0,
         sensors
         | kalman_filter
-        # | control
-        # | actuator_allocator
-        | calculate_torque
+        | control
+        | actuator_allocator
+        # | calculate_torque
         | saturate_force
         | calculate_speed
         | rw_effector
