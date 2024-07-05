@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 unreal-api.git = "https://github.com/elodin-sys/unreal-rust"
-unreal-api.branch = "feature/bevy-0.13"
+unreal-api.branch = "feature/bevy-0.14"
 unreal-reflect.git = "https://github.com/elodin-sys/unreal-rust"
-unreal-reflect.branch = "feature/bevy-0.13"
-bevy_ecs = "0.13"
-bevy.version = "0.13"
+unreal-reflect.branch = "feature/bevy-0.14"
+bevy_ecs = "0.14"
+bevy.version = "0.14"
 bevy.default-features = false
 log = "0.4"
 tokio = { version = "1.35.1", features = ["full"] }

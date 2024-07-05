@@ -1,4 +1,5 @@
 use bevy::asset::{AssetApp, Assets};
+use bevy::color::ColorToComponents;
 use bevy::core_pipeline::prepass::{
     DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass,
 };
@@ -12,7 +13,8 @@ use bevy::math::Vec4;
 use bevy::pbr::SetMeshViewBindGroup;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
 use bevy::render::render_phase::{
-    DrawFunctions, RenderCommandResult, RenderPhase, SetItemPipeline,
+    DrawFunctions, PhaseItemExtraIndex, RenderCommandResult, SetItemPipeline,
+    ViewSortedRenderPhases,
 };
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
@@ -20,7 +22,6 @@ use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
 use bevy::{
     app::Plugin,
     asset::{load_internal_asset, Handle},
-    core::cast_slice,
     core_pipeline::core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT},
     ecs::{
         component::Component,
@@ -63,7 +64,7 @@ impl Plugin for PlotGpuPlugin {
             .init_asset::<Line>();
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
-        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
@@ -90,11 +91,11 @@ impl Plugin for PlotGpuPlugin {
     }
 
     fn finish(&self, app: &mut bevy::prelude::App) {
-        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
-        let render_device = render_app.world.resource::<RenderDevice>();
+        let render_device = render_app.world().resource::<RenderDevice>();
         let single = BindGroupLayoutEntries::single(
             ShaderStages::VERTEX,
             uniform_buffer::<LineUniform>(true),
@@ -128,7 +129,7 @@ impl LineUniform {
     pub fn new(line_width: f32, color: Color) -> Self {
         Self {
             line_width,
-            color: Vec4::from_array(color.as_rgba_f32()),
+            color: Vec4::from_array(color.to_linear().to_f32_array()),
             #[cfg(feature = "bevy_render/webgl")]
             _padding: Default::default(),
             chunk_size: 1.0,
@@ -413,7 +414,7 @@ fn extract_lines(
             let index = range.start as u64 * 4;
             let data = &line.averaged_data[range];
             let data = &data[..(data.len().min(15_000))];
-            let data = cast_slice(data);
+            let data = bytemuck::cast_slice(data);
             render_queue.0.write_buffer(&buffer, index, data);
         }
         cached_state.state.apply(world)
@@ -421,8 +422,9 @@ fn extract_lines(
 }
 
 type ViewQuery = (
+    Entity,
     &'static ExtractedView,
-    &'static mut RenderPhase<Transparent3d>,
+    //&'static mut ViewSortedRenderPhases<Transparent3d>,
     Option<&'static RenderLayers>,
     (
         Has<NormalPrepass>,
@@ -441,17 +443,22 @@ fn queue_line(
     msaa: Res<Msaa>,
     lines: Query<(Entity, &Handle<Line>, &LineConfig)>,
     mut views: Query<ViewQuery>,
+    mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawLine3d>().unwrap();
 
     for (
+        view_entity,
         view,
-        mut transparent_phase,
+        //mut transparent_phase,
         render_layers,
         (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
     ) in &mut views
     {
-        let render_layers = render_layers.copied().unwrap_or_default();
+        let Some(transparent_phase) = transparent_render_phases.get_mut(&view_entity) else {
+            continue;
+        };
+        let render_layers = render_layers.cloned().unwrap_or_default();
 
         let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
             | MeshPipelineKey::from_hdr(view.hdr);
@@ -486,7 +493,7 @@ fn queue_line(
                 pipeline,
                 distance: 0.,
                 batch_range: 0..1,
-                dynamic_offset: None,
+                extra_index: PhaseItemExtraIndex::NONE,
             });
         }
     }

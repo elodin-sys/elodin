@@ -1,12 +1,10 @@
-use bevy::{
-    ecs::{
-        entity::Entity,
-        system::{Query, Res, ResMut, SystemParam, SystemState},
-        world::World,
-    },
-    utils::smallvec::SmallVec,
+use bevy::ecs::{
+    entity::Entity,
+    system::{Query, Res, ResMut, SystemParam, SystemState},
+    world::World,
 };
 use bevy_egui::egui;
+use smallvec::SmallVec;
 
 use conduit::{bevy::MaxTick, query::MetadataStore, ComponentId, EntityId};
 use egui::Align;

@@ -4,7 +4,6 @@ use std::path::Path;
 
 use bevy::asset::io::*;
 use bevy::prelude::*;
-use bevy::utils::BoxedFuture;
 use reqwest::StatusCode;
 
 #[derive(Default)]
@@ -114,37 +113,26 @@ impl Client {
 }
 
 impl AssetReader for Client {
-    fn read<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> BoxedFuture<'a, Result<Box<Reader<'a>>, AssetReaderError>> {
-        Box::pin(async move {
-            let url = self.url(path)?;
-            let bytes = self.get(url).await?;
-            let reader = VecReader::new(bytes);
-            Ok(Box::new(reader) as Box<Reader<'a>>)
-        })
+    async fn read<'a>(&'a self, path: &'a Path) -> Result<Box<Reader<'a>>, AssetReaderError> {
+        let url = self.url(path)?;
+        let bytes = self.get(url).await?;
+        let reader = VecReader::new(bytes);
+        Ok(Box::new(reader) as Box<Reader<'a>>)
     }
 
-    fn read_meta<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> BoxedFuture<'a, Result<Box<Reader<'a>>, AssetReaderError>> {
-        Box::pin(async move { Err(AssetReaderError::NotFound(path.to_owned())) })
+    async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<Box<Reader<'a>>, AssetReaderError> {
+        Err(AssetReaderError::NotFound(path.to_owned()))
     }
 
-    fn read_directory<'a>(
+    async fn read_directory<'a>(
         &'a self,
         path: &'a Path,
-    ) -> BoxedFuture<'a, Result<Box<PathStream>, AssetReaderError>> {
-        Box::pin(async move { Err(AssetReaderError::NotFound(path.to_owned())) })
+    ) -> Result<Box<PathStream>, AssetReaderError> {
+        Err(AssetReaderError::NotFound(path.to_owned()))
     }
 
-    fn is_directory<'a>(
-        &'a self,
-        _path: &'a Path,
-    ) -> BoxedFuture<'a, Result<bool, AssetReaderError>> {
-        Box::pin(async { Ok(false) })
+    async fn is_directory<'a>(&'a self, _path: &'a Path) -> Result<bool, AssetReaderError> {
+        Ok(false)
     }
 }
 

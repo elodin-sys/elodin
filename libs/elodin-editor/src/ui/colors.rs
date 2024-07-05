@@ -102,14 +102,14 @@ pub trait ColorExt {
 impl ColorExt for Color32 {
     fn into_bevy(self) -> ::bevy::prelude::Color {
         let [r, g, b, a] = self.to_srgba_unmultiplied().map(|c| c as f32 / 255.0);
-        ::bevy::prelude::Color::rgba(r, g, b, a)
+        ::bevy::prelude::Color::srgba(r, g, b, a)
     }
 }
 
 pub mod bevy {
     use bevy::prelude::Color;
-    pub const RED: Color = Color::rgb(0.91, 0.29, 0.08);
-    pub const GREEN: Color = Color::rgb(0.53, 0.87, 0.62);
-    pub const BLUE: Color = Color::rgb(0.08, 0.38, 0.82);
-    pub const GREY_900: Color = Color::rgb(0.2, 0.2, 0.2);
+    pub const RED: Color = Color::srgb(0.91, 0.29, 0.08);
+    pub const GREEN: Color = Color::srgb(0.53, 0.87, 0.62);
+    pub const BLUE: Color = Color::srgb(0.08, 0.38, 0.82);
+    pub const GREY_900: Color = Color::srgb(0.2, 0.2, 0.2);
 }

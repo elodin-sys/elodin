@@ -291,6 +291,7 @@ pub enum AlphaMode {
     Premultiplied,
     Add,
     Multiply,
+    AlphaToCoverage,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]

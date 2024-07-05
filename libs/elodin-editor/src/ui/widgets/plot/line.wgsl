@@ -46,8 +46,8 @@ fn vertex(vertex: VertexInput) -> VertexOutput {
     let x_a = f32(vertex.tick) * line_uniform.chunk_size;
     let pos_a = vec2(x_a, vertex.position_a);
     let pos_b = vec2(x_a + line_uniform.chunk_size, vertex.position_b);
-    let clip_a = (view.projection * vec4(pos_a, 0.0, 1.0)).xy;
-    let clip_b = (view.projection * vec4(pos_b, 0.0, 1.0)).xy;
+    let clip_a = (view.clip_from_view * vec4(pos_a, 0.0, 1.0)).xy;
+    let clip_b = (view.clip_from_view * vec4(pos_b, 0.0, 1.0)).xy;
     let offset_a = resolution * (0.5 * clip_a + 0.5);
     let offset_b = resolution * (0.5 * clip_b + 0.5);
     let x_basis = normalize(offset_b - offset_a);
