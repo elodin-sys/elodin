@@ -5,7 +5,10 @@ use bevy::{
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
-    pbr::DirectionalLightShadowMap,
+    pbr::{
+        wireframe::{WireframeConfig, WireframePlugin},
+        DirectionalLightShadowMap,
+    },
     prelude::*,
     render::{
         camera::{Exposure, PhysicalCameraParameters},
@@ -131,7 +134,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
-            //.add_plugins(TweeningPlugin)
+            .add_plugins(WireframePlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::widgets::plot::PlotPlugin)
             .add_systems(Startup, setup_floating_origin)
@@ -140,6 +143,10 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
             .add_systems(Update, set_floating_origin)
+            .insert_resource(WireframeConfig {
+                global: false,
+                default_color: Color::WHITE,
+            })
             .insert_resource(ClearColor(Color::Srgba(Srgba::hex("#0C0C0C").unwrap())));
 
         #[cfg(target_os = "macos")]

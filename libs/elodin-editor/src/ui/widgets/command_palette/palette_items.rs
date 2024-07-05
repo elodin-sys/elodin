@@ -4,6 +4,7 @@ use bevy::{
         system::{Query, ResMut, SystemParam, SystemState},
         world::World,
     },
+    pbr::wireframe::WireframeConfig,
     prelude::*,
     render::view::Visibility,
 };
@@ -154,6 +155,25 @@ pub fn palette_viewport_items(filter: &str) -> Vec<PaletteItemWrapper> {
                             PaletteItemCreateTileType::Graph,
                             row_margin,
                             String::from("Create Graph"),
+                            matched_char_indices,
+                        ),
+                    );
+                },
+            ),
+        },
+        PaletteItemWrapper {
+            label: String::from("Toggle Wireframe"),
+            group_label: false,
+            match_indices: vec![],
+            widget: Box::new(
+                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
+                    ui.add_widget_with::<PaletteItemViewportToggleWireframe>(
+                        world,
+                        "viewport_create_graph",
+                        (
+                            (request_focus, use_item),
+                            row_margin,
+                            String::from("Toggle Wireframe"),
                             matched_char_indices,
                         ),
                     );
@@ -486,6 +506,41 @@ impl WidgetSystem for PaletteItemSaveReplay<'_> {
 
         if btn.clicked() || use_item {
             event.send(ControlMsg::SaveReplay);
+            command_palette_state.show = false;
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct PaletteItemViewportToggleWireframe<'w> {
+    command_palette_state: ResMut<'w, CommandPaletteState>,
+    wireframe_config: ResMut<'w, WireframeConfig>,
+}
+
+impl WidgetSystem for PaletteItemViewportToggleWireframe<'_> {
+    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let mut state_mut = state.get_mut(world);
+        let mut command_palette_state = state_mut.command_palette_state;
+        let wireframe_enabled = &mut state_mut.wireframe_config.global;
+
+        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
+
+        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
+
+        if request_focus {
+            btn.request_focus();
+        }
+
+        if btn.clicked() || use_item {
+            *wireframe_enabled = !*wireframe_enabled;
             command_palette_state.show = false;
         }
     }

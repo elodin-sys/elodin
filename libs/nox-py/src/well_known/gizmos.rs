@@ -46,3 +46,32 @@ impl VectorArrow {
         Ok(PyBufBytes { bytes })
     }
 }
+
+#[pyclass]
+#[derive(Clone)]
+pub struct BodyAxes {
+    inner: conduit::well_known::BodyAxes,
+}
+
+#[pymethods]
+impl BodyAxes {
+    #[new]
+    #[pyo3(signature = (entity, scale=1.0))]
+    fn new(entity: EntityId, scale: f32) -> Self {
+        Self {
+            inner: conduit::well_known::BodyAxes {
+                entity_id: entity.inner,
+                scale,
+            },
+        }
+    }
+
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::BodyAxes::ASSET_NAME
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
+    }
+}
