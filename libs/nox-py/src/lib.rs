@@ -24,6 +24,7 @@ mod entity;
 mod error;
 mod exec;
 mod graph;
+mod linalg;
 mod pipeline_builder;
 mod query;
 mod sim_runner;
@@ -42,6 +43,7 @@ pub use entity::*;
 pub use error::*;
 pub use exec::*;
 pub use graph::*;
+pub use linalg::*;
 pub use pipeline_builder::*;
 pub use query::*;
 pub use spatial::*;
@@ -185,5 +187,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
+    m.add_function(wrap_pyfunction!(skew, m)?)?;
     Ok(())
 }

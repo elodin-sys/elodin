@@ -11,19 +11,6 @@ def test_q_dist():
     assert jnp.isclose(dist, 1.0, atol=1e-6)
 
 
-def test_skew_symmetric():
-    v = jnp.array([1.0, 2.0, 3.0])
-    skew = util.skew_symmetric(v)
-    expected_skew = jnp.array(
-        [
-            [0.0, -3.0, 2.0],
-            [3.0, 0.0, -1.0],
-            [-2.0, 1.0, 0.0],
-        ]
-    )
-    assert jnp.all(jnp.isclose(skew, expected_skew, atol=1e-6))
-
-
 def test_quat_to_matrix():
     q1 = el.Quaternion.from_axis_angle(jnp.array([1.0, 0.0, 0.0]), jnp.pi)
     mat = util.quat_to_matrix(q1)

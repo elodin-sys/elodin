@@ -50,7 +50,7 @@ fn propogate_state_covariance(
     let one = f64::one();
     let q = (one - c) / omega_norm_squared;
     let r = (omega_norm * dt - s) / (omega_norm_squared * omega_norm);
-    let omega_cross = skew_symmetric_cross(&omega);
+    let omega_cross = omega.skew();
     let omega_cross_square = omega_cross.dot(&omega_cross);
     let eye = Matrix3::eye();
     let phi_00: Matrix3<f64, ArrayRepr> = if omega_norm.into_buf() > 1e-5 {
@@ -129,7 +129,7 @@ impl State {
             let var_r = Matrix::<f64, 3, 3, ArrayRepr>::eye() * sigma.powi(2);
             let body_r = q_hat.inverse() * reference;
             let e = measured_body - body_r;
-            let skew_sym = skew_symmetric_cross(&body_r);
+            let skew_sym = body_r.skew();
             let h: Matrix<f64, 3, 6, ArrayRepr> =
                 Matrix::concat_in_dim([skew_sym, Matrix::<f64, 3, 3, ArrayRepr>::zeros()], 1);
             let h_trans = h.transpose();
@@ -185,12 +185,6 @@ impl State {
             self.omega = Vector::zeros();
         }
     }
-}
-
-fn skew_symmetric_cross(a: &Vector<f64, 3, ArrayRepr>) -> Matrix3<f64, ArrayRepr> {
-    let [x, y, z] = a.parts();
-    let zero = 0.0.into();
-    Matrix::from_scalars([zero, -z, y, z, zero, -x, -y, x, zero])
 }
 
 #[cfg(test)]
@@ -257,13 +251,6 @@ mod tests {
             &array![0.00833324, 0., 0., 0.99996528],
             epsilon = 1e-5
         );
-    }
-
-    #[test]
-    fn test_skew_symmetric_cross() {
-        let out = skew_symmetric_cross(&tensor![1., 2., 3.,]);
-        let expected = tensor![[0., -3., 2.], [3., 0., -1.], [-2., 1., 0.]];
-        assert_relative_eq!(out.inner(), expected.inner(), epsilon = 1e-6);
     }
 
     #[test]
