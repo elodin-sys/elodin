@@ -905,7 +905,7 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
 
     digits -= x.abs().log10().ceil() as i32;
     let y = (10.0f64).powi(digits);
-    (y * x).round() / y
+    (y * x).ceil() / y
 }
 
 #[derive(Debug, Clone)]

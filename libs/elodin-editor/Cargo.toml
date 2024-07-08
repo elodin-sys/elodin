@@ -63,6 +63,7 @@ smallvec.features = ["const_generics", "union"]
 # helpers
 itertools = "0.12.1"
 bytemuck = "1.16.1"
+opener = "0.7.1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
