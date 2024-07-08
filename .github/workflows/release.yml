@@ -40,7 +40,7 @@ permissions:
 on:
   push:
     tags:
-      - '**[0-9]+.[0-9]+.[0-9]+*'
+      - "**[0-9]+.[0-9]+.[0-9]+*"
 
 jobs:
   # Run 'cargo dist plan' (or host) to determine what tasks we need to do
@@ -50,7 +50,7 @@ jobs:
       val: ${{ steps.plan.outputs.manifest }}
       tag: ${{ github.ref_name }}
       tag-flag: ${{ format('--tag={0}', github.ref_name) }}
-      publishing: 'true'
+      publishing: "true"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -124,7 +124,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' 
+          python-version: "3.10"
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
@@ -203,7 +203,7 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -214,7 +214,7 @@ jobs:
             libwayland-dev libxkbcommon-dev libopenblas-dev
       - name: Install Python dependencies
         run: |
-          pip install patchelf jax jaxlib typing_extensions
+          pip install patchelf jax typing_extensions
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -237,10 +237,10 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
       - name: Install Python dependencies
         run: |
-          pip install jax jaxlib typing_extensions
+          pip install jax typing_extensions
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:

@@ -290,7 +290,7 @@ def build_expr(builder, sys):
         sys.call(builder)
         return builder.ret_vars()
     var_array = builder.var_arrays()
-    xla = jax.xla_computation(lambda a: call(a, builder))(var_array)
+    xla = jax.jit(lambda a: call(a, builder), keep_unused=True).lower(var_array).compiler_ir('hlo')
     return xla";
 
         let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
