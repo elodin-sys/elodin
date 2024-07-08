@@ -10,6 +10,6 @@ Run apt-get update && \
 
 Run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile default --target wasm32-unknown-unknown --default-toolchain stable -y
 
-Run pip install maturin patchelf jax jaxlib typing_extensions
+Run pip install maturin patchelf jax typing_extensions
 
 Env PATH /root/.cargo/bin:$PATH

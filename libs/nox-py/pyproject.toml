@@ -12,7 +12,6 @@ classifiers = [
 ]
 dependencies = [
     "jax",
-    "jaxlib",
     "numpy",
     "typing-extensions",
     "polars",

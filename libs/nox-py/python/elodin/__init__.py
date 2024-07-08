@@ -487,17 +487,6 @@ class Scene(Archetype):
     glb: GlbAsset
 
 
-def build_expr(builder: PipelineBuilder, sys: System) -> Any:
-    sys.init(builder)
-
-    def call(args, builder):
-        builder.inject_args(args)
-        sys.call(builder)
-
-    xla = jax.xla_computation(lambda a: call(a, builder))(builder.var_arrays())
-    return xla
-
-
 class World(WorldBuilder):
     def run(
         self,
