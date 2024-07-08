@@ -7,7 +7,7 @@ use crate::{Field, RealField, Repr, Scalar, TensorItem, Vector, MRP};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(pub Vector<T, 4, P>);
-impl<T: TensorItem + Copy, R: Repr> Clone for Quaternion<T, R>
+impl<T: Field, R: Repr> Clone for Quaternion<T, R>
 where
     R::Inner<T::Elem, Const<4>>: Clone,
 {
@@ -15,8 +15,7 @@ where
         Self(self.0.clone())
     }
 }
-impl<T: TensorItem + Copy, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy
-{}
+impl<T: Field, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy {}
 
 impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
     fn default() -> Self {

@@ -216,6 +216,10 @@ macro_rules! dummy_impl_repr {
             ) -> Self::Inner<T1, D1> {
                 todo!()
             }
+
+            fn noop<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+                todo!()
+            }
         }
     };
 }
@@ -484,5 +488,9 @@ impl Repr for Op {
         let zero = T1::zero::<Op>().inner.broadcast(shape.clone());
         let diag = diag.broadcast_in_dim(shape.clone(), smallvec![0]);
         a.eq(b).select(diag, zero)
+    }
+
+    fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.clone()
     }
 }

@@ -1,6 +1,6 @@
 //! Provides functionality for handling vectors in computational tasks, supporting conversion between host and Nox-specific representations, and enabling vector operations like extension, normalization, and cross products.
 use crate::{
-    tensor, ArrayRepr, DefaultRepr, Dim, Field, RealField, Repr, Scalar, Tensor, TensorItem,
+    tensor, ArrayRepr, DefaultRepr, Dim, Field, Matrix, RealField, Repr, Scalar, Tensor, TensorItem,
 };
 use nalgebra::{Const, DimMul, ToTypenum};
 
@@ -64,7 +64,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
     }
 }
 
-impl<T: Field, R: Repr> Vector<T, 3, R> {
+impl<T: RealField, R: Repr> Vector<T, 3, R> {
     /// Computes the cross product of two 3-dimensional vectors.
     pub fn cross(&self, other: &Self) -> Self {
         let [ax, ay, az] = self.parts();
@@ -73,6 +73,20 @@ impl<T: Field, R: Repr> Vector<T, 3, R> {
         let y = &az * &bx - &ax * &bz;
         let z = &ax * &by - &ay * &bx;
         Vector::from_arr([x, y, z])
+    }
+
+    /// Computes the skew-symmetric matrix representation of the vector.
+    /// This is the matrix that, when multiplied with another vector, computes the cross product of the two vectors.
+    pub fn skew(&self) -> Matrix<T, 3, 3, R> {
+        let [x, y, z] = self.parts();
+        Matrix::from_rows(
+            [
+                [T::zero(), -z.clone(), y.clone()],
+                [z.clone(), T::zero(), -x.clone()],
+                [-y.clone(), x.clone(), T::zero()],
+            ]
+            .map(Vector::from_arr),
+        )
     }
 }
 
@@ -97,7 +111,7 @@ impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
 mod tests {
     use std::f64::consts::FRAC_PI_4;
 
-    use nalgebra::vector;
+    use nalgebra::{matrix, vector};
 
     use super::*;
     use crate::ToHost;
@@ -213,5 +227,35 @@ mod tests {
             .unwrap()
             .to_host();
         assert_eq!(out, vector![-FRAC_PI_4, 3.0 * FRAC_PI_4])
+    }
+
+    #[test]
+    fn test_cross() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Vector<f32, 3>, b: Vector<f32, 3>| a.cross(&b))
+            .build()
+            .unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec
+            .run(&client, vector![1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0])
+            .unwrap()
+            .to_host();
+        assert_eq!(out, vector![0.0, 0.0, 1.0])
+    }
+
+    #[test]
+    fn test_skew() {
+        let client = Client::cpu().unwrap();
+        let comp = (|a: Vector<f32, 3>| a.skew()).build().unwrap();
+        let exec = comp.compile(&client).unwrap();
+        let out = exec.run(&client, vector![1.0, 2.0, 3.0]).unwrap().to_host();
+        assert_eq!(
+            out,
+            matrix![
+                0.0, -3.0, 2.0;
+                3.0, 0.0, -1.0;
+                -2.0, 1.0, 0.0
+            ]
+        )
     }
 }
