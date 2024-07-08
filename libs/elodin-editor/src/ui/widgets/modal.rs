@@ -454,7 +454,9 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
             .unwrap_or_else(|| "None");
 
         ui.scope(|ui| {
-            ui.set_enabled(!components.is_empty());
+            if components.is_empty() {
+                ui.disable();
+            }
 
             theme::configure_combo_box(ui.style_mut());
             egui::ComboBox::from_id_source("COMPONENT")

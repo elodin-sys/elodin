@@ -327,17 +327,16 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
     #[allow(clippy::fn_params_excessive_bools)]
     fn tab_ui(
         &mut self,
-        tiles: &Tiles<Pane>,
+        tiles: &mut Tiles<Pane>,
         ui: &mut Ui,
         id: egui::Id,
         tile_id: egui_tiles::TileId,
-        active: bool,
-        is_being_dragged: bool,
+        state: &egui_tiles::TabState,
     ) -> egui::Response {
         let is_selected = self.selected_object.is_tile_selected(tile_id);
         let tab_state = if is_selected {
             TabState::Selected
-        } else if active {
+        } else if state.active {
             TabState::Active
         } else {
             TabState::Inactive
@@ -345,7 +344,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
         let text = self.tab_title_for_tile(tiles, tile_id);
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
-        let galley = text.into_galley(ui, Some(false), f32::INFINITY, font_id);
+        let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id);
         let x_margin = self.tab_title_spacing(ui.visuals());
         let (_, rect) = ui.allocate_space(vec2(
             galley.size().x + x_margin * 4.0,
@@ -356,7 +355,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             .translate(vec2(-3.0 * x_margin, 0.0));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
 
-        if ui.is_rect_visible(rect) && !is_being_dragged {
+        if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let bg_color = match tab_state {
                 TabState::Active => colors::BLACK_BLACK_600,
                 TabState::Selected => colors::PRIMARY_CREAME,

@@ -50,7 +50,7 @@ impl GraphBundle {
         let render_layers = RenderLayers::layer(layer);
         let camera = Camera3dBundle {
             camera: Camera {
-                order: 1,
+                order: 2,
                 hdr: false,
                 ..Default::default()
             },
