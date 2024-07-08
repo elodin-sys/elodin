@@ -161,7 +161,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     }
 }
 
-impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
+impl<T: Field, D: Dim> Tensor<T, D, Op> {
     pub fn index<I: TensorIndex<T, D>>(&self, index: I) -> I::Output {
         index.index(self.clone())
     }

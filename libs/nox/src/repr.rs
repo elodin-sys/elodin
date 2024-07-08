@@ -160,4 +160,6 @@ pub trait Repr {
     fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
         diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1>;
+
+    fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 }

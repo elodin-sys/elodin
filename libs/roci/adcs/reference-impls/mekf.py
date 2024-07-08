@@ -59,7 +59,7 @@ def propogate_state_covariance(
     p = s / omega_norm
     q = (1 - c) / (omega_norm**2)
     r = (omega_norm * dt - s) / (omega_norm**3)
-    omega_cross = skew_symmetric_cross(omega)
+    omega_cross = el.skew(omega)
     omega_cross_square = omega_cross @ omega_cross
     phi_00 = jax.lax.select(
         omega_norm > 1e-5,
@@ -97,7 +97,7 @@ def estimate_attitude(
         body_r = q_hat.inverse() @ measured_reference
         print(f"body_r = {repr(body_r)}")
         e = measured_body - body_r
-        skew_sym = skew_symmetric_cross(body_r)
+        skew_sym = el.skew(body_r)
         print(f"skew_sym = {repr(skew_sym)}")
         H = np.block([skew_sym, np.zeros((3, 3))])
         print(f"H = {repr(H)}")
@@ -117,10 +117,6 @@ def estimate_attitude(
     q_hat = update_quaternion(q_hat, delta_alpha)
     b_hat = b_hat + delta_beta
     return (q_hat, b_hat, p, omega)
-
-
-def skew_symmetric_cross(a: jax.Array) -> jax.Array:
-    return np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
 
 
 ref_a = np.array([0.0, 1.0, 0.0])

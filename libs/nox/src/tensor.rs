@@ -20,8 +20,7 @@ pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
-impl<T: TensorItem + Copy, D: Dim, R: Repr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy
-{}
+impl<T: Field, D: Dim, R: Repr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy {}
 
 impl<T: TensorItem, D: Dim, P: Repr> std::fmt::Debug for Tensor<T, D, P>
 where
@@ -71,13 +70,10 @@ impl<T: Copy> TensorItem for T {
     type Elem = T;
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> Clone for Tensor<T, D, R>
-where
-    R::Inner<T::Elem, D>: Clone,
-{
+impl<T: Field, D: Dim, R: Repr> Clone for Tensor<T, D, R> {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            inner: R::noop(&self.inner),
             phantom: self.phantom,
         }
     }
