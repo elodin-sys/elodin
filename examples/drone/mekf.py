@@ -158,9 +158,9 @@ def update_filter(
         .at[6:9, 3:6]
         .set(jnp.identity(3))
         .at[0:3, 0:3]
-        .set(-util.skew_symmetric(gyro))
+        .set(-el.skew(gyro))
         .at[3:6, 0:3]
-        .set(-util.quat_to_matrix(q).dot(util.skew_symmetric(accel)))
+        .set(-util.quat_to_matrix(q).dot(el.skew(accel)))
         .at[3:6, 12:15]
         .set(-util.quat_to_matrix(q))
     )
@@ -173,11 +173,11 @@ def update_filter(
     H = (
         jnp.zeros(shape=(6, 18))
         .at[0:3, 0:3]
-        .set(util.skew_symmetric(q.inverse() @ jnp.array([0.0, 0.0, 1.0])))
+        .set(el.skew(q.inverse() @ jnp.array([0.0, 0.0, 1.0])))
         .at[0:3, 12:15]
         .set(jnp.identity(3))
         .at[3:6, 0:3]
-        .set(util.skew_symmetric(q.inverse() @ jnp.array([0.0, 1.0, 0.0])))
+        .set(el.skew(q.inverse() @ jnp.array([0.0, 1.0, 0.0])))
         .at[3:6, 15:18]
         .set(jnp.identity(3))
     )

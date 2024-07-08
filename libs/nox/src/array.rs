@@ -1442,6 +1442,10 @@ impl Repr for ArrayRepr {
     ) -> Self::Inner<T1, D1> {
         Array::from_diag(diag)
     }
+
+    fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.clone()
+    }
 }
 
 fn matmul_dims(a: &'_ [usize], b: &'_ [usize]) -> Option<([usize; 2], usize)> {
@@ -1658,6 +1662,22 @@ mod tests {
         let c: Array<f32, Const<1>> = Array { buf: [3.0] };
         let d: Array<f32, Const<3>> = Array::concat_many(&[a, b, c], 0).unwrap();
         assert_eq!(d.buf, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_concat_many() {
+        let a: Array<f32, Const<3>> = Array {
+            buf: [1.0, 2.0, 3.0],
+        };
+        let b: Array<f32, Const<3>> = Array {
+            buf: [4.0, 5.0, 6.0],
+        };
+        let c: Array<f32, Const<3>> = Array {
+            buf: [7.0, 8.0, 9.0],
+        };
+        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many(&[a, b, c], 0).unwrap();
+        assert_eq!(d.buf, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0],]);
     }
 
     #[test]

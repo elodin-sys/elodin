@@ -24,23 +24,13 @@ def quat_dist(q1: el.Quaternion, q2: el.Quaternion) -> jnp.float64:
     return 2 * jnp.arccos(jnp.abs(jnp.dot(q1.vector(), q2.vector())))
 
 
-def skew_symmetric(v: jax.Array) -> jax.Array:
-    return jnp.array(
-        [
-            [0.0, -v[2], v[1]],
-            [v[2], 0.0, -v[0]],
-            [-v[1], v[0], 0.0],
-        ]
-    )
-
-
 def quat_to_matrix(q: el.Quaternion) -> jax.Array:
     q0, q1, q2, s = q.vector()
     v = jnp.array([q0, q1, q2])
     return (
         2.0 * jnp.outer(v, v)
         + jnp.identity(3) * (s**2 - jnp.dot(v, v))
-        + 2.0 * s * skew_symmetric(v)
+        + 2.0 * s * el.skew(v)
     )
 
 

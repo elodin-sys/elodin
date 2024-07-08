@@ -13,6 +13,9 @@ mod tensor;
 mod transfer;
 mod vector;
 
+#[cfg(feature = "jax")]
+mod py;
+
 pub use builder::*;
 pub use client::*;
 pub use comp::*;

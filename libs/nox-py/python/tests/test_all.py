@@ -302,3 +302,17 @@ def test_six_dof_force():
     assert np.isclose(
         x.to_numpy()[0], np.array([0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0]), rtol=1e-5
     ).all()  # values taken from simulink
+
+
+def test_skew():
+    arr = np.array([1.0, 2.0, 3.0])
+    assert np.isclose(
+        el.skew(arr),
+        np.array(
+            [
+                [0.0, -3.0, 2.0],
+                [3.0, 0.0, -1.0],
+                [-2.0, 1.0, 0.0],
+            ]
+        ),
+    ).all()
