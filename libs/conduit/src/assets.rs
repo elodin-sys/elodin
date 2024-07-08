@@ -1,4 +1,4 @@
-use crate::{concat_str, Asset, ComponentId, ComponentType};
+use crate::{concat_str, Asset, ComponentType};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -48,30 +48,23 @@ pub struct AssetStore {
 pub struct AssetItem {
     pub generation: usize,
     pub inner: Bytes,
-    pub component_id: ComponentId,
 }
 
 impl AssetStore {
     pub fn insert<A: Asset + Send + Sync + 'static>(&mut self, val: A) -> Handle<A> {
-        let Handle { id, .. } =
-            self.insert_bytes(A::COMPONENT_ID, postcard::to_allocvec(&val).unwrap());
+        let Handle { id, .. } = self.insert_bytes(postcard::to_allocvec(&val).unwrap());
         Handle {
             id,
             _phantom: PhantomData,
         }
     }
 
-    pub fn insert_bytes(
-        &mut self,
-        component_id: ComponentId,
-        bytes: impl Into<Bytes>,
-    ) -> Handle<()> {
+    pub fn insert_bytes(&mut self, bytes: impl Into<Bytes>) -> Handle<()> {
         let inner = bytes.into();
         let id = self.data.len();
         self.data.push(AssetItem {
             generation: 1,
             inner,
-            component_id,
         });
         Handle {
             id: id as u64,

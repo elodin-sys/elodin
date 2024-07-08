@@ -73,7 +73,7 @@ impl WorldBuilder {
                 let metadata = conduit::Metadata::asset(&name);
                 let component_id = metadata.component_id();
                 let archetype_name = metadata.component_name().into();
-                let inner = self.world.assets.insert_bytes(component_id, bytes.bytes);
+                let inner = self.world.assets.insert_bytes(bytes.bytes);
                 let archetype = Archetype {
                     component_datas: vec![Metadata { inner: metadata }],
                     arrays: vec![],
@@ -93,11 +93,7 @@ impl WorldBuilder {
 
     fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
         let asset = PyAsset::try_new(py, asset)?;
-        let metadata = conduit::Metadata::asset(&asset.name()?);
-        let inner = self
-            .world
-            .assets
-            .insert_bytes(metadata.component_id(), asset.bytes()?);
+        let inner = self.world.assets.insert_bytes(asset.bytes()?);
         Ok(Handle { inner })
     }
 
