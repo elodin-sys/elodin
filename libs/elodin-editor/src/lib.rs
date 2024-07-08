@@ -97,7 +97,8 @@ impl Plugin for EditorPlugin {
                                 min_height: 400.,
                                 ..Default::default()
                             },
-
+                            composite_alpha_mode: bevy::window::CompositeAlphaMode::PostMultiplied,
+                            //transparent: true,
                             prevent_default_event_handling: true,
                             ..default()
                         }),
@@ -139,6 +140,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::ui::widgets::plot::PlotPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
+            .add_systems(Startup, spawn_clear_bg)
             .add_systems(Update, make_entities_selectable)
             .add_systems(Update, sync_pos)
             .add_systems(Update, sync_paused)
@@ -147,7 +149,7 @@ impl Plugin for EditorPlugin {
                 global: false,
                 default_color: Color::WHITE,
             })
-            .insert_resource(ClearColor(Color::Srgba(Srgba::hex("#0C0C0C").unwrap())));
+            .insert_resource(ClearColor(Color::NONE));
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
@@ -179,6 +181,46 @@ fn setup_floating_origin(mut commands: Commands) {
     ));
 }
 
+fn spawn_clear_bg(mut commands: Commands) {
+    commands.spawn((Camera2dBundle::default(), IsDefaultUiCamera));
+    let bg_color = Color::Srgba(Srgba::hex("#0C0C0C").unwrap());
+    // root node
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Stretch,
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            parent.spawn(NodeBundle {
+                style: Style {
+                    height: Val::Px(56.0),
+                    ..default()
+                },
+                background_color: if cfg!(target_os = "macos") {
+                    Color::NONE.into()
+                } else {
+                    bg_color.into()
+                },
+                ..default()
+            });
+
+            parent.spawn(NodeBundle {
+                style: Style {
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                background_color: bg_color.into(),
+                ..default()
+            });
+        });
+}
+
 fn spawn_main_camera(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -187,8 +229,6 @@ fn spawn_main_camera(
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
     viewport: &Viewport,
 ) -> (Entity, Option<Entity>, Option<Entity>) {
-    // For adding features incompatible with wasm:
-
     let mut main_camera_layers = RenderLayers::default();
     let mut grid_layers = RenderLayers::none();
     if let Some(grid_layer) = render_layer_alloc.alloc() {
@@ -224,6 +264,8 @@ fn spawn_main_camera(
                 .looking_at(Vec3::ZERO, Vec3::Y),
             camera: Camera {
                 hdr: false,
+                clear_color: ClearColorConfig::None,
+                order: 1,
                 ..Default::default()
             },
             tonemapping: Tonemapping::TonyMcMapface,
@@ -234,6 +276,7 @@ fn spawn_main_camera(
                 // full frame sensor height
                 sensor_height: 24.0 / 1000.0,
             }),
+
             ..default()
         },
         main_camera_layers,
@@ -286,7 +329,8 @@ fn setup_titlebar(
 ) {
     use cocoa::{
         appkit::{
-            NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
+            NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+            NSWindowToolbarStyle,
         },
         base::{id, nil, BOOL},
     };
@@ -300,6 +344,7 @@ fn setup_titlebar(
 
     for (id, _) in &windows {
         let window = winit_windows.get_window(id).unwrap();
+        window.set_blur(true);
         use raw_window_handle::HasRawWindowHandle;
         let handle = window.raw_window_handle();
         let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
@@ -346,6 +391,14 @@ fn setup_titlebar(
                 panic!("null toolbar");
             }
             window.setTitlebarAppearsTransparent_(true);
+            let color = NSColor::clearColor(nil);
+            window.setBackgroundColor_(NSColor::colorWithRed_green_blue_alpha_(
+                color,
+                (0x0C / 0xFF) as f64,
+                (0x0C / 0xFF) as f64,
+                (0x0C / 0xFF) as f64,
+                0.7,
+            ));
             window.setStyleMask_(
                 NSWindowStyleMask::NSFullSizeContentViewWindowMask
                     | NSWindowStyleMask::NSResizableWindowMask

@@ -59,7 +59,6 @@ impl WidgetSystem for Hierarchy<'_> {
                 .resizable(true)
                 .frame(egui::Frame {
                     fill: colors::PRIMARY_SMOKE,
-                    stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
                     inner_margin: egui::Margin::same(4.0),
                     ..Default::default()
                 })
@@ -143,13 +142,10 @@ pub fn header(
             egui::Frame::none()
                 .inner_margin(egui::Margin::symmetric(16.0, 16.0))
                 .show(ui, |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new("ENTITIES")
-                                .color(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
-                        )
-                        .wrap(false),
-                    );
+                    ui.add(egui::Label::new(
+                        egui::RichText::new("ENTITIES")
+                            .color(colors::with_opacity(colors::PRIMARY_CREAME, 0.4)),
+                    ));
                 });
         }
     })

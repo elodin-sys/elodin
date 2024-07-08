@@ -17,24 +17,22 @@ nalgebra = "0.32"
 # bevy
 bevy.version = "0.14"
 bevy.features = ["wayland", ]
-bevy_egui.git = "https://github.com/Friz64/bevy_egui.git"
-bevy_egui.branch = "bevy-0.14"
-egui.version = "0.27"
+bevy_egui.version = "0.28"
+egui.version = "0.28"
 egui.features = ["rayon"]
-egui_tiles = "0.8"
+egui_tiles = "0.9"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
 bevy_infinite_grid.git = "https://github.com/tychedelia/bevy_infinite_grid.git"
 bevy_infinite_grid.branch = "main"
-bevy_mod_picking = { version = "0.20.0-rc.0", default-features = false, features = [
+bevy_mod_picking = { version = "0.20.0", default-features = false, features = [
     "backend_raycast",
 ] }
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot_v0.14"
-bevy_editor_cam.git = "https://github.com/aevyrie/bevy_editor_cam.git"
-bevy_editor_cam.branch = "bevy-0.14"
-bevy_framepace.git = "https://github.com/aevyrie/bevy_framepace.git"
+bevy_editor_cam = "0.3.0"
+bevy_framepace = "0.17"
 
 # rand
 fastrand.version = "2"

@@ -252,15 +252,15 @@ impl RootWidgetSystem for Titlebar<'_> {
         egui::TopBottomPanel::top("title_bar")
             .frame(
                 egui::Frame {
-                    fill: colors::PRIMARY_ONYX,
+                    fill: Color32::TRANSPARENT,
                     stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
                     ..Default::default()
                 }
                 .inner_margin(Margin::same(titlebar_margin).left(16.0).right(16.0)),
             )
+            .exact_height(titlebar_height)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.set_height(titlebar_height - titlebar_margin * 2.0);
                 ui.horizontal_centered(|ui| {
                     ui.add_space(traffic_light_offset);
                     if cfg!(target_family = "wasm") {
@@ -282,16 +282,6 @@ impl RootWidgetSystem for Titlebar<'_> {
                         }
                         ui.add_space(8.0);
                     }
-                    if ui
-                        .add(
-                            EImageButton::new(icon_side_bar_left)
-                                .scale(titlebar_scale, titlebar_scale)
-                                .bg_color(Color32::TRANSPARENT),
-                        )
-                        .clicked()
-                    {
-                        sidebar_state.left_open = !sidebar_state.left_open;
-                    };
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
@@ -303,6 +293,17 @@ impl RootWidgetSystem for Titlebar<'_> {
                             .clicked()
                         {
                             sidebar_state.right_open = !sidebar_state.right_open;
+                        };
+                        ui.add_space(4.0);
+                        if ui
+                            .add(
+                                EImageButton::new(icon_side_bar_left)
+                                    .scale(titlebar_scale, titlebar_scale)
+                                    .bg_color(Color32::TRANSPARENT),
+                            )
+                            .clicked()
+                        {
+                            sidebar_state.left_open = !sidebar_state.left_open;
                         };
                     });
                 });
@@ -371,51 +372,44 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
                     ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
                 }
 
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::none())
-                    .show_inside(ui, |ui| {
-                        if landscape_layout {
-                            ui.add_widget_with::<Hierarchy>(
+                if landscape_layout {
+                    ui.add_widget_with::<Hierarchy>(
+                        world,
+                        "hierarchy",
+                        (false, icon_search, width),
+                    );
+
+                    ui.add_widget_with::<Inspector>(
+                        world,
+                        "inspector",
+                        (false, inspector_icons, width),
+                    );
+                } else {
+                    egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "section_bottom")
+                        .resizable(true)
+                        .frame(egui::Frame::default())
+                        .default_height(200.0)
+                        .max_height(width * 0.5)
+                        .show_inside(ui, |ui| {
+                            let hierarchy_width = ui.add_widget_with::<Hierarchy>(
                                 world,
                                 "hierarchy",
-                                (false, icon_search, width),
+                                (true, icon_search, width),
                             );
+
+                            let inspector_width = width - hierarchy_width;
 
                             ui.add_widget_with::<Inspector>(
                                 world,
                                 "inspector",
-                                (false, inspector_icons, width),
+                                (true, inspector_icons, inspector_width),
                             );
-                        } else {
-                            egui::TopBottomPanel::new(
-                                egui::panel::TopBottomSide::Bottom,
-                                "section_bottom",
-                            )
-                            .resizable(true)
-                            .frame(egui::Frame::default())
-                            .default_height(200.0)
-                            .max_height(width * 0.5)
-                            .show_inside(ui, |ui| {
-                                let hierarchy_width = ui.add_widget_with::<Hierarchy>(
-                                    world,
-                                    "hierarchy",
-                                    (true, icon_search, width),
-                                );
+                        });
 
-                                let inspector_width = width - hierarchy_width;
+                    ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
+                }
 
-                                ui.add_widget_with::<Inspector>(
-                                    world,
-                                    "inspector",
-                                    (true, inspector_icons, inspector_width),
-                                );
-                            });
-
-                            ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
-                        }
-
-                        ui.add_widget::<tiles::TileSystem>(world, "tile_system");
-                    });
+                ui.add_widget::<tiles::TileSystem>(world, "tile_system");
             });
     }
 }

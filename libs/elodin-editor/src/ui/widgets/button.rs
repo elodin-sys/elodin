@@ -261,7 +261,9 @@ impl EButton {
 
         // Paint the UI
         if ui.is_rect_visible(rect) {
-            ui.set_enabled(!self.disabled);
+            if self.disabled {
+                ui.disable();
+            }
 
             let style = ui.style_mut();
             style.visuals.widgets.inactive.bg_fill = self.bg_color;
