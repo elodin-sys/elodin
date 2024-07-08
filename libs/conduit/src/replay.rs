@@ -264,9 +264,8 @@ fn send_sub(
     tick: u64,
     entity_ids: &[EntityId],
 ) -> Result<(), Error> {
-    let comp_id = sub.component_id;
     let col = world
-        .column_at_tick(comp_id, tick)
+        .column_at_tick(sub.component_id, tick)
         .ok_or(Error::ComponentNotFound)?;
     if col.metadata.asset {
         let mut changed = false;
@@ -292,7 +291,7 @@ fn send_sub(
                 payload: Payload::ControlMsg(ControlMsg::Asset {
                     entity_id,
                     bytes: value.inner.clone(),
-                    component_id: value.component_id,
+                    component_id: sub.component_id,
                     asset_index: id,
                 }),
             };
