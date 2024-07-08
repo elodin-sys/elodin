@@ -1,547 +1,337 @@
+use std::collections::BTreeMap;
+
 use bevy::{
     ecs::{
+        entity::Entity,
+        event::EventWriter,
         query::With,
-        system::{Query, ResMut, SystemParam, SystemState},
+        system::{Commands, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
     pbr::wireframe::WireframeConfig,
-    prelude::*,
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
-use conduit::ControlMsg;
+use conduit::{
+    query::MetadataStore,
+    well_known::{BodyAxes, EntityMetadata},
+    ComponentId, ControlMsg,
+};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
-use crate::ui::{
-    colors,
-    tiles::{self, NewTileState},
-    widgets::{WidgetSystem, WidgetSystemExt},
-    HdrEnabled,
+use crate::{
+    plugins::navigation_gizmo::RenderLayerAlloc,
+    ui::{
+        tiles,
+        widgets::plot::{default_component_values, GraphBundle},
+        EntityData, HdrEnabled,
+    },
 };
 
-use super::{CommandPaletteIcons, CommandPaletteState, PaletteItem};
+pub struct PalettePage {
+    items: Vec<PaletteItem>,
+    pub label: Option<String>,
+    initialized: bool,
+}
 
-type CommandPaletteOptionWidget = Box<
-    dyn Fn(&mut egui::Ui, &mut World, (bool, bool), Vec<usize>, &CommandPaletteIcons, egui::Margin),
->;
+impl PalettePage {
+    pub fn new(items: Vec<PaletteItem>) -> Self {
+        Self {
+            items,
+            initialized: false,
+            label: None,
+        }
+    }
 
-pub struct PaletteItemWrapper {
+    pub fn label(mut self, label: impl ToString) -> Self {
+        self.label = Some(label.to_string());
+        self
+    }
+
+    pub fn initialize(&mut self, world: &mut World) {
+        if !self.initialized {
+            for item in &mut self.items {
+                item.system.initialize(world)
+            }
+        }
+    }
+
+    pub fn filter(&mut self, filter: &str) -> Vec<MatchedPaletteItem<'_>> {
+        let matcher = SkimMatcherV2::default();
+        self.items
+            .iter_mut()
+            .filter_map(|item| {
+                let (_, match_indices) = matcher.fuzzy_indices(&item.label, filter)?;
+                Some(MatchedPaletteItem {
+                    item,
+                    match_indices,
+                })
+            })
+            .collect()
+    }
+}
+
+pub struct PaletteItem {
     pub label: String,
-    pub group_label: bool,
+    pub header: String,
+    pub icon: PaletteIcon,
+    pub system: Box<dyn System<In = (), Out = PaletteEvent>>,
+}
+
+pub enum PaletteIcon {
+    None,
+    Link,
+}
+
+impl PaletteItem {
+    pub fn new<M, I: IntoSystem<(), PaletteEvent, M>>(
+        label: impl ToString,
+        header: impl ToString,
+        system: I,
+    ) -> Self {
+        Self {
+            label: label.to_string(),
+            header: header.to_string(),
+            system: Box::new(I::into_system(system)),
+            icon: PaletteIcon::None,
+        }
+    }
+
+    pub fn icon(mut self, icon: PaletteIcon) -> Self {
+        self.icon = icon;
+        self
+    }
+}
+
+pub enum PaletteEvent {
+    NextPage {
+        prev_page_label: Option<String>,
+        next_page: PalettePage,
+    },
+    Exit,
+}
+
+impl From<PalettePage> for PaletteEvent {
+    fn from(v: PalettePage) -> Self {
+        Self::NextPage {
+            prev_page_label: None,
+            next_page: v,
+        }
+    }
+}
+
+pub struct MatchedPaletteItem<'a> {
+    pub item: &'a mut PaletteItem,
     pub match_indices: Vec<usize>,
-    pub widget: CommandPaletteOptionWidget,
 }
 
-pub fn show_palette_item(
-    palette_item: &PaletteItemWrapper,
-    matcher: &SkimMatcherV2,
-    filter: &str,
-) -> Option<Vec<usize>> {
-    if palette_item.group_label {
-        return Some(vec![]);
-    }
+const VIEWPORT_LABEL: &str = "VIEWPORT";
+const SIMULATION_LABEL: &str = "SIMULATION";
+const HELP_LABEL: &str = "HELP";
 
-    if let Some((_, indices)) = matcher.fuzzy_indices(&palette_item.label, filter) {
-        return Some(indices);
-    }
-
-    None
+fn create_graph() -> PaletteItem {
+    PaletteItem::new(
+        "Create Graph",
+        VIEWPORT_LABEL,
+        |entities: Query<EntityData>| {
+            PalettePage::new(
+                entities
+                    .iter()
+                    .map(|(_, entity, _, metadata)| graph_entity_item(metadata, entity))
+                    .collect(),
+            )
+            .into()
+        },
+    )
 }
 
-pub fn filter_palette_items(
-    palette_items: Vec<PaletteItemWrapper>,
-    filter: &str,
-) -> Vec<PaletteItemWrapper> {
-    let matcher = SkimMatcherV2::default();
-    let mut palette_items_filtered = vec![];
+fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> PaletteItem {
+    PaletteItem::new(
+        entity_metadata.name.clone(),
+        "Entities",
+        move |entities: Query<EntityData>, metadata: Res<MetadataStore>| {
+            let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
+            let items = components
+                .0
+                .keys()
+                .filter_map(|id| metadata.get_metadata(id).cloned())
+                .map(move |item| {
+                    PaletteItem::new(
+                        item.name.clone(),
+                        "Components",
+                        move |entities: Query<EntityData>,
+                              mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+                              mut tile_state: ResMut<tiles::TileState>| {
+                            let component_id = item.component_id();
+                            let Ok((entity_id, _, component_value_map, _)) = entities.get(entity)
+                            else {
+                                return PaletteEvent::Exit;
+                            };
 
-    for palette_item in palette_items {
-        if let Some(indices) = show_palette_item(&palette_item, &matcher, filter) {
-            palette_items_filtered.push(PaletteItemWrapper {
-                match_indices: indices,
-                ..palette_item
-            });
-        }
-    }
-
-    if palette_items_filtered.len() > 1 {
-        palette_items_filtered
-    } else {
-        vec![]
-    }
-}
-
-pub fn palette_viewport_items(filter: &str) -> Vec<PaletteItemWrapper> {
-    let palette_items = vec![
-        PaletteItemWrapper {
-            label: String::from("Viewport"),
-            group_label: true,
-            match_indices: vec![],
-            widget: Box::new(|ui, _, _, _, _, row_margin| {
-                egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Viewport").color(colors::PRIMARY_CREAME_6));
-                });
-            }),
-        },
-        PaletteItemWrapper {
-            label: String::from("Toggle HDR"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemViewportToggleHdr>(
-                        world,
-                        "viewport_toggle_hdr",
-                        (
-                            (request_focus, use_item),
-                            row_margin,
-                            String::from("Toggle HDR"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-        PaletteItemWrapper {
-            label: String::from("Toggle Grid"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemViewportToggleGrid>(
-                        world,
-                        "viewport_toggle_grid",
-                        (
-                            (request_focus, use_item),
-                            row_margin,
-                            String::from("Toggle Grid"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-        PaletteItemWrapper {
-            label: String::from("Create Viewport"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemViewportCreateTile>(
-                        world,
-                        "viewport_create_graph",
-                        (
-                            (request_focus, use_item),
-                            PaletteItemCreateTileType::Viewport,
-                            row_margin,
-                            String::from("Create Viewport"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-        PaletteItemWrapper {
-            label: String::from("Create Graph"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemViewportCreateTile>(
-                        world,
-                        "viewport_create_graph",
-                        (
-                            (request_focus, use_item),
-                            PaletteItemCreateTileType::Graph,
-                            row_margin,
-                            String::from("Create Graph"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-        PaletteItemWrapper {
-            label: String::from("Toggle Wireframe"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemViewportToggleWireframe>(
-                        world,
-                        "viewport_create_graph",
-                        (
-                            (request_focus, use_item),
-                            row_margin,
-                            String::from("Toggle Wireframe"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-    ];
-
-    filter_palette_items(palette_items, filter)
-}
-
-pub fn palette_sim_items(filter: &str) -> Vec<PaletteItemWrapper> {
-    let palette_items = vec![
-        PaletteItemWrapper {
-            label: String::from("Simulation"),
-            group_label: true,
-            match_indices: vec![],
-            widget: Box::new(|ui, _, _, _, _, row_margin| {
-                egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Simulation").color(colors::PRIMARY_CREAME_6));
-                });
-            }),
-        },
-        PaletteItemWrapper {
-            label: String::from("Save Replay"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, _, row_margin| {
-                    ui.add_widget_with::<PaletteItemSaveReplay>(
-                        world,
-                        "save_replay",
-                        (
-                            (request_focus, use_item),
-                            row_margin,
-                            String::from("Save Replay"),
-                            matched_char_indices,
-                        ),
-                    );
-                },
-            ),
-        },
-    ];
-
-    filter_palette_items(palette_items, filter)
-}
-
-pub fn palette_help_items(filter: &str) -> Vec<PaletteItemWrapper> {
-    let palette_items = vec![
-        PaletteItemWrapper {
-            label: String::from("Help"),
-            group_label: true,
-            match_indices: vec![],
-            widget: Box::new(|ui, _, _, _, _, row_margin| {
-                egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Help").color(colors::PRIMARY_CREAME_6));
-                });
-            }),
-        },
-        PaletteItemWrapper {
-            label: String::from("Documentation"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, icons, row_margin| {
-                    ui.add_widget_with::<PaletteItemOpenLink>(
-                        world,
-                        "help_documentation",
-                        (
-                            (request_focus, use_item),
-                            icons.link,
-                            row_margin,
-                            String::from("Documentation"),
-                            matched_char_indices,
-                            String::from("https://docs.elodin.systems"),
-                        ),
-                    );
-                },
-            ),
-        },
-        PaletteItemWrapper {
-            label: String::from("Release Notes"),
-            group_label: false,
-            match_indices: vec![],
-            widget: Box::new(
-                |ui, world, (request_focus, use_item), matched_char_indices, icons, row_margin| {
-                    ui.add_widget_with::<PaletteItemOpenLink>(
-                        world,
-                        "help_release_notes",
-                        (
-                            (request_focus, use_item),
-                            icons.link,
-                            row_margin,
-                            String::from("Release Notes"),
-                            matched_char_indices,
-                            String::from("https://docs.elodin.systems/updates/changelog"),
-                        ),
-                    );
-                },
-            ),
-        },
-    ];
-
-    filter_palette_items(palette_items, filter)
-}
-
-#[derive(SystemParam)]
-pub struct PaletteItemOpenLink<'w> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-}
-
-impl WidgetSystem for PaletteItemOpenLink<'_> {
-    type Args = (
-        (bool, bool),
-        egui::TextureId,
-        egui::Margin,
-        String,
-        Vec<usize>,
-        String,
-    );
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-
-        let (
-            (request_focus, use_item),
-            icon,
-            row_margin,
-            item_label,
-            matched_char_indices,
-            item_url,
-        ) = args;
-
-        let btn = ui.add(
-            PaletteItem::new(item_label, matched_char_indices)
-                .icon(icon)
-                .margin(row_margin),
-        );
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            ui.ctx().open_url(egui::OpenUrl {
-                url: item_url,
-                new_tab: true,
-            });
-
-            command_palette_state.show = false;
-        }
-    }
-}
-
-#[derive(SystemParam)]
-pub struct PaletteItemViewportToggleHdr<'w> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-    hdr_enabled: ResMut<'w, HdrEnabled>,
-}
-
-impl WidgetSystem for PaletteItemViewportToggleHdr<'_> {
-    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let mut hdr_enabled = state_mut.hdr_enabled;
-
-        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
-
-        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            hdr_enabled.0 = !hdr_enabled.0;
-            command_palette_state.show = false;
-        }
-    }
-}
-
-#[derive(SystemParam)]
-pub struct PaletteItemViewportToggleGrid<'w, 's> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-    grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
-}
-
-impl WidgetSystem for PaletteItemViewportToggleGrid<'_, '_> {
-    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let mut grid_visibility = state_mut.grid_visibility;
-
-        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
-
-        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            let all_hidden = grid_visibility
-                .iter()
-                .all(|grid_visibility| grid_visibility == Visibility::Hidden);
-
-            for mut grid_visibility in grid_visibility.iter_mut() {
-                *grid_visibility = if all_hidden {
-                    Visibility::Visible
-                } else {
-                    Visibility::Hidden
-                };
+                            let component_value = component_value_map.0.get(&component_id).unwrap();
+                            let values =
+                                default_component_values(entity_id, &component_id, component_value);
+                            let entities = BTreeMap::from_iter(std::iter::once((
+                                entity_id.to_owned(),
+                                BTreeMap::from_iter(std::iter::once((
+                                    component_id,
+                                    values.clone(),
+                                ))),
+                            )));
+                            let bundle = GraphBundle::new(&mut render_layer_alloc, entities, None);
+                            tile_state.create_graph_tile(None, bundle);
+                            PaletteEvent::Exit
+                        },
+                    )
+                })
+                .collect();
+            PaletteEvent::NextPage {
+                prev_page_label: Some(entity_metadata.name.clone()),
+                next_page: PalettePage::new(items),
             }
-
-            command_palette_state.show = false;
-        }
-    }
+        },
+    )
 }
 
-pub enum PaletteItemCreateTileType {
-    Viewport,
-    Graph,
+fn toggle_body_axes() -> PaletteItem {
+    PaletteItem::new(
+        "Toggle Body Axes",
+        VIEWPORT_LABEL,
+        |entities: Query<EntityData>| {
+            PalettePage::new(
+                entities
+                    .iter()
+                    .filter_map(|(&entity_id, _, value_map, metadata)| {
+                        if value_map.0.contains_key(&ComponentId::new("world_pos")) {
+                            Some(PaletteItem::new(
+                                metadata.name.clone(),
+                                "Entities",
+                                move |mut commands: Commands, query: Query<(Entity, &BodyAxes)>| {
+                                    let mut found = false;
+                                    for (e, axes) in query.iter() {
+                                        if axes.entity_id == entity_id {
+                                            found = true;
+                                            commands.entity(e).remove::<BodyAxes>();
+                                        }
+                                    }
+                                    if !found {
+                                        commands.spawn(BodyAxes {
+                                            entity_id,
+                                            scale: 1.0,
+                                        });
+                                    }
+                                    PaletteEvent::Exit
+                                },
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )
+            .into()
+        },
+    )
 }
 
-#[derive(SystemParam)]
-pub struct PaletteItemViewportCreateTile<'w> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-    new_tile_state: ResMut<'w, tiles::NewTileState>,
+fn create_viewport() -> PaletteItem {
+    PaletteItem::new(
+        "Create Viewport",
+        VIEWPORT_LABEL,
+        |entities: Query<EntityData>| {
+            PalettePage::new(
+                std::iter::once(PaletteItem::new(
+                    "None",
+                    "Entities",
+                    move |mut tile_state: ResMut<tiles::TileState>| {
+                        tile_state.create_viewport_tile(None);
+                        PaletteEvent::Exit
+                    },
+                ))
+                .chain(
+                    entities
+                        .iter()
+                        .filter_map(|(&entity_id, _, value_map, metadata)| {
+                            if value_map.0.contains_key(&ComponentId::new("world_pos")) {
+                                Some(PaletteItem::new(
+                                    metadata.name.clone(),
+                                    "Entities",
+                                    move |mut tile_state: ResMut<tiles::TileState>| {
+                                        tile_state.create_viewport_tile(Some(entity_id));
+                                        PaletteEvent::Exit
+                                    },
+                                ))
+                            } else {
+                                None
+                            }
+                        }),
+                )
+                .collect(),
+            )
+            .into()
+        },
+    )
 }
 
-impl WidgetSystem for PaletteItemViewportCreateTile<'_> {
-    type Args = (
-        (bool, bool),
-        PaletteItemCreateTileType,
-        egui::Margin,
-        String,
-        Vec<usize>,
-    );
-    type Output = ();
+impl Default for PalettePage {
+    fn default() -> PalettePage {
+        PalettePage::new(vec![
+            PaletteItem::new(
+                "Toggle Wireframe",
+                VIEWPORT_LABEL,
+                |mut wireframe: ResMut<WireframeConfig>| {
+                    wireframe.global = !wireframe.global;
+                    PaletteEvent::Exit
+                },
+            ),
+            PaletteItem::new(
+                "Toggle HDR",
+                VIEWPORT_LABEL,
+                |mut hdr: ResMut<HdrEnabled>| {
+                    hdr.0 = !hdr.0;
+                    PaletteEvent::Exit
+                },
+            ),
+            PaletteItem::new(
+                "Toggle Grid",
+                VIEWPORT_LABEL,
+                |mut grid_visibility: Query<&mut Visibility, With<InfiniteGrid>>| {
+                    let all_hidden = grid_visibility
+                        .iter()
+                        .all(|grid_visibility| grid_visibility == Visibility::Hidden);
 
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let mut new_tile_state = state_mut.new_tile_state;
-
-        let ((request_focus, use_item), tile_type, row_margin, item_label, matched_char_indices) =
-            args;
-
-        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            match tile_type {
-                PaletteItemCreateTileType::Viewport => {
-                    *new_tile_state = NewTileState::Viewport(None, None)
-                }
-                PaletteItemCreateTileType::Graph => {
-                    *new_tile_state = NewTileState::Graph {
-                        entity_id: None,
-                        component_id: None,
-                        range_id: None,
-                        parent_id: None,
+                    for mut grid_visibility in grid_visibility.iter_mut() {
+                        *grid_visibility = if all_hidden {
+                            Visibility::Visible
+                        } else {
+                            Visibility::Hidden
+                        };
                     }
-                }
-            }
 
-            command_palette_state.show = false;
-        }
-    }
-}
-
-#[derive(SystemParam)]
-pub struct PaletteItemSaveReplay<'w> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-    event: EventWriter<'w, ControlMsg>,
-}
-
-impl WidgetSystem for PaletteItemSaveReplay<'_> {
-    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let mut event = state_mut.event;
-
-        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
-
-        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            event.send(ControlMsg::SaveReplay);
-            command_palette_state.show = false;
-        }
-    }
-}
-
-#[derive(SystemParam)]
-pub struct PaletteItemViewportToggleWireframe<'w> {
-    command_palette_state: ResMut<'w, CommandPaletteState>,
-    wireframe_config: ResMut<'w, WireframeConfig>,
-}
-
-impl WidgetSystem for PaletteItemViewportToggleWireframe<'_> {
-    type Args = ((bool, bool), egui::Margin, String, Vec<usize>);
-    type Output = ();
-
-    fn ui_system(
-        world: &mut World,
-        state: &mut SystemState<Self>,
-        ui: &mut egui::Ui,
-        args: Self::Args,
-    ) {
-        let mut state_mut = state.get_mut(world);
-        let mut command_palette_state = state_mut.command_palette_state;
-        let wireframe_enabled = &mut state_mut.wireframe_config.global;
-
-        let ((request_focus, use_item), row_margin, item_label, matched_char_indices) = args;
-
-        let btn = ui.add(PaletteItem::new(item_label, matched_char_indices).margin(row_margin));
-
-        if request_focus {
-            btn.request_focus();
-        }
-
-        if btn.clicked() || use_item {
-            *wireframe_enabled = !*wireframe_enabled;
-            command_palette_state.show = false;
-        }
+                    PaletteEvent::Exit
+                },
+            ),
+            create_graph(),
+            create_viewport(),
+            toggle_body_axes(),
+            PaletteItem::new(
+                "Save Replay",
+                SIMULATION_LABEL,
+                |mut event: EventWriter<ControlMsg>| {
+                    event.send(ControlMsg::SaveReplay);
+                    PaletteEvent::Exit
+                },
+            ),
+            PaletteItem::new("Documentation", HELP_LABEL, || {
+                let _ = opener::open("https://docs.elodin.systems");
+                PaletteEvent::Exit
+            })
+            .icon(PaletteIcon::Link),
+            PaletteItem::new("Release Notes", HELP_LABEL, || {
+                let _ = opener::open("https://docs.elodin.systems/updates/changelog");
+                PaletteEvent::Exit
+            })
+            .icon(PaletteIcon::Link),
+        ])
     }
 }

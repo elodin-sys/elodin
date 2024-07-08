@@ -29,6 +29,7 @@ pub const PEACH_DEFAULT: Color32 = Color32::from_rgb(0xFF, 0xD7, 0xB3);
 pub const REDDISH_DEFAULT: Color32 = Color32::from_rgb(0xE9, 0x4B, 0x14);
 pub const HYPERBLUE_DEFAULT: Color32 = Color32::from_rgb(0x14, 0x5F, 0xCF);
 pub const MINT_DEFAULT: Color32 = Color32::from_rgb(0x88, 0xDE, 0x9F);
+pub const BONE_DEFAULT: Color32 = Color32::from_rgb(0xE4, 0xD9, 0xC3);
 
 pub const TURQUOISE_40: Color32 = Color32::from_rgb(0x38, 0x55, 0x59);
 pub const SLATE_40: Color32 = Color32::from_rgb(0x41, 0x3A, 0x73);

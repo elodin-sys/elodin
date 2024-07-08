@@ -6,18 +6,16 @@ use bevy::{
     input::{keyboard::KeyCode, ButtonInput},
 };
 use bevy_egui::EguiContexts;
-use egui::epaint::Shadow;
+use egui::{epaint::Shadow, Margin, Modifiers};
 use nalgebra::clamp;
 
 use crate::ui::{
     colors::{self, with_opacity},
     images, theme,
-    utils::Shrink4,
+    utils::{MarginSides, Shrink4},
 };
 
-use self::palette_items::{
-    palette_help_items, palette_sim_items, palette_viewport_items, PaletteItemWrapper,
-};
+use self::palette_items::{MatchedPaletteItem, PaletteEvent, PaletteIcon, PalettePage};
 
 use super::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystem, WidgetSystemExt};
 
@@ -28,6 +26,8 @@ pub struct CommandPaletteState {
     pub filter: String,
     pub show: bool,
     pub input_focus: bool,
+    pub page_stack: Vec<PalettePage>,
+    pub selected_index: usize,
 }
 
 #[derive(SystemParam)]
@@ -72,6 +72,7 @@ impl RootWidgetSystem for CommandPalette<'_> {
     }
 }
 
+#[derive(Clone)]
 pub struct CommandPaletteIcons {
     pub link: egui::TextureId,
     // TODO: cmd_btn
@@ -105,11 +106,12 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
 
         if !command_palette_state.show {
             command_palette_state.filter = "".to_string();
+            command_palette_state.page_stack.clear();
             return false;
         }
 
         let screen_rect = ctx.screen_rect();
-        let palette_width = clamp(screen_rect.width() / 3.0, 400.0, 600.0);
+        let palette_width = clamp(screen_rect.width() / 2.0, 500.0, 900.0);
         let palette_size = egui::vec2(palette_width, 800.0);
         let palette_min = egui::pos2(
             screen_rect.center().x - palette_width / 2.0,
@@ -122,7 +124,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .fixed_size(palette_size)
             .fixed_pos(palette_min)
             .frame(egui::Frame {
-                fill: colors::PRIMARY_SMOKE,
+                fill: colors::PRIMARY_ONYX,
                 stroke: egui::Stroke::new(1.0, with_opacity(colors::PRIMARY_CREAME, 0.005)),
                 rounding: theme::rounding_xs(),
                 shadow: Shadow {
@@ -136,15 +138,14 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .show(ctx, |ui| {
                 ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
 
-                let search_has_focus =
-                    ui.add_widget::<PaletteSearch>(world, "command_palette_search");
+                let (up, down) = ui.add_widget::<PaletteSearch>(world, "command_palette_search");
 
                 ui.separator();
 
                 ui.add_widget_with::<PaletteItems>(
                     world,
                     "command_palette_items",
-                    (command_palette_icons, search_has_focus),
+                    (command_palette_icons, up, down),
                 );
             });
 
@@ -163,7 +164,7 @@ pub struct PaletteSearch<'w> {
 
 impl WidgetSystem for PaletteSearch<'_> {
     type Args = ();
-    type Output = bool;
+    type Output = (bool, bool);
 
     fn ui_system(
         world: &mut World,
@@ -180,41 +181,105 @@ impl WidgetSystem for PaletteSearch<'_> {
         egui::Frame::none()
             .inner_margin(egui::Margin::same(16.0))
             .show(ui, |ui| {
-                let style = ui.style_mut();
-                style.visuals.selection.stroke = egui::Stroke::NONE;
-                style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-                style.visuals.extreme_bg_color = colors::TRANSPARENT;
+                ui.horizontal(|ui| {
+                    let style = ui.style_mut();
+                    style.visuals.selection.stroke = egui::Stroke::NONE;
+                    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                    style.visuals.extreme_bg_color = colors::TRANSPARENT;
+                    let len = command_palette_state.page_stack.len().saturating_sub(1);
+                    for page in command_palette_state.page_stack[..len].iter() {
+                        ui.style_mut().interaction.selectable_labels = false;
+                        if let Some(label) = &page.label {
+                            egui::Frame::none()
+                                .fill(colors::BONE_DEFAULT)
+                                .inner_margin(Margin::symmetric(8.0, 1.0))
+                                .outer_margin(Margin::ZERO.right(6.0))
+                                .rounding(3.0)
+                                .show(ui, |ui| {
+                                    let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                                    font_id.size = 11.0;
+                                    ui.label(
+                                        egui::RichText::new(label)
+                                            .font(font_id)
+                                            .color(colors::PRIMARY_ONYX),
+                                    );
+                                });
+                        } else {
+                            let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                            font_id.size = 16.0;
+                            egui::Frame::none()
+                                .fill(colors::BONE_DEFAULT)
+                                .outer_margin(Margin::ZERO.right(6.0))
+                                .inner_margin(Margin::symmetric(5.5, 0.0))
+                                .rounding(3.0)
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new("←")
+                                            .font(font_id)
+                                            .color(colors::PRIMARY_ONYX),
+                                    );
+                                });
+                        }
+                    }
 
-                let search_bar = ui.add(
-                    egui::TextEdit::singleline(&mut command_palette_state.filter)
-                        .hint_text("Search...")
-                        .return_key(egui::KeyboardShortcut::new(
-                            egui::Modifiers::NONE,
-                            egui::Key::Escape,
-                        ))
-                        .desired_width(ui.available_width()),
-                );
+                    let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                    font_id.size = 13.0;
 
-                if command_palette_state.input_focus {
-                    search_bar.request_focus();
-                    command_palette_state.input_focus = false;
-                }
+                    let mut popped_page = false;
+                    if command_palette_state.filter.is_empty() {
+                        ui.ctx().input(|i| {
+                            if i.key_pressed(egui::Key::Backspace) {
+                                popped_page = true;
+                                command_palette_state.page_stack.pop();
+                                command_palette_state.selected_index = 0;
+                            }
+                        })
+                    }
 
-                has_focus = search_bar.has_focus();
-            });
+                    let (up_pressed, down_pressed) = ui.ctx().input_mut(|i| {
+                        (
+                            i.consume_key(Modifiers::NONE, egui::Key::ArrowUp),
+                            i.consume_key(Modifiers::NONE, egui::Key::ArrowDown),
+                        )
+                    });
+                    let search_bar = ui.add(
+                        egui::TextEdit::singleline(&mut command_palette_state.filter)
+                            .hint_text("Type a command...")
+                            .font(font_id)
+                            .return_key(egui::KeyboardShortcut::new(
+                                egui::Modifiers::NONE,
+                                egui::Key::Escape,
+                            ))
+                            .desired_width(ui.available_width()),
+                    );
 
-        has_focus
+                    if search_bar.changed() {
+                        command_palette_state.selected_index = 0;
+                    }
+
+                    if command_palette_state.input_focus {
+                        search_bar.request_focus();
+                        command_palette_state.input_focus = false;
+                    }
+
+                    command_palette_state.input_focus |= popped_page;
+                    has_focus = search_bar.has_focus();
+                    (up_pressed, down_pressed)
+                })
+                .inner
+            })
+            .inner
     }
 }
 
 #[derive(SystemParam)]
 pub struct PaletteItems<'w> {
-    command_palette_state: Res<'w, CommandPaletteState>,
+    command_palette_state: ResMut<'w, CommandPaletteState>,
     kbd: Res<'w, ButtonInput<KeyCode>>,
 }
 
 impl WidgetSystem for PaletteItems<'_> {
-    type Args = (CommandPaletteIcons, bool);
+    type Args = (CommandPaletteIcons, bool, bool);
     type Output = ();
 
     fn ui_system(
@@ -223,56 +288,104 @@ impl WidgetSystem for PaletteItems<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let (icons, search_has_focus) = args;
+        let (icons, up_pressed, down_pressed) = args;
         let state_mut = state.get_mut(world);
-        let command_palette_state = state_mut.command_palette_state;
-        let kbd = state_mut.kbd;
-
+        let mut command_palette_state = state_mut.command_palette_state;
+        let kbd = state_mut.kbd.clone();
+        let mut selected_index = command_palette_state.selected_index;
+        let hit_enter = kbd.just_pressed(KeyCode::Enter);
         let filter = command_palette_state.filter.clone();
 
-        let palette_items_filtered = [
-            palette_help_items(&filter),
-            palette_viewport_items(&filter),
-            palette_sim_items(&filter),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<PaletteItemWrapper>>();
-
+        if command_palette_state.page_stack.is_empty() {
+            command_palette_state
+                .page_stack
+                .push(PalettePage::default());
+        }
+        let mut page = command_palette_state.page_stack.pop().unwrap();
+        page.initialize(world);
+        let mut palette_items_filtered = page.filter(&filter);
         let row_margin = egui::Margin::symmetric(16.0, 12.0);
         let row_height = ui.spacing().interact_size.y + row_margin.sum().y;
         let max_visible_rows = clamp(palette_items_filtered.len(), 0, 10);
-
-        let mut request_focus = kbd.just_pressed(KeyCode::ArrowDown) && search_has_focus;
-        let mut use_first_item = kbd.just_pressed(KeyCode::Enter) && search_has_focus;
+        if down_pressed {
+            selected_index =
+                (selected_index + 1).min(palette_items_filtered.len().saturating_sub(1));
+        }
+        if up_pressed {
+            selected_index = selected_index.saturating_sub(1);
+        }
 
         if max_visible_rows > 0 {
-            egui::ScrollArea::vertical()
+            let res = egui::ScrollArea::vertical()
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .show_rows(ui, row_height, max_visible_rows, |ui, row_range| {
-                    for palette_item in palette_items_filtered[row_range].iter() {
-                        let current_request_focus = !palette_item.group_label && request_focus;
-                        let current_use_first_item = !palette_item.group_label && use_first_item;
-
-                        (palette_item.widget)(
-                            ui,
-                            world,
-                            (current_request_focus, current_use_first_item),
-                            palette_item.match_indices.clone(),
-                            &icons,
-                            row_margin,
-                        );
-
-                        if current_request_focus {
-                            request_focus = false;
+                    let mut current_heading: Option<String> = None;
+                    for (
+                        i,
+                        MatchedPaletteItem {
+                            item,
+                            match_indices,
+                        },
+                    ) in palette_items_filtered.drain(row_range).enumerate()
+                    {
+                        if Some(&item.header) != current_heading.as_ref() {
+                            egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(item.header.clone())
+                                        .monospace()
+                                        .color(colors::PRIMARY_CREAME_6),
+                                );
+                            });
+                            current_heading = Some(item.header.clone());
                         }
+                        let btn = ui.add({
+                            let widget = PaletteItemWidget::new(
+                                item.label.clone(),
+                                match_indices,
+                                i == selected_index,
+                            )
+                            .margin(row_margin);
+                            match item.icon {
+                                PaletteIcon::Link => widget.icon(icons.link),
+                                PaletteIcon::None => widget,
+                            }
+                        });
 
-                        if current_use_first_item {
-                            use_first_item = false;
+                        if btn.clicked() || (i == selected_index && hit_enter) {
+                            return Some(item.system.run((), world));
                         }
                     }
+                    None
                 });
+            match res.inner {
+                Some(PaletteEvent::Exit) => {
+                    let mut state_mut = state.get_mut(world);
+                    state_mut.command_palette_state.show = false;
+                    state_mut.command_palette_state.selected_index = 0;
+                }
+                Some(PaletteEvent::NextPage {
+                    next_page,
+                    prev_page_label,
+                }) => {
+                    let mut state_mut = state.get_mut(world);
+                    state_mut.command_palette_state.filter = "".to_string();
+                    if let Some(prev_page_label) = prev_page_label {
+                        page.label = Some(prev_page_label);
+                    }
+                    state_mut.command_palette_state.page_stack.push(page);
+                    state_mut.command_palette_state.page_stack.push(next_page);
+                    state_mut.command_palette_state.input_focus = true;
+                    state_mut.command_palette_state.selected_index = 0;
+                }
+                None => {
+                    let mut state_mut = state.get_mut(world);
+                    state_mut.command_palette_state.page_stack.push(page);
+                    state_mut.command_palette_state.selected_index = selected_index;
+                }
+            }
         } else {
+            let mut state_mut = state.get_mut(world);
+            state_mut.command_palette_state.page_stack.push(page);
             egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
                 ui.label(
                     egui::RichText::new("Couldn't find anything...")
@@ -284,7 +397,7 @@ impl WidgetSystem for PaletteItems<'_> {
 }
 
 #[must_use = "You should put this widget in an ui with `ui.add(widget);`"]
-pub struct PaletteItem {
+pub struct PaletteItemWidget {
     label: String,
     matched_char_indices: Vec<usize>,
     icon: Option<egui::TextureId>,
@@ -297,10 +410,12 @@ pub struct PaletteItem {
     hovered_bg_color: egui::Color32,
 
     text_color: egui::Color32,
+
+    active: bool,
 }
 
-impl PaletteItem {
-    pub fn new(label: impl ToString, matched_char_indices: Vec<usize>) -> Self {
+impl PaletteItemWidget {
+    pub fn new(label: impl ToString, matched_char_indices: Vec<usize>, active: bool) -> Self {
         Self {
             label: label.to_string(),
             matched_char_indices,
@@ -309,11 +424,12 @@ impl PaletteItem {
 
             margin: egui::Margin::symmetric(16.0, 8.0),
 
-            inactive_bg_color: colors::PRIMARY_SMOKE,
-            active_bg_color: colors::PRIMARY_ONYX,
+            inactive_bg_color: colors::PRIMARY_ONYX,
+            active_bg_color: with_opacity(colors::PRIMARY_CREAME, 0.05),
             hovered_bg_color: with_opacity(colors::PRIMARY_CREAME, 0.1),
 
             text_color: colors::PRIMARY_CREAME,
+            active,
         }
     }
 
@@ -366,7 +482,11 @@ impl PaletteItem {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_fill = self.inactive_bg_color;
+            style.visuals.widgets.inactive.bg_fill = if self.active {
+                self.active_bg_color
+            } else {
+                self.inactive_bg_color
+            };
             style.visuals.widgets.active.bg_fill = self.active_bg_color;
             style.visuals.widgets.hovered.bg_fill = self.hovered_bg_color;
 
@@ -424,7 +544,7 @@ impl PaletteItem {
     }
 }
 
-impl egui::Widget for PaletteItem {
+impl egui::Widget for PaletteItemWidget {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         self.render(ui)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
