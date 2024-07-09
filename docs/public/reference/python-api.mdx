@@ -298,11 +298,11 @@ A spatial transform is a 7D vector that represents a rigid body transformation i
 
 ### _class_ `elodin.SpatialMotion`
 
-A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
+A spatial motion is a 6D vector that represents either the velocity or acceleration of a rigid body in 3D space.
 
 - `SpatialMotion.zero()` -> [elodin.SpatialMotion]
 
-    Create a spatial motion with no linear or angular velocity.
+    Create a spatial motion with no linear or angular velocity/acceleration.
 
 - `SpatialMotion.from_linear(linear)` -> [elodin.SpatialMotion]
 
