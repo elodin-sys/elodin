@@ -278,9 +278,7 @@ class Rocket(el.Archetype):
 
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
-    return f + el.SpatialForce.from_linear(
-        jnp.array([0.0, 0.0, -9.81]) * inertia.mass()
-    )
+    return f + el.SpatialForce(linear=jnp.array([0.0, 0.0, -9.81]) * inertia.mass())
 
 
 @el.map
@@ -365,9 +363,7 @@ def aero_forces(
 
     f_aero_linear = jnp.array([CA, CYR, CZR]) * q * a_ref
     f_aero_torque = jnp.array([Cl, -CmR, CnR]) * q * a_ref * l_ref
-    f_aero = el.SpatialForce.from_linear(f_aero_linear) + el.SpatialForce.from_torque(
-        f_aero_torque
-    )
+    f_aero = el.SpatialForce(linear=f_aero_linear, torque=f_aero_torque)
     return f_aero
 
 
@@ -387,7 +383,7 @@ def apply_thrust(t: el.Time, p: el.WorldPos, f: el.Force) -> el.Force:
     thrust = jnp.array(thrust_curve["thrust"])
     f_t = jnp.interp(t, time, thrust)
     thrust = p.angular() @ thrust_vector_body_frame * f_t
-    return f + el.SpatialForce.from_linear(thrust)
+    return f + el.SpatialForce(linear=thrust)
 
 
 @el.map
