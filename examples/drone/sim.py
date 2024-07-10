@@ -117,11 +117,13 @@ def motor_torque(thrust: Thrust) -> Torque:
 @el.map
 def body_thrust(thrust: Thrust, torque: Torque) -> BodyThrust:
     yaw_torque_sum = jnp.sum(torque * motor_spin_dir)
-    body_thrust = el.SpatialForce.from_linear(jnp.array([0.0, 0.0, jnp.sum(thrust)]))
-    yaw_torque = el.SpatialForce.from_torque(jnp.array([0.0, 0.0, yaw_torque_sum]))
+    body_thrust = el.SpatialForce(linear=jnp.array([0.0, 0.0, jnp.sum(thrust)]))
+    yaw_torque = el.SpatialForce(torque=jnp.array([0.0, 0.0, yaw_torque_sum]))
     # additional torque from differential thrust:
-    pitch_roll_torque = el.SpatialForce.from_torque(
-        jnp.sum(motor_torque_axes * thrust[:, None] * motor_dist[:, None], axis=0)
+    pitch_roll_torque = el.SpatialForce(
+        torque=jnp.sum(
+            motor_torque_axes * thrust[:, None] * motor_dist[:, None], axis=0
+        )
     )
     return body_thrust + yaw_torque + pitch_roll_torque
 
@@ -137,16 +139,12 @@ def drag(v: el.WorldVel) -> BodyDrag:
 def apply_body_forces(
     thrust: BodyThrust, drag: BodyDrag, pos: el.WorldPos, f: el.Force
 ) -> el.Force:
-    return (
-        f + el.SpatialForce.from_linear(drag) + el.SpatialForce(pos.angular() @ thrust)
-    )
+    return f + el.SpatialForce(linear=drag) + el.SpatialForce(pos.angular() @ thrust)
 
 
 @el.map
 def gravity(inertia: el.Inertia, f: el.Force) -> el.Force:
-    return f + el.SpatialForce.from_linear(
-        jnp.array([0.0, 0.0, -9.81]) * inertia.mass()
-    )
+    return f + el.SpatialForce(linear=jnp.array([0.0, 0.0, -9.81]) * inertia.mass())
 
 
 def world() -> el.World:
@@ -154,9 +152,11 @@ def world() -> el.World:
     drone = world.spawn(
         [
             el.Body(
-                world_pos=el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 2.0]))
-                + el.SpatialTransform.from_axis_angle(
-                    jnp.array([0.0, 0.0, 1.0]), jnp.pi * 0.0 / 4.0
+                world_pos=el.SpatialTransform(
+                    linear=jnp.array([0.0, 0.0, 2.0]),
+                    angular=el.Quaternion.from_axis_angle(
+                        jnp.array([0.0, 0.0, 1.0]), jnp.pi * 0.0 / 4.0
+                    ),
                 ),
                 inertia=el.SpatialInertia(1.0, inertia=jnp.array([0.1, 0.1, 0.2])),
             ),

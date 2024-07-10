@@ -9,7 +9,7 @@ TIME_STEP = 1.0 / 240.0
 
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
-    return f + el.SpatialForce.from_linear(np.array([0.0, 0.0, -9.81]) * inertia.mass())
+    return f + el.SpatialForce(linear=np.array([0.0, 0.0, -9.81]) * inertia.mass())
 
 
 elasticity = 0.85
@@ -87,7 +87,7 @@ def collison_impulse_static(
     ).dot(norm)
     jr = jr_top / jr_bottom
     impulse = jr / mass_a * norm
-    return el.SpatialMotion.from_linear(impulse)
+    return el.SpatialMotion(linear=impulse)
 
 
 def collison_impulse(
@@ -118,7 +118,7 @@ def collison_impulse(
     )
     jr = jr_top / jr_bottom
     impulse = jr / mass_a * norm
-    return el.SpatialMotion.from_linear(impulse)
+    return el.SpatialMotion(linear=impulse)
 
 
 @el.system
@@ -162,9 +162,9 @@ for i in range(1, 200):
     ball = world.spawn(
         [
             el.Body(
-                world_pos=el.SpatialTransform.from_linear(pos),
-                world_vel=el.WorldVel.from_linear(
-                    jax.random.normal(key, shape=(3,)) * 3.0
+                world_pos=el.SpatialTransform(linear=pos),
+                world_vel=el.SpatialMotion(
+                    linear=jax.random.normal(key, shape=(3,)) * 3.0
                 ),
             ),
             el.Shape(mesh, color),

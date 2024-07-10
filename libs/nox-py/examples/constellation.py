@@ -300,8 +300,8 @@ def control(
 ) -> el.Query[ControlForce]:
     return sensor.map(
         ControlForce,
-        lambda p, v, i: el.SpatialForce.from_torque(
-            -1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
+        lambda p, v, i: el.SpatialForce(
+            torque=-1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
         ),
     )
 
@@ -321,8 +321,8 @@ def actuator_allocator(
         RWForce,
         el.SpatialForce.zero(),
         lambda xs, axis, control_force: xs
-        + el.SpatialForce.from_torque(
-            np.clip(
+        + el.SpatialForce(
+            torque=np.clip(
                 np.dot(control_force.torque(), axis) * axis,
                 -rw_force_clamp,
                 rw_force_clamp,
@@ -371,7 +371,7 @@ def gravity_effector(
     m = a_inertia.mass()
     norm = la.norm(r)
     f = G * M * m * r / (norm * norm * norm)
-    return force + el.SpatialForce.from_linear(-f)
+    return force + el.SpatialForce(linear=-f)
 
 
 w = el.World()
@@ -418,9 +418,7 @@ def spawn_sat(x, y, w: el.World):
     ang_vel = jax.random.normal(rand_key, shape=(3,))
     ang_vel = ang_vel / la.norm(ang_vel) * 3.0
     b = el.Body(
-        world_pos=el.SpatialTransform.from_linear(
-            rot @ np.array([1.0, 0.0, 0.0]) * radius
-        ),
+        world_pos=el.SpatialTransform(linear=rot @ np.array([1.0, 0.0, 0.0]) * radius),
         world_vel=el.SpatialMotion(ang_vel, rot @ np.array([0.0, 1.0, 0.0]) * velocity),
         inertia=el.SpatialInertia(12.0, j),
         # Credit to the OreSat program https://www.oresat.org for the model above
@@ -483,9 +481,9 @@ w.spawn(
 w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.SpatialMotion.from_angular(
-                np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(
+                angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
             ),
             inertia=el.SpatialInertia(1.0),
         ),

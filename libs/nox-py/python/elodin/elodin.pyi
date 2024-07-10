@@ -94,7 +94,10 @@ class SpatialTransform:
     @staticmethod
     def from_axis_angle(
         axis: jax.typing.ArrayLike, angle: jax.typing.ArrayLike
-    ) -> SpatialTransform: ...
+    ) -> SpatialTransform:
+        """
+        DEPRECATED: Use `SpatialTransform(angular=Quaternion.from_axis_angle(...))` instead.
+        """
     def flatten(self) -> Any: ...
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
@@ -112,7 +115,12 @@ class SpatialTransform:
 
 class SpatialForce:
     __metadata__: ClassVar[Tuple[Component,]]
-    def __init__(self, arr: jax.typing.ArrayLike): ...
+    def __init__(
+        self,
+        arr: Optional[jax.typing.ArrayLike] = None,
+        torque: Optional[jax.typing.ArrayLike] = None,
+        linear: Optional[jax.typing.ArrayLike] = None,
+    ): ...
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialForce: ...
     def flatten(self) -> Any: ...
@@ -120,18 +128,31 @@ class SpatialForce:
     def unflatten(aux: Any, jax: Any) -> Any: ...
     def asarray(self) -> jax.typing.ArrayLike: ...
     @staticmethod
-    def zero() -> SpatialForce: ...
+    def zero() -> SpatialForce:
+        """
+        DEPRECATED: Use `SpatialForce()` instead.
+        """
     @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialForce: ...
+    def from_linear(linear: jax.typing.ArrayLike) -> SpatialForce:
+        """
+        DEPRECATED: Use `SpatialForce(linear=...)` instead.
+        """
     @staticmethod
-    def from_torque(linear: jax.typing.ArrayLike) -> SpatialForce: ...
+    def from_torque(torque: jax.typing.ArrayLike) -> SpatialForce:
+        """
+        DEPRECATED: Use `SpatialForce(torque=...)` instead.
+        """
     def force(self) -> jax.typing.ArrayLike: ...
     def torque(self) -> jax.typing.ArrayLike: ...
     def __add__(self, other: SpatialForce) -> SpatialForce: ...
 
 class SpatialMotion:
     __metadata__: ClassVar[Tuple[Component,]]
-    def __init__(self, angular: jax.typing.ArrayLike, linear: jax.typing.ArrayLike): ...
+    def __init__(
+        self,
+        angular: Optional[jax.typing.ArrayLike] = None,
+        linear: Optional[jax.typing.ArrayLike] = None,
+    ): ...
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialMotion: ...
     def flatten(self) -> Any: ...
@@ -141,9 +162,15 @@ class SpatialMotion:
     @staticmethod
     def zero() -> SpatialMotion: ...
     @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialMotion: ...
+    def from_linear(linear: jax.typing.ArrayLike) -> SpatialMotion:
+        """
+        DEPRECATED: Use `SpatialMotion(linear=...)` instead.
+        """
     @staticmethod
-    def from_angular(angular: jax.typing.ArrayLike) -> SpatialMotion: ...
+    def from_angular(angular: jax.typing.ArrayLike) -> SpatialMotion:
+        """
+        DEPRECATED: Use `SpatialMotion(angular=...)` instead.
+        """
     def linear(self) -> jax.Array: ...
     def angular(self) -> jax.Array: ...
     def __add__(self, other: SpatialMotion) -> SpatialMotion: ...
@@ -271,9 +298,11 @@ class Component:
         asset: bool = False,
         metadata: dict[str, str | bool | int] = {},
     ): ...
-    # DEPRECATED: Use Component.name instead
     @staticmethod
-    def id(component: Any) -> str: ...
+    def id(component: Any) -> str:
+        """
+        DEPRECATED: Use `Component.name()` instead.
+        """
     @staticmethod
     def name(component: Any) -> str: ...
     @staticmethod

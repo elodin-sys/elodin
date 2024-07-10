@@ -134,9 +134,13 @@ impl From<nox::SpatialMotion<f64>> for SpatialMotion {
 #[pymethods]
 impl SpatialMotion {
     #[new]
-    fn new(angular: PyObject, linear: PyObject) -> Self {
-        let angular = Vector::from_op(Noxpr::jax(angular));
-        let linear = Vector::from_op(Noxpr::jax(linear));
+    fn new(angular: Option<PyObject>, linear: Option<PyObject>) -> Self {
+        let linear = linear
+            .map(|arr| Vector::from_op(Noxpr::jax(arr)))
+            .unwrap_or_else(Vector::zeros);
+        let angular = angular
+            .map(|arr| Vector::from_op(Noxpr::jax(arr)))
+            .unwrap_or_else(Vector::zeros);
         nox::SpatialMotion::new(angular, linear).into()
     }
 
@@ -215,8 +219,27 @@ impl From<nox::SpatialForce<f64>> for SpatialForce {
 #[pymethods]
 impl SpatialForce {
     #[new]
-    fn new(arr: PyObject) -> Self {
-        nox::SpatialForce::from_op(Noxpr::jax(arr)).into()
+    fn new(
+        arr: Option<PyObject>,
+        torque: Option<PyObject>,
+        linear: Option<PyObject>,
+    ) -> PyResult<Self> {
+        if let Some(arr) = arr {
+            if linear.is_some() || torque.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Cannot specify both array and linear/torque",
+                ));
+            }
+            Ok(nox::SpatialForce::from_op(Noxpr::jax(arr)).into())
+        } else {
+            let linear = linear
+                .map(|arr| Vector::from_op(Noxpr::jax(arr)))
+                .unwrap_or_else(Vector::zeros);
+            let angular = torque
+                .map(|arr| Vector::from_op(Noxpr::jax(arr)))
+                .unwrap_or_else(Vector::zeros);
+            Ok(nox::SpatialForce::new(angular, linear).into())
+        }
     }
 
     #[staticmethod]

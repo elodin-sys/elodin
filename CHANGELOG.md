@@ -17,6 +17,22 @@
   # after
   world_pos = el.SpatialTransform()
   ```
+- Add `SpatialForce()` constructor that replaces `SpatialForce.zero()`, `SpatialForce.from_linear(linear)`, and `SpatialForce.from_torque(torque)` by making use of optional arguments. The old methods are still available but deprecated.
+  ```python
+  # before
+  force = el.SpatialForce.from_linear(jnp.array([0.0, 0.0, 1.0])) + el.SpatialForce.from_torque(jnp.array([0.0, 70.0, 0.0]))
+
+  # after
+  force = el.SpatialForce(linear=jnp.array([0.0, 0.0, 1.0]), torque=jnp.array([0.0, 70.0, 0.0]))
+
+  # before
+  force = el.SpatialForce.zero()
+
+  # after
+  force = el.SpatialForce()
+  ```
+- Deprecate `SpatialTransform.from_axis_angle(axis, angle)` in favor of `SpatialTransform(angular=Quaternion.from_axis_angle(axis, angle))`.
+- Deprecate `SpatialMotion.from_linear(linear)` and `SpatialMotion.from_angular(angular)` in favor of `SpatialMotion(linear=linear, angular=angular)`.
 - Add filtered search for entities and components.
 - Always include zero as a tick in the y-axis of plots.
 - Replace "Welcome" panel with a new UI for creating viewports and graphs.
