@@ -175,7 +175,7 @@ pub fn entity_list(
                         }
                     })
                     .collect::<Vec<_>>();
-                filtered_entities.sort_by(|a, b| a.0.cmp(&b.0));
+                filtered_entities.sort_by(|a, b| b.0.cmp(&a.0));
 
                 for (_, entity_id, entity, _, metadata) in filtered_entities {
                     let selected = selected_object.is_entity_selected(*entity_id);
