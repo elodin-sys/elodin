@@ -325,6 +325,7 @@ impl WidgetSystem for PaletteItems<'_> {
                         MatchedPaletteItem {
                             item,
                             match_indices,
+                            ..
                         },
                     ) in palette_items_filtered.drain(row_range).enumerate()
                     {

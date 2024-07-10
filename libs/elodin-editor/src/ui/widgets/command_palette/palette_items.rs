@@ -58,16 +58,20 @@ impl PalettePage {
 
     pub fn filter(&mut self, filter: &str) -> Vec<MatchedPaletteItem<'_>> {
         let matcher = SkimMatcherV2::default();
-        self.items
+        let mut items: Vec<_> = self
+            .items
             .iter_mut()
             .filter_map(|item| {
-                let (_, match_indices) = matcher.fuzzy_indices(&item.label, filter)?;
+                let (score, match_indices) = matcher.fuzzy_indices(&item.label, filter)?;
                 Some(MatchedPaletteItem {
                     item,
+                    score,
                     match_indices,
                 })
             })
-            .collect()
+            .collect();
+        items.sort_by(|a, b| b.score.cmp(&a.score));
+        items
     }
 }
 
@@ -122,6 +126,7 @@ impl From<PalettePage> for PaletteEvent {
 
 pub struct MatchedPaletteItem<'a> {
     pub item: &'a mut PaletteItem,
+    pub score: i64,
     pub match_indices: Vec<usize>,
 }
 
