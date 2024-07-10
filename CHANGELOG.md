@@ -21,6 +21,7 @@
 - Always include zero as a tick in the y-axis of plots.
 - Replace "Welcome" panel with a new UI for creating viewports and graphs.
 - Add "Save Replay" command to command palette (Cmd + P).
+- Show progress bar when executing `exec.run(ticks)` unless explicitly disabled with `exec.run(ticks, show_progress=False)`.
 
 ## [v0.3.23]
 - **(breaking)** Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
