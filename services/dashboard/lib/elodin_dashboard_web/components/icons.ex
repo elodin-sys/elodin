@@ -155,4 +155,20 @@ defmodule ElodinDashboardWeb.IconComponents do
     </svg>
     """
   end
+
+  def icon_copy(assigns) do
+    ~H"""
+    <svg width="19" height="18" viewBox="0 0 19 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g clip-path="url(#clip0_2462_13322)">
+        <rect x="2.5" y="6" width="10" height="10" stroke="#FFFBF0" stroke-width="2" />
+        <path d="M4.5 2H16.5V14" stroke="#FFFBF0" stroke-width="2" />
+      </g>
+      <defs>
+        <clipPath id="clip0_2462_13322">
+          <rect width="18" height="18" fill="white" transform="translate(0.5)" />
+        </clipPath>
+      </defs>
+    </svg>
+    """
+  end
 end

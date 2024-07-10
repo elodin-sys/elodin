@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod auth;
+mod create;
 mod editor;
 mod license;
 mod monte_carlo;
@@ -22,6 +23,8 @@ enum Commands {
     MonteCarlo(monte_carlo::Args),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
+    /// Create template
+    Create(create::Args),
 }
 
 impl Cli {
@@ -47,6 +50,7 @@ impl Cli {
             Some(Commands::Login) => rt.block_on(self.login()),
             Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
             Some(Commands::Editor(args)) => self.editor(args.clone()),
+            Some(Commands::Create(args)) => self.create_template(args),
             None => self.editor(editor::Args::default()),
         };
         if let Err(err) = res {
