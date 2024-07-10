@@ -146,26 +146,15 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <%= @title %>
         </div>
         <div class="flex w-full items-center justify-between">
-          <pre class="inline"><span class="select-none">$ </span><span class="select-all" id="download-code"><%= @code %></span></pre>
-          <svg
-            width="19"
-            height="18"
-            viewBox="0 0 19 18"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            class="hover:opacity-75 transition-all cursor-pointer"
-            phx-click={JS.dispatch("phx:copy-inner", to: "\#download-code")}
-          >
-            <g clip-path="url(#clip0_2462_13322)">
-              <rect x="2.5" y="6" width="10" height="10" stroke="#FFFBF0" stroke-width="2" />
-              <path d="M4.5 2H16.5V14" stroke="#FFFBF0" stroke-width="2" />
-            </g>
-            <defs>
-              <clipPath id="clip0_2462_13322">
-                <rect width="18" height="18" fill="white" transform="translate(0.5)" />
-              </clipPath>
-            </defs>
-          </svg>
+          <pre class="inline overflow-scroll"><span class="select-none">$ </span><span class="select-all" id="download-code"><%= @code %></span></pre>
+          <span class="ml-4">
+            <span
+              class="hover:opacity-75 transition-all cursor-pointer"
+              phx-click={JS.dispatch("phx:copy-inner", to: "\#download-code")}
+            >
+              <.icon_copy />
+            </span>
+          </span>
         </div>
       </div>
     </div>
@@ -765,7 +754,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             title="Try one of our templates"
             action="Download one of our templates via the CLI."
           >
-            <.code title="CUBE SAT" code="elodin create --template cubesat">
+            <.code title="CUBE SAT" code="elodin create --template cube-sat">
               <:icon>
                 <svg
                   width="57"
@@ -859,7 +848,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             title="Run a Monte Carlo Sim"
             action="See the template simulation in action."
           >
-            <.code title="MONTE CARLO" code="elodin monte-carlo example.py" />
+            <.code title="MONTE CARLO" code="elodin monte-carlo run --name rocket rocket.py" />
             <:button>
               <.button class="mt-10 !py-4 !px-8" type="crema" phx-click={JS.push("next_page")}>
                 Next
