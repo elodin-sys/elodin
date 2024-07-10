@@ -224,7 +224,7 @@ impl WorldBuilder {
             }
             Args::Bench { ticks } => {
                 let mut exec = self.build(py, sys, time_step, client)?;
-                exec.run(ticks)?;
+                exec.run(py, ticks, true)?;
                 let tempdir = tempfile::tempdir()?;
                 exec.exec.write_to_dir(tempdir)?;
                 let profile = exec.profile();
