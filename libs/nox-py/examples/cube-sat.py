@@ -5,6 +5,7 @@ from jax.numpy import linalg as la
 from dataclasses import dataclass
 import elodin as el
 from typing import Annotated
+from dataclasses import field
 
 angular_vel_axis = np.array([1.0, 1.0, 1.0])
 angular_vel_axis = angular_vel_axis / la.norm(angular_vel_axis)
@@ -180,7 +181,7 @@ def calculate_covariance(
 
 
 Q = calculate_covariance(
-    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
+    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 60.0
 )
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
@@ -236,7 +237,7 @@ def propogate_state_covariance(
     phi_01 = jax.lax.select(
         omega_norm > 1e-5,
         omega_cross * q - np.eye(3) * dt - omega_cross_square * r,
-        np.eye(3) * -1.0 / 120.0,
+        np.eye(3) * -1.0 / 60.0,
     )
     phi_10 = np.zeros((3, 3))
     phi_11 = np.eye(3)
@@ -293,7 +294,7 @@ def kalman_filter(
         p,
         np.array([mag_body, sun_body]),
         np.array([mag_ref, sun_ref]),
-        1 / 120.0,
+        1 / 60.0,
     )
     return (q_hat, omega_hat, b_hat, big_p)
 
@@ -401,6 +402,10 @@ RWVoltage = Annotated[
     jax.Array,
     el.Component("rw_voltage", el.ComponentType(el.PrimitiveType.F64, ())),
 ]
+RWFriction = Annotated[
+    jax.Array,
+    el.Component("rw_friction", el.ComponentType(el.PrimitiveType.F64, ())),
+]
 
 
 @el.system
@@ -425,9 +430,31 @@ def calculate_speed(ang_momentum: RWAngMomentum) -> RWSpeed:
     return np.array(la.norm(ang_momentum) / i)
 
 
+# source: https://hanspeterschaub.info/basilisk/_downloads/17eeb82a3f1a8e0b8617c8b8284303ed/Basilisk-REACTIONWHEELSTATEEFFECTOR-20170816.pdf
 @el.map
-def calculate_torque(voltage: RWVoltage, axis: RWAxis) -> RWForce:
-    return el.SpatialForce.from_torque((voltage / 10 * -0.04) * axis)
+def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFriction]:
+    static_fric = 0.0005
+    columb_fric = 0.0005
+    stribeck_coef = 0.0005
+    cv = 0.00005
+    omega_limit = 0.1
+
+    stribeck_torque = (
+        -np.sqrt(2 * np.exp(1.0))
+        * (static_fric - columb_fric)
+        * np.exp(-((speed / stribeck_coef) ** 2))
+        - columb_fric * np.tanh(10 * speed / stribeck_coef)
+        - cv * speed
+    )
+    use_stribeck = np.logical_and(
+        np.abs(speed) < 0.01 * omega_limit,
+        np.sign(speed) == np.sign(la.norm(force.torque())),
+    )
+    # use_stribeck = np.abs(speed) < (0.01 * omega_limit)
+    torque = jax.lax.select(
+        use_stribeck, stribeck_torque, -columb_fric * np.sign(speed) - cv * speed
+    )
+    return (force + el.SpatialForce.from_torque(torque * axis), torque)
 
 
 @el.map
@@ -449,11 +476,12 @@ class RWRel(el.Archetype):
 
 @dataclass
 class ReactionWheel(el.Archetype):
-    rw_force: RWForce
     axis: RWAxis
-    ang_momentum: RWAngMomentum
-    speed: RWSpeed
-    voltage: RWVoltage
+    rw_force: RWForce = field(default_factory=el.SpatialForce.zero)
+    ang_momentum: RWAngMomentum = field(default_factory=lambda: np.zeros(3))
+    speed: RWSpeed = field(default_factory=lambda: np.float64(0.0))
+    voltage: RWVoltage = field(default_factory=lambda: np.float64(0.0))
+    friction: RWFriction = field(default_factory=lambda: np.float64(0.0))
 
 
 @el.system
@@ -520,11 +548,7 @@ w.spawn(el.BodyAxes(sat, scale=1.0))
 
 rw_1 = w.spawn(
     ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
         axis=np.array([1.0, 0.0, 0.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-        speed=np.zeros(()),
-        voltage=np.zeros(()),
     ),
     name="Reaction Wheel 1",
 )
@@ -532,23 +556,13 @@ rw_1 = w.spawn(
 
 rw_2 = w.spawn(
     ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
         axis=np.array([0.0, 1.0, 0.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-        speed=np.zeros(()),
-        voltage=np.zeros(()),
     ),
     name="Reaction Wheel 2",
 )
 
 rw_3 = w.spawn(
-    ReactionWheel(
-        rw_force=el.SpatialForce.zero(),
-        axis=np.array([0.0, 0.0, 1.0]),
-        ang_momentum=np.array([0.0, 0.0, 0.0]),
-        speed=np.zeros(()),
-        voltage=np.zeros(()),
-    ),
+    ReactionWheel(axis=np.array([0.0, 0.0, 1.0])),
     name="Reaction Wheel 3",
 )
 
@@ -678,7 +692,7 @@ exec = w.run(
         | kalman_filter
         | control
         | actuator_allocator
-        # | calculate_torque
+        | rw_drag
         | saturate_force
         | calculate_speed
         | rw_effector
