@@ -375,8 +375,8 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
 def control(sensor: el.Query[AttEst, AngVelEst, Goal]) -> el.Query[ControlForce]:
     return sensor.map(
         ControlForce,
-        lambda p, v, i: el.SpatialForce.from_torque(
-            -1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
+        lambda p, v, i: el.SpatialForce(
+            torque=-1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
         ),
     )
 
@@ -420,7 +420,7 @@ def actuator_allocator(
         RWForce,
         el.SpatialForce.zero(),
         lambda xs, axis, control_force: xs
-        + el.SpatialForce.from_torque(np.dot(control_force.torque(), axis) * axis),
+        + el.SpatialForce(torque=np.dot(control_force.torque(), axis) * axis),
     )
 
 
@@ -454,7 +454,7 @@ def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFr
     torque = jax.lax.select(
         use_stribeck, stribeck_torque, -columb_fric * np.sign(speed) - cv * speed
     )
-    return (force + el.SpatialForce.from_torque(torque * axis), torque)
+    return (force + el.SpatialForce(toruqe=torque * axis), torque)
 
 
 @el.map
@@ -466,7 +466,7 @@ def saturate_force(
         np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
     )
     torque = np.clip(torque, -rw_force_clamp, rw_force_clamp)
-    return (el.SpatialForce.from_torque(torque), ang_momentum + torque * 1 / 60.0)
+    return (el.SpatialForce(torque=torque), ang_momentum + torque * 1 / 60.0)
 
 
 @dataclass
@@ -496,7 +496,7 @@ def rw_effector(
         el.Force,
         el.SpatialForce.zero(),
         lambda f, pos, force: f
-        + el.SpatialForce.from_torque(pos.angular() @ force.torque()),
+        + el.SpatialForce(torque=pos.angular() @ force.torque()),
     )
 
 
@@ -511,7 +511,7 @@ def gravity_effector(
     m = a_inertia.mass()
     norm = la.norm(r)
     f = G * M * m * r / (norm * norm * norm)
-    return force + el.SpatialForce.from_linear(-f)
+    return force + el.SpatialForce(linear=-f)
 
 
 w = el.World()
@@ -519,9 +519,7 @@ w = el.World()
 sat = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(
-                np.array([1.0, 0.0, 0.0]) * radius
-            ),
+            world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0]) * radius),
             world_vel=el.SpatialMotion(
                 initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity
             ),
@@ -674,9 +672,9 @@ w.spawn(
 w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.SpatialMotion.from_angular(
-                np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(
+                angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
             ),
             inertia=el.SpatialInertia(1.0),
         ),

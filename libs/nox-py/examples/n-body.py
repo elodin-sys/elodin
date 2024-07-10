@@ -19,7 +19,7 @@ def gravity(
         M = b_inertia.mass()
         norm = la.norm(r)
         f = G * M * m * r / (norm * norm * norm)
-        return el.SpatialForce.from_linear(force.force() - f)
+        return el.SpatialForce(linear=force.force() - f)
 
     return graph.edge_fold(
         query, query, el.Force, el.SpatialForce.zero(), gravity_inner
@@ -38,8 +38,8 @@ for i in range(1, 200):
     body = w.spawn(
         [
             el.Body(
-                world_pos=el.WorldPos.from_linear(pos),
-                world_vel=el.WorldVel.from_linear(vel),
+                world_pos=el.SpatialTransform(linear=pos),
+                world_vel=el.SpatialMotion(linear=vel),
                 inertia=el.SpatialInertia(1.0 / G),
             ),
             el.Shape(mesh, color),

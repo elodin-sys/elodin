@@ -60,8 +60,8 @@ def test_six_dof():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -160,7 +160,7 @@ def test_spatial_vector_algebra():
         return v + v
 
     w = el.World()
-    w.spawn(el.Body(world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
+    w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))))
     exec = w.build(double_vec)
     exec.run()
     v = exec.column_array(el.Component.id(el.WorldVel))
@@ -171,8 +171,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 1.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -191,8 +191,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 1.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -211,8 +211,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([1.0, 1.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([1.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -235,20 +235,20 @@ def test_six_dof_ang_vel_int():
 def test_six_dof_torque():
     @el.map
     def constant_torque(_: el.Force) -> el.Force:
-        return el.SpatialForce.from_torque(np.array([1.0, 0.0, 0.0]))
+        return el.SpatialForce(torque=np.array([1.0, 0.0, 0.0]))
 
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0, np.array([0.5, 0.75, 0.25])),
         )
     )
@@ -284,15 +284,15 @@ def test_six_dof_force():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
 
     @el.map
     def constant_force(_: el.Force) -> el.Force:
-        return el.SpatialForce.from_linear(np.array([1.0, 0.0, 0.0]))
+        return el.SpatialForce(linear=np.array([1.0, 0.0, 0.0]))
 
     sys = el.six_dof(1.0 / 120.0, constant_force)
     exec = w.build(sys)

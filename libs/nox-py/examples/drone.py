@@ -65,7 +65,7 @@ def spline(_: el.WorldPos, t: el.Time) -> el.WorldPos:
 
     grad = jax.jacfwd(spline)
     ang = rot_between(np.array([1.0, 0.0, 0.0]), grad(t - i))
-    return el.WorldPos.from_linear(spline(t - i)) + el.WorldPos.from_angular(ang)
+    return el.SpatialTransform(linear=spline(t - i), angular=ang)
 
 
 def rot_between(body_axis, r):
@@ -83,7 +83,7 @@ class Camera(el.Archetype):
 world = el.World()
 drone = world.spawn(
     [
-        el.Body(world_pos=el.SpatialTransform.from_linear(points[0])),
+        el.Body(world_pos=el.SpatialTransform(linear=points[0])),
         world.glb("https://storage.googleapis.com/elodin-marketing/models/drone.glb"),
         Camera(np.array([0]), np.array(0.0)),
     ],
