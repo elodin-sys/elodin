@@ -27,8 +27,8 @@ numpy.version = "0.21"
 
 # nox
 nox-ecs.path = "../nox-ecs"
-nox-ecs-macros.path = "../nox-ecs-macros"
 nox-ecs.features = ["pyo3"]
+nox-ecs-macros.path = "../nox-ecs-macros"
 parking_lot = "0.12.1"
 
 # types
@@ -74,3 +74,4 @@ tokio-util.optional = true
 include_dir = "0.7.3"
 
 walkdir = "2.5.0"
+indicatif = "0.17.8"
