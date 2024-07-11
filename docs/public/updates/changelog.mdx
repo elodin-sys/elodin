@@ -4,18 +4,66 @@ icon: bars-staggered
 ---
 
 
+## v0.3.24
+- Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
+- Add `max_ticks` parameter to `WorldBuilder.run`. The simulation will run until the specified number of ticks is reached.
+- Add body frame visualization option. 
+  To try it out, either open the command palette and type `Toggle Body Axes` or add the following code to your simulation file:
+  ```python
+    w.spawn(el.BodyAxes(entity, scale=1.0))
+  ```
+- Add the ability to create graphs and viewports entirely from the command palette. Try spawning a new graph by typing `Create Graph`, to see the new workflow.
+- **(fix)** If there were pytest failures in a  Monte Carlo sample, the sample would still be reported as a pass. This is now fixed.
+- **(fix)** Fix line pixelation in long-running plots.
+- Add `SpatialTransform()` constructor that replaces `SpatialTransform.zero()`, `SpatialTransform.from_linear(linear)`, and `SpatialTransform.from_angular(quaternion)` by making use of optional arguments. The old methods are still available but deprecated.
+  ```python
+  # before
+  world_pos = el.SpatialTransform.from_linear(jnp.array([0.0, 0.0, 1.0])) + el.SpatialTransform.from_angular(euler_to_quat(jnp.array([0.0, 70.0, 0.0])))
+
+  # after
+  world_pos = el.SpatialTransform(linear=jnp.array([0.0, 0.0, 1.0]), angular=euler_to_quat(jnp.array([0.0, 70.0, 0.0])))
+
+  # before
+  world_pos = el.SpatialTransform.zero()
+
+  # after
+  world_pos = el.SpatialTransform()
+  ```
+- Add `SpatialForce()` constructor that replaces `SpatialForce.zero()`, `SpatialForce.from_linear(linear)`, and `SpatialForce.from_torque(torque)` by making use of optional arguments. The old methods are still available but deprecated.
+  ```python
+  # before
+  force = el.SpatialForce.from_linear(jnp.array([0.0, 0.0, 1.0])) + el.SpatialForce.from_torque(jnp.array([0.0, 70.0, 0.0]))
+
+  # after
+  force = el.SpatialForce(linear=jnp.array([0.0, 0.0, 1.0]), torque=jnp.array([0.0, 70.0, 0.0]))
+
+  # before
+  force = el.SpatialForce.zero()
+
+  # after
+  force = el.SpatialForce()
+  ```
+- Deprecate `SpatialTransform.from_axis_angle(axis, angle)` in favor of `SpatialTransform(angular=Quaternion.from_axis_angle(axis, angle))`.
+- Deprecate `SpatialMotion.from_linear(linear)` and `SpatialMotion.from_angular(angular)` in favor of `SpatialMotion(linear=linear, angular=angular)`.
+- Add filtered search for entities and components.
+- Always include zero as a tick in the y-axis of plots.
+- Replace "Welcome" panel with a new UI for creating viewports and graphs.
+- Add "Save Replay" command to command palette (Cmd + P).
+- Show progress bar when executing `exec.run(ticks)` unless explicitly disabled with `exec.run(ticks, show_progress=False)`.
+- Add a create command for templates to the Elodin CLI
+
+
 ## v0.3.23
 - **(breaking)** Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
 - **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
-- Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status)
+- Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status).
 - `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
 - Export simulation data to a directory using `exec.write_to_dir(path)`.
 
 
 ## v0.3.22
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
-    - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap.
-    The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
+    - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap. The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
 
 
 ## v0.3.21
