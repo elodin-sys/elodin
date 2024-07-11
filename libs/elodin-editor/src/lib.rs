@@ -80,6 +80,11 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        let composite_alpha_mode = if cfg!(target_arch = "wasm32") {
+            bevy::window::CompositeAlphaMode::Opaque
+        } else {
+            bevy::window::CompositeAlphaMode::PostMultiplied
+        };
         app
             //.insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
@@ -97,8 +102,7 @@ impl Plugin for EditorPlugin {
                                 min_height: 400.,
                                 ..Default::default()
                             },
-                            composite_alpha_mode: bevy::window::CompositeAlphaMode::PostMultiplied,
-                            //transparent: true,
+                            composite_alpha_mode,
                             prevent_default_event_handling: true,
                             ..default()
                         }),
