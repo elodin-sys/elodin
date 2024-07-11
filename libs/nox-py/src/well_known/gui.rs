@@ -18,15 +18,17 @@ pub struct Panel {
 impl Panel {
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (track_entity = None, track_rotation = true, fov = 45.0, active = false, pos = None, looking_at = None, show_grid = false, hdr = false, name = "Viewport".to_string()))]
     pub fn viewport(
         track_entity: Option<EntityId>,
-        track_rotation: Option<bool>,
-        fov: Option<f32>,
-        active: Option<bool>,
+        track_rotation: bool,
+        fov: f32,
+        active: bool,
         pos: Option<PyArrayLike1<f32>>,
         looking_at: Option<PyArrayLike1<f32>>,
-        show_grid: Option<bool>,
-        hdr: Option<bool>,
+        show_grid: bool,
+        hdr: bool,
+        name: String,
     ) -> PyResult<Self> {
         let pos = if let Some(arr) = pos {
             let slice = arr.as_slice()?;
@@ -37,15 +39,15 @@ impl Panel {
         } else {
             Vector3::new(5.0, 5.0, 10.0)
         };
-        let track_rotation = track_rotation.unwrap_or(true);
         let mut viewport = conduit::well_known::Viewport {
             track_entity: track_entity.map(|x| x.inner),
-            fov: fov.unwrap_or(45.0),
-            active: active.unwrap_or_default(),
+            fov,
+            active,
             pos,
             track_rotation,
-            show_grid: show_grid.unwrap_or_default(),
-            hdr: hdr.unwrap_or_default(),
+            show_grid,
+            hdr,
+            name,
             ..Default::default()
         };
         if let Some(pos) = looking_at {
@@ -93,7 +95,8 @@ impl Panel {
     }
 
     #[staticmethod]
-    pub fn graph(entities: Vec<GraphEntity>) -> PyResult<Self> {
+    #[pyo3(signature = (entities, name = "Graph".to_string()))]
+    pub fn graph(entities: Vec<GraphEntity>, name: String) -> PyResult<Self> {
         let entities = entities
             .into_iter()
             .map(|x| conduit::well_known::GraphEntity {
@@ -109,7 +112,7 @@ impl Panel {
             })
             .collect();
         Ok(Self {
-            inner: conduit::well_known::Panel::Graph(Graph { entities }),
+            inner: conduit::well_known::Panel::Graph(Graph { name, entities }),
         })
     }
 }
