@@ -1,14 +1,16 @@
 # Changelog
 
 ## [unreleased]
-- **(feat)** Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
-- **(feat)** Add `max_ticks` parameter to `WorldBuilder.run`. The simulation will run until the specified number of ticks is reached.
-- **(feat)** Add body frame visualization option. 
+
+## [v0.3.24]
+- Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
+- Add `max_ticks` parameter to `WorldBuilder.run`. The simulation will run until the specified number of ticks is reached.
+- Add body frame visualization option. 
   To try it out, either open the command palette and type `Toggle Body Axes` or add the following code to your simulation file:
   ```python
     w.spawn(el.BodyAxes(entity, scale=1.0))
   ```
-- **(feat)** Add the ability to create graphs and viewports entirely from the command palette. Try spawning a new graph by typing `Create Graph`, to see the new workflow 
+- Add the ability to create graphs and viewports entirely from the command palette. Try spawning a new graph by typing `Create Graph`, to see the new workflow.
 - **(fix)** If there were pytest failures in a  Monte Carlo sample, the sample would still be reported as a pass. This is now fixed.
 - **(fix)** Fix line pixelation in long-running plots.
 - Add `SpatialTransform()` constructor that replaces `SpatialTransform.zero()`, `SpatialTransform.from_linear(linear)`, and `SpatialTransform.from_angular(quaternion)` by making use of optional arguments. The old methods are still available but deprecated.
@@ -209,7 +211,8 @@
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.23...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.24...HEAD
+[v0.3.24]: https://github.com/elodin-sys/paracosm/compare/v0.3.23...v0.3.24
 [v0.3.23]: https://github.com/elodin-sys/paracosm/compare/v0.3.22...v0.3.23
 [v0.3.22]: https://github.com/elodin-sys/paracosm/compare/v0.3.21...v0.3.22
 [v0.3.21]: https://github.com/elodin-sys/paracosm/compare/v0.3.20...v0.3.21
