@@ -101,20 +101,20 @@ html, body, [data-phx-main], main {
 .display-on-hover {
   overflow: hidden;
 }
-.display-on-hover a {
+.display-on-hover .display-on-hover-show {
   width: 0;
   height: 18px;
   box-sizing: border-box;
-  display: flex;
+  display: none;
   overflow: hidden;
   white-space: nowrap;
 }
-.display-on-hover:hover a {
+.display-on-hover:hover .display-on-hover-show {
   display: flex;
-  width: 205px;
+  width: 140px;
 }
 
-.display-on-hover:hover svg {
+.display-on-hover:hover .display-on-hover-hide {
   display: none;
 }
 
