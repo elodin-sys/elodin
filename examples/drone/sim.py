@@ -182,6 +182,7 @@ def world() -> el.World:
                             show_grid=True,
                             pos=[-0.5, -3.0, 0.5],
                             looking_at=[0.0, 0.0, 0.5],
+                            name="Drone Camera",
                         ),
                         el.Panel.graph(
                             [
@@ -191,7 +192,8 @@ def world() -> el.World:
                                         el.Component.index(mekf.AttEstError),
                                     ],
                                 )
-                            ]
+                            ],
+                            name="Attitude Estimation Error",
                         ),
                     ]
                 ),
@@ -205,7 +207,8 @@ def world() -> el.World:
                                         el.Component.index(motors.MotorInput),
                                     ],
                                 )
-                            ]
+                            ],
+                            name="Motor Input",
                         ),
                         el.Panel.graph(
                             [
@@ -215,7 +218,8 @@ def world() -> el.World:
                                         el.Component.index(Thrust),
                                     ],
                                 )
-                            ]
+                            ],
+                            name="Thrust",
                         ),
                         el.Panel.graph(
                             [
@@ -227,7 +231,8 @@ def world() -> el.World:
                                         el.Component.index(sensors.Gyro),
                                     ],
                                 )
-                            ]
+                            ],
+                            name="Rate Control",
                         ),
                     ]
                 ),

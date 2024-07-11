@@ -338,15 +338,16 @@ class Panel:
     def viewport(
         track_entity: Optional[EntityId] = None,
         track_rotation: bool = True,
-        fov: Optional[float] = None,
+        fov: float = 45.0,
         active: bool = False,
         pos: Union[List[float], jax.Array, None] = None,
         looking_at: Union[List[float], jax.Array, None] = None,
         show_grid: bool = False,
         hdr: bool = False,
+        name: str = "Viewport",
     ) -> Panel: ...
     @staticmethod
-    def graph(entities: list[GraphEntity]) -> Panel: ...
+    def graph(entities: list[GraphEntity], name: str = "Graph") -> Panel: ...
     def asset_name(self) -> str: ...
     def bytes(self) -> bytes: ...
 

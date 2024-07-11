@@ -30,6 +30,7 @@ pub struct Viewport {
     pub rotation: UnitQuaternion<f32>,
     pub show_grid: bool,
     pub hdr: bool,
+    pub name: String,
 }
 
 impl Viewport {
@@ -52,6 +53,7 @@ impl Default for Viewport {
             track_rotation: true,
             show_grid: false,
             hdr: false,
+            name: "Viewport".to_string(),
         }
     }
 }
@@ -64,6 +66,16 @@ impl Asset for Panel {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Graph {
     pub entities: Vec<GraphEntity>,
+    pub name: String,
+}
+
+impl Default for Graph {
+    fn default() -> Self {
+        Self {
+            entities: Vec::new(),
+            name: "Graph".to_string(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
