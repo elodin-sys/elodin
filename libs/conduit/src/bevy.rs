@@ -58,6 +58,9 @@ pub struct MaxTick(pub u64);
 pub struct Tick(pub u64);
 
 #[derive(bevy::prelude::Resource)]
+pub struct Simulating(pub bool);
+
+#[derive(bevy::prelude::Resource)]
 pub struct TimeStep(pub Duration);
 
 impl ColumnMsg<Bytes> {
@@ -292,6 +295,7 @@ pub struct RecvSystemArgs<'w, 's> {
     exit: EventWriter<'w, AppExit>,
     max_tick_res: ResMut<'w, MaxTick>,
     tick_res: ResMut<'w, Tick>,
+    simulating_res: ResMut<'w, Simulating>,
 }
 
 fn recv_system(args: RecvSystemArgs) {
@@ -313,6 +317,7 @@ fn recv_system(args: RecvSystemArgs) {
         mut exit,
         mut max_tick_res,
         mut tick_res,
+        mut simulating_res,
     } = args;
 
     while let Ok(MsgPair { msg, tx }) = rx.try_recv() {
@@ -394,9 +399,14 @@ fn recv_system(args: RecvSystemArgs) {
             Msg::Control(ControlMsg::Exit) => {
                 exit.send(AppExit::Success);
             }
-            Msg::Control(ControlMsg::Tick { tick, max_tick }) => {
+            Msg::Control(ControlMsg::Tick {
+                tick,
+                max_tick,
+                simulating,
+            }) => {
                 max_tick_res.0 = *max_tick;
                 tick_res.0 = *tick;
+                simulating_res.0 = *simulating;
             }
             Msg::Control(_) => {}
             Msg::Column(col) => {
@@ -438,6 +448,7 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(AssetMap::default());
         app.insert_resource(MaxTick(0));
         app.insert_resource(Tick(0));
+        app.insert_resource(Simulating(false));
         app.insert_resource(TimeStep(Duration::default()));
         app.insert_resource(ConduitRx(self.rx.clone()));
         app.insert_resource(ConduitMsgSender(tx));

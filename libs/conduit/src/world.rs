@@ -19,7 +19,13 @@ impl Default for TimeStep {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct OutputTimeStep {
+    pub time_step: std::time::Duration,
+    pub last_tick: std::time::Instant,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct World {
     pub host: Buffers,
     pub history: Vec<Buffers>,
@@ -29,7 +35,29 @@ pub struct World {
     pub assets: AssetStore,
     pub tick: u64,
     pub entity_len: u64,
-    pub time_step: TimeStep,
+    pub sim_time_step: TimeStep,
+    pub run_time_step: TimeStep,
+    pub output_time_step: Option<OutputTimeStep>,
+    pub max_tick: u64,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            host: Default::default(),
+            history: Default::default(),
+            entity_ids: Default::default(),
+            dirty_components: Default::default(),
+            component_map: Default::default(),
+            assets: Default::default(),
+            tick: Default::default(),
+            entity_len: Default::default(),
+            run_time_step: Default::default(),
+            sim_time_step: Default::default(),
+            output_time_step: Default::default(),
+            max_tick: u64::MAX,
+        }
+    }
 }
 
 pub struct ColumnRef<'a, B: 'a> {
@@ -68,12 +96,16 @@ impl From<Entity<'_>> for EntityId {
 }
 
 impl World {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mut history: Vec<Buffers>,
         entity_ids: ustr::UstrMap<Vec<u8>>,
         component_map: HashMap<ComponentId, (ArchetypeName, Metadata)>,
         asset_store: AssetStore,
-        time_step: TimeStep,
+        sim_time_step: TimeStep,
+        run_time_step: TimeStep,
+        output_time_step: Option<OutputTimeStep>,
+        max_tick: u64,
     ) -> Self {
         let host = history.pop().unwrap_or_default();
         let tick = history.len() as u64;
@@ -94,7 +126,10 @@ impl World {
             assets: asset_store,
             tick,
             entity_len,
-            time_step,
+            run_time_step,
+            sim_time_step,
+            output_time_step,
+            max_tick,
         }
     }
 
@@ -216,7 +251,10 @@ impl Clone for World {
             assets: self.assets.clone(),
             tick: self.tick,
             entity_len: self.entity_len,
-            time_step: self.time_step,
+            run_time_step: self.run_time_step,
+            sim_time_step: self.sim_time_step,
+            output_time_step: self.output_time_step.clone(),
+            max_tick: self.max_tick,
         }
     }
 }

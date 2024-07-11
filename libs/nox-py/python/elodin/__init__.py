@@ -492,6 +492,10 @@ class World(WorldBuilder):
         self,
         system: System,
         time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
+        max_ticks: Optional[int] = None,
         client: Optional[Client] = None,
     ):
         current_frame = inspect.currentframe()
@@ -500,7 +504,11 @@ class World(WorldBuilder):
         frame = current_frame.f_back
         if frame is None:
             raise Exception("No previous frame")
-        addr = super().run(system, time_step, client)
+        if sim_time_step is None:
+            sim_time_step = time_step
+        addr = super().run(
+            system, sim_time_step, run_time_step, output_time_step, max_ticks, client
+        )
         locals = frame.f_locals
         if addr is not None:
             conduit_client = Conduit.tcp(addr)
@@ -514,19 +522,48 @@ class World(WorldBuilder):
         system: System,
         addr: Optional[str] = None,
         time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
+        max_ticks: Optional[int] = None,
         client: Optional[Client] = None,
     ):
-        super().serve(system, False, time_step, client, addr)
+        if sim_time_step is None:
+            sim_time_step = time_step
+        super().serve(
+            system,
+            False,
+            sim_time_step,
+            run_time_step,
+            output_time_step,
+            max_ticks,
+            client,
+            addr,
+        )
 
     def view(
         self,
         system: System,
         time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
         client: Optional[Client] = None,
     ) -> Any:
         from IPython.display import IFrame
 
-        addr = super().serve(system, True, time_step, client, None)
+        if sim_time_step is None:
+            sim_time_step = time_step
+        addr = super().serve(
+            system,
+            True,
+            sim_time_step,
+            run_time_step,
+            output_time_step,
+            None,
+            client,
+            None,
+        )
         return IFrame(f"http://{addr}", width=960, height=540)
 
     def glb(self, url: str) -> Scene:
