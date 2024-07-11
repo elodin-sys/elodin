@@ -14,7 +14,7 @@ use big_space::GridCell;
 use conduit::{
     bevy::{EntityMap, Tick, TimeStep},
     query::MetadataStore,
-    well_known::{EntityMetadata, Panel, Viewport},
+    well_known::{EntityMetadata, Graph, Panel, Viewport},
     ComponentId, ControlMsg, EntityId,
 };
 use egui_tiles::{Container, Tile, TileId, Tiles};
@@ -118,7 +118,7 @@ impl Pane {
     fn title(&self) -> &str {
         match self {
             Pane::Graph(pane) => &pane.label,
-            Pane::Viewport(_) => "Viewport",
+            Pane::Viewport(viewport) => &viewport.label,
         }
     }
 
@@ -200,6 +200,7 @@ struct ViewportPane {
     pub nav_gizmo: Option<Entity>,
     pub nav_gizmo_camera: Option<Entity>,
     pub rect: Option<egui::Rect>,
+    pub label: String,
 }
 
 impl ViewportPane {
@@ -224,6 +225,7 @@ impl ViewportPane {
             nav_gizmo,
             nav_gizmo_camera,
             rect: None,
+            label: viewport.name.clone(),
         }
     }
 }
@@ -235,10 +237,10 @@ struct GraphPane {
 }
 
 impl GraphPane {
-    fn new(graph_id: Entity, index: usize) -> Self {
+    fn new(graph_id: Entity, label: String) -> Self {
         Self {
             id: graph_id,
-            label: format!("Graph {:?}", index),
+            label,
             rect: None,
         }
     }
@@ -839,9 +841,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     };
                     let graph_id = commands.spawn(graph_bundle).id();
 
-                    let graph = GraphPane::new(graph_id, graph_state_query.iter().len());
-                    let graph_id = graph.id;
-                    let graph_label = graph.label.clone();
+                    let graph_label = Graph::default().name;
+                    let graph = GraphPane::new(graph_id, graph_label.clone());
                     let pane = Pane::Graph(graph);
 
                     if let Some(tile_id) =
@@ -908,7 +909,6 @@ pub struct SyncViewportParams<'w, 's> {
     grid_cell: Query<'w, 's, &'static GridCell<i128>>,
     metadata_store: Res<'w, MetadataStore>,
     hdr_enabled: ResMut<'w, HdrEnabled>,
-    graph_states: Query<'w, 's, &'static GraphState>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -924,7 +924,6 @@ pub fn sync_viewports(params: SyncViewportParams) {
         grid_cell,
         metadata_store,
         mut hdr_enabled,
-        graph_states,
     } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
@@ -940,7 +939,6 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &grid_cell,
             &metadata_store,
             &mut hdr_enabled,
-            &graph_states,
         );
 
         commands.entity(entity).insert(SyncedViewport);
@@ -961,7 +959,6 @@ fn spawn_panel(
     grid_cell: &Query<&GridCell<i128>>,
     metadata_store: &Res<MetadataStore>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
-    graph_states: &Query<&GraphState>,
 ) -> Option<TileId> {
     match panel {
         conduit::well_known::Panel::Viewport(viewport) => {
@@ -1026,7 +1023,6 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
-                    graph_states,
                 );
             });
             tile_id
@@ -1054,7 +1050,6 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
-                    graph_states,
                 );
             });
             tile_id
@@ -1088,7 +1083,7 @@ fn spawn_panel(
             let graph_id = commands
                 .spawn(GraphBundle::new(render_layer_alloc, entities, None))
                 .id();
-            let graph = GraphPane::new(graph_id, graph_states.iter().len());
+            let graph = GraphPane::new(graph_id, graph.name.clone());
             ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
         }
     }
