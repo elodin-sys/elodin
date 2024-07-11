@@ -1,7 +1,9 @@
 extern crate self as nox_ecs;
 
 use conduit::well_known::{Material, Mesh};
-use conduit::{Archetype, Builder, ComponentExt, ComponentId, ComponentType, EntityId, Handle};
+use conduit::{
+    Archetype, Builder, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
+};
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
 use profile::Profiler;
@@ -272,8 +274,22 @@ where
         }
     }
 
-    pub fn time_step(mut self, time_step: Duration) -> Self {
-        self.world.time_step = TimeStep(time_step);
+    pub fn sim_time_step(mut self, time_step: Duration) -> Self {
+        self.world.sim_time_step = TimeStep(time_step);
+        self
+    }
+
+    pub fn run_time_step(mut self, time_step: Duration) -> Self {
+        self.world.run_time_step = TimeStep(time_step);
+        self
+    }
+
+    pub fn output_time_step(mut self, time_step: Duration) -> Self {
+        self.world.output_time_step = OutputTimeStep {
+            time_step,
+            last_tick: std::time::Instant::now(),
+        }
+        .into();
         self
     }
 
@@ -592,7 +608,7 @@ impl WorldExec<Compiled> {
     }
 
     pub fn profile(&self) -> HashMap<&'static str, f64> {
-        self.profiler.profile(self.world.time_step.0)
+        self.profiler.profile(self.world.run_time_step.0)
     }
 }
 

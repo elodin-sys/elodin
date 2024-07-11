@@ -1,4 +1,5 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
 use std::mem;
 use std::ops::Range;
@@ -11,7 +12,93 @@ use crate::{
     EntityId, Error, Handle, Metadata, Packet, Payload, Query, StreamId,
 };
 
-pub type Connection = flume::Sender<Packet<Payload<Bytes>>>;
+#[derive(Debug, Clone)]
+pub struct Connection {
+    pub tx: flume::Sender<Packet<Payload<Bytes>>>,
+    pub state: ConnectionState,
+    pub playing: bool,
+}
+
+impl Connection {
+    pub fn new(tx: flume::Sender<Packet<Payload<Bytes>>>) -> Self {
+        Self {
+            tx,
+            state: Default::default(),
+            playing: true,
+        }
+    }
+
+    pub fn tick(&mut self, world: &World) -> Option<u64> {
+        if self.playing {
+            Some(self.state.tick(world.tick))
+        } else {
+            self.state.load_tick()
+        }
+    }
+
+    pub fn load_tick(&self, world: &World) -> Option<u64> {
+        Some(self.state.load_tick().unwrap_or(world.tick))
+    }
+
+    pub fn send(
+        &self,
+        msg: Packet<Payload<Bytes>>,
+    ) -> Result<(), flume::SendError<Packet<Payload<Bytes>>>> {
+        self.tx.send(msg)
+    }
+}
+
+// #[derive(Debug, Clone)]
+// pub enum ConnectionState {
+//     Replaying { index: u64 },
+//     Live,
+// }
+
+#[derive(Debug, Clone)]
+pub struct ConnectionState(pub Arc<AtomicU64>);
+impl Default for ConnectionState {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU64::new(0)))
+    }
+}
+
+impl ConnectionState {
+    const LIVE: u64 = u64::MAX;
+
+    fn load_tick(&self) -> Option<u64> {
+        let tick = self.0.load(std::sync::atomic::Ordering::SeqCst);
+        if tick == Self::LIVE {
+            None
+        } else {
+            Some(tick)
+        }
+    }
+
+    fn tick(&self, world_tick: u64) -> u64 {
+        let mut tick = self.0.load(std::sync::atomic::Ordering::SeqCst);
+        if tick == Self::LIVE {
+            world_tick
+        } else {
+            loop {
+                let new_tick = (tick + 1).min(world_tick);
+                match self.0.compare_exchange_weak(
+                    tick,
+                    new_tick,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                ) {
+                    Err(val) => {
+                        if val == Self::LIVE {
+                            return world_tick;
+                        }
+                        tick = val;
+                    }
+                    Ok(_) => return new_tick,
+                }
+            }
+        }
+    }
+}
 
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 #[derive(Debug, Clone)]
@@ -19,23 +106,21 @@ pub struct Replay {
     sub_manager: SubscriptionManager,
     proxy: Proxy,
     in_rx: flume::Receiver<Packet<Payload<Bytes>>>,
-    out_tx: flume::Sender<Packet<Payload<Bytes>>>,
+    connection: Connection,
     world: World,
-    tick: u64,
-    playing: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Subscription {
     component_id: ComponentId,
     stream_id: StreamId,
-    connection: Connection,
+    pub connection: Connection,
     sent_generation: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct SubscriptionManager {
-    subscriptions: Vec<Subscription>,
+    pub subscriptions: Vec<Subscription>,
     pub metadata_store: MetadataStore,
 }
 
@@ -103,7 +188,7 @@ impl Replay {
                 stream_id: StreamId::CONTROL,
                 payload: Payload::ControlMsg(ControlMsg::StartSim {
                     metadata_store: metadata_store.clone(),
-                    time_step: world.time_step.0,
+                    time_step: world.sim_time_step.0,
                     entity_ids: world.entity_ids(),
                 }),
             })
@@ -120,10 +205,8 @@ impl Replay {
             sub_manager: SubscriptionManager::new(metadata_store),
             proxy,
             in_rx,
-            out_tx,
+            connection: Connection::new(out_tx.clone()),
             world,
-            tick: 0,
-            playing: true,
         }
     }
 
@@ -134,36 +217,39 @@ impl Replay {
                 Payload::Column(_) => {}
             }
         }
-        if self.playing {
-            self.out_tx
-                .send(Packet {
-                    stream_id: StreamId::CONTROL,
-                    payload: Payload::ControlMsg(ControlMsg::Tick {
-                        tick: self.tick,
-                        max_tick: self.world.tick,
-                    }),
-                })
-                .map_err(|_| Error::ConnectionClosed)?;
-            self.sub_manager.send(&self.world, self.tick);
-            self.tick += 1;
+
+        let Some(tick) = self.connection.tick(&self.world) else {
+            return Ok(());
+        };
+        if let Err(err) = self.connection.send(Packet {
+            stream_id: StreamId::CONTROL,
+            payload: Payload::ControlMsg(ControlMsg::Tick {
+                tick,
+                max_tick: self.world.tick,
+                simulating: false,
+            }),
+        }) {
+            tracing::debug!(?err, "send tick error, dropping connection");
         }
+        self.sub_manager.send(&self.world);
         self.proxy.flush()?;
-        if self.tick >= self.world.tick {
-            self.playing = false;
-        }
         Ok(())
     }
 
     fn process_msg(&mut self, msg: ControlMsg) -> Result<(), Error> {
-        let tx = self.out_tx.clone();
         match msg {
             ControlMsg::Subscribe { query } => {
-                self.sub_manager.subscribe(query, tx)?;
+                self.sub_manager.subscribe(query, self.connection.clone())?;
             }
-            ControlMsg::SetPlaying(playing) => self.playing = playing,
-            ControlMsg::Rewind(index) => self.tick = index,
+            ControlMsg::SetPlaying(playing) => {
+                self.connection.playing = playing;
+            }
+            ControlMsg::Rewind(index) => {
+                self.connection.state.0.store(index, Ordering::SeqCst);
+            }
             ControlMsg::Query { time_range, query } => {
-                self.sub_manager.query(time_range, query, &self.world, tx)?;
+                self.sub_manager
+                    .query(time_range, query, &self.world, self.connection.clone())?;
             }
             _ => {}
         }
@@ -179,8 +265,11 @@ impl SubscriptionManager {
         }
     }
 
-    pub fn send(&mut self, world: &World, tick: u64) {
+    pub fn send(&mut self, world: &World) {
         self.subscriptions.retain_mut(|sub| {
+            let Some(tick) = sub.connection.load_tick(world) else {
+                return true;
+            };
             send_sub(world, sub, tick, &[])
                 .inspect_err(|err| {
                     tracing::debug!(?err, "send sub error, dropping connection");
