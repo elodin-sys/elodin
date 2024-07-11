@@ -1,6 +1,7 @@
 [package]
 name = "helmholtz-chamber"
 edition = "2021"
+publish = false
 version.workspace = true
 repository.workspace = true
 
