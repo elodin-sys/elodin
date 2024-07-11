@@ -40,7 +40,7 @@ impl Cli {
             .expect("tokio runtime failed to start");
         match self.command {
             // un-licensed commands
-            Some(Commands::Login) | None => {}
+            Some(Commands::Login) | Some(Commands::Create(_)) | None => {}
             // licensed commands
             _ => {
                 rt.block_on(self.verify_license_key());
