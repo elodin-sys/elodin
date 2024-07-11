@@ -46,21 +46,29 @@ class WorldBuilder:
     def run(
         self,
         system: Any,
-        time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
+        max_ticks: Optional[int] = None,
         client: Optional[Client] = None,
     ): ...
     def serve(
         self,
         system: Any,
         daemon: bool = False,
-        time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
+        max_ticks: Optional[int] = None,
         client: Optional[Client] = None,
         addr: Optional[str] = None,
     ): ...
     def build(
         self,
         system: Any,
-        time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = None,
+        run_time_step: Optional[float] = None,
+        output_time_step: Optional[float] = None,
         client: Optional[Client] = None,
     ) -> Exec: ...
 

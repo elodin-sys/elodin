@@ -232,7 +232,7 @@ impl SimRunner {
                     error!(?err, "failed to run conduit exec");
                     return Err(err.into());
                 }
-                let sleep_time = conduit_exec.time_step().saturating_sub(start.elapsed());
+                let sleep_time = conduit_exec.run_time_step().saturating_sub(start.elapsed());
                 thread::sleep(sleep_time);
 
                 if let Ok(exec) = exec_rx.try_recv() {

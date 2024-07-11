@@ -454,7 +454,7 @@ def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFr
     torque = jax.lax.select(
         use_stribeck, stribeck_torque, -columb_fric * np.sign(speed) - cv * speed
     )
-    return (force + el.SpatialForce(toruqe=torque * axis), torque)
+    return (force + el.SpatialForce(torque=torque * axis), torque)
 
 
 @el.map
@@ -698,5 +698,8 @@ exec = w.run(
         | earth_point,
         el.Integrator.SemiImplicit,
     ),
-    time_step=1.0 / 240.0,
+    sim_time_step=1.0 / 60.0,
+    run_time_step=0.0 / 60.0,
+    output_time_step=1 / 60.0,
+    max_ticks=60 * 60 * 30,
 )

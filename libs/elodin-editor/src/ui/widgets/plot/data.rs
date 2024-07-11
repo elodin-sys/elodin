@@ -130,7 +130,11 @@ pub fn collect_entity_data(
                     graph.enabled_lines.clear();
                 }
             }
-            Msg::Control(ControlMsg::Tick { tick, max_tick: _ }) => {
+            Msg::Control(ControlMsg::Tick {
+                tick,
+                max_tick: _,
+                simulating: _,
+            }) => {
                 if collected_graph_data.tick_range.end < tick {
                     collected_graph_data.tick_range.end = tick;
                 }

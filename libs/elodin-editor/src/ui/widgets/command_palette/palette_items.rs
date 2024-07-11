@@ -13,6 +13,7 @@ use bevy::{
 };
 use bevy_infinite_grid::InfiniteGrid;
 use conduit::{
+    bevy::Simulating,
     query::MetadataStore,
     well_known::{BodyAxes, EntityMetadata},
     ComponentId, ControlMsg,
@@ -313,6 +314,14 @@ impl Default for PalettePage {
                         };
                     }
 
+                    PaletteEvent::Exit
+                },
+            ),
+            PaletteItem::new(
+                "Toggle Simulating",
+                VIEWPORT_LABEL,
+                |mut event: EventWriter<ControlMsg>, simulating: Res<Simulating>| {
+                    event.send(ControlMsg::SetSimulating(!simulating.0));
                     PaletteEvent::Exit
                 },
             ),

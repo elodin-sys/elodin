@@ -559,10 +559,12 @@ pub enum ControlMsg {
         asset_index: u64,
     },
     SetPlaying(bool),
+    SetSimulating(bool),
     Rewind(u64),
     Tick {
         tick: u64,
         max_tick: u64,
+        simulating: bool,
     },
     SaveReplay,
     Exit,

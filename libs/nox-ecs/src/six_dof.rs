@@ -190,7 +190,7 @@ mod tests {
         let mut exec = world
             .builder()
             .tick_pipeline(six_dof(|| (), time_step, Integrator::Rk4))
-            .time_step(std::time::Duration::from_secs_f64(time_step))
+            .run_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client)
@@ -272,7 +272,7 @@ mod tests {
         let mut exec = world
             .builder()
             .tick_pipeline(six_dof(|| constant_torque, time_step, Integrator::Rk4))
-            .time_step(std::time::Duration::from_secs_f64(time_step))
+            .run_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client.clone())
