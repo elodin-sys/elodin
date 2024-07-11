@@ -44,10 +44,10 @@ mod polars;
 #[cfg(all(feature = "std", feature = "polars"))]
 pub use polars::PolarsWorld;
 
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 mod replay;
 
-#[cfg(all(feature = "std", feature = "xla"))]
+#[cfg(feature = "std")]
 pub use replay::*;
 
 #[cfg(feature = "std")]

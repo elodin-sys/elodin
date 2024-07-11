@@ -14,7 +14,7 @@ rand = ["fastrand"]
 well-known = ["nalgebra"]
 std = ["bytes/std", "postcard/use-std", "ndarray/std", "well-known"]
 xla = ["nox/xla"]
-polars = ["dep:polars", "polars-arrow", "arrow", "xla", "std"]
+polars = ["dep:polars", "polars-arrow", "arrow", "std"]
 
 [dependencies]
 # serialize
