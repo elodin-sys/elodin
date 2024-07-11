@@ -16,7 +16,7 @@ shared = ["nox/shared"]
 nox.path = "../nox"
 nox.features = ["xla"]
 conduit.path = "../conduit"
-conduit.features = ["nox", "polars"]
+conduit.features = ["nox", "polars", "xla"]
 
 # data structures
 smallvec.version = "1.11.2"
