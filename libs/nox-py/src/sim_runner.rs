@@ -104,7 +104,7 @@ impl SimRunner {
             let exec: WorldExec<Compiled> = exec_rx.recv()?;
             let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
             let mut start = Instant::now();
-            let time_step = conduit_exec.time_step();
+            let time_step = conduit_exec.run_time_step();
             loop {
                 if let Err(err) = conduit_exec.run() {
                     error!(?err, "failed to run conduit exec");

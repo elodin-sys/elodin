@@ -12,8 +12,8 @@ use std::time::Duration;
 use std::{fs::File, path::Path};
 
 use crate::world::{Buffers, ColumnRef, TimeStep, World};
-use crate::Error;
 use crate::{ArchetypeName, ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
+use crate::{Error, OutputTimeStep};
 
 impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn series(&self) -> Result<Series, Error> {
@@ -25,10 +25,13 @@ impl World {
     pub fn polars(&self) -> Result<PolarsWorld, Error> {
         PolarsWorld::new(
             &self.component_map,
-            self.time_step.0,
+            self.run_time_step.0,
+            self.sim_time_step.0,
             &self.entity_ids,
             &self.history,
             &self.host,
+            self.output_time_step.clone().map(|d| d.time_step),
+            self.max_tick,
         )
     }
 
@@ -47,8 +50,25 @@ impl World {
         let history = polars_world.history()?;
         let entity_ids = polars_world.entity_ids()?;
         let component_map = polars_world.component_map();
-        let time_step = TimeStep(polars_world.metadata.time_step);
-        let world = World::new(history, entity_ids, component_map, assets, time_step);
+        let run_time_step = TimeStep(polars_world.metadata.run_time_step);
+        let sim_time_step = TimeStep(polars_world.metadata.sim_time_step);
+        let output_time_step = polars_world
+            .metadata
+            .output_time_step
+            .map(|d| OutputTimeStep {
+                time_step: d,
+                last_tick: std::time::Instant::now(),
+            });
+        let world = World::new(
+            history,
+            entity_ids,
+            component_map,
+            assets,
+            sim_time_step,
+            run_time_step,
+            output_time_step,
+            polars_world.metadata.max_ticks,
+        );
         Ok(world)
     }
 }
@@ -64,16 +84,24 @@ pub struct PolarsWorld {
 pub struct WorldMetadata {
     archetypes: ustr::UstrMap<Vec<Metadata>>,
     #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
-    time_step: std::time::Duration,
+    sim_time_step: std::time::Duration,
+    #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
+    run_time_step: std::time::Duration,
+    output_time_step: Option<Duration>,
+    max_ticks: u64,
 }
 
 impl PolarsWorld {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         component_map: &HashMap<ComponentId, (ArchetypeName, Metadata)>,
-        time_step: Duration,
+        run_time_step: Duration,
+        sim_time_step: Duration,
         entity_ids: &ustr::UstrMap<Vec<u8>>,
         history: &[Buffers],
         host: &Buffers,
+        output_time_step: Option<Duration>,
+        max_ticks: u64,
     ) -> Result<Self, Error> {
         let archetype_metadata = component_map.iter().fold(
             ustr::UstrMap::<Vec<Metadata>>::default(),
@@ -116,7 +144,10 @@ impl PolarsWorld {
         }
         let metadata = WorldMetadata {
             archetypes: archetype_metadata,
-            time_step,
+            run_time_step,
+            sim_time_step,
+            output_time_step,
+            max_ticks,
         };
         Ok(Self {
             archetypes,

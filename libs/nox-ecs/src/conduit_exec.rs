@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::atomic::Ordering};
 
 use crate::{Compiled, Error, WorldExec};
 use conduit::{
@@ -12,8 +12,7 @@ pub struct ConduitExec {
     connections: Vec<Connection>,
     rx: flume::Receiver<MsgPair>,
     exec: WorldExec<Compiled>,
-    playing: bool,
-    state: State,
+    simulating: bool,
     replay_dir: PathBuf,
 }
 
@@ -30,47 +29,49 @@ impl ConduitExec {
             connections: Vec::new(),
             rx,
             exec,
-            playing: true,
-            state: State::default(),
             replay_dir,
+            simulating: true,
         }
     }
 
-    pub fn time_step(&self) -> std::time::Duration {
-        self.exec.world.time_step.0
+    pub fn sim_time_step(&self) -> std::time::Duration {
+        self.exec.world.sim_time_step.0
+    }
+
+    pub fn run_time_step(&self) -> std::time::Duration {
+        self.exec.world.run_time_step.0
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
-        if self.playing {
-            match &mut self.state {
-                State::Running => {
-                    self.exec.run()?;
-                }
-                State::Replaying { index } => {
-                    *index += 1;
-                    if *index >= self.exec.tick() {
-                        self.state = State::Running;
-                    }
-                }
-            }
+        if self.simulating && self.exec.world.tick < self.exec.world.max_tick {
+            self.exec.run()?;
         }
-        self.send();
-        self.recv();
+        if let Some(output_time_step) = &mut self.exec.world.output_time_step {
+            let elapsed = output_time_step.last_tick.elapsed();
+            if elapsed >= output_time_step.time_step {
+                output_time_step.last_tick += elapsed;
+                self.send();
+                self.recv();
+            }
+        } else {
+            self.send();
+            self.recv();
+        }
         Ok(())
     }
 
     pub fn send(&mut self) {
-        let tick = match self.state {
-            State::Running => self.exec.tick(),
-            State::Replaying { index } => index,
-        };
         // drop connections and subscriptions if the connection is closed
         self.connections.retain_mut(|con| {
+            let Some(tick) = con.tick(&self.exec.world) else {
+                return true;
+            };
             con.send(Packet {
                 stream_id: StreamId::CONTROL,
                 payload: Payload::ControlMsg(ControlMsg::Tick {
                     tick,
                     max_tick: self.exec.tick(),
+                    simulating: self.simulating,
                 }),
             })
             .inspect_err(|err| {
@@ -78,11 +79,8 @@ impl ConduitExec {
             })
             .is_ok()
         });
-        let tick = match self.state {
-            State::Running => self.exec.world.tick,
-            State::Replaying { index } => index,
-        };
-        self.sub_manager.send(&self.exec.world, tick);
+
+        self.sub_manager.send(&self.exec.world);
     }
 
     pub fn recv(&mut self) {
@@ -103,7 +101,7 @@ impl ConduitExec {
     }
 
     pub fn add_connection(&mut self, conn: Connection) -> Result<(), Error> {
-        let already_exits = self.connections.iter().any(|c| c.same_channel(&conn));
+        let already_exits = self.connections.iter().any(|c| c.tx.same_channel(&conn.tx));
         if already_exits {
             tracing::debug!("connection already exists");
             return Ok(());
@@ -113,7 +111,7 @@ impl ConduitExec {
             stream_id: StreamId::CONTROL,
             payload: Payload::ControlMsg(ControlMsg::StartSim {
                 metadata_store: self.sub_manager.metadata_store.clone(),
-                time_step: self.time_step(),
+                time_step: self.sim_time_step(),
                 entity_ids: self.exec.world.entity_ids(),
             }),
         })?;
@@ -127,15 +125,49 @@ impl ConduitExec {
             return Ok(());
         };
         match msg {
-            Msg::Control(ControlMsg::Connect) => self.add_connection(tx)?,
+            Msg::Control(ControlMsg::Connect) => self.add_connection(Connection::new(tx))?,
             Msg::Control(ControlMsg::Subscribe { query }) => {
-                self.sub_manager.subscribe(query, tx)?;
+                let con = self
+                    .connections
+                    .iter()
+                    .find(|c| c.tx.same_channel(&tx))
+                    .cloned()
+                    .unwrap_or_else(|| Connection::new(tx));
+                self.sub_manager.subscribe(query, con)?;
             }
-            Msg::Control(ControlMsg::SetPlaying(playing)) => self.playing = playing,
-            Msg::Control(ControlMsg::Rewind(index)) => self.state = State::Replaying { index },
+            Msg::Control(ControlMsg::SetPlaying(playing)) => {
+                for con in &mut self.connections {
+                    if con.tx.same_channel(&tx) {
+                        con.playing = playing;
+                    }
+                }
+                for sub in &mut self.sub_manager.subscriptions {
+                    let con = &mut sub.connection;
+                    if con.tx.same_channel(&tx) {
+                        con.playing = playing;
+                    }
+                }
+            }
+            Msg::Control(ControlMsg::SetSimulating(simulating)) => {
+                self.simulating = simulating;
+            }
+            Msg::Control(ControlMsg::Rewind(index)) => {
+                for con in &mut self.connections {
+                    if con.tx.same_channel(&tx) {
+                        con.state.0.store(index, Ordering::SeqCst);
+                    }
+                }
+            }
             Msg::Control(ControlMsg::Query { time_range, query }) => {
+                let con = self
+                    .connections
+                    .iter()
+                    .find(|c| c.tx.same_channel(&tx))
+                    .cloned()
+                    .unwrap_or_else(|| Connection::new(tx));
+
                 self.sub_manager
-                    .query(time_range, query, &self.exec.world, tx)?;
+                    .query(time_range, query, &self.exec.world, con)?;
             }
             Msg::Control(ControlMsg::SaveReplay) => {
                 let date_time = chrono::Local::now().to_rfc3339();
@@ -179,15 +211,6 @@ impl ConduitExec {
     }
 }
 
-#[derive(Default, Copy, Clone)]
-enum State {
-    #[default]
-    Running,
-    Replaying {
-        index: u64,
-    },
-}
-
 #[cfg(feature = "tokio")]
 pub fn spawn_tcp_server(
     socket_addr: std::net::SocketAddr,
@@ -202,7 +225,8 @@ pub fn spawn_tcp_server(
     let (tx, rx) = flume::unbounded();
     let exec = exec.compile(client)?;
     let mut conduit_exec = ConduitExec::new(exec, rx);
-    let time_step = conduit_exec.time_step();
+    println!("max_tick: {}", conduit_exec.exec.world.max_tick);
+    let time_step = conduit_exec.run_time_step();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
