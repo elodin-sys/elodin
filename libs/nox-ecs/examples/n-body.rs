@@ -77,7 +77,7 @@ fn main() {
     let exec = world
         .builder()
         .tick_pipeline(six_dof(|| gravity, time_step, Integrator::SemiImplicit))
-        .time_step(std::time::Duration::from_secs_f64(1.0 / 240.0))
+        .run_time_step(std::time::Duration::from_secs_f64(1.0 / 240.0))
         .build()
         .unwrap();
     let client = nox::Client::cpu().unwrap();

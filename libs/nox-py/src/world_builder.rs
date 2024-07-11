@@ -104,6 +104,8 @@ impl WorldBuilder {
         sys: PyObject,
         daemon: Option<bool>,
         time_step: Option<f64>,
+        output_time_step: Option<f64>,
+        max_ticks: Option<u64>,
         client: Option<&Client>,
         addr: Option<&str>,
     ) -> Result<String, Error> {
@@ -120,7 +122,7 @@ impl WorldBuilder {
             )
             .try_init();
 
-        let exec = self.build_uncompiled(py, sys, time_step)?;
+        let exec = self.build_uncompiled(py, sys, time_step, output_time_step, max_ticks)?;
 
         let client = match client {
             Some(c) => c.client.clone(),
@@ -154,11 +156,15 @@ impl WorldBuilder {
         Ok(rx.recv().unwrap().to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &mut self,
         py: Python<'_>,
         sys: PyObject,
-        time_step: Option<f64>,
+        sim_time_step: Option<f64>,
+        run_time_step: Option<f64>,
+        output_time_step: Option<f64>,
+        max_ticks: Option<u64>,
         client: Option<&Client>,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
@@ -189,7 +195,14 @@ impl WorldBuilder {
 
         match args {
             Args::Build { dir } => {
-                let mut exec = self.build_uncompiled(py, sys, time_step)?;
+                let mut exec = self.build_uncompiled(
+                    py,
+                    sys,
+                    sim_time_step,
+                    run_time_step,
+                    output_time_step,
+                    max_ticks,
+                )?;
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
@@ -200,7 +213,14 @@ impl WorldBuilder {
                 watch,
             } => {
                 if !watch {
-                    let exec = self.build_uncompiled(py, sys, time_step)?;
+                    let exec = self.build_uncompiled(
+                        py,
+                        sys,
+                        sim_time_step,
+                        run_time_step,
+                        output_time_step,
+                        max_ticks,
+                    )?;
                     let client = match client {
                         Some(c) => c.client.clone(),
                         None => nox::Client::cpu()?,
@@ -223,7 +243,15 @@ impl WorldBuilder {
                 }
             }
             Args::Bench { ticks } => {
-                let mut exec = self.build(py, sys, time_step, client)?;
+                let mut exec = self.build(
+                    py,
+                    sys,
+                    sim_time_step,
+                    run_time_step,
+                    output_time_step,
+                    max_ticks,
+                    client,
+                )?;
                 exec.run(py, ticks, true)?;
                 let tempdir = tempfile::tempdir()?;
                 exec.exec.write_to_dir(tempdir)?;
@@ -241,14 +269,25 @@ impl WorldBuilder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         &mut self,
         py: Python<'_>,
         system: PyObject,
-        time_step: Option<f64>,
+        sim_time_step: Option<f64>,
+        run_time_step: Option<f64>,
+        output_time_step: Option<f64>,
+        max_ticks: Option<u64>,
         client: Option<&Client>,
     ) -> Result<Exec, Error> {
-        let exec = self.build_uncompiled(py, system, time_step)?;
+        let exec = self.build_uncompiled(
+            py,
+            system,
+            sim_time_step,
+            run_time_step,
+            output_time_step,
+            max_ticks,
+        )?;
         let client = match client {
             Some(c) => c.client.clone(),
             None => nox::Client::cpu()?,
@@ -263,15 +302,34 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: PyObject,
-        time_step: Option<f64>,
+        sim_time_step: Option<f64>,
+        run_time_step: Option<f64>,
+        output_time_step: Option<f64>,
+        max_ticks: Option<u64>,
     ) -> Result<nox_ecs::WorldExec, Error> {
-        if let Some(ts) = time_step {
+        if let Some(ts) = sim_time_step {
             let ts = Duration::from_secs_f64(ts);
             // 1ms (~1000 ticks/sec) is the minimum time step
             // if ts <= Duration::from_millis(1) {
             //     return Err(Error::InvalidTimeStep(ts));
             // }
-            self.world.time_step = TimeStep(ts);
+            self.world.sim_time_step = TimeStep(ts);
+            self.world.run_time_step = TimeStep(ts);
+        }
+        if let Some(ts) = run_time_step {
+            let ts = Duration::from_secs_f64(ts);
+            self.world.run_time_step = TimeStep(ts);
+        }
+
+        if let Some(ts) = output_time_step {
+            let time_step = Duration::from_secs_f64(ts);
+            self.world.output_time_step = Some(conduit::OutputTimeStep {
+                time_step,
+                last_tick: std::time::Instant::now(),
+            })
+        }
+        if let Some(max_ticks) = max_ticks {
+            self.world.max_tick = max_ticks;
         }
 
         let start = std::time::Instant::now();
