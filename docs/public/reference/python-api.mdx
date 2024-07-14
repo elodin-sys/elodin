@@ -259,9 +259,9 @@ Unit quaternions are used to represent spatial orientations and rotations of bod
 
     Multiply two quaternions.
 
-- `__matmul__(vector)` -> [jax.Array]
+- `__matmul__(vector)` -> [jax.Array] | [elodin.SpatialTransform] | [elodin.SpatialMotion] | [elodin.SpatialForce]
 
-    Rotate `vector` by computing the matrix product. The vector can be a plain [jax.Array] or one of the following spatial objects: [elodin.SpatialTransform], [elodin.SpatialMotion], [elodin.SpatialForce].
+    Rotate `vector` by computing the matrix product. The vector can be a plain [jax.Array] or one of the following spatial objects: [elodin.SpatialTransform], [elodin.SpatialMotion], [elodin.SpatialForce]. The return type is the same as the input type.
 
 
 ## Spatial Vector Algebra

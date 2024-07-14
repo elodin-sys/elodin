@@ -1,7 +1,17 @@
 from __future__ import annotations
 from collections.abc import Sequence
 import jax
-from typing import Any, Optional, Union, Tuple, ClassVar, List, Protocol, Annotated
+from typing import (
+    Any,
+    Optional,
+    Union,
+    Tuple,
+    ClassVar,
+    List,
+    Protocol,
+    Annotated,
+    overload,
+)
 import polars as pl
 from elodin import Archetype
 
@@ -216,9 +226,14 @@ class Quaternion:
     def normalize(self) -> Quaternion: ...
     def __mul__(self, other: Quaternion) -> Quaternion: ...
     def __add__(self, other: Quaternion) -> Quaternion: ...
-    def __matmul__(
-        self, vector: jax.Array | SpatialTransform | SpatialMotion | SpatialForce
-    ) -> jax.Array: ...
+    @overload
+    def __matmul__(self, vector: jax.Array) -> jax.Array: ...
+    @overload
+    def __matmul__(self, spatial_transform: SpatialTransform) -> SpatialTransform: ...
+    @overload
+    def __matmul__(self, spatial_motion: SpatialMotion) -> SpatialMotion: ...
+    @overload
+    def __matmul__(self, spatial_force: SpatialForce) -> SpatialForce: ...
     def inverse(self) -> Quaternion: ...
 
 class RustSystem:
