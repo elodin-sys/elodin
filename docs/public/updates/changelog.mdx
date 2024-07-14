@@ -51,6 +51,13 @@ icon: bars-staggered
 - Add "Save Replay" command to command palette (Cmd + P).
 - Show progress bar when executing `exec.run(ticks)` unless explicitly disabled with `exec.run(ticks, show_progress=False)`.
 - Add a create command for templates to the Elodin CLI
+- Allowing naming of viewports and graphs from code.
+  ```python
+  el.Panel.graph(
+    [ el.GraphEntity(drone, [ el.Component.index(mekf.AttEstError) ]) ],
+    name="Attitude Estimation Error",
+  )
+  ```
 
 
 ## v0.3.23
