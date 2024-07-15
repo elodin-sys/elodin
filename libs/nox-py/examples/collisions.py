@@ -187,7 +187,7 @@ world.spawn(
 )
 world.spawn(
     el.Panel.graph(
-        [el.GraphEntity(b, el.Component.index(el.WorldPos)[4:]) for b in balls]
+        *[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]
     ),
 )
 
