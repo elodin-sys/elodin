@@ -1,6 +1,57 @@
 # Changelog
 
 ## [unreleased]
+- **(breaking)** Use variable positional arguments for `el.Panel.vsplit`, `el.Panel.hsplit`, `el.Panel.graph`, and `el.GraphEntity` instead of lists. This results in much less verbose panel configuration code. To update your code, either replace the list of arguments with individual arguments separated by commas or unpack the list with `*`.
+  ```python
+  # before:
+  world.spawn(
+      el.Panel.hsplit(
+          [
+              el.Panel.vsplit(
+                  [
+                      el.Panel.graph(
+                          [
+                              el.GraphEntity(
+                                  sat,
+                                  [
+                                      el.Component.index(SunRef),
+                                  ],
+                              )
+                          ]
+                      ),
+                  ]
+              ),
+          ]
+      ),
+  )
+  world.spawn(
+      el.Panel.graph(
+          [el.GraphEntity(b, el.Component.index(el.WorldPos)[4:]) for b in balls]
+      ),
+  )
+
+  # after:
+  world.spawn(
+      el.Panel.hsplit(
+          el.Panel.vsplit(
+              el.Panel.graph(el.GraphEntity(sat, el.Component.index(SunRef))),
+          ),
+      ),
+  )
+  world.spawn(
+      el.Panel.graph(
+          *[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]
+      ),
+  )
+  ```
+- `GraphEntity` constructor now accepts component classes directly instead of `el.Component.index(ComponentClass)`. However, `el.Component.index` is still needed for slicing and indexing into individual elements of a component.
+  ```python
+  # before:
+  el.GraphEntity(sat, el.Component.index(SunRef))
+
+  # after:
+  el.GraphEntity(sat, SunRef)
+  ```
 
 ## [v0.3.24]
 - Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.

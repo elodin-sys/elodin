@@ -172,71 +172,40 @@ def world() -> el.World:
     )
     world.spawn(
         el.Panel.hsplit(
-            [
-                el.Panel.vsplit(
-                    [
-                        el.Panel.viewport(
-                            track_entity=drone,
-                            track_rotation=False,
-                            active=True,
-                            show_grid=True,
-                            pos=[-0.5, -3.0, 0.5],
-                            looking_at=[0.0, 0.0, 0.5],
-                            name="Drone Camera",
-                        ),
-                        el.Panel.graph(
-                            [
-                                el.GraphEntity(
-                                    drone,
-                                    [
-                                        el.Component.index(mekf.AttEstError),
-                                    ],
-                                )
-                            ],
-                            name="Attitude Estimation Error",
-                        ),
-                    ]
+            el.Panel.vsplit(
+                el.Panel.viewport(
+                    track_entity=drone,
+                    track_rotation=False,
+                    active=True,
+                    show_grid=True,
+                    pos=[-0.5, -3.0, 0.5],
+                    looking_at=[0.0, 0.0, 0.5],
+                    name="Drone Camera",
                 ),
-                el.Panel.vsplit(
-                    [
-                        el.Panel.graph(
-                            [
-                                el.GraphEntity(
-                                    drone,
-                                    [
-                                        el.Component.index(motors.MotorInput),
-                                    ],
-                                )
-                            ],
-                            name="Motor Input",
-                        ),
-                        el.Panel.graph(
-                            [
-                                el.GraphEntity(
-                                    drone,
-                                    [
-                                        el.Component.index(Thrust),
-                                    ],
-                                )
-                            ],
-                            name="Thrust",
-                        ),
-                        el.Panel.graph(
-                            [
-                                el.GraphEntity(
-                                    drone,
-                                    [
-                                        el.Component.index(control.AngVelSetpoint),
-                                        el.Component.index(control.EulerRateTarget),
-                                        el.Component.index(sensors.Gyro),
-                                    ],
-                                )
-                            ],
-                            name="Rate Control",
-                        ),
-                    ]
+                el.Panel.graph(
+                    el.GraphEntity(drone, mekf.AttEstError),
+                    name="Attitude Estimation Error",
                 ),
-            ],
+            ),
+            el.Panel.vsplit(
+                el.Panel.graph(
+                    el.GraphEntity(drone, motors.MotorInput),
+                    name="Motor Input",
+                ),
+                el.Panel.graph(
+                    el.GraphEntity(drone, Thrust),
+                    name="Thrust",
+                ),
+                el.Panel.graph(
+                    el.GraphEntity(
+                        drone,
+                        control.AngVelSetpoint,
+                        control.EulerRateTarget,
+                        sensors.Gyro,
+                    ),
+                    name="Rate Control",
+                ),
+            ),
             active=True,
         ),
         name="Viewport",
