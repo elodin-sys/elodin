@@ -475,45 +475,26 @@ rocket = w.spawn(
 
 w.spawn(
     el.Panel.hsplit(
-        [
-            el.Panel.vsplit(
-                [
-                    el.Panel.viewport(
-                        track_entity=rocket,
-                        track_rotation=False,
-                        pos=[5.0, 0.0, 1.0],
-                        looking_at=[0.0, 0.0, 0.0],
-                        show_grid=True,
-                    ),
-                ]
+        el.Panel.vsplit(
+            el.Panel.viewport(
+                track_entity=rocket,
+                track_rotation=False,
+                pos=[5.0, 0.0, 1.0],
+                looking_at=[0.0, 0.0, 0.0],
+                show_grid=True,
             ),
-            el.Panel.vsplit(
-                [
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                rocket,
-                                [
-                                    el.Component.index(FinDeflect),
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                rocket,
-                                [
-                                    el.Component.index(VRelAccel)[1:],
-                                    el.Component.index(VRelAccelFiltered)[1:],
-                                    el.Component.index(AccelSetpointSmooth),
-                                ],
-                            )
-                        ]
-                    ),
-                ]
+        ),
+        el.Panel.vsplit(
+            el.Panel.graph(el.GraphEntity(rocket, FinDeflect)),
+            el.Panel.graph(
+                el.GraphEntity(
+                    rocket,
+                    AccelSetpointSmooth,
+                    *el.Component.index(VRelAccel)[1:],
+                    *el.Component.index(VRelAccelFiltered)[1:],
+                )
             ),
-        ],
+        ),
         active=True,
     )
 )
