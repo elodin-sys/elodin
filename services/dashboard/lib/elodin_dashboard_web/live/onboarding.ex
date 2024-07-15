@@ -16,17 +16,17 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             {0, 0}
 
           current_user["onboarding_data"] == nil ->
-            {2, 1}
+            {3, 1}
 
           true ->
-            {1000, 3}
+            {1000, 4}
         end
       )
 
     param_page =
-      case Integer.parse(params["page_num"] || "3") do
+      case Integer.parse(params["page_num"] || "4") do
         {param_page, _} -> param_page
-        :error -> 3
+        :error -> 4
       end
 
     page = max(min(param_page, max_page), min_page)
@@ -40,19 +40,19 @@ defmodule ElodinDashboardWeb.OnboardingLive do
        socket
        |> assign(page: page)
        |> assign(loading: false)
-       |> assign(selected_industries: MapSet.new())}
+       |> assign(selected_usecases: MapSet.new())}
     end
   end
 
-  def handle_event("select_industry", %{"id" => id}, socket) do
-    selected_industries =
-      if MapSet.member?(socket.assigns[:selected_industries], id) do
-        socket.assigns[:selected_industries] |> MapSet.delete(id)
+  def handle_event("select_usecases", %{"id" => id}, socket) do
+    selected_usecases =
+      if MapSet.member?(socket.assigns[:selected_usecases], id) do
+        socket.assigns[:selected_usecases] |> MapSet.delete(id)
       else
-        selected_industries = socket.assigns[:selected_industries] |> MapSet.put(id)
+        selected_usecases = socket.assigns[:selected_usecases] |> MapSet.put(id)
       end
 
-    {:noreply, assign(socket, :selected_industries, selected_industries)}
+    {:noreply, assign(socket, :selected_usecases, selected_usecases)}
   end
 
   def handle_event("start_trial", %{"tier" => tier}, socket) do
@@ -69,8 +69,8 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     {:noreply, push_redirect(socket, to: "/onboard/#{page}")}
   end
 
-  def handle_event("poll_results", %{"selected_industries" => selected_industries}, socket) do
-    send(self(), {:poll_results, selected_industries})
+  def handle_event("poll_results", %{"selected_usecases" => selected_usecases}, socket) do
+    send(self(), {:poll_results, selected_usecases})
     {:noreply, assign(socket, :loading, true)}
   end
 
@@ -95,17 +95,17 @@ defmodule ElodinDashboardWeb.OnboardingLive do
      |> assign(:current_user, current_user)}
   end
 
-  def handle_info({:poll_results, selected_industries}, socket) do
+  def handle_info({:poll_results, selected_usecases}, socket) do
     Atc.update_user(
       %Api.UpdateUserReq{
         onboarding_data: %Api.OnboardingData{
-          usecases: Enum.to_list(selected_industries)
+          usecases: Enum.to_list(selected_usecases)
         }
       },
       socket.assigns[:current_user]["token"]
     )
 
-    {:noreply, socket |> assign(:page, 3) |> assign(:loading, false)}
+    {:noreply, socket |> assign(:page, 4) |> assign(:loading, false)}
   end
 
   def poll_item(assigns) do
@@ -120,7 +120,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         "border border-solid active:bg-opacity-60 active:border-opacity-70",
         @class
       ]}
-      phx-click={JS.push("select_industry", value: %{id: @id})}
+      phx-click={JS.push("select_usecases", value: %{id: @id})}
     >
       <h4 class="font-medium"><%= @label %></h4>
     </div>
@@ -377,14 +377,14 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             "bg-opacity-0 hover:bg-opacity-20 hover:border-b-primary-smoke",
             "cursor-pointer text-sm font-medium",
             item.class,
-            if(@selected_industries |> Enum.member?(item.id), do: item.selected_class || "", else: ""),
-            if(@selected_industries |> Enum.member?(item.id),
+            if(@selected_usecases |> Enum.member?(item.id), do: item.selected_class || "", else: ""),
+            if(@selected_usecases |> Enum.member?(item.id),
               do: "!bg-opacity-100",
               else: "border-b border-onyx-9"
             ),
-            if(i == 0 && !(@selected_industries |> Enum.member?(item.id)), do: "border-t", else: "")
+            if(i == 0 && !(@selected_usecases |> Enum.member?(item.id)), do: "border-t", else: "")
           ]}
-          phx-click={JS.push("select_industry", value: %{id: item.id})}
+          phx-click={JS.push("select_usecases", value: %{id: item.id})}
         >
           <%= item.name |> String.upcase() %>
         </div>
@@ -396,10 +396,10 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               class="!py-4 !px-8"
               type="crema"
               phx-click={
-                if(@number == "02",
+                if(@number == "03",
                   do:
                     JS.push("poll_results",
-                      value: %{selected_industries: Enum.to_list(@selected_industries)}
+                      value: %{selected_usecases: Enum.to_list(@selected_usecases)}
                     ),
                   else: JS.push("next_page")
                 )
@@ -413,7 +413,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             </.button>
           </div>
           <div class="text-mono font-medium text-sm">
-            <%= @number %> / 02
+            <%= @number %> / 03
           </div>
         </div>
       </:button>
@@ -571,7 +571,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <.poll_selector
             number="01"
             prompt="What are you working on?"
-            selected_industries={@selected_industries}
+            selected_usecases={@selected_usecases}
             loading={@loading}
             items={[
               %{
@@ -640,8 +640,78 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="flex w-full justify-center items-center mt-12">
           <.poll_selector
             number="02"
+            prompt="Where did you hear about us?"
+            selected_usecases={@selected_usecases}
+            loading={@loading}
+            items={[
+              %{
+                id: "instagram-tiktok-youtube",
+                name: "instagram / tiktok / youtube",
+                selected_class: "text-black",
+                class: "bg-yellow"
+              },
+              %{
+                id: "linkedin",
+                name: "linkedin",
+                selected_class: "text-black",
+                class: "bg-red"
+              },
+              %{
+                id: "newsletter",
+                name: "newsletter",
+                selected_class: "text-black",
+                class: "bg-slate"
+              },
+              %{
+                id: "word-of-mouth",
+                name: "word of mouth",
+                selected_class: "text-black",
+                class: "bg-orange"
+              },
+              %{
+                id: "other",
+                name: "Other",
+                selected_class: "text-black",
+                class: "bg-green"
+              }
+            ]}
+          />
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  def page(%{page: 3} = assigns) do
+    ~H"""
+    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+      <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
+        <div class="w-full flex align-stretch">
+          <.link href="/" style="color: #000;">
+            <.ologo class="w-5" />
+          </.link>
+        </div>
+        <div class="w-full text-sm font-mono text-black mt-16 ">
+          GETTING STARTED
+        </div>
+        <div class="w-full text-2xl text-space text-black font-medium mt-2">
+          Introduction to Elodin
+        </div>
+        <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
+      </div>
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+        <div class="w-full flex flex-col items-end">
+          <img
+            src={@current_user["avatar"]}
+            class="ml-elo-lg w-8 h-8 inline-block rounded-full"
+            phx-click={toggle("#user_dropdown")}
+          /> <.user_dropdown current_user={@current_user} />
+        </div>
+        <div class="flex w-full justify-center items-center mt-12">
+          <.poll_selector
+            number="03"
             prompt="What excites you about Elodin?"
-            selected_industries={@selected_industries}
+            selected_usecases={@selected_usecases}
             loading={@loading}
             items={[
               %{
@@ -682,7 +752,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def page(%{page: 3} = assigns) do
+  def page(%{page: 4} = assigns) do
     ~H"""
     <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
@@ -757,7 +827,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def page(%{page: 4} = assigns) do
+  def page(%{page: 5} = assigns) do
     ~H"""
     <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
@@ -815,7 +885,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def page(%{page: 5} = assigns) do
+  def page(%{page: 6} = assigns) do
     ~H"""
     <div class="w-full flex h-full bg-onyx max-lg:flex-col">
       <div class="lg:w-1/2 max-lg:w-full h-full bg-bone p-6 px-20 flex flex-col">
@@ -859,7 +929,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
-  def page(%{page: 6} = assigns) do
+  def page(%{page: 7} = assigns) do
     ~H"""
     <div class="w-full flex h-full bg-onyx max-lg:flex-col">
       <div class="lg:w-1/2 max-lg:w-full h-full bg-bone flex flex-col items-center justify-center">
@@ -920,7 +990,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     <.page
       page={@page}
       loading={@loading}
-      selected_industries={@selected_industries}
+      selected_usecases={@selected_usecases}
       current_user={@current_user}
     />
     """
