@@ -32,6 +32,7 @@ use ui::{tiles, EntityPair, HoveredEntity};
 
 use crate::plugins::editor_cam_touch;
 
+pub mod chunks;
 mod plugins;
 pub mod ui;
 
@@ -141,14 +142,14 @@ impl Plugin for EditorPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(WireframePlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
-            .add_plugins(crate::ui::widgets::plot::PlotPlugin)
+            .add_plugins(crate::ui::widgets::PlotPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Startup, spawn_clear_bg)
             .add_systems(Update, make_entities_selectable)
-            .add_systems(Update, sync_pos)
+            .add_systems(PreUpdate, sync_pos)
             .add_systems(Update, sync_paused)
-            .add_systems(Update, set_floating_origin)
+            .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
