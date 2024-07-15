@@ -388,6 +388,22 @@ impl<'a, D: ndarray::Dimension> ComponentValue<'a, D> {
             ),
         }
     }
+
+    pub fn get(&self, i: usize) -> Option<ElementValue> {
+        match self {
+            ComponentValue::U8(x) => x.as_slice()?.get(i).map(|&x| ElementValue::U8(x)),
+            ComponentValue::U16(x) => x.as_slice()?.get(i).map(|&x| ElementValue::U16(x)),
+            ComponentValue::U32(x) => x.as_slice()?.get(i).map(|&x| ElementValue::U32(x)),
+            ComponentValue::U64(x) => x.as_slice()?.get(i).map(|&x| ElementValue::U64(x)),
+            ComponentValue::I8(x) => x.as_slice()?.get(i).map(|&x| ElementValue::I8(x)),
+            ComponentValue::I16(x) => x.as_slice()?.get(i).map(|&x| ElementValue::I16(x)),
+            ComponentValue::I32(x) => x.as_slice()?.get(i).map(|&x| ElementValue::I32(x)),
+            ComponentValue::I64(x) => x.as_slice()?.get(i).map(|&x| ElementValue::I64(x)),
+            ComponentValue::Bool(x) => x.as_slice()?.get(i).map(|&x| ElementValue::Bool(x)),
+            ComponentValue::F32(x) => x.as_slice()?.get(i).map(|&x| ElementValue::F32(x)),
+            ComponentValue::F64(x) => x.as_slice()?.get(i).map(|&x| ElementValue::F64(x)),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Copy)]

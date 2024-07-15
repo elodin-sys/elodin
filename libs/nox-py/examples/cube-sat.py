@@ -17,6 +17,7 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
+TIME_STEP = 1.0 / 20.0
 
 # sensors
 GyroOmega = Annotated[
@@ -181,7 +182,7 @@ def calculate_covariance(
 
 
 Q = calculate_covariance(
-    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 60.0
+    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), TIME_STEP
 )
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
@@ -237,7 +238,7 @@ def propogate_state_covariance(
     phi_01 = jax.lax.select(
         omega_norm > 1e-5,
         omega_cross * q - np.eye(3) * dt - omega_cross_square * r,
-        np.eye(3) * -1.0 / 60.0,
+        np.eye(3) * -TIME_STEP,
     )
     phi_10 = np.zeros((3, 3))
     phi_11 = np.eye(3)
@@ -294,7 +295,7 @@ def kalman_filter(
         p,
         np.array([mag_body, sun_body]),
         np.array([mag_ref, sun_ref]),
-        1 / 60.0,
+        TIME_STEP,
     )
     return (q_hat, omega_hat, b_hat, big_p)
 
@@ -461,12 +462,12 @@ def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFr
 def saturate_force(
     force: RWForce, ang_momentum: RWAngMomentum
 ) -> tuple[RWForce, RWAngMomentum]:
-    new_ang_momentum = ang_momentum + force.torque() * 1 / 60.0
+    new_ang_momentum = ang_momentum + force.torque() * TIME_STEP
     torque = jax.lax.select(
         np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
     )
     torque = np.clip(torque, -rw_force_clamp, rw_force_clamp)
-    return (el.SpatialForce(torque=torque), ang_momentum + torque * 1 / 60.0)
+    return (el.SpatialForce(torque=torque), ang_momentum + torque * TIME_STEP)
 
 
 @dataclass
@@ -670,9 +671,18 @@ w.spawn(
     name="Earth",
 )
 
+w.spawn(
+    el.Line3d(
+        sat,
+        "world_pos",
+        line_width=10.0,
+        perspective=False,
+    )
+)
+
 exec = w.run(
     system=el.six_dof(
-        1.0 / 60.0,
+        TIME_STEP,
         sensors
         | kalman_filter
         | control
@@ -685,8 +695,8 @@ exec = w.run(
         | earth_point,
         el.Integrator.SemiImplicit,
     ),
-    sim_time_step=1.0 / 60.0,
-    run_time_step=0.0 / 60.0,
-    output_time_step=1 / 60.0,
-    max_ticks=60 * 60 * 30,
+    sim_time_step=TIME_STEP,
+    run_time_step=0.0 / 10.0,
+    output_time_step=1 / 512.0,
+    max_ticks=60 * 20 * 128,
 )

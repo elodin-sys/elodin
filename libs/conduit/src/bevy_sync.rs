@@ -7,8 +7,8 @@ use crate::{
     },
     client::MsgPair,
     well_known::{
-        self, BodyAxes, EntityMetadata, Glb, Material, Mesh as ConduitMesh, Panel, VectorArrow,
-        WorldPos,
+        self, BodyAxes, EntityMetadata, Glb, Line3d, Material, Mesh as ConduitMesh, Panel,
+        VectorArrow, WorldPos,
     },
     EntityId,
 };
@@ -49,6 +49,7 @@ impl Plugin for SyncPlugin {
             )))
             .add_conduit_asset::<BodyAxes>(Box::new(SyncPostcardAdapter::<BodyAxes>::new(None)))
             .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
+            .add_conduit_asset::<Line3d>(Box::new(SyncPostcardAdapter::<Line3d>::new(None)))
             .add_conduit_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
             ))

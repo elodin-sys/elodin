@@ -1,20 +1,20 @@
 use bevy::asset::Asset;
-use bevy::ecs::system::Res;
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{Assets, Handle},
     ecs::system::{Commands, Query},
     log::warn,
-    prelude::{ResMut, Resource},
+    prelude::Resource,
 };
-use conduit::bevy::ConduitMsgReceiver;
+use conduit::bytes::Bytes;
 use conduit::{
     client::Msg, ser_de::ColumnValue, ComponentId, ComponentValue, ControlMsg, EntityId,
 };
 use itertools::Itertools;
-use roaring::RoaringBitmap;
 
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+
+use crate::chunks::{Chunk, Chunks};
 
 use super::GraphState;
 
@@ -112,52 +112,59 @@ impl CollectedGraphData {
 
 #[allow(clippy::too_many_arguments)]
 pub fn collect_entity_data(
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    mut graphs: Query<&mut GraphState>,
-    reader: Res<ConduitMsgReceiver>,
-    mut lines: ResMut<Assets<Line>>,
-    mut commands: Commands,
+    msg: &Msg<Bytes>,
+    collected_graph_data: &mut CollectedGraphData,
+    graphs: &mut Query<&mut GraphState>,
+    lines: &mut Assets<Line>,
+    commands: &mut Commands,
 ) {
-    while let Ok(msg) = reader.try_recv() {
-        match msg {
-            Msg::Control(ControlMsg::StartSim { .. }) => {
-                collected_graph_data.entities.clear();
-                collected_graph_data.tick_range = 0..0;
-                for mut graph in graphs.iter_mut() {
-                    for (_, (entity, _)) in graph.enabled_lines.iter() {
-                        commands.entity(*entity).despawn();
-                    }
-                    graph.enabled_lines.clear();
+    // while let Ok(msg) = reader.try_recv() {
+    //     collect_entity_data_line_3d(
+    //         &msg,
+    //         &mut collected_graph_data_3d,
+    //         &mut plots_3d,
+    //         &mut lines_3d,
+    //         &floating_origin,
+    //     );
+    match msg {
+        Msg::Control(ControlMsg::StartSim { .. }) => {
+            collected_graph_data.entities.clear();
+            collected_graph_data.tick_range = 0..0;
+            for mut graph in graphs.iter_mut() {
+                for (_, (entity, _)) in graph.enabled_lines.iter() {
+                    commands.entity(*entity).despawn();
                 }
+                graph.enabled_lines.clear();
             }
-            Msg::Control(ControlMsg::Tick {
-                tick,
-                max_tick: _,
-                simulating: _,
-            }) => {
-                if collected_graph_data.tick_range.end < tick {
-                    collected_graph_data.tick_range.end = tick;
-                }
-            }
-            Msg::Column(col) => {
-                let component_id = col.metadata.component_id();
-                for res in col.iter() {
-                    let Ok(ColumnValue { entity_id, value }) = res else {
-                        warn!("error parsing column value");
-                        continue;
-                    };
-                    let Some(entity) = collected_graph_data.entities.get_mut(&entity_id) else {
-                        continue;
-                    };
-                    let Some(component) = entity.components.get_mut(&component_id) else {
-                        continue;
-                    };
-                    component.add_values(&value, &mut lines, col.payload.time);
-                }
-            }
-            _ => {}
         }
+        Msg::Control(ControlMsg::Tick {
+            tick,
+            max_tick: _,
+            simulating: _,
+        }) => {
+            if collected_graph_data.tick_range.end < *tick {
+                collected_graph_data.tick_range.end = *tick;
+            }
+        }
+        Msg::Column(col) => {
+            let component_id = col.metadata.component_id();
+            for res in col.iter() {
+                let Ok(ColumnValue { entity_id, value }) = res else {
+                    warn!("error parsing column value");
+                    continue;
+                };
+                let Some(entity) = collected_graph_data.entities.get_mut(&entity_id) else {
+                    continue;
+                };
+                let Some(component) = entity.components.get_mut(&component_id) else {
+                    continue;
+                };
+                component.add_values(&value, lines, col.payload.time);
+            }
+        }
+        _ => {}
     }
+    //}
 }
 
 #[derive(Debug, Asset, Clone, TypePath, Default)]
@@ -170,7 +177,7 @@ pub struct Line {
 
 #[derive(Debug, Clone)]
 pub struct LineData {
-    pub data: CachedData,
+    pub data: Chunks<f64>,
     pub averaged_data: Vec<f32>,
     pub averaged_count: Vec<u16>,
     pub invalidated_range: Option<Range<usize>>,
@@ -197,7 +204,7 @@ impl Default for LineData {
 
 impl LineData {
     pub fn push(&mut self, tick: usize, value: f64) {
-        self.data.push_value(tick, value);
+        self.data.push(tick, value);
         if self.recalculate_avg_data() {
             self.push_avg(tick, value);
         }
@@ -220,11 +227,7 @@ impl LineData {
         self.averaged_data = self
             .data
             .range(self.current_range.clone())
-            .flat_map(|c| {
-                let start = self.current_range.start.max(c.range.start) - c.range.start;
-                let end = self.current_range.end.min(c.range.end) - c.range.start;
-                &c.data[start..end]
-            })
+            .map(|x| *x)
             .chunks(new_chunk_size)
             .into_iter()
             .map(|chunk| (chunk.sum::<f64>() / new_chunk_size as f64) as f32)
@@ -288,104 +291,7 @@ impl LineData {
         self.averaged_range = self.current_range.clone();
     }
 
-    pub fn range(&mut self) -> impl Iterator<Item = &mut Chunk> {
-        self.data.range(self.current_range.clone())
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Chunk {
-    pub range: Range<usize>,
-    pub data: Vec<f64>,
-    pub unfetched: RoaringBitmap,
-}
-
-const UNLOADED: u64 = 0b111111111111000000000000000000000000000000000000000000011111111;
-
-impl Chunk {
-    pub fn unhydrated(range: Range<usize>) -> Self {
-        Chunk {
-            data: range.clone().map(|_| f64::from_bits(UNLOADED)).collect(),
-            range: range.clone(),
-            unfetched: range.map(|x| x as u32).collect(),
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct CachedData {
-    chunks: Vec<Option<Chunk>>,
-}
-
-pub const CHUNK_SIZE: usize = 0x2000;
-
-impl CachedData {
-    fn range(&mut self, requested_range: Range<usize>) -> impl Iterator<Item = &mut Chunk> {
-        let start = requested_range.start / CHUNK_SIZE;
-        let end = requested_range.end / CHUNK_SIZE;
-        let range = start..=end;
-        if *range.start() >= self.chunks.len() {
-            for _ in self.chunks.len()..=*range.start() {
-                self.chunks.push(None);
-            }
-        }
-        if *range.end() >= self.chunks.len() {
-            for _ in self.chunks.len()..=*range.end() {
-                self.chunks.push(None);
-            }
-        }
-        self.chunks
-            .get_mut(range)
-            .expect("vec did not contain range")
-            .iter_mut()
-            .enumerate()
-            .map(move |(i, c)| {
-                let start = (start + i) * CHUNK_SIZE;
-                let end = start + CHUNK_SIZE;
-                c.get_or_insert_with(|| Chunk::unhydrated(start..end))
-            })
-    }
-
-    pub fn push_value(&mut self, tick: usize, value: f64) {
-        if let Some(Some(ref mut last)) = self.chunks.last_mut() {
-            if last.range.end.saturating_add(1) == tick {
-                let i = tick - last.range.start;
-                if i > last.data.len() {
-                    for j in last.data.len()..i {
-                        last.data.insert(j, f64::from_bits(UNLOADED));
-                    }
-                }
-                if i == last.data.len() {
-                    last.data.push(value);
-                } else {
-                    last.data[i] = value;
-                }
-
-                last.unfetched.remove(i as u32);
-                last.range.end = tick;
-                return;
-            }
-        }
-        for chunk in self.range(tick..tick + 1) {
-            if chunk.range.contains(&tick) {
-                let Some(i) = tick.checked_sub(chunk.range.start) else {
-                    continue;
-                };
-                if i == chunk.data.len() {
-                    chunk.data.push(value);
-                } else {
-                    chunk.data[i] = value;
-                }
-                chunk.unfetched.remove(i as u32);
-            }
-        }
-    }
-
-    pub fn set_unfetched(&mut self, range: Range<usize>) {
-        for chunk in self.range(range.clone()) {
-            let start = range.start.max(chunk.range.start) as u32;
-            let end = range.end.max(chunk.range.end) as u32;
-            chunk.unfetched.insert_range(start..end);
-        }
+    pub fn range(&mut self) -> impl Iterator<Item = &mut Chunk<f64>> {
+        self.data.chunks_range(self.current_range.clone())
     }
 }

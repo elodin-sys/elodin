@@ -14,10 +14,10 @@ pub struct VectorArrow {
 #[pymethods]
 impl VectorArrow {
     #[new]
-    #[pyo3(signature = (entity, name, offset=0, color=Color::new(1.0, 1.0, 1.0), attached=true, body_frame=true, scale=1.0))]
+    #[pyo3(signature = (entity, component_name, offset=0, color=Color::new(1.0, 1.0, 1.0), attached=true, body_frame=true, scale=1.0))]
     fn new(
         entity: EntityId,
-        name: String,
+        component_name: String,
         offset: usize,
         color: Color,
         attached: bool,
@@ -27,7 +27,7 @@ impl VectorArrow {
         Self {
             inner: conduit::well_known::VectorArrow {
                 entity_id: entity.inner,
-                id: ComponentId::new(&name),
+                id: ComponentId::new(&component_name),
                 range: offset..offset + 2,
                 color: color.inner,
                 attached,
