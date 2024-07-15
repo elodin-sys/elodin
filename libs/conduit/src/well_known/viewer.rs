@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Asset, ComponentId, EntityId};
 
+use super::Color;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Panel {
@@ -88,4 +90,19 @@ pub struct GraphEntity {
 pub struct GraphComponent {
     pub component_id: ComponentId,
     pub indexes: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct Line3d {
+    pub entity: EntityId,
+    pub component_id: ComponentId,
+    pub index: [usize; 3],
+    pub line_width: f32,
+    pub color: Color,
+    pub perspective: bool,
+}
+
+impl Asset for Line3d {
+    const ASSET_NAME: &'static str = "line_3d";
 }

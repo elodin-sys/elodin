@@ -347,6 +347,14 @@ class Exec:
 
 class Color:
     def __init__(self, r: float, g: float, b: float): ...
+    TURQUOISE: ClassVar[Color]
+    SLATE: ClassVar[Color]
+    PUMPKIN: ClassVar[Color]
+    YOLK: ClassVar[Color]
+    PEACH: ClassVar[Color]
+    REDDISH: ClassVar[Color]
+    HYPERBLUE: ClassVar[Color]
+    MINT: ClassVar[Color]
 
 class Gizmo:
     @staticmethod
@@ -379,6 +387,38 @@ class GraphEntity:
 
 class Glb:
     def __init__(self, path: str): ...
+    def bytes(self) -> bytes: ...
+
+class BodyAxes:
+    def __init__(self, entity: EntityId, scale: float = 1.0): ...
+    def asset_name(self) -> str: ...
+    def bytes(self) -> bytes: ...
+
+class VectorArrow:
+    def __init__(
+        self,
+        entity: EntityId,
+        component_name: str,
+        offset: int = 0,
+        color: Optional[Color] = None,
+        attached: bool = False,
+        body_frame: bool = True,
+        scale: float = 1.0,
+    ): ...
+    def asset_name(self) -> str: ...
+    def bytes(self) -> bytes: ...
+
+class Line3d:
+    def __init__(
+        self,
+        entity: EntityId,
+        component_name: str = "world_pos",
+        line_width: float = 10.0,
+        color: Optional[Color] = None,
+        index: Optional[list[int]] = None,
+        perspective: bool = False,
+    ): ...
+    def asset_name(self) -> str: ...
     def bytes(self) -> bytes: ...
 
 def six_dof(
