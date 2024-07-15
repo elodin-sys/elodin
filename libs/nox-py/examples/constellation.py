@@ -458,21 +458,19 @@ for x in range(-bound, bound):
 
 w.spawn(
     el.Panel.hsplit(
-        [
-            el.Panel.viewport(
-                track_entity=sat,
-                track_rotation=False,
-                pos=[100.0, 0.0, 0.0],
-                looking_at=[0.0, 0.0, 0.0],
-                active=True,
-            ),
-            el.Panel.graph(
-                [
-                    el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
-                    for sat_id in sat_ids
-                ]
-            ),
-        ],
+        el.Panel.viewport(
+            track_entity=sat,
+            track_rotation=False,
+            pos=[100.0, 0.0, 0.0],
+            looking_at=[0.0, 0.0, 0.0],
+            active=True,
+        ),
+        el.Panel.graph(
+            *[
+                el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
+                for sat_id in sat_ids
+            ]
+        ),
         active=True,
     ),
     name="Viewport and Graph",

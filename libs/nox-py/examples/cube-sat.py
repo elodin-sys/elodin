@@ -631,40 +631,27 @@ w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
 w.spawn(
     el.Panel.vsplit(
-        [
-            el.Panel.hsplit(
-                [
-                    el.Panel.viewport(
-                        track_entity=sat,
-                        track_rotation=False,
-                        pos=[7.0, 0.0, 0.0],
-                        looking_at=[0.0, 0.0, 0.0],
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                css,
-                                [
-                                    el.Component.index(CssValue),
-                                ],
-                            )
-                            for css in [css_0, css_1, css_2, css_3, css_4, css_5]
-                        ]
-                    ),
-                ]
+        el.Panel.hsplit(
+            el.Panel.viewport(
+                track_entity=sat,
+                track_rotation=False,
+                pos=[7.0, 0.0, 0.0],
+                looking_at=[0.0, 0.0, 0.0],
             ),
             el.Panel.graph(
-                [
-                    el.GraphEntity(
-                        sat,
-                        [
-                            el.Component.index(el.WorldPos)[:4],
-                            el.Component.index(AttEst),
-                        ],
-                    )
+                *[
+                    el.GraphEntity(css, CssValue)
+                    for css in [css_0, css_1, css_2, css_3, css_4, css_5]
                 ]
             ),
-        ],
+        ),
+        el.Panel.graph(
+            el.GraphEntity(
+                sat,
+                AttEst,
+                *el.Component.index(el.WorldPos)[:4],
+            )
+        ),
         active=True,
     )
 )

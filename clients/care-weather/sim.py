@@ -87,6 +87,7 @@ class Determination(el.Archetype):
     sun_sensors: SunSensors = field(default_factory=lambda: np.zeros(6))
     rw_speed: RWSpeed = field(default_factory=lambda: np.zeros(3))
 
+
 @dataclass
 class Control(el.Archetype):
     rw_speed_setpoint: RWSpeedSetpoint = field(default_factory=lambda: np.zeros(3))
@@ -106,135 +107,39 @@ sat = world.spawn(
 
 world.spawn(
     el.Panel.hsplit(
-        [
-            el.Panel.viewport(
-                track_entity=sat,
-                track_rotation=False,
-                pos=[0.5, -0.05, 0.1],
-                looking_at=[0.0, 0.0, 0.0],
-                show_grid=True,
-            ),
-            el.Panel.vsplit(
-                [
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(el.WorldPos)[:4],
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(SunPos),
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    # el.Component.index(MagValue),
-                                    el.Component.index(MagPostCal),
-                                ],
-                            )
-                        ]
-                    ),
-                ]
-            ),
-        ],
+        el.Panel.viewport(
+            track_entity=sat,
+            track_rotation=False,
+            pos=[0.5, -0.05, 0.1],
+            looking_at=[0.0, 0.0, 0.0],
+            show_grid=True,
+        ),
+        el.Panel.vsplit(
+            el.Panel.graph(el.GraphEntity(sat, *el.Component.index(el.WorldPos)[:4])),
+            el.Panel.graph(el.GraphEntity(sat, SunPos)),
+            el.Panel.graph(el.GraphEntity(sat, MagPostCal)),
+        ),
         active=True,
     )
 )
 world.spawn(
     el.Panel.hsplit(
-        [
-            el.Panel.vsplit(
-                [
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(SunRef),
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(MagRef),
-                                ],
-                            )
-                        ]
-                    ),
-                ]
-            ),
-            el.Panel.vsplit(
-                [
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(SunSensors),
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(Gyro),
-                                ],
-                            )
-                        ]
-                    ),
-                ]
-            ),
-        ]
+        el.Panel.vsplit(
+            el.Panel.graph(el.GraphEntity(sat, SunRef)),
+            el.Panel.graph(el.GraphEntity(sat, MagRef)),
+        ),
+        el.Panel.vsplit(
+            el.Panel.graph(el.GraphEntity(sat, SunSensors)),
+            el.Panel.graph(el.GraphEntity(sat, Gyro)),
+        ),
     ),
 )
 world.spawn(
     el.Panel.hsplit(
-        [
-            el.Panel.vsplit(
-                [
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(RWSpeed),
-                                ],
-                            )
-                        ]
-                    ),
-                    el.Panel.graph(
-                        [
-                            el.GraphEntity(
-                                sat,
-                                [
-                                    el.Component.index(RWSpeedSetpoint),
-                                ],
-                            )
-                        ]
-                    ),
-                ]
-            ),
-        ]
+        el.Panel.vsplit(
+            el.Panel.graph(el.GraphEntity(sat, RWSpeed)),
+            el.Panel.graph(el.GraphEntity(sat, RWSpeedSetpoint)),
+        ),
     ),
 )
 
@@ -251,8 +156,30 @@ def noop(
     sun_sensor: SunSensors,
     rw_speed: RWSpeed,
     rw_speed_setpoint: RWSpeedSetpoint,
-) -> tuple[el.WorldPos, MagRef, SunRef, MagValue, MagPostCal, SunPos, Gyro, SunSensors, RWSpeed, RWSpeedSetpoint]:
-    return pos, mag_ref, sun_ref, mag_value, mag_postcal, sun_pos, gyro, sun_sensor, rw_speed, rw_speed_setpoint
+) -> tuple[
+    el.WorldPos,
+    MagRef,
+    SunRef,
+    MagValue,
+    MagPostCal,
+    SunPos,
+    Gyro,
+    SunSensors,
+    RWSpeed,
+    RWSpeedSetpoint,
+]:
+    return (
+        pos,
+        mag_ref,
+        sun_ref,
+        mag_value,
+        mag_postcal,
+        sun_pos,
+        gyro,
+        sun_sensor,
+        rw_speed,
+        rw_speed_setpoint,
+    )
 
 
 exec = world.run(
