@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 mod auth;
@@ -38,6 +39,12 @@ impl Cli {
             .enable_all()
             .build()
             .expect("tokio runtime failed to start");
+
+        if let Err(err) = self.first_launch() {
+            eprintln!("Error: {:#}", err);
+            std::process::exit(1);
+        }
+
         match self.command {
             // un-licensed commands
             Some(Commands::Login) | Some(Commands::Create(_)) | None => {}
@@ -57,6 +64,28 @@ impl Cli {
             eprintln!("Error: {:#}", err);
             std::process::exit(1);
         }
+    }
+
+    fn first_launch(&self) -> anyhow::Result<()> {
+        let dirs = self.dirs().context("failed to get data directory")?;
+        let data_dir = dirs.data_dir();
+        let is_first_launch = !data_dir.exists();
+        std::fs::create_dir_all(data_dir).context("failed to create data directory")?;
+
+        if is_first_launch {
+            println!("This is your first use of the Elodin CLI!\n");
+
+            println!("You can log in using this command:");
+            println!("    elodin login\n");
+
+            println!("Please be aware that you will need the Elodin Python SDK, which can be installed using `pip`:");
+            println!("    pip install -U elodin\n");
+
+            println!("For more information, you can always take a look at our docs https://docs.elodin.systems");
+            std::process::exit(0);
+        }
+
+        Ok(())
     }
 
     fn is_dev(&self) -> bool {
