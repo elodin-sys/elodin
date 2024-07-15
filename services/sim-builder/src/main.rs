@@ -1,6 +1,7 @@
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::{server::Routes, Server};
+use tonic::service::Routes;
+use tonic::transport::Server;
 
 mod api;
 

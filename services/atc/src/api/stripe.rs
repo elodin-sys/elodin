@@ -2,8 +2,8 @@ use crate::error::Error;
 use atc_entity::{billing_account, events::DbExt, user};
 use axum::{
     async_trait,
-    extract::{FromRequest, State},
-    http::{Request, StatusCode},
+    extract::{FromRequest, Request, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use elodin_types::api::LicenseType;
@@ -17,14 +17,10 @@ use super::AxumContext;
 pub struct StripeEvent(Event);
 
 #[async_trait]
-impl<B> FromRequest<AxumContext, B> for StripeEvent
-where
-    String: FromRequest<AxumContext, B>,
-    B: Send + Sync + 'static,
-{
+impl FromRequest<AxumContext> for StripeEvent {
     type Rejection = Response;
 
-    async fn from_request(req: Request<B>, state: &AxumContext) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request, state: &AxumContext) -> Result<Self, Self::Rejection> {
         let signature = if let Some(sig) = req.headers().get("stripe-signature") {
             sig.to_owned()
         } else {

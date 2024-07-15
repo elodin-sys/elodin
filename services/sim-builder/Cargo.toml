@@ -9,9 +9,9 @@ elodin-types = { version = "0.1.0", path = "../../libs/elodin-types/rust" }
 
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["net"] }
-tonic = { version = "0.11.0" }
-tonic-reflection = "0.11"
-tonic-health = "0.11"
+tonic = { version = "0.12.0" }
+tonic-reflection = "0.12"
+tonic-health = "0.12"
 anyhow = "1.0.80"
 tower = "0.4.13"
 tracing = "0.1.40"
@@ -24,4 +24,8 @@ tokio-util = "0.7"
 blake3 = "1.5.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "44321de", features = ["tonic-conn"] }
+tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "3a41323", features = ["tonic-conn"] }
+
+[dev-dependencies]
+hyper-util.version = "0.1.6"
+hyper-util.features = ["tokio"]

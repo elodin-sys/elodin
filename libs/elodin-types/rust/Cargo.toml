@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 bit-vec = "0.6.3"
-tonic = "0.11"
-prost = "0.12"
+tonic = "0.12"
+prost = "0.13"
 uuid = { version = "1.6.1", features = ["serde"] }
 serde = { version = "1.0.196", features = ["derive"] }
 chrono = { version = "0.4.33", default-features = false, features = ["serde"] }
 
 [build-dependencies]
-tonic-build = "0.11"
+tonic-build = "0.12"

@@ -46,18 +46,19 @@ anyhow = "1"
 thiserror = "1.0"
 
 # grpc
-tonic = "0.11"
-tonic-reflection = "0.11"
-tonic-health = "0.11"
+tonic = "0.12"
+tonic-reflection = "0.12"
+tonic-health = "0.12"
 
 
 # http
-axum.version = "0.6.20"
-axum.features = ["ws", "headers"]
+bytes = "1.6"
+axum.version = "0.7"
+axum.features = ["ws"]
 tower.version = "0.4"
-hyper.version = "0.14.24"
-hyper.features = ["stream"]
-tower-http = "0.4.4"
+tower.features = ["steer"]
+hyper = "1.4"
+tower-http = "0.5"
 
 # sql
 sea-orm.version = "0.12"
@@ -70,11 +71,11 @@ jsonwebtoken = "9"
 ring = "0.17"
 
 # http
-reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # k8s
-kube = { version = "0.88", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.21", features = ["latest"] }
+kube = { version = "0.92", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.22", features = ["latest"] }
 
 # queue
 fred = { version = "9", features = ["i-pubsub", "partial-tracing", "subscriber-client"] }
@@ -84,7 +85,7 @@ redmq.path = "../../libs/redmq"
 chrono = "0.4"
 
 # gcs
-google-cloud-storage = { version = "0.15.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
+google-cloud-storage = { version = "0.20.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
 
 # stripe
 async-stripe.version = "0.37"
