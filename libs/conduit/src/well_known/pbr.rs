@@ -268,16 +268,18 @@ pub struct Color {
 }
 
 impl Color {
-    pub const BLACK: Self = Self {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-    };
-    pub const WHITE: Self = Self {
-        r: 1.0,
-        g: 1.0,
-        b: 1.0,
-    };
+    pub const BLACK: Self = Self::rgb(0., 0., 0.);
+    pub const WHITE: Self = Self::rgb(1., 1., 1.);
+
+    pub const TURQUOISE: Self = Self::rgb(0.41, 0.7, 0.75);
+    pub const SLATE: Self = Self::rgb(0.5, 0.44, 1.);
+    pub const PUMPKIN: Self = Self::rgb(1.0, 0.44, 0.12);
+    pub const YOLK: Self = Self::rgb(1., 0.77, 0.02);
+    pub const PEACH: Self = Self::rgb(1., 0.84, 0.7);
+    pub const REDDISH: Self = Self::rgb(0.913, 0.125, 0.0335);
+    pub const HYPERBLUE: Self = Self::rgb(0.08, 0.38, 0.82);
+    pub const MINT: Self = Self::rgb(0.53, 0.87, 0.62);
+
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
     }

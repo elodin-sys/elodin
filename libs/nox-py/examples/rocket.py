@@ -472,6 +472,7 @@ rocket = w.spawn(
     name="Rocket",
 )
 
+w.spawn(el.Line3d(rocket, line_width=11.0))
 
 w.spawn(
     el.Panel.hsplit(

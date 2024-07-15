@@ -73,6 +73,46 @@ impl Color {
             inner: conduit::well_known::Color::rgb(r, g, b),
         }
     }
+
+    #[classattr]
+    pub const TURQUOISE: Self = Color {
+        inner: conduit::well_known::Color::TURQUOISE,
+    };
+
+    #[classattr]
+    pub const SLATE: Self = Color {
+        inner: conduit::well_known::Color::SLATE,
+    };
+
+    #[classattr]
+    pub const PUMPKIN: Self = Color {
+        inner: conduit::well_known::Color::PUMPKIN,
+    };
+
+    #[classattr]
+    pub const YOLK: Self = Color {
+        inner: conduit::well_known::Color::YOLK,
+    };
+
+    #[classattr]
+    pub const PEACH: Self = Color {
+        inner: conduit::well_known::Color::PEACH,
+    };
+
+    #[classattr]
+    pub const REDDISH: Self = Color {
+        inner: conduit::well_known::Color::REDDISH,
+    };
+
+    #[classattr]
+    pub const HYPERBLUE: Self = Color {
+        inner: conduit::well_known::Color::HYPERBLUE,
+    };
+
+    #[classattr]
+    pub const MINT: Self = Color {
+        inner: conduit::well_known::Color::MINT,
+    };
 }
 
 #[derive(Clone)]
