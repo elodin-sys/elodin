@@ -62,35 +62,39 @@ impl Orca {
                 Ok(msg) = self.vm_events.recv() => Ok(OrcaMsg::DbEvent(msg)),
                 else => break,
             };
-            match msg {
+            let msg = match msg {
                 Err(err) => {
                     error!(?err, "error event");
+                    continue;
                 }
-                Ok(OrcaMsg::K8sEvent(Event::Applied(pod))) => {
+                Ok(msg) => msg,
+            };
+            match msg {
+                OrcaMsg::K8sEvent(Event::Apply(pod)) => {
                     if let Err(err) = self.handle_pod_change(&pod).await {
                         warn!(?err, "error handling pod update");
                     }
                 }
-                Ok(OrcaMsg::K8sEvent(Event::Deleted(pod))) => {
+                OrcaMsg::K8sEvent(Event::Delete(pod)) => {
                     if let Err(err) = self.handle_pod_deleted(&pod).await {
                         warn!(?err, "error handling pod deleted");
                     }
                 }
-                Ok(OrcaMsg::K8sEvent(Event::Restarted(_pods))) => {
-                    // NOTE(sphw): choosing not to handle stream restarts right now
+                OrcaMsg::K8sEvent(Event::InitApply(_) | Event::Init | Event::InitDone) => {
+                    // ingore init events for now
                 }
-                Ok(OrcaMsg::DbEvent(DbEvent::Insert(vm))) => {
+                OrcaMsg::DbEvent(DbEvent::Insert(vm)) => {
                     trace!(?vm, "vm insert event");
                     if let Err(err) = self.spawn_vm(vm.id).await {
                         error!(?err, "error spawning vm");
                     }
                 }
-                Ok(OrcaMsg::DbEvent(DbEvent::Delete(vm))) => {
+                OrcaMsg::DbEvent(DbEvent::Delete(vm)) => {
                     if let Err(err) = self.handle_vm_deleted(&vm).await {
                         warn!(?err, "error handling vm deleted");
                     }
                 }
-                Ok(OrcaMsg::DbEvent(DbEvent::Update(_vm))) => {}
+                OrcaMsg::DbEvent(DbEvent::Update(_vm)) => {}
             }
         }
         drop(cancel_on_drop);

@@ -271,10 +271,13 @@ pub fn builder_channel(addr: Uri) -> Channel {
 }
 
 #[cfg(target_os = "linux")]
-async fn vsock_connect(uri: Uri) -> Result<tokio_vsock::VsockStream, std::io::Error> {
+async fn vsock_connect(
+    uri: Uri,
+) -> Result<hyper_util::rt::TokioIo<tokio_vsock::VsockStream>, std::io::Error> {
     let cid = uri.host().unwrap().parse::<u32>().unwrap();
     let port = uri.port_u16().unwrap();
     let addr = tokio_vsock::VsockAddr::new(cid, port as u32);
     tracing::debug!(cid, port, "connecting to vsock");
-    tokio_vsock::VsockStream::connect(addr).await
+    let vsock_stream = tokio_vsock::VsockStream::connect(addr).await?;
+    Ok(hyper_util::rt::TokioIo::new(vsock_stream))
 }

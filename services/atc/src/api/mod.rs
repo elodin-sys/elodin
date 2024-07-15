@@ -1,5 +1,5 @@
 use crate::{
-    api::{multiplex::MultiplexService, sandbox::sim_socket},
+    api::sandbox::sim_socket,
     config::{Auth0Config, StripePlansConfig},
     current_user_route, current_user_route_txn,
     error::Error,
@@ -7,8 +7,8 @@ use crate::{
     optional_current_user_route, optional_current_user_route_txn,
 };
 use atc_entity::events::DbEvent;
+use axum::{body::Body, http::Request, routing::post};
 use axum::{extract::MatchedPath, routing::get};
-use axum::{http::Request, routing::post};
 use elodin_types::api::*;
 use fred::prelude::*;
 use futures::Stream;
@@ -19,6 +19,7 @@ use std::{net::SocketAddr, pin::Pin, time::Duration};
 use tokio::sync::broadcast;
 use tonic::async_trait;
 use tonic::{transport::Server, Response, Status};
+use tower::{make::Shared, steer::Steer};
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{info, Span};
 
@@ -27,7 +28,6 @@ use crate::config::ApiConfig;
 mod billing_account;
 mod license;
 mod monte_carlo;
-mod multiplex;
 mod sandbox;
 mod stripe;
 mod user;
@@ -147,15 +147,32 @@ impl Api {
             .add_service(health_service)
             .add_service(svc)
             .add_service(reflection)
-            .into_service();
-        let service = MultiplexService::new(rest, grpc);
-        axum::Server::bind(&address)
-            .serve(tower::make::Shared::new(service))
-            .await?;
+            .into_router();
+        let service = Steer::new(
+            vec![rest, grpc],
+            |req: &Request<Body>, _services: &[_]| {
+                if is_grpc_request(req) {
+                    1
+                } else {
+                    0
+                }
+            },
+        );
+
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        axum::serve(listener, Shared::new(service)).await?;
 
         tracing::debug!("done");
         Ok(())
     }
+}
+
+fn is_grpc_request<B>(req: &Request<B>) -> bool {
+    req.headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .map(|content_type| content_type.as_bytes())
+        .filter(|content_type| content_type.starts_with(b"application/grpc"))
+        .is_some()
 }
 
 #[allow(dead_code)]
