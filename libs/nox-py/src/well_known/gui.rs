@@ -140,3 +140,70 @@ impl GraphEntity {
         Ok(Self { entity, components })
     }
 }
+
+#[pyclass]
+pub struct Line3d {
+    inner: conduit::well_known::Line3d,
+}
+
+#[pymethods]
+impl Line3d {
+    #[new]
+    pub fn new(
+        entity: EntityId,
+        component_name: Option<String>,
+        line_width: Option<f32>,
+        color: Option<Color>,
+        index: Option<Vec<usize>>,
+        perspective: Option<bool>,
+    ) -> PyResult<Self> {
+        use conduit::well_known::Color;
+        const COLORS: &[Color] = &[
+            Color::TURQUOISE,
+            Color::SLATE,
+            Color::PUMPKIN,
+            Color::YOLK,
+            Color::PEACH,
+            Color::REDDISH,
+            Color::HYPERBLUE,
+            Color::MINT,
+            Color::TURQUOISE,
+        ];
+        let component_name = component_name.unwrap_or_else(|| "world_pos".to_string());
+        let line_width = line_width.unwrap_or(10.0);
+        let index = if let Some(index) = index {
+            if index.len() != 3 {
+                return Err(PyValueError::new_err("index must be 3"));
+            }
+            [index[0], index[1], index[2]]
+        } else if component_name == "world_pos" {
+            [4, 5, 6]
+        } else {
+            [0, 1, 2]
+        };
+        let component_id = ComponentId::new(&component_name);
+        let color = color
+            .map(|c| c.inner)
+            .unwrap_or_else(|| COLORS[component_id.0 as usize % COLORS.len()]);
+
+        Ok(Self {
+            inner: conduit::well_known::Line3d {
+                entity: entity.inner,
+                component_id,
+                line_width,
+                color,
+                index,
+                perspective: perspective.unwrap_or_default(),
+            },
+        })
+    }
+
+    pub fn asset_name(&self) -> &'static str {
+        conduit::well_known::Line3d::ASSET_NAME
+    }
+
+    pub fn bytes(&self) -> Result<PyBufBytes, Error> {
+        let bytes = postcard::to_allocvec(&self.inner).unwrap().into();
+        Ok(PyBufBytes { bytes })
+    }
+}

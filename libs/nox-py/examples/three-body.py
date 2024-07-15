@@ -75,5 +75,7 @@ w.spawn(
 
 w.spawn(el.VectorArrow(a, "world_vel", offset=3, body_frame=False, scale=1.0))
 
+w.spawn(el.Line3d(b, "world_pos", index=[4, 5, 6], line_width=10.0))
+
 sys = el.six_dof(TIME_STEP, gravity)
 sim = w.run(sys, TIME_STEP)
