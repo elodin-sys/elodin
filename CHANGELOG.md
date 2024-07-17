@@ -52,6 +52,8 @@
   # after:
   el.GraphEntity(sat, SunRef)
   ```
+- Add better default names for viewports and graphs. E.g. Track: <entity
+name>" for viewports and "<entity name>: <component name>" for graphs.
 
 ## [v0.3.24]
 - Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
