@@ -18,7 +18,7 @@ pub struct Panel {
 impl Panel {
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (track_entity = None, track_rotation = true, fov = 45.0, active = false, pos = None, looking_at = None, show_grid = false, hdr = false, name = "Viewport".to_string()))]
+    #[pyo3(signature = (track_entity = None, track_rotation = true, fov = 45.0, active = false, pos = None, looking_at = None, show_grid = false, hdr = false, name = None))]
     pub fn viewport(
         track_entity: Option<EntityId>,
         track_rotation: bool,
@@ -28,7 +28,7 @@ impl Panel {
         looking_at: Option<PyArrayLike1<f32>>,
         show_grid: bool,
         hdr: bool,
-        name: String,
+        name: Option<String>,
     ) -> PyResult<Self> {
         let pos = if let Some(arr) = pos {
             let slice = arr.as_slice()?;
@@ -95,8 +95,8 @@ impl Panel {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (*entities, name = "Graph".to_string()))]
-    pub fn graph(entities: Vec<GraphEntity>, name: String) -> PyResult<Self> {
+    #[pyo3(signature = (*entities, name = None))]
+    pub fn graph(entities: Vec<GraphEntity>, name: Option<String>) -> PyResult<Self> {
         let entities = entities
             .into_iter()
             .map(|x| conduit::well_known::GraphEntity {
