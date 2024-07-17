@@ -211,6 +211,7 @@ impl ViewportPane {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
         viewport: &Viewport,
+        label: String,
     ) -> Self {
         let (camera, nav_gizmo, nav_gizmo_camera) = spawn_main_camera(
             commands,
@@ -225,7 +226,7 @@ impl ViewportPane {
             nav_gizmo,
             nav_gizmo_camera,
             rect: None,
-            label: viewport.name.clone(),
+            label,
         }
     }
 }
@@ -805,6 +806,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         track_entity,
                         ..Viewport::default()
                     };
+                    let label = viewport_label(&viewport, &entity_map, &entity_metadata);
                     let viewport_pane = ViewportPane::spawn(
                         &mut commands,
                         &asset_server,
@@ -812,6 +814,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         &mut materials,
                         &mut render_layer_alloc,
                         &viewport,
+                        label,
                     );
                     if let Some(camera) = viewport_pane.camera {
                         let mut camera = commands.entity(camera);
@@ -841,7 +844,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     };
                     let graph_id = commands.spawn(graph_bundle).id();
 
-                    let graph_label = Graph::default().name;
+                    let graph_label = graph_label(
+                        &Graph::default(),
+                        &entity_map,
+                        &entity_metadata,
+                        &metadata_store,
+                    );
                     let graph = GraphPane::new(graph_id, graph_label.clone());
                     let pane = Pane::Graph(graph);
 
@@ -906,6 +914,7 @@ pub struct SyncViewportParams<'w, 's> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     entity_map: Res<'w, EntityMap>,
+    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>>,
     metadata_store: Res<'w, MetadataStore>,
     hdr_enabled: ResMut<'w, HdrEnabled>,
@@ -921,6 +930,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
         mut materials,
         mut render_layer_alloc,
         entity_map,
+        entity_metadata,
         grid_cell,
         metadata_store,
         mut hdr_enabled,
@@ -936,6 +946,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &mut render_layer_alloc,
             &mut commands,
             &entity_map,
+            &entity_metadata,
             &grid_cell,
             &metadata_store,
             &mut hdr_enabled,
@@ -956,12 +967,14 @@ fn spawn_panel(
     render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
     commands: &mut Commands,
     entity_map: &Res<EntityMap>,
+    entity_metadata: &Query<&EntityMetadata>,
     grid_cell: &Query<&GridCell<i128>>,
     metadata_store: &Res<MetadataStore>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
 ) -> Option<TileId> {
     match panel {
         conduit::well_known::Panel::Viewport(viewport) => {
+            let label = viewport_label(viewport, entity_map, entity_metadata);
             let pane = ViewportPane::spawn(
                 commands,
                 asset_server,
@@ -969,6 +982,7 @@ fn spawn_panel(
                 materials,
                 render_layer_alloc,
                 viewport,
+                label,
             );
             let camera = pane.camera.expect("no camera spawned for viewport");
             let mut camera = commands.entity(camera);
@@ -1020,6 +1034,7 @@ fn spawn_panel(
                     render_layer_alloc,
                     commands,
                     entity_map,
+                    entity_metadata,
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
@@ -1047,6 +1062,7 @@ fn spawn_panel(
                     render_layer_alloc,
                     commands,
                     entity_map,
+                    entity_metadata,
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
@@ -1083,7 +1099,8 @@ fn spawn_panel(
             let graph_id = commands
                 .spawn(GraphBundle::new(render_layer_alloc, entities, None))
                 .id();
-            let graph = GraphPane::new(graph_id, graph.name.clone());
+            let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
+            let graph = GraphPane::new(graph_id, graph_label);
             ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
         }
     }
@@ -1127,4 +1144,55 @@ pub fn shortcuts(kbd: Res<ButtonInput<KeyCode>>, mut ui_state: ResMut<TileState>
         };
         tabs.set_active(*new_active_id);
     }
+}
+
+fn viewport_label(
+    viewport: &Viewport,
+    entity_map: &EntityMap,
+    entity_metadata: &Query<&EntityMetadata>,
+) -> String {
+    viewport
+        .name
+        .clone()
+        .or_else(|| {
+            viewport
+                .track_entity
+                .and_then(|id| entity_map.0.get(&id))
+                .and_then(|entity| entity_metadata.get(*entity).ok())
+                .map(|metadata| metadata.name.clone())
+                .map(|name| format!("Track: {}", name))
+        })
+        .unwrap_or_else(|| {
+            let pos = viewport.pos;
+            format!("Viewport({},{},{})", pos.x, pos.y, pos.z)
+        })
+}
+
+fn graph_label(
+    graph: &Graph,
+    entity_map: &EntityMap,
+    entity_metadata: &Query<&EntityMetadata>,
+    metadata_store: &MetadataStore,
+) -> String {
+    graph
+        .name
+        .clone()
+        .or_else(|| {
+            let entity = graph.entities.first()?;
+            if graph.entities.len() > 1 {
+                return None;
+            }
+            let entity_name = entity_map
+                .0
+                .get(&entity.entity_id)
+                .and_then(|entity| entity_metadata.get(*entity).ok())
+                .map(|metadata| metadata.name.as_str())?;
+            let component = entity.components.first()?;
+            let component_name = &metadata_store.get_metadata(&component.component_id)?.name;
+            if entity.components.len() > 1 {
+                return Some(format!("{}: {}, ...", entity_name, component_name));
+            }
+            Some(format!("{}: {}", entity_name, component_name))
+        })
+        .unwrap_or_else(|| "Graph".to_string())
 }

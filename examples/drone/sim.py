@@ -180,22 +180,12 @@ def world() -> el.World:
                     show_grid=True,
                     pos=[-0.5, -3.0, 0.5],
                     looking_at=[0.0, 0.0, 0.5],
-                    name="Drone Camera",
                 ),
-                el.Panel.graph(
-                    el.GraphEntity(drone, mekf.AttEstError),
-                    name="Attitude Estimation Error",
-                ),
+                el.Panel.graph(el.GraphEntity(drone, mekf.AttEstError)),
             ),
             el.Panel.vsplit(
-                el.Panel.graph(
-                    el.GraphEntity(drone, motors.MotorInput),
-                    name="Motor Input",
-                ),
-                el.Panel.graph(
-                    el.GraphEntity(drone, Thrust),
-                    name="Thrust",
-                ),
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorInput)),
+                el.Panel.graph(el.GraphEntity(drone, Thrust)),
                 el.Panel.graph(
                     el.GraphEntity(
                         drone,
@@ -203,7 +193,7 @@ def world() -> el.World:
                         control.EulerRateTarget,
                         sensors.Gyro,
                     ),
-                    name="Rate Control",
+                    name="Drone: rate_control",
                 ),
             ),
             active=True,
