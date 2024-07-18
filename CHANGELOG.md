@@ -1,6 +1,8 @@
 # Changelog
 
 ## [unreleased]
+
+## [v0.3.25]
 - **(breaking)** Use variable positional arguments for `el.Panel.vsplit`, `el.Panel.hsplit`, `el.Panel.graph`, and `el.GraphEntity` instead of lists. This results in much less verbose panel configuration code. To update your code, either replace the list of arguments with individual arguments separated by commas or unpack the list with `*`.
   ```python
   # before:
@@ -54,8 +56,8 @@
   # after:
   el.GraphEntity(sat, SunRef)
   ```
-- Add better default names for viewports and graphs. E.g. Track: <entity
-name>" for viewports and "<entity name>: <component name>" for graphs.
+- Add better default names for viewports and graphs. E.g. Track: "\<entity
+name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Add basic support for 3D plots/traces in the editor.
   - Trace an entity's position by spawning in `elodin.Line3d` assets:
     ```python
@@ -285,7 +287,8 @@ name>" for viewports and "<entity name>: <component name>" for graphs.
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.24...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.25...HEAD
+[v0.3.25]: https://github.com/elodin-sys/paracosm/compare/v0.3.24...v0.3.25
 [v0.3.24]: https://github.com/elodin-sys/paracosm/compare/v0.3.23...v0.3.24
 [v0.3.23]: https://github.com/elodin-sys/paracosm/compare/v0.3.22...v0.3.23
 [v0.3.22]: https://github.com/elodin-sys/paracosm/compare/v0.3.21...v0.3.22
