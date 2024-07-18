@@ -56,6 +56,18 @@
   ```
 - Add better default names for viewports and graphs. E.g. Track: <entity
 name>" for viewports and "<entity name>: <component name>" for graphs.
+- Add basic support for 3D plots/traces in the editor.
+  - Trace an entity's position by spawning in `elodin.Line3d` assets:
+    ```python
+    # The entity id is required as the first positional argument.
+    world.spawn(el.Line3d(rocket))
+
+    # You can specify the color and width of the line.
+    w.spawn(el.Line3d(rocket, line_width=5.0, color=el.Color(1.0, 0.0, 0.0)))
+
+    # You can enable or disable perspective rendering, which makes the line scale with distance to the camera. This is enabled by default.
+    w.spawn(el.Line3d(rocket, perspective=False))
+    ```
 
 ## [v0.3.24]
 - Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
