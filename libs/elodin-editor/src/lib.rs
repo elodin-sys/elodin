@@ -81,10 +81,10 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        let composite_alpha_mode = if cfg!(target_arch = "wasm32") {
-            bevy::window::CompositeAlphaMode::Opaque
-        } else {
+        let composite_alpha_mode = if cfg!(target_os = "macos") {
             bevy::window::CompositeAlphaMode::PostMultiplied
+        } else {
+            bevy::window::CompositeAlphaMode::Opaque
         };
         app
             //.insert_resource(AssetMetaCheck::Never)

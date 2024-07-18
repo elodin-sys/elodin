@@ -44,6 +44,8 @@
       ),
   )
   ```
+- **(fix)**: Fix editor crash on Windows due to:
+  > Requested alpha mode PostMultiplied is not in the list of supported alpha modes: [Opaque]
 - `GraphEntity` constructor now accepts component classes directly instead of `el.Component.index(ComponentClass)`. However, `el.Component.index` is still needed for slicing and indexing into individual elements of a component.
   ```python
   # before:
