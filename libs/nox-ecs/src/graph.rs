@@ -1,9 +1,9 @@
 use bytes::Buf;
-use conduit::{ComponentType, ComponentValue, EntityId};
+use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{Component, ComponentArray, ComponentGroup, PipelineBuilder, Query, SystemParam};
+use crate::{Component, ComponentArray, ComponentGroup, Query};
 
 #[derive(Clone)]
 pub struct GraphQuery<E> {
@@ -92,14 +92,14 @@ impl EdgeComponent for Edge {
 
 pub struct TotalEdge;
 
-impl<E: EdgeComponent + 'static> SystemParam<PipelineBuilder> for GraphQuery<E> {
+impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
     type Item = Self;
 
-    fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+    fn init(_builder: &mut crate::system::SystemBuilder) -> Result<(), crate::Error> {
         Ok(())
     }
 
-    fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
+    fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
         let col = builder.world.column::<E>().unwrap();
         let ty = &col.metadata.component_type;
         let buf = &mut &col.column[..];
@@ -111,23 +111,29 @@ impl<E: EdgeComponent + 'static> SystemParam<PipelineBuilder> for GraphQuery<E> 
             })
             .collect::<Option<Vec<_>>>()
             .unwrap();
-        GraphQuery {
+        Ok(GraphQuery {
             edges,
             phantom_data: PhantomData,
-        }
+        })
     }
 
-    fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
+    fn component_ids() -> impl Iterator<Item = conduit::ComponentId> {
+        std::iter::empty()
+    }
+
+    fn output(&self, _builder: &mut crate::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+        unimplemented!()
+    }
 }
 
-impl SystemParam<PipelineBuilder> for GraphQuery<TotalEdge> {
+impl crate::system::SystemParam for GraphQuery<TotalEdge> {
     type Item = Self;
 
-    fn init(_: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+    fn init(_builder: &mut crate::system::SystemBuilder) -> Result<(), crate::Error> {
         Ok(())
     }
 
-    fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
+    fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
         let edges = (0..builder.world.entity_len)
             .flat_map(|from| {
                 (0..builder.world.entity_len)
@@ -135,13 +141,19 @@ impl SystemParam<PipelineBuilder> for GraphQuery<TotalEdge> {
                     .map(move |to| Edge::new(from, to))
             })
             .collect::<Vec<_>>();
-        GraphQuery {
+        Ok(GraphQuery {
             edges,
             phantom_data: PhantomData,
-        }
+        })
     }
 
-    fn insert_into_builder(self, _builder: &mut crate::PipelineBuilder) {}
+    fn component_ids() -> impl Iterator<Item = conduit::ComponentId> {
+        std::iter::empty()
+    }
+
+    fn output(&self, _builder: &mut crate::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+        unimplemented!()
+    }
 }
 
 pub fn exprs_from_edges_queries<A, B>(
@@ -263,6 +275,7 @@ impl<E> GraphQuery<E> {
                     entity_map: from.entity_map.clone(),
                     len: from.len,
                     phantom_data: PhantomData,
+                    component_id: ComponentId::new("foo"), // TODO(sphw): fix me
                 });
             }
         }

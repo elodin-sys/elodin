@@ -31,15 +31,18 @@ pub fn component_group(input: TokenStream) -> TokenStream {
         impl #generics #crate_name::ComponentGroup for #ident #generics #where_clause {
             type Params = (Self,);
             type Append<B> = (Self, B);
-            fn init_params(builder: &mut #crate_name::PipelineBuilder) -> Result<(), #crate_name::Error> {
-                <(#(#params,)*)>::init_params(builder)
+
+            fn init(builder: &mut #crate_name::system::SystemBuilder) -> Result<(), #crate_name::Error> {
+                <(#(#params,)*)>::init(builder)
             }
 
-            fn component_arrays<'a>(
-                builder: &'a #crate_name::PipelineBuilder,
+
+           fn component_arrays_new<'a>(
+                builder: &'a #crate_name::system::SystemBuilder,
             ) -> impl Iterator<Item = #crate_name::ComponentArray<()>> + 'a {
-                <(#(#params,)*)>::component_arrays(builder)
+                <(#(#params,)*)>::component_arrays_new(builder)
             }
+
 
             fn component_types() -> impl Iterator<Item = #crate_name::ComponentType> {
                 <(#(#params,)*)>::component_types()

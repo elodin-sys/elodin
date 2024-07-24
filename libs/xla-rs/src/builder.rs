@@ -160,4 +160,18 @@ impl XlaBuilder {
             builder: self.clone(),
         }
     }
+
+    pub fn call(&self, args: &[XlaOpRef<'_>], comp: &XlaComputation) -> XlaOp {
+        let args_ptr = args.as_ptr();
+        let args_len = args.len();
+        let raw = unsafe {
+            cpp!([self as "std::shared_ptr<XlaBuilder>*", args_ptr as "const XlaOp*", args_len as "size_t", comp as "const XlaComputation*"] -> XlaOpRaw as "XlaOp" {
+                return XlaOp(Call(self->get(), *comp, absl::Span(args_ptr, args_len)));
+            })
+        };
+        XlaOp {
+            raw,
+            builder: self.clone(),
+        }
+    }
 }
