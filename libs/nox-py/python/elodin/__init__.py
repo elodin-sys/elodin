@@ -66,58 +66,32 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("df", dfs, ids=sample_numbers)
 
 
-class System(Protocol):
-    def call(self, builder: PipelineBuilder): ...
-
-    def init(self, builder: PipelineBuilder): ...
-
-    def pipe(self, other: Any) -> Any:
-        return Pipe(self, other)
-
-    def __or__(self, other: Any) -> Any:
-        return self.pipe(other)
-
-
-@dataclass
-class Pipe(System):
-    a: System
-    b: System
-
-    def init(self, builder: PipelineBuilder):
-        self.a.init(builder)
-        self.b.init(builder)
-
-    def call(self, builder: PipelineBuilder):
-        self.a.call(builder)
-        self.b.call(builder)
-
-
 def system(func) -> System:
-    class Inner(System):
-        func: Callable[[Any], Any]
+    sig = inspect.signature(func)
+    # TODO(sphw): use varadict function
+    params = sig.parameters
+    input_ids = []
+    edge_ids = []
+    for _, p in params.items():
+        input_ids.extend(p.annotation.component_ids(p.annotation))
+        if getattr(p.annotation, "edge_ids", None) is not None:
+            edge_ids.extend(p.annotation.edge_ids(p.annotation))
+    output_ids = []
+    return_annotation = sig.return_annotation
+    if return_annotation is not inspect._empty:
+        output_ids.extend(sig.return_annotation.component_ids(return_annotation))
 
-        def init(self, builder: PipelineBuilder):
-            sig = inspect.signature(func)
-            params = sig.parameters
+    def outer(builder):
+        def inner(*args):
+            new_args = []
             for _, p in params.items():
-                p.annotation.init_builder(p.annotation, builder)
-            if sig.return_annotation is not inspect._empty:
-                sig.return_annotation.init_builder(sig.return_annotation, builder)
+                new_args.append(p.annotation.from_builder(p.annotation, builder, args))
+            output = func(*new_args)
+            return output.output(builder, args)
 
-        def call(self, builder: PipelineBuilder):
-            sig = inspect.signature(func)
-            params = sig.parameters
-            args = [
-                p.annotation.from_builder(p.annotation, builder)
-                for (_, p) in params.items()
-            ]
-            ret = func(*args)
-            if ret is not None:
-                ret.insert_into_builder(builder)
+        return inner
 
-    inner = Inner()
-    inner.func = func
-    return inner
+    return PyFnSystem(outer, input_ids, output_ids, edge_ids, func.__repr__()).system()
 
 
 T = TypeVar("T")
@@ -184,7 +158,17 @@ class Query(Generic[Unpack[A]]):
         )
 
     @staticmethod
-    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> "Query[Any]":
+    def component_ids(new_tp: type[Any]) -> list[str]:
+        t_args = typing.get_args(new_tp)
+        ids = []
+        for t_arg in t_args:
+            ids.append(Component.name(t_arg))
+        return ids
+
+    @staticmethod
+    def from_builder(
+        new_tp: type[Any], builder: SystemBuilder, args: list[Any]
+    ) -> "Query[Any]":
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
@@ -194,24 +178,19 @@ class Query(Generic[Unpack[A]]):
             component_classes.append(t_arg)
             ids.append(Component.name(t_arg))
         return Query(
-            QueryInner.from_builder(builder, ids), component_data, component_classes
+            QueryInner.from_builder(builder, ids, args),
+            component_data,
+            component_classes,
         )
 
-    @staticmethod
-    def init_builder(new_tp: type[Any], builder: PipelineBuilder):
-        t_args = typing.get_args(new_tp)
-        for t_arg in t_args:
-            component_data = Metadata.of(t_arg)
-            builder.init_var(Component.name(t_arg), component_data.ty)
+    def output(self, builder: SystemBuilder, args: list[Any]) -> Any:
+        return self.inner.output(builder, args)
 
     def __getitem__(self, index: int) -> Any:
         if len(self.bufs) > 1:
             raise Exception("Cannot index into a query with multiple inputs")
         cls = self.component_classes[0]
         return from_array(cls, self.bufs[0][index])
-
-    def insert_into_builder(self, builder: PipelineBuilder):
-        self.inner.insert_into_builder(builder)
 
 
 def map(
@@ -227,7 +206,7 @@ def map(
         return_ty = tuple(return_ty.__args__)
 
     @system
-    def inner(q: query):  # type: ignore
+    def inner(q: query) -> Query[return_ty]:  # type: ignore
         return q.map(return_ty, func)
 
     return inner
@@ -262,7 +241,9 @@ class GraphQuery(Generic[E]):
         self.inner = inner
 
     @staticmethod
-    def from_builder(new_tp: type[Any], builder: PipelineBuilder) -> "GraphQuery[E]":
+    def from_builder(
+        new_tp: type[Any], builder: SystemBuilder, _: list[Any]
+    ) -> "GraphQuery[E]":
         t_args = typing.get_args(new_tp)
         edge_ty = t_args[0]
         if isinstance(edge_ty, type(TotalEdge)):
@@ -276,14 +257,17 @@ class GraphQuery(Generic[E]):
         )
 
     @staticmethod
-    def init_builder(new_tp: type[Any], builder: PipelineBuilder):
+    def component_ids(_: type[Any]) -> list[str]:
+        return []
+
+    @staticmethod
+    def edge_ids(new_tp: type[Any]) -> list[str]:
         t_args = typing.get_args(new_tp)
-        edge_ty = t_args[0]
-        if isinstance(edge_ty, type(TotalEdge)):
-            return
+        ids = []
         for t_arg in t_args:
-            component_data = Metadata.of(t_arg)
-            builder.init_var(Component.name(t_arg), component_data.ty)
+            if t_arg is not TotalEdge:
+                ids.append(Component.name(t_arg))
+        return ids
 
     def edge_fold(
         self,
@@ -490,7 +474,7 @@ class Scene(Archetype):
 class World(WorldBuilder):
     def run(
         self,
-        system: System,
+        system: PyFnSystem,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
         run_time_step: Optional[float] = None,
@@ -519,7 +503,7 @@ class World(WorldBuilder):
 
     def serve(
         self,
-        system: System,
+        system: PyFnSystem,
         addr: Optional[str] = None,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
@@ -543,7 +527,7 @@ class World(WorldBuilder):
 
     def view(
         self,
-        system: System,
+        system: PyFnSystem,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
         run_time_step: Optional[float] = None,
