@@ -1,14 +1,11 @@
 use nox::{SpatialForce, SpatialInertia, SpatialMotion};
+use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
-use nox_ecs::{IntoSystem, Query, System, WorldPos};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 use std::sync::Arc;
 
-use crate::{
-    semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, PipelineBuilder, Rk4Ext,
-    Time,
-};
+use crate::{semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, Rk4Ext, Time};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -121,7 +118,7 @@ pub struct Body {
     pub mass: Inertia,
 }
 
-pub fn advance_time(time_step: f64) -> impl System<PipelineBuilder> {
+pub fn advance_time(time_step: f64) -> impl System {
     let increment_time = move |query: ComponentArray<Time>| -> ComponentArray<Time> {
         query.map(|time: Time| Time(time.0 + time_step)).unwrap()
     };
@@ -132,17 +129,18 @@ pub fn six_dof<Sys, M, A, R>(
     effectors: impl FnOnce() -> Sys,
     time_step: f64,
     integrator: Integrator,
-) -> Arc<dyn System<PipelineBuilder, Arg = (), Ret = ()> + Send + Sync>
+) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
 where
     M: 'static,
     A: 'static,
     R: 'static,
-    Sys: IntoSystem<PipelineBuilder, M, A, R> + 'static,
-    <Sys as IntoSystem<PipelineBuilder, M, A, R>>::System: Send + Sync,
+    Sys: IntoSystem<M, A, R> + 'static,
+    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
+    //let sys = clear_forces.pipe(calc_accel);
     match integrator {
-        Integrator::Rk4 => Arc::new(ErasedSystem::new(sys.rk4_with_dt::<U, DU>(time_step))),
+        Integrator::Rk4 => Arc::new(sys.rk4_with_dt::<U, DU>(time_step)),
         Integrator::SemiImplicit => {
             let integrate =
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
@@ -156,6 +154,7 @@ mod tests {
     use super::*;
     use crate::World;
     use crate::WorldExt;
+    use approx::assert_relative_eq;
     use conduit::ComponentExt;
     use conduit::ComponentId;
     use nox::nalgebra::{UnitQuaternion, Vector3};
@@ -333,5 +332,78 @@ mod tests {
             [0.0, 1.0, 1.0],
             [0.0, 0.0, 1.0],
         );
+    }
+
+    #[test]
+    fn test_six_dof_constant_force() {
+        let mut world = World::default();
+        world.spawn(Body {
+            pos: WorldPos(SpatialTransform {
+                inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0].into(),
+            }),
+            vel: WorldVel(SpatialMotion {
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            accel: WorldAccel(SpatialMotion {
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            force: Force(SpatialForce {
+                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
+            }),
+            mass: Inertia(SpatialInertia {
+                inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
+            }),
+        });
+
+        fn constant_force(query: ComponentArray<Force>) -> ComponentArray<Force> {
+            query
+                .map(|_: Force| -> Force {
+                    Force(SpatialForce {
+                        inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                    })
+                })
+                .unwrap()
+        }
+
+        let time_step = 1.0 / 1.0;
+        let client = nox::Client::cpu().unwrap();
+        let mut exec = world
+            .builder()
+            .tick_pipeline(six_dof(|| constant_force, time_step, Integrator::Rk4))
+            .run_time_step(std::time::Duration::from_secs_f64(time_step))
+            .build()
+            .unwrap()
+            .compile(client)
+            .unwrap();
+        for _ in 0..1 {
+            exec.run().unwrap();
+        }
+        let column = exec
+            .column_at_tick(ComponentId::new("world_pos"), 1)
+            .unwrap();
+        let (_, pos) = column
+            .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
+            .next()
+            .unwrap();
+
+        let vel = exec
+            .column_at_tick(ComponentId::new("world_vel"), 1)
+            .unwrap();
+        let (_, vel) = vel
+            .typed_iter::<SpatialMotion<f64, ArrayRepr>>()
+            .next()
+            .unwrap();
+
+        let accel = exec
+            .column_at_tick(ComponentId::new("world_accel"), 1)
+            .unwrap();
+        let (_, accel) = accel
+            .typed_iter::<SpatialMotion<f64, ArrayRepr>>()
+            .next()
+            .unwrap();
+
+        assert_eq!(accel.linear(), tensor![1.0, 0.0, 0.0]);
+        assert_relative_eq!(vel.linear(), tensor![1.0, 0.0, 0.0], epsilon = 1e-6);
+        assert_eq!(pos.linear(), tensor![0.5, 0.0, 0.0]);
     }
 }

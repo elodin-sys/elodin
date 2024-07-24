@@ -9,7 +9,7 @@ use std::{
 
 use itertools::Itertools;
 use smallvec::{smallvec, SmallVec};
-use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaOp, XlaOpRef};
+use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
 use crate::{
     CompFn, DefaultMap, DefaultMappedDim, Dim, Error, FromOp, IntoOp, MapDim, Tensor, TensorItem,
@@ -78,6 +78,8 @@ pub enum NoxprNode {
 
     #[cfg(feature = "jax")]
     Jax(pyo3::PyObject),
+
+    Call(Call),
 }
 
 /// Represents a constant value within the Noxpr.
@@ -475,6 +477,38 @@ pub struct Convert {
     pub ty: ElementType,
 }
 
+#[derive(Clone)]
+pub struct NoxprComp {
+    pub func: Arc<NoxprFn>,
+    pub id: NoxprId,
+    pub ty: NoxprTy,
+}
+
+impl std::fmt::Debug for NoxprComp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NoxprComp")
+            .field("id", &self.id)
+            .field("ty", &self.ty)
+            .finish()
+    }
+}
+
+impl NoxprComp {
+    pub fn new(func: NoxprFn, ty: NoxprTy) -> Self {
+        NoxprComp {
+            func: Arc::new(func),
+            id: NoxprId::default(),
+            ty,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Call {
+    pub comp: NoxprComp,
+    pub args: Vec<Noxpr>,
+}
+
 /// A unique identifier for `Noxpr` expressions to facilitate caching and optimization.
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub struct NoxprId(usize);
@@ -776,6 +810,9 @@ impl Noxpr {
                 }))
             }
             NoxprNode::Slice(slice) => {
+                let NoxprTy::ArrayTy(expr_ty) = slice.expr.ty()? else {
+                    return None;
+                };
                 if slice.start_indices.len() != slice.stop_indices.len() {
                     return None;
                 }
@@ -790,7 +827,7 @@ impl Noxpr {
                     })
                     .collect::<Option<SmallVec<_>>>()?;
                 Some(NoxprTy::ArrayTy(ArrayTy {
-                    element_type: slice.expr.element_type()?,
+                    element_type: expr_ty.element_type,
                     shape,
                 }))
             }
@@ -919,6 +956,7 @@ impl Noxpr {
                 }))
             }
             NoxprNode::Select(select) => select.on_true.ty(),
+            NoxprNode::Call(c) => Some(c.comp.ty.clone()),
         }
     }
 
@@ -985,6 +1023,7 @@ impl Noxpr {
             }),
             NoxprNode::Convert(c) => Some(c.ty),
             NoxprNode::Select(c) => c.on_true.element_type(),
+            NoxprNode::Call(c) => c.comp.func.inner.element_type(),
         }
     }
 
@@ -1112,19 +1151,7 @@ impl Noxpr {
             }
             NoxprNode::Iota(i) => Some(i.shape.shape.clone()),
             NoxprNode::DynamicUpdateSlice(d) => d.expr.shape(),
-            NoxprNode::GetTupleElement(g) => match g.expr.deref() {
-                NoxprNode::Tuple(elems) => elems.get(g.index)?.shape(),
-                NoxprNode::Param(p) => {
-                    if let NoxprTy::Tuple(elems) = &p.ty {
-                        let ty = elems.get(g.index)?;
-                        if let NoxprTy::ArrayTy(a) = ty {
-                            return Some(a.shape.clone());
-                        }
-                    }
-                    None
-                }
-                _ => None,
-            },
+            NoxprNode::GetTupleElement(g) => get_tuple_shape(g.index, &g.expr.node),
             NoxprNode::Scan(s) => s.initial_state.shape(),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
@@ -1133,6 +1160,18 @@ impl Noxpr {
             }),
             NoxprNode::Convert(c) => c.arg.shape(),
             NoxprNode::Select(c) => c.on_true.shape(),
+            NoxprNode::Call(c) => {
+                // if let NoxprNode::Jax(j) = &*c.comp.func.inner.node {
+                //     None
+                // } else {
+                //     c.comp.func.inner.shape()
+                // }
+                if let NoxprTy::ArrayTy(ref ty) = c.comp.ty {
+                    Some(ty.shape.clone())
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -1162,6 +1201,10 @@ impl Noxpr {
     #[cfg(feature = "jax")]
     pub fn jax(py: pyo3::PyObject) -> Noxpr {
         Noxpr::new(NoxprNode::Jax(py))
+    }
+
+    pub fn call(comp: NoxprComp, args: Vec<Noxpr>) -> Noxpr {
+        Noxpr::new(NoxprNode::Call(Call { comp, args }))
     }
 
     /// Retrieves the unique identifier of the `Noxpr` instance.
@@ -1210,6 +1253,7 @@ impl Noxpr {
             NoxprNode::Abs(_) => "Abs",
             NoxprNode::Convert(_) => "Convert",
             NoxprNode::Select(_) => "Select",
+            NoxprNode::Call(_) => "Call",
         }
     }
 
@@ -1257,6 +1301,29 @@ impl Deref for Noxpr {
     }
 }
 
+fn get_tuple_shape(index: usize, expr: &NoxprNode) -> Option<SmallVec<[i64; 4]>> {
+    match expr {
+        NoxprNode::Tuple(elems) => elems.get(index)?.shape(),
+        NoxprNode::Param(p) => {
+            if let NoxprTy::Tuple(elems) = &p.ty {
+                let ty = elems.get(index)?;
+                if let NoxprTy::ArrayTy(a) = ty {
+                    return Some(a.shape.clone());
+                }
+            }
+            None
+        }
+        NoxprNode::Call(c) => match &c.comp.ty {
+            NoxprTy::Tuple(elems) => elems.get(index).and_then(|e| match e {
+                NoxprTy::Tuple(_) => None,
+                NoxprTy::ArrayTy(a) => Some(a.shape.clone()),
+            }),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Represents a parameter in the Noxpr.
 #[derive(Debug, Clone)]
 pub struct ParamExpr {
@@ -1294,6 +1361,7 @@ impl_binary_op!(Sub, sub, Sub);
 pub struct XlaTracer {
     builder: XlaBuilder,
     cache: HashMap<NoxprId, XlaOp>,
+    comp_cache: HashMap<NoxprId, Arc<XlaComputation>>,
 }
 
 impl XlaTracer {
@@ -1302,6 +1370,7 @@ impl XlaTracer {
         Self {
             builder: XlaBuilder::new(name),
             cache: HashMap::new(),
+            comp_cache: HashMap::new(),
         }
     }
 
@@ -1583,9 +1652,31 @@ impl XlaTracer {
                 let on_false = self.visit(&s.on_false)?;
                 cond.select(&on_true, &on_false)
             }
+            NoxprNode::Call(c) => {
+                let comp = self.visit_comp(&c.comp)?;
+                let args = c
+                    .args
+                    .iter()
+                    .map(|arg| self.visit(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let args = args.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
+                self.builder.call(&args, &comp)
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
+    }
+
+    fn visit_comp(&mut self, comp: &NoxprComp) -> Result<Arc<XlaComputation>, Error> {
+        if let Some(comp) = self.comp_cache.get(&comp.id) {
+            return Ok(comp.clone());
+        }
+        let mut tracer = XlaTracer::new("comp");
+        tracer.comp_cache.clone_from(&self.comp_cache);
+        let xla_comp = Arc::new(comp.func.build_with_tracer(&mut tracer)?.build()?);
+        self.comp_cache = tracer.comp_cache;
+        self.comp_cache.insert(comp.id, xla_comp.clone());
+        Ok(xla_comp)
     }
 
     /// Helps in visiting and compiling binary operations like Add, Mul into XLA binary operations.
@@ -1611,6 +1702,11 @@ impl NoxprFn {
     /// Builds an XLA operation based on the `NoxprFn` definition.
     pub fn build(&self, name: &str) -> Result<XlaOp, Error> {
         let mut tracer = XlaTracer::new(name);
+        self.build_with_tracer(&mut tracer)
+    }
+
+    /// Builds an XLA operation based on the `NoxprFn` definition.
+    pub fn build_with_tracer(&self, tracer: &mut XlaTracer) -> Result<XlaOp, Error> {
         for a in self.args.iter() {
             tracer.visit(a)?;
         }
@@ -1675,8 +1771,9 @@ impl std::fmt::Display for NoxprFn {
 }
 
 /// Used to trace and replace `Noxpr` references, mainly for transformation or optimization purposes.
+#[derive(Debug, Clone, Default)]
 pub struct ReplacementTracer {
-    cache: HashMap<NoxprId, Noxpr>,
+    pub cache: HashMap<NoxprId, Noxpr>,
 }
 
 impl ReplacementTracer {
@@ -1688,7 +1785,7 @@ impl ReplacementTracer {
     }
 
     /// Visits and potentially modifies a `Noxpr` based on cached transformations.
-    fn visit(&mut self, expr: &Noxpr) -> Noxpr {
+    pub fn visit(&mut self, expr: &Noxpr) -> Noxpr {
         let id = expr.id();
         if let Some(expr) = self.cache.get(&id) {
             return expr.clone();
@@ -1798,6 +1895,13 @@ impl ReplacementTracer {
                     cond,
                     on_true,
                     on_false,
+                }))
+            }
+            NoxprNode::Call(c) => {
+                let args = c.args.iter().map(|a| self.visit(a)).collect();
+                Noxpr::new(NoxprNode::Call(Call {
+                    comp: c.comp.clone(),
+                    args,
                 }))
             }
         };
@@ -1980,8 +2084,12 @@ impl BatchTracer {
         }
     }
 
-    /// Visits a `Noxpr` and applies any batch-specific transformations.
     pub fn visit(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
+        self.visit_inner(expr)
+    }
+
+    /// Visits a `Noxpr` and applies any batch-specific transformations.
+    pub fn visit_inner(&mut self, expr: &Noxpr) -> Result<BatchedExpr, Error> {
         let id = expr.id();
         if let Some(op) = self.cache.get(&id) {
             return Ok(op.clone());
@@ -2473,6 +2581,10 @@ impl BatchTracer {
                     inner: Noxpr::select(&cond.inner, on_true.inner, on_false.inner),
                     batch_axis: cond.batch_axis,
                 }
+            }
+            NoxprNode::Call(_) => {
+                // TODO(sphw): we have to figure out if we can batch calls at all
+                todo!()
             }
         };
         self.cache.insert(id, op.clone());
@@ -3025,6 +3137,10 @@ impl PrettyPrintTracer {
                 )?;
                 Ok(num)
             }
+            NoxprNode::Call(_) => {
+                let num = self.print_var(id, writer)?;
+                Ok(num)
+            }
         };
         write!(writer, ": {:?}", expr.shape())?;
         writeln!(writer)?;
@@ -3063,8 +3179,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3084,12 +3199,10 @@ mod tests {
             mat.vmap(|x: Scalar<f32>| x.sqrt()).unwrap().collapse()
         }
         let comp = add_one.build().unwrap();
-        println!("{}", comp.to_hlo_text().unwrap());
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3109,12 +3222,10 @@ mod tests {
             mat.vmap(|_| Scalar::from(1.0)).unwrap().collapse()
         }
         let comp = add_one.build().unwrap();
-        println!("{}", comp.to_hlo_text().unwrap());
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3134,12 +3245,10 @@ mod tests {
             mat.vmap(|x: Vector<f32, 2>| x).unwrap().collapse()
         }
         let comp = add_one.build().unwrap();
-        println!("{}", comp.to_hlo_text().unwrap());
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3166,8 +3275,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3202,12 +3310,10 @@ mod tests {
         }
 
         let comp = norm.build().unwrap();
-        println!("{}", comp.to_hlo_text().unwrap());
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3230,8 +3336,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3255,8 +3360,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3279,8 +3383,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -3307,8 +3410,7 @@ mod tests {
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
+                panic!("{}", msg);
             }
             Err(e) => {
                 panic!("{:?}", e);

@@ -1,13 +1,13 @@
-use crate::{ComponentGroup, Error, PipelineBuilder, Query};
-use crate::{IntoSystem, System, SystemParam};
+use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
+use crate::{ComponentGroup, Error, Query};
+use conduit::World;
 use nox::IntoOp;
 use std::ops::Add;
-use std::sync::Arc;
 use std::{marker::PhantomData, ops::Mul};
 
 pub struct Rk4<U, DU, Pipe> {
     dt: f64,
-    pipe: Arc<Pipe>,
+    pipe: Pipe,
     phantom_data: PhantomData<(U, DU)>,
 }
 
@@ -15,7 +15,7 @@ impl<Pipe, U, DU> Rk4<U, DU, Pipe> {
     pub fn new(pipe: Pipe, dt: f64) -> Self {
         Self {
             dt,
-            pipe: Arc::new(pipe),
+            pipe,
             phantom_data: PhantomData,
         }
     }
@@ -32,7 +32,7 @@ pub trait Rk4Ext {
 
 impl<Sys> Rk4Ext for Sys
 where
-    Sys: System<PipelineBuilder>,
+    Sys: System,
 {
     fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
     where
@@ -49,30 +49,41 @@ where
     }
 }
 
-impl<Pipe, U, DU> System<PipelineBuilder> for Rk4<U, DU, Pipe>
+impl<Pipe, U, DU> System for Rk4<U, DU, Pipe>
 where
-    Query<U>: SystemParam<PipelineBuilder, Item = Query<U>> + Clone,
-    Query<DU>: SystemParam<PipelineBuilder, Item = Query<DU>> + Clone,
-    U: Add<DU, Output = U> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = U>,
-    DU: Add<DU, Output = DU> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = DU>,
+    Query<U>: SystemParam<Item = Query<U>> + Clone,
+    Query<DU>: SystemParam<Item = Query<DU>> + Clone,
+    U: Add<DU, Output = U>
+        + ComponentGroup
+        + IntoOp
+        + for<'a> nox::FromBuilder<Item<'a> = U>
+        + Send
+        + Sync,
+    DU: Add<DU, Output = DU>
+        + ComponentGroup
+        + IntoOp
+        + for<'a> nox::FromBuilder<Item<'a> = DU>
+        + Send
+        + Sync,
     f64: Mul<DU, Output = DU>,
-    Pipe: System<PipelineBuilder>,
+    Pipe: System + Send + Sync,
 {
-    type Arg = Pipe::Arg;
-    type Ret = Pipe::Ret;
+    type Arg = ();
+    type Ret = ();
 
-    fn init_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
-        self.pipe.init_builder(builder)?;
+    fn init(&self, builder: &mut SystemBuilder) -> Result<(), Error> {
+        self.pipe.init(builder)?;
         Query::<U>::init(builder)?;
         Query::<DU>::init(builder)
     }
 
-    fn add_to_builder(&self, builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
-        let dt = self.dt;
-        let init_u = Query::<U>::from_builder(builder);
+    fn compile(&self, world: &World) -> Result<CompiledSystem, Error> {
+        let mut builder = SystemBuilder::new(world);
+        let compiled_pipe = self.pipe.compile(world)?;
+        self.init(&mut builder)?;
+        let init_u = Query::<U>::param(&builder)?;
         let f = |dt: f64| {
-            let init_u = init_u.clone();
-            move |du: Query<DU>| -> Query<U> {
+            move |init_u: Query<U>, du: Query<DU>| -> Query<U> {
                 init_u
                     .clone()
                     .join_query(du.clone())
@@ -80,22 +91,37 @@ where
                     .unwrap()
             }
         };
-        let mut step = |dt: f64| -> Result<Query<DU>, Error> {
-            f(dt).pipe(self.pipe.clone()).add_to_builder(builder)?;
-            Ok(Query::<DU>::from_builder(builder))
+
+        let step = |dt: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
+            f(dt)
+                .into_system()
+                .compile(world)?
+                .insert_into_builder(builder)?;
+            compiled_pipe.clone().insert_into_builder(builder)?;
+            Query::<DU>::param(builder)
         };
-        let k1 = step(0.0)?;
-        let k2 = step(dt / 2.0)?;
-        let k3 = step(dt / 2.0)?;
-        let k4 = step(dt)?;
+
+        let k1 = step(0.0, &mut builder)?;
+        init_u.insert_into_builder(&mut builder);
+        let k2 = step(self.dt / 2.0, &mut builder)?;
+        init_u.insert_into_builder(&mut builder);
+        let k3 = step(self.dt / 2.0, &mut builder)?;
+        init_u.insert_into_builder(&mut builder);
+        let k4 = step(self.dt, &mut builder)?;
+        init_u.insert_into_builder(&mut builder);
+
         let u = init_u
             .join_query(k1)
             .join_query(k2)
             .join_query(k3)
-            .join_query(k4)
-            .map(|(((du, k1), k2), k3), k4| du + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4))?;
-        u.insert_into_builder(builder);
-        Ok(())
+            .join_query(k4.clone())
+            .map(|(((u, k1), k2), k3), k4| {
+                let du = (self.dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+                u + du
+            })
+            .unwrap();
+        u.insert_into_builder(&mut builder);
+        builder.to_compiled_system()
     }
 }
 
