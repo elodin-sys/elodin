@@ -29,7 +29,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.25"
+version = "0.3.26"
 repository = "https://github.com/elodin-sys/paracosm"
 
 # Config for 'cargo dist'

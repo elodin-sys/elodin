@@ -2,6 +2,9 @@
 
 ## [unreleased]
 
+## [v0.3.26]
+- Improve simulation startup times.
+
 ## [v0.3.25]
 - **(breaking)** Use variable positional arguments for `el.Panel.vsplit`, `el.Panel.hsplit`, `el.Panel.graph`, and `el.GraphEntity` instead of lists. This results in much less verbose panel configuration code. To update your code, either replace the list of arguments with individual arguments separated by commas or unpack the list with `*`.
   ```python
@@ -287,7 +290,8 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.25...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.26...HEAD
+[v0.3.26]: https://github.com/elodin-sys/paracosm/compare/v0.3.25...v0.3.26
 [v0.3.25]: https://github.com/elodin-sys/paracosm/compare/v0.3.24...v0.3.25
 [v0.3.24]: https://github.com/elodin-sys/paracosm/compare/v0.3.23...v0.3.24
 [v0.3.23]: https://github.com/elodin-sys/paracosm/compare/v0.3.22...v0.3.23
