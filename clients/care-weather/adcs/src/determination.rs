@@ -179,9 +179,10 @@ impl<const HZ: usize> System for Determination<HZ> {
                 })
                 .normalize()
         };
-        let nav_state = self.nav_state_out.read_msg();
 
-        if let Ok(time) = Epoch::now() {
+        if let Ok(_time) = Epoch::now() {
+            // NOTE: hard coding time for chamber simulations
+            let time = Epoch::from_gregorian_utc_hms(2024, 6, 26, 23, 0, 0);
             world.mag_ref = self
                 .override_mag_ref
                 .map(Tensor::from_buf)
@@ -207,7 +208,7 @@ impl<const HZ: usize> System for Determination<HZ> {
             Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h);
         let mag_body = hard_iron_cal.normalize();
         world.mag_postcal_value = mag_body.into_buf();
-        let att_mrp_bn = if let Some(mut mekf_state) = self.mekf_state.take() {
+        let (att_mrp_bn, omega) = if let Some(mut mekf_state) = self.mekf_state.take() {
             mekf_state.reset_if_invalid();
             let config = self
                 .mekf_config
@@ -220,22 +221,15 @@ impl<const HZ: usize> System for Determination<HZ> {
                 [config.sigma_sun, config.sigma_mag],
             );
             let mekf_state = self.mekf_state.insert(mekf_state);
-            MRP::from(mekf_state.q_hat).0.into_buf()
+            (MRP::from(mekf_state.q_hat).0.into_buf(), mekf_state.omega)
         } else {
             let att =
                 roci_adcs::triad(sun_body, mag_body, world.sun_ref, world.mag_ref.normalize());
-            MRP::from_rot_matrix(att).0.into_buf()
+            (MRP::from_rot_matrix(att).0.into_buf(), world.omega)
         };
 
-        // println!("css_inp: {:?}", world.css_inputs);
-        // println!("sun_val: {:?}", nav_state.vehSunPntBdy);
-        // println!("mag_val: {:?}", world.mag_value);
-        // println!("sun_ref: {:?}", world.sun_ref);
-        // println!("mag_ref: {:?}", world.mag_ref);
-        // println!("att_mrp: {:?}", att_mrp_bn);
-
         world.nav_out.att_mrp_bn = att_mrp_bn;
-        world.nav_out.omega_bn_b = nav_state.omega_BN_B;
+        world.nav_out.omega_bn_b = omega.into_buf();
         world.nav_out.sun_vec_b = sun_body.into_buf();
     }
 }

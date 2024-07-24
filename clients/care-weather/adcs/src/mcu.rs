@@ -1,4 +1,5 @@
 use std::f64::consts::PI;
+use std::fmt::Display;
 use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
@@ -18,27 +19,40 @@ pub struct McuDriver<const HZ: usize, H: System> {
     read_buf: Vec<u8>,
     config: McuConfig,
     gnc_system: H,
+    radio_flag: RadioFlag,
+}
+
+struct RadioFlag(bool);
+
+impl Display for RadioFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 {
+            write!(f, ">")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct McuConfig {
     #[serde(default)]
     pub arm_reaction_wheels: bool,
+    #[serde(default)]
+    pub enable_gps: bool,
     pub path: String,
     pub baud_rate: Option<u32>,
     pub adcs_format: BitFlags<AdcsFormat>,
-    pub adcs_update_interval: u32,
-    pub adcs_cycle_duration: u32,
-    pub adcs_cycle_interval: u32,
     pub gps_update_interval: u32,
     pub gps_cycle_duration: u32,
     pub gps_cycle_interval: u32,
+    #[serde(default)]
+    pub use_radio: bool,
 }
 
 #[derive(Default, Componentize, Decomponentize)]
 pub struct ControlWorld {
-    #[roci(entity_id = 0, component_id = "rw_speed_setpoint")]
-    rw_speed_setpoint: [f64; 3],
+    #[roci(entity_id = 0, component_id = "rw_pwm_setpoint")]
+    rw_pwm_setpoint: [f64; 3],
 }
 
 impl<const HZ: usize, H: System> McuDriver<HZ, H> {
@@ -54,6 +68,7 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
             port_builder,
             port,
             read_buf,
+            radio_flag: RadioFlag(config.use_radio),
             config,
             gnc_system,
         };
@@ -69,6 +84,7 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => 0,
             Err(e) => return Err(e),
         };
+        println!("bytes-read = {bytes_read:?}");
         if bytes_read > 0 {
             self.read_buf.extend_from_slice(&buf[..bytes_read]);
             while let Some(pos) = self.read_buf.iter().position(|&b| b == b'\n') {
@@ -89,68 +105,44 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
     }
 
     pub fn print_info(&mut self) -> std::io::Result<()> {
-        writeln!(&mut self.port, "info")?;
+        writeln!(&mut self.port, "{}info", self.radio_flag)?;
         self.port.set_timeout(Duration::from_secs(1))?;
-        loop {
-            for line in self.try_read_lines()? {
-                println!("{}", line);
-                if line == "|info|" {
-                    return Ok(());
-                }
-            }
-        }
+        Ok(())
+        // loop {
+        //     for line in self.try_read_lines()? {
+        //         println!("{}", line);
+        //         if line == "|info|" {
+        //             return Ok(());
+        //         }
+        //     }
+        // }
     }
 
     fn init_mcu(&mut self) {
         let McuConfig {
             adcs_format,
-            adcs_update_interval,
-            adcs_cycle_duration,
-            adcs_cycle_interval,
             gps_update_interval,
             gps_cycle_duration,
             gps_cycle_interval,
+            enable_gps,
             ..
         } = self.config.clone();
-        self.init_adcs(
-            adcs_format,
-            adcs_update_interval,
-            adcs_cycle_duration,
-            adcs_cycle_interval,
-        )
-        .unwrap();
-        if let Err(e) = self.init_gps(gps_update_interval, gps_cycle_duration, gps_cycle_interval) {
-            eprintln!("Failed to initialize GPS: {}", e);
+        self.init_adcs(adcs_format).unwrap();
+        if enable_gps {
+            if let Err(e) =
+                self.init_gps(gps_update_interval, gps_cycle_duration, gps_cycle_interval)
+            {
+                eprintln!("Failed to initialize GPS: {}", e);
+            }
         }
     }
 
-    fn init_adcs(
-        &mut self,
-        adcs_format: BitFlags<AdcsFormat>,
-        update_interval: u32,
-        cycle_duration: u32,
-        cycle_interval: u32,
-    ) -> std::io::Result<()> {
-        let cmd = adcs_init_command(update_interval, cycle_duration, cycle_interval, adcs_format);
+    fn init_adcs(&mut self, adcs_format: BitFlags<AdcsFormat>) -> std::io::Result<()> {
+        let cmd = adcs_init_command(adcs_format);
         println!("-> {}", cmd);
-        writeln!(&mut self.port, "{}", cmd)?;
+        writeln!(&mut self.port, "{}{}", self.radio_flag, cmd)?;
         self.port.set_timeout(Duration::from_secs(1))?;
-        let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
-        let nack_msg = "|!KEY|";
-        loop {
-            for line in self.try_read_lines()? {
-                println!("<- {}", line);
-                if line == ack_msg {
-                    println!("ADCS initialized success");
-                    return Ok(());
-                } else if line == nack_msg {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Unsupported,
-                        "received NACK from MCU",
-                    ));
-                }
-            }
-        }
+        Ok(())
     }
 
     fn init_gps(
@@ -161,7 +153,7 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
     ) -> std::io::Result<()> {
         let cmd = gps_init_command(update_interval, cycle_duration, cycle_interval);
         println!("-> {}", cmd);
-        writeln!(&mut self.port, "{}", cmd)?;
+        writeln!(&mut self.port, "{}{}", self.radio_flag, cmd)?;
         self.port.set_timeout(Duration::from_secs(1))?;
         let ack_msg = format!("|{}|", cmd.replace(';', "|").replace('=', ":"));
         let nack_msg = "|!KEY|";
@@ -184,18 +176,23 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
     fn set_controls(&mut self, control_world: &mut ControlWorld) {
         // map rad/sec to RPM
         let rpms = control_world
-            .rw_speed_setpoint
-            .map(|v| (v * 60.0 / (2.0 * PI)).round() as i32);
-        let cmd = set_rw_rpm_command(rpms);
+            .rw_pwm_setpoint
+            .map(|pwm| pwm.clamp(-4096., 4096.) as i32);
+        let cmd = set_rw_pwm_command(rpms);
         // println!("-> {}", cmd);
         if self.config.arm_reaction_wheels {
-            writeln!(&mut self.port, "{}", cmd).unwrap();
+            writeln!(&mut self.port, "{}{}", self.radio_flag, cmd).unwrap();
         } else {
             // println!("skipping command because RWs are disabled");
         }
     }
 
     fn read_sensor_data(&mut self, world: &mut determination::World) {
+        if let Err(err) = writeln!(&mut self.port, "{}adcs;", self.radio_flag) {
+            eprintln!("error writing adcs command: {err}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
         let lines = match self.try_read_lines() {
             Ok(lines) => lines,
             Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {
@@ -218,14 +215,16 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
             }
         };
         for line in lines {
-            // println!("<- {}", line);
-            if let Some(msg) = line.strip_prefix("[FILE][adcs]") {
+            println!("<- {}", line);
+            if let Some(msg) = line.strip_prefix("[adcs]") {
+                println!("adcs line <- {}", line);
                 if msg.starts_with('#') {
                     continue;
                 }
                 let sensor_data = match SensorData::from_str(msg) {
                     Ok(sensor_data) => sensor_data,
                     Err(err) => {
+                        println!("<- {}", line);
                         eprintln!("error parsing sensor data: {}", err);
                         continue;
                     }
@@ -243,7 +242,7 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
 
                 world.mag_value = sensor_data.mag.map(|v| v as f64);
                 // swap x and y
-                world.mag_value = [world.mag_value[1], world.mag_value[0], world.mag_value[2]];
+                // world.mag_value = [world.mag_value[1], world.mag_value[0], world.mag_value[2]];
                 world.omega =
                     Vector::<f64, 3, ArrayRepr>::from_buf(sensor_data.gyro) * (PI / 180.0f64);
 
@@ -253,7 +252,9 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
                     .adcs_format
                     .contains(AdcsFormat::IncludeReactionWheelRpm)
                 {
-                    world.rw_speed = sensor_data.reaction_wheel_rpm.map(|v| v * 2.0 * PI / 60.0);
+                    world.rw_speed = sensor_data
+                        .reaction_wheel_rpm
+                        .map(|v| v * 2.0 * PI / 60.0 + 0.01);
                 }
             } else if let Some(msg) = line.strip_prefix("[FILE][gps]") {
                 println!("<- received gps message: {}", msg);
@@ -305,6 +306,7 @@ impl<const HZ: usize, H: System<Driver = Hz<{ HZ }>>> System for McuDriver<HZ, H
         world.sink_columns(gnc_world);
         self.gnc_system.update(gnc_world);
         gnc_world.sink_columns(control_world);
+        std::thread::sleep(Duration::from_millis(100));
         self.set_controls(control_world);
     }
 }
@@ -435,7 +437,7 @@ impl FromStr for SensorData {
                 .map(str::parse)
                 .collect::<Result<ArrayVec<_, 3>, _>>()?
                 .into_inner()
-                .map_err(|_| SensorParseError::InsufficientParts)?;
+                .unwrap_or_default();
         }
 
         Ok(sensor_data)
@@ -477,25 +479,11 @@ impl FromStr for GpsData {
     }
 }
 
-// update_interval (msec) - how often ADCS sensor values are sent by the MCU during an active cycle
-// cycle_duration (sec) - how long the ADCS cycle lasts
-// cycle_interval (sec) - how long the ADCS cycle is inactive before the next cycle starts
 // adcs_format - a bitfield that specifies which sensor values are included in the ADCS cycle
 // Returns a MCU command string that configures the ADCS cycle.
 // E.g: a.fmt=7;a.upd=1000;a.dur=10;a.int=100
-pub fn adcs_init_command(
-    update_interval: u32,
-    cycle_duration: u32,
-    cycle_interval: u32,
-    adcs_format: BitFlags<AdcsFormat>,
-) -> String {
-    format!(
-        "a.fmt={};a.upd={};a.dur={};a.int={}",
-        adcs_format.bits(),
-        update_interval,
-        cycle_duration,
-        cycle_interval
-    )
+pub fn adcs_init_command(adcs_format: BitFlags<AdcsFormat>) -> String {
+    format!("a.fmt={};a.stream=1;rw.begin", adcs_format.bits())
 }
 
 // update_interval (msec) - how often GPS sensor values are sent by the MCU during an active cycle
@@ -511,8 +499,8 @@ pub fn gps_init_command(update_interval: u32, cycle_duration: u32, cycle_interva
 }
 
 // Returns a MCU command string that sets the reaction wheel RPM values.
-pub fn set_rw_rpm_command(rpm: [i32; 3]) -> String {
-    format!("rw.rpm={},{},{};rw.setrpm", rpm[0], rpm[1], rpm[2])
+pub fn set_rw_pwm_command(pwm: [i32; 3]) -> String {
+    format!(">rw.pwm={},{},{}", pwm[0], pwm[1], pwm[2])
 }
 
 #[cfg(test)]
@@ -523,25 +511,19 @@ mod tests {
     fn test_config_adcs_cycle() {
         assert_eq!(
             adcs_init_command(
-                1000,
-                10,
-                100,
                 AdcsFormat::IncludeMag | AdcsFormat::IncludeGyro | AdcsFormat::IncludeAccel
             ),
-            "a.fmt=7;a.upd=1000;a.dur=10;a.int=100"
+            "a.fmt=7;a.stream=1;rw.begin"
         );
 
         assert_eq!(
             adcs_init_command(
-                1000,
-                10,
-                100,
                 AdcsFormat::IncludeMag
                     | AdcsFormat::IncludeGyro
                     | AdcsFormat::IncludeAccel
                     | AdcsFormat::IncludeCss
             ),
-            "a.fmt=39;a.upd=1000;a.dur=10;a.int=100"
+            "a.fmt=39;a.stream=1;rw.begin"
         );
     }
 

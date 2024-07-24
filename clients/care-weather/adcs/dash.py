@@ -97,7 +97,7 @@ world = el.World()
 sat = world.spawn(
     [
         el.Body(inertia=el.SpatialInertia(2825.2 / 1000.0, j)),
-        world.glb(os.path.abspath("./clients/care-weather/veery.glb")),
+        world.glb(os.path.abspath("../veery.glb")),
         # Credit to the OreSat program https://www.oresat.org for the model above
         Determination(),
         Control(),

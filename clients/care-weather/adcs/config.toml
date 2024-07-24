@@ -44,7 +44,8 @@ sigma_mag = 0.002
 t = [[ 1.9203215e-03, -6.2749350e-05,  8.8365946e-04],
      [ 8.0907519e-04,  1.8392554e-03, -9.3289115e-04],
      [-4.2906895e-04,  1.2010682e-03,  1.5906866e-03]]
-h = [26.5769, -213.0922, 517.9383]
+# h = [26.5769, -213.0922, 517.9383]
+h = [822.0664, 606.8390, -389.1912]
 
 [guidance]
 sigma_r0r = [0.0, 0.0, 0.0]
@@ -53,8 +54,8 @@ sigma_r0r = [0.0, 0.0, 0.0]
 control_axes_body = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 [control.feedback_config]
-p = 4.0
-k = 4.0
+p = 0.001
+k = 0.0001
 k_i = 0.0
 integral_limit = 500
 control_law = 'A'
@@ -67,17 +68,17 @@ inertia = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 [[control.rw_config.wheels]]
 spin_axis = [1.0, 0.0, 0.0]
 inertia = 5.3516e-06
-max_torque = 0.04
+max_torque = 0.1
 
 [[control.rw_config.wheels]]
 spin_axis = [0.0, 1.0, 0.0]
 inertia = 5.3516e-06
-max_torque = 0.04
+max_torque = 0.1
 
 [[control.rw_config.wheels]]
 spin_axis = [0.0, 0.0, 1.0]
 inertia = 5.3516e-06
-max_torque = 0.04
+max_torque = 0.1
 
 [control.voltage_config]
 voltage_max = 10.0
@@ -91,12 +92,12 @@ com_b = [0.0, 0.0, 0.0]
 spacecraft_mass = 1.0
 
 [mcu]
-path = "/dev/cu.usbmodem70A4923233351"
-adcs_format = 39 # all sensors - reaction wheel RPMs
-# adcs_format = 295 # enable all sensors
-adcs_update_interval = 100
-adcs_cycle_duration = 20
-adcs_cycle_interval = 10
+enable_gps = false
+arm_reaction_wheels = true
+path = "/dev/cu.usbmodem11201"
+#adcs_format = 35 # all sensors - reaction wheel RPMs, accel
+adcs_format = 291 # all sensors - accel
 gps_update_interval = 1000
 gps_cycle_duration = 20
 gps_cycle_interval = 10
+use_radio = true

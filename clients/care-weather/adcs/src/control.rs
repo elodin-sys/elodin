@@ -1,15 +1,17 @@
 use basilisk::{
     att_control::{MRPFeedback, MRPFeedbackConfig, RWArrayConfig, RWAvailability},
     channel::BskChannel,
-    effector_interfaces::{RWMotorTorque, RWMotorVoltage, VoltageConfig},
+    effector_interfaces::RWMotorTorque,
     sys::{
         ArrayMotorTorqueMsgPayload, AttGuidMsgPayload, CmdTorqueBodyMsgPayload, RWSpeedMsgPayload,
         VehicleConfigMsgPayload,
     },
 };
-use nox::{ArrayRepr, Vector};
+use nox::{ArrayRepr, Quaternion, Vector};
 use roci::{Componentize, Decomponentize, System};
 use serde::{Deserialize, Serialize};
+
+use crate::NavData;
 
 #[derive(Default, Componentize, Decomponentize)]
 pub struct World {
@@ -17,11 +19,18 @@ pub struct World {
     // inputs
     #[roci(entity_id = 0, component_id = "rw_speed")]
     rw_speed: Vector<f64, 3, ArrayRepr>,
+
+    // hacks inputs
+    #[roci(entity_id = 0, component_id = "target_att")]
+    target_att: [f64; 3],
+
     // outputs
     #[roci(entity_id = 0, component_id = "rw_torque")]
     rw_torque: Vector<f64, 3, ArrayRepr>,
-    #[roci(entity_id = 0, component_id = "rw_speed_setpoint")]
-    rw_speed_setpoint: Vector<f64, 3, ArrayRepr>,
+    #[roci(entity_id = 0, component_id = "rw_pwm_setpoint")]
+    rw_pwm_setpoint: Vector<f64, 3, ArrayRepr>,
+
+    nav_out: NavData,
 }
 
 #[derive(Default, Componentize, Decomponentize, Debug)]
@@ -39,9 +48,6 @@ pub struct AttErrInput {
 pub struct Control<const HZ: usize> {
     mrp_feedback: MRPFeedback,
     motor_torque: RWMotorTorque,
-    motor_voltage: RWMotorVoltage,
-
-    rw_inertia: Vector<f64, 3, ArrayRepr>,
 
     att_guid_in: BskChannel<AttGuidMsgPayload>,
     rw_speed_in: BskChannel<RWSpeedMsgPayload>,
@@ -50,6 +56,7 @@ pub struct Control<const HZ: usize> {
     cmd_torque: BskChannel<CmdTorqueBodyMsgPayload>,
     #[allow(dead_code)]
     motor_torque_out: BskChannel<ArrayMotorTorqueMsgPayload>,
+    rw_max_torque: Vector<f64, 3, ArrayRepr>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,7 +64,6 @@ pub struct ControlConfig {
     control_axes_body: [f64; 9],
     feedback_config: MRPFeedbackConfig,
     rw_config: RWArrayConfig,
-    voltage_config: VoltageConfig,
     vehicle_config: VehicleConfig,
 }
 
@@ -74,7 +80,6 @@ impl<const HZ: usize> Control<HZ> {
             control_axes_body,
             feedback_config,
             rw_config,
-            voltage_config,
             vehicle_config,
         } = control_config;
         let rw_speed_in = BskChannel::pair();
@@ -82,13 +87,16 @@ impl<const HZ: usize> Control<HZ> {
         let rw_avail = RWAvailability {
             availability: rw_config.wheels.iter().map(|_| true).collect(),
         };
-        let mut rw_inertia = [0.0; 3];
-        rw_inertia
-            .iter_mut()
-            .zip(rw_config.wheels.iter().map(|wheel| wheel.inertia))
-            .for_each(|(rw_inertia, inertia)| {
-                *rw_inertia = inertia;
+
+        let mut rw_max_torques = [0.0; 3];
+        rw_config
+            .wheels
+            .iter()
+            .zip(rw_max_torques.iter_mut())
+            .for_each(|(wheel, out)| {
+                *out = wheel.max_torque;
             });
+        let rw_max_torque = Vector::from_buf(rw_max_torques);
 
         rw_array_config.write(rw_config.into(), 0);
         let rw_availability_cmd = BskChannel::pair();
@@ -124,24 +132,14 @@ impl<const HZ: usize> Control<HZ> {
             rw_array_config.clone(),
             rw_availability_cmd.clone(),
         );
-        let motor_voltage_out = BskChannel::pair();
-        let motor_voltage = RWMotorVoltage::new(
-            voltage_config,
-            motor_voltage_out,
-            motor_torque_out.clone(),
-            rw_speed_in.clone(),
-            rw_availability_cmd,
-            rw_array_config.clone(),
-        );
         Self {
             mrp_feedback,
             motor_torque,
-            motor_voltage,
             att_guid_in,
             rw_speed_in,
             motor_torque_out,
             cmd_torque,
-            rw_inertia: Vector::from_buf(rw_inertia),
+            rw_max_torque,
         }
     }
 }
@@ -155,12 +153,25 @@ impl<const HZ: usize> System for Control<HZ> {
             att_err,
             rw_speed,
             rw_torque,
-            rw_speed_setpoint,
+            rw_pwm_setpoint,
+            nav_out,
+            target_att,
         } = world;
+        let mrp = nav_out.att_mrp_bn;
+        let mrp = nox::MRP::<f64, ArrayRepr>(nox::Tensor::from_buf(mrp));
+        let quat = nox::Quaternion::from(&mrp);
+
+        let target_q = Quaternion::from_euler(Vector::from_buf(*target_att));
+
+        //let target_q = Quaternion::<f64, ArrayRepr>::from_axis_angle(Vector::z_axis(), PI / 2.0);
+        let error = quat * target_q.inverse();
+        // dbg!(error);
+        let [_, _, z] = error.mrp().0.into_buf();
+        let [x, y, z_omega] = nav_out.omega_bn_b;
         self.att_guid_in.write(
             AttGuidMsgPayload {
-                sigma_BR: att_err.att_err_mrp,
-                omega_BR_B: att_err.omega_err_br_b,
+                sigma_BR: [0.0, 0.0, z],
+                omega_BR_B: [x, y, z_omega],
                 omega_RN_B: att_err.omega_rn_b,
                 domega_RN_B: att_err.domega_rn_b,
             },
@@ -177,10 +188,19 @@ impl<const HZ: usize> System for Control<HZ> {
         );
         self.mrp_feedback.update(0);
         self.motor_torque.update(0);
-        self.motor_voltage.update(0);
         let motor_torques = self.motor_torque_out.read_msg().motorTorque;
-        *rw_torque = Vector::from_buf((&motor_torques[..3]).try_into().unwrap());
-        let rw_accel = *rw_torque / self.rw_inertia;
-        *rw_speed_setpoint = *rw_speed_setpoint + rw_accel * (1.0 / HZ as f64);
+
+        // clamp rw_torque to max_torque
+        let mut torques = [0.0; 3];
+        torques
+            .iter_mut()
+            .zip(motor_torques)
+            .zip(self.rw_max_torque.into_buf())
+            .for_each(|((torque, rw_torque), max_torque)| {
+                *torque = rw_torque.clamp(-max_torque, max_torque);
+            });
+        *rw_torque = Vector::from_buf(torques);
+
+        *rw_pwm_setpoint = (*rw_torque / self.rw_max_torque) * 4096.0;
     }
 }
