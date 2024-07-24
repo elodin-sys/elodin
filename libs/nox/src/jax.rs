@@ -2,14 +2,14 @@
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{PyDict, PyTuple},
+    types::{IntoPyDict, PyDict, PyTuple},
     PyObject, PyResult, Python,
 };
 use smallvec::SmallVec;
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 use xla::{ArrayElement, ElementType, Literal};
 
-use crate::{BinaryOp, CompFn, Error, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode};
+use crate::{BinaryOp, CompFn, Error, IntoOp, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprNode};
 
 impl Noxpr {
     /// Converts a `Noxpr` expression to a `Jax` operation using a tracer.
@@ -69,8 +69,16 @@ impl JaxTracer {
                 xla::ElementType::F16 => todo!(),
                 xla::ElementType::Bf16 => todo!(),
             },
-            NoxprNode::Param(_) => unimplemented!(),
-            NoxprNode::Tuple(_) => todo!(),
+            NoxprNode::Param(_) => {
+                unimplemented!("param found")
+            }
+            NoxprNode::Tuple(args) => {
+                let elems = args
+                    .iter()
+                    .map(|x| self.visit(x))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Python::with_gil(|py| PyTuple::new_bound(py, elems).into_py(py))
+            }
             NoxprNode::Iota(i) => Python::with_gil(|py| {
                 let size = i.shape.shape[i.dim];
                 let dtype = dtype(&i.shape.element_type)?;
@@ -220,7 +228,14 @@ impl JaxTracer {
                     let elem = elems.get(g.index).ok_or(Error::OutOfBoundsAccess)?;
                     self.visit(elem)?
                 }
-                _ => return Err(Error::GetTupleElemWrongType),
+                _ => {
+                    let jax = self.visit(&g.expr)?;
+                    Python::with_gil(|py| {
+                        jax.call_method1(py, "__getitem__", (g.index,))
+                            .map(|x| x.into_py(py))
+                    })
+                    .unwrap()
+                }
             },
             NoxprNode::Scan(s) => {
                 let initial_state = self.visit(&s.initial_state)?;
@@ -256,9 +271,37 @@ impl JaxTracer {
                         .map_err(Error::PyO3)
                 })?
             }
+            NoxprNode::Call(c) => {
+                let args = c
+                    .args
+                    .iter()
+                    .map(|x| self.visit(x))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let call_fn = self.visit_comp(&c.comp);
+                Python::with_gil(|py| {
+                    let call_fn = call_fn.into_py(py);
+                    let tuple = PyTuple::new_bound(py, args.into_iter());
+                    call_fn.call1(py, tuple)
+                })?
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
+    }
+
+    fn visit_comp(&mut self, comp: &NoxprComp) -> PyObject {
+        Python::with_gil(|py| {
+            if let NoxprNode::Jax(obj) = &*comp.func.inner.node {
+                if obj.getattr(py, "__call__").is_ok() {
+                    return obj.clone();
+                }
+            }
+            JaxNoxprFn {
+                tracer: JaxTracer::default(),
+                inner: comp.func.clone(),
+            }
+            .into_py(py)
+        })
     }
 
     /// Helper function to retrieve operands for a binary operation.
@@ -285,16 +328,17 @@ impl JaxTracer {
     fn visit_fn(&mut self, op: &NoxprFn) -> JaxNoxprFn {
         JaxNoxprFn {
             tracer: self.clone(),
-            inner: op.clone(),
+            inner: Arc::new(op.clone()),
         }
     }
 }
 
 /// A Python callable wrapper for `NoxprFn` to be used in `Jax`.
-#[pyo3::prelude::pyclass]
-struct JaxNoxprFn {
-    tracer: JaxTracer,
-    inner: NoxprFn,
+#[pyo3::prelude::pyclass(weakref)]
+#[derive(Clone)]
+pub struct JaxNoxprFn {
+    pub tracer: JaxTracer,
+    pub inner: Arc<NoxprFn>,
 }
 
 #[pyo3::prelude::pymethods]
@@ -304,7 +348,7 @@ impl JaxNoxprFn {
     #[pyo3(signature = (*args, **kwargs))]
     fn __call__(
         &mut self,
-        _py: Python<'_>,
+        py: Python<'_>,
         args: Bound<PyTuple>,
         kwargs: Option<Bound<PyDict>>,
     ) -> PyResult<PyObject> {
@@ -312,9 +356,27 @@ impl JaxNoxprFn {
             let a = args.get_item(i)?;
             self.tracer.cache.insert(arg.id(), a.into());
         }
-        self.tracer
+
+        let out = self
+            .tracer
             .visit(&self.inner.inner)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        Ok(out)
+    }
+
+    #[allow(unused_variables)]
+    #[pyo3(signature = (*args, **kwargs))]
+    fn lower<'py>(
+        &mut self,
+        py: Python<'py>,
+        args: Bound<PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let jax = py.import_bound("jax").unwrap();
+        let jit_args = [("keep_unused", true)].into_py_dict_bound(py);
+        let jit = jax.call_method("jit", (self.clone(),), Some(&jit_args))?;
+
+        jit.call_method("lower", args, kwargs)
     }
 }
 

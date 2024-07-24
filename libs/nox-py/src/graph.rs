@@ -2,9 +2,8 @@ use super::*;
 
 use conduit::{ComponentExt, ComponentId};
 use nox_ecs::{
-    graph::{exprs_from_edges_queries, GraphQuery, TotalEdge},
+    graph::{exprs_from_edges_queries, GraphQuery},
     nox::IntoOp,
-    SystemParam,
 };
 use pyo3::types::{PyDict, PyList};
 
@@ -17,11 +16,10 @@ pub struct GraphQueryInner {
 #[pymethods]
 impl GraphQueryInner {
     #[staticmethod]
-    fn from_builder_total_edge(builder: &mut PipelineBuilder) -> Result<GraphQueryInner, Error> {
-        let query = GraphQuery::<TotalEdge>::from_builder(&builder.builder);
+    fn from_builder_total_edge(builder: &mut SystemBuilder) -> Result<GraphQueryInner, Error> {
         Ok(GraphQueryInner {
             query: GraphQuery {
-                edges: query.edges,
+                edges: builder.total_edges.clone(),
                 phantom_data: PhantomData,
             },
         })
@@ -29,26 +27,18 @@ impl GraphQueryInner {
 
     #[staticmethod]
     fn from_builder(
-        builder: &mut PipelineBuilder,
+        builder: &mut SystemBuilder,
         edge_name: String,
         reverse: bool,
     ) -> Result<GraphQueryInner, Error> {
-        use nox_ecs::graph::EdgeComponent;
-        let col = builder
-            .builder
-            .world
-            .column_by_id(ComponentId::new(&edge_name))
-            .unwrap();
-        let edges = col
+        let edge_id = ComponentId::new(&edge_name);
+        let edges = builder
+            .edge_map
+            .get(&edge_id)
+            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+        let edges = edges
             .iter()
-            .map(move |(_, value)| {
-                let edge = nox_ecs::graph::Edge::from_value(value).unwrap();
-                if reverse {
-                    edge.reverse()
-                } else {
-                    edge
-                }
-            })
+            .map(|x| if reverse { x.reverse() } else { x.clone() })
             .collect();
         Ok(GraphQueryInner {
             query: GraphQuery {

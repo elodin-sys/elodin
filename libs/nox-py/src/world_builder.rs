@@ -1,8 +1,7 @@
 use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
-use nox_ecs::{conduit, nox, spawn_tcp_server, TimeStep, World};
-use pyo3::{exceptions::PyValueError, types::PyBytes};
+use nox_ecs::{conduit, nox, spawn_tcp_server, System as _, TimeStep, World};
 use std::{path::PathBuf, time::Duration};
 
 #[pyclass(subclass)]
@@ -160,7 +159,7 @@ impl WorldBuilder {
     pub fn run(
         &mut self,
         py: Python<'_>,
-        sys: PyObject,
+        sys: System,
         sim_time_step: Option<f64>,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
@@ -273,7 +272,7 @@ impl WorldBuilder {
     pub fn build(
         &mut self,
         py: Python<'_>,
-        system: PyObject,
+        system: System,
         sim_time_step: Option<f64>,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
@@ -301,7 +300,7 @@ impl WorldBuilder {
     fn build_uncompiled(
         &mut self,
         py: Python<'_>,
-        sys: PyObject,
+        sys: System,
         sim_time_step: Option<f64>,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
@@ -332,44 +331,11 @@ impl WorldBuilder {
             self.world.max_tick = max_ticks;
         }
 
-        let start = std::time::Instant::now();
         let world = std::mem::take(&mut self.world);
-        let builder = nox_ecs::PipelineBuilder::from_world(world);
-        let builder = PipelineBuilder { builder };
-        let py_code = "import jax
-def build_expr(builder, sys):
-    sys.init(builder)
-    def call(args, builder):
-        builder.inject_args(args)
-        sys.call(builder)
-        return builder.ret_vars()
-    var_array = builder.var_arrays()
-    xla = jax.jit(lambda a: call(a, builder), keep_unused=True).lower(var_array).compiler_ir('hlo')
-    return xla";
+        let xla_exec = sys.compile(&world)?;
+        let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
-        let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
-            .getattr("build_expr")?
-            .into();
-        let builder = Bound::new(py, builder)?;
-        let comp = fun
-            .call1(py, (builder.borrow_mut(), sys))?
-            .extract::<PyObject>(py)?;
-        let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
-        let comp = comp
-            .downcast_bound::<PyBytes>(py)
-            .map_err(|_| Error::HloModuleNotBytes)?;
-        let comp_bytes = comp.as_bytes();
-        let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
-            .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        tracing::debug!(duration = ?start.elapsed(), "generated HLO");
-        let builder = std::mem::take(&mut builder.borrow_mut().builder);
-        let ret_ids = builder.vars.keys().copied().collect::<Vec<_>>();
-        let metadata = nox_ecs::ExecMetadata {
-            arg_ids: builder.param_ids,
-            ret_ids,
-        };
-        let tick_exec = nox_ecs::Exec::new(metadata, hlo_module);
-        let exec = nox_ecs::WorldExec::new(builder.world, tick_exec, None);
+        let exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         Ok(exec)
     }
 }

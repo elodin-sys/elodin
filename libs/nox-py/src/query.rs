@@ -3,8 +3,8 @@ use crate::*;
 use std::marker::PhantomData;
 
 use conduit::ComponentId;
-use nox_ecs::join_query;
 use nox_ecs::{join_many, nox::Noxpr};
+use nox_ecs::{join_query, update_var, ComponentArray};
 
 #[pyclass]
 #[derive(Clone)]
@@ -16,45 +16,59 @@ pub struct QueryInner {
 #[pymethods]
 impl QueryInner {
     #[staticmethod]
-    pub fn from_builder(
-        builder: &mut PipelineBuilder,
-        component_names: Vec<String>,
+    pub fn from_arrays(
+        arrays: Vec<PyObject>,
+        //component_names: Vec<String>,
+        metadata: QueryMetadata,
     ) -> Result<QueryInner, Error> {
-        let component_ids = component_names
-            .iter()
-            .map(|name| ComponentId::new(name))
-            .collect::<Vec<_>>();
-        let metadata = component_ids
+        Ok(QueryInner {
+            query: nox_ecs::Query {
+                exprs: arrays.into_iter().map(Noxpr::jax).collect(),
+                entity_map: metadata.entity_map,
+                len: metadata.len,
+                phantom_data: PhantomData,
+            },
+            metadata: metadata.metadata,
+        })
+    }
+
+    #[staticmethod]
+    pub fn from_builder(
+        builder: SystemBuilder,
+        component_ids: Vec<String>,
+        args: Vec<PyObject>,
+    ) -> Result<QueryInner, Error> {
+        let (query, metadata) = component_ids
             .iter()
             .map(|id| {
-                builder.builder.world.column_by_id(*id).map(|c| Metadata {
-                    inner: c.metadata.clone(),
-                })
+                let id = ComponentId::new(id);
+                let (meta, i) = builder
+                    .get_var(id)
+                    .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                let buffer = args.get(i).ok_or(nox_ecs::Error::ComponentNotFound)?;
+                Ok::<_, Error>((
+                    ComponentArray {
+                        buffer: Noxpr::jax(buffer.clone()),
+                        len: meta.len,
+                        entity_map: meta.entity_map,
+                        component_id: meta.metadata.component_id(),
+                        phantom_data: PhantomData,
+                    },
+                    meta.metadata,
+                ))
             })
-            .collect::<Option<Vec<_>>>()
-            .ok_or(nox_ecs::Error::ComponentNotFound)?;
-        let query = component_ids
-            .iter()
-            .copied()
-            .map(|id| {
-                builder
-                    .builder
-                    .vars
-                    .get(&id)
-                    .ok_or(nox_ecs::Error::ComponentNotFound)
-            })
-            .try_fold(None, |mut query, a| {
-                let a = a?;
+            .try_fold((None, vec![]), |(mut query, mut metadata), res| {
+                let (a, meta) = res?;
+                metadata.push(meta);
                 if query.is_some() {
-                    query = Some(join_many(query.take().unwrap(), &*a.borrow()));
+                    query = Some(join_many(query.take().unwrap(), &a));
                 } else {
-                    let a = a.borrow().clone();
                     let q: nox_ecs::Query<()> = a.into();
                     query = Some(q);
                 }
-                Ok::<_, Error>(query)
-            })?
-            .expect("query must not be empty");
+                Ok::<_, Error>((query, metadata))
+            })?;
+        let query = query.ok_or(nox_ecs::Error::ComponentNotFound)?;
         Ok(Self { query, metadata })
     }
 
@@ -71,19 +85,44 @@ impl QueryInner {
         }
     }
 
+    pub fn output(&self, builder: SystemBuilder, args: Vec<PyObject>) -> Result<PyObject, Error> {
+        let mut outputs = vec![];
+        for (expr, id) in self
+            .query
+            .exprs
+            .iter()
+            .zip(self.metadata.iter().map(|m| m.inner.component_id()))
+        {
+            let Some((meta, index)) = builder.get_var(id) else {
+                return Err(nox_ecs::Error::ComponentNotFound.into());
+            };
+            let buffer = args.get(index).ok_or(nox_ecs::Error::ComponentNotFound)?;
+
+            if meta.entity_map == self.query.entity_map {
+                outputs.push(expr.clone());
+            } else {
+                let out = update_var(
+                    &meta.entity_map,
+                    &self.query.entity_map,
+                    &Noxpr::jax(buffer.clone()),
+                    expr,
+                );
+                outputs.push(out);
+            }
+        }
+        if outputs.len() == 1 {
+            outputs.pop().unwrap().to_jax().map_err(Error::from)
+        } else {
+            Noxpr::tuple(outputs).to_jax().map_err(Error::from)
+        }
+    }
+
     pub fn arrays(&self) -> Result<Vec<PyObject>, Error> {
         self.query
             .exprs
             .iter()
             .map(|e| e.to_jax().map_err(Error::from))
             .collect()
-    }
-
-    pub fn insert_into_builder(&self, builder: &mut PipelineBuilder) {
-        self.query.insert_into_builder_erased(
-            &mut builder.builder,
-            self.metadata.iter().map(|m| m.inner.component_id()),
-        );
     }
 
     pub fn join_query(&self, other: &QueryInner) -> QueryInner {
@@ -95,5 +134,20 @@ impl QueryInner {
             .chain(other.metadata.iter().cloned())
             .collect();
         QueryInner { query, metadata }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct QueryMetadata {
+    pub entity_map: BTreeMap<conduit::EntityId, usize>,
+    pub len: usize,
+    pub metadata: Vec<Metadata>,
+}
+
+#[pymethods]
+impl QueryMetadata {
+    pub fn merge(&mut self, other: QueryMetadata) {
+        self.metadata.extend(other.metadata);
     }
 }
