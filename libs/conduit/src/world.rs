@@ -310,6 +310,17 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    #[cfg(feature = "xla")]
+    pub fn buffer_ty(&self) -> ::nox::ArrayTy {
+        let mut shape = self.metadata.component_type.shape.clone();
+        shape.insert(0, self.len() as i64);
+        let element_type = self.metadata.component_type.primitive_ty.element_type();
+        ::nox::ArrayTy {
+            element_type,
+            shape,
+        }
+    }
 }
 
 impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {

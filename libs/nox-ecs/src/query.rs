@@ -1,4 +1,4 @@
-use crate::{Component, ComponentArray, ComponentExt, Error, PipelineBuilder, SystemParam};
+use crate::{system::SystemBuilder, Component, ComponentArray, ComponentExt, Error, SystemParam};
 use conduit::{ComponentId, ComponentType, EntityId};
 use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
 use smallvec::{smallvec, SmallVec};
@@ -9,6 +9,17 @@ pub struct Query<Param> {
     pub entity_map: BTreeMap<EntityId, usize>,
     pub len: usize,
     pub phantom_data: PhantomData<Param>,
+}
+
+impl<Param> std::fmt::Debug for Query<Param> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Query")
+            .field("exprs", &self.exprs)
+            .field("entity_map", &self.entity_map)
+            .field("len", &self.len)
+            .field("phantom_data", &self.phantom_data)
+            .finish()
+    }
 }
 
 impl<Param> Clone for Query<Param> {
@@ -38,10 +49,12 @@ pub trait ComponentGroup {
     type Params;
     type Append<O>;
 
-    fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), Error>;
-    fn component_arrays(
-        builder: &'_ crate::PipelineBuilder,
-    ) -> impl Iterator<Item = ComponentArray<()>> + '_;
+    fn init(builder: &mut SystemBuilder) -> Result<(), Error>;
+
+    fn component_arrays_new<'a>(
+        builder: &'a SystemBuilder,
+    ) -> impl Iterator<Item = ComponentArray<()>> + 'a;
+
     fn component_types() -> impl Iterator<Item = ComponentType>;
     fn component_ids() -> impl Iterator<Item = ComponentId>;
     fn component_count() -> usize;
@@ -57,23 +70,24 @@ macro_rules! impl_group {
             type Params = Self;
             type Append<O> = ($($param,)* O);
 
-            fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), crate::Error> {
+            fn init(builder: &mut crate::system::SystemBuilder) -> Result<(), Error> {
                 $(
-                    <$param>::init_params(builder)?;
+                    <$param>::init(builder)?;
                 )*
                 Ok(())
+
             }
 
-
-            fn component_arrays<'a>(
-                builder: &'a crate::PipelineBuilder,
+            fn component_arrays_new<'a>(
+                builder: &'a crate::system::SystemBuilder,
             ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
                 let iter = std::iter::empty();
                 $(
-                    let iter = iter.chain($param::component_arrays(builder));
+                    let iter = iter.chain($param::component_arrays_new(builder));
                 )*
                 iter
             }
+
 
             fn component_types() -> impl Iterator<Item = ComponentType> {
                 let iter = std::iter::empty();
@@ -108,20 +122,21 @@ macro_rules! impl_group {
 impl<T> ComponentGroup for T
 where
     T: Component,
-    ComponentArray<T>: SystemParam<PipelineBuilder, Item = ComponentArray<T>>,
+    ComponentArray<T>: crate::system::SystemParam<Item = ComponentArray<T>>,
 {
     type Params = T;
 
     type Append<O> = (T, O);
 
-    fn init_params(builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
-        ComponentArray::<T>::init(builder)
+    fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
+        <ComponentArray<T> as crate::system::SystemParam>::init(builder)
     }
 
-    fn component_arrays(
-        builder: &'_ crate::PipelineBuilder,
-    ) -> impl Iterator<Item = ComponentArray<()>> + '_ {
-        std::iter::once(ComponentArray::<T>::from_builder(builder).cast())
+    fn component_arrays_new<'a>(
+        builder: &'a SystemBuilder,
+    ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
+        use crate::system::SystemParam;
+        std::iter::once(ComponentArray::<T>::param(builder).unwrap().cast())
     }
 
     fn map_axes() -> &'static [usize] {
@@ -154,15 +169,15 @@ impl_group!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_group!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_group!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
-impl<G: ComponentGroup> SystemParam<PipelineBuilder> for Query<G> {
+impl<G: ComponentGroup> crate::system::SystemParam for Query<G> {
     type Item = Self;
 
-    fn init(builder: &mut crate::PipelineBuilder) -> Result<(), Error> {
-        G::init_params(builder)
+    fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
+        G::init(builder)
     }
 
-    fn from_builder(builder: &crate::PipelineBuilder) -> Self::Item {
-        G::component_arrays(builder)
+    fn param(builder: &SystemBuilder) -> Result<Self::Item, Error> {
+        Ok(G::component_arrays_new(builder)
             .fold(None, |mut query, a| {
                 if query.is_some() {
                     query = Some(join_many(query.take().unwrap(), &a));
@@ -173,38 +188,75 @@ impl<G: ComponentGroup> SystemParam<PipelineBuilder> for Query<G> {
                 query
             })
             .expect("query must be non empty")
-            .transmute()
+            .transmute())
     }
 
-    fn insert_into_builder(self, builder: &mut crate::PipelineBuilder) {
-        self.insert_into_builder_erased(builder, G::component_ids());
+    fn component_ids() -> impl Iterator<Item = ComponentId> {
+        G::component_ids()
     }
-}
 
-impl<C> Query<C> {
-    #[doc(hidden)]
-    pub fn insert_into_builder_erased(
-        &self,
-        builder: &mut crate::PipelineBuilder,
-        component_ids: impl Iterator<Item = ComponentId>,
-    ) {
-        for (expr, id) in self.exprs.iter().zip(component_ids) {
+    fn output(&self, builder: &mut SystemBuilder) -> Result<Noxpr, Error> {
+        let mut outputs = vec![];
+        for (expr, id) in self.exprs.iter().zip(G::component_ids()) {
             let array: ComponentArray<()> = ComponentArray {
                 buffer: expr.clone(),
                 len: self.len,
                 entity_map: self.entity_map.clone(),
                 phantom_data: PhantomData,
+                component_id: id,
             };
 
             if let Some(var) = builder.vars.get_mut(&id) {
-                let mut var = var.borrow_mut();
                 if var.entity_map != self.entity_map {
-                    var.buffer =
-                        crate::update_var(&var.entity_map, &self.entity_map, &var.buffer, expr);
-                    return;
+                    outputs.push(crate::update_var(
+                        &var.entity_map,
+                        &self.entity_map,
+                        &var.buffer,
+                        expr,
+                    ));
+                    continue;
                 }
             }
-            builder.vars.insert(id, array.into());
+            outputs.push(array.buffer);
+        }
+        if outputs.len() == 1 {
+            Ok(outputs.pop().unwrap())
+        } else {
+            Ok(Noxpr::tuple(outputs))
+        }
+    }
+}
+
+impl<G: ComponentGroup> Query<G> {
+    pub fn get_component(&self, id: ComponentId) -> Option<&Noxpr> {
+        let (i, _) = G::component_ids().enumerate().find(|(_, x)| id == *x)?;
+        self.exprs.get(i)
+    }
+
+    pub fn insert_into_builder(&self, builder: &mut SystemBuilder) {
+        let output = self.output(builder).unwrap();
+        if G::component_ids().count() == 1 {
+            let id = G::component_ids().next().unwrap();
+            let array: ComponentArray<()> = ComponentArray {
+                buffer: output,
+                len: self.len,
+                entity_map: self.entity_map.clone(),
+                phantom_data: PhantomData,
+                component_id: id,
+            };
+            builder.vars.insert(id, array);
+        } else {
+            for (i, id) in G::component_ids().enumerate() {
+                let expr = output.get_tuple_element(i);
+                let array: ComponentArray<()> = ComponentArray {
+                    buffer: expr.clone(),
+                    len: self.len,
+                    entity_map: self.entity_map.clone(),
+                    phantom_data: PhantomData,
+                    component_id: id,
+                };
+                builder.vars.insert(id, array);
+            }
         }
     }
 }

@@ -8,7 +8,7 @@ use conduit::{ComponentId, PolarsWorld};
 use nox_ecs::{
     conduit,
     nox::{self, Noxpr},
-    ErasedSystem, System,
+    ErasedSystem,
 };
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyValueError;
@@ -25,7 +25,6 @@ mod error;
 mod exec;
 mod graph;
 mod linalg;
-mod pipeline_builder;
 mod query;
 mod sim_runner;
 mod spatial;
@@ -44,7 +43,6 @@ pub use error::*;
 pub use exec::*;
 pub use graph::*;
 pub use linalg::*;
-pub use pipeline_builder::*;
 pub use query::*;
 pub use spatial::*;
 pub use system::*;
@@ -111,21 +109,20 @@ impl From<Integrator> for nox_ecs::Integrator {
 
 #[pyfunction]
 #[pyo3(signature = (time_step, sys = None, integrator = Integrator::Rk4))]
-pub fn six_dof(time_step: f64, sys: Option<PyObject>, integrator: Integrator) -> RustSystem {
+pub fn six_dof(time_step: f64, sys: Option<System>, integrator: Integrator) -> System {
     let integrator = integrator.into();
-    let sys: Arc<dyn System<nox_ecs::PipelineBuilder, Arg = (), Ret = ()> + Send + Sync> =
-        if let Some(sys) = sys {
-            nox_ecs::six_dof::six_dof(|| PySystem { sys }, time_step, integrator)
-        } else {
-            nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
-        };
-    RustSystem { inner: sys }
+    let sys: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
+        nox_ecs::six_dof::six_dof(|| sys, time_step, integrator)
+    } else {
+        nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
+    };
+    System { inner: sys }
 }
 
 #[pyfunction]
-pub fn advance_time(time_step: f64) -> RustSystem {
+pub fn advance_time(time_step: f64) -> System {
     let sys = nox_ecs::six_dof::advance_time(time_step);
-    RustSystem {
+    System {
         inner: Arc::new(ErasedSystem::new(sys)),
     }
 }
@@ -155,7 +152,6 @@ pub fn read_batch_results(path: String) -> Result<(Vec<PyDataFrame>, Vec<String>
 #[pymodule]
 pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
-    m.add_class::<PipelineBuilder>()?;
     m.add_class::<WorldBuilder>()?;
     m.add_class::<Exec>()?;
     m.add_class::<EntityId>()?;
@@ -165,7 +161,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SpatialMotion>()?;
     m.add_class::<SpatialInertia>()?;
     m.add_class::<Quaternion>()?;
-    m.add_class::<RustSystem>()?;
     m.add_class::<Mesh>()?;
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
@@ -184,6 +179,10 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GraphEntity>()?;
     m.add_class::<Glb>()?;
     m.add_class::<Line3d>()?;
+    m.add_class::<PyFnSystem>()?;
+    m.add_class::<QueryMetadata>()?;
+    m.add_class::<SystemBuilder>()?;
+    m.add_class::<System>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;

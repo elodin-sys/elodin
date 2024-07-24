@@ -2,14 +2,13 @@ extern crate self as nox_ecs;
 
 use conduit::well_known::{Material, Mesh};
 use conduit::{
-    Archetype, Builder, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
+    Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
 };
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr, NoxprFn};
+use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr};
 use profile::Profiler;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::iter::once;
@@ -27,18 +26,18 @@ mod history;
 mod integrator;
 mod profile;
 mod query;
+mod system;
 
 pub mod graph;
 pub mod six_dof;
 
 pub use component::*;
-pub use conduit::{
-    Buffers, ColumnRef, Entity, IntoSystem, Pipe, PolarsWorld, System, SystemParam, TimeStep, World,
-};
+pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
 pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use integrator::*;
 pub use query::*;
+pub use system::*;
 
 pub use nox_ecs_macros::{Archetype, Component};
 
@@ -47,6 +46,7 @@ pub struct ComponentArray<T> {
     pub len: usize,
     pub entity_map: BTreeMap<EntityId, usize>,
     pub phantom_data: PhantomData<T>,
+    pub component_id: ComponentId,
 }
 
 impl<T> Clone for ComponentArray<T> {
@@ -56,6 +56,7 @@ impl<T> Clone for ComponentArray<T> {
             len: self.len,
             entity_map: self.entity_map.clone(),
             phantom_data: PhantomData,
+            component_id: self.component_id,
         }
     }
 }
@@ -69,20 +70,12 @@ impl<T> ComponentArray<T> {
             phantom_data: PhantomData,
             entity_map: self.entity_map,
             len: self.len,
+            component_id: self.component_id,
         }
     }
 
     pub fn buffer(&self) -> &Noxpr {
         &self.buffer
-    }
-
-    fn erase_ty(self) -> ComponentArray<()> {
-        ComponentArray {
-            buffer: self.buffer,
-            phantom_data: PhantomData,
-            len: self.len,
-            entity_map: self.entity_map,
-        }
     }
 }
 
@@ -105,56 +98,40 @@ impl<T: conduit::Component + FromOp> ComponentArray<T> {
     }
 }
 
-impl<T: conduit::Component + 'static> SystemParam<PipelineBuilder> for ComponentArray<T> {
-    type Item = ComponentArray<T>;
+impl<T: conduit::Component + 'static> crate::system::SystemParam for ComponentArray<T> {
+    type Item = Self;
 
-    fn init(builder: &mut PipelineBuilder) -> Result<(), Error> {
+    fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
         let id = T::COMPONENT_ID;
-        if builder.vars.contains_key(&id) {
-            return Ok(());
-        }
-        let column = builder
-            .world
-            .column::<T>()
-            .ok_or(Error::ComponentNotFound)?;
-        let len = column.len();
-        let mut ty: ArrayTy = T::component_type().into();
-        ty.shape.insert(0, len as i64);
-        let op = Noxpr::parameter(
-            builder.param_ops.len() as i64,
-            nox::NoxprTy::ArrayTy(ty),
-            format!(
-                "{}::{}",
-                std::any::type_name::<T>(),
-                builder.param_ops.len()
-            ),
-        );
-        builder.param_ops.push(op.clone());
-        builder.param_ids.push(id);
-        let array = ComponentArray {
-            buffer: op,
-            phantom_data: PhantomData,
-            len,
-            entity_map: column.entity_map(),
-        };
-        builder.vars.insert(id, array.into());
+        builder.init_with_column(id)?;
         Ok(())
     }
 
-    fn from_builder(builder: &PipelineBuilder) -> Self::Item {
-        builder.vars[&T::COMPONENT_ID].borrow().clone().cast()
+    fn param(builder: &SystemBuilder) -> Result<Self::Item, Error> {
+        let id = T::COMPONENT_ID;
+        if let Some(var) = builder.vars.get(&id) {
+            Ok(var.clone().cast())
+        } else {
+            Err(Error::ComponentNotFound)
+        }
     }
 
-    fn insert_into_builder(self, builder: &mut PipelineBuilder) {
+    fn component_ids() -> impl Iterator<Item = ComponentId> {
+        std::iter::once(T::COMPONENT_ID)
+    }
+
+    fn output(&self, builder: &mut SystemBuilder) -> Result<Noxpr, Error> {
         if let Some(var) = builder.vars.get_mut(&T::COMPONENT_ID) {
-            let mut var = var.borrow_mut();
             if var.entity_map != self.entity_map {
-                var.buffer =
-                    update_var(&var.entity_map, &self.entity_map, &var.buffer, &self.buffer);
-                return;
+                return Ok(update_var(
+                    &var.entity_map,
+                    &self.entity_map,
+                    &var.buffer,
+                    &self.buffer,
+                ));
             }
         }
-        builder.vars.insert(T::COMPONENT_ID, self.erase_ty().into());
+        Ok(self.buffer.clone())
     }
 }
 
@@ -193,29 +170,6 @@ pub fn update_var(
     )
 }
 
-#[derive(Default)]
-pub struct PipelineBuilder {
-    pub vars: BTreeMap<ComponentId, RefCell<ComponentArray<()>>>,
-    pub param_ids: Vec<ComponentId>,
-    pub param_ops: Vec<Noxpr>,
-    pub world: World,
-}
-
-impl PipelineBuilder {
-    pub fn from_world(world: World) -> Self {
-        PipelineBuilder {
-            vars: BTreeMap::default(),
-            param_ids: vec![],
-            param_ops: vec![],
-            world,
-        }
-    }
-}
-
-impl Builder for PipelineBuilder {
-    type Error = Error;
-}
-
 pub trait WorldExt {
     fn builder(self) -> WorldBuilder;
 }
@@ -244,15 +198,15 @@ impl Default for WorldBuilder {
 
 impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
 where
-    Sys: System<PipelineBuilder>,
-    StartupSys: System<PipelineBuilder>,
+    Sys: crate::system::System,
+    StartupSys: crate::system::System,
 {
     pub fn world(mut self, world: World) -> Self {
         self.world = world;
         self
     }
 
-    pub fn tick_pipeline<M, A, R, N: IntoSystem<PipelineBuilder, M, A, R>>(
+    pub fn tick_pipeline<M, A, R, N: system::IntoSystem<M, A, R>>(
         self,
         pipe: N,
     ) -> WorldBuilder<N::System, StartupSys> {
@@ -263,7 +217,7 @@ where
         }
     }
 
-    pub fn startup_pipeline<M, A, R, N: IntoSystem<PipelineBuilder, M, A, R>>(
+    pub fn startup_pipeline<M, A, R, N: system::IntoSystem<M, A, R>>(
         self,
         startup: N,
     ) -> WorldBuilder<Sys, N::System> {
@@ -327,10 +281,8 @@ pub trait IntoSystemExt<Marker, Arg, Ret> {
         Self::System: Sized;
 }
 
-impl<S: IntoSystem<PipelineBuilder, Marker, Arg, Ret>, Marker, Arg, Ret>
-    IntoSystemExt<Marker, Arg, Ret> for S
-{
-    type System = <Self as IntoSystem<PipelineBuilder, Marker, Arg, Ret>>::System;
+impl<S: IntoSystem<Marker, Arg, Ret>, Marker, Arg, Ret> IntoSystemExt<Marker, Arg, Ret> for S {
+    type System = <Self as IntoSystem<Marker, Arg, Ret>>::System;
 
     fn world(self) -> WorldBuilder<Self::System>
     where
@@ -345,40 +297,25 @@ pub trait SystemExt {
     fn build(self, world: &mut World) -> Result<Exec, Error>;
 }
 
-impl<S: System<PipelineBuilder>> SystemExt for S {
+impl<S: crate::system::System> SystemExt for S {
     fn build(self, world: &mut World) -> Result<Exec, Error> {
-        let owned_world = std::mem::take(world);
-        let mut builder = PipelineBuilder {
+        let mut system_builder = SystemBuilder {
             vars: BTreeMap::default(),
-            param_ids: vec![],
-            param_ops: vec![],
-            world: owned_world,
+            inputs: vec![],
+            world,
         };
-        self.init_builder(&mut builder)?;
-        self.add_to_builder(&mut builder)?;
-        let ret = builder
-            .vars
-            .into_iter()
-            .map(|(id, v)| (id, v.into_inner()))
-            .collect::<Vec<_>>();
-        let ret_ops = ret
-            .iter()
-            .map(|(_, v)| v.buffer.clone())
-            .collect::<Vec<_>>();
-        let ret_ids = ret.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-        let ret = Noxpr::tuple(ret_ops);
-        let func = NoxprFn {
-            args: builder.param_ops,
-            inner: ret,
-        };
-        let op = func.build("pipeline")?;
-        let comp = op.build()?;
-        *world = builder.world;
+        self.init(&mut system_builder)?;
+        let CompiledSystem {
+            computation,
+            inputs,
+            outputs,
+        } = self.compile(world)?;
         let metadata = ExecMetadata {
-            arg_ids: builder.param_ids,
-            ret_ids,
+            arg_ids: inputs,
+            ret_ids: outputs,
         };
-        Ok(Exec::new(metadata, comp.to_hlo_module()))
+        let computation = computation.func.build("exec")?.build()?;
+        Ok(Exec::new(metadata, computation.to_hlo_module()))
     }
 }
 
@@ -624,20 +561,9 @@ impl<C: Component> ComponentArray<C> {
             len: self.len,
             phantom_data: PhantomData,
             entity_map: self.entity_map.clone(),
+            component_id: O::COMPONENT_ID,
         })
     }
-}
-
-impl SystemParam<PipelineBuilder> for () {
-    type Item = ();
-
-    fn init(_builder: &mut PipelineBuilder) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn from_builder(_builder: &PipelineBuilder) -> Self::Item {}
-
-    fn insert_into_builder(self, _builder: &mut PipelineBuilder) {}
 }
 
 pub struct ErasedSystem<Sys, Arg, Ret> {
@@ -654,19 +580,19 @@ impl<Sys, Arg, Ret> ErasedSystem<Sys, Arg, Ret> {
     }
 }
 
-impl<Sys, Arg, Ret> System<PipelineBuilder> for ErasedSystem<Sys, Arg, Ret>
+impl<Sys, Arg, Ret> System for ErasedSystem<Sys, Arg, Ret>
 where
-    Sys: System<PipelineBuilder, Arg = Arg, Ret = Ret>,
+    Sys: System<Arg = Arg, Ret = Ret>,
 {
     type Arg = ();
     type Ret = ();
 
-    fn add_to_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.system.add_to_builder(builder)
+    fn init(&self, builder: &mut SystemBuilder) -> Result<(), Error> {
+        self.system.init(builder)
     }
 
-    fn init_builder(&self, builder: &mut PipelineBuilder) -> Result<(), Error> {
-        self.system.init_builder(builder)
+    fn compile(&self, world: &World) -> Result<CompiledSystem, Error> {
+        self.system.compile(world)
     }
 }
 
