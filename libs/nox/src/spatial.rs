@@ -30,7 +30,10 @@ where
     }
 }
 
-impl<T: Field> Clone for SpatialTransform<T> {
+impl<T: Field, R: Repr> Clone for SpatialTransform<T, R>
+where
+    Vector<T, 7, R>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -112,7 +115,10 @@ pub struct SpatialForce<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }
 
-impl<T: Field> Clone for SpatialForce<T> {
+impl<T: Field, R: Repr> Clone for SpatialForce<T, R>
+where
+    Vector<T, 6, R>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -198,8 +204,10 @@ impl<T: RealField, R: Repr> Add for SpatialForce<T, R> {
 pub struct SpatialInertia<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
-
-impl<T: Field> Clone for SpatialInertia<T> {
+impl<T: Field, R: Repr> Clone for SpatialInertia<T, R>
+where
+    Vector<T, 7, R>: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),

@@ -48,6 +48,28 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
         Quaternion(inner)
     }
 
+    // Constructs a new quaternion from euler angles
+    pub fn from_euler(
+        angles: Vector<T, 3, R>,
+        // roll: impl Into<Scalar<T, R>>,
+        // pitch: impl Into<Scalar<T, R>>,
+        // yaw: impl Into<Scalar<T, R>>,
+    ) -> Self {
+        let [roll, pitch, yaw] = angles.parts();
+        let cr = &(&roll / T::two()).cos();
+        let sr = &(&roll / T::two()).sin();
+        let cp = &(&pitch / T::two()).cos();
+        let sp = &(&pitch / T::two()).sin();
+        let cy = &(&yaw / T::two()).cos();
+        let sy = &(&yaw / T::two()).sin();
+        let w = cr * cp * cy + sr * sp * sy;
+        let x = sr * cp * cy - cr * sp * sy;
+        let y = cr * sp * cy + sr * cp * sy;
+        let z = cr * cp * sy - sr * sp * cy;
+        let inner = Vector::from_arr([x, y, z, w]);
+        Quaternion(inner)
+    }
+
     /// Creates a unit quaternion with no rotation.
     pub fn identity() -> Self {
         let inner = T::zero::<R>()
