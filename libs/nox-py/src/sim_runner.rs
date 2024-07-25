@@ -38,11 +38,12 @@ pub enum Args {
 pub struct SimSupervisor;
 
 impl SimSupervisor {
-    pub fn spawn(path: PathBuf) -> JoinHandle<anyhow::Result<()>> {
-        std::thread::spawn(move || Self::run(path))
+    pub fn spawn(path: PathBuf) -> JoinHandle<()> {
+        std::thread::spawn(move || Self::run(path).unwrap())
     }
 
     pub fn run(path: PathBuf) -> anyhow::Result<()> {
+        let path = path.canonicalize()?;
         let parent_dir = path.parent().unwrap();
 
         let addr = "0.0.0.0:2240".parse::<SocketAddr>().unwrap();
@@ -132,7 +133,7 @@ impl SimRunner {
         let mut start = Instant::now();
         info!("building sim");
 
-        let status = std::process::Command::new("python")
+        let status = std::process::Command::new("python3")
             .arg(path)
             .arg("build")
             .arg("--dir")
