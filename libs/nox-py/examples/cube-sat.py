@@ -372,14 +372,12 @@ def earth_point(pos: el.WorldPos, deg: UserGoal) -> Goal:
     return euler_to_quat(deg) * el.Quaternion(np.array([*a, w])).normalize()
 
 
-@el.system
-def control(sensor: el.Query[AttEst, AngVelEst, Goal]) -> el.Query[ControlForce]:
-    return sensor.map(
-        ControlForce,
-        lambda p, v, i: el.SpatialForce(
-            torque=-1.0 * v * d + -1.0 * (p.inverse().vector() - i.vector())[:3] * k
-        ),
-    )
+@el.map
+def control(att_est: AttEst, ang_vel: AngVelEst, goal: Goal) -> ControlForce:
+    error = (att_est.inverse() * goal).vector()
+    sign = np.sign(error[3])
+    error = error[:3]
+    return el.SpatialForce(torque=-1.0 * ang_vel * d + sign * error * k)
 
 
 # effectors
