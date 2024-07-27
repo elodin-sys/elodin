@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
 use elodin_types::Metadata;
+use tonic::transport::ClientTlsConfig;
 use tonic::{service::interceptor::InterceptedService, transport};
 
 use super::auth::AuthInterceptor;
@@ -59,6 +60,11 @@ impl Cli {
     pub async fn client(&self) -> anyhow::Result<Client> {
         let auth_interceptor = self.auth_interceptor()?;
         let channel = transport::Endpoint::from_shared(self.url.clone())?
+            .tls_config(
+                ClientTlsConfig::default()
+                    .with_webpki_roots()
+                    .assume_http2(true),
+            )?
             .timeout(std::time::Duration::from_secs(5))
             .connect_timeout(std::time::Duration::from_secs(5))
             .connect()
