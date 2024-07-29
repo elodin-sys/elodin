@@ -392,17 +392,23 @@ impl Quaternion {
     }
 
     pub fn __matmul__(&self, py: Python<'_>, rhs: PyObject) -> Result<PyObject, Error> {
-        let noxpr = if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
-            self.inner.clone().mul(s.inner).into_op()
+        if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
+            let op = self.inner.clone().mul(s.inner).into_op();
+            let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_op(op));
+            Ok(spatial_transform.into_py(py).to_owned())
         } else if let Ok(s) = rhs.extract::<SpatialMotion>(py) {
-            self.inner.clone().mul(s.inner).into_op()
+            let op = self.inner.clone().mul(s.inner).into_op();
+            let spatial_motion = SpatialMotion::from(nox::SpatialMotion::from_op(op));
+            Ok(spatial_motion.into_py(py).to_owned())
         } else if let Ok(s) = rhs.extract::<SpatialForce>(py) {
-            self.inner.clone().mul(s.inner).into_op()
+            let op = self.inner.clone().mul(s.inner).into_op();
+            let spatial_force = SpatialForce::from(nox::SpatialForce::from_op(op));
+            Ok(spatial_force.into_py(py).to_owned())
         } else {
             let vec = Vector::from_op(Noxpr::jax(rhs));
-            self.inner.clone().mul(vec).into_op()
-        };
-        Ok(noxpr.to_jax()?)
+            let op = self.inner.clone().mul(vec).into_op();
+            Ok(op.to_jax()?)
+        }
     }
 
     pub fn inverse(&self) -> Self {
