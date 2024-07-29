@@ -474,7 +474,7 @@ class Scene(Archetype):
 class World(WorldBuilder):
     def run(
         self,
-        system: PyFnSystem,
+        system: System,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
         run_time_step: Optional[float] = None,
@@ -503,7 +503,7 @@ class World(WorldBuilder):
 
     def serve(
         self,
-        system: PyFnSystem,
+        system: System,
         addr: Optional[str] = None,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
@@ -527,7 +527,7 @@ class World(WorldBuilder):
 
     def view(
         self,
-        system: PyFnSystem,
+        system: System,
         time_step: Optional[float] = None,
         sim_time_step: Optional[float] = None,
         run_time_step: Optional[float] = None,
