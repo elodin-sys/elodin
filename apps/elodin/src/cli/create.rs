@@ -6,6 +6,7 @@ enum TemplateType {
     #[default]
     Rocket,
     CubeSat,
+    ThreeBody,
 }
 
 #[derive(clap::Args, Clone, Default)]
@@ -28,6 +29,10 @@ impl Cli {
             TemplateType::Rocket => (
                 "rocket.py",
                 include_str!("../../../../libs/nox-py/examples/rocket.py"),
+            ),
+            TemplateType::ThreeBody => (
+                "three-body.py",
+                include_str!("../../../../libs/nox-py/examples/three-body.py"),
             ),
         };
 
