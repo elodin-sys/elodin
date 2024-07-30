@@ -2,6 +2,7 @@
 
 ## [unreleased]
 - **(fix)** Set the correct type information for the return value of `el.Quaternion` `__matmul__`. Previously, it would always return a `jax.BatchTracer` even if a spatial type was being multiplied.
+- **(fix)** Fix `tonic` tls configuration in CLI
 
 ## [v0.3.26]
 - Improve simulation startup times.
