@@ -19,13 +19,27 @@ impl Api {
             .onboarding_data
             .and_then(|data| serde_json::from_value(data).ok());
 
+        let (billing_account_id, subscription_status) =
+            if let Some(billing_account_id) = user.billing_account_id {
+                (
+                    Some(billing_account_id.as_bytes().to_vec()),
+                    Some(
+                        self.get_subscription_status(billing_account_id, user.id, &self.db)
+                            .await?,
+                    ),
+                )
+            } else {
+                (None, None)
+            };
+
         Ok(CurrentUserResp {
             id: user.id.as_bytes().to_vec(),
             email: user.email,
             name: user.name,
             avatar: user.avatar,
             license_type: LicenseType::from(user.license_type).into(),
-            billing_account_id: user.billing_account_id.map(|id| id.as_bytes().to_vec()),
+            billing_account_id,
+            subscription_status,
             onboarding_data,
         })
     }

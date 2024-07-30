@@ -35,6 +35,7 @@ mod utils;
 use utils::*;
 
 pub struct Api {
+    base_url: String,
     address: SocketAddr,
     db: DatabaseConnection,
     sim_storage_client: SimStorageClient,
@@ -84,6 +85,7 @@ impl Api {
             auth_config: config.auth0.clone(),
         };
         Ok(Self {
+            base_url: config.base_url,
             address: config.address,
             db,
             redis,
@@ -333,6 +335,13 @@ impl api_server::Api for Api {
         req: tonic::Request<CreateBillingAccountReq>,
     ) -> Result<Response<BillingAccount>, Status> {
         current_user_route_txn!(self, req, Self::create_billing_account)
+    }
+
+    async fn get_stripe_subscription_status(
+        &self,
+        req: tonic::Request<GetStripeSubscriptionStatusReq>,
+    ) -> Result<Response<StripeSubscriptionStatus>, Status> {
+        current_user_route_txn!(self, req, Self::get_stripe_subscription_status)
     }
 
     async fn generate_license(

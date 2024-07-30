@@ -35,6 +35,9 @@ service Api {
 
     // License Gen
     rpc GenerateLicense(GenerateLicenseReq) returns (GenerateLicenseResp);
+
+    // Stripe
+    rpc GetStripeSubscriptionStatus(GetStripeSubscriptionStatusReq) returns (StripeSubscriptionStatus);
 }
 
 message CurrentUserReq {}
@@ -45,7 +48,8 @@ message CurrentUserResp {
     string avatar = 4;
     LicenseType license_type = 5;
     optional bytes billing_account_id = 6;
-    optional OnboardingData onboarding_data = 7;
+    optional StripeSubscriptionStatus subscription_status = 7;
+    optional OnboardingData onboarding_data = 8;
 }
 
 enum LicenseType {
@@ -217,6 +221,17 @@ message BillingAccount {
     bytes id = 1;
     string name = 2;
     string customer_id = 3;
+}
+
+message GetStripeSubscriptionStatusReq {
+    string billing_account_id = 1;
+}
+
+message StripeSubscriptionStatus {
+    string portal_url = 1;
+    int64 subscription_end = 2;
+    optional int64 trial_start = 3;
+    optional int64 trial_end = 4;
 }
 
 

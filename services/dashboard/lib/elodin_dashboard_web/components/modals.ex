@@ -40,7 +40,7 @@ defmodule ElodinDashboardWeb.ModalComponents do
       show={@show}
       on_cancel={@on_cancel}
     >
-      <div class="h-[560px] w-[820px] relative flex flex-col items-stretch">
+      <div class="h-[560px] w-[820px] pt-6 relative flex flex-col items-stretch">
         <div class="basis-5/6 flex flex-col items-center">
           <%= render_slot(@inner_block) %>
         </div>

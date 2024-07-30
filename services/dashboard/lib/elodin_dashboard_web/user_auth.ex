@@ -34,6 +34,7 @@ defmodule ElodinDashboardWeb.UserAuth do
            "avatar" => user.avatar,
            "id" => user.id,
            "billing_account_id" => user.billing_account_id,
+           "subscription_status" => user.subscription_status,
            "onboarding_data" => user.onboarding_data
          }}
 
