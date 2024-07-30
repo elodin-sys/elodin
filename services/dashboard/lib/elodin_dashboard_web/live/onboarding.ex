@@ -79,14 +79,15 @@ defmodule ElodinDashboardWeb.OnboardingLive do
   end
 
   def handle_info({:start_trial, tier}, socket) do
-    Atc.create_billing_account(
-      %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
-      socket.assigns[:current_user]["token"]
-    )
+    {:ok, resp} =
+      Atc.create_billing_account(
+        %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
+        socket.assigns[:current_user]["token"]
+      )
 
     page = 1
     current_user = socket.assigns[:current_user]
-    current_user = Map.put(current_user, "billing_account_id", "tmp")
+    current_user = Map.put(current_user, "billing_account_id", resp.id)
 
     {:noreply,
      socket
@@ -139,7 +140,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
   def download_option(assigns) do
     ~H"""
     <div class={[
-      "border-t border-b border-onyx-9 border-opacity-30 border-solid mx-[-40px] mt-6 py-6 px-10 flex items-center",
+      "border-t border-b border-primary-onyx-9 border-opacity-30 border-solid mx-[-40px] mt-6 py-6 px-10 flex items-center",
       "h-[90px]",
       @class
     ]}>
@@ -147,14 +148,14 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <%= render_slot(@icon) %>
       </div>
       <div class="flex flex-col w-full">
-        <div class={["flex w-full font-mono text-green text-sm font-medium", @title_class]}>
+        <div class={["flex w-full font-mono text-mint text-sm font-medium", @title_class]}>
           <%= @title %><%= render_slot(@title_note) %>
         </div>
         <div class="flex w-full items-center justify-between">
-          <.link href={@download_href} class="underline underline-offset-4 text-crema">
+          <.link href={@download_href} class="underline underline-offset-4 text-primary-creame">
             <%= @download_title %>
           </.link>
-          <.link href={@sha_href} class="underline underline-offset-4 text-crema">
+          <.link href={@sha_href} class="underline underline-offset-4 text-primary-creame">
             sha256
           </.link>
         </div>
@@ -172,7 +173,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
   def code(assigns) do
     ~H"""
     <div class={[
-      "border-t border-b border-onyx-9 border-opacity-30 border-solid mx-[-40px] mt-6 py-6 px-10 flex items-center",
+      "border-t border-b border-primary-onyx-9 border-opacity-30 border-solid mx-[-40px] mt-6 py-6 px-10 flex items-center",
       "h-[90px]",
       @class
     ]}>
@@ -180,7 +181,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <%= render_slot(@icon) %>
       </div>
       <div class="flex flex-col w-full">
-        <div class={["flex w-full font-mono text-green text-sm font-medium", @title_class]}>
+        <div class={["flex w-full font-mono text-mint text-sm font-medium", @title_class]}>
           <%= @title %>
         </div>
         <div class="flex w-full items-center justify-between">
@@ -258,7 +259,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def pricebox(assigns) do
     ~H"""
-    <div class="w-[418px] bg-onyx p-10 rounded-elo-xs border border-solid border-crema border-opacity-10 flex-col">
+    <div class="w-[418px] bg-primary-onyx p-10 rounded-elo-xs border border-solid border-primary-creame border-opacity-10 flex-col">
       <div class="text-4xl font-space">
         <%= @title %>
       </div>
@@ -268,14 +269,14 @@ defmodule ElodinDashboardWeb.OnboardingLive do
       ]}>
         <%= @users %>
       </div>
-      <div class="text-crema-60 text-lg w-full py-2">
+      <div class="text-primary-creame-60 text-lg w-full py-2">
         <%= @subtitle %>
       </div>
       <div class="text-3xl w-full py-2 font-medium font-mono">
         <%= @price %><span :if={@per_month} class="text-xl">/month</span>
       </div>
-      <hr class="border-onyx-9 my-8" />
-      <div class="font-mono text-crema tracking-elo-mono-small font-medium text-sm w-full py-2">
+      <hr class="border-primary-onyx-9 my-8" />
+      <div class="font-mono text-primary-creame tracking-elo-mono-small font-medium text-sm w-full py-2">
         INCLUDES
       </div>
       <ul class="font-medium space-y-2">
@@ -380,7 +381,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             if(@selected_usecases |> Enum.member?(item.id), do: item.selected_class || "", else: ""),
             if(@selected_usecases |> Enum.member?(item.id),
               do: "!bg-opacity-100",
-              else: "border-b border-onyx-9"
+              else: "border-b border-primary-onyx-9"
             ),
             if(i == 0 && !(@selected_usecases |> Enum.member?(item.id)), do: "border-t", else: "")
           ]}
@@ -394,7 +395,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <div>
             <.button
               class="!py-4 !px-8"
-              type="crema"
+              type="creame"
               phx-click={
                 if(@number == "03",
                   do:
@@ -426,15 +427,15 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def onboard_box(assigns) do
     ~H"""
-    <div class="flex flex-col bg-primary-smoke w-[556px] h-[662px] p-10 border border-crema rounded-elo-xs border-opacity-5 justify-between">
+    <div class="flex flex-col bg-primary-smoke w-[556px] h-[662px] p-10 border border-primary-creame rounded-elo-xs border-opacity-5 justify-between">
       <div class="flex flex-col">
-        <div class="text-onyx-9 text-sm font-mono font-medium">
+        <div class="text-primary-onyx-9 text-sm font-mono font-medium">
           <%= @heading %>
         </div>
         <div class="font-space text-xl font-medium mt-2">
           <%= @title %>
         </div>
-        <div class="text-md text-crema-60 mt-2">
+        <div class="text-md text-primary-creame-60 mt-2">
           <%= @action %>
         </div>
         <%= render_slot(@inner_block) %>
@@ -498,7 +499,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         <div class="text-5xl w-full text-center mt-4 font-space">
           Select your Plan
         </div>
-        <div class="text-xl w-full text-center mt-4 text-crema-60">
+        <div class="text-xl w-full text-center mt-4 text-primary-creame-60">
           Try for free (no credit card required)
         </div>
         <div class="w-full mt-16 flex justify-center gap-8 flex-wrap">
@@ -507,8 +508,8 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             subtitle="Perfect for students and hackers getting started on a new project."
             users="INDIVIDUALS / STUDENTS"
             price="$50"
-            highlight_class="border-green text-green"
-            button_class="bg-green border-green"
+            highlight_class="border-mint text-mint"
+            button_class="bg-mint border-mint"
             features={["60 mins of Compute Credits", "Non-Commercial Usage", "Community Support"]}
             tier={1}
             loading={@loading}
@@ -518,8 +519,8 @@ defmodule ElodinDashboardWeb.OnboardingLive do
             subtitle="For the startups and innovators of the next-generation of aerospace companies."
             users="BUSINESSES"
             price="$500"
-            highlight_class="text-yellow"
-            button_class="bg-yellow border-yellow text-yellow"
+            highlight_class="text-yolk"
+            button_class="bg-yolk border-yolk text-yolk"
             features={["60,000 mins of Compute Credits", "Commercial Usage", "Advanced Support"]}
             tier={2}
             loading={@loading}
@@ -544,7 +545,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 1} = assigns) do
     ~H"""
-    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+    <div class="w-full flex min-h-full bg-primary-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -559,7 +560,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -578,13 +579,13 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "drones",
                 name: "Drones",
                 selected_class: "text-black",
-                class: "bg-yellow"
+                class: "bg-yolk"
               },
               %{
                 id: "rockets",
                 name: "Rockets",
                 selected_class: "text-black",
-                class: "bg-red"
+                class: "bg-reddish"
               },
               %{
                 id: "space",
@@ -602,7 +603,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "other",
                 name: "Other",
                 selected_class: "text-black",
-                class: "bg-green"
+                class: "bg-mint"
               }
             ]}
           />
@@ -614,7 +615,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 2} = assigns) do
     ~H"""
-    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+    <div class="w-full flex min-h-full bg-primary-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -629,7 +630,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -648,13 +649,13 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "instagram-tiktok-youtube",
                 name: "instagram / tiktok / youtube",
                 selected_class: "text-black",
-                class: "bg-yellow"
+                class: "bg-yolk"
               },
               %{
                 id: "linkedin",
                 name: "linkedin",
                 selected_class: "text-black",
-                class: "bg-red"
+                class: "bg-reddish"
               },
               %{
                 id: "newsletter",
@@ -672,7 +673,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "other",
                 name: "Other",
                 selected_class: "text-black",
-                class: "bg-green"
+                class: "bg-mint"
               }
             ]}
           />
@@ -684,7 +685,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 3} = assigns) do
     ~H"""
-    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+    <div class="w-full flex min-h-full bg-primary-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -699,7 +700,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={1} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -718,13 +719,13 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "python-lib",
                 name: "PHYSICS SIMULATION LIBRARY",
                 selected_class: "text-black",
-                class: "bg-yellow"
+                class: "bg-yolk"
               },
               %{
                 id: "3d-viewer",
                 name: "LIVE 3D VIEWER",
                 selected_class: "text-black",
-                class: "bg-red"
+                class: "bg-reddish"
               },
               %{
                 id: "monte-carlo",
@@ -742,7 +743,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
                 id: "other-component",
                 name: "Other",
                 selected_class: "text-black",
-                class: "bg-green"
+                class: "bg-mint"
               }
             ]}
           />
@@ -754,7 +755,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 4} = assigns) do
     ~H"""
-    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+    <div class="w-full flex min-h-full bg-primary-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -769,7 +770,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={2} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -804,11 +805,11 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               sha_href="https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip.sha256"
             >
               <:title_note>
-                <div class="h-[18px] inline-block bg-onyx rounded-elo-xxs ml-2">
+                <div class="h-[18px] inline-block bg-primary-onyx rounded-elo-xxs ml-2">
                   <span class="display-on-hover-hide transition-all block w-[18px]">*</span>
                   <a
                     href="https://docs.elodin.systems/quickstart#windows"
-                    class="display-on-hover-show px-1 text-xs text-green transition-all h-[18px] flex items-center"
+                    class="display-on-hover-show px-1 text-xs text-mint transition-all h-[18px] flex items-center"
                   >
                     Extra instructions
                   </a>
@@ -816,7 +817,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               </:title_note>
             </.download_option>
             <:button>
-              <.button class="mt-10 !py-4 !px-8" type="crema" phx-click={JS.push("next_page")}>
+              <.button class="mt-10 !py-4 !px-8" type="creame" phx-click={JS.push("next_page")}>
                 Next
               </.button>
             </:button>
@@ -829,7 +830,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 5} = assigns) do
     ~H"""
-    <div class="w-full flex min-h-full bg-onyx max-lg:flex-col items-stretch">
+    <div class="w-full flex min-h-full bg-primary-onyx max-lg:flex-col items-stretch">
       <div class="lg:w-1/2 max-lg:w-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -844,7 +845,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={3} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -867,14 +868,14 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               title="ROCKET"
               code="elodin create --template rocket"
               class="border-t-transparent !mt-0"
-              title_class="!text-yellow"
+              title_class="!text-yolk"
             >
               <:icon>
                 <.icon_rocket />
               </:icon>
             </.code>
             <:button>
-              <.button class="mt-10 !py-4 !px-8" type="crema" phx-click={JS.push("next_page")}>
+              <.button class="mt-10 !py-4 !px-8" type="creame" phx-click={JS.push("next_page")}>
                 Next
               </.button>
             </:button>
@@ -887,7 +888,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 6} = assigns) do
     ~H"""
-    <div class="w-full flex h-full bg-onyx max-lg:flex-col">
+    <div class="w-full flex h-full bg-primary-onyx max-lg:flex-col">
       <div class="lg:w-1/2 max-lg:w-full h-full bg-bone p-6 px-20 flex flex-col">
         <div class="w-full flex align-stretch">
           <.link href="/" style="color: #000;">
@@ -902,7 +903,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </div>
         <.onboarding_steps onboarding_steps={default_onboard_steps()} selected={4} />
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -918,7 +919,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           >
             <.code title="MONTE CARLO" code="elodin monte-carlo run --name rocket rocket.py" />
             <:button>
-              <.button class="mt-10 !py-4 !px-8" type="crema" phx-click={JS.push("next_page")}>
+              <.button class="mt-10 !py-4 !px-8" type="creame" phx-click={JS.push("next_page")}>
                 Next
               </.button>
             </:button>
@@ -931,11 +932,11 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def page(%{page: 7} = assigns) do
     ~H"""
-    <div class="w-full flex h-full bg-onyx max-lg:flex-col">
+    <div class="w-full flex h-full bg-primary-onyx max-lg:flex-col">
       <div class="lg:w-1/2 max-lg:w-full h-full bg-bone flex flex-col items-center justify-center">
         <div phx-hook="FireworksHook" id="fireworks" style="width: 300px; height: 375.652px;"></div>
       </div>
-      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-onyx">
+      <div class="lg:w-1/2 max-lg:w-full flex flex-col px-20 p-6 bg-primary-onyx">
         <div class="w-full flex flex-col items-end">
           <img
             src={@current_user["avatar"]}
@@ -953,7 +954,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               <.link
                 class={[
                   "h-20 flex items-center mx-[-40px] px-10 justify-between",
-                  "border-t border-onyx-9"
+                  "border-t border-primary-onyx-9"
                 ]}
                 href="/"
               >
@@ -962,7 +963,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               <.link
                 class={[
                   "h-20 flex items-center mx-[-40px] px-10 justify-between",
-                  "border-b border-t border-onyx-9"
+                  "border-b border-t border-primary-onyx-9"
                 ]}
                 href="https://docs.elodin.systems"
               >
@@ -971,7 +972,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
               <.link
                 class={[
                   "h-20 flex items-center mx-[-40px] px-10 justify-between",
-                  "border-b border-onyx-9"
+                  "border-b border-primary-onyx-9"
                 ]}
                 href="https://elodin.app/discord"
               >

@@ -25,26 +25,8 @@ module.exports = {
           DEFAULT: "#EF5800",
           50: "#FFFBF0",
         },
-        green: {
-          DEFAULT: "#88DE9F",
-          40: "rgb(30 32 28)",
-          300: "#88DE9F",
-        },
-        "green-opacity": {
-          "40": "rgba(136, 222, 159, 0.4)"
-        },
         "dark-matte": "#131212",
-        "red": {
-          DEFAULT: "rgb(233, 75, 20)",
-          40: "rgb(31, 21, 17)",
-          30: "rgba(233, 75, 20, 0.3)",
-          5: "rgba(233, 75, 20, 0.05)"
-        },
         "dim-red": "rgb(36, 20, 15)",
-        yellow: {
-          DEFAULT: "rgb(254, 197, 4)",
-          400: "#FEC504",
-        },
         "tan": "rgb(255, 215, 179)",
         "code": "#282C34",
         "primative-colors-brand-hyper-red": "rgba(238, 58, 67, 1)",
@@ -53,10 +35,6 @@ module.exports = {
         "primative-colors-white-opacity-900": "rgba(255, 255, 255, 1)",
         "tokens-surface-primary": "rgba(31, 31, 31, 1)",
         "tokens-surface-secondary": "rgba(13, 13, 13, 1)",
-        "crema": {
-          DEFAULT: "rgb(255, 251, 240)",
-          60:  "rgba(255, 251, 240, 0.6)",
-        },
         "black-primary": "rgba(23, 22, 21, 1)",
         "black-secondary": "rgba(13, 13, 13, 1)",
         "black-header": "rgb(20, 20, 20)",
@@ -70,13 +48,28 @@ module.exports = {
         },
         "sep-black": "#202020",
         "primary-onyx": {
-          "9": "rgba(46, 45, 44, 1)",
+          DEFAULT: "#171615",
+          "9": "#2E2D2C",
         },
-        "onyx": {
-          DEFAULT: "rgb(23, 22, 21)",
-          "9": "rgba(46, 45, 44, 1)",
+        "primary-smoke": "#0D0D0D",
+        "primary-creame": {
+          DEFAULT: "#FFFBF0",
+          60: "rgba(255, 251, 240, 0.6)",
+          10: "rgba(255, 251, 240, 0.1)",
         },
-        "primary-smoke": "rgba(13, 13, 13, 1)",
+        "mint": {
+          DEFAULT: "#88DE9F",
+          40: "rgba(136, 222, 159, 0.4)",
+        },
+        "yolk": {
+          DEFAULT: "#FEC504",
+        },
+        "reddish": {
+          DEFAULT: "#E94B14",
+          40: "rgba(233, 75, 20, 0.4)",
+          30: "rgba(233, 75, 20, 0.3)",
+          5: "rgba(233, 75, 20, 0.05)"
+        },
         "slate": "rgb(127, 113, 255)",
         "peach": "rgb(255, 215, 179)",
         "grey": "rgb(51, 51, 51)",

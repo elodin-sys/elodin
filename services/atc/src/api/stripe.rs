@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::{config::StripePlansConfig, error::Error};
 use atc_entity::{billing_account, events::DbExt, user};
 use axum::{
     async_trait,
@@ -6,13 +6,16 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use elodin_types::api::LicenseType;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, Unchanged};
-use stripe::{Event, EventObject, EventType};
+use elodin_types::api::{GetStripeSubscriptionStatusReq, LicenseType, StripeSubscriptionStatus};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set, Unchanged,
+};
+use std::str::FromStr;
+use stripe::{Customer, CustomerId, Event, EventObject, EventType, PriceId};
 use tracing::warn;
 use uuid::Uuid;
 
-use super::AxumContext;
+use super::{Api, AxumContext, CurrentUser};
 
 pub struct StripeEvent(Event);
 
@@ -194,5 +197,93 @@ fn sub_status_active(status: &stripe::SubscriptionStatus) -> bool {
         | stripe::SubscriptionStatus::PastDue
         | stripe::SubscriptionStatus::Paused
         | stripe::SubscriptionStatus::Unpaid => false,
+    }
+}
+
+pub fn get_price_id(
+    stripe_plans_config: &StripePlansConfig,
+    license_type: elodin_types::api::LicenseType,
+) -> Result<String, Error> {
+    match license_type {
+        elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => {
+            Err(Error::InvalidLicenseType)
+        }
+        elodin_types::api::LicenseType::NonCommercial => {
+            Ok(stripe_plans_config.non_commercial_price.to_string())
+        }
+        elodin_types::api::LicenseType::Commercial => {
+            Ok(stripe_plans_config.commercial_price.to_string())
+        }
+    }
+}
+
+impl Api {
+    pub async fn get_stripe_subscription_status(
+        &self,
+        req: GetStripeSubscriptionStatusReq,
+        CurrentUser { user, .. }: CurrentUser,
+        txn: &DatabaseTransaction,
+    ) -> Result<StripeSubscriptionStatus, Error> {
+        let billing_account_id = Uuid::parse_str(&req.billing_account_id)?;
+
+        self.get_subscription_status(billing_account_id, user.id, txn)
+            .await
+    }
+
+    pub async fn get_subscription_status(
+        &self,
+        billing_account_id: Uuid,
+        user_id: Uuid,
+        txn: &impl ConnectionTrait,
+    ) -> Result<StripeSubscriptionStatus, Error> {
+        let Some(billing_account) = billing_account::Entity::find_by_id(billing_account_id)
+            .filter(billing_account::Column::OwnerUserId.eq(user_id))
+            .one(txn)
+            .await?
+        else {
+            return Err(Error::NotFound);
+        };
+
+        let Ok(customer_id) = CustomerId::from_str(&billing_account.customer_id) else {
+            return Err(Error::NotFound);
+        };
+
+        let customer = Customer::retrieve(&self.stripe, &customer_id, &[]).await?;
+
+        let portal_session = stripe::BillingPortalSession::create(
+            &self.stripe,
+            stripe::CreateBillingPortalSession {
+                return_url: Some(&self.base_url),
+                ..stripe::CreateBillingPortalSession::new(customer.id.clone())
+            },
+        )
+        .await?;
+
+        let price_id_str = get_price_id(
+            &self.stripe_plans_config,
+            billing_account.seat_license_type.into(),
+        )?;
+        let Ok(price_id) = PriceId::from_str(&price_id_str) else {
+            return Err(Error::NotFound);
+        };
+
+        let list_subs_params = stripe::ListSubscriptions {
+            customer: Some(customer_id),
+            price: Some(price_id),
+            ..stripe::ListSubscriptions::new()
+        };
+
+        let subs = stripe::Subscription::list(&self.stripe, &list_subs_params).await?;
+        let Some(sub) = subs.data.first() else {
+            // Subscription should always exists (even if it's ended)
+            return Err(Error::NotFound);
+        };
+
+        Ok(StripeSubscriptionStatus {
+            portal_url: portal_session.url,
+            subscription_end: sub.current_period_end,
+            trial_start: sub.trial_start,
+            trial_end: sub.trial_end,
+        })
     }
 }

@@ -24,7 +24,7 @@ defmodule ElodinDashboardWeb.SidebarComponents do
           "h-1 w-5",
           if(@selected, do: "bg-black-secondary", else: "bg-orange-50")
         ]}>
-          <div class="h-full bg-yellow-400" style={"width: #{@progress * 100}%"} />
+          <div class="h-full bg-yolk" style={"width: #{@progress * 100}%"} />
         </div>
       <% end %>
     </a>

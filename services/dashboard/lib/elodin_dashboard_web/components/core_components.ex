@@ -20,10 +20,56 @@ defmodule ElodinDashboardWeb.CoreComponents do
   alias Phoenix.LiveView.JS
   import ElodinDashboardWeb.Gettext
 
+  attr(:trial_left, :integer, default: 5)
+  attr(:trial_length, :integer, default: 15)
+  attr(:label, :string, default: "DAYS LEFT IN THE TRIAL")
+
+  def trial_progress_bar(assigns) do
+    trial_progress_value = assigns.trial_left / assigns.trial_length
+
+    trial_progress_color =
+      cond do
+        trial_progress_value > 0.66 -> "mint"
+        trial_progress_value > 0.33 -> "yolk"
+        trial_progress_value >= 0.0 -> "reddish"
+      end
+
+    assigns =
+      assigns
+      |> assign(:value, trial_progress_value)
+      |> assign(:color, trial_progress_color)
+
+    ~H"""
+    <div class="flex flex-col gap-3 p-4 bg-primary-onyx rounded-lg">
+      <div class="w-full font-mono text-sm text-primary-creame-60 tracking-elo-mono-medium leading-tight text-center">
+        <span class={"text-#{@color}"}>
+          <%= @trial_left %>
+        </span>
+        <%= @label %>
+      </div>
+
+      <div class="w-full h-1.5 flex">
+        <%= if @value > 0.0 do %>
+          <div
+            class={["h-full rounded bg-#{@color}", if(@value < 1.0, do: "mr-2", else: "")]}
+            style={"width: #{@value * 100.0}%;"}
+          />
+        <% end %>
+        <%= if @value < 1.0 do %>
+          <div
+            class="border border-primary-creame-10 h-full rounded"
+            style={"width: #{(1.0 - @value) * 100}%;"}
+          />
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
   attr(:number, :float, default: 50.0)
   attr(:value, :float, default: 50.0)
   attr(:label, :string, default: "LABEL")
-  attr(:color, :string, default: "bg-green")
+  attr(:color, :string, default: "bg-mint")
 
   def label_progress_bar(assigns) do
     ~H"""
@@ -33,7 +79,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
   end
 
   attr(:value, :float, default: 1.0)
-  attr(:color, :string, default: "bg-green")
+  attr(:color, :string, default: "bg-mint")
 
   def progress_bar(assigns) do
     ~H"""
@@ -46,7 +92,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
       <% end %>
       <%= if @value < 1.0 do %>
         <div
-          class="border border-crema-60 h-full rounded-elo-xs"
+          class="border border-primary-creame-60 h-full rounded-elo-xs"
           style={"width: #{(1.0 - @value) * 100}%;"}
         />
       <% end %>
@@ -67,10 +113,10 @@ defmodule ElodinDashboardWeb.CoreComponents do
   def horizontal_label(assigns) do
     ~H"""
     <div class={["w-full font-mono tracking-elo-mono-medium content-stretch", @class]}>
-      <span class="float-left text-crema-60 text-sm font-medium leading-tight">
+      <span class="float-left text-primary-creame-60 text-sm font-medium leading-tight">
         <%= @label %>
       </span>
-      <span class="text-crema float-right text-sm leading-tight">
+      <span class="text-primary-creame float-right text-sm leading-tight">
         <%= @value %>
       </span>
     </div>
@@ -100,6 +146,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
   attr(:bg_color, :string, default: "black-primary")
   attr(:container_padding, :string, default: "elo-xl")
   attr(:on_cancel, JS, default: %JS{})
+  attr(:can_close, :boolean, default: true)
   slot(:inner_block, required: true)
 
   def modal(assigns) do
@@ -108,7 +155,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
       id={@id}
       phx-mounted={@show && show_modal(@id)}
       phx-remove={hide_modal(@id)}
-      data-cancel={JS.exec(@on_cancel, "phx-remove")}
+      data-cancel={if(@can_close, do: JS.exec(@on_cancel, "phx-remove"), else: nil)}
       class="relative z-50 hidden"
     >
       <div
@@ -131,9 +178,9 @@ defmodule ElodinDashboardWeb.CoreComponents do
               phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
               phx-key="escape"
               phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
-              class={"relative hidden overflow-hidden rounded-elo-xs bg-#{@bg_color} text-white p-#{@container_padding} pt-[48px] shadow-lg transition"}
+              class={"relative hidden overflow-hidden rounded-elo-xs bg-#{@bg_color} text-white p-#{@container_padding} shadow-lg transition"}
             >
-              <div class="absolute top-elo-xl right-5">
+              <div :if={@can_close} class="absolute top-elo-xl right-5">
                 <button
                   phx-click={JS.exec("data-cancel", to: "##{@id}")}
                   type="button"
@@ -198,8 +245,9 @@ defmodule ElodinDashboardWeb.CoreComponents do
       role="alert"
       class={[
         "fixed top-2 right-2 mr-2 w-80 sm:w-96 z-50 rounded-elo-xs p-3 ring-1 ring-opacity-40",
-        @kind == :info && "bg-green-40 text-green ring-green fill-green",
-        @kind == :error && "bg-red-40 text-red shadow-md ring-red fill-red"
+        @kind == :info && "bg-mint-40 text-mint ring-mint fill-mint",
+        @kind == :error &&
+          "bg-reddish-40 text-reddish shadow-md ring-reddish fill-reddish"
       ]}
       {@rest}
     >
@@ -322,7 +370,7 @@ defmodule ElodinDashboardWeb.CoreComponents do
         "bg-opacity-0 bg-white",
         "hover:bg-opacity-5 hover:border-opacity-20",
         "active:brightness-75",
-        "text-[12px] leading-[8px] font-semibold text-crema",
+        "text-[12px] leading-[8px] font-semibold text-primary-creame",
         @class
       ]}
       {@rest}
@@ -332,16 +380,16 @@ defmodule ElodinDashboardWeb.CoreComponents do
     """
   end
 
-  def button(%{type: "crema", class: class} = assigns) do
+  def button(%{type: "creame", class: class} = assigns) do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-crema border-opacity-40 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-primary-creame border-opacity-40 p-[12px] ",
         "transition-all",
-        "bg-opacity-5 bg-crema",
+        "bg-opacity-5 bg-primary-creame",
         "hover:bg-opacity-10 hover:border-opacity-45",
         "active:brightness-75",
-        "text-[12px] leading-[8px] font-semibold text-crema",
+        "text-[12px] leading-[8px] font-semibold text-primary-creame",
         @class
       ]}
       {@rest}
@@ -372,13 +420,13 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-red border-opacity-40 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-reddish border-opacity-40 p-[12px] ",
         "flex gap-2 justify-center items-center h-[38px]",
         "transition-all",
-        "bg-red bg-opacity-5",
+        "bg-reddish bg-opacity-5",
         "hover:bg-opacity-15 hover:border-opacity-30",
         "active:brightness-75",
-        "text-[12px] leading-[8px] font-semibold text-red",
+        "text-[12px] leading-[8px] font-semibold text-reddish",
         @class
       ]}
       {@rest}
@@ -392,12 +440,12 @@ defmodule ElodinDashboardWeb.CoreComponents do
     ~H"""
     <button
       class={[
-        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-green border-opacity-40 p-[12px] ",
+        "phx-submit-loading:opacity-75 rounded-elo-xxs border-solid border border-mint border-opacity-40 p-[12px] ",
         "transition-all",
-        "bg-green bg-opacity-5",
+        "bg-mint bg-opacity-5",
         "enabled:hover:bg-opacity-15 enabled:hover:border-opacity-30",
         "enabled:active:brightness-75",
-        "text-[12px] leading-[8px] font-semibold text-green",
+        "text-[12px] leading-[8px] font-semibold text-mint",
         @class
       ]}
       disabled={@disabled}

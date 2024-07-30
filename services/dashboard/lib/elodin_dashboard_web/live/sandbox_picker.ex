@@ -297,7 +297,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       <.form
         for={@new_form}
         phx-submit="save"
-        class="flex justify-center align-center flex-col gap-elo-xl mt-elo-xl"
+        class="pt-6 flex justify-center align-center flex-col gap-elo-xl mt-elo-xl"
       >
         <.input name="name" label="Name" field={@new_form[:name]} autocomplete="false" data-1p-ignore />
         <.button class="">New Sandbox</.button>

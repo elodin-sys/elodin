@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::Error;
 
-use super::{Api, CurrentUser};
+use super::{stripe::get_price_id, Api, CurrentUser};
 
 impl Api {
     pub async fn create_billing_account(
@@ -55,17 +55,7 @@ impl Api {
         .insert_with_event(&self.db, &self.redis)
         .await?;
         if existing_accounts.is_empty() {
-            let trial_price = match req.trial_license_type() {
-                elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => {
-                    return Err(Error::InvalidLicenseType);
-                }
-                elodin_types::api::LicenseType::NonCommercial => {
-                    self.stripe_plans_config.non_commercial_price.to_string()
-                }
-                elodin_types::api::LicenseType::Commercial => {
-                    self.stripe_plans_config.commercial_price.to_string()
-                }
-            };
+            let price_id = get_price_id(&self.stripe_plans_config, req.trial_license_type())?;
             let trial_end = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -77,7 +67,7 @@ impl Api {
                     stripe::CreateSubscription {
                         trial_end: Some(Scheduled::at(trial_end)),
                         items: Some(vec![stripe::CreateSubscriptionItems {
-                            price: Some(trial_price),
+                            price: Some(price_id),
                             ..Default::default()
                         }]),
                         trial_settings: Some(stripe::CreateSubscriptionTrialSettings {

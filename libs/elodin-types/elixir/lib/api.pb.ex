@@ -58,7 +58,12 @@ defmodule Elodin.Types.Api.CurrentUserResp do
   field :license_type, 5, type: Elodin.Types.Api.LicenseType, json_name: "licenseType", enum: true
   field :billing_account_id, 6, proto3_optional: true, type: :bytes, json_name: "billingAccountId"
 
-  field :onboarding_data, 7,
+  field :subscription_status, 7,
+    proto3_optional: true,
+    type: Elodin.Types.Api.StripeSubscriptionStatus,
+    json_name: "subscriptionStatus"
+
+  field :onboarding_data, 8,
     proto3_optional: true,
     type: Elodin.Types.Api.OnboardingData,
     json_name: "onboardingData"
@@ -341,6 +346,25 @@ defmodule Elodin.Types.Api.BillingAccount do
   field :customer_id, 3, type: :string, json_name: "customerId"
 end
 
+defmodule Elodin.Types.Api.GetStripeSubscriptionStatusReq do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :billing_account_id, 1, type: :string
+end
+
+defmodule Elodin.Types.Api.StripeSubscriptionStatus do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.12.0"
+
+  field :portal_url, 1, type: :string
+  field :subscription_end, 2, type: :int64
+  field :trial_start, 3, proto3_optional: true, type: :int64
+  field :trial_end, 4, proto3_optional: true, type: :int64
+end
+
 defmodule Elodin.Types.Api.GenerateLicenseReq do
   @moduledoc false
 
@@ -411,6 +435,10 @@ defmodule Elodin.Types.Api.Api.Service do
   rpc :CreateBillingAccount,
       Elodin.Types.Api.CreateBillingAccountReq,
       Elodin.Types.Api.BillingAccount
+
+  rpc :GetStripeSubscriptionStatus,
+      Elodin.Types.Api.GetStripeSubscriptionStatusReq,
+      Elodin.Types.Api.StripeSubscriptionStatus
 
   rpc :GenerateLicense, Elodin.Types.Api.GenerateLicenseReq, Elodin.Types.Api.GenerateLicenseResp
 end

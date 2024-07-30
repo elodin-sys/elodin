@@ -232,7 +232,7 @@ defmodule ElodinDashboardWeb.EditorLive do
     >
       <h2 class="font-semibold absolute top-elo-xl left-elo-xl ">Share</h2>
       <.form
-        class="flex justify-left items-center flex-row gap-elo-xl mt-elo-xl"
+        class="pt-6 flex justify-left items-center flex-row gap-elo-xl mt-elo-xl"
         phx-change="set_public"
       >
         <.input name="public" type="checkbox" id="public" value={@sandbox.public} />

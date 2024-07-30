@@ -199,9 +199,9 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
 
   def status_color(type) do
     case(type) do
-      "pass" -> "bg-green"
-      "fail" -> "bg-red"
-      "active" -> "bg-yellow"
+      "pass" -> "bg-mint"
+      "fail" -> "bg-reddish"
+      "active" -> "bg-yolk"
       "pending" -> "bg-tan"
     end
   end
@@ -233,7 +233,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
     ~H"""
     <div class="flex items-center gap-2">
       <div style="width: 8px; height: 8px;" class={["rounded-elo-xxs", @color]} />
-      <span class="text-crema font-normal"><%= @type %></span>
+      <span class="text-primary-creame font-normal"><%= @type %></span>
     </div>
     """
   end
@@ -249,7 +249,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
         <div style={"width: #{@value / 100.0 * 16}px; height: 8px;"} class={@color} />
         <div style={"width: #{(1 - (@value / 100.0)) * 16}px; height: 8px;"} class="bg-[#FFFBF0]" />
       </div>
-      <span class="text-crema"><%= @value %>%</span>
+      <span class="text-primary-creame"><%= @value %>%</span>
     </div>
     """
   end
@@ -264,10 +264,10 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
           <div class="flex w-full gap-elo-xl flex-col xl:flex-row">
             <.frame>
               <div class="flex w-full flex-col min-w-[22rem]">
-                <div class="text-crema pb-1">
+                <div class="text-primary-creame pb-1">
                   <%= @run.name %>
                 </div>
-                <div class="text-crema-60">
+                <div class="text-primary-creame-60">
                   Project
                 </div>
                 <.divider />
@@ -284,13 +284,13 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
                   number={@run.failure_count}
                   value={@run.failure_count / @run.sample_count}
                   label="FAIL"
-                  color="bg-red"
+                  color="bg-reddish"
                 />
                 <.label_progress_bar
                   number={@run.active_count}
                   value={@run.active_count / @run.sample_count}
                   label="ACTIVE"
-                  color="bg-yellow"
+                  color="bg-yolk"
                 />
                 <.label_progress_bar
                   number={@run.pending_count}
@@ -316,9 +316,9 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
             class="flex w-full shrink-0 mt-elo-xl bg-black-secondary rounded-elo-xs border border-white border-opacity-10 overflow-scroll font-mono font-medium tracking-elo-mono-small"
             style="max-height: 80vh"
           >
-            <table class="w-full text-crema text-sm text-left">
+            <table class="w-full text-primary-creame text-sm text-left">
               <thead class="sticky top-0">
-                <tr class="h-[51px] bg-black-header text-crema text-crema-60 text-sm">
+                <tr class="h-[51px] bg-black-header text-primary-creame text-primary-creame-60 text-sm">
                   <td class="pl-elo-xl">SAMPLE</td>
                   <td>STATE</td>
                   <td>PROGRESS</td>
