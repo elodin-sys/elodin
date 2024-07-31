@@ -506,6 +506,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <.pricebox
             title="Non-Commercial"
             subtitle="Perfect for students and hackers getting started on a new project."
+            button_text="START FREE 30 DAY TRIAL"
             users="INDIVIDUALS / STUDENTS"
             price="$50"
             highlight_class="border-mint text-mint"
@@ -517,6 +518,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <.pricebox
             title="Commercial"
             subtitle="For the startups and innovators of the next-generation of aerospace companies."
+            button_text="START FREE 5 DAY TRIAL"
             users="BUSINESSES"
             price="$500"
             highlight_class="text-yolk"
