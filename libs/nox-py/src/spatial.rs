@@ -114,8 +114,20 @@ impl SpatialTransform {
         (Self::metadata().into(),)
     }
 
-    fn __add__(&self, other: &SpatialTransform) -> Self {
-        (self.inner.clone() + other.inner.clone()).into()
+    fn __add__(&self, py: Python<'_>, rhs: PyObject) -> PyResult<PyObject> {
+        if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
+            let op = self.inner.clone().add(s.inner).into_op();
+            let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_op(op));
+            Ok(spatial_transform.into_py(py).to_owned())
+        } else if let Ok(s) = rhs.extract::<SpatialMotion>(py) {
+            let op = self.inner.clone().add(s.inner).into_op();
+            let spatial_motion = SpatialMotion::from(nox::SpatialMotion::from_op(op));
+            Ok(spatial_motion.into_py(py).to_owned())
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Unsupported type for addition",
+            ))
+        }
     }
 }
 
@@ -413,6 +425,11 @@ impl Quaternion {
 
     pub fn inverse(&self) -> Self {
         self.inner.clone().inverse().into()
+    }
+
+    pub fn integrate_body(&self, arr: PyObject) -> Self {
+        let body_delta = Vector::from_op(Noxpr::jax(arr));
+        self.inner.integrate_body(body_delta).into()
     }
 }
 
