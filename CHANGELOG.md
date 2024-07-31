@@ -2,6 +2,9 @@
 
 ## [unreleased]
 
+## [v0.3.28]
+- Various bug fixes.
+
 ## [v0.3.27]
 - **(fix)** Set the correct type information for the return value of `el.Quaternion` `__matmul__`. Previously, it would always return a `jax.BatchTracer` even if a spatial type was being multiplied.
 - **(fix)** Fix issue where CLI is unable to verify the license key.
@@ -294,7 +297,8 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.27...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.28...HEAD
+[v0.3.28]: https://github.com/elodin-sys/paracosm/compare/v0.3.27...v0.3.28
 [v0.3.27]: https://github.com/elodin-sys/paracosm/compare/v0.3.26...v0.3.27
 [v0.3.26]: https://github.com/elodin-sys/paracosm/compare/v0.3.25...v0.3.26
 [v0.3.25]: https://github.com/elodin-sys/paracosm/compare/v0.3.24...v0.3.25
