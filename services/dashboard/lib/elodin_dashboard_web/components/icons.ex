@@ -34,12 +34,13 @@ defmodule ElodinDashboardWeb.IconComponents do
   end
 
   attr(:class, :string, default: "")
+  attr(:id, :string, default: "")
 
   attr(:rest, :global)
 
   def spinner(assigns) do
     ~H"""
-    <div class={["w-[24px] height-[24px]", @class]}>
+    <div id={@id} class={["w-[24px] height-[24px]", @class]}>
       <svg class="w-full h-full" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path
           fill-rule="evenodd"
