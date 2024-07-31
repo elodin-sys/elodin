@@ -247,6 +247,10 @@ Unit quaternions are used to represent spatial orientations and rotations of bod
 
     Normalize to a unit quaternion.
 
+- `integrate_body(body_delta)` -> [elodin.Quaternion]
+
+    Perform quaternion integration in body-frame with angular velocity `body_delta`, which must be a 3D vector.
+
 - `__add__(other)` -> [elodin.Quaternion]
 
     Add two quaternions.
@@ -288,9 +292,9 @@ A spatial transform is a 7D vector that represents a rigid body transformation i
 
     Get the angular part of the spatial transform as a quaternion.
 
-- `__add__(other)` -> [elodin.SpatialTransform]
+- `__add__(other)` -> [elodin.SpatialTransform] | [elodin.SpatialMotion]
 
-    Add two spatial transforms.
+    Add either a [elodin.SpatialTransform] or a [elodin.SpatialMotion] to the spatial transform. The return type is always a spatial transform.
 
 ### _class_ `elodin.SpatialMotion`
 

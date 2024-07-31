@@ -1,6 +1,8 @@
 # Changelog
 
 ## [unreleased]
+- Support adding `el.SpatialMotion` to `el.SpatialTransform`.
+- Add body-frame quaternion integration to `el.Quaternion` via `integrate_body`.
 
 ## [v0.3.28]
 - Various bug fixes.
