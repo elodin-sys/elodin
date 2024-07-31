@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::Error;
 
-use super::{stripe::get_price_id, Api, CurrentUser};
+use super::{stripe::get_price_id_and_trial, Api, CurrentUser};
 
 impl Api {
     pub async fn create_billing_account(
@@ -55,12 +55,13 @@ impl Api {
         .insert_with_event(&self.db, &self.redis)
         .await?;
         if existing_accounts.is_empty() {
-            let price_id = get_price_id(&self.stripe_plans_config, req.trial_license_type())?;
+            let (price_id, trial_length) =
+                get_price_id_and_trial(&self.stripe_plans_config, req.trial_license_type())?;
             let trial_end = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-                + 30 * 3600 * 24;
+                + trial_length;
             let trial_end = trial_end as i64;
             stripe::Subscription::create(
                     &self.stripe,

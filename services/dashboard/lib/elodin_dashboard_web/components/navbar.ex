@@ -177,7 +177,7 @@ defmodule ElodinDashboardWeb.NavbarComponents do
         <div class="self-center text-sm font-mono tracking-elo-mono-medium text-primary-smoke">
           START YOUR FREE TRIAL
         </div>
-        <.link href="https://www.elodin.systems/pricing">
+        <.link href="/onboard">
           <.button class="py-2.5 px-6 text-primary-smoke border-primary-smoke border font-medium">
             SIGN UP
           </.button>
