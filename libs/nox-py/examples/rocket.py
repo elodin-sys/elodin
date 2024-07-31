@@ -374,7 +374,7 @@ def apply_aero_forces(
     f: el.Force,
 ) -> el.Force:
     # convert from body frame to world frame
-    return f + el.SpatialForce(p.angular() @ f_aero)
+    return f + p.angular() @ f_aero
 
 
 @el.map
