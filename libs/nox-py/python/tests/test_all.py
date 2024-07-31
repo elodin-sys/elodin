@@ -60,8 +60,8 @@ def test_six_dof():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -70,6 +70,39 @@ def test_six_dof():
     exec.run()
     x = exec.column_array(el.Component.id(el.WorldPos))
     assert (x == [0.0, 0.0, 0.0, 1.0, 1.0 / 60.0, 0.0, 0.0]).all()
+
+
+def test_spatial_integration():
+    @el.map
+    def integrate_velocity(
+        world_pos: el.WorldPos, world_vel: el.WorldVel
+    ) -> el.WorldPos:
+        linear = world_pos.linear() + world_vel.linear()
+        angular = world_pos.angular().integrate_body(world_vel.angular())
+        return el.SpatialTransform(linear=linear, angular=angular)
+
+    sys = integrate_velocity
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(
+                linear=np.array([0.0, 0.0, 0.0]),
+            ),
+            world_vel=el.SpatialMotion(
+                linear=np.array([1.0, 0.0, 0.0]),
+                angular=np.array([np.pi / 2, 0.0, 0.0]),
+            ),
+            inertia=el.SpatialInertia(1.0),
+        )
+    )
+    exec = w.build(sys)
+    exec.run()
+    exec.run()
+    pos = exec.column_array(el.Component.name(el.WorldPos))
+    assert (pos[4:] == [2.0, 0.0, 0.0]).all()
+    assert np.allclose(
+        pos.to_numpy()[0][:4], np.array([0.97151626, 0.0, 0.0, 0.23697292])
+    )
 
 
 def test_graph():
@@ -160,7 +193,7 @@ def test_spatial_vector_algebra():
         return v + v
 
     w = el.World()
-    w.spawn(el.Body(world_vel=el.WorldVel.from_linear(np.array([1.0, 0.0, 0.0]))))
+    w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))))
     exec = w.build(double_vec)
     exec.run()
     v = exec.column_array(el.Component.id(el.WorldVel))
@@ -171,8 +204,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 1.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -191,8 +224,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 1.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -211,8 +244,8 @@ def test_six_dof_ang_vel_int():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([1.0, 1.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([1.0, 1.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
@@ -284,8 +317,8 @@ def test_six_dof_force():
     w = el.World()
     w.spawn(
         el.Body(
-            world_pos=el.WorldPos.from_linear(np.array([0.0, 0.0, 0.0])),
-            world_vel=el.WorldVel.from_angular(np.array([0.0, 0.0, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 0.0])),
             inertia=el.SpatialInertia(1.0),
         )
     )
