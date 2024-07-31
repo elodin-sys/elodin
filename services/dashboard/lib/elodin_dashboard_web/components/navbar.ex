@@ -6,10 +6,15 @@ defmodule ElodinDashboardWeb.NavbarComponents do
   slot(:navbar_center, required: false)
   slot(:navbar_right, required: false)
   attr(:current_user, :map, required: false)
+  attr(:is_demo_sandbox, :boolean, default: false)
 
   def navbar(assigns) do
     ~H"""
-    <ul class="w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-4 justify-start h-16 bg-black-secondary text-white shrink-0 fixed border-b-sep-black border-b border-b-solid">
+    <ul class={[
+      "w-full z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-4 justify-start",
+      "h-16 bg-black-secondary text-white shrink-0 fixed border-b-sep-black border-b border-b-solid",
+      if(@is_demo_sandbox, do: "mt-[54px]", else: "")
+    ]}>
       <li class="mr-auto flex ">
         <.link href="/">
           <img src="/images/o-logo.svg" class="w-5" />
@@ -163,10 +168,23 @@ defmodule ElodinDashboardWeb.NavbarComponents do
   slot(:navbar_center, required: false)
   slot(:navbar_right, required: false)
   attr(:current_user, :map, required: false)
+  attr(:is_demo_sandbox, :boolean, default: false)
 
   def navbar_layout(assigns) do
     ~H"""
-    <.navbar current_user={@current_user}>
+    <%= if @is_demo_sandbox do %>
+      <div class="w-full flex fixed bg-mint gap-6 py-3 place-content-center">
+        <div class="self-center text-sm font-mono tracking-elo-mono-medium text-primary-smoke">
+          START YOUR FREE TRIAL
+        </div>
+        <.link href="https://www.elodin.systems/pricing">
+          <.button class="py-2.5 px-6 text-primary-smoke border-primary-smoke border font-medium">
+            SIGN UP
+          </.button>
+        </.link>
+      </div>
+    <% end %>
+    <.navbar current_user={@current_user} is_demo_sandbox={@is_demo_sandbox}>
       <:navbar_center>
         <%= render_slot(@navbar_center) %>
       </:navbar_center>
@@ -174,9 +192,11 @@ defmodule ElodinDashboardWeb.NavbarComponents do
         <%= render_slot(@navbar_right) %>
       </:navbar_right>
     </.navbar>
-    <div class="h-full flex pt-[64px]">
+    <div class={["h-full flex", if(@is_demo_sandbox, do: "pt-[118px]", else: "pt-[64px]")]}>
       <%= render_slot(@inner_block) %>
-      <.subscription_status_modal current_user={@current_user} />
+      <%= if !@is_demo_sandbox do %>
+        <.subscription_status_modal current_user={@current_user} />
+      <% end %>
     </div>
     """
   end

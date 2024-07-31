@@ -31,6 +31,7 @@ defmodule ElodinDashboardWeb.EditorLive do
 
         {:ok,
          socket
+         |> assign(:is_demo_sandbox, sandbox.user_id == nil)
          |> assign(:url, uri)
          |> assign(:sandbox, %{
            id_string: id_string,
@@ -142,7 +143,7 @@ defmodule ElodinDashboardWeb.EditorLive do
 
   def render(assigns) do
     ~H"""
-    <.navbar_layout current_user={@current_user}>
+    <.navbar_layout current_user={@current_user} is_demo_sandbox={@is_demo_sandbox}>
       <:navbar_center>
         <span class="font-semibold"><%= @sandbox.name %></span>
       </:navbar_center>
