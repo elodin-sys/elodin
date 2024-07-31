@@ -139,7 +139,7 @@ def drag(v: el.WorldVel) -> BodyDrag:
 def apply_body_forces(
     thrust: BodyThrust, drag: BodyDrag, pos: el.WorldPos, f: el.Force
 ) -> el.Force:
-    return f + el.SpatialForce(linear=drag) + el.SpatialForce(pos.angular() @ thrust)
+    return f + el.SpatialForce(linear=drag) + pos.angular() @ thrust
 
 
 @el.map
