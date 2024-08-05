@@ -327,7 +327,8 @@ defmodule ElodinDashboardWeb.UserAuth do
       if socket.assigns.current_user["billing_account_id"] != nil do
         {:cont, socket}
       else
-        {:halt, socket |> Phoenix.LiveView.redirect(to: "/onboard")}
+        {:halt,
+         socket |> Phoenix.LiveView.redirect(external: "https://www.elodin.systems/pricing")}
       end
     else
       socket =
