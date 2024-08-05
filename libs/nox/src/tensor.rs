@@ -700,6 +700,18 @@ impl<D: Dim + NotConst1> BroadcastDim<Const<1>, D> for ShapeConstraint {
     type Output = D;
 }
 
+impl<const N1: usize, const N2: usize> BroadcastDim<Const<N2>, (Const<N1>, Const<N2>)>
+    for ShapeConstraint
+{
+    type Output = (Const<N1>, Const<N2>);
+}
+
+impl<const N1: usize, const N2: usize> BroadcastDim<(Const<N1>, Const<N2>), Const<N2>>
+    for ShapeConstraint
+{
+    type Output = (Const<N1>, Const<N2>);
+}
+
 /// Marker trait for dimension types that are not dynamic, typically used for compile-time fixed dimensions.
 pub trait NotDyn {}
 impl<const N: usize> NotDyn for Const<N> {}
