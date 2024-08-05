@@ -220,6 +220,23 @@ macro_rules! dummy_impl_repr {
             fn noop<T1: Field, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
                 todo!()
             }
+
+            fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
+                _arg: &Self::Inner<T1, D1>,
+                _upper: bool,
+            ) -> Result<Self::Inner<T1, D1>, Error> {
+                todo!()
+            }
+
+            fn row<T1: Field, D1: Dim>(
+                _arg: &Self::Inner<T1, D1>,
+                _index: usize,
+            ) -> Self::Inner<T1, crate::RowDim<D1>>
+            where
+                ShapeConstraint: crate::DimRow<D1>,
+            {
+                todo!()
+            }
         }
     };
 }
@@ -492,5 +509,37 @@ impl Repr for Op {
 
     fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone()
+    }
+
+    fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
+        arg: &Self::Inner<T1, D1>,
+        upper: bool,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        Ok(Noxpr::cholesky(arg, upper))
+        // TODO(sphw): We will need to maks out the unused triangle to ensure that it is zero,
+        // since it may be uninitialized memory or the existing values
+    }
+
+    fn row<T1: Field, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+        index: usize,
+    ) -> Self::Inner<T1, crate::RowDim<D1>>
+    where
+        ShapeConstraint: crate::DimRow<D1>,
+    {
+        let shape = D1::shape();
+        let strides = shape
+            .iter()
+            .rev()
+            .scan(1, |acc, &x| {
+                let res = *acc;
+                *acc *= x;
+                Some(res)
+            })
+            .collect::<SmallVec<[i64; 4]>>();
+        let index = index as i64;
+        arg.clone()
+            .slice(smallvec![index, 0], smallvec![index + 1, shape[1]], strides)
+            .reshape(smallvec![shape[1]])
     }
 }

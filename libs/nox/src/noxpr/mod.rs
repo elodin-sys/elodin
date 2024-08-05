@@ -1,3 +1,4 @@
+mod batch;
 mod builder;
 mod client;
 mod comp;
@@ -16,6 +17,7 @@ mod vector;
 #[cfg(feature = "jax")]
 mod py;
 
+pub use batch::*;
 pub use builder::*;
 pub use client::*;
 pub use comp::*;

@@ -1,4 +1,6 @@
 //! Provides a Matrix type alias with convenience functions for converting to various representations.
+use std::marker::PhantomData;
+
 use crate::{DefaultRepr, Error, RealField, Repr, Tensor, Vector};
 use nalgebra::Const;
 
@@ -13,13 +15,21 @@ pub type Matrix5<T, R = DefaultRepr> = Matrix<T, 5, 5, R>;
 pub type Matrix6<T, R = DefaultRepr> = Matrix<T, 6, 6, R>;
 pub type Matrix6x3<T, R = DefaultRepr> = Matrix<T, 6, 3, R>;
 
-impl<T: RealField, R: Repr> Matrix3<T, R> {
-    pub fn from_rows(rows: [Vector<T, 3, R>; 3]) -> Self {
+impl<const R: usize, const C: usize, T: RealField, Rep: Repr> Matrix<T, R, C, Rep> {
+    pub fn from_rows(rows: [Vector<T, C, Rep>; R]) -> Self {
         let arr = rows.map(|x| x.inner);
-        let inner = R::concat_many(&arr[..], 0);
+        let inner = Rep::concat_many(&arr[..], 0);
         Matrix {
             inner,
-            phantom: std::marker::PhantomData,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn row(&self, index: usize) -> Vector<T, C, Rep> {
+        let inner = Rep::row(&self.inner, index);
+        Vector {
+            inner,
+            phantom: PhantomData,
         }
     }
 }
@@ -78,6 +88,10 @@ impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
             }
             _ => R::try_lu_inverse(&self.inner).map(Tensor::from_inner),
         }
+    }
+
+    pub fn try_cholesky(&self, upper: bool) -> Result<Self, Error> {
+        R::try_cholesky(&self.inner, upper).map(Tensor::from_inner)
     }
 }
 

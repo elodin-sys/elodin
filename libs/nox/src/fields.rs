@@ -54,7 +54,7 @@ pub trait Field:
     const ELEMENT_TY: xla::ElementType;
 }
 
-pub trait RealField: Field + Neg<Output = Self> + MatMul + LU {
+pub trait RealField: Field + Neg<Output = Self> + MatMul + LU + Cholskey {
     fn sqrt(self) -> Self;
     fn cos(self) -> Self;
     fn sin(self) -> Self;
@@ -270,5 +270,36 @@ impl LU for f32 {
         info: &mut i32,
     ) {
         lapack::sgetri(n, a, lda, ipiv, work, lwork, info)
+    }
+}
+
+/// Trait for getting the choleskey decomposition of a matrix
+pub trait Cholskey: Sized {
+    /// See [`lapack::dpotrf`] or [`lapack::spotrf`] for more information
+    /// # Safety
+    /// When using these functions you need to ensure that the n, lda, and uplo values are correct
+    /// or else there could be weird memory issues.
+    unsafe fn potrf(uplo: u8, n: i32, a: &mut [Self], lda: i32, info: &mut i32);
+}
+
+impl Cholskey for f64 {
+    unsafe fn potrf(uplo: u8, n: i32, a: &mut [f64], lda: i32, info: &mut i32) {
+        // Because the LAPACK functions are written in Fortran,
+        // they expect the input to be in column-major order,
+        // but we use row-major order.
+        // So we need to ask LAPACk to use the opposite triangle.
+        let uplo = if uplo == b'U' { b'L' } else { b'U' };
+        lapack::dpotrf(uplo, n, a, lda, info)
+    }
+}
+
+impl Cholskey for f32 {
+    unsafe fn potrf(uplo: u8, n: i32, a: &mut [f32], lda: i32, info: &mut i32) {
+        // Because the LAPACK functions are written in Fortran,
+        // they expect the input to be in column-major order,
+        // but we use row-major order.
+        // So we need to ask LAPACk to use the opposite triangle.
+        let uplo = if uplo == b'U' { b'L' } else { b'U' };
+        lapack::spotrf(uplo, n, a, lda, info)
     }
 }

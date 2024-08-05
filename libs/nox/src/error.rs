@@ -60,4 +60,8 @@ pub enum Error {
 
     #[error("concat dim failed with dims")]
     InvalidConcatDims,
+
+    /// Error when matrix inversion failed
+    #[error("matrix cholesky failed with {0} arg illegal")]
+    Cholesky(i32),
 }
