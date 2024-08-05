@@ -105,6 +105,12 @@ impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
     pub fn normalize(&self) -> Self {
         self / self.norm()
     }
+
+    pub fn outer<const N2: usize>(&self, other: &Vector<T, N2, R>) -> Matrix<T, N, N2, R> {
+        let a: Matrix<T, N2, N, R> = self.clone().broadcast();
+        let b: Matrix<T, N, N2, R> = other.clone().broadcast();
+        a.transpose() * b
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +263,25 @@ mod tests {
                 -2.0, 1.0, 0.0
             ]
         )
+    }
+
+    #[test]
+    fn test_outer() {
+        let a = tensor![1.0, 2.0, 3.0];
+        let b = tensor![1.0, 2.0, 3.0];
+        let out = a.outer(&b);
+        let expected = tensor![[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [3.0, 6.0, 9.0]];
+        assert_eq!(out, expected);
+
+        let a = tensor![1.0, 0.0, 3.0];
+        let b = tensor![2.0, 2.0, 0.0];
+        let out = a.outer(&b);
+        let expected = tensor![[2.0, 2.0, 0.0], [0.0, 0.0, 0.0], [6.0, 6.0, 0.0]];
+        assert_eq!(out, expected);
+
+        let a = tensor![1.0, 2.0];
+        let b = tensor![1.0, 2.0, 3.0, 4.0];
+        let out = a.outer(&b);
+        assert_eq!(out, tensor![[1., 2., 3., 4.], [2., 4., 6., 8.]]);
     }
 }

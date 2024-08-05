@@ -24,6 +24,7 @@ impl Noxpr {
 pub struct JaxTracer {
     lax: PyObject,
     jnp: PyObject,
+    linalg: PyObject,
     cache: HashMap<NoxprId, PyObject>,
 }
 
@@ -33,9 +34,11 @@ impl JaxTracer {
         Python::with_gil(|py| {
             let lax = py.import_bound("jax.lax").unwrap().into();
             let jnp = py.import_bound("jax.numpy").unwrap().into();
+            let linalg = py.import_bound("jax.numpy.linalg").unwrap().into();
             Self {
                 lax,
                 jnp,
+                linalg,
                 cache: HashMap::new(),
             }
         })
@@ -282,6 +285,15 @@ impl JaxTracer {
                     let call_fn = call_fn.into_py(py);
                     let tuple = PyTuple::new_bound(py, args.into_iter());
                     call_fn.call1(py, tuple)
+                })?
+            }
+            NoxprNode::Cholesky(c) => {
+                let expr = self.visit(&c.arg)?;
+                Python::with_gil(|py| {
+                    let kwargs = PyDict::new_bound(py);
+                    kwargs.set_item("upper", c.upper)?;
+                    self.linalg
+                        .call_method_bound(py, "cholesky", (expr,), Some(&kwargs))
                 })?
             }
         };

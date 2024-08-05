@@ -5,7 +5,7 @@ use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
     DimGet, DotDim, Field, MapDim, TensorDim, XlaDim,
 };
-use crate::{ConstDim, Error, RealField, SquareDim, TransposeDim, TransposedDim};
+use crate::{ConstDim, DimRow, Error, RealField, RowDim, SquareDim, TransposeDim, TransposedDim};
 use nalgebra::constraint::ShapeConstraint;
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
@@ -162,4 +162,16 @@ pub trait Repr {
     ) -> Self::Inner<T1, D1>;
 
     fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
+
+    fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
+        arg: &Self::Inner<T1, D1>,
+        upper: bool,
+    ) -> Result<Self::Inner<T1, D1>, Error>;
+
+    fn row<T1: Field, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+        index: usize,
+    ) -> Self::Inner<T1, RowDim<D1>>
+    where
+        ShapeConstraint: DimRow<D1>;
 }

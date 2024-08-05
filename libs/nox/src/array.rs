@@ -330,7 +330,7 @@ macro_rules! impl_op {
                             Array::uninit(d2.as_ref());
                         let mut broadcast_dims = d2.clone();
                         if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
-                            todo!("handle unbroadcastble dims");
+                            todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d1.as_ref());
                         }
                         for ((a, b), out) in self
                             .broadcast_iter(broadcast_dims.clone())
@@ -347,7 +347,7 @@ macro_rules! impl_op {
                             Array::uninit(d2.as_ref());
                         let mut broadcast_dims = d1.clone();
                         if !cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
-                            todo!("handle unbroadcastble dims");
+                            todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d2.as_ref());
                         }
                         for ((b, a), out) in b
                             .broadcast_iter(broadcast_dims.clone())
@@ -573,12 +573,13 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         for i in indexes.as_mut().iter_mut() {
             *i = 0
         }
-        for (i, ((dim, existing_stride), new_dim)) in existing_dims
+        for ((dim, existing_stride), (i, new_dim)) in existing_dims
             .as_ref()
             .iter()
-            .zip(existing_strides.as_ref().iter())
-            .zip(new_dims.as_ref().iter())
-            .enumerate()
+            .rev()
+            .chain(std::iter::repeat(&1))
+            .zip(existing_strides.as_ref().iter().rev())
+            .zip(new_dims.as_ref().iter().enumerate().rev())
         {
             if dim == new_dim {
                 new_strides.as_mut()[i] = *existing_stride;
@@ -782,7 +783,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                 iter.zip(arg.buf.as_buf().iter()).for_each(|(a, b)| {
                     a.write(*b);
                 });
-                current_offsets[dim] += offset; // TODO: replace with appropriate stride I think
+                current_offsets[dim] += offset;
             }
 
             Ok(unsafe { out.assume_init() })
@@ -800,6 +801,22 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 
     pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
         let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(D2::DIM);
+        let in_dim = D1::dim(&self.buf);
+        assert!(
+            in_dim.as_ref().len() == D2::DIM.len(),
+            "source array rank is different than slice array"
+        );
+        for ((&out_dim, &in_dim), &offset) in D2::DIM
+            .iter()
+            .zip(in_dim.as_ref().iter())
+            .zip(offsets.iter())
+        {
+            assert!(
+                offset + out_dim <= in_dim,
+                "slice out of bounds {:?}",
+                offsets
+            );
+        }
         let iter = self.offset_iter(offsets);
         let iter = StrideIterator {
             buf: iter.buf,
@@ -938,6 +955,70 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             });
         out
     }
+
+    pub fn try_cholesky_mut(&mut self, upper: bool) -> Result<(), Error>
+    where
+        T1: RealField,
+        D1: SquareDim,
+    {
+        let uplo = if upper { b'U' } else { b'L' };
+        let mut info = 0;
+        let n = D1::order(&self.buf);
+        unsafe {
+            T1::potrf(uplo, n as i32, self.buf.as_mut_buf(), n as i32, &mut info);
+        }
+        if info < 0 {
+            return Err(Error::InvertFailed(-info));
+        }
+        if upper {
+            for i in 0..n {
+                for j in 0..i {
+                    self.buf.as_mut_buf()[i * n + j] = T1::zero_prim();
+                }
+            }
+        } else {
+            for i in 0..n {
+                for j in i + 1..n {
+                    self.buf.as_mut_buf()[i * n + j] = T1::zero_prim();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn try_cholesky(&self, upper: bool) -> Result<Self, Error>
+    where
+        T1: RealField,
+        D1: SquareDim,
+    {
+        let mut out = self.clone();
+        out.try_cholesky_mut(upper)?;
+        Ok(out)
+    }
+
+    pub fn row(&self, index: usize) -> Array<T1, RowDim<D1>>
+    where
+        ShapeConstraint: DimRow<D1>,
+    {
+        let dim = D1::dim(&self.buf);
+        let out_size = dim.as_ref()[1];
+        let mut out: Array<MaybeUninit<T1>, RowDim<D1>> = Array::uninit(&[out_size]);
+        let offsets = &[index, 0];
+        let iter = self.offset_iter(offsets);
+        let iter = StrideIterator {
+            buf: iter.buf,
+            stride: iter.stride,
+            indexes: iter.indexes,
+            offsets: iter.offsets,
+            dims: &[1, out_size],
+            phantom: PhantomData,
+            bump_index: false,
+        };
+        for (a, out) in iter.zip(out.buf.as_mut_buf().iter_mut()) {
+            out.write(*a);
+        }
+        unsafe { out.assume_init() }
+    }
 }
 
 pub trait SquareDim: ArrayDim {
@@ -1038,8 +1119,30 @@ impl<const A: usize, const B: usize> DimGet for (Const<A>, Const<B>) {
     }
 }
 
+pub trait DimColumn<D1> {
+    type ColumnDim: Dim;
+    const COLUMN_SIZE: usize;
+}
+
+pub type ColumnDim<D1> = <ShapeConstraint as DimColumn<D1>>::ColumnDim;
+
+impl<D1: Dim, const N2: usize> DimColumn<(D1, Const<N2>)> for ShapeConstraint {
+    type ColumnDim = D1;
+    const COLUMN_SIZE: usize = N2;
+}
+
+pub type RowDim<D1> = <ShapeConstraint as DimRow<D1>>::RowDim;
+
+pub trait DimRow<D1> {
+    type RowDim: Dim;
+}
+
+impl<D1: Dim, D2: Dim> DimRow<(D1, D2)> for ShapeConstraint {
+    type RowDim = D2;
+}
+
 fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
-    for (output, other) in output.iter_mut().zip(other.iter()) {
+    for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
         if *output == *other || *other == 1 {
             continue;
         }
@@ -1123,25 +1226,6 @@ where
             .map(|(&i, s): (&usize, usize)| i * s)
             .sum();
         self.buf.get(i)
-        // let indexes = self.indexes.as_mut();
-        // let dims = self.dims.as_ref();
-        // let i: usize = indexes
-        //     .iter()
-        //     .zip(self.stride.stride_iter())
-        //     .map(|(&i, s): (&usize, usize)| i * s)
-        //     .sum();
-        // let mut carry = true;
-        // for (&dim, index) in dims.iter().zip(indexes.iter_mut()).rev() {
-        //     if carry {
-        //         *index += 1;
-        //     }
-        //     carry = *index >= dim;
-        //     if carry {
-        //         *index = 0;
-        //     }
-        // }
-
-        // self.buf.get(i)
     }
 }
 
@@ -1445,6 +1529,23 @@ impl Repr for ArrayRepr {
 
     fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone()
+    }
+
+    fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
+        arg: &Self::Inner<T1, D1>,
+        upper: bool,
+    ) -> Result<Self::Inner<T1, D1>, Error> {
+        arg.try_cholesky(upper)
+    }
+
+    fn row<T1: Field, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+        index: usize,
+    ) -> Self::Inner<T1, crate::RowDim<D1>>
+    where
+        ShapeConstraint: crate::DimRow<D1>,
+    {
+        arg.row(index)
     }
 }
 
@@ -1799,4 +1900,52 @@ mod tests {
     //     ];
     //     assert_relative_eq!(a, expected_inverse, epsilon = 1e-4);
     // }
+
+    #[test]
+    fn test_cholesky() {
+        let mut a = array![[1.0, 0.0], [0.0, 1.0]];
+        a.try_cholesky_mut(true).unwrap();
+        assert_eq!(a, array![[1.0, 0.0], [0.0, 1.0]]);
+        let mut a = array![[4.0, 0.0], [0.0, 16.0]];
+        a.try_cholesky_mut(true).unwrap();
+        assert_eq!(a, array![[2.0, 0.0], [0.0, 4.0]]);
+        let a = array![[1., 2., 3.], [0., 2., 3.], [0., 0., 1.]];
+        let b = a.dot(&a.transpose());
+        println!("{:?}", b);
+        assert_relative_eq!(
+            b.try_cholesky(true).unwrap(),
+            array![
+                [3.7416575, 3.474396, 0.8017837],
+                [0., 0.9636248, 0.22237495],
+                [0., 0., 0.5547002]
+            ],
+            epsilon = 1e-6
+        );
+
+        assert_relative_eq!(
+            b.try_cholesky(false).unwrap(),
+            array![
+                [3.7416575, 0., 0.],
+                [3.474396, 0.9636248, 0.],
+                [0.8017837, 0.22237495, 0.5547002]
+            ],
+            epsilon = 1e-6
+        );
+    }
+
+    #[test]
+    fn test_broadcast_more_dims() {
+        let a = array![[1.0, 2.0], [1.0, 2.0], [1.0, 2.0]];
+        let b = array![5.0, 0.0];
+        let out = a.sub(&b);
+        assert_eq!(out, array![[-4., 2.], [-4., 2.], [-4., 2.]])
+    }
+
+    #[test]
+    fn test_row() {
+        let a = array![[1.0, 2.0], [5.0, 8.0], [9.0, 9.0]];
+        assert_eq!(array![1., 2.], a.row(0));
+        assert_eq!(array![5., 8.], a.row(1));
+        assert_eq!(array![9., 9.], a.row(2));
+    }
 }

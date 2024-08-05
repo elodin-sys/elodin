@@ -1136,6 +1136,21 @@ impl XlaOp {
         }
     }
 
+    pub fn cholesky(&self, lower: bool) -> Self {
+        let op = &self.raw;
+        let raw = unsafe {
+            cpp!([op as "const XlaOp*", lower as "bool"] -> XlaOpRaw as "XlaOp" {
+                    try {
+                        return XlaOp(Cholesky(*op, lower));
+                    }catch(std::exception& e) {
+                        return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                    }
+                }
+            )
+        };
+        self.wrap(raw)
+    }
+
     pub fn builder(&self) -> &XlaBuilder {
         &self.builder
     }
