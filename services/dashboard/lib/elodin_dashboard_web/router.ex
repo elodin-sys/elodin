@@ -62,8 +62,8 @@ defmodule ElodinDashboardWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{ElodinDashboardWeb.UserAuth, :ensure_authenticated}] do
-      live("/onboard", OnboardingLive, :view)
-      live("/onboard/:page_num", OnboardingLive, :view)
+      live("/onboard/:sub_type", OnboardingLive, :view)
+      live("/onboard/:sub_type/:page_num", OnboardingLive, :view)
     end
 
     live_session :require_onboard,

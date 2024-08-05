@@ -9,22 +9,39 @@ defmodule ElodinDashboardWeb.OnboardingLive do
   def mount(params, _, socket) do
     current_user = socket.assigns[:current_user]
 
-    {max_page, min_page} =
+    page_num = params["page_num"]
+    sub_type = params["sub_type"]
+
+    if current_user["billing_account_id"] == nil do
+      tier =
+        case sub_type do
+          "non_commercial" -> 1
+          "commercial" -> 2
+        end
+
+      {:ok, resp} =
+        Atc.create_billing_account(
+          %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
+          current_user["token"]
+        )
+
+      current_user = Map.put(current_user, "billing_account_id", resp.id)
+      page_num = "1"
+    end
+
+    {min_page, max_page} =
       IO.inspect(
         cond do
-          current_user["billing_account_id"] == nil ->
-            {0, 0}
-
           current_user["onboarding_data"] == nil ->
-            {3, 1}
+            {1, 3}
 
           true ->
-            {1000, 4}
+            {4, 1000}
         end
       )
 
     param_page =
-      case Integer.parse(params["page_num"] || "4") do
+      case Integer.parse(page_num || "4") do
         {param_page, _} -> param_page
         :error -> 4
       end
@@ -34,11 +51,12 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     if param_page != page do
       {:ok,
        socket
-       |> push_redirect(to: "/onboard/#{page}")}
+       |> push_redirect(to: "/onboard/#{sub_type}/#{page}")}
     else
       {:ok,
        socket
        |> assign(page: page)
+       |> assign(sub_type: sub_type)
        |> assign(loading: false)
        |> assign(selected_usecases: MapSet.new())}
     end
@@ -55,18 +73,15 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     {:noreply, assign(socket, :selected_usecases, selected_usecases)}
   end
 
-  def handle_event("start_trial", %{"tier" => tier}, socket) do
-    send(self(), {:start_trial, tier})
-    {:noreply, assign(socket, :loading, tier)}
-  end
-
   def handle_event("next_page", _, socket) do
     page = socket.assigns[:page] + 1
-    {:noreply, push_redirect(socket, to: "/onboard/#{page}")}
+    sub_type = socket.assigns[:sub_type]
+    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}")}
   end
 
   def handle_event("set_page", %{"page" => page}, socket) do
-    {:noreply, push_redirect(socket, to: "/onboard/#{page}")}
+    sub_type = socket.assigns[:sub_type]
+    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}")}
   end
 
   def handle_event("poll_results", %{"selected_usecases" => selected_usecases}, socket) do
@@ -76,24 +91,6 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
   def handle_event("select_example", %{"example" => example}, socket) do
     {:noreply, socket |> push_redirect(to: "/example#{example}")}
-  end
-
-  def handle_info({:start_trial, tier}, socket) do
-    {:ok, resp} =
-      Atc.create_billing_account(
-        %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
-        socket.assigns[:current_user]["token"]
-      )
-
-    page = 1
-    current_user = socket.assigns[:current_user]
-    current_user = Map.put(current_user, "billing_account_id", resp.id)
-
-    {:noreply,
-     socket
-     |> push_redirect(to: "/onboard/#{page}")
-     |> assign(:loading, false)
-     |> assign(:current_user, current_user)}
   end
 
   def handle_info({:poll_results, selected_usecases}, socket) do
@@ -250,57 +247,6 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         </clipPath>
       </defs>
     </svg>
-    """
-  end
-
-  attr(:button_text, :string, default: "START FREE 15 DAY TRIAL")
-  attr(:per_month, :boolean, default: true)
-  attr(:tier, :integer, default: nil)
-
-  def pricebox(assigns) do
-    ~H"""
-    <div class="w-[418px] bg-primary-onyx p-10 rounded-elo-xs border border-solid border-primary-creame border-opacity-10 flex-col">
-      <div class="text-4xl font-space">
-        <%= @title %>
-      </div>
-      <div class={[
-        "font-mono tracking-elo-mono-small font-medium text-sm w-full py-2",
-        @highlight_class
-      ]}>
-        <%= @users %>
-      </div>
-      <div class="text-primary-creame-60 text-lg w-full py-2">
-        <%= @subtitle %>
-      </div>
-      <div class="text-3xl w-full py-2 font-medium font-mono">
-        <%= @price %><span :if={@per_month} class="text-xl">/month</span>
-      </div>
-      <hr class="border-primary-onyx-9 my-8" />
-      <div class="font-mono text-primary-creame tracking-elo-mono-small font-medium text-sm w-full py-2">
-        INCLUDES
-      </div>
-      <ul class="font-medium space-y-2">
-        <li :for={feature <- @features} class="flex items-center">
-          <.checkbox class={@highlight_class} /> <%= feature %>
-        </li>
-      </ul>
-      <%= if @tier do %>
-        <.button
-          class={["w-full mt-8 py-6 flex justify-center", @button_class]}
-          phx-click={JS.push("start_trial", value: %{tier: @tier})}
-        >
-          <%= if @loading == @tier do %>
-            <.spinner class={["animate-spin w-8 h-4 my-[-4px] m-0", @highlight_class]} />
-          <% else %>
-            <%= @button_text %>
-          <% end %>
-        </.button>
-      <% else %>
-        <.button class={["w-full mt-8 py-6 flex justify-center", @button_class]}>
-          <%= @button_text %>
-        </.button>
-      <% end %>
-    </div>
     """
   end
 
@@ -476,73 +422,6 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         prompt: "See your template in action."
       }
     ]
-  end
-
-  def page(%{page: 0} = assigns) do
-    ~H"""
-    <div class="w-full flex min-h-full px-20 p-6 bg-primary-smoke align-stretch flex-col">
-      <div class="w-full flex h-16 justify-between">
-        <.link href="/">
-          <img src="/images/o-logo.svg" class="w-5" />
-        </.link>
-        <img
-          src={@current_user["avatar"]}
-          class="ml-elo-lg w-8 h-8 inline-block rounded-full"
-          phx-click={toggle("#user_dropdown")}
-        />
-        <.user_dropdown current_user={@current_user} />
-      </div>
-      <div class="w-full flex flex-col">
-        <div class="font-mono text-peach tracking-elo-mono-small font-medium text-sm w-full text-center">
-          PRICING
-        </div>
-        <div class="text-5xl w-full text-center mt-4 font-space">
-          Select your Plan
-        </div>
-        <div class="text-xl w-full text-center mt-4 text-primary-creame-60">
-          Try for free (no credit card required)
-        </div>
-        <div class="w-full mt-16 flex justify-center gap-8 flex-wrap">
-          <.pricebox
-            title="Non-Commercial"
-            subtitle="Perfect for students and hackers getting started on a new project."
-            button_text="START FREE 30 DAY TRIAL"
-            users="INDIVIDUALS / STUDENTS"
-            price="$50"
-            highlight_class="border-mint text-mint"
-            button_class="bg-mint border-mint"
-            features={["60 mins of Compute Credits", "Non-Commercial Usage", "Community Support"]}
-            tier={1}
-            loading={@loading}
-          />
-          <.pricebox
-            title="Commercial"
-            subtitle="For the startups and innovators of the next-generation of aerospace companies."
-            button_text="START FREE 5 DAY TRIAL"
-            users="BUSINESSES"
-            price="$500"
-            highlight_class="text-yolk"
-            button_class="bg-yolk border-yolk text-yolk"
-            features={["60,000 mins of Compute Credits", "Commercial Usage", "Advanced Support"]}
-            tier={2}
-            loading={@loading}
-          />
-          <.pricebox
-            title="Enterprise"
-            subtitle="Large organizations that need customized solutions, and dedicated support."
-            users="LARGE ORG / CORPORATIONS"
-            price="Custom"
-            per_month={false}
-            highlight_class="text-orange"
-            button_class="bg-orange border-orange text-orange"
-            button_text="CONTACT SALES"
-            features={["SSO", "Self Hosted", "ITAR Compliance"]}
-            loading={@loading}
-          />
-        </div>
-      </div>
-    </div>
-    """
   end
 
   def page(%{page: 1} = assigns) do
