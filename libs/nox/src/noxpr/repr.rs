@@ -1,6 +1,6 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{ConstDim, Error, RealField, SquareDim, TransposeDim, TransposedDim};
+use crate::{ConstDim, Elem, Error, RealField, SquareDim, TransposeDim, TransposedDim};
 use nalgebra::constraint::ShapeConstraint;
 use smallvec::{smallvec, SmallVec};
 
@@ -22,14 +22,14 @@ pub struct Buffer;
 macro_rules! dummy_impl_repr {
     ($repr_ty: tt, $inner: ty) => {
         impl Repr for $repr_ty {
-            type Inner<T: Copy, D: Dim> = $inner;
+            type Inner<T: Elem, D: Dim> = $inner;
 
             fn add<T, D1, D2>(
                 _left: &Self::Inner<T, D1>,
                 _right: &Self::Inner<T, D2>,
             ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
             where
-                T: Add<Output = T> + Copy,
+                T: Add<Output = T> + Elem,
                 D1: Dim + ArrayDim,
                 D2: Dim + ArrayDim,
                 ShapeConstraint: BroadcastDim<D1, D2>,
@@ -43,7 +43,7 @@ macro_rules! dummy_impl_repr {
                 _right: &Self::Inner<T, D2>,
             ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
             where
-                T: Sub<Output = T> + Copy,
+                T: Sub<Output = T> + Elem,
                 D1: Dim + ArrayDim,
                 D2: Dim + ArrayDim,
                 ShapeConstraint: BroadcastDim<D1, D2>,
@@ -57,7 +57,7 @@ macro_rules! dummy_impl_repr {
                 _right: &Self::Inner<T, D2>,
             ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
             where
-                T: Mul<Output = T> + Copy,
+                T: Mul<Output = T> + Elem,
                 D1: Dim + ArrayDim,
                 D2: Dim + ArrayDim,
                 ShapeConstraint: BroadcastDim<D1, D2>,
@@ -71,7 +71,7 @@ macro_rules! dummy_impl_repr {
                 _right: &Self::Inner<T, D2>,
             ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
             where
-                T: Div<Output = T> + Copy,
+                T: Div<Output = T> + Elem,
                 D1: Dim + ArrayDim,
                 D2: Dim + ArrayDim,
                 ShapeConstraint: BroadcastDim<D1, D2>,
@@ -85,7 +85,7 @@ macro_rules! dummy_impl_repr {
                 _right: &Self::Inner<T, D2>,
             ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
             where
-                T: RealField + Div<Output = T> + Copy,
+                T: RealField + Div<Output = T> + Elem,
                 D1: Dim + ArrayDim,
                 D2: Dim + ArrayDim,
                 ShapeConstraint: DotDim<D1, D2>,
@@ -223,7 +223,6 @@ macro_rules! dummy_impl_repr {
 
             fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
                 _arg: &Self::Inner<T1, D1>,
-                _upper: bool,
             ) -> Result<Self::Inner<T1, D1>, Error> {
                 todo!()
             }
@@ -245,14 +244,14 @@ dummy_impl_repr!(Buffer, xla::PjRtBuffer);
 dummy_impl_repr!(Literal, xla::Literal);
 
 impl Repr for Op {
-    type Inner<T: Copy, D: TensorDim + ArrayDim + XlaDim> = Noxpr;
+    type Inner<T: Elem, D: TensorDim + ArrayDim + XlaDim> = Noxpr;
 
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Add<Output = T> + Copy,
+        T: Add<Output = T> + Elem,
         D1: Dim,
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -266,7 +265,7 @@ impl Repr for Op {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Sub<Output = T> + Copy,
+        T: Sub<Output = T> + Elem,
         D1: Dim,
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -280,7 +279,7 @@ impl Repr for Op {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Mul<Output = T> + Copy,
+        T: Mul<Output = T> + Elem,
         D1: Dim,
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -294,7 +293,7 @@ impl Repr for Op {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Div<Output = T> + Copy,
+        T: Div<Output = T> + Elem,
         D1: Dim,
         D2: Dim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -308,7 +307,7 @@ impl Repr for Op {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: RealField + Copy,
+        T: RealField + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -513,9 +512,8 @@ impl Repr for Op {
 
     fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
         arg: &Self::Inner<T1, D1>,
-        upper: bool,
     ) -> Result<Self::Inner<T1, D1>, Error> {
-        Ok(Noxpr::cholesky(arg, upper))
+        Ok(Noxpr::cholesky(arg, false))
         // TODO(sphw): We will need to maks out the unused triangle to ensure that it is zero,
         // since it may be uninitialized memory or the existing values
     }

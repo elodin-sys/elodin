@@ -1,7 +1,7 @@
 use xla::NativeType;
 
 use crate::{
-    Builder, FromBuilder, FromOp, Noxpr, Op, SpatialForce, SpatialInertia, SpatialMotion,
+    Builder, Elem, FromBuilder, FromOp, Noxpr, Op, SpatialForce, SpatialInertia, SpatialMotion,
     SpatialTransform, TensorItem, Vector,
 };
 
@@ -19,7 +19,7 @@ impl<T: TensorItem> crate::IntoOp for SpatialMotion<T, Op> {
     }
 }
 
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialMotion<T, Op> {
+impl<T: xla::ArrayElement + NativeType + Elem> FromBuilder for SpatialMotion<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
@@ -43,7 +43,7 @@ impl<T: TensorItem> FromOp for SpatialInertia<T, Op> {
     }
 }
 
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialInertia<T, Op> {
+impl<T: xla::ArrayElement + NativeType + Elem> FromBuilder for SpatialInertia<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
@@ -67,7 +67,7 @@ impl<T: TensorItem> FromOp for SpatialForce<T, Op> {
     }
 }
 
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialForce<T, Op> {
+impl<T: xla::ArrayElement + NativeType + Elem> FromBuilder for SpatialForce<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
@@ -77,7 +77,7 @@ impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialForce<T, Op> {
     }
 }
 
-impl<T: TensorItem> FromOp for SpatialTransform<T, Op> {
+impl<T: TensorItem + Elem> FromOp for SpatialTransform<T, Op> {
     fn from_op(op: Noxpr) -> Self {
         Self {
             inner: Vector::from_op(op),
@@ -85,7 +85,7 @@ impl<T: TensorItem> FromOp for SpatialTransform<T, Op> {
     }
 }
 
-impl<T: xla::ArrayElement + NativeType> FromBuilder for SpatialTransform<T, Op> {
+impl<T: xla::ArrayElement + NativeType + Elem> FromBuilder for SpatialTransform<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {

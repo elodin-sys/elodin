@@ -1,6 +1,6 @@
 use crate::{
-    ArrayTy, Buffer, BufferArg, Client, FromHost, Literal, Matrix, MaybeOwned, Noxpr, Op, Tensor,
-    ToHost,
+    ArrayTy, Buffer, BufferArg, Client, Elem, FromHost, Literal, Matrix, MaybeOwned, Noxpr, Op,
+    Tensor, ToHost,
 };
 use nalgebra::{ArrayStorage, Const, IsContiguous, Scalar as NalgebraScalar, Storage};
 use num_traits::Zero;
@@ -10,7 +10,7 @@ use xla::{ArrayElement, NativeType};
 
 impl<T, const R: usize, const C: usize> ToHost for Matrix<T, R, C, Buffer>
 where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement,
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + Elem,
 {
     type HostTy = nalgebra::Matrix<T, Const<R>, Const<C>, ArrayStorage<T, R, C>>;
 
@@ -26,7 +26,7 @@ where
 impl<T, S, const R: usize, const C: usize> BufferArg<Matrix<T, R, C, Buffer>>
     for nalgebra::Matrix<T, Const<R>, Const<C>, S>
 where
-    T: xla::NativeType + NalgebraScalar + ArrayElement,
+    T: xla::NativeType + NalgebraScalar + ArrayElement + Elem,
     S: Storage<T, Const<R>, Const<C>>,
     S: IsContiguous,
 {
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
+impl<T: ArrayElement + NativeType + Elem, const R: usize, const C: usize> Matrix<T, R, C, Literal> {
     /// Converts a literal matrix to a constant matrix for operations within Nox.
     pub fn constant(self) -> Matrix<T, R, C, Op> {
         let inner = Noxpr::constant(
@@ -54,7 +54,7 @@ impl<T: ArrayElement + NativeType, const R: usize, const C: usize> Matrix<T, R, 
 }
 
 /// Extension trait to convert between different representations.
-pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize> {
+pub trait MatrixExt<T: ArrayElement + NativeType + Elem, const R: usize, const C: usize> {
     /// Converts the matrix to a constant matrix representation.
     fn constant(&self) -> Matrix<T, R, C, Op>;
 
@@ -68,7 +68,7 @@ pub trait MatrixExt<T: ArrayElement + NativeType, const R: usize, const C: usize
 impl<T, S, const R: usize, const C: usize> MatrixExt<T, R, C>
     for nalgebra::Matrix<T, Const<R>, Const<C>, S>
 where
-    T: xla::NativeType + NalgebraScalar + ArrayElement,
+    T: xla::NativeType + NalgebraScalar + ArrayElement + Elem,
     S: Storage<T, Const<R>, Const<C>>,
     S: IsContiguous,
 {
@@ -103,7 +103,7 @@ where
 
 impl<T, const R: usize, const C: usize> FromHost for Matrix<T, R, C, Buffer>
 where
-    T: NativeType + NalgebraScalar + ArrayElement,
+    T: NativeType + NalgebraScalar + ArrayElement + Elem,
 {
     type HostTy = nalgebra::Matrix<T, Const<R>, Const<C>, ArrayStorage<T, R, C>>;
 
@@ -115,7 +115,7 @@ where
 impl<T, const R: usize, const C: usize, const N: usize> FromHost
     for Tensor<T, (Const<R>, Const<C>, Const<N>), Buffer>
 where
-    T: NativeType + NalgebraScalar + ArrayElement,
+    T: NativeType + NalgebraScalar + ArrayElement + Elem,
 {
     type HostTy = [nalgebra::Matrix<T, Const<R>, Const<C>, ArrayStorage<T, R, C>>; N];
 
@@ -138,7 +138,7 @@ impl<T, S, const R: usize, const C: usize, const N: usize>
     BufferArg<Tensor<T, (Const<R>, Const<C>, Const<N>), Buffer>>
     for [nalgebra::Matrix<T, Const<R>, Const<C>, S>; N]
 where
-    T: xla::NativeType + NalgebraScalar + ArrayElement,
+    T: xla::NativeType + NalgebraScalar + ArrayElement + Elem,
     S: Storage<T, Const<R>, Const<C>>,
     S: IsContiguous,
 {

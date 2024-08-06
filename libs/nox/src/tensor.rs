@@ -1,10 +1,10 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
 use crate::{
-    Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, MatMul, Repr, Scalar, SquareDim, TransposeDim,
+    Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, Repr, Scalar, SquareDim, TransposeDim,
     TransposedDim,
 };
-use crate::{DefaultRepr, RealField};
+use crate::{DefaultRepr, Elem, RealField};
 use approx::{AbsDiffEq, RelativeEq};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::{smallvec, SmallVec};
@@ -59,10 +59,10 @@ pub trait TensorItem {
     type Dim: Dim;
 
     /// The primitive element that will be stored in actual memory
-    type Elem: Copy;
+    type Elem: Elem;
 }
 
-impl<T: Copy> TensorItem for T {
+impl<T: Elem> TensorItem for T {
     type Item = Scalar<T>;
     type Tensor<D> = Tensor<T, D> where D: Dim;
     type Dim = ();
@@ -101,7 +101,7 @@ impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem + Copy, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: TensorItem + Elem, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
         Self {
             inner,
@@ -129,7 +129,7 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem + Copy, D: Dim> Tensor<T, D, ArrayRepr> {
+impl<T: TensorItem + Elem, D: Dim> Tensor<T, D, ArrayRepr> {
     pub fn from_buf(buf: D::Buf<T::Elem>) -> Self {
         Self {
             inner: Array { buf },
@@ -260,7 +260,7 @@ macro_rules! impl_op {
         where
             $(T: $t_bound,)+
             $(T::Elem: $t_bound,)+
-            T: Copy + $op<Output = T>,
+            T: Elem + $op<Output = T>,
             T::Elem: $op<Output = T::Elem>,
             D1: Dim + ArrayDim,
             D2: Dim + ArrayDim,
@@ -280,7 +280,7 @@ macro_rules! impl_op {
         where
             $(T: $t_bound,)+
             $(T::Elem: $t_bound,)+
-            T: Copy + $op<Output = T>,
+            T: Elem + $op<Output = T>,
             T::Elem: $op<Output = T::Elem>,
             D1: Dim + ArrayDim,
             D2: Dim + ArrayDim,
@@ -300,7 +300,7 @@ macro_rules! impl_op {
         where
             $(T: $t_bound,)+
             $(T::Elem: $t_bound,)+
-            T: Copy + $op<Output = T>,
+            T: Elem + $op<Output = T>,
             T::Elem: $op<Output = T::Elem>,
             D1: Dim + ArrayDim,
             D2: Dim + ArrayDim,
@@ -320,7 +320,7 @@ macro_rules! impl_op {
         where
             $(T: $t_bound,)+
             $(T::Elem: $t_bound,)+
-            T: Copy + $op<Output = T>,
+            T: Elem + $op<Output = T>,
             T::Elem: $op<Output = T::Elem>,
             D1: Dim + ArrayDim,
             D2: Dim + ArrayDim,
@@ -822,7 +822,7 @@ impl<T: RealField, D1: Dim, R: Repr> Tensor<T, D1, R> {
         right: &Tensor<T, D2, R>,
     ) -> Tensor<T, <ShapeConstraint as DotDim<D1, D2>>::Output, R>
     where
-        T: MatMul + Copy,
+        T: Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -977,7 +977,7 @@ impl<T: Field, R: Repr> From<T> for Tensor<T, (), R> {
 
 impl<T: TensorItem, D: Dim, R: Repr> AbsDiffEq for Tensor<T, D, R>
 where
-    T: Copy,
+    T: Elem,
     R::Inner<T::Elem, D>: AbsDiffEq,
 {
     type Epsilon = <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon;
@@ -993,9 +993,9 @@ where
 
 impl<T: TensorItem, D: Dim, R: Repr> RelativeEq for Tensor<T, D, R>
 where
-    T: Copy,
+    T: Elem,
     R::Inner<T::Elem, D>: RelativeEq + AbsDiffEq,
-    <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon: Copy,
+    <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon: Elem,
 {
     fn default_max_relative() -> <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon {
         <R::Inner<T::Elem, D> as RelativeEq>::default_max_relative()

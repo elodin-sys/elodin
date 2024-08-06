@@ -7,7 +7,7 @@ use std::ops::Mul;
 
 use nox::{
     nalgebra::{constraint::ShapeConstraint, Const},
-    ArrayDim, DefaultRepr, Dim, DotDim, Field, MatMul, Matrix, RealField, Repr, Tensor,
+    ArrayDim, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, RealField, Repr, Tensor,
 };
 
 pub trait Frame {}
@@ -34,7 +34,7 @@ impl<T: RealField, A: Frame, B: Frame, R: Repr> DCM<T, A, B, R> {
         right: &Tensor<T, D2, R>,
     ) -> Tensor<T, <ShapeConstraint as DotDim<(Const<3>, Const<3>), D2>>::Output, R>
     where
-        T: MatMul + Copy,
+        T: Field + Elem,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<(Const<3>, Const<3>), D2>,
         <ShapeConstraint as DotDim<(Const<3>, Const<3>), D2>>::Output: Dim + ArrayDim,

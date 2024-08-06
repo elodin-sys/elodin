@@ -4,6 +4,7 @@ use crate::ArrayTy;
 use crate::Buffer;
 use crate::BufferArg;
 use crate::Client;
+use crate::Elem;
 use crate::Field;
 use crate::FromHost;
 use crate::MaybeOwned;
@@ -19,7 +20,7 @@ use num_traits::Zero;
 use smallvec::smallvec;
 use xla::{ArrayElement, NativeType};
 
-impl<T: NativeType + ArrayElement> Vector<T, 3, Op> {
+impl<T: NativeType + ArrayElement + Elem> Vector<T, 3, Op> {
     /// Extends a 3-dimensional vector to a 4-dimensional vector by appending a given element.
     pub fn extend(&self, elem: T) -> Vector<T, 4, Op> {
         let elem = elem.literal();
@@ -34,7 +35,7 @@ impl<T: NativeType + ArrayElement> Vector<T, 3, Op> {
 
 impl<T, const N: usize> ToHost for Vector<T, N, Buffer>
 where
-    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement,
+    T: xla::NativeType + NalgebraScalar + Zero + ArrayElement + Elem,
 {
     type HostTy = nalgebra::Vector<T, Const<N>, ArrayStorage<T, N, 1>>;
 
@@ -49,7 +50,7 @@ where
 
 impl<T, const R: usize> FromHost for Vector<T, R, Buffer>
 where
-    T: NativeType + Field + ArrayElement,
+    T: NativeType + Field + ArrayElement + Elem,
 {
     type HostTy = nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>;
 
@@ -67,7 +68,7 @@ where
 impl<T: TensorItem, const R: usize> BufferArg<Vector<T, R, Buffer>>
     for nalgebra::Vector<T, Const<R>, ArrayStorage<T, R, 1>>
 where
-    T: NativeType + Field + ArrayElement,
+    T: NativeType + Field + ArrayElement + Elem,
 {
     fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client

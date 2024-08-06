@@ -137,8 +137,8 @@ pub struct LineUniform {
     pub depth_bias: f32,
     pub model: Mat4,
     pub perspective: u32,
-    #[cfg(feature = "bevy_render/webgl")]
-    _padding: [f32; 3],
+    #[cfg(target_arch = "wasm32")]
+    pub _padding: [f32; 3],
 }
 
 impl LineUniform {
@@ -149,7 +149,7 @@ impl LineUniform {
             depth_bias: 0.0,
             model: Mat4::IDENTITY,
             perspective: 0,
-            #[cfg(feature = "bevy_render/webgl")]
+            #[cfg(target_arch = "wasm32")]
             _padding: Default::default(),
         }
     }
@@ -210,7 +210,7 @@ impl SpecializedRenderPipeline for LinePipeline {
         key: Self::Key,
     ) -> bevy::render::render_resource::RenderPipelineDescriptor {
         let shader_defs = vec![
-            #[cfg(feature = "bevy_render/webgl")]
+            #[cfg(target_arch = "wasm32")]
             "SIXTEEN_BYTE_ALIGNMENT".into(),
         ];
 

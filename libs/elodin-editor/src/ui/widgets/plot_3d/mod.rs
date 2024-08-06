@@ -72,6 +72,8 @@ pub fn sync_line_plot_3d(
                 depth_bias: 0.0,
                 model: Mat4::IDENTITY,
                 perspective: if line_plot.perspective { 1 } else { 0 },
+                #[cfg(target_arch = "wasm32")]
+                _padding: Default::default(),
             },
             config: LineConfig {
                 render_layers: RenderLayers::default(),
