@@ -7,11 +7,16 @@ use xla::Literal;
 
 use crate::{Repr, Scalar, TensorItem};
 
+pub trait Elem: Copy + Default {}
+
+impl<T> Elem for T where T: Copy + Default {}
+
 /// Represents a mathematical field, supporting basic arithmetic operations,
 /// matrix multiplication, and the generation of standard constants.
 pub trait Field:
     TensorItem<Elem = Self>
     + Copy
+    + Elem
     + Mul<Output = Self>
     + Add<Output = Self>
     + Sub<Output = Self>
@@ -54,7 +59,9 @@ pub trait Field:
     const ELEMENT_TY: xla::ElementType;
 }
 
-pub trait RealField: Field + Neg<Output = Self> + MatMul + LU + Cholskey {
+pub trait RealField:
+    Elem + Field + Neg<Output = Self> + faer::SimpleEntity + faer::ComplexField
+{
     fn sqrt(self) -> Self;
     fn cos(self) -> Self;
     fn sin(self) -> Self;
@@ -150,156 +157,3 @@ impl_real_closed_field!(i64, 0, 1, 2);
 impl_real_closed_field!(u16, 0, 1, 2);
 impl_real_closed_field!(u32, 0, 1, 2);
 impl_real_closed_field!(u64, 0, 1, 2);
-
-/// Trait for performing matrix multiplication.
-pub trait MatMul {
-    /// Perform a matrix multiplication.
-    ///
-    /// # Safety
-    /// Please see [`matrixmultiply::dgemm`] for safety info
-    #[allow(clippy::too_many_arguments)]
-    unsafe fn gemm(
-        m: usize,
-        k: usize,
-        n: usize,
-        alpha: Self,
-        a: *const Self,
-        rsa: isize,
-        csa: isize,
-        b: *const Self,
-        rsb: isize,
-        csb: isize,
-        beta: Self,
-        c: *mut Self,
-        rsc: isize,
-        csc: isize,
-    );
-}
-
-impl MatMul for f64 {
-    unsafe fn gemm(
-        m: usize,
-        k: usize,
-        n: usize,
-        alpha: Self,
-        a: *const Self,
-        rsa: isize,
-        csa: isize,
-        b: *const Self,
-        rsb: isize,
-        csb: isize,
-        beta: Self,
-        c: *mut Self,
-        rsc: isize,
-        csc: isize,
-    ) {
-        matrixmultiply::dgemm(m, k, n, alpha, a, rsa, csa, b, rsb, csb, beta, c, rsc, csc)
-    }
-}
-
-impl MatMul for f32 {
-    unsafe fn gemm(
-        m: usize,
-        k: usize,
-        n: usize,
-        alpha: Self,
-        a: *const Self,
-        rsa: isize,
-        csa: isize,
-        b: *const Self,
-        rsb: isize,
-        csb: isize,
-        beta: Self,
-        c: *mut Self,
-        rsc: isize,
-        csc: isize,
-    ) {
-        matrixmultiply::sgemm(m, k, n, alpha, a, rsa, csa, b, rsb, csb, beta, c, rsc, csc)
-    }
-}
-
-pub trait LU: Sized {
-    /// # Safety
-    /// When using these functions you need to ensure that the n, lda, work, and ipiv values are correct
-    /// or else there could be weird memory issues.
-    unsafe fn getrf(m: i32, n: i32, a: &mut [Self], lda: i32, ipiv: &mut [i32], info: &mut i32);
-    /// # Safety
-    /// When using these functions you need to ensure that the n, lda, work, and ipiv values are correct
-    /// or else there could be weird memory issues.
-    unsafe fn getri(
-        n: i32,
-        a: &mut [Self],
-        lda: i32,
-        ipiv: &[i32],
-        work: &mut [Self],
-        lwork: i32,
-        info: &mut i32,
-    );
-}
-
-impl LU for f64 {
-    unsafe fn getrf(m: i32, n: i32, a: &mut [f64], lda: i32, ipiv: &mut [i32], info: &mut i32) {
-        lapack::dgetrf(m, n, a, lda, ipiv, info)
-    }
-
-    unsafe fn getri(
-        n: i32,
-        a: &mut [Self],
-        lda: i32,
-        ipiv: &[i32],
-        work: &mut [Self],
-        lwork: i32,
-        info: &mut i32,
-    ) {
-        lapack::dgetri(n, a, lda, ipiv, work, lwork, info)
-    }
-}
-
-impl LU for f32 {
-    unsafe fn getrf(m: i32, n: i32, a: &mut [Self], lda: i32, ipiv: &mut [i32], info: &mut i32) {
-        lapack::sgetrf(m, n, a, lda, ipiv, info)
-    }
-
-    unsafe fn getri(
-        n: i32,
-        a: &mut [Self],
-        lda: i32,
-        ipiv: &[i32],
-        work: &mut [Self],
-        lwork: i32,
-        info: &mut i32,
-    ) {
-        lapack::sgetri(n, a, lda, ipiv, work, lwork, info)
-    }
-}
-
-/// Trait for getting the choleskey decomposition of a matrix
-pub trait Cholskey: Sized {
-    /// See [`lapack::dpotrf`] or [`lapack::spotrf`] for more information
-    /// # Safety
-    /// When using these functions you need to ensure that the n, lda, and uplo values are correct
-    /// or else there could be weird memory issues.
-    unsafe fn potrf(uplo: u8, n: i32, a: &mut [Self], lda: i32, info: &mut i32);
-}
-
-impl Cholskey for f64 {
-    unsafe fn potrf(uplo: u8, n: i32, a: &mut [f64], lda: i32, info: &mut i32) {
-        // Because the LAPACK functions are written in Fortran,
-        // they expect the input to be in column-major order,
-        // but we use row-major order.
-        // So we need to ask LAPACk to use the opposite triangle.
-        let uplo = if uplo == b'U' { b'L' } else { b'U' };
-        lapack::dpotrf(uplo, n, a, lda, info)
-    }
-}
-
-impl Cholskey for f32 {
-    unsafe fn potrf(uplo: u8, n: i32, a: &mut [f32], lda: i32, info: &mut i32) {
-        // Because the LAPACK functions are written in Fortran,
-        // they expect the input to be in column-major order,
-        // but we use row-major order.
-        // So we need to ask LAPACk to use the opposite triangle.
-        let uplo = if uplo == b'U' { b'L' } else { b'U' };
-        lapack::spotrf(uplo, n, a, lda, info)
-    }
-}

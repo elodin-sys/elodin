@@ -15,6 +15,7 @@ where
         Self(self.0.clone())
     }
 }
+
 impl<T: Field, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy {}
 
 impl<T: RealField, R: Repr> Default for Quaternion<T, R> {

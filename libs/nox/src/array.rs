@@ -1,24 +1,33 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
+use crate::{
+    AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
+    Elem, Error, Field, MapDim, RealField, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
+};
 use approx::{AbsDiffEq, RelativeEq};
+use dyn_stack::ReborrowMut;
+use faer::{
+    linalg::{
+        cholesky::llt::compute::{cholesky_in_place, cholesky_in_place_req},
+        lu::{
+            full_pivoting::compute::lu_in_place_req, partial_pivoting::inverse::invert_in_place_req,
+        },
+    },
+    Parallelism,
+};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
+use std::default::Default;
 use std::{
     marker::PhantomData,
-    mem::{self, MaybeUninit},
     ops::{Add, Div, Mul, Neg, Sub},
 };
 
-use crate::{
-    AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
-    Error, Field, MapDim, RealField, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
-};
-
 /// A struct representing an array with type-safe dimensions and element type.
-pub struct Array<T: Copy, D: ArrayDim> {
+pub struct Array<T: Elem, D: ArrayDim> {
     pub buf: D::Buf<T>,
 }
 
-impl<T: Copy, D: ArrayDim> Clone for Array<T, D>
+impl<T: Elem, D: ArrayDim> Clone for Array<T, D>
 where
     D::Buf<T>: Clone,
 {
@@ -29,11 +38,11 @@ where
     }
 }
 
-impl<T: Copy, D: ArrayDim> Copy for Array<T, D> where D::Buf<T>: Copy {}
+impl<T: Elem, D: ArrayDim> Copy for Array<T, D> where D::Buf<T>: Copy {}
 
 impl<T1, D1> Default for Array<T1, D1>
 where
-    T1: Copy,
+    T1: Elem,
     D1: ArrayDim,
     D1::Buf<T1>: Default,
 {
@@ -44,7 +53,7 @@ where
     }
 }
 
-impl<T: Copy, D: ArrayDim> std::fmt::Debug for Array<T, D>
+impl<T: Elem, D: ArrayDim> std::fmt::Debug for Array<T, D>
 where
     D::Buf<T>: std::fmt::Debug,
 {
@@ -55,57 +64,57 @@ where
 
 /// Defines an interface for array dimensions, associating buffer types and dimensionality metadata.
 pub trait ArrayDim: TensorDim {
-    type Buf<T>: ArrayBuf<T, Uninit = Self::Buf<MaybeUninit<T>>>
+    type Buf<T>: ArrayBuf<T>
     where
-        T: Copy;
+        T: Elem;
     type Dim: AsRef<[usize]> + AsMut<[usize]> + Clone;
 
     /// Returns the dimensions of the buffer.
-    fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
+    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim;
 
     /// Returns the strides of the buffer for multidimensional access.
-    fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim;
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim;
 }
 
 impl ArrayDim for ScalarDim {
-    type Buf<T> = T where T: Copy;
+    type Buf<T> = T where T: Elem;
 
     type Dim = [usize; 0];
 
-    fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         []
     }
 
-    fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         []
     }
 }
 
 impl<const D: usize> ArrayDim for Const<D> {
-    type Buf<T> = [T; D] where T: Copy;
+    type Buf<T> = [T; D] where T: Elem;
 
     type Dim = [usize; 1];
 
     #[inline]
-    fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [D]
     }
 
-    fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [1]
     }
 }
 
 impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
-    type Buf<T> = [[T; D2]; D1] where T: Copy;
+    type Buf<T> = [[T; D2]; D1] where T: Elem;
 
     type Dim = [usize; 2];
 
-    fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [D1, D2]
     }
 
-    fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [D2, 1]
     }
 }
@@ -113,14 +122,14 @@ impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
 impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
     for (Const<D1>, Const<D2>, Const<D3>)
 {
-    type Buf<T> = [[[T; D3]; D2]; D1] where T: Copy;
+    type Buf<T> = [[[T; D3]; D2]; D1] where T: Elem;
     type Dim = [usize; 3];
 
-    fn dim<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [D1, D2, D3]
     }
 
-    fn strides<T: Copy>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
         [D3 * D2, D2, 1]
     }
 }
@@ -129,32 +138,10 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
 pub trait ArrayBuf<T>: Clone {
     fn as_buf(&self) -> &[T];
     fn as_mut_buf(&mut self) -> &mut [T];
-
-    type Uninit: ArrayBuf<MaybeUninit<T>>;
-    fn uninit(dims: &[usize]) -> Self::Uninit;
-
-    /// Transitions the unitilized buffer to an initialized state
-    ///
-    /// # Safety
-    /// This function will cause undefined behavior
-    /// unless you ensure that every value in the underyling buffer is initialized
-    /// See [`MaybeUninit::assume_init`] for more information.
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self;
+    fn default(dims: &[usize]) -> Self;
 }
 
-// Size-heterogeneous transmutation (seriously unsafe!)
-// We use this for transmuting a [MaybeUninit<T>; N] to a [T; N]
-// without forcing an unnecessary copy.s
-// source: https://crates.io/crates/transmute/0.1.1
-unsafe fn transmute_no_size_check<A, B>(a: A) -> B {
-    debug_assert_eq!(mem::size_of::<A>(), mem::size_of::<B>());
-    debug_assert_eq!(mem::align_of::<A>(), mem::align_of::<B>());
-    let b = core::ptr::read(&a as *const A as *const B);
-    core::mem::forget(a);
-    b
-}
-
-impl<T: Clone + Copy> ArrayBuf<T> for ndarray::ArrayD<T> {
+impl<T: Clone + Elem> ArrayBuf<T> for ndarray::ArrayD<T> {
     fn as_buf(&self) -> &[T] {
         self.as_slice().expect("ndarray in non-standard order")
     }
@@ -163,18 +150,12 @@ impl<T: Clone + Copy> ArrayBuf<T> for ndarray::ArrayD<T> {
         self.as_slice_mut().expect("ndarray in non-standard order")
     }
 
-    type Uninit = ndarray::ArrayD<MaybeUninit<T>>;
-
-    fn uninit(dims: &[usize]) -> Self::Uninit {
-        unsafe { ndarray::ArrayD::uninit(dims).assume_init() }
-    }
-
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
-        uninit.assume_init()
+    fn default(dims: &[usize]) -> Self {
+        ndarray::ArrayD::default(dims)
     }
 }
 
-impl<T: Copy + Clone> ArrayBuf<T> for T {
+impl<T: Elem + Clone> ArrayBuf<T> for T {
     fn as_buf(&self) -> &[T] {
         core::slice::from_ref(self)
     }
@@ -183,18 +164,12 @@ impl<T: Copy + Clone> ArrayBuf<T> for T {
         core::slice::from_mut(self)
     }
 
-    type Uninit = MaybeUninit<T>;
-
-    fn uninit(_dims: &[usize]) -> Self::Uninit {
-        MaybeUninit::uninit()
-    }
-
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
-        unsafe { uninit.assume_init() }
+    fn default(_dims: &[usize]) -> Self {
+        T::default()
     }
 }
 
-impl<const D: usize, T: Copy + Clone> ArrayBuf<T> for [T; D] {
+impl<const D: usize, T: Elem + Clone> ArrayBuf<T> for [T; D] {
     fn as_buf(&self) -> &[T] {
         self
     }
@@ -203,114 +178,66 @@ impl<const D: usize, T: Copy + Clone> ArrayBuf<T> for [T; D] {
         self
     }
 
-    type Uninit = [MaybeUninit<T>; D];
-
-    fn uninit(_dims: &[usize]) -> Self::Uninit {
-        // Safety: This code is inlined from `MaybeUninit::uninit_array()`, and is
-        // safe because an unitilized array of `MaybeUninit<T>` is valid.
-        unsafe { MaybeUninit::<[MaybeUninit<T>; D]>::uninit().assume_init() }
-    }
-
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
-        unsafe { transmute_no_size_check(uninit) }
+    fn default(_dims: &[usize]) -> Self {
+        [T::default(); D]
     }
 }
 
-impl<T: Clone + Copy, const D1: usize, const D2: usize> ArrayBuf<T> for [[T; D1]; D2] {
+impl<T: Clone + Elem, const D1: usize, const D2: usize> ArrayBuf<T> for [[T; D1]; D2] {
     fn as_buf(&self) -> &[T] {
-        let ptr = self.as_ptr();
-        let len = D1 * D2;
-
-        unsafe { std::slice::from_raw_parts(ptr as *const T, len) }
+        self.as_flattened()
     }
 
     fn as_mut_buf(&mut self) -> &mut [T] {
-        let ptr = self.as_ptr();
-        let len = D1 * D2;
-
-        unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) }
+        self.as_flattened_mut()
     }
 
-    type Uninit = [[MaybeUninit<T>; D1]; D2];
-
-    fn uninit(_dims: &[usize]) -> Self::Uninit {
-        // Safety: This code is similar to the code in `MaybeUnint::unint_array()`, and is
-        // safe because an unitilized array of `MaybeUninit<T>` is valid.
-        unsafe { MaybeUninit::<[[MaybeUninit<T>; D1]; D2]>::uninit().assume_init() }
-    }
-
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
-        unsafe { transmute_no_size_check(uninit) }
+    fn default(_dims: &[usize]) -> Self {
+        [[T::default(); D1]; D2]
     }
 }
 
-impl<T: Clone + Copy, const D1: usize, const D2: usize, const D3: usize> ArrayBuf<T>
+impl<T: Clone + Elem, const D1: usize, const D2: usize, const D3: usize> ArrayBuf<T>
     for [[[T; D1]; D2]; D3]
 {
     fn as_buf(&self) -> &[T] {
-        let ptr = self.as_ptr();
-        let len = D1 * D2 * D3;
-
-        unsafe { std::slice::from_raw_parts(ptr as *const T, len) }
+        self.as_flattened().as_flattened()
     }
 
     fn as_mut_buf(&mut self) -> &mut [T] {
-        let ptr = self.as_ptr();
-        let len = D1 * D2 * D3;
-
-        unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) }
+        self.as_flattened_mut().as_flattened_mut()
     }
 
-    type Uninit = [[[MaybeUninit<T>; D1]; D2]; D3];
-
-    fn uninit(_dims: &[usize]) -> Self::Uninit {
-        unsafe { MaybeUninit::<[[[MaybeUninit<T>; D1]; D2]; D3]>::uninit().assume_init() }
-    }
-
-    unsafe fn assume_init(uninit: Self::Uninit) -> Self {
-        unsafe { transmute_no_size_check(uninit) }
+    fn default(_dims: &[usize]) -> Self {
+        [[[T::default(); D1]; D2]; D3]
     }
 }
 
 impl ArrayDim for Dyn {
-    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Copy;
+    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
 
     type Dim = SmallVec<[usize; 4]>;
 
-    fn dim<T: Copy>(buf: &Self::Buf<T>) -> Self::Dim {
+    fn dim<T: Elem>(buf: &Self::Buf<T>) -> Self::Dim {
         buf.shape().iter().copied().collect()
     }
 
-    fn strides<T: Copy>(buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Dim {
         buf.strides().iter().map(|x| *x as usize).collect()
     }
 }
 
-impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<MaybeUninit<T1>, D1> {
-    /// Constructs an uninitialized array given dimensions.
-    pub fn uninit(dims: &[usize]) -> Self {
-        Self {
-            buf: D1::Buf::<T1>::uninit(dims),
-        }
-    }
-
-    /// Transitions the array from uninitialized to initialized state, assuming all values are initialized.
-    ///
-    /// # Safety
-    /// This function will cause undefined behavior unless you ensure that every value in the underyling buffer is initialized
-    /// See [`MaybeUninit::assume_init`] for more information.
-    pub unsafe fn assume_init(self) -> Array<T1, D1> {
-        unsafe {
-            Array {
-                buf: <D1::Buf<T1>>::assume_init(self.buf),
-            }
+impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+    pub fn zeroed(dims: &[usize]) -> Self {
+        Array {
+            buf: D1::Buf::<T1>::default(dims),
         }
     }
 }
 
 macro_rules! impl_op {
     ($op:tt, $op_trait:tt, $fn_name:tt) => {
-        impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+        impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
             pub fn $fn_name<D2: ArrayDim + TensorDim + XlaDim>(
                 &self,
@@ -326,8 +253,8 @@ macro_rules! impl_op {
 
                 match d1.as_ref().len().cmp(&d2.as_ref().len()) {
                     std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
-                        let mut out: Array<MaybeUninit<T1>, BroadcastedDim<D1, D2>> =
-                            Array::uninit(d2.as_ref());
+                        let mut out: Array<T1, BroadcastedDim<D1, D2>> =
+                            Array::zeroed(d2.as_ref());
                         let mut broadcast_dims = d2.clone();
                         if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
                             todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d1.as_ref());
@@ -338,13 +265,13 @@ macro_rules! impl_op {
                             .zip(b.broadcast_iter(broadcast_dims).unwrap())
                             .zip(out.buf.as_mut_buf().iter_mut())
                         {
-                            out.write(*a $op *b);
+                            *out = *a $op *b;
                         }
-                        unsafe { out.assume_init() }
+                        out
                     }
                     std::cmp::Ordering::Greater => {
-                        let mut out: Array<MaybeUninit<T1>, BroadcastedDim<D1, D2>> =
-                            Array::uninit(d2.as_ref());
+                        let mut out: Array<T1, BroadcastedDim<D1, D2>> =
+                            Array::zeroed(d2.as_ref());
                         let mut broadcast_dims = d1.clone();
                         if !cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
                             todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d2.as_ref());
@@ -355,9 +282,9 @@ macro_rules! impl_op {
                             .zip(self.broadcast_iter(broadcast_dims).unwrap())
                             .zip(out.buf.as_mut_buf().iter_mut())
                         {
-                            out.write(*a $op *b);
+                            *out = *a $op *b;
                         }
-                        unsafe { out.assume_init() }
+                        out
                     }
                 }
             }
@@ -366,14 +293,14 @@ macro_rules! impl_op {
     }
 }
 
-impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn reshape<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, D2>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
         let d1 = D1::dim(&self.buf);
 
-        let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(d1.as_ref());
+        let mut out: Array<T1, D2> = Array::zeroed(d1.as_ref());
         let mut broadcast_dims = d1.clone();
         if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
             todo!("handle unbroadcastable dims");
@@ -383,9 +310,9 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             .unwrap()
             .zip(out.buf.as_mut_buf().iter_mut())
         {
-            out.write(*a);
+            *out = *a;
         }
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn broadcast<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
@@ -395,7 +322,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     {
         let d1 = D1::dim(&self.buf);
 
-        let mut out: Array<MaybeUninit<T1>, BroadcastedDim<D1, D2>> = Array::uninit(d1.as_ref());
+        let mut out: Array<T1, BroadcastedDim<D1, D2>> = Array::zeroed(d1.as_ref());
         let mut broadcast_dims = d1.clone();
         if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
             todo!("handle unbroadcastble dims");
@@ -405,9 +332,9 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             .unwrap()
             .zip(out.buf.as_mut_buf().iter_mut())
         {
-            out.write(*a);
+            *out = *a;
         }
-        unsafe { out.assume_init() }
+        out
     }
 }
 
@@ -418,21 +345,21 @@ impl_op!(/, Div, div);
 
 macro_rules! impl_unary_op {
     ($op_trait:tt, $fn_name:tt) => {
-        impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+        impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             pub fn $fn_name(&self) -> Array<T1, D1>
             where
                 T1: $op_trait,
             {
                 let d1 = D1::dim(&self.buf);
-                let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
+                let mut out: Array<T1, D1> = Array::zeroed(d1.as_ref());
                 self.buf
                     .as_buf()
                     .iter()
                     .zip(out.buf.as_mut_buf().iter_mut())
                     .for_each(|(a, out)| {
-                        out.write($op_trait::$fn_name(*a));
+                        *out = $op_trait::$fn_name(*a);
                     });
-                unsafe { out.assume_init() }
+                out
             }
         }
     };
@@ -443,21 +370,21 @@ impl_unary_op!(RealField, sin);
 impl_unary_op!(RealField, cos);
 impl_unary_op!(RealField, abs);
 
-impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn neg(&self) -> Array<T1, D1>
     where
         T1: Neg<Output = T1>,
     {
         let d1 = D1::dim(&self.buf);
-        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(d1.as_ref());
+        let mut out: Array<T1, D1> = Array::zeroed(d1.as_ref());
         self.buf
             .as_buf()
             .iter()
             .zip(out.buf.as_mut_buf().iter_mut())
             .for_each(|(a, out)| {
-                out.write(-*a);
+                *out = -*a;
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn transpose(&self) -> Array<T1, TransposedDim<D1>>
@@ -465,14 +392,14 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         ShapeConstraint: TransposeDim<D1>,
         TransposedDim<D1>: ConstDim,
     {
-        let mut out: Array<MaybeUninit<T1>, TransposedDim<D1>> =
-            Array::uninit(<TransposedDim<D1> as ConstDim>::DIM);
+        let mut out: Array<T1, TransposedDim<D1>> =
+            Array::zeroed(<TransposedDim<D1> as ConstDim>::DIM);
         self.transpose_iter()
             .zip(out.buf.as_mut_buf().iter_mut())
             .for_each(|(a, out)| {
-                out.write(*a);
+                *out = *a;
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn transpose_iter(&self) -> impl Iterator<Item = &'_ T1> {
@@ -612,54 +539,43 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         right: &Array<T1, D2>,
     ) -> Array<T1, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
     where
-        T1: RealField + Copy,
+        T1: RealField + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
         <ShapeConstraint as crate::DotDim<D1, D2>>::Output: Dim + ArrayDim,
     {
-        let left = self;
-        let dim_left = D1::dim(&left.buf);
-        let stride_left = D1::strides(&left.buf);
-        let dim_right = D2::dim(&right.buf);
-        let m = dim_left.as_ref().first().copied().unwrap_or(0);
-        let k = dim_right.as_ref().first().copied().unwrap_or(0);
-        let n = dim_right.as_ref().get(1).copied().unwrap_or(1);
-        let stride_right = D2::strides(&right.buf);
-        let (dims, rank) = matmul_dims(dim_left.as_ref(), dim_right.as_ref()).unwrap();
-        let dims = &dims[..rank];
-        let mut out: Array<MaybeUninit<T1>, DottedDim<D1, D2>> = Array::uninit(dims);
-        let stride_out = <crate::DottedDim<D1, D2>>::strides(&out.buf);
-        let alpha = T1::one_prim();
-        let a = left.buf.as_buf().as_ref().as_ptr();
-        let b = right.buf.as_buf().as_ref().as_ptr();
-        let rsa = stride_left.as_ref().first().copied().unwrap_or(1) as isize;
-        let csa = stride_left.as_ref().get(1).copied().unwrap_or(1) as isize;
-        let rsb = stride_right.as_ref().first().copied().unwrap_or(1) as isize;
-        let csb = stride_right.as_ref().get(1).copied().unwrap_or(1) as isize;
-        let c = out.buf.as_mut_buf().as_mut().as_mut_ptr();
-        let rsc = stride_out.as_ref().first().copied().unwrap_or(1) as isize;
-        let csc = stride_out.as_ref().get(1).copied().unwrap_or(1) as isize;
+        let dim_left = D1::dim(&self.buf);
+        let dim_left = dim_left.as_ref();
+        let (row_left, col_left) = match dim_left.as_ref().len() {
+            2 => (dim_left[0], dim_left[1]),
+            1 => (1, dim_left[0]),
+            _ => unreachable!("dot is only valid for args of rank 1 or 2"),
+        };
+        let left = faer::mat::from_row_major_slice(self.buf.as_buf(), row_left, col_left);
 
-        unsafe {
-            T1::gemm(
-                m,
-                k,
-                n,
-                alpha,
-                a,
-                rsa,
-                csa,
-                b,
-                rsb,
-                csb,
-                T1::zero_prim(),
-                c as *mut T1,
-                rsc,
-                csc,
-            );
-            out.assume_init()
-        }
+        let dim_right = D2::dim(&right.buf);
+        let dim_right = dim_right.as_ref();
+        let row_right = dim_right.as_ref().first().copied().unwrap_or(1);
+        let col_right = dim_right.as_ref().get(1).copied().unwrap_or(1);
+
+        let right = faer::mat::from_row_major_slice(right.buf.as_buf(), row_right, col_right);
+        let (dims, rank) = matmul_dims(dim_left, dim_right).unwrap();
+        let dims = &dims[..rank];
+        let mut out: Array<T1, DottedDim<D1, D2>> = Array::zeroed(dims);
+        let row_right = dims.as_ref().first().copied().unwrap_or(1);
+        let col_right = dims.as_ref().get(1).copied().unwrap_or(1);
+        let out_mat =
+            faer::mat::from_row_major_slice_mut(out.buf.as_mut_buf(), row_right, col_right);
+        faer::linalg::matmul::matmul(
+            out_mat,
+            left,
+            right,
+            None,
+            T1::one_prim(),
+            Parallelism::None,
+        );
+        out
     }
 
     /// Concatenates two arrays along the first dimension.
@@ -682,16 +598,16 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         let mut out_dims = d2.clone();
         assert_eq!(d1.as_ref().len(), d2.as_ref().len());
         out_dims.as_mut()[0] = d1.as_ref()[0] + d2.as_ref()[0];
-        let mut out: Array<MaybeUninit<T1>, ConcatDim<D1, D2>> = Array::uninit(out_dims.as_ref());
+        let mut out: Array<T1, ConcatDim<D1, D2>> = Array::zeroed(out_dims.as_ref());
         self.buf
             .as_buf()
             .iter()
             .chain(right.buf.as_buf().iter())
             .zip(out.buf.as_mut_buf().iter_mut())
             .for_each(|(a, b)| {
-                b.write(*a);
+                *b = *a;
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     /// Concatenates multiple arraysinto a single array along a specified dimension.
@@ -719,15 +635,15 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             if dim != 0 {
                 return Err(Error::InvalidConcatDims);
             }
-            let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(&[args.len()]);
+            let mut out: Array<T1, D2> = Array::zeroed(&[args.len()]);
             args.iter()
                 .flat_map(|a| a.buf.as_buf().iter())
                 .zip(out.buf.as_mut_buf().iter_mut())
                 .for_each(|(a, b)| {
-                    b.write(*a);
+                    *b = *a;
                 });
 
-            Ok(unsafe { out.assume_init() })
+            Ok(out)
         } else {
             for x in out_dims.as_mut() {
                 *x = 0;
@@ -750,7 +666,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                     }
                 }
             }
-            let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(out_dims.as_ref());
+            let mut out: Array<T1, D2> = Array::zeroed(out_dims.as_ref());
             let mut current_offsets = D2::const_dim();
             let current_offsets = current_offsets.as_mut();
             current_offsets.iter_mut().for_each(|a| *a = 0);
@@ -781,12 +697,12 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                     bump_index: false,
                 };
                 iter.zip(arg.buf.as_buf().iter()).for_each(|(a, b)| {
-                    a.write(*b);
+                    *a = *b;
                 });
                 current_offsets[dim] += offset;
             }
 
-            Ok(unsafe { out.assume_init() })
+            Ok(out)
         }
     }
 
@@ -800,7 +716,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
-        let mut out: Array<MaybeUninit<T1>, D2> = Array::uninit(D2::DIM);
+        let mut out: Array<T1, D2> = Array::zeroed(D2::DIM);
         let in_dim = D1::dim(&self.buf);
         assert!(
             in_dim.as_ref().len() == D2::DIM.len(),
@@ -828,9 +744,9 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             bump_index: false,
         };
         for (a, out) in iter.zip(out.buf.as_mut_buf().iter_mut()) {
-            out.write(*a);
+            *out = *a;
         }
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn try_lu_inverse_mut(&mut self) -> Result<(), Error>
@@ -838,35 +754,34 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         T1: RealField,
         D1: SquareDim,
     {
-        let mut work: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::dim(&self.buf).as_ref());
-        work.buf.as_mut_buf().iter_mut().for_each(|a| {
-            a.write(T1::zero_prim());
-        });
-        let mut work = unsafe { work.assume_init() };
-        let mut ipiv = D1::ipiv(&self.buf);
-        let mut info = 0;
-        let n = D1::order(&self.buf) as i32;
-        unsafe {
-            T1::getrf(n, n, self.buf.as_mut_buf(), n, ipiv.as_mut(), &mut info);
-        }
-        if info < 0 {
-            return Err(Error::InvertFailed(-info));
-        }
-        unsafe {
-            T1::getri(
-                n,
-                self.buf.as_mut_buf(),
-                n,
-                ipiv.as_mut(),
-                work.buf.as_mut_buf(),
-                n * n,
-                &mut info,
+        let n = D1::order(&self.buf);
+        let req = invert_in_place_req::<u32, T1>(n, n, Parallelism::None)
+            .map_err(|_| Error::SizeOverflow)?
+            .or(
+                lu_in_place_req::<u32, T1>(n, n, Parallelism::None, Default::default())
+                    .map_err(|_| Error::SizeOverflow)?,
             );
-        }
-        if info < 0 {
-            return Err(Error::InvertFailed(-info));
-        }
-        Ok(())
+        stackalloc::alloca_zeroed(req.unaligned_bytes_required(), move |work| {
+            let mut stack = dyn_stack::PodStack::new(work);
+            let mut perm = D1::ipiv(&self.buf);
+            let mut perm_inv = D1::ipiv(&self.buf);
+            let mut mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
+            let (_info, row_perm) = faer::linalg::lu::partial_pivoting::compute::lu_in_place(
+                mat.rb_mut(),
+                perm.as_mut(),
+                perm_inv.as_mut(),
+                Parallelism::None,
+                stack.rb_mut(),
+                Default::default(),
+            );
+            faer::linalg::lu::partial_pivoting::inverse::invert_in_place(
+                mat,
+                row_perm,
+                Parallelism::None,
+                stack,
+            );
+            Ok(())
+        })
     }
 
     pub fn try_lu_inverse(&self) -> Result<Self, Error>
@@ -884,7 +799,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         D1: ConstDim,
         T1: Field,
     {
-        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::DIM);
+        let mut out: Array<T1, D1> = Array::zeroed(D1::DIM);
         out.buf
             .as_mut_buf()
             .iter_mut()
@@ -894,9 +809,9 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                     .chain(std::iter::repeat(T1::zero_prim())),
             )
             .for_each(|(a, b)| {
-                a.write(b);
+                *a = b;
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn eye() -> Self
@@ -904,7 +819,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         D1: SquareDim + ConstDim,
         T1: Field,
     {
-        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::DIM);
+        let mut out: Array<T1, D1> = Array::zeroed(D1::DIM);
         let len = out.buf.as_buf().len();
         out.offset_iter_mut(&[0, 0, 0])
             .enumerate()
@@ -912,12 +827,12 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             .for_each(|(i, a)| {
                 let i = i.as_ref();
                 if i[0] == i[1] {
-                    a.write(T1::one_prim());
+                    *a = T1::one_prim();
                 } else {
-                    a.write(T1::zero_prim());
+                    *a = T1::zero_prim();
                 }
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn from_diag(diag: Array<T1, D1::SideDim>) -> Self
@@ -925,7 +840,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         D1: SquareDim + ConstDim,
         T1: Field,
     {
-        let mut out: Array<MaybeUninit<T1>, D1> = Array::uninit(D1::DIM);
+        let mut out: Array<T1, D1> = Array::zeroed(D1::DIM);
         let len = out.buf.as_buf().len();
         out.offset_iter_mut(&[0, 0, 0])
             .enumerate()
@@ -933,12 +848,12 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             .for_each(|(i, a)| {
                 let i = i.as_ref();
                 if i[0] == i[1] {
-                    a.write(diag.buf.as_buf()[i[0]]);
+                    *a = diag.buf.as_buf()[i[0]];
                 } else {
-                    a.write(T1::zero_prim());
+                    *a = T1::zero_prim();
                 }
             });
-        unsafe { out.assume_init() }
+        out
     }
 
     pub fn atan2(&self, other: &Self) -> Self
@@ -956,43 +871,41 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         out
     }
 
-    pub fn try_cholesky_mut(&mut self, upper: bool) -> Result<(), Error>
+    pub fn try_cholesky_mut(&mut self) -> Result<(), Error>
     where
         T1: RealField,
         D1: SquareDim,
     {
-        let uplo = if upper { b'U' } else { b'L' };
-        let mut info = 0;
         let n = D1::order(&self.buf);
-        unsafe {
-            T1::potrf(uplo, n as i32, self.buf.as_mut_buf(), n as i32, &mut info);
-        }
-        if info < 0 {
-            return Err(Error::InvertFailed(-info));
-        }
-        if upper {
-            for i in 0..n {
-                for j in 0..i {
-                    self.buf.as_mut_buf()[i * n + j] = T1::zero_prim();
-                }
-            }
-        } else {
-            for i in 0..n {
-                for j in i + 1..n {
-                    self.buf.as_mut_buf()[i * n + j] = T1::zero_prim();
-                }
+        let req = cholesky_in_place_req::<T1>(n, Parallelism::None, Default::default())
+            .map_err(|_| Error::SizeOverflow)?;
+        let mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
+        stackalloc::alloca_zeroed(req.unaligned_bytes_required(), move |work| {
+            let stack = dyn_stack::PodStack::new(work);
+            cholesky_in_place(
+                mat,
+                Default::default(),
+                Parallelism::None,
+                stack,
+                Default::default(),
+            )
+        })?;
+
+        for i in 0..n {
+            for j in i + 1..n {
+                self.buf.as_mut_buf()[i * n + j] = T1::zero_prim();
             }
         }
         Ok(())
     }
 
-    pub fn try_cholesky(&self, upper: bool) -> Result<Self, Error>
+    pub fn try_cholesky(&self) -> Result<Self, Error>
     where
         T1: RealField,
         D1: SquareDim,
     {
         let mut out = self.clone();
-        out.try_cholesky_mut(upper)?;
+        out.try_cholesky_mut()?;
         Ok(out)
     }
 
@@ -1002,7 +915,7 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     {
         let dim = D1::dim(&self.buf);
         let out_size = dim.as_ref()[1];
-        let mut out: Array<MaybeUninit<T1>, RowDim<D1>> = Array::uninit(&[out_size]);
+        let mut out: Array<T1, RowDim<D1>> = Array::zeroed(&[out_size]);
         let offsets = &[index, 0];
         let iter = self.offset_iter(offsets);
         let iter = StrideIterator {
@@ -1015,42 +928,42 @@ impl<T1: Copy, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             bump_index: false,
         };
         for (a, out) in iter.zip(out.buf.as_mut_buf().iter_mut()) {
-            out.write(*a);
+            *out = *a;
         }
-        unsafe { out.assume_init() }
+        out
     }
 }
 
 pub trait SquareDim: ArrayDim {
     type SideDim: Dim;
-    type IPIV: AsMut<[i32]>;
-    fn ipiv<T: Copy>(_buf: &Self::Buf<T>) -> Self::IPIV;
-    fn order<T: Copy>(buf: &Self::Buf<T>) -> usize;
+    type IPIV: AsMut<[u32]>;
+    fn ipiv<T: Elem>(_buf: &Self::Buf<T>) -> Self::IPIV;
+    fn order<T: Elem>(buf: &Self::Buf<T>) -> usize;
 }
 
 impl SquareDim for Dyn {
     type SideDim = Dyn;
-    type IPIV = Vec<i32>;
+    type IPIV = Vec<u32>;
 
-    fn ipiv<T: Copy>(buf: &Self::Buf<T>) -> Self::IPIV {
+    fn ipiv<T: Elem>(buf: &Self::Buf<T>) -> Self::IPIV {
         let n = buf.shape()[0];
         vec![0; n]
     }
 
-    fn order<T: Copy>(buf: &Self::Buf<T>) -> usize {
+    fn order<T: Elem>(buf: &Self::Buf<T>) -> usize {
         buf.shape()[0]
     }
 }
 
 impl<const N: usize> SquareDim for (Const<N>, Const<N>) {
     type SideDim = Const<N>;
-    type IPIV = [i32; N];
+    type IPIV = [u32; N];
 
-    fn ipiv<T: Copy>(_buf: &Self::Buf<T>) -> Self::IPIV {
+    fn ipiv<T: Elem>(_buf: &Self::Buf<T>) -> Self::IPIV {
         [0; N]
     }
 
-    fn order<T: Copy>(_buf: &Self::Buf<T>) -> usize {
+    fn order<T: Elem>(_buf: &Self::Buf<T>) -> usize {
         N
     }
 }
@@ -1087,7 +1000,7 @@ where
 pub trait DimGet: Dim {
     type Index;
 
-    fn get<T: Copy>(index: Self::Index, buf: &Self::Buf<T>) -> T;
+    fn get<T: Elem>(index: Self::Index, buf: &Self::Buf<T>) -> T;
 
     type IndexArray: AsRef<[usize]>;
     fn index_as_array(index: Self::Index) -> Self::IndexArray;
@@ -1096,7 +1009,7 @@ pub trait DimGet: Dim {
 impl<const N: usize> DimGet for Const<N> {
     type Index = usize;
 
-    fn get<T: Copy>(index: Self::Index, buf: &Self::Buf<T>) -> T {
+    fn get<T: Elem>(index: Self::Index, buf: &Self::Buf<T>) -> T {
         buf[index]
     }
 
@@ -1109,7 +1022,7 @@ impl<const N: usize> DimGet for Const<N> {
 impl<const A: usize, const B: usize> DimGet for (Const<A>, Const<B>) {
     type Index = (usize, usize);
 
-    fn get<T: Copy>((a, b): Self::Index, buf: &Self::Buf<T>) -> T {
+    fn get<T: Elem>((a, b): Self::Index, buf: &Self::Buf<T>) -> T {
         buf[a][b]
     }
 
@@ -1282,7 +1195,7 @@ where
             .zip(self.stride.stride_iter())
             .map(|(&i, s): (&usize, usize)| i * s)
             .sum();
-        unsafe { std::mem::transmute(self.buf.get_mut(i)) }
+        unsafe { self.buf.get_mut(i).map(|p| &mut *(p as *mut T)) }
     }
 }
 
@@ -1334,14 +1247,14 @@ impl<
 pub struct ArrayRepr;
 
 impl Repr for ArrayRepr {
-    type Inner<T, D: Dim> = Array<T, D> where T: Copy;
+    type Inner<T, D: Dim> = Array<T, D> where T: Elem ;
 
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Add<Output = T> + Copy,
+        T: Add<Output = T> + Elem,
         D1: ArrayDim + TensorDim + XlaDim,
         D2: ArrayDim + TensorDim + XlaDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -1355,7 +1268,7 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Sub<Output = T> + Copy,
+        T: Sub<Output = T> + Elem,
         D1: crate::Dim + ArrayDim,
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -1369,7 +1282,7 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Mul<Output = T> + Copy,
+        T: Mul<Output = T> + Elem,
         D1: crate::Dim + ArrayDim,
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -1383,7 +1296,7 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Div<Output = T> + Copy,
+        T: Div<Output = T> + Elem,
         D1: crate::Dim + ArrayDim,
         D2: crate::Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -1397,7 +1310,7 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
     where
-        T: RealField + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: crate::DotDim<D1, D2>,
@@ -1533,9 +1446,8 @@ impl Repr for ArrayRepr {
 
     fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
         arg: &Self::Inner<T1, D1>,
-        upper: bool,
     ) -> Result<Self::Inner<T1, D1>, Error> {
-        arg.try_cholesky(upper)
+        arg.try_cholesky()
     }
 
     fn row<T1: Field, D1: Dim>(
@@ -1623,7 +1535,7 @@ macro_rules! array {
     }};
 }
 
-impl<T: Copy + PartialEq, D: Dim> PartialEq for Array<T, D> {
+impl<T: Elem + PartialEq, D: Dim> PartialEq for Array<T, D> {
     fn eq(&self, other: &Self) -> bool {
         self.buf.as_buf() == other.buf.as_buf()
     }
@@ -1631,9 +1543,9 @@ impl<T: Copy + PartialEq, D: Dim> PartialEq for Array<T, D> {
 
 impl<T: AbsDiffEq, D: Dim> AbsDiffEq for Array<T, D>
 where
-    T: Copy,
+    T: Elem,
 
-    T::Epsilon: Copy,
+    T::Epsilon: Elem,
 {
     type Epsilon = T::Epsilon;
 
@@ -1648,8 +1560,8 @@ where
 
 impl<T: RelativeEq, D: Dim> RelativeEq for Array<T, D>
 where
-    T: Copy,
-    T::Epsilon: Copy,
+    T: Elem,
+    T::Epsilon: Elem,
 {
     fn default_max_relative() -> T::Epsilon {
         T::default_max_relative()
@@ -1766,7 +1678,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_concat_many() {
         let a: Array<f32, Const<3>> = Array {
             buf: [1.0, 2.0, 3.0],
@@ -1860,74 +1771,64 @@ mod tests {
         assert_relative_eq!(y.atan2(&x), array![-FRAC_PI_4, 3.0 * FRAC_PI_4]);
     }
 
-    // #[test]
-    // fn test_lu_inverse() {
-    //     let mut a = array![[1.0, 2.0], [3.0, 4.0]];
-    //     a.try_lu_inverse_mut().unwrap();
-    //     assert_eq!(a, array![[-2.0, 1.0], [1.5, -0.5]]);
+    #[test]
+    fn test_lu_inverse() {
+        let mut a = array![[1.0, 2.0], [3.0, 4.0]];
+        a.try_lu_inverse_mut().unwrap();
+        assert_relative_eq!(a, array![[-2.0, 1.0], [1.5, -0.5]]);
 
-    //     let mut a = array![[1.0, 0.0], [0.0, 1.0]];
-    //     a.try_lu_inverse_mut().unwrap();
-    //     assert_eq!(a, array![[1.0, 0.0], [0.0, 1.0]]);
+        let mut a = array![[1.0, 0.0], [0.0, 1.0]];
+        a.try_lu_inverse_mut().unwrap();
+        assert_eq!(a, array![[1.0, 0.0], [0.0, 1.0]]);
 
-    //     #[rustfmt::skip]
-    //     let mut a: Array<f64, (Const<10>, Const<10>)> = array![
-    //         [24570.1, 76805.1, 43574.6, 18894.2, -7640.97, 2261.34, 22776.7, 24861.4, 81641., 34255.6],
-    //         [12354.1, 78957.6, 5642.45, -4702.81, 63301.7, 35105.5, 35568.9, 58708.1, 45157., 65454.5],
-    //         [8302.27, 65510.6, 20473.5, 55808.1, 39832.5, 92954.5, 79581.3, 35383.3, 96110.3, 34361.5],
-    //         [30932.6, 67202.2, 21617.7, 75088.7, 71295.8, 42937.1, 26957.5, 59796.5, 35418.6, 26217.4],
-    //         [77307.7, 39452.7, 75145.5, 44098.6, 12566.9, 16471.8, 71774.6, -4106.6, 53838.2, 36685.3],
-    //         [83757.9, 17360., 8921.7, 65612.8, 90126.7, 86641.8, 21293.4, 20590.5, 13033.9, 76379.3],
-    //         [83768.9, 46348.9, 16581.3, 31374.9, 9137.27, 37604.4, 32564., 15644.9, -4805.73, 49756.],
-    //         [12081.9, 85443.3, 88681.9, 64841.1, 51603.8, 53034.5, 7805.68, 39358.2, -140.273, 84237.4],
-    //         [40253.6, 69906.9, 38533.1, 60614., 57636.5, 82128.6, 68686.8, 37255.3, 33246.1, 52798.4],
-    //         [16576.6, 37261.4, 38658.7, 91431.4, 40354.5, 9395.03, 62509.4, 28617.7, 33828.6, 60181.7]
-    //     ];
-    //     a.try_lu_inverse_mut().unwrap();
+        #[rustfmt::skip]
+         let mut a: Array<f64, (Const<10>, Const<10>)> = array![
+             [24570.1, 76805.1, 43574.6, 18894.2, -7640.97, 2261.34, 22776.7, 24861.4, 81641., 34255.6],
+             [12354.1, 78957.6, 5642.45, -4702.81, 63301.7, 35105.5, 35568.9, 58708.1, 45157., 65454.5],
+             [8302.27, 65510.6, 20473.5, 55808.1, 39832.5, 92954.5, 79581.3, 35383.3, 96110.3, 34361.5],
+             [30932.6, 67202.2, 21617.7, 75088.7, 71295.8, 42937.1, 26957.5, 59796.5, 35418.6, 26217.4],
+             [77307.7, 39452.7, 75145.5, 44098.6, 12566.9, 16471.8, 71774.6, -4106.6, 53838.2, 36685.3],
+             [83757.9, 17360., 8921.7, 65612.8, 90126.7, 86641.8, 21293.4, 20590.5, 13033.9, 76379.3],
+             [83768.9, 46348.9, 16581.3, 31374.9, 9137.27, 37604.4, 32564., 15644.9, -4805.73, 49756.],
+             [12081.9, 85443.3, 88681.9, 64841.1, 51603.8, 53034.5, 7805.68, 39358.2, -140.273, 84237.4],
+             [40253.6, 69906.9, 38533.1, 60614., 57636.5, 82128.6, 68686.8, 37255.3, 33246.1, 52798.4],
+             [16576.6, 37261.4, 38658.7, 91431.4, 40354.5, 9395.03, 62509.4, 28617.7, 33828.6, 60181.7]
+         ];
+        a.try_lu_inverse_mut().unwrap();
 
-    //     #[rustfmt::skip]
-    //     let  expected_inverse: Array<f64, (Const<10>, Const<10>)> = array![
-    //         [-0.0000100226, 3.34899e-6, 8.88045e-6, 9.55701e-6, 0.0000103527, -4.59573e-7, 0.000013572, 2.24482e-6, -0.0000248319, -5.47633e-6],
-    //         [0.0000858703, -0.000028404, -0.0000867496, -0.0000302066, -0.0000451287, 0.0000168553, -0.0000504144, -0.000040719, 0.000163731, 5.85461e-6],
-    //         [-0.000043415, 0.0000132544, 0.0000398965, 0.0000175089, 0.0000308841, -0.0000127083, 0.0000196943, 0.0000276474, -0.0000772964, -9.97593e-6],
-    //         [0.0000195235, -0.0000152707, -0.0000151017, -2.35467e-6, -0.0000144411, 5.44407e-6, -8.03035e-6, -8.26637e-6, 0.0000293996, 9.4548e-6],
-    //         [0.0000395083, -9.01866e-6, -0.0000518759, -0.0000126334, -0.0000150054, 0.0000164758, -0.0000424713, -0.0000239907, 0.0000884494, 1.77583e-6],
-    //         [-0.0000213967, 2.21527e-6, 0.0000281531, 4.94374e-6, 6.72697e-6, -3.5336e-6, 0.000015341, 0.0000136699, -0.0000350585, -9.13423e-6],
-    //         [-9.60105e-6, 5.4443e-6, 7.88212e-7, -3.35387e-6, 5.25609e-6, -7.54644e-6, 2.13287e-6, -4.36139e-6, 6.954e-6, 5.16871e-6],
-    //         [-0.000125344, 0.0000464253, 0.000126716, 0.0000579426, 0.0000603612, -0.0000382841, 0.0000876006, 0.0000614865, -0.000240183, -0.0000127178],
-    //         [9.00549e-7, 2.22589e-6, 0.0000120239, 2.6913e-6, 5.10871e-6, 3.9984e-6, -1.12099e-6, 1.35222e-6, -0.0000214447, -1.312e-6],
-    //         [-6.26086e-6, 8.06916e-6, 0.0000111363, -9.48246e-6, -8.31803e-7, 2.88266e-6, 9.86769e-6, 7.87647e-6, -0.0000243396, 8.19543e-6]
-    //     ];
-    //     assert_relative_eq!(a, expected_inverse, epsilon = 1e-4);
-    // }
+        #[rustfmt::skip]
+         let  expected_inverse: Array<f64, (Const<10>, Const<10>)> = array![
+             [-0.0000100226, 3.34899e-6, 8.88045e-6, 9.55701e-6, 0.0000103527, -4.59573e-7, 0.000013572, 2.24482e-6, -0.0000248319, -5.47633e-6],
+             [0.0000858703, -0.000028404, -0.0000867496, -0.0000302066, -0.0000451287, 0.0000168553, -0.0000504144, -0.000040719, 0.000163731, 5.85461e-6],
+             [-0.000043415, 0.0000132544, 0.0000398965, 0.0000175089, 0.0000308841, -0.0000127083, 0.0000196943, 0.0000276474, -0.0000772964, -9.97593e-6],
+             [0.0000195235, -0.0000152707, -0.0000151017, -2.35467e-6, -0.0000144411, 5.44407e-6, -8.03035e-6, -8.26637e-6, 0.0000293996, 9.4548e-6],
+             [0.0000395083, -9.01866e-6, -0.0000518759, -0.0000126334, -0.0000150054, 0.0000164758, -0.0000424713, -0.0000239907, 0.0000884494, 1.77583e-6],
+             [-0.0000213967, 2.21527e-6, 0.0000281531, 4.94374e-6, 6.72697e-6, -3.5336e-6, 0.000015341, 0.0000136699, -0.0000350585, -9.13423e-6],
+             [-9.60105e-6, 5.4443e-6, 7.88212e-7, -3.35387e-6, 5.25609e-6, -7.54644e-6, 2.13287e-6, -4.36139e-6, 6.954e-6, 5.16871e-6],
+             [-0.000125344, 0.0000464253, 0.000126716, 0.0000579426, 0.0000603612, -0.0000382841, 0.0000876006, 0.0000614865, -0.000240183, -0.0000127178],
+             [9.00549e-7, 2.22589e-6, 0.0000120239, 2.6913e-6, 5.10871e-6, 3.9984e-6, -1.12099e-6, 1.35222e-6, -0.0000214447, -1.312e-6],
+             [-6.26086e-6, 8.06916e-6, 0.0000111363, -9.48246e-6, -8.31803e-7, 2.88266e-6, 9.86769e-6, 7.87647e-6, -0.0000243396, 8.19543e-6]
+         ];
+        assert_relative_eq!(a, expected_inverse, epsilon = 1e-4);
+    }
 
     #[test]
     fn test_cholesky() {
         let mut a = array![[1.0, 0.0], [0.0, 1.0]];
-        a.try_cholesky_mut(true).unwrap();
+        a.try_cholesky_mut().unwrap();
         assert_eq!(a, array![[1.0, 0.0], [0.0, 1.0]]);
         let mut a = array![[4.0, 0.0], [0.0, 16.0]];
-        a.try_cholesky_mut(true).unwrap();
+        a.try_cholesky_mut().unwrap();
         assert_eq!(a, array![[2.0, 0.0], [0.0, 4.0]]);
         let a = array![[1., 2., 3.], [0., 2., 3.], [0., 0., 1.]];
         let b = a.dot(&a.transpose());
         println!("{:?}", b);
         assert_relative_eq!(
-            b.try_cholesky(true).unwrap(),
+            b.try_cholesky().unwrap().transpose(),
             array![
                 [3.7416575, 3.474396, 0.8017837],
                 [0., 0.9636248, 0.22237495],
                 [0., 0., 0.5547002]
-            ],
-            epsilon = 1e-6
-        );
-
-        assert_relative_eq!(
-            b.try_cholesky(false).unwrap(),
-            array![
-                [3.7416575, 0., 0.],
-                [3.474396, 0.9636248, 0.],
-                [0.8017837, 0.22237495, 0.5547002]
             ],
             epsilon = 1e-6
         );

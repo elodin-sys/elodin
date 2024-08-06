@@ -2,9 +2,9 @@ use std::{marker::PhantomData, ops::Add};
 
 use xla::{ArrayElement, NativeType};
 
-use crate::{Buffer, BufferArg, Field, MaybeOwned, Repr, Scalar, ToHost};
+use crate::{Buffer, BufferArg, Elem, Field, MaybeOwned, Repr, Scalar, ToHost};
 
-impl<T: NativeType + ArrayElement> ToHost for Scalar<T, Buffer> {
+impl<T: NativeType + ArrayElement + Elem> ToHost for Scalar<T, Buffer> {
     type HostTy = T;
 
     fn to_host(&self) -> Self::HostTy {
@@ -27,7 +27,7 @@ impl<T: Field, R: Repr> Add<T> for Scalar<T, R> {
 
 impl<T> BufferArg<Scalar<T, Buffer>> for T
 where
-    T: xla::NativeType + nalgebra::Scalar + ArrayElement + Copy,
+    T: xla::NativeType + nalgebra::Scalar + ArrayElement + Elem,
 {
     fn as_buffer(&self, client: &crate::Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
         let inner = client

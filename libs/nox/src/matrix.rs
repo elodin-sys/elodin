@@ -90,8 +90,8 @@ impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
         }
     }
 
-    pub fn try_cholesky(&self, upper: bool) -> Result<Self, Error> {
-        R::try_cholesky(&self.inner, upper).map(Tensor::from_inner)
+    pub fn try_cholesky(&self) -> Result<Self, Error> {
+        R::try_cholesky(&self.inner).map(Tensor::from_inner)
     }
 }
 

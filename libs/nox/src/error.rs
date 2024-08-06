@@ -63,5 +63,9 @@ pub enum Error {
 
     /// Error when matrix inversion failed
     #[error("matrix cholesky failed with {0} arg illegal")]
-    Cholesky(i32),
+    Cholesky(#[from] faer::linalg::cholesky::llt::CholeskyError),
+
+    /// faer stack overflow error
+    #[error("size overflow")]
+    SizeOverflow,
 }
