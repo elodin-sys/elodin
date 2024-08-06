@@ -1,4 +1,4 @@
-use crate::{Client, FromOp, FromPjrtBuffer, MaybeOwned};
+use crate::{Client, Elem, FromOp, FromPjrtBuffer, MaybeOwned};
 use nalgebra::Scalar as NalgebraScalar;
 use num_traits::Zero;
 
@@ -20,7 +20,7 @@ impl<T: TensorItem> AsBuffer for Quaternion<T, Buffer> {
     }
 }
 
-impl<T: xla::ArrayElement + NativeType> FromBuilder for Quaternion<T, Op> {
+impl<T: xla::ArrayElement + NativeType + Elem> FromBuilder for Quaternion<T, Op> {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {

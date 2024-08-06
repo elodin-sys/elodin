@@ -107,7 +107,7 @@ impl<const N: usize> MerweConfig<N> {
         let lambda = self.lambda;
         debug_assert_eq!(S, 2 * N + 1, "S must be 2 * N + 1");
         let mut i = 0;
-        let u = ((N as f64 + lambda) * sigma).try_cholesky(true)?;
+        let u = ((N as f64 + lambda) * sigma).try_cholesky()?.transpose();
         let points = [0u8; S].map(|_| {
             let point = match i {
                 0 => x.clone(),
