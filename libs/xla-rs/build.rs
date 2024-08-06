@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
         find_cuda_helper::include_cuda();
         let cuda = find_cuda_helper::find_cuda_root().unwrap();
         config
-            .include(&cuda.join("include"))
+            .include(cuda.join("include"))
             .include(&cuda)
             .define("JAX_GPU_CUDA", Some("1"))
             .define("EL_CUDA", Some("1"))

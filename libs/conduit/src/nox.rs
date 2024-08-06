@@ -1,4 +1,4 @@
-use core::mem::{self, MaybeUninit};
+use core::mem;
 use nalgebra::{Const, Dyn};
 use nox::{
     Array, ArrayDim, ArrayRepr, ConstDim, Dim, Field, Quaternion, Repr, SpatialForce,
@@ -411,7 +411,7 @@ macro_rules! impl_array_to_value_repr {
                 let ComponentValue::$prim(array) = value else {
                     return None;
                 };
-                let mut uninit = nox::Array::<MaybeUninit<$ty>, D>::uninit(array.shape());
+                let mut uninit = nox::Array::<$ty, D>::zeroed(array.shape());
                 let array = array.as_slice()?;
                 if array.len() != uninit.buf.as_buf().len() {
                     return None;
@@ -420,9 +420,9 @@ macro_rules! impl_array_to_value_repr {
                     .iter()
                     .zip(uninit.buf.as_mut_buf())
                     .for_each(|(a, b)| {
-                        b.write(*a);
+                        *b = *a;
                     });
-                Some(unsafe { uninit.assume_init() })
+                Some(uninit)
             }
         }
     };

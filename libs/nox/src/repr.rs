@@ -5,7 +5,9 @@ use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
     DimGet, DotDim, Field, MapDim, TensorDim, XlaDim,
 };
-use crate::{ConstDim, DimRow, Error, RealField, RowDim, SquareDim, TransposeDim, TransposedDim};
+use crate::{
+    ConstDim, DimRow, Elem, Error, RealField, RowDim, SquareDim, TransposeDim, TransposedDim,
+};
 use nalgebra::constraint::ShapeConstraint;
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
@@ -16,7 +18,7 @@ impl<D: ArrayDim + TensorDim + XlaDim> Dim for D {}
 pub trait Repr {
     type Inner<T, D: Dim>
     where
-        T: Copy;
+        T: Elem;
 
     /// Performs element-wise addition of two tensors, broadcasting as necessary.
     fn add<T, D1, D2>(
@@ -24,7 +26,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Add<Output = T> + Copy,
+        T: Add<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -36,7 +38,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Sub<Output = T> + Copy,
+        T: Sub<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -48,7 +50,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Mul<Output = T> + Copy,
+        T: Mul<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -60,7 +62,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
     where
-        T: Div<Output = T> + Copy,
+        T: Div<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -72,7 +74,7 @@ pub trait Repr {
         right: &Self::Inner<T, D2>,
     ) -> Self::Inner<T, <ShapeConstraint as DotDim<D1, D2>>::Output>
     where
-        T: RealField + Div<Output = T> + Copy,
+        T: RealField + Div<Output = T> + Elem,
         D1: Dim + ArrayDim,
         D2: Dim + ArrayDim,
         ShapeConstraint: DotDim<D1, D2>,
@@ -165,7 +167,6 @@ pub trait Repr {
 
     fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
         arg: &Self::Inner<T1, D1>,
-        upper: bool,
     ) -> Result<Self::Inner<T1, D1>, Error>;
 
     fn row<T1: Field, D1: Dim>(
