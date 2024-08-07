@@ -7,6 +7,7 @@ import jax.random as rng
 
 import filter
 import params
+from config import Config
 
 enable_sensor_noise = True
 
@@ -94,19 +95,17 @@ class Noise:
         self,
         seed: int,
         device: int,
-        dt: float,
         noise_covariance: float,
         bias_drift_covariance: float,
     ):
-        self.dt = dt
         self.noise_covariance = noise_covariance
         self.bias_drift_covariance = bias_drift_covariance
         self.key = rng.fold_in(rng.key(seed), device)
 
-    def drift_bias(self, bias: jax.Array, tick: SensorTick) -> jax.Array:
+    def drift_bias(self, bias: jax.Array, tick: SensorTick, dt: float) -> jax.Array:
         key = rng.fold_in(self.key, tick)
         std_dev = jnp.sqrt(self.bias_drift_covariance)
-        drift = std_dev * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * self.dt
+        drift = std_dev * rng.normal(key, shape=bias.shape, dtype=bias.dtype) * dt
         return bias + drift
 
     def sample(self, m: jax.Array, bias: jax.Array, tick: SensorTick) -> jax.Array:
@@ -116,10 +115,10 @@ class Noise:
         return m + noise + bias
 
 
-gyro_noise = Noise(0, 0, params.FAST_LOOP_TIME_STEP, 0.001, 0.001)
+gyro_noise = Noise(0, 0, 0.001, 0.001)
 init_gyro_bias = jnp.array([0.0025, 0.0001, 0.0005])
-accel_noise = Noise(0, 1, params.FAST_LOOP_TIME_STEP, 0.001, 0.0)
-mag_noise = Noise(0, 2, params.FAST_LOOP_TIME_STEP, 0.0001, 0.0)
+accel_noise = Noise(0, 1, 0.001, 0.0)
+mag_noise = Noise(0, 2, 0.0001, 0.0)
 
 
 @dataclass
@@ -144,7 +143,8 @@ def advance_sensor_tick(tick: SensorTick) -> SensorTick:
 
 @el.map
 def update_gyro_noise(tick: SensorTick, bias: GyroBias) -> GyroBias:
-    return gyro_noise.drift_bias(bias, tick)
+    dt = Config.GLOBAL.fast_loop_time_step
+    return gyro_noise.drift_bias(bias, tick, dt)
 
 
 @el.map
@@ -155,10 +155,11 @@ def gyro(
     delay: GyroLPFDelay,
     bias: GyroBias,
 ) -> tuple[GyroLPFDelay, Gyro]:
+    dt = Config.GLOBAL.fast_loop_time_step
     body_v = p.angular().inverse() @ v.angular()
     if enable_sensor_noise:
         body_v = gyro_noise.sample(body_v, bias, tick)
-    lpf = filter.BiquadLPF(params.INS_GYRO_FILTER, 1.0 / params.FAST_LOOP_TIME_STEP)
+    lpf = filter.BiquadLPF(params.INS_GYRO_FILTER, 1.0 / dt)
     new_delay = lpf.apply(delay, body_v)
     return (new_delay, new_delay[2])
 
@@ -171,10 +172,11 @@ def accel(
     delay: AccelLPFDelay,
     bias: AccelBias,
 ) -> tuple[AccelLPFDelay, Accel]:
+    dt = Config.GLOBAL.fast_loop_time_step
     body_a = p.angular().inverse() @ (a.linear() / 9.81 + jnp.array([0, 0, 1]))
     if enable_sensor_noise:
         body_a = accel_noise.sample(body_a, bias, tick)
-    lpf = filter.BiquadLPF(params.INS_ACCEL_FILTER, 1.0 / params.FAST_LOOP_TIME_STEP)
+    lpf = filter.BiquadLPF(params.INS_ACCEL_FILTER, 1.0 / dt)
     new_delay = lpf.apply(delay, body_a)
     return (new_delay, new_delay[2])
 
@@ -186,8 +188,9 @@ def mag(
     bias: MagnetometerBias,
     prev_mag: Magnetometer,
 ) -> Magnetometer:
+    dt = Config.GLOBAL.fast_loop_time_step
     data_rate = 1.0 / 100.0
-    tick_rate = round(data_rate / params.FAST_LOOP_TIME_STEP)
+    tick_rate = round(data_rate / dt)
     assert tick_rate == 9
     body_mag_ref = p.angular().inverse() @ jnp.array([0.0, 1.0, 0.0])
     if enable_sensor_noise:
