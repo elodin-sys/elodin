@@ -9,8 +9,8 @@ import params
 import util
 import motors
 import filter
+from config import Config
 
-TIME_STEP = 1.0 / params.SCHED_LOOP_RATE
 AC_ATTITUDE_THRUST_ERROR_ANGLE = 30.0 * jnp.pi / 180.0  # 30 degrees
 
 rate_pid_gains = jnp.array(
@@ -145,7 +145,7 @@ def angular_to_euler_accel_limit(att: el.Quaternion, ang_rate: jax.Array) -> jax
 # The first rotation corrects the thrust vector and the second rotation corrects the heading vector.
 def thrust_vector_rotation_angles(
     att_target: el.Quaternion, att_body: el.Quaternion
-) -> tuple[jax.Array, jnp.float64]:
+) -> tuple[jax.Array, jax.Array]:
     thrust_up = jnp.array([0.0, 0.0, 1.0])
     att_target_thrust = att_target @ thrust_up
     att_body_thrust = att_body @ thrust_up
@@ -193,6 +193,7 @@ class AttitudeController(el.Archetype):
 def rate_pid_state(
     state: RatePIDState, target: AngVelSetpoint, gyro: sensors.Gyro
 ) -> RatePIDState:
+    dt = Config.GLOBAL.dt
     e_filter = filter.LPF(
         jnp.array(
             [
@@ -201,7 +202,7 @@ def rate_pid_state(
                 params.ATC_RAT_YAW_FLTE,
             ]
         ),
-        1.0 / TIME_STEP,
+        1.0 / dt,
     )
     d_filter = filter.LPF(
         jnp.array(
@@ -211,14 +212,14 @@ def rate_pid_state(
                 params.ATC_RAT_YAW_FLTD,
             ]
         ),
-        1.0 / TIME_STEP,
+        1.0 / dt,
     )
 
     e_prev, i_prev, _ = state
     e = target - gyro
     e = e_filter.apply(e_prev, e)
-    i = i_prev + (e * TIME_STEP)
-    d = (e - e_prev) / TIME_STEP
+    i = i_prev + (e * dt)
+    d = (e - e_prev) / dt
     d = d_filter.apply(i_prev, d)
 
     return jnp.array([e, i, d])
@@ -239,7 +240,7 @@ def update_target_attitude(
     att_target: AttitudeTarget,
     euler_rate_target: EulerRateTarget,
 ) -> tuple[AttitudeTarget, EulerRateTarget]:
-    dt = TIME_STEP
+    dt = Config.GLOBAL.dt
     roll_desired, pitch_desired, yaw_rate_desired = angle_desired
     roll_target, pitch_target, yaw_target = util.quat_to_euler(att_target)
     roll_rate_target, pitch_rate_target, yaw_rate_target = euler_rate_target
@@ -336,7 +337,7 @@ def attitude_control(
                 params.ATC_RAT_YAW_FLTT,
             ]
         ),
-        1.0 / TIME_STEP,
+        Config.GLOBAL.dt,
     )
     ang_vel_body = t_filter.apply(prev_ang_vel_sp, ang_vel_body)
     return ang_vel_body

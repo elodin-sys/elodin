@@ -50,8 +50,5 @@ ATC_RAT_YAW_FLTD = 20.0  # (Hz)
 
 # Other non-Ardupilot parameters:
 
-# The default Ardupilot IMU sample rate is 1 kHz.
-# 900 Hz is the closest we can get to 1 kHz while still being a multiple of 300 Hz.
-FAST_LOOP_TIME_STEP = 1.0 / 900.0
 # Time it takes for the step response of a motor to reach 63.2% of its final value (s)
 MOT_TIME_CONST = 0.1
