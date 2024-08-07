@@ -173,7 +173,7 @@ pub fn exprs_from_edges_queries<A, B>(
             continue;
         }
         let mut to = t_query.filter(&ids);
-        match exprs.entry(ids.len()) {
+        match exprs.entry(to.len) {
             std::collections::btree_map::Entry::Occupied(mut o) => {
                 let (o_from, o_to) = o.get_mut();
                 for (a, b) in o_from.exprs.iter_mut().zip(from.exprs.iter()) {
@@ -381,6 +381,9 @@ mod tests {
         #[derive(Component)]
         struct A(Scalar<f64>);
 
+        #[derive(Component)]
+        struct B(Scalar<f64>);
+
         fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
             g.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
                 A(acc.0 + b.0)
@@ -391,6 +394,9 @@ mod tests {
         world.spawn(A(10.0.into())).id();
         world.spawn(A(100.0.into())).id();
         world.spawn(A(1000.0.into())).id();
+
+        // This entity should be ignored as it doesn't have the A component
+        world.spawn(B(10000.0.into()));
 
         let world = world.run();
         let c = world.column::<A>().unwrap();

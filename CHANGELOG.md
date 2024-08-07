@@ -1,6 +1,7 @@
 # Changelog
 
 ## [unreleased]
+- **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
 
 ## [v0.3.29]
 - Support adding `el.SpatialMotion` to `el.SpatialTransform`.
