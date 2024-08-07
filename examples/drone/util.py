@@ -1,17 +1,19 @@
-import math
 import jax
 from jax import numpy as jnp
 import elodin as el
 
 
-def motor_torque_axes(motor_angles: jax.Array) -> jax.Array:
-    def motor_position(theta: float) -> jax.Array:
-        return jnp.array([math.cos(theta), math.sin(theta), 0.0])
+def motor_positions(angles: jax.Array, distance: float) -> jax.Array:
+    # for each angle, calculate the x and y position of the motor
+    x = jnp.cos(angles)
+    y = jnp.sin(angles)
+    z = jnp.zeros_like(angles)
+    return jnp.stack([x, y, z], axis=-1) * distance
 
+
+def motor_torque_axes(motor_positions: jax.Array) -> jax.Array:
     thrust_dir = jnp.array([0.0, 0.0, 1.0])
-    return jnp.array(
-        [jnp.cross(motor_position(theta), thrust_dir) for theta in motor_angles]
-    )
+    return jnp.cross(motor_positions, thrust_dir)
 
 
 # Closeness of two quaternions in terms of the angle of rotation
