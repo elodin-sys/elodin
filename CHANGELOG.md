@@ -1,6 +1,8 @@
 # Changelog
 
 ## [unreleased]
+
+## [v0.3.30]
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
 
 ## [v0.3.29]
@@ -302,7 +304,8 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Remember window size on restart.
 - Add configurable labels for component elements.
 
-[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.29...HEAD
+[unreleased]: https://github.com/elodin-sys/paracosm/compare/v0.3.30...HEAD
+[v0.3.29]: https://github.com/elodin-sys/paracosm/compare/v0.3.29...v0.3.30
 [v0.3.29]: https://github.com/elodin-sys/paracosm/compare/v0.3.28...v0.3.29
 [v0.3.28]: https://github.com/elodin-sys/paracosm/compare/v0.3.27...v0.3.28
 [v0.3.27]: https://github.com/elodin-sys/paracosm/compare/v0.3.26...v0.3.27
