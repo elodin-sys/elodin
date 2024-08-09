@@ -23,7 +23,7 @@ let
     mixFodDeps = beam_pkgs.fetchMixDeps {
       inherit src version;
       pname = "mix-deps-dashboard";
-      hash = "sha256-0QW6ZWijhQ12n9qxPgn67qUw6vghL8D/qAFT+ZGeTfM=";
+      hash = "sha256-UX6tSUTgEN1KiuiNed63wffmIYx0HnQgkqZlD2uWRO8=";
     };
     ELODIN_TYPES_PATH = "./vendor/elodin_types";
     preConfigure = ''
@@ -37,6 +37,7 @@ let
       cp -R --no-preserve=mode,ownership  ${../services/dashboard/priv/static/images} ./priv/static/images
     '';
     postBuild = ''
+      mix ua_inspector.download --force
       mix assets.deploy
     '';
   };
