@@ -59,6 +59,7 @@ defmodule ElodinDashboard.MixProject do
       {:protobuf, "~> 0.12.0"},
       {:poolboy, "~> 1.5.1"},
       elodin_types_dep(),
+      {:ua_inspector, "~> 3.0"},
       {:uuid, "~> 1.1"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]

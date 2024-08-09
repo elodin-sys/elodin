@@ -11,6 +11,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
     page_num = params["page_num"]
     sub_type = params["sub_type"]
+    ignore_device = params["ignore_device"] == "1"
 
     if current_user["billing_account_id"] == nil do
       tier =
@@ -28,6 +29,12 @@ defmodule ElodinDashboardWeb.OnboardingLive do
       current_user = Map.put(current_user, "billing_account_id", resp.id)
       page_num = "1"
     end
+
+    device_type =
+      case UAInspector.parse(get_connect_info(socket, :user_agent)) do
+        %UAInspector.Result{device: %UAInspector.Result.Device{type: dt}} -> dt
+        _ -> "unknown"
+      end
 
     {min_page, max_page} =
       IO.inspect(
@@ -49,14 +56,18 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     page = max(min(param_page, max_page), min_page)
 
     if param_page != page do
+      query = if(ignore_device, do: "?ignore_device=1", else: "")
+
       {:ok,
        socket
-       |> push_redirect(to: "/onboard/#{sub_type}/#{page}")}
+       |> push_redirect(to: "/onboard/#{sub_type}/#{page}#{query}")}
     else
       {:ok,
        socket
        |> assign(page: page)
        |> assign(sub_type: sub_type)
+       |> assign(is_desktop: device_type == "desktop")
+       |> assign(ignore_device: ignore_device)
        |> assign(loading: false)
        |> assign(selected_usecases: MapSet.new())}
     end
@@ -73,15 +84,21 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     {:noreply, assign(socket, :selected_usecases, selected_usecases)}
   end
 
+  def handle_event("hide_not_supported_warning", _, socket) do
+    {:noreply, assign(socket, :ignore_device, true)}
+  end
+
   def handle_event("next_page", _, socket) do
     page = socket.assigns[:page] + 1
     sub_type = socket.assigns[:sub_type]
-    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}")}
+    query = if(socket.assigns[:ignore_device], do: "?ignore_device=1", else: "")
+    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}#{query}")}
   end
 
   def handle_event("set_page", %{"page" => page}, socket) do
     sub_type = socket.assigns[:sub_type]
-    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}")}
+    query = if(socket.assigns[:ignore_device], do: "?ignore_device=1", else: "")
+    {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}#{query}")}
   end
 
   def handle_event("poll_results", %{"selected_usecases" => selected_usecases}, socket) do
@@ -867,14 +884,42 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     """
   end
 
+  def not_supported_device_warning(assigns) do
+    ~H"""
+    <div class="flex flex-col min-h-full justify-center overflow-hidden bg-primary-smoke">
+      <div class="flex flex-col gap-4 bg-primary-onyx text-primary-creame p-10 mx-auto max-w-[300px] rounded border border-primary-creame-10">
+        <h2 class="font-normal text-2xl">
+          Your account is half created - but please finish on a desktop.
+        </h2>
+
+        <p class="text-primary-creame-60 pb-6">
+          Elodin is built for a desktop experience. Mobile is not yet optimized at this time.
+        </p>
+
+        <.button type="secondary" class="py-4 px-6" phx-click={JS.push("hide_not_supported_warning")}>
+          GIVE IT A TRY REGARDLESS
+        </.button>
+
+        <.link href="https://www.elodin.systems/">
+          <.button class="py-4 px-6">RETURN TO ELODIN.SYSTEMS</.button>
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
   def render(assigns) do
     ~H"""
-    <.page
-      page={@page}
-      loading={@loading}
-      selected_usecases={@selected_usecases}
-      current_user={@current_user}
-    />
+    <%= if @ignore_device || @is_desktop do %>
+      <.page
+        page={@page}
+        loading={@loading}
+        selected_usecases={@selected_usecases}
+        current_user={@current_user}
+      />
+    <% else %>
+      <.not_supported_device_warning />
+    <% end %>
     """
   end
 end
