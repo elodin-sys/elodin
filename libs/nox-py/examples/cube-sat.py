@@ -499,18 +499,47 @@ def rw_effector(
     )
 
 
+J2 = 1.08262668e-3
+
+
+Radius = Annotated[
+    jax.Array,
+    el.Component("radius", el.ComponentType(el.PrimitiveType.F64, ())),
+]
+
+
 @el.map
 def gravity_effector(
     _: Goal,
     force: el.Force,
     a_pos: el.WorldPos,
     a_inertia: el.Inertia,
-) -> el.Force:
+) -> tuple[el.Force, Radius]:
     r = a_pos.linear()
     m = a_inertia.mass()
     norm = la.norm(r)
-    f = G * M * m * r / (norm * norm * norm)
-    return force + el.SpatialForce(linear=-f)
+    e_r = r / norm
+    mu = G * M
+    f = -mu * m * r / (norm * norm * norm)
+    z = r[2]
+    e_z = np.array([0.0, 0.0, 1.0])
+    j2 = (
+        -mu
+        * m
+        * J2
+        * earth_radius**2
+        * (
+            3 * z / (norm**5) * e_z
+            + (3.0 / (2.0 * norm**4) - 15.0 * z**2 / (2.0 * norm**6.0)) * e_r
+        )
+    )
+    # j2 = -mu * m * r / (norm ** 3) * ( 1 - (3/2) * J2 * (earth_radius / norm) ** 2 * (5 * z ** 2 / norm ** 2 - np.array([1, 1, 3])))
+    return (force + el.SpatialForce(linear=f + j2), norm)
+
+
+@dataclass
+class Debug(el.Archetype):
+    radius: Radius
 
 
 w = el.World()
@@ -534,6 +563,7 @@ sat = w.spawn(
         KalmanFilter(
             np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
         ),
+        Debug(0.0),
         w.glb("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"),
     ],
     name="OreSat",
