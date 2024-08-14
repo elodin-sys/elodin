@@ -12,7 +12,7 @@ use roci::{
 };
 use roci_macros::{Componentize, Decomponentize};
 
-#[derive(Debug, Default, Componentize, Decomponentize)]
+#[derive(Debug, Default, Componentize, Decomponentize, Metadatatize)]
 struct World {
     #[roci(entity_id = 3, component_id = "world_pos")]
     world_pos: SpatialTransform<f64, ArrayRepr>,
