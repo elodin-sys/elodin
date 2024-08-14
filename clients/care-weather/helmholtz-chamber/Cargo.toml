@@ -10,3 +10,4 @@ repository.workspace = true
 [dependencies]
 serialport = "4.3.0"
 roci.workspace = true
+roci.features = ["tokio", "std"]

@@ -1,13 +1,16 @@
+use std::path::PathBuf;
+
 use roci::{
     combinators::PipeExt,
     drivers::{os_sleep_driver, Driver, Hz},
-    tokio, Componentize, Decomponentize,
+    tokio, Componentize, Decomponentize, Metadatatize,
 };
 use serde::{Deserialize, Serialize};
 
 mod control;
 mod determination;
 mod guidance;
+mod log;
 pub mod mcu;
 mod sim_adapter;
 
@@ -29,6 +32,7 @@ pub struct Config {
     guidance: guidance::GuidanceConfig,
     control: control::ControlConfig,
     mcu: mcu::McuConfig,
+    data_log_path: PathBuf,
 }
 
 impl Config {
@@ -55,10 +59,11 @@ fn main() -> anyhow::Result<()> {
         guidance,
         control,
         mcu,
+        data_log_path,
     } = config;
-    let det = determination::Determination::new(determination);
+    let det = determination::Determination::<HZ>::new(determination);
     let _guidance = guidance::Guidance::<HZ>::new(guidance.sigma_r0r);
-    let control = control::Control::new(control);
+    let control = control::Control::<HZ>::new(control);
     let (tx, _) = tokio::tcp_connect::<Hz<HZ>>(
         "127.0.0.1:2240".parse().unwrap(),
         &[],
@@ -68,6 +73,8 @@ fn main() -> anyhow::Result<()> {
     let mut mcu_driver = mcu::McuDriver::new(mcu, gnc_system)?;
     mcu_driver.print_info().unwrap();
     let sim_adapter = sim_adapter::SimAdapter;
-    os_sleep_driver(mcu_driver.pipe(sim_adapter).pipe(tx)).run();
+    let csv_logger = roci::csv::CSVLogger::<log::World, Hz<HZ>>::try_from_path(data_log_path)?;
+
+    os_sleep_driver(sim_adapter.pipe(mcu_driver).pipe(tx).pipe(csv_logger)).run();
     Ok(())
 }

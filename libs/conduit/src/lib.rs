@@ -22,6 +22,8 @@ mod util;
 #[cfg(feature = "well-known")]
 pub mod well_known;
 
+mod primitives;
+
 pub use assets::*;
 pub use error::*;
 pub use types::*;
@@ -44,8 +46,8 @@ mod polars;
 #[cfg(all(feature = "std", feature = "polars"))]
 pub use polars::PolarsWorld;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "tokio")]
 mod replay;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "tokio")]
 pub use replay::*;

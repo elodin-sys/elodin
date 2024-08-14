@@ -1,5 +1,5 @@
 use nox::{ArrayRepr, SpatialTransform};
-use roci::{drivers::Hz, Componentize, Decomponentize, System};
+use roci::{drivers::Hz, Componentize, Decomponentize, Metadatatize, System};
 
 use crate::NavData;
 
@@ -10,7 +10,7 @@ pub struct World {
     inertial_pos: SpatialTransform<f64, ArrayRepr>,
 }
 
-#[derive(Default, Componentize, Decomponentize)]
+#[derive(Default, Componentize, Decomponentize, Metadatatize)]
 pub struct TxWorld {
     // out
     #[roci(entity_id = 0, component_id = "world_pos")]

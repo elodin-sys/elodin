@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader};
 
+use roci::Metadatatize;
 use roci::{
     combinators::PipeExt,
     conduit::Query,
@@ -20,7 +21,7 @@ impl<const H: usize> Chamber<H> {
     }
 }
 
-#[derive(Default, Componentize, Decomponentize, Debug)]
+#[derive(Default, Componentize, Decomponentize, Debug, Metadatatize)]
 pub struct World {
     #[roci(entity_id = 0, component_id = "mag_ref")]
     mag_ref: [f64; 3],

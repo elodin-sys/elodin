@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 roci.workspace = true
+roci.features = ["tokio", "std", "csv"]
 conduit.workspace = true
 conduit.features = ["nox"]
 conduit.default-features = false

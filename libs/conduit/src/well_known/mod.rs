@@ -10,7 +10,6 @@ mod bevy_conv;
 mod camera;
 mod metadata;
 mod pbr;
-mod primitives;
 mod viewer;
 
 pub use camera::*;

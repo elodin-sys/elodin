@@ -8850,14 +8850,16 @@ name = "roci"
 version = "0.1.0"
 dependencies = [
  "bbqueue",
+ "bytes",
  "conduit",
  "crossbeam",
+ "csv",
  "fastrand 2.1.0",
- "flume",
  "heapless 0.8.0",
  "nix 0.29.0",
  "nox",
  "roci-macros",
+ "serde",
  "spin",
  "thingbuf",
  "tokio",
