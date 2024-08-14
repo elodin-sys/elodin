@@ -1,8 +1,7 @@
+use bytes::{buf::UninitSlice, BufMut};
 use conduit::{
-    bytes::{buf::UninitSlice, BufMut},
-    ser_de::Frozen,
-    Component, ComponentId, ComponentValue, ComponentValueDim, ConstComponent, EntityId, Metadata,
-    ValueRepr,
+    ser_de::Frozen, Component, ComponentId, ComponentValue, ComponentValueDim, ConstComponent,
+    EntityId, ValueRepr,
 };
 use heapless::FnvIndexMap;
 use tracing::warn;
@@ -11,20 +10,12 @@ use crate::{Componentize, Decomponentize};
 
 pub struct Column<V: ValueRepr + Component + ConstComponent, const N: usize> {
     map: FnvIndexMap<EntityId, V, N>,
-    metadata: Metadata,
 }
 
 impl<V: ValueRepr + Component + ConstComponent, const N: usize> Column<V, N> {
     pub fn new() -> Self {
-        let metadata = Metadata {
-            name: V::NAME.into(),
-            component_type: V::TY,
-            tags: Default::default(),
-            asset: V::ASSET,
-        };
         Self {
             map: Default::default(),
-            metadata,
         }
     }
 }
@@ -60,14 +51,6 @@ impl<V: ValueRepr + Component + ConstComponent, const N: usize> Componentize for
             output.apply_value(ComponentId::new(V::NAME), *id, value);
         });
     }
-
-    fn get_metadata(&self, component_id: ComponentId) -> Option<&Metadata> {
-        if component_id == ComponentId::new(V::NAME) {
-            Some(&self.metadata)
-        } else {
-            None
-        }
-    }
 }
 
 #[derive(Default)]
@@ -100,7 +83,7 @@ unsafe impl<const N: usize> BufMut for FixedBuffer<N> {
         self.0.set_len(pos);
     }
 
-    fn chunk_mut(&mut self) -> &mut conduit::bytes::buf::UninitSlice {
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
         let len = self.0.len();
 
         let ptr = self.0.as_mut_ptr();

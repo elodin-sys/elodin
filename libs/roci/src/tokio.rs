@@ -255,10 +255,6 @@ impl Componentize for Option<RxChannel> {
             }
         }
     }
-
-    fn get_metadata(&self, _component_id: ComponentId) -> Option<&Metadata> {
-        None
-    }
 }
 
 impl<D: DriverMode> System for Rx<D> {
@@ -299,10 +295,6 @@ impl Decomponentize for Option<TxChannel> {
 
 impl Componentize for Option<TxChannel> {
     fn sink_columns(&self, _output: &mut impl Decomponentize) {}
-
-    fn get_metadata(&self, _component_id: ComponentId) -> Option<&Metadata> {
-        None
-    }
 }
 
 impl<D: DriverMode> System for Tx<D> {

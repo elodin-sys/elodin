@@ -7,6 +7,7 @@ use syn::Ident;
 
 mod componentize;
 mod decomponentize;
+mod metadatatize;
 
 #[derive(Debug, FromField)]
 #[darling(attributes(roci))]
@@ -25,6 +26,11 @@ pub fn componentize(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Decomponentize, attributes(roci))]
 pub fn decomponentize(input: TokenStream) -> TokenStream {
     decomponentize::decomponentize(input)
+}
+
+#[proc_macro_derive(Metadatatize, attributes(roci))]
+pub fn metadatize(input: TokenStream) -> TokenStream {
+    metadatatize::metadatatize(input)
 }
 
 pub(crate) fn roci_crate_name() -> proc_macro2::TokenStream {

@@ -178,7 +178,6 @@ impl State {
     /// Resets the state if any parameter is non-finite
     pub fn reset_if_invalid(&mut self) {
         if self.is_non_finite() {
-            println!("reset");
             self.q_hat = Quaternion::identity();
             self.b_hat = Vector::zeros();
             self.p = Matrix::eye();
