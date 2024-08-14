@@ -1,9 +1,9 @@
 use crate::{concat_str, Asset, ComponentType};
 
+use alloc::vec::Vec;
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-
 use core::marker::PhantomData;
+use serde::{Deserialize, Serialize};
 
 use crate::Component;
 
