@@ -16,30 +16,6 @@
     <.live_title>
       <%= assigns[:page_title] || "Elodin" %>
     </.live_title>
-    <script>
-      (function () {
-        var script = document.createElement("script");
-        script.onload = () => {
-          // Grafana Faro WebSdk for Real User Metrics (RUM) Observability
-          // https://grafana.com/docs/grafana-cloud/monitor-applications/frontend-observability/faro-web-sdk/
-          var is_prod = window.location.host.includes('elodin.systems');
-          var app_id = is_prod ? '76f1358c78a12ff44f8c6c4c1f9eb602' : '5cba6fd7267e4853d08a98ea40a68678';
-          var app_name = is_prod ? 'elodin-app' : 'elodin-dev';
-
-          window.GrafanaFaroWebSdk.initializeFaro({
-            url: 'https://faro-collector-prod-us-west-0.grafana.net/collect/' + app_id,
-            app: {
-              name: app_name,
-              version: "1.0.0",
-            },
-          });
-        };
-
-        script.src =
-          "https://unpkg.com/@grafana/faro-web-sdk@^1.0.0/dist/bundle/faro-web-sdk.iife.js";
-        document.head.appendChild(script);
-      })();
-    </script>
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>

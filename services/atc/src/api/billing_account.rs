@@ -56,7 +56,8 @@ impl Api {
         .await?;
         if existing_accounts.is_empty() {
             let (price_id, trial_length) =
-                get_price_id_and_trial(&self.stripe_plans_config, req.trial_license_type())?;
+                get_price_id_and_trial(&self.stripe_plans_config, req.trial_license_type())
+                    .ok_or(Error::InvalidLicenseType)?;
             let trial_end = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()

@@ -9,7 +9,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
   def mount(params, _, socket) do
     current_user = socket.assigns[:current_user]
 
-    page_num = params["page_num"]
+    page_num = params["page_num"] || "1"
     sub_type = params["sub_type"]
     ignore_device = params["ignore_device"] == "1"
 
@@ -199,7 +199,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <%= @title %>
         </div>
         <div class="flex w-full items-center justify-between">
-          <pre class="inline overflow-scroll"><span class="select-none">$ </span><span class="select-all" id="download-code"><%= @code %></span></pre>
+          <pre class="inline overflow-x-auto"><span class="select-none">$ </span><span class="select-all" id="download-code"><%= @code %></span></pre>
           <span class="ml-4">
             <span
               class="hover:opacity-75 transition-all cursor-pointer"

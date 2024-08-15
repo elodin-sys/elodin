@@ -203,16 +203,14 @@ fn sub_status_active(status: &stripe::SubscriptionStatus) -> bool {
 pub fn get_price_id_and_trial(
     stripe_plans_config: &StripePlansConfig,
     license_type: elodin_types::api::LicenseType,
-) -> Result<(String, u64), Error> {
+) -> Option<(String, u64)> {
     match license_type {
-        elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => {
-            Err(Error::InvalidLicenseType)
-        }
-        elodin_types::api::LicenseType::NonCommercial => Ok((
+        elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => None,
+        elodin_types::api::LicenseType::NonCommercial => Some((
             stripe_plans_config.non_commercial_price.to_string(),
             30 * 3600 * 24,
         )),
-        elodin_types::api::LicenseType::Commercial => Ok((
+        elodin_types::api::LicenseType::Commercial => Some((
             stripe_plans_config.commercial_price.to_string(),
             5 * 3600 * 24,
         )),
@@ -261,10 +259,18 @@ impl Api {
         )
         .await?;
 
-        let (price_id_str, _) = get_price_id_and_trial(
+        let Some((price_id_str, _)) = get_price_id_and_trial(
             &self.stripe_plans_config,
             billing_account.seat_license_type.into(),
-        )?;
+        ) else {
+            return Ok(StripeSubscriptionStatus {
+                portal_url: portal_session.url,
+                subscription_end: 0,
+                trial_start: None,
+                trial_end: None,
+            });
+        };
+
         let Ok(price_id) = PriceId::from_str(&price_id_str) else {
             return Err(Error::NotFound);
         };
