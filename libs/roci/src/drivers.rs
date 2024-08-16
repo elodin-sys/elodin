@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use tracing::warn;
 
-use crate::System;
+use crate::{IntoSystem, System};
 
 pub trait Driver {
     fn run(self);
@@ -39,14 +39,15 @@ pub struct OsSleepDriver<const HZ: usize, H: System> {
     start: Option<Instant>,
 }
 
-pub fn os_sleep_driver<const HZ: usize, S: System<Driver = Hz<HZ>>>(
+pub fn os_sleep_driver<const HZ: usize, P, S: IntoSystem<P>>(
     system: S,
-) -> OsSleepDriver<HZ, S>
+) -> OsSleepDriver<HZ, S::System<Hz<HZ>>>
 where
-    S::World: Send,
+    S::System<Hz<HZ>>: System<Driver = Hz<HZ>>,
+    <S::System<Hz<HZ>> as System>::World: Send,
 {
     OsSleepDriver {
-        system,
+        system: system.into_system(),
         start: None,
     }
 }

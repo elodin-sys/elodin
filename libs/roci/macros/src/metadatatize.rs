@@ -12,6 +12,7 @@ pub struct Metadatatize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
+    entity_id: Option<u64>,
 }
 
 pub fn metadatatize(input: TokenStream) -> TokenStream {
@@ -21,13 +22,15 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
+        entity_id,
     } = Metadatatize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let conduit = quote! { #crate_name::conduit };
     let fields = data.take_struct().unwrap();
     let ids = fields.fields.iter().map(|field| {
         let ident = field.ident.as_ref().expect("only named fields allowed");
-        if field.entity_id.is_some() {
+        let entity_id = field.entity_id.or(entity_id);
+        if entity_id.is_some() {
             let component_id = match &field.component_id {
                 Some(c) => quote! {
                     #crate_name::conduit::ComponentId::new(#c)
@@ -54,7 +57,8 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         }
     });
     let match_arms = fields.fields.iter().map(|field| {
-        if field.entity_id.is_some() {
+        let entity_id = field.entity_id.or(entity_id);
+        if entity_id.is_some() {
             let ty = &field.ty;
             let component_name = match &field.component_id {
                 Some(c) => quote! {
@@ -94,7 +98,8 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
 
     let metadata_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        if field.entity_id.is_some() {
+        let entity_id = field.entity_id.or(entity_id);
+        if entity_id.is_some() {
             let component_name = match &field.component_id {
                 Some(c) => quote! {
                     #c

@@ -12,6 +12,7 @@ pub struct Decomponentize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
+    entity_id: Option<u64>,
 }
 
 pub fn decomponentize(input: TokenStream) -> TokenStream {
@@ -21,6 +22,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
+        entity_id,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let conduit = quote! { #crate_name::conduit };
@@ -44,17 +46,17 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .expect("only named field allowed")
             .to_string()
             .to_case(Case::UpperSnake);
-        if let Some(id) = field.entity_id {
-        let const_name = format!("{name}_ID");
-        let const_name = syn::Ident::new(&const_name, Span::call_site());
-        quote! {
-            const #const_name: #conduit::ComponentId = #component_id;
-            if component_id == #const_name && entity_id == #conduit::EntityId(#id) {
-                if let Some(val) = <#ty>::from_component_value(value.clone()) {
-                    self.#ident = val;
-                    }
+        if let Some(id) = field.entity_id.or(entity_id) {
+            let const_name = format!("{name}_ID");
+            let const_name = syn::Ident::new(&const_name, Span::call_site());
+            quote! {
+                const #const_name: #conduit::ComponentId = #component_id;
+                if component_id == #const_name && entity_id == #conduit::EntityId(#id) {
+                    if let Some(val) = <#ty>::from_component_value(value.clone()) {
+                        self.#ident = val;
+                        }
+                }
             }
-        }
         }else {
             quote! {
                 self.#ident.apply_value(component_id, entity_id, value.clone());
