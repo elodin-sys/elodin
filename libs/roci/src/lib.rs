@@ -1,12 +1,15 @@
+use combinators::Pipe;
 use drivers::DriverMode;
 
 mod componentize;
 mod decomponentize;
+mod system_fn;
 
 pub use componentize::*;
 pub use conduit;
 pub use decomponentize::*;
 pub use roci_macros::{Componentize, Decomponentize, Metadatatize};
+pub use system_fn::*;
 
 pub mod combinators;
 #[cfg(feature = "csv")]
@@ -32,6 +35,16 @@ pub trait System {
     }
 
     fn update(&mut self, world: &mut Self::World);
+
+    fn pipe<P, R: IntoSystem<P>>(self, right: R) -> Pipe<Self, R::System<Self::Driver>>
+    where
+        Self: Sized,
+    {
+        Pipe {
+            left: self,
+            right: right.into_system(),
+        }
+    }
 }
 
 pub const fn system_max_size<H: System>() -> usize {

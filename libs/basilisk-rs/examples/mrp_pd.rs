@@ -6,21 +6,17 @@ use basilisk::{
 use conduit::Query;
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
 use roci::{
-    combinators::PipeExt,
     drivers::{os_sleep_driver, Driver, Hz},
     *,
 };
 use roci_macros::{Componentize, Decomponentize};
 
 #[derive(Debug, Default, Componentize, Decomponentize, Metadatatize)]
+#[roci(entity_id = 3)]
 struct World {
-    #[roci(entity_id = 3, component_id = "world_pos")]
     world_pos: SpatialTransform<f64, ArrayRepr>,
-    #[roci(entity_id = 3, component_id = "ang_vel_est")]
     ang_vel_est: Vector<f64, 3, ArrayRepr>,
-    #[roci(entity_id = 3, component_id = "control_force")]
     control_force: SpatialForce<f64, ArrayRepr>,
-    #[roci(entity_id = 3, component_id = "goal")]
     goal: Quaternion<f64, ArrayRepr>,
 }
 
