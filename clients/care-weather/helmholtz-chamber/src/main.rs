@@ -2,7 +2,6 @@ use std::io::{BufRead, BufReader};
 
 use roci::Metadatatize;
 use roci::{
-    combinators::PipeExt,
     conduit::Query,
     drivers::{os_sleep_driver, Driver, Hz},
     tokio, Componentize, Decomponentize, System,
@@ -22,11 +21,10 @@ impl<const H: usize> Chamber<H> {
 }
 
 #[derive(Default, Componentize, Decomponentize, Debug, Metadatatize)]
+#[roci(entity_id = 0)]
 pub struct World {
-    #[roci(entity_id = 0, component_id = "mag_ref")]
     mag_ref: [f64; 3],
-    #[roci(entity_id = 0, component_id = "chamber_mag_reading")]
-    mag_reading: [f64; 3],
+    chamber_mag_reading: [f64; 3],
 }
 
 impl<const H: usize> System for Chamber<H> {
@@ -43,13 +41,13 @@ impl<const H: usize> System for Chamber<H> {
                 for (i, key) in line.split(':').skip(1).enumerate() {
                     let num = key.split('\t').next().unwrap().trim();
                     let x: f64 = num.parse().unwrap();
-                    world.mag_reading[i] = x;
+                    world.chamber_mag_reading[i] = x;
                 }
             }
             line.clear();
         }
         println!("target={},{},{}", x, y, z);
-        println!("reading={:?}", world.mag_reading);
+        println!("reading={:?}", world.chamber_mag_reading);
         writeln!(self.port, "target={},{},{}", x, y, z).unwrap();
     }
 }

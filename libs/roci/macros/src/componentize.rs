@@ -10,6 +10,7 @@ pub struct Componentize {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), crate::Field>,
+    entity_id: Option<u64>,
 }
 
 pub fn componentize(input: TokenStream) -> TokenStream {
@@ -19,6 +20,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
+        entity_id,
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let conduit = quote! { #crate_name::conduit };
@@ -36,7 +38,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
             },
         };
         let ident = field.ident.as_ref().expect("only named fields allowed");
-        if let Some(id) = field.entity_id {
+        if let Some(id) = field.entity_id.or(entity_id) {
             quote! {
                 output.apply_value(
                     #component_id,
@@ -53,7 +55,8 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     });
     let count_arms = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        if field.entity_id.is_some() {
+        let entity_id = field.entity_id.or(entity_id);
+        if entity_id.is_some() {
             quote! {
                 <#ty as #crate_name::conduit::ConstComponent>::MAX_SIZE +
             }
