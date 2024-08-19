@@ -73,6 +73,10 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     end
   end
 
+  def handle_params(_, uri, socket) do
+    {:noreply, assign(socket, :uri, uri)}
+  end
+
   def handle_event("select_usecases", %{"id" => id}, socket) do
     selected_usecases =
       if MapSet.member?(socket.assigns[:selected_usecases], id) do
@@ -92,6 +96,18 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     page = socket.assigns[:page] + 1
     sub_type = socket.assigns[:sub_type]
     query = if(socket.assigns[:ignore_device], do: "?ignore_device=1", else: "")
+
+    Posthog.capture("user_onboarding_next_page", %{
+      distinct_id: socket.assigns[:current_user]["email"],
+      "$lib": "posthog-elixir",
+      "$current_url": socket.assigns[:uri],
+      properties: %{
+        subscription_type: sub_type,
+        page: page,
+        is_desktop: socket.assigns[:is_desktop]
+      }
+    })
+
     {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}#{query}")}
   end
 
@@ -119,6 +135,16 @@ defmodule ElodinDashboardWeb.OnboardingLive do
       },
       socket.assigns[:current_user]["token"]
     )
+
+    Posthog.capture("user_onboarding_poll_answered", %{
+      distinct_id: socket.assigns[:current_user]["id"],
+      "$lib": "posthog-elixir",
+      "$current_url": socket.assigns[:uri],
+      properties: %{
+        subscription_type: socket.assigns[:sub_type],
+        is_desktop: socket.assigns[:is_desktop]
+      }
+    })
 
     {:noreply, socket |> assign(:page, 4) |> assign(:loading, false)}
   end
