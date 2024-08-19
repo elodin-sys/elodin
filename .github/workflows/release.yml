@@ -212,6 +212,8 @@ jobs:
 
   linux-wheel:
     runs-on: "ubuntu-20.04"
+    needs:
+      - plan
     if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
     steps:
       - uses: actions/checkout@v4
@@ -247,6 +249,8 @@ jobs:
 
   macos-wheel:
     runs-on: "macos-latest"
+    needs:
+      - plan
     if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
     steps:
       - uses: actions/checkout@v4
