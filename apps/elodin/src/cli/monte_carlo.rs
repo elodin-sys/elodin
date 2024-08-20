@@ -1,5 +1,6 @@
+use std::fs;
 use std::io::Seek;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
@@ -184,6 +185,11 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     let context_dir = file.parent().unwrap();
 
     // copy the context directory to the temp dir:
+    let dir_size = get_dir_size(context_dir)?;
+    if dir_size > 10_000_000 {
+        anyhow::bail!("Project folder size is too big ({} bytes)", dir_size);
+    }
+
     copy_dir::copy_dir(context_dir, tmp_dir.path().join("context"))?;
 
     let archive_file = tempfile::tempfile()?;
@@ -197,4 +203,26 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     println!("Bundled simulation artifacts (size: {} bytes)", len);
 
     Ok(archive_file)
+}
+
+pub fn get_dir_size(path: &Path) -> anyhow::Result<u64> {
+    let path_metadata = path.symlink_metadata()?;
+    let mut size_in_bytes = 0;
+
+    if path_metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let entry_metadata = entry.metadata()?;
+
+            if entry_metadata.is_dir() {
+                size_in_bytes += get_dir_size(&entry.path())?;
+            } else {
+                size_in_bytes += entry_metadata.len();
+            }
+        }
+    } else {
+        size_in_bytes = path_metadata.len();
+    }
+
+    Ok(size_in_bytes)
 }
