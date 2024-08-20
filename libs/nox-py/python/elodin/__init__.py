@@ -399,8 +399,12 @@ Inertia = Annotated[
 Seed = Annotated[
     jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})
 ]
-Time = Annotated[
-    jax.Array, Component("time", ComponentType.F64, metadata={"priority": 6})
+SimulationTick = Annotated[
+    jax.Array, Component("simulation_tick", ComponentType.F64, metadata={"priority": 7})
+]
+SimulationTimeStep = Annotated[
+    jax.Array,
+    Component("simulation_time_step", ComponentType.F64, metadata={"priority": 8}),
 ]
 MeshAsset = Annotated[
     Handle,

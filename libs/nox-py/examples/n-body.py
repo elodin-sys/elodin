@@ -57,5 +57,5 @@ w.spawn(
     name="Viewport 1",
 )
 
-sys = el.six_dof(TIME_STEP, gravity)
+sys = el.six_dof(sys=gravity)
 sim = w.run(sys, 1 / 240.0)

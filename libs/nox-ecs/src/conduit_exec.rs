@@ -225,7 +225,6 @@ pub fn spawn_tcp_server(
     let (tx, rx) = flume::unbounded();
     let exec = exec.compile(client)?;
     let mut conduit_exec = ConduitExec::new(exec, rx);
-    println!("max_tick: {}", conduit_exec.exec.world.max_tick);
     let time_step = conduit_exec.run_time_step();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();

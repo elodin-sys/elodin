@@ -6,9 +6,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import params
 import util
 from sensors import Gyro, Accel, Magnetometer, AccelHealth
+from config import Config
 
 # TODO: incorporate GNSS, barometer, etc.
 
@@ -135,7 +135,7 @@ def update_filter(
     mag_bias_est: MagBiasEst,
     accel_health: AccelHealth,
 ) -> tuple[EstCov, AttEst, GyroBiasEst, AccelBiasEst, MagBiasEst]:
-    dt = 1.0 / params.SCHED_LOOP_RATE
+    dt = Config.GLOBAL.dt
     # Normalize accel:
     accel = jax.lax.cond(
         jnp.linalg.norm(accel) > 1e-6,

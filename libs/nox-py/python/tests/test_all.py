@@ -69,7 +69,8 @@ def test_six_dof():
     exec = w.build(sys)
     exec.run()
     x = exec.column_array(el.Component.id(el.WorldPos))
-    assert (x == [0.0, 0.0, 0.0, 1.0, 1.0 / 60.0, 0.0, 0.0]).all()
+    assert np.allclose(x.to_numpy()[0][:4], np.array([0.0, 0.0, 0.0, 1.0]))
+    assert np.allclose(x.to_numpy()[0][4:], np.array([0.01666667, 0.0, 0.0]))
 
 
 def test_spatial_integration():

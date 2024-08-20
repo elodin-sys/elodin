@@ -343,8 +343,12 @@ def attitude_control(
     return ang_vel_body
 
 
-@el.map
-def attitude_flight_plan(time: el.Time) -> AngleDesired:
+@el.system
+def attitude_flight_plan(
+    tick: el.Query[el.SimulationTick],
+    dt: el.Query[el.SimulationTimeStep],
+    angle: el.Query[AngleDesired],
+) -> el.Query[AngleDesired]:
     pitch_test_points = jnp.array(
         [
             [0.0, 0.0, 0.0],
@@ -391,11 +395,17 @@ def attitude_flight_plan(time: el.Time) -> AngleDesired:
             yaw_test_points,
         ]
     )
-    return points[time.astype(jnp.int32)]
+    time = tick[0] * dt[0]
+    point = points[time.astype(jnp.int32)]
+    return angle.map(AngleDesired, lambda _: point)
 
 
-@el.map
-def rate_flight_plan(time: el.Time, target: AngVelSetpoint) -> AngVelSetpoint:
+@el.system
+def rate_flight_plan(
+    tick: el.Query[el.SimulationTick],
+    dt: el.Query[el.SimulationTimeStep],
+    target: el.Query[AngVelSetpoint],
+) -> el.Query[AngVelSetpoint]:
     pitch_test_points = jnp.array(
         [
             [0.0, 0.0, 0.0],
@@ -432,9 +442,6 @@ def rate_flight_plan(time: el.Time, target: AngVelSetpoint) -> AngVelSetpoint:
         ]
     )
     points = jnp.concatenate([pitch_test_points, roll_test_points, yaw_test_points])
-    return jax.lax.cond(
-        time < len(points),
-        lambda _: points[time.astype(jnp.int32)],
-        lambda _: target,
-        operand=None,
-    )
+    time = tick[0] * dt[0]
+    point = points[time.astype(jnp.int32)]
+    return target.map(AngVelSetpoint, lambda _: point)

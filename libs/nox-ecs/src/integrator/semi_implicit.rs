@@ -1,6 +1,7 @@
-use crate::{ComponentGroup, ErasedSystem, IntoSystem, Query};
+use crate::globals::SimulationTimeStep;
+use crate::{ComponentArray, ComponentGroup, ErasedSystem, IntoSystem, Query};
 use crate::{System, SystemParam};
-use nox::IntoOp;
+use nox::{IntoOp, Scalar};
 use std::ops::Add;
 use std::ops::Mul;
 
@@ -46,10 +47,18 @@ where
     X: Add<V, Output = X> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = X>,
     V: Add<A, Output = V> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = V>,
     A: ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = A>,
-    f64: Mul<V, Output = V>,
-    f64: Mul<A, Output = A>,
+    Scalar<f64>: Mul<V, Output = V>,
+    Scalar<f64>: Mul<A, Output = A>,
 {
-    semi_implicit_euler_with_dt::<X, V, A>(1.0 / 60.0)
+    let step_v = move |dt: ComponentArray<SimulationTimeStep>, query: Query<(V, A)>| -> Query<V> {
+        let dt = dt.get(0).0;
+        query.map(|v, a| v + dt.clone() * a).unwrap()
+    };
+    let step_x = move |dt: ComponentArray<SimulationTimeStep>, query: Query<(X, V)>| -> Query<X> {
+        let dt = dt.get(0).0;
+        query.map(|x, v| x + dt.clone() * v).unwrap()
+    };
+    ErasedSystem::new(step_v.pipe(step_x))
 }
 
 #[cfg(test)]
@@ -82,7 +91,7 @@ mod tests {
             }
         }
 
-        impl Mul<V> for f64 {
+        impl Mul<V> for Scalar<f64> {
             type Output = V;
 
             fn mul(self, rhs: V) -> Self::Output {
@@ -93,7 +102,7 @@ mod tests {
         #[derive(Clone, Component)]
         struct A(Scalar<f64>);
 
-        impl Mul<A> for f64 {
+        impl Mul<A> for Scalar<f64> {
             type Output = A;
 
             fn mul(self, rhs: A) -> Self::Output {
@@ -119,7 +128,7 @@ mod tests {
             .tick_pipeline(semi_implicit_euler::<X, V, A>());
         let world = builder.run();
         let col = world.column::<X>().unwrap();
-        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.0027222222222222222])
+        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.0006805555011111122])
     }
 
     #[test]
@@ -147,19 +156,19 @@ mod tests {
             }
         }
 
-        impl Mul<V> for f64 {
+        impl Mul<V> for Scalar<f64> {
             type Output = V;
 
             fn mul(self, rhs: V) -> Self::Output {
-                V(self * rhs.0)
+                V(&self * rhs.0)
             }
         }
 
-        impl Mul<A> for f64 {
+        impl Mul<A> for Scalar<f64> {
             type Output = A;
 
             fn mul(self, rhs: A) -> Self::Output {
-                A(self * rhs.0)
+                A(&self * rhs.0)
             }
         }
 
@@ -189,7 +198,7 @@ mod tests {
         let col = world.column::<X>().unwrap();
         assert_eq!(
             col.typed_buf::<f64>().unwrap(),
-            &[1.0f64, 0.0, 0.0, 0.0, 0.016666666666666666, 0.0, 0.0]
+            &[1.0f64, 0.0, 0.0, 0.0, 0.008333333, 0.0, 0.0]
         )
     }
 }

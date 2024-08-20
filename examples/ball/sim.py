@@ -90,5 +90,5 @@ def world(seed: int = 0) -> el.World:
 
 def system() -> el.System:
     effectors = gravity | apply_wind
-    sys = sample_wind | bounce | el.six_dof(TIME_STEP, effectors)
+    sys = sample_wind | bounce | el.six_dof(sys=effectors)
     return sys

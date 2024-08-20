@@ -262,10 +262,10 @@ macro_rules! impl_op {
             $(T::Elem: $t_bound,)+
             T: Elem + $op<Output = T>,
             T::Elem: $op<Output = T::Elem>,
-            D1: Dim + ArrayDim,
-            D2: Dim + ArrayDim,
+            D1: Dim,
+            D2: Dim,
             ShapeConstraint: BroadcastDim<D1, D2>,
-            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim + ArrayDim,
+            <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
         {
             type Output = Tensor<T, BroadcastedDim<D1, D2>, R>;
 

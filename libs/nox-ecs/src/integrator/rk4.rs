@@ -1,18 +1,19 @@
+use crate::globals::SimulationTimeStep;
 use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
-use crate::{ComponentGroup, Error, Query};
+use crate::{ComponentArray, ComponentGroup, Error, Query};
 use conduit::World;
-use nox::IntoOp;
+use nox::{IntoOp, Scalar};
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};
 
 pub struct Rk4<U, DU, Pipe> {
-    dt: f64,
+    dt: Option<f64>,
     pipe: Pipe,
     phantom_data: PhantomData<(U, DU)>,
 }
 
 impl<Pipe, U, DU> Rk4<U, DU, Pipe> {
-    pub fn new(pipe: Pipe, dt: f64) -> Self {
+    pub fn new(pipe: Pipe, dt: Option<f64>) -> Self {
         Self {
             dt,
             pipe,
@@ -38,14 +39,14 @@ where
     where
         Self: Sized,
     {
-        Rk4::new(self, 1.0 / 60.0)
+        Rk4::new(self, None)
     }
 
     fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, Self>
     where
         Self: Sized,
     {
-        Rk4::new(self, dt)
+        Rk4::new(self, Some(dt))
     }
 }
 
@@ -66,6 +67,7 @@ where
         + Send
         + Sync,
     f64: Mul<DU, Output = DU>,
+    Scalar<f64>: Mul<DU, Output = DU>,
     Pipe: System + Send + Sync,
 {
     type Arg = ();
@@ -73,6 +75,7 @@ where
 
     fn init(&self, builder: &mut SystemBuilder) -> Result<(), Error> {
         self.pipe.init(builder)?;
+        ComponentArray::<SimulationTimeStep>::init(builder)?;
         Query::<U>::init(builder)?;
         Query::<DU>::init(builder)
     }
@@ -82,19 +85,22 @@ where
         let compiled_pipe = self.pipe.compile(world)?;
         self.init(&mut builder)?;
         let init_u = Query::<U>::param(&builder)?;
-        let f = |dt: f64| {
-            move |init_u: Query<U>, du: Query<DU>| -> Query<U> {
+        let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
+        let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
+
+        let step = |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
+            let f = |dt: ComponentArray<SimulationTimeStep>,
+                     init_u: Query<U>,
+                     du: Query<DU>|
+             -> Query<U> {
+                let dt = &dt.get(0).0 * dt_factor;
                 init_u
                     .clone()
                     .join_query(du.clone())
-                    .map(|u, du| u + dt * du)
+                    .map(|u, du| u + dt.clone() * du)
                     .unwrap()
-            }
-        };
-
-        let step = |dt: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-            f(dt)
-                .into_system()
+            };
+            f.into_system()
                 .compile(world)?
                 .insert_into_builder(builder)?;
             compiled_pipe.clone().insert_into_builder(builder)?;
@@ -103,11 +109,11 @@ where
 
         let k1 = step(0.0, &mut builder)?;
         init_u.insert_into_builder(&mut builder);
-        let k2 = step(self.dt / 2.0, &mut builder)?;
+        let k2 = step(0.5, &mut builder)?;
         init_u.insert_into_builder(&mut builder);
-        let k3 = step(self.dt / 2.0, &mut builder)?;
+        let k3 = step(0.5, &mut builder)?;
         init_u.insert_into_builder(&mut builder);
-        let k4 = step(self.dt, &mut builder)?;
+        let k4 = step(1.0, &mut builder)?;
         init_u.insert_into_builder(&mut builder);
 
         let u = init_u
@@ -116,7 +122,7 @@ where
             .join_query(k3)
             .join_query(k4.clone())
             .map(|(((u, k1), k2), k3), k4| {
-                let du = (self.dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+                let du = (&dt * (1.0 / 6.0)) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
                 u + du
             })
             .unwrap();
@@ -165,6 +171,14 @@ mod tests {
             }
         }
 
+        impl Mul<V> for Scalar<f64> {
+            type Output = V;
+
+            fn mul(self, rhs: V) -> Self::Output {
+                V(self * rhs.0)
+            }
+        }
+
         #[derive(Archetype)]
         struct Body {
             x: X,
@@ -179,7 +193,7 @@ mod tests {
         let builder = world.builder().tick_pipeline(().rk4::<X, V>());
         let world = builder.run();
         let col = world.column::<X>().unwrap();
-        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.16666666666666669])
+        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.08333333])
     }
 
     #[test]
@@ -236,6 +250,17 @@ mod tests {
             }
         }
 
+        impl Mul<DU> for Scalar<f64> {
+            type Output = DU;
+
+            fn mul(self, rhs: DU) -> Self::Output {
+                DU {
+                    v: V(&self * rhs.v.0),
+                    a: A(&self * rhs.a.0),
+                }
+            }
+        }
+
         #[derive(Archetype)]
         struct Body {
             x: X,
@@ -260,7 +285,7 @@ mod tests {
         let col = world.column::<X>().unwrap();
         assert_eq!(
             col.typed_buf::<f64>().unwrap(),
-            &[1.0f64, 0.0, 0.0, 0.0, 0.016666666666666666, 0.0, 0.0]
+            &[1.0f64, 0.0, 0.0, 0.0, 0.008333333, 0.0, 0.0]
         )
     }
 }

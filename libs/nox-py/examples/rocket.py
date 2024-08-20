@@ -129,6 +129,11 @@ AccelSetpointSmooth = ty.Annotated[
     ),
 ]
 
+Thrust = ty.Annotated[
+    jax.Array,
+    el.Component("thrust", el.ComponentType.F64, metadata={"priority": 17}),
+]
+
 aero_df = pl.from_dict({
     'Mach': [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9],
     'Alphac': [0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0, 0.0, 5.0, 10.0, 15.0],
@@ -246,7 +251,6 @@ def to_coord(s: pl.Series, val: jax.Array) -> jax.Array:
 
 @el.dataclass
 class Rocket(el.Archetype):
-    time: el.Time = field(default_factory=lambda: jnp.float64(0.0))
     angle_of_attack: AngleOfAttack = field(default_factory=lambda: jnp.array([0.0]))
     aero_coefs: AeroCoefs = field(
         default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -274,6 +278,7 @@ class Rocket(el.Archetype):
     accel_setpoint_smooth: AccelSetpointSmooth = field(
         default_factory=lambda: jnp.array([0.0, 0.0])
     )
+    thrust: Thrust = field(default_factory=lambda: jnp.float64(0.0))
 
 
 @el.map
@@ -377,13 +382,22 @@ def apply_aero_forces(
     return f + p.angular() @ f_aero
 
 
-@el.map
-def apply_thrust(t: el.Time, p: el.WorldPos, f: el.Force) -> el.Force:
+@el.system
+def thrust(
+    tick: el.Query[el.SimulationTick],
+    dt: el.Query[el.SimulationTimeStep],
+    q: el.Query[Motor],
+) -> el.Query[Thrust]:
+    t = tick[0] * dt[0]
     time = jnp.array(thrust_curve["time"])
     thrust = jnp.array(thrust_curve["thrust"])
     f_t = jnp.interp(t, time, thrust)
-    thrust = p.angular() @ thrust_vector_body_frame * f_t
-    return f + el.SpatialForce(linear=thrust)
+    return q.map(Thrust, lambda _: f_t)
+
+
+@el.map
+def apply_thrust(thrust: Thrust, f: el.Force, p: el.WorldPos) -> el.Force:
+    return f + el.SpatialForce(linear=p.angular() @ thrust_vector_body_frame * thrust)
 
 
 @el.map
@@ -400,12 +414,7 @@ def v_rel_accel(v: el.WorldVel, a: el.WorldAccel) -> VRelAccel:
 
 
 @el.map
-def v_rel_accel_buffer(
-    time: el.Time, a_rel: VRelAccel, buffer: VRelAccelBuffer
-) -> VRelAccelBuffer:
-    slow_start_time = 4.0
-    slow_start = jnp.minimum(time, slow_start_time) / slow_start_time
-    a_rel *= slow_start
+def v_rel_accel_buffer(a_rel: VRelAccel, buffer: VRelAccelBuffer) -> VRelAccelBuffer:
     return jnp.concatenate((buffer[1:], a_rel.reshape(1, 3)))
 
 
@@ -416,13 +425,11 @@ def v_rel_accel_filtered(s: VRelAccelBuffer) -> VRelAccelFiltered:
 
 @el.map
 def accel_setpoint_smooth(
-    time: el.Time, a: AccelSetpoint, a_s: AccelSetpointSmooth
+    a: AccelSetpoint, a_s: AccelSetpointSmooth
 ) -> AccelSetpointSmooth:
-    slow_start_time = 4.0
-    slow_start = jnp.minimum(time, slow_start_time) / slow_start_time
-    diff = a - a_s
-    a_s += diff
-    return a_s * slow_start
+    dt = TIME_STEP
+    exp_decay_constant = 0.5
+    return a_s + (a - a_s) * jnp.exp(-exp_decay_constant * dt)
 
 
 @el.map
@@ -501,8 +508,7 @@ w.spawn(
 )
 
 non_effectors = (
-    el.advance_time(TIME_STEP)
-    | mach
+    mach
     | angle_of_attack
     | accel_setpoint_smooth
     | v_rel_accel
@@ -513,7 +519,8 @@ non_effectors = (
     | fin_control
     | aero_coefs
     | aero_forces
+    | thrust
 )
 effectors = gravity | apply_thrust | apply_aero_forces
-sys = non_effectors | el.six_dof(TIME_STEP, effectors, integrator=el.Integrator.Rk4)
+sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
 w.run(sys, time_step=TIME_STEP)

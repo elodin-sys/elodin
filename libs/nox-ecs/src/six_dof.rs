@@ -1,11 +1,14 @@
-use nox::{SpatialForce, SpatialInertia, SpatialMotion};
+use nox::{Scalar, SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
 use std::ops::{Add, Mul};
 use std::sync::Arc;
 
-use crate::{semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator, Rk4Ext, Time};
+use crate::{
+    semi_implicit_euler, semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator,
+    Rk4Ext,
+};
 
 #[derive(Clone, Component)]
 pub struct WorldVel(pub SpatialMotion<f64>);
@@ -46,6 +49,17 @@ impl Add for DU {
     }
 }
 
+impl Mul<DU> for Scalar<f64> {
+    type Output = DU;
+
+    fn mul(self, rhs: DU) -> Self::Output {
+        DU {
+            v: WorldVel(&self * rhs.v.0),
+            a: WorldAccel(&self * rhs.a.0),
+        }
+    }
+}
+
 impl Mul<DU> for f64 {
     type Output = DU;
 
@@ -81,11 +95,27 @@ impl Mul<WorldVel> for f64 {
     }
 }
 
+impl Mul<WorldVel> for Scalar<f64> {
+    type Output = WorldVel;
+
+    fn mul(self, rhs: WorldVel) -> Self::Output {
+        WorldVel(&self * rhs.0)
+    }
+}
+
 impl Mul<WorldAccel> for f64 {
     type Output = WorldAccel;
 
     fn mul(self, rhs: WorldAccel) -> Self::Output {
         WorldAccel(self * rhs.0)
+    }
+}
+
+impl Mul<WorldAccel> for Scalar<f64> {
+    type Output = WorldAccel;
+
+    fn mul(self, rhs: WorldAccel) -> Self::Output {
+        WorldAccel(&self * rhs.0)
     }
 }
 
@@ -118,14 +148,7 @@ pub struct Body {
     pub mass: Inertia,
 }
 
-pub fn advance_time(time_step: f64) -> impl System {
-    let increment_time = move |query: ComponentArray<Time>| -> ComponentArray<Time> {
-        query.map(|time: Time| Time(time.0 + time_step)).unwrap()
-    };
-    increment_time.into_system()
-}
-
-pub fn six_dof<Sys, M, A, R>(
+pub fn six_dof_with_dt<Sys, M, A, R>(
     effectors: impl FnOnce() -> Sys,
     time_step: f64,
     integrator: Integrator,
@@ -144,6 +167,28 @@ where
         Integrator::SemiImplicit => {
             let integrate =
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
+            Arc::new(ErasedSystem::new(sys.pipe(integrate)))
+        }
+    }
+}
+
+pub fn six_dof<Sys, M, A, R>(
+    effectors: impl FnOnce() -> Sys,
+    integrator: Integrator,
+) -> Arc<dyn System<Arg = (), Ret = ()> + Send + Sync>
+where
+    M: 'static,
+    A: 'static,
+    R: 'static,
+    Sys: IntoSystem<M, A, R> + 'static,
+    <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
+{
+    let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
+    //let sys = clear_forces.pipe(calc_accel);
+    match integrator {
+        Integrator::Rk4 => Arc::new(sys.rk4::<U, DU>()),
+        Integrator::SemiImplicit => {
+            let integrate = semi_implicit_euler::<WorldPos, WorldVel, WorldAccel>();
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))
         }
     }
@@ -188,8 +233,8 @@ mod tests {
         let client = nox::Client::cpu().unwrap();
         let mut exec = world
             .builder()
-            .tick_pipeline(six_dof(|| (), time_step, Integrator::Rk4))
-            .run_time_step(std::time::Duration::from_secs_f64(time_step))
+            .tick_pipeline(six_dof(|| (), Integrator::Rk4))
+            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client)
@@ -270,8 +315,8 @@ mod tests {
         let time_step = 1.0 / 120.0;
         let mut exec = world
             .builder()
-            .tick_pipeline(six_dof(|| constant_torque, time_step, Integrator::Rk4))
-            .run_time_step(std::time::Duration::from_secs_f64(time_step))
+            .tick_pipeline(six_dof(|| constant_torque, Integrator::Rk4))
+            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client.clone())
@@ -366,19 +411,12 @@ mod tests {
         }
 
         let time_step = 1.0 / 1.0;
-        let client = nox::Client::cpu().unwrap();
-        let mut exec = world
+        let world = world
             .builder()
-            .tick_pipeline(six_dof(|| constant_force, time_step, Integrator::Rk4))
-            .run_time_step(std::time::Duration::from_secs_f64(time_step))
-            .build()
-            .unwrap()
-            .compile(client)
-            .unwrap();
-        for _ in 0..1 {
-            exec.run().unwrap();
-        }
-        let column = exec
+            .tick_pipeline(six_dof(|| constant_force, Integrator::Rk4))
+            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
+            .run();
+        let column = world
             .column_at_tick(ComponentId::new("world_pos"), 1)
             .unwrap();
         let (_, pos) = column
@@ -386,7 +424,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let vel = exec
+        let vel = world
             .column_at_tick(ComponentId::new("world_vel"), 1)
             .unwrap();
         let (_, vel) = vel
@@ -394,7 +432,7 @@ mod tests {
             .next()
             .unwrap();
 
-        let accel = exec
+        let accel = world
             .column_at_tick(ComponentId::new("world_accel"), 1)
             .unwrap();
         let (_, accel) = accel

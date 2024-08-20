@@ -35,11 +35,11 @@ fn main() {
         })
         .insert(shape);
 
-    let time_step = 1.0 / 60.0;
+    let time_step = std::time::Duration::from_secs_f64(1.0 / 240.0);
     let exec = world
         .builder()
-        .tick_pipeline(six_dof(|| earth_gravity, time_step, Integrator::Rk4))
-        .run_time_step(std::time::Duration::from_secs_f64(time_step))
+        .tick_pipeline(six_dof(|| earth_gravity, Integrator::Rk4))
+        .sim_time_step(time_step)
         .build()
         .unwrap();
     let client = nox::Client::cpu().unwrap();

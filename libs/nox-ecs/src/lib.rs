@@ -1,6 +1,6 @@
 extern crate self as nox_ecs;
 
-use conduit::well_known::{Material, Mesh};
+use conduit::well_known::{Color, EntityMetadata, Material, Mesh};
 use conduit::{
     Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
 };
@@ -22,6 +22,7 @@ pub use nox;
 mod component;
 mod conduit_exec;
 mod dyn_array;
+mod globals;
 mod history;
 mod integrator;
 mod profile;
@@ -35,6 +36,7 @@ pub use component::*;
 pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
 pub use conduit_exec::*;
 pub use dyn_array::*;
+pub use globals::*;
 pub use integrator::*;
 pub use query::*;
 pub use system::*;
@@ -171,10 +173,19 @@ pub fn update_var(
 }
 
 pub trait WorldExt {
+    fn add_globals(&mut self);
     fn builder(self) -> WorldBuilder;
 }
 
 impl WorldExt for World {
+    fn add_globals(&mut self) {
+        self.spawn(SystemGlobals::new(self.sim_time_step.0.as_secs_f64()))
+            .metadata(EntityMetadata {
+                name: "Globals".to_string(),
+                color: Color::WHITE,
+            });
+    }
+
     fn builder(self) -> WorldBuilder {
         WorldBuilder::default().world(self)
     }
@@ -256,8 +267,11 @@ where
     }
 
     pub fn build(mut self) -> Result<WorldExec, Error> {
+        self.world.add_globals();
         let tick_exec = self.pipe.build(&mut self.world)?;
-        let startup_exec = self.startup_sys.build(&mut self.world)?;
+        let startup_exec = increment_sim_tick
+            .pipe(self.startup_sys)
+            .build(&mut self.world)?;
         let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
         Ok(world_exec)
     }
@@ -610,7 +624,7 @@ pub enum Error {
     ComponentNotFound,
     #[error("component value had wrong size")]
     ValueSizeMismatch,
-    #[error("conduit error")]
+    #[error("conduit error: {0}")]
     Conduit(#[from] conduit::Error),
     #[error("channel closed")]
     ChannelClosed,
@@ -693,42 +707,42 @@ mod tests {
     #[test]
     fn test_get_scalar() {
         #[derive(Component)]
-        struct Seed(Scalar<f64>);
+        struct A(Scalar<f64>);
 
         #[derive(Component)]
-        struct Value(Scalar<f64>);
+        struct B(Scalar<f64>);
 
-        fn add_system(s: ComponentArray<Seed>, v: ComponentArray<Value>) -> ComponentArray<Value> {
-            v.map(|v: Value| Value(v.0 + s.get(0).0)).unwrap()
+        fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
+            v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
         }
 
         let mut world = add_system.world();
-        world.spawn(Seed(5.0.into()));
-        world.spawn(Value((-1.0).into()));
-        world.spawn(Value(7.0.into()));
+        world.spawn(A(5.0.into()));
+        world.spawn(B((-1.0).into()));
+        world.spawn(B(7.0.into()));
         let world = world.run();
-        let v = world.column::<Value>().unwrap();
+        let v = world.column::<B>().unwrap();
         assert_eq!(v.typed_buf::<f64>().unwrap(), &[4.0, 12.0])
     }
 
     #[test]
     fn test_get_tensor() {
         #[derive(Component)]
-        struct Seed(Vector<f64, 3>);
+        struct A(Vector<f64, 3>);
 
         #[derive(Component)]
-        struct Value(Vector<f64, 3>);
+        struct B(Vector<f64, 3>);
 
-        fn add_system(s: ComponentArray<Seed>, v: ComponentArray<Value>) -> ComponentArray<Value> {
-            v.map(|v: Value| Value(v.0 + s.get(0).0)).unwrap()
+        fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
+            v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
         }
 
         let mut world = add_system.world();
-        world.spawn(Seed(tensor![5.0, 2.0, -3.0].into()));
-        world.spawn(Value(tensor![-1.0, 3.5, 6.0].into()));
-        world.spawn(Value(tensor![7.0, -1.0, 1.0].into()));
+        world.spawn(A(tensor![5.0, 2.0, -3.0].into()));
+        world.spawn(B(tensor![-1.0, 3.5, 6.0].into()));
+        world.spawn(B(tensor![7.0, -1.0, 1.0].into()));
         let world = world.run();
-        let v = world.column::<Value>().unwrap();
+        let v = world.column::<B>().unwrap();
         assert_eq!(
             v.typed_buf::<f64>().unwrap(),
             &[4.0, 5.5, 3.0, 12.0, 1.0, -2.0]
