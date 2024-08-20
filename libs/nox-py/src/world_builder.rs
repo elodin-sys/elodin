@@ -1,7 +1,10 @@
 use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
-use nox_ecs::{conduit, nox, spawn_tcp_server, System as _, TimeStep, World};
+use nox_ecs::{
+    conduit, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
+    WorldExt,
+};
 use std::{path::PathBuf, time::Duration};
 
 #[pyclass(subclass)]
@@ -331,8 +334,10 @@ impl WorldBuilder {
             self.world.max_tick = max_ticks;
         }
 
+        self.world.add_globals();
+
         let world = std::mem::take(&mut self.world);
-        let xla_exec = sys.compile(&world)?;
+        let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
         let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
         let exec = nox_ecs::WorldExec::new(world, tick_exec, None);

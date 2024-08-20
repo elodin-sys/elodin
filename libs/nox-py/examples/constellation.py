@@ -493,15 +493,14 @@ w.spawn(
 
 exec = w.run(
     system=el.six_dof(
-        1 / 120.0,
-        sensors
+        sys=sensors
         | kalman_filter
         | control
         | actuator_allocator
         | rw_effector
         | gravity_effector
         | earth_point,
-        el.Integrator.SemiImplicit,
+        integrator=el.Integrator.SemiImplicit,
     ),
     time_step=1.0 / 240.0,
 )
