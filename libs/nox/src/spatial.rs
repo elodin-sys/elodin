@@ -394,6 +394,24 @@ impl<R: Repr> Mul<SpatialMotion<f32, R>> for f32 {
     }
 }
 
+impl<T: RealField> Mul<&Scalar<T>> for SpatialMotion<T> {
+    type Output = SpatialMotion<T>;
+    fn mul(self, rhs: &Scalar<T>) -> Self::Output {
+        SpatialMotion {
+            inner: self.inner * rhs,
+        }
+    }
+}
+
+impl<T: RealField> Mul<SpatialMotion<T>> for &Scalar<T> {
+    type Output = SpatialMotion<T>;
+    fn mul(self, rhs: SpatialMotion<T>) -> Self::Output {
+        SpatialMotion {
+            inner: self * rhs.inner,
+        }
+    }
+}
+
 impl<T, R> Add<SpatialMotion<T, R>> for SpatialTransform<T, R>
 where
     R: Repr,

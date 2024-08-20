@@ -19,6 +19,7 @@ fn gravity(g: GraphQuery<TotalEdge>, q: Query<WorldPos>) -> ComponentArray<Force
         |acc: Force, (pos_a, pos_b): (WorldPos, WorldPos)| {
             let r = pos_a.0.linear() - pos_b.0.linear();
             let m = 1.0 / G;
+            #[allow(non_snake_case)]
             let M = 1.0 / G;
             let norm = r.norm();
             let f = G * M * m * r / (&norm * &norm * norm);
@@ -73,11 +74,11 @@ fn main() {
         }
     }
 
-    let time_step = 1.0 / 240.0;
+    let time_step = std::time::Duration::from_secs_f64(1.0 / 240.0);
     let exec = world
         .builder()
-        .tick_pipeline(six_dof(|| gravity, time_step, Integrator::SemiImplicit))
-        .run_time_step(std::time::Duration::from_secs_f64(1.0 / 240.0))
+        .tick_pipeline(six_dof(|| gravity, Integrator::SemiImplicit))
+        .sim_time_step(time_step)
         .build()
         .unwrap();
     let client = nox::Client::cpu().unwrap();

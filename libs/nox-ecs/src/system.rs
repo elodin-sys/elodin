@@ -428,6 +428,22 @@ impl<A: System, B: System> Pipe<A, B> {
     }
 }
 
+pub struct Schedule<A: System> {
+    system: A,
+}
+
+impl<A: System> System for Schedule<A> {
+    type Arg = A::Arg;
+    type Ret = A::Ret;
+    fn init(&self, builder: &mut SystemBuilder) -> Result<(), Error> {
+        self.system.init(builder)
+    }
+
+    fn compile(&self, world: &World) -> Result<CompiledSystem, Error> {
+        self.system.compile(world)
+    }
+}
+
 impl<A: System, B: System> System for Pipe<A, B> {
     type Arg = (A::Arg, B::Arg);
     type Ret = (A::Ret, B::Ret);

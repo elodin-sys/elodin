@@ -103,7 +103,7 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
 
         Now, we're ready to start simulating:
         ```python
-        sys = six_dof(TIME_STEP, gravity)
+        sys = six_dof(gravity)
         sim = w.run(sys, TIME_STEP)
         ```
         At this moment, bodies will be flying off into space, so feel free to remove these last 2 lines for now.
@@ -133,7 +133,7 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
     <Step title="Start the Simulation!">
         You can now update the simulation by pressing `Update Sim` or hitting `Cmd-Enter`.
         ```python
-        sys = six_dof(TIME_STEP, gravity)
+        sys = six_dof(gravity)
         sim = w.run(sys, TIME_STEP)
         ```
     </Step>

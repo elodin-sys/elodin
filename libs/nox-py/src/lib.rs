@@ -108,23 +108,22 @@ impl From<Integrator> for nox_ecs::Integrator {
 }
 
 #[pyfunction]
-#[pyo3(signature = (time_step, sys = None, integrator = Integrator::Rk4))]
-pub fn six_dof(time_step: f64, sys: Option<System>, integrator: Integrator) -> System {
+#[pyo3(signature = (time_step = None, sys = None, integrator = Integrator::Rk4))]
+pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrator) -> System {
     let integrator = integrator.into();
-    let sys: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> = if let Some(sys) = sys {
-        nox_ecs::six_dof::six_dof(|| sys, time_step, integrator)
-    } else {
-        nox_ecs::six_dof::six_dof(|| (), time_step, integrator)
-    };
+    let sys: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> =
+        if let Some(dt) = time_step {
+            if let Some(sys) = sys {
+                nox_ecs::six_dof::six_dof_with_dt(|| sys, dt, integrator)
+            } else {
+                nox_ecs::six_dof::six_dof_with_dt(|| (), dt, integrator)
+            }
+        } else if let Some(sys) = sys {
+            nox_ecs::six_dof::six_dof(|| sys, integrator)
+        } else {
+            nox_ecs::six_dof::six_dof(|| (), integrator)
+        };
     System { inner: sys }
-}
-
-#[pyfunction]
-pub fn advance_time(time_step: f64) -> System {
-    let sys = nox_ecs::six_dof::advance_time(time_step);
-    System {
-        inner: Arc::new(ErasedSystem::new(sys)),
-    }
 }
 
 #[pyfunction]
@@ -184,7 +183,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SystemBuilder>()?;
     m.add_class::<System>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
-    m.add_function(wrap_pyfunction!(advance_time, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     Ok(())

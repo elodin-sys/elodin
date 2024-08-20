@@ -710,8 +710,7 @@ w.spawn(
 
 exec = w.run(
     system=el.six_dof(
-        TIME_STEP,
-        sensors
+        sys=sensors
         | kalman_filter
         | control
         | actuator_allocator
@@ -721,7 +720,7 @@ exec = w.run(
         | rw_effector
         | gravity_effector
         | earth_point,
-        el.Integrator.SemiImplicit,
+        integrator=el.Integrator.SemiImplicit,
     ),
     sim_time_step=TIME_STEP,
     run_time_step=0.0 / 10.0,
