@@ -192,5 +192,5 @@ world.spawn(
 )
 
 
-sys = bounce.pipe(collide).pipe(walls).pipe(el.six_dof(TIME_STEP, gravity))
+sys = bounce.pipe(collide).pipe(walls).pipe(el.six_dof(sys=gravity))
 world.run(sys, TIME_STEP)

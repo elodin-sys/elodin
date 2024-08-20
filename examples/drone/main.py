@@ -23,4 +23,10 @@ EDU_450_CONFIG = Config(
 
 EDU_450_CONFIG.set_as_global()
 
-world().run(system(), time_step=Config.GLOBAL.dt)
+world().run(
+    system(),
+    run_time_step=0.0,
+    sim_time_step=Config.GLOBAL.dt,
+    output_time_step=Config.GLOBAL.dt,
+    max_ticks=int(Config.GLOBAL.simulation_time / Config.GLOBAL.dt),
+)

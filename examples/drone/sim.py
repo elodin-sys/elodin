@@ -64,11 +64,6 @@ Torque = ty.Annotated[
 
 
 @dataclass
-class Globals(el.Archetype):
-    time: el.Time = field(default_factory=lambda: jnp.float64(0.0))
-
-
-@dataclass
 class Drone(el.Archetype):
     body_thrust: BodyThrust = field(default_factory=lambda: el.SpatialForce.zero())
     body_drag: BodyDrag = field(default_factory=lambda: jnp.zeros(3))
@@ -77,9 +72,7 @@ class Drone(el.Archetype):
 
 
 @el.map
-def motor_thrust_response(
-    time: el.Time, pwm: motors.MotorPwm, prev_thrust: Thrust
-) -> Thrust:
+def motor_thrust_response(pwm: motors.MotorPwm, prev_thrust: Thrust) -> Thrust:
     poly_coefs = jnp.array([params.MOT_THST_EXPO, 1 - params.MOT_THST_EXPO, 0.0])
     remove_thrust_curve_scaling = partial(jnp.polyval, poly_coefs)
     thrust = remove_thrust_curve_scaling(pwm / motors.MAX_PWM_THROTTLE) * max_thrust
@@ -141,7 +134,6 @@ def world() -> el.World:
             sensors.IMU(),
             control.AttitudeController(),
             mekf.MEKF(),
-            Globals(),
         ],
         name="Drone",
     )
@@ -210,8 +202,7 @@ def system() -> el.System:
 
     inner = inner_loop(
         INNER_RUN_COUNT,
-        el.advance_time(Config.GLOBAL.fast_loop_time_step)
-        | el.six_dof(
+        el.six_dof(
             Config.GLOBAL.fast_loop_time_step,
             effectors,
             integrator=el.Integrator.SemiImplicit,

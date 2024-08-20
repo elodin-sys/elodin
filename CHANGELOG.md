@@ -1,6 +1,12 @@
 # Changelog
 
 ## [unreleased]
+- **(breaking)** Replace `el.Time` and `el.advance_time` with `el.SimulationTick` and `el.SimulationTimeStep`.
+  - The simulation tick is automatically advanced by a built-in system.
+  - The simulation time step is set to the same value as the "sim_time_step" provided in `World.run`.
+- Add a built-in `SystemGlobals` archetype that is automatically spawned for every simulation.
+  - This archetype is only associated with a single managed entity and contains global variables that can be accessed by any system.
+  - Currently, it contains `el.SimulationTick` and `el.SimulationTimeStep` which are automatically set to the current tick and simulation time step respectively.
 
 ## [v0.3.30]
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
