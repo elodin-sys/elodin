@@ -1,4 +1,4 @@
-use conduit::{ComponentId, Metadata};
+use impeller::{ComponentId, Metadata};
 
 pub trait Metadatatize {
     fn get_metadata(&self, component_id: ComponentId) -> Option<&Metadata>;

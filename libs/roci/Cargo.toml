@@ -7,14 +7,14 @@ edition = "2021"
 
 [features]
 default = ["csv", "std"]
-std = ["conduit/std"]
+std = ["impeller/std"]
 csv = ["dep:csv", "serde"]
-tokio = ["dep:tokio", "tokio-stream", "tokio-util", "fastrand", "conduit/tokio", "conduit/std", "std"]
+tokio = ["dep:tokio", "tokio-stream", "tokio-util", "fastrand", "impeller/tokio", "impeller/std", "std"]
 
 [dependencies]
-conduit.workspace = true
-conduit.default-features = false
-conduit.features = ["rand"]
+impeller.workspace = true
+impeller.default-features = false
+impeller.features = ["rand"]
 
 # datastructures
 heapless = "0.8"

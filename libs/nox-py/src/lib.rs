@@ -4,9 +4,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use conduit::{ComponentId, PolarsWorld};
+use impeller::{ComponentId, PolarsWorld};
 use nox_ecs::{
-    conduit,
+    impeller,
     nox::{self, Noxpr},
     ErasedSystem,
 };
@@ -19,11 +19,11 @@ use tracing_subscriber::EnvFilter;
 mod archetype;
 mod asset;
 mod component;
-mod conduit_client;
 mod entity;
 mod error;
 mod exec;
 mod graph;
+mod impeller_client;
 mod linalg;
 mod query;
 mod sim_runner;
@@ -169,7 +169,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
-    m.add_class::<conduit_client::Conduit>()?;
+    m.add_class::<impeller_client::Impeller>()?;
     m.add_class::<VectorArrow>()?;
     m.add_class::<BodyAxes>()?;
     m.add_class::<Color>()?;

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
-use conduit::{ComponentId, World};
+use impeller::{ComponentId, World};
 use nox::{ArrayTy, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprTy};
 
 use crate::{ComponentArray, Error};

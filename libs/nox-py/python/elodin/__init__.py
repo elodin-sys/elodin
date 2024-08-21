@@ -499,8 +499,8 @@ class World(WorldBuilder):
         )
         locals = frame.f_locals
         if addr is not None:
-            conduit_client = Conduit.tcp(addr)
-            locals["client"] = conduit_client
+            impeller_client = Impeller.tcp(addr)
+            locals["client"] = impeller_client
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()

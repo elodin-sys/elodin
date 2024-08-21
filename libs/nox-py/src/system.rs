@@ -1,6 +1,6 @@
 use crate::*;
 
-use conduit::World;
+use impeller::World;
 use nox_ecs::{
     graph::{EdgeComponent, GraphQuery, TotalEdge},
     nox::{jax::JaxNoxprFn, NoxprComp, NoxprFn, NoxprNode, NoxprTy},
@@ -203,7 +203,7 @@ pub struct SystemBuilder {
 
 #[derive(Clone)]
 pub struct ArgMetadata {
-    pub entity_map: BTreeMap<conduit::EntityId, usize>,
+    pub entity_map: BTreeMap<impeller::EntityId, usize>,
     pub len: usize,
     pub metadata: Metadata,
 }

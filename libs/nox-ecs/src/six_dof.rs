@@ -200,8 +200,8 @@ mod tests {
     use crate::World;
     use crate::WorldExt;
     use approx::assert_relative_eq;
-    use conduit::ComponentExt;
-    use conduit::ComponentId;
+    use impeller::ComponentExt;
+    use impeller::ComponentId;
     use nox::nalgebra::{UnitQuaternion, Vector3};
     use nox::tensor;
     use nox::ArrayRepr;

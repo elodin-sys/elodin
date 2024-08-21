@@ -2,8 +2,8 @@ use crate::*;
 
 use std::collections::HashMap;
 
-use nox_ecs::conduit;
-use nox_ecs::conduit::TagValue;
+use nox_ecs::impeller;
+use nox_ecs::impeller::TagValue;
 use pyo3::types::PyList;
 
 #[derive(Clone)]
@@ -168,8 +168,8 @@ impl ComponentType {
     }
 }
 
-impl From<conduit::ComponentType> for ComponentType {
-    fn from(val: conduit::ComponentType) -> Self {
+impl From<impeller::ComponentType> for ComponentType {
+    fn from(val: impeller::ComponentType) -> Self {
         ComponentType {
             ty: val.primitive_ty.into(),
             shape: val.shape.to_vec(),
@@ -177,9 +177,9 @@ impl From<conduit::ComponentType> for ComponentType {
     }
 }
 
-impl From<ComponentType> for conduit::ComponentType {
+impl From<ComponentType> for impeller::ComponentType {
     fn from(val: ComponentType) -> Self {
-        conduit::ComponentType {
+        impeller::ComponentType {
             primitive_ty: val.ty.into(),
             shape: val.shape.into(),
         }
@@ -202,38 +202,38 @@ pub enum PrimitiveType {
     Bool,
 }
 
-impl From<conduit::PrimitiveTy> for PrimitiveType {
-    fn from(val: conduit::PrimitiveTy) -> Self {
+impl From<impeller::PrimitiveTy> for PrimitiveType {
+    fn from(val: impeller::PrimitiveTy) -> Self {
         match val {
-            conduit::PrimitiveTy::F64 => PrimitiveType::F64,
-            conduit::PrimitiveTy::F32 => PrimitiveType::F32,
-            conduit::PrimitiveTy::U64 => PrimitiveType::U64,
-            conduit::PrimitiveTy::U32 => PrimitiveType::U32,
-            conduit::PrimitiveTy::U16 => PrimitiveType::U16,
-            conduit::PrimitiveTy::U8 => PrimitiveType::U8,
-            conduit::PrimitiveTy::I64 => PrimitiveType::I64,
-            conduit::PrimitiveTy::I32 => PrimitiveType::I32,
-            conduit::PrimitiveTy::I16 => PrimitiveType::I16,
-            conduit::PrimitiveTy::I8 => PrimitiveType::I8,
-            conduit::PrimitiveTy::Bool => PrimitiveType::Bool,
+            impeller::PrimitiveTy::F64 => PrimitiveType::F64,
+            impeller::PrimitiveTy::F32 => PrimitiveType::F32,
+            impeller::PrimitiveTy::U64 => PrimitiveType::U64,
+            impeller::PrimitiveTy::U32 => PrimitiveType::U32,
+            impeller::PrimitiveTy::U16 => PrimitiveType::U16,
+            impeller::PrimitiveTy::U8 => PrimitiveType::U8,
+            impeller::PrimitiveTy::I64 => PrimitiveType::I64,
+            impeller::PrimitiveTy::I32 => PrimitiveType::I32,
+            impeller::PrimitiveTy::I16 => PrimitiveType::I16,
+            impeller::PrimitiveTy::I8 => PrimitiveType::I8,
+            impeller::PrimitiveTy::Bool => PrimitiveType::Bool,
         }
     }
 }
 
-impl From<PrimitiveType> for conduit::PrimitiveTy {
+impl From<PrimitiveType> for impeller::PrimitiveTy {
     fn from(val: PrimitiveType) -> Self {
         match val {
-            PrimitiveType::F64 => conduit::PrimitiveTy::F64,
-            PrimitiveType::F32 => conduit::PrimitiveTy::F32,
-            PrimitiveType::U64 => conduit::PrimitiveTy::U64,
-            PrimitiveType::U32 => conduit::PrimitiveTy::U32,
-            PrimitiveType::U16 => conduit::PrimitiveTy::U16,
-            PrimitiveType::U8 => conduit::PrimitiveTy::U8,
-            PrimitiveType::I64 => conduit::PrimitiveTy::I64,
-            PrimitiveType::I32 => conduit::PrimitiveTy::I32,
-            PrimitiveType::I16 => conduit::PrimitiveTy::I16,
-            PrimitiveType::I8 => conduit::PrimitiveTy::I8,
-            PrimitiveType::Bool => conduit::PrimitiveTy::Bool,
+            PrimitiveType::F64 => impeller::PrimitiveTy::F64,
+            PrimitiveType::F32 => impeller::PrimitiveTy::F32,
+            PrimitiveType::U64 => impeller::PrimitiveTy::U64,
+            PrimitiveType::U32 => impeller::PrimitiveTy::U32,
+            PrimitiveType::U16 => impeller::PrimitiveTy::U16,
+            PrimitiveType::U8 => impeller::PrimitiveTy::U8,
+            PrimitiveType::I64 => impeller::PrimitiveTy::I64,
+            PrimitiveType::I32 => impeller::PrimitiveTy::I32,
+            PrimitiveType::I16 => impeller::PrimitiveTy::I16,
+            PrimitiveType::I8 => impeller::PrimitiveTy::I8,
+            PrimitiveType::Bool => impeller::PrimitiveTy::Bool,
         }
     }
 }
