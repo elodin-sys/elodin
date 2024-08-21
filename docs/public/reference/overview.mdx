@@ -8,7 +8,7 @@ icon: list
 An Elodin simulation consists of:
 - **[Systems]:** Systems are reusable functions that operate on a set of components. Composing different systems allows for the creation of custom physics engines. Some examples of systems include gravity, aerodynamics, collision detection.
 - **World:** World is a container of all the entities in the simulation. See [ECS Data Model](#ecs-data-model) for more context on entities.
-- **Flight Software (FSW):** Flight software is a set of processes that run independent of the simulation. Using conduit, FSW subscribes to relevant simulation data and sends control commands back to the simulation.
+- **Flight Software (FSW):** Flight software is a set of processes that run independent of the simulation. Using `impeller`, FSW subscribes to relevant simulation data and sends control commands back to the simulation.
 
 ![Simulation Architecture](/reference/architecture.svg)
 

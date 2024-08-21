@@ -14,7 +14,7 @@ use bevy::{
     render::view::RenderLayers,
 };
 use big_space::GridCell;
-use conduit::{
+use impeller::{
     bevy::Tick,
     query::MetadataStore,
     well_known::{EntityMetadata, Line3d},
@@ -120,7 +120,7 @@ pub fn set_line_plot_3d_range(
                     chunk.unfetched.remove_range(start as u32..end as u32);
                     control_msg.send(ControlMsg::Query {
                         time_range,
-                        query: conduit::Query {
+                        query: impeller::Query {
                             component_id: meta.component_id,
                             with_component_ids: vec![],
                             entity_ids: vec![meta.entity],

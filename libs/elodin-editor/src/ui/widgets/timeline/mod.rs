@@ -3,8 +3,8 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::{egui, EguiContexts};
-use conduit::bevy::{MaxTick, Tick, TimeStep};
 use egui::emath::Numeric;
+use impeller::bevy::{MaxTick, Tick, TimeStep};
 use timeline_controls::TimelineControls;
 use timeline_ranges::{TimelineRanges, TimelineRangesPanel};
 

@@ -8,7 +8,7 @@ use bevy::{
     math::Vec3,
     transform::components::Transform,
 };
-use conduit::{
+use impeller::{
     bevy::{ComponentValueMap, EntityMap},
     well_known::{BodyAxes, VectorArrow, WorldPos},
 };
@@ -60,12 +60,12 @@ fn render_vector_arrow(
             continue;
         };
         let vec = match value {
-            conduit::ComponentValue::F32(arr) => Vector3::new(
+            impeller::ComponentValue::F32(arr) => Vector3::new(
                 arr[range.start] as f64,
                 arr[range.start + 1] as f64,
                 arr[range.start + 2] as f64,
             ),
-            conduit::ComponentValue::F64(arr) => {
+            impeller::ComponentValue::F64(arr) => {
                 Vector3::new(arr[range.start], arr[range.start + 1], arr[range.start + 2])
             }
             _ => {

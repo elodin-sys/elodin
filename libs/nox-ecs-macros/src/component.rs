@@ -50,11 +50,11 @@ pub fn component(input: TokenStream) -> TokenStream {
         }
 
 
-        impl #crate_name::conduit::Component for #ident #generics #where_clause {
+        impl #crate_name::impeller::Component for #ident #generics #where_clause {
             const NAME: &'static str = #name;
 
-            fn component_type() -> #crate_name::conduit::ComponentType {
-                <#ty as #crate_name::conduit::Component>::component_type()
+            fn component_type() -> #crate_name::impeller::ComponentType {
+                <#ty as #crate_name::impeller::Component>::component_type()
             }
         }
 

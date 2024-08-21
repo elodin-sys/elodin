@@ -1,5 +1,5 @@
-use conduit::well_known::Color;
 use egui::Color32;
+use impeller::well_known::Color;
 
 pub const WHITE: Color32 = Color32::WHITE;
 pub const TRANSPARENT: Color32 = Color32::TRANSPARENT;

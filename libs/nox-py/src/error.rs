@@ -24,8 +24,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
-    #[error("conduit error {0}")]
-    Conduit(#[from] conduit::Error),
+    #[error("impeller error {0}")]
+    Impeller(#[from] impeller::Error),
     #[error("polars error {0}")]
     Polars(#[from] polars::error::PolarsError),
     #[error("serde error {0}")]

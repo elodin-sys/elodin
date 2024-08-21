@@ -214,25 +214,25 @@ pub trait AssetAdapter {
 }
 
 pub trait AppExt {
-    fn add_conduit_component<C: BevyComponent>(&mut self) -> &mut Self;
+    fn add_impeller_component<C: BevyComponent>(&mut self) -> &mut Self;
 
-    fn add_conduit_component_with_adapter<C: BevyComponent>(
+    fn add_impeller_component_with_adapter<C: BevyComponent>(
         &mut self,
         adapter: Box<dyn ComponentAdapter + Send + Sync>,
     ) -> &mut Self;
 
-    fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
+    fn add_impeller_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self;
 }
 
 impl AppExt for bevy::app::App {
-    fn add_conduit_component<C: BevyComponent>(&mut self) -> &mut Self {
-        self.add_conduit_component_with_adapter::<C>(Box::<StaticComponentAdapter<C>>::default())
+    fn add_impeller_component<C: BevyComponent>(&mut self) -> &mut Self {
+        self.add_impeller_component_with_adapter::<C>(Box::<StaticComponentAdapter<C>>::default())
     }
 
-    fn add_conduit_component_with_adapter<C: BevyComponent>(
+    fn add_impeller_component_with_adapter<C: BevyComponent>(
         &mut self,
         adapter: Box<dyn ComponentAdapter + Send + Sync>,
     ) -> &mut Self {
@@ -251,7 +251,7 @@ impl AppExt for bevy::app::App {
         self
     }
 
-    fn add_conduit_asset<R: Asset + bevy::prelude::Component + Debug>(
+    fn add_impeller_asset<R: Asset + bevy::prelude::Component + Debug>(
         &mut self,
         adapter: Box<dyn AssetAdapter + Send + Sync>,
     ) -> &mut Self {
@@ -266,21 +266,21 @@ impl AppExt for bevy::app::App {
 }
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub struct ConduitRx(pub flume::Receiver<MsgPair>);
+pub struct ImpellerRx(pub flume::Receiver<MsgPair>);
 
 #[derive(Component)]
 pub struct Persistent;
 
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub struct ConduitMsgSender(pub flume::Sender<Msg>);
+pub struct ImpellerMsgSender(pub flume::Sender<Msg>);
 #[derive(Debug, Resource, Deref, DerefMut)]
-pub struct ConduitMsgReceiver(pub flume::Receiver<Msg>);
+pub struct ImpellerMsgReceiver(pub flume::Receiver<Msg>);
 
 #[derive(SystemParam)]
 pub struct RecvSystemArgs<'w, 's> {
-    rx: Res<'w, ConduitRx>,
+    rx: Res<'w, ImpellerRx>,
     entity_map: ResMut<'w, EntityMap>,
-    event: Res<'w, ConduitMsgSender>,
+    event: Res<'w, ImpellerMsgSender>,
     commands: Commands<'w, 's>,
     value_map: Query<'w, 's, &'static mut ComponentValueMap>,
     metadata_store: ResMut<'w, MetadataStore>,
@@ -425,22 +425,22 @@ fn recv_system(args: RecvSystemArgs) {
 }
 
 #[derive(Clone)]
-pub struct ConduitSubscribePlugin {
+pub struct ImpellerSubscribePlugin {
     rx: flume::Receiver<MsgPair>,
 }
 
-impl ConduitSubscribePlugin {
+impl ImpellerSubscribePlugin {
     pub fn new(rx: flume::Receiver<MsgPair>) -> Self {
         Self { rx }
     }
 
-    pub fn pair() -> (ConduitSubscribePlugin, flume::Sender<MsgPair>) {
+    pub fn pair() -> (ImpellerSubscribePlugin, flume::Sender<MsgPair>) {
         let (tx, rx) = flume::unbounded();
-        (ConduitSubscribePlugin { rx }, tx)
+        (ImpellerSubscribePlugin { rx }, tx)
     }
 }
 
-impl Plugin for ConduitSubscribePlugin {
+impl Plugin for ImpellerSubscribePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         let (tx, rx) = flume::unbounded();
         app.insert_resource(EntityMap::default());
@@ -450,9 +450,9 @@ impl Plugin for ConduitSubscribePlugin {
         app.insert_resource(Tick(0));
         app.insert_resource(Simulating(false));
         app.insert_resource(TimeStep(Duration::default()));
-        app.insert_resource(ConduitRx(self.rx.clone()));
-        app.insert_resource(ConduitMsgSender(tx));
-        app.insert_resource(ConduitMsgReceiver(rx));
+        app.insert_resource(ImpellerRx(self.rx.clone()));
+        app.insert_resource(ImpellerMsgSender(tx));
+        app.insert_resource(ImpellerMsgReceiver(rx));
         app.add_event::<SubscribeEvent>();
         app.add_event::<ControlMsg>();
         app.add_event::<ColumnPayloadMsg>();

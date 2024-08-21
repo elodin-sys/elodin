@@ -159,7 +159,7 @@ pub struct WidgetId(pub u64);
 
 impl WidgetId {
     pub const fn new(str: &str) -> Self {
-        Self(conduit::const_fnv1a_hash::fnv1a_hash_str_64(str))
+        Self(impeller::const_fnv1a_hash::fnv1a_hash_str_64(str))
     }
 }
 

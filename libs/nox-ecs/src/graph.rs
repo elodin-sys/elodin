@@ -1,5 +1,5 @@
 use bytes::Buf;
-use conduit::{ComponentId, ComponentType, ComponentValue, EntityId};
+use impeller::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -52,12 +52,12 @@ impl FromBuilder for Edge {
     }
 }
 
-impl conduit::Component for Edge {
+impl impeller::Component for Edge {
     const NAME: &'static str = "edge";
 
-    fn component_type() -> conduit::ComponentType {
+    fn component_type() -> impeller::ComponentType {
         ComponentType {
-            primitive_ty: conduit::PrimitiveTy::U64,
+            primitive_ty: impeller::PrimitiveTy::U64,
             shape: smallvec::smallvec![2],
         }
     }
@@ -117,7 +117,7 @@ impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
         })
     }
 
-    fn component_ids() -> impl Iterator<Item = conduit::ComponentId> {
+    fn component_ids() -> impl Iterator<Item = impeller::ComponentId> {
         std::iter::empty()
     }
 
@@ -147,7 +147,7 @@ impl crate::system::SystemParam for GraphQuery<TotalEdge> {
         })
     }
 
-    fn component_ids() -> impl Iterator<Item = conduit::ComponentId> {
+    fn component_ids() -> impl Iterator<Item = impeller::ComponentId> {
         std::iter::empty()
     }
 

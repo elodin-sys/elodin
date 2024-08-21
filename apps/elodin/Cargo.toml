@@ -32,8 +32,8 @@ copy_dir = "0.1.3"
 elodin-types.path = "../../libs/elodin-types/rust"
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
-conduit.path = "../../libs/conduit"
-conduit.features = ["tokio", "polars"]
+impeller.path = "../../libs/impeller"
+impeller.features = ["tokio", "polars"]
 
 # crypto
 ring = "0.17"

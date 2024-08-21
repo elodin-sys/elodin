@@ -7,8 +7,8 @@ One of the pernicious difficulties we encountered developing the physics toolkit
 The trouble is that the physics toolkit is entirely customizable, so it's possible to have infinite possible data combinations.
 Thankfully, ECS provides an exceedingly simple way of syncing data between systems.
 
-## Conduit
- We call this protocol Conduit. You can send data as a tuple of the entity id, component id, and value, like so:
+## Impel
+ We call this protocol Impel. You can send data as a tuple of the entity id, component id, and value, like so:
 
 ```rust
 (EntityId(1), ComponentId("pos"), Vector3(1,1,3))
@@ -28,7 +28,7 @@ The simulation software can also send out sensor output this same way.
 
 This is nice because it means reacting to new inputs and producing outputs that work with the same systems that we use for the core simulation above.
 
-We use Conduit to record the entire state of the system. We create a recorder service that subscribes to all components and entities from the simulation and control software. Every time it receives a message, it adds it to a table. Then, you can use that data to query the entire state of the system at any time. This allows users to specify failure and success conditions with ease; simply write a statement like
+We use Impel to record the entire state of the system. We create a recorder service that subscribes to all components and entities from the simulation and control software. Every time it receives a message, it adds it to a table. Then, you can use that data to query the entire state of the system at any time. This allows users to specify failure and success conditions with ease; simply write a statement like
 
 ```rust
 assert(entity[3].pos == vector3(1.0, 0.0, 0.0))

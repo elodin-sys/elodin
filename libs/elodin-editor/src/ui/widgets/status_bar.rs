@@ -5,7 +5,7 @@ use bevy::{
         world::World,
     },
 };
-use conduit::bevy::{MaxTick, Tick, TimeStep};
+use impeller::bevy::{MaxTick, Tick, TimeStep};
 
 use crate::ui::colors;
 

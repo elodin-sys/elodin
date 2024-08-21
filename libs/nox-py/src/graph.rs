@@ -1,6 +1,6 @@
 use super::*;
 
-use conduit::{ComponentExt, ComponentId};
+use impeller::{ComponentExt, ComponentId};
 use nox_ecs::{
     graph::{exprs_from_edges_queries, GraphQuery},
     nox::IntoOp,

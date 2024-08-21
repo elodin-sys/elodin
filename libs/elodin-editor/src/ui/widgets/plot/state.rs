@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
-use conduit::ComponentValue;
-use conduit::{ComponentId, EntityId};
+use impeller::ComponentValue;
+use impeller::{ComponentId, EntityId};
 
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
 use crate::ui::widgets::timeline::timeline_ranges::TimelineRangeId;

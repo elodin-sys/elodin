@@ -1,9 +1,9 @@
 use bytes::{buf::UninitSlice, BufMut};
-use conduit::{
+use heapless::FnvIndexMap;
+use impeller::{
     ser_de::Frozen, Component, ComponentId, ComponentValue, ComponentValueDim, ConstComponent,
     EntityId, ValueRepr,
 };
-use heapless::FnvIndexMap;
 use tracing::warn;
 
 use crate::{Componentize, Decomponentize};

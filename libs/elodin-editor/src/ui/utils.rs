@@ -1,5 +1,5 @@
 use bevy_egui::egui;
-use conduit::ComponentValue;
+use impeller::ComponentValue;
 
 pub fn get_galley_layout_job(
     text: impl ToString,

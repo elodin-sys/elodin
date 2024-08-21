@@ -4,7 +4,7 @@ members = [
     "apps/editor-web",
     "libs/elodin-editor",
     "libs/elodin-types/rust",
-    "libs/conduit",
+    "libs/impeller",
     "libs/nox",
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
@@ -92,7 +92,7 @@ nox.path = "libs/nox"
 nox.default-features = false
 nox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
-conduit.path = "libs/conduit"
-conduit.default-features = false
+impeller.path = "libs/impeller"
+impeller.default-features = false
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"

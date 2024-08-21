@@ -1,5 +1,5 @@
 use bytes::Buf;
-use conduit::{
+use impeller::{
     client::{Demux, MsgPair},
     Packet, Payload,
 };

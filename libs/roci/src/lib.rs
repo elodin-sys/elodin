@@ -6,8 +6,8 @@ mod decomponentize;
 mod system_fn;
 
 pub use componentize::*;
-pub use conduit;
 pub use decomponentize::*;
+pub use impeller;
 pub use roci_macros::{Componentize, Decomponentize, Metadatatize};
 pub use system_fn::*;
 

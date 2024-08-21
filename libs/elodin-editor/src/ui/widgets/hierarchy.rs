@@ -3,8 +3,8 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use conduit::well_known::EntityMetadata;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use impeller::well_known::EntityMetadata;
 
 use crate::ui::{
     colors::{self, EColor},
@@ -183,18 +183,18 @@ pub fn entity_list(
 
                     if list_item.clicked() {
                         if let SelectedObject::Entity(prev) = selected_object.as_ref() {
-                            **selected_object = if prev.conduit == *entity_id {
+                            **selected_object = if prev.impeller == *entity_id {
                                 SelectedObject::None
                             } else {
                                 SelectedObject::Entity(EntityPair {
                                     bevy: entity,
-                                    conduit: *entity_id,
+                                    impeller: *entity_id,
                                 })
                             };
                         } else {
                             **selected_object = SelectedObject::Entity(EntityPair {
                                 bevy: entity,
-                                conduit: *entity_id,
+                                impeller: *entity_id,
                             })
                         }
                     }

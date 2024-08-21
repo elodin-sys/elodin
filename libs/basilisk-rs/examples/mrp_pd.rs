@@ -3,7 +3,7 @@ use basilisk::{
     channel::BskChannel,
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
-use conduit::Query;
+use impeller::Query;
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
 use roci::{
     drivers::{os_sleep_driver, Driver, Hz},

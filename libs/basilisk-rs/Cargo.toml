@@ -34,5 +34,5 @@ roci.features = ["tokio"]
 roci-macros.path = "../roci/macros"
 tracing-subscriber = "0.3"
 nox.path = "../nox"
-conduit.path = "../conduit"
-conduit.features = ["nox"]
+impeller.path = "../impeller"
+impeller.features = ["nox"]

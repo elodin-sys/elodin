@@ -8,7 +8,7 @@ use bevy::ecs::{
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
-use conduit::{
+use impeller::{
     bevy::ColumnPayloadMsg,
     ndarray::{self, Dimension},
     query::MetadataStore,
