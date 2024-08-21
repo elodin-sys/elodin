@@ -1,6 +1,6 @@
 use std::ops::{Add, Mul};
 
-use conduit::ComponentExt;
+use impeller::ComponentExt;
 use nox_ecs::nox::{self, FromOp, IntoOp, Noxpr, Scalar, Vector};
 use pyo3::{prelude::*, types::PyTuple};
 

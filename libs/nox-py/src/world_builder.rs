@@ -2,7 +2,7 @@ use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
 use clap::Parser;
 use nox_ecs::{
-    conduit, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
+    impeller, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
     WorldExt,
 };
 use std::{path::PathBuf, time::Duration};
@@ -41,7 +41,7 @@ impl WorldBuilder {
 
     pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
         let entity_id = EntityId {
-            inner: conduit::EntityId(self.world.entity_len),
+            inner: impeller::EntityId(self.world.entity_len),
         };
         self.insert(entity_id, spawnable)?;
         self.world.entity_len += 1;
@@ -72,7 +72,7 @@ impl WorldBuilder {
                 Ok(())
             }
             Spawnable::Asset { name, bytes } => {
-                let metadata = conduit::Metadata::asset(&name);
+                let metadata = impeller::Metadata::asset(&name);
                 let component_id = metadata.component_id();
                 let archetype_name = metadata.component_name().into();
                 let inner = self.world.assets.insert_bytes(bytes.bytes);
@@ -325,7 +325,7 @@ impl WorldBuilder {
 
         if let Some(ts) = output_time_step {
             let time_step = Duration::from_secs_f64(ts);
-            self.world.output_time_step = Some(conduit::OutputTimeStep {
+            self.world.output_time_step = Some(impeller::OutputTimeStep {
                 time_step,
                 last_tick: std::time::Instant::now(),
             })

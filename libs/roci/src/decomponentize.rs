@@ -1,4 +1,4 @@
-use conduit::{ComponentId, ComponentValue, ComponentValueDim, EntityId};
+use impeller::{ComponentId, ComponentValue, ComponentValueDim, EntityId};
 
 pub trait Decomponentize {
     fn apply_value<D: ComponentValueDim>(

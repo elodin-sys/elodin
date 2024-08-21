@@ -1,5 +1,5 @@
 use crate::{system::SystemBuilder, Component, ComponentArray, ComponentExt, Error, SystemParam};
-use conduit::{ComponentId, ComponentType, EntityId};
+use impeller::{ComponentId, ComponentType, EntityId};
 use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
 use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};

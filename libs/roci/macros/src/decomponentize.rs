@@ -25,17 +25,17 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         entity_id,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let conduit = quote! { #crate_name::conduit };
+    let impeller = quote! { #crate_name::impeller };
     let fields = data.take_struct().unwrap();
     let if_arms = fields.fields.iter().map(|field| {
         let ty = &field.ty;
         let component_id = match &field.component_id {
             Some(c) => quote! {
-                #crate_name::conduit::ComponentId::new(#c)
+                #crate_name::impeller::ComponentId::new(#c)
             },
             None => {
                 quote! {
-                    #crate_name::conduit::ComponentId::new(<#ty as #crate_name::conduit::Component>::NAME)
+                    #crate_name::impeller::ComponentId::new(<#ty as #crate_name::impeller::Component>::NAME)
                 }
             },
         };
@@ -50,8 +50,8 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
             quote! {
-                const #const_name: #conduit::ComponentId = #component_id;
-                if component_id == #const_name && entity_id == #conduit::EntityId(#id) {
+                const #const_name: #impeller::ComponentId = #component_id;
+                if component_id == #const_name && entity_id == #impeller::EntityId(#id) {
                     if let Some(val) = <#ty>::from_component_value(value.clone()) {
                         self.#ident = val;
                         }
@@ -65,12 +65,12 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
     });
     quote! {
         impl #crate_name::Decomponentize for #ident #generics #where_clause {
-            fn apply_value<D: #conduit::ComponentValueDim>(&mut self,
-                            component_id: #conduit::ComponentId,
-                            entity_id: #conduit::EntityId,
-                            value: #conduit::ComponentValue<'_, D>
+            fn apply_value<D: #impeller::ComponentValueDim>(&mut self,
+                            component_id: #impeller::ComponentId,
+                            entity_id: #impeller::EntityId,
+                            value: #impeller::ComponentValue<'_, D>
             ) {
-                use #conduit::ValueRepr;
+                use #impeller::ValueRepr;
                 #(#if_arms)*
             }
         }

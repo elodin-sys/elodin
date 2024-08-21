@@ -36,13 +36,13 @@ pub fn archetype(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     let name = ident.to_string().to_case(Case::Snake);
     quote! {
-        impl #crate_name::conduit::Archetype for #ident #generics #where_clause {
-            fn name() -> #crate_name::conduit::ArchetypeName {
-                #crate_name::conduit::ArchetypeName::from(#name)
+        impl #crate_name::impeller::Archetype for #ident #generics #where_clause {
+            fn name() -> #crate_name::impeller::ArchetypeName {
+                #crate_name::impeller::ArchetypeName::from(#name)
             }
 
-            fn components() -> Vec<#crate_name::conduit::Metadata> {
-                use #crate_name::conduit::ComponentExt;
+            fn components() -> Vec<#crate_name::impeller::Metadata> {
+                use #crate_name::impeller::ComponentExt;
                 vec![#( <#tys>::metadata(), )*]
             }
 

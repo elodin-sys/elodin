@@ -1,8 +1,8 @@
 use crate::*;
 
-use conduit::well_known::{Graph, GraphComponent, Split};
-use nox_ecs::conduit::Asset;
-use nox_ecs::{conduit, nox::nalgebra::Vector3};
+use impeller::well_known::{Graph, GraphComponent, Split};
+use nox_ecs::impeller::Asset;
+use nox_ecs::{impeller, nox::nalgebra::Vector3};
 use numpy::PyArrayLike1;
 use pyo3::exceptions::PyValueError;
 
@@ -11,7 +11,7 @@ use crate::EntityId;
 #[pyclass]
 #[derive(Clone)]
 pub struct Panel {
-    inner: conduit::well_known::Panel,
+    inner: impeller::well_known::Panel,
 }
 
 #[pymethods]
@@ -39,7 +39,7 @@ impl Panel {
         } else {
             Vector3::new(5.0, 5.0, 10.0)
         };
-        let mut viewport = conduit::well_known::Viewport {
+        let mut viewport = impeller::well_known::Viewport {
             track_entity: track_entity.map(|x| x.inner),
             fov,
             active,
@@ -59,12 +59,12 @@ impl Panel {
             viewport = viewport.looking_at(pos);
         }
         Ok(Self {
-            inner: conduit::well_known::Panel::Viewport(viewport),
+            inner: impeller::well_known::Panel::Viewport(viewport),
         })
     }
 
     pub fn asset_name(&self) -> &'static str {
-        conduit::well_known::Panel::ASSET_NAME
+        impeller::well_known::Panel::ASSET_NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {
@@ -76,7 +76,7 @@ impl Panel {
     #[pyo3(signature = (*panels, active = false))]
     pub fn vsplit(panels: Vec<Panel>, active: bool) -> Self {
         Self {
-            inner: conduit::well_known::Panel::VSplit(Split {
+            inner: impeller::well_known::Panel::VSplit(Split {
                 panels: panels.into_iter().map(|x| x.inner).collect(),
                 active,
             }),
@@ -87,7 +87,7 @@ impl Panel {
     #[pyo3(signature = (*panels, active = false))]
     pub fn hsplit(panels: Vec<Panel>, active: bool) -> Self {
         Self {
-            inner: conduit::well_known::Panel::HSplit(Split {
+            inner: impeller::well_known::Panel::HSplit(Split {
                 panels: panels.into_iter().map(|x| x.inner).collect(),
                 active,
             }),
@@ -99,13 +99,13 @@ impl Panel {
     pub fn graph(entities: Vec<GraphEntity>, name: Option<String>) -> PyResult<Self> {
         let entities = entities
             .into_iter()
-            .map(|x| conduit::well_known::GraphEntity {
+            .map(|x| impeller::well_known::GraphEntity {
                 entity_id: x.entity.inner,
                 components: x.components,
             })
             .collect();
         Ok(Self {
-            inner: conduit::well_known::Panel::Graph(Graph { name, entities }),
+            inner: impeller::well_known::Panel::Graph(Graph { name, entities }),
         })
     }
 }
@@ -143,7 +143,7 @@ impl GraphEntity {
 
 #[pyclass]
 pub struct Line3d {
-    inner: conduit::well_known::Line3d,
+    inner: impeller::well_known::Line3d,
 }
 
 #[pymethods]
@@ -157,7 +157,7 @@ impl Line3d {
         index: Option<Vec<usize>>,
         perspective: Option<bool>,
     ) -> PyResult<Self> {
-        use conduit::well_known::Color;
+        use impeller::well_known::Color;
         const COLORS: &[Color] = &[
             Color::TURQUOISE,
             Color::SLATE,
@@ -187,7 +187,7 @@ impl Line3d {
             .unwrap_or_else(|| COLORS[component_id.0 as usize % COLORS.len()]);
 
         Ok(Self {
-            inner: conduit::well_known::Line3d {
+            inner: impeller::well_known::Line3d {
                 entity: entity.inner,
                 component_id,
                 line_width,
@@ -199,7 +199,7 @@ impl Line3d {
     }
 
     pub fn asset_name(&self) -> &'static str {
-        conduit::well_known::Line3d::ASSET_NAME
+        impeller::well_known::Line3d::ASSET_NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {

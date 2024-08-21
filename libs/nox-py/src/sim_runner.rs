@@ -1,6 +1,6 @@
 use clap::Parser;
-use conduit::client::MsgPair;
-use nox_ecs::{Compiled, ConduitExec, WorldExec};
+use impeller::client::MsgPair;
+use nox_ecs::{Compiled, ImpellerExec, WorldExec};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -76,7 +76,7 @@ impl SimSupervisor {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let server = conduit::server::TcpServer::bind(tx, addr).await.unwrap();
+                let server = impeller::server::TcpServer::bind(tx, addr).await.unwrap();
                 server.run().await
             })
             .unwrap();
@@ -103,12 +103,12 @@ impl SimRunner {
         let (exec_tx, exec_rx) = flume::bounded(1);
         std::thread::spawn(move || -> anyhow::Result<()> {
             let exec: WorldExec<Compiled> = exec_rx.recv()?;
-            let mut conduit_exec = ConduitExec::new(exec, server_rx.clone());
+            let mut impeller_exec = ImpellerExec::new(exec, server_rx.clone());
             let mut start = Instant::now();
-            let time_step = conduit_exec.run_time_step();
+            let time_step = impeller_exec.run_time_step();
             loop {
-                if let Err(err) = conduit_exec.run() {
-                    error!(?err, "failed to run conduit exec");
+                if let Err(err) = impeller_exec.run() {
+                    error!(?err, "failed to run impeller exec");
                     return Err(err.into());
                 }
                 let sleep_time = time_step.saturating_sub(start.elapsed());
@@ -117,10 +117,10 @@ impl SimRunner {
 
                 if let Ok(exec) = exec_rx.try_recv() {
                     trace!("received new code, updating sim");
-                    let conns = conduit_exec.connections().to_vec();
-                    conduit_exec = ConduitExec::new(exec, server_rx.clone());
+                    let conns = impeller_exec.connections().to_vec();
+                    impeller_exec = ImpellerExec::new(exec, server_rx.clone());
                     for conn in conns {
-                        conduit_exec.add_connection(conn)?;
+                        impeller_exec.add_connection(conn)?;
                     }
                 }
             }
