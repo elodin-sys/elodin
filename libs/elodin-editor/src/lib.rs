@@ -81,10 +81,33 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        let present_mode = if cfg!(target_os = "macos") {
+            PresentMode::AutoNoVsync
+        } else {
+            PresentMode::AutoVsync
+        };
         let composite_alpha_mode = if cfg!(target_os = "macos") {
             bevy::window::CompositeAlphaMode::PostMultiplied
         } else {
             bevy::window::CompositeAlphaMode::Opaque
+        };
+        let winit_settings = if cfg!(target_os = "macos") {
+            WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Reactive {
+                    wait: Duration::from_millis(16),
+                    react_to_device_events: true,
+                    react_to_user_events: true,
+                    react_to_window_events: true,
+                },
+                unfocused_mode: bevy::winit::UpdateMode::Reactive {
+                    wait: Duration::from_millis(32),
+                    react_to_device_events: false,
+                    react_to_user_events: true,
+                    react_to_window_events: true,
+                },
+            }
+        } else {
+            WinitSettings::game()
         };
         app
             //.insert_resource(AssetMetaCheck::Never)
@@ -95,7 +118,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode: PresentMode::AutoNoVsync,
+                            present_mode,
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -114,20 +137,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
-            .insert_resource(WinitSettings {
-                focused_mode: bevy::winit::UpdateMode::Reactive {
-                    wait: Duration::from_millis(16),
-                    react_to_device_events: true,
-                    react_to_user_events: true,
-                    react_to_window_events: true,
-                },
-                unfocused_mode: bevy::winit::UpdateMode::Reactive {
-                    wait: Duration::from_millis(32),
-                    react_to_device_events: false,
-                    react_to_user_events: true,
-                    react_to_window_events: true,
-                },
-            })
+            .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
             .add_plugins(DefaultPickingPlugins)
