@@ -8,29 +8,16 @@ convert_changelog() {
     # Flag to skip the changelog header
     local skip_header=true
 
-    # Flag to skip the unreleased section
-    local skip_unreleased=false
-
     # Read each line of the changelog file
     while IFS= read -r line; do
-        # Skip lines until the first occurrence of "## [unreleased]"
-        if $skip_header && ! [[ $line =~ ^##\ \[unreleased\] ]]; then
+        # Skip lines until the first occurrence of "## unreleased"
+        if $skip_header && ! [[ $line =~ ^##\ unreleased ]]; then
             continue
-        else
-            skip_header=false
         fi
+        skip_header=false
 
-        # Check if the line starts with "## [unreleased]"
-        if [[ $line =~ ^##\ \[unreleased\] ]]; then
-            skip_unreleased=true
-        # Check if the line starts with "## [vX.X.X]"
-        elif [[ $line =~ ^##\ \[v[0-9]+\.[0-9]+\.[0-9]+\] ]]; then
-            skip_unreleased=false
-            # Remove links from the line
-            line=$(echo "$line" | sed -E 's/\[v([0-9]+\.[0-9]+\.[0-9]+)\]/v\1/g')
-            formatted_changelog+="\n$line\n"
-        elif ! $skip_unreleased && [[ ! $line =~ \[[v0-9]+\.[0-9]+\.[0-9]+\]: ]] && [[ ! $line =~ ^\[unreleased\]: ]]; then
-            # Exclude lines with links to GitHub comparisons and unreleased section
+        # Check if the line starts with "## unreleased"
+        if ! [[ $line =~ ^##\ unreleased ]]; then
             formatted_changelog+="$line\n"
         fi
     done < "$file_path"
@@ -47,4 +34,3 @@ fi
 # Convert the changelog
 converted_changelog=$(convert_changelog "$1")
 echo "$converted_changelog"
-
