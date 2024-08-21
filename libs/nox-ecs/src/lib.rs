@@ -1,7 +1,7 @@
 extern crate self as nox_ecs;
 
-use conduit::well_known::{Color, EntityMetadata, Material, Mesh};
-use conduit::{
+use impeller::well_known::{Color, EntityMetadata, Material, Mesh};
+use impeller::{
     Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
 };
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
@@ -16,14 +16,14 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-pub use conduit;
+pub use impeller;
 pub use nox;
 
 mod component;
-mod conduit_exec;
 mod dyn_array;
 mod globals;
 mod history;
+mod impeller_exec;
 mod integrator;
 mod profile;
 mod query;
@@ -33,10 +33,10 @@ pub mod graph;
 pub mod six_dof;
 
 pub use component::*;
-pub use conduit::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
-pub use conduit_exec::*;
 pub use dyn_array::*;
 pub use globals::*;
+pub use impeller::{Buffers, ColumnRef, Entity, PolarsWorld, TimeStep, World};
+pub use impeller_exec::*;
 pub use integrator::*;
 pub use query::*;
 pub use system::*;
@@ -81,7 +81,7 @@ impl<T> ComponentArray<T> {
     }
 }
 
-impl<T: conduit::Component + FromOp> ComponentArray<T> {
+impl<T: impeller::Component + FromOp> ComponentArray<T> {
     pub fn get(&self, offset: i64) -> T {
         let ty: ArrayTy = T::component_type().into();
         let shape = ty.shape;
@@ -100,7 +100,7 @@ impl<T: conduit::Component + FromOp> ComponentArray<T> {
     }
 }
 
-impl<T: conduit::Component + 'static> crate::system::SystemParam for ComponentArray<T> {
+impl<T: impeller::Component + 'static> crate::system::SystemParam for ComponentArray<T> {
     type Item = Self;
 
     fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
@@ -624,8 +624,8 @@ pub enum Error {
     ComponentNotFound,
     #[error("component value had wrong size")]
     ValueSizeMismatch,
-    #[error("conduit error: {0}")]
-    Conduit(#[from] conduit::Error),
+    #[error("impeller error: {0}")]
+    Impeller(#[from] impeller::Error),
     #[error("channel closed")]
     ChannelClosed,
     #[error("io {0}")]
@@ -656,7 +656,7 @@ mod tests {
         six_dof::{Body, Force, Inertia, WorldAccel, WorldVel},
         Archetype, World, WorldPos,
     };
-    use conduit::well_known::Glb;
+    use impeller::well_known::Glb;
     use nox::{
         tensor, Scalar, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector,
     };

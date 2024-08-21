@@ -2,7 +2,7 @@ use crate::*;
 
 use std::marker::PhantomData;
 
-use conduit::ComponentId;
+use impeller::ComponentId;
 use nox_ecs::{join_many, nox::Noxpr};
 use nox_ecs::{join_query, update_var, ComponentArray};
 
@@ -140,7 +140,7 @@ impl QueryInner {
 #[pyclass]
 #[derive(Clone)]
 pub struct QueryMetadata {
-    pub entity_map: BTreeMap<conduit::EntityId, usize>,
+    pub entity_map: BTreeMap<impeller::EntityId, usize>,
     pub len: usize,
     pub metadata: Vec<Metadata>,
 }

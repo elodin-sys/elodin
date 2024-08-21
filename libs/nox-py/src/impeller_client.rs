@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use conduit::{client::AsyncClient, ColumnPayload, Packet, Payload, StreamId};
+use impeller::{client::AsyncClient, ColumnPayload, Packet, Payload, StreamId};
 use pyo3::prelude::*;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
@@ -7,24 +7,24 @@ use tokio::sync::Mutex;
 use crate::{Archetype, EntityId, Error, Metadata, PyUntypedArrayExt};
 
 #[pyclass]
-pub struct Conduit {
-    inner: Arc<Mutex<ConduitInner>>,
+pub struct Impeller {
+    inner: Arc<Mutex<ImpellerInner>>,
     rt: tokio::runtime::Runtime,
 }
 
-pub struct ConduitInner {
+pub struct ImpellerInner {
     addr: SocketAddr,
-    client: Option<conduit::client::TcpClient>,
+    client: Option<impeller::client::TcpClient>,
 }
 
 #[pymethods]
-impl Conduit {
+impl Impeller {
     #[staticmethod]
     pub fn tcp(addr: String) -> Result<Self, Error> {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let addr: SocketAddr = addr.parse().unwrap();
-        let inner = Arc::new(Mutex::new(ConduitInner::new(addr)));
-        Ok(Conduit { inner, rt })
+        let inner = Arc::new(Mutex::new(ImpellerInner::new(addr)));
+        Ok(Impeller { inner, rt })
     }
 
     pub fn send(
@@ -44,7 +44,7 @@ impl Conduit {
             .iter()
             .zip(component_datas.iter())
             .map(|(arr, data)| {
-                let ty: conduit::ComponentType = data.component_type.clone();
+                let ty: impeller::ComponentType = data.component_type.clone();
                 let elem_size = ty.primitive_ty.element_type().element_size_in_bytes();
                 unsafe { Bytes::copy_from_slice(arr.buf(elem_size)) }
             })
@@ -56,12 +56,12 @@ impl Conduit {
     }
 }
 
-impl ConduitInner {
+impl ImpellerInner {
     fn new(addr: SocketAddr) -> Self {
         Self { addr, client: None }
     }
 
-    async fn client(&mut self) -> Result<&mut conduit::client::TcpClient, Error> {
+    async fn client(&mut self) -> Result<&mut impeller::client::TcpClient, Error> {
         if let Some(ref mut client) = self.client {
             Ok(client)
         } else {
@@ -82,7 +82,7 @@ impl ConduitInner {
         for _ in 0..2 {
             match send_inner(client, entity_id, &component_datas, &arrays, time).await {
                 Ok(_) => break,
-                Err(conduit::Error::Io(_)) => {
+                Err(impeller::Error::Io(_)) => {
                     continue;
                 }
                 Err(err) => return Err(err.into()),
@@ -93,12 +93,12 @@ impl ConduitInner {
 }
 
 async fn send_inner(
-    client: &mut conduit::client::TcpClient,
+    client: &mut impeller::client::TcpClient,
     entity_id: EntityId,
     component_datas: &[Metadata],
     arrays: &[Bytes],
     time: u64,
-) -> Result<(), conduit::Error> {
+) -> Result<(), impeller::Error> {
     let stream_id = StreamId::rand();
     for (data, value_buf) in component_datas.iter().zip(arrays.iter()) {
         let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.inner.clone());

@@ -1,6 +1,6 @@
 use std::f64;
 
-use conduit::well_known::{Material, Mesh, Shape};
+use impeller::well_known::{Material, Mesh, Shape};
 use nox::{tensor, SpatialMotion};
 use nox::{SpatialForce, SpatialInertia, SpatialTransform};
 use nox_ecs::graph::GraphQuery;

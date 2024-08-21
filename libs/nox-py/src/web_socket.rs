@@ -8,10 +8,10 @@ use axum::{
     Router,
 };
 use bytes::{Bytes, BytesMut};
-use conduit::{client::MsgPair, server::handle_stream_sink};
 use futures::{SinkExt, StreamExt, TryStreamExt};
+use impeller::{client::MsgPair, server::handle_stream_sink};
 use include_dir::{include_dir, Dir};
-use nox_ecs::{nox, ConduitExec, Error, WorldExec};
+use nox_ecs::{nox, Error, ImpellerExec, WorldExec};
 use std::net::SocketAddr;
 
 static ASSETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets");
@@ -28,8 +28,8 @@ pub fn spawn_ws_server(
 
     let (tx, rx) = flume::unbounded();
     let exec = exec.compile(client.clone())?;
-    let mut conduit_exec = ConduitExec::new(exec, rx);
-    let time_step = conduit_exec.time_step();
+    let mut impeller_exec = ImpellerExec::new(exec, rx);
+    let time_step = impeller_exec.time_step();
     let axum_token = cancel_token.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -60,7 +60,7 @@ pub fn spawn_ws_server(
     });
     loop {
         let start = Instant::now();
-        conduit_exec.run()?;
+        impeller_exec.run()?;
         if check_canceled() {
             break Ok(());
         }

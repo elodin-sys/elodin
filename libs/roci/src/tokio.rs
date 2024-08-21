@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
 };
 
-use conduit::{
+use impeller::{
     bytes::{Bytes, BytesMut},
     client::{AsyncClient, Demux, Msg, TcpWriter},
     ser_de::ColumnValue,

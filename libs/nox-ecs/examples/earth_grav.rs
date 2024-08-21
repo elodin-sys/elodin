@@ -1,4 +1,4 @@
-use conduit::well_known::{Material, Mesh};
+use impeller::well_known::{Material, Mesh};
 use nox::{tensor, SpatialMotion};
 use nox::{SpatialForce, SpatialInertia, SpatialTransform};
 use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldExt, WorldPos};

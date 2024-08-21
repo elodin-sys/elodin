@@ -3,7 +3,7 @@ use nox::{IntoOp, Scalar};
 use nox_ecs_macros::Component;
 
 pub trait Component:
-    conduit::Component + IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self>
+    impeller::Component + IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self>
 {
 }
 
@@ -31,7 +31,7 @@ impl Time {
 #[cfg(test)]
 mod tests {
     use crate::{Seed, WorldPos};
-    use conduit::Component;
+    use impeller::Component;
 
     #[test]
     fn component_names() {
