@@ -2,6 +2,7 @@
 
 ## [unreleased]
 - **(fix)** Fix cutoff titlebar in editor on browser and windows.
+- **(fix)** Fix bug in the drone example's rate controller where the derivative term wasn't filtered correctly (https://github.com/elodin-sys/elodin/issues/18). It effectively caused the integral gain to amplified and the derivative gain to be suppressed.
 - **(breaking)** Replace `el.Time` and `el.advance_time` with `el.SimulationTick` and `el.SimulationTimeStep`.
   - The simulation tick is automatically advanced by a built-in system.
   - The simulation time step is set to the same value as the "sim_time_step" provided in `World.run`.
