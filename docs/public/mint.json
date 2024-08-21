@@ -14,15 +14,27 @@
       "to": "#1E43E2"
     }
   },
-  "topbarLinks": [
+  "anchors": [
     {
       "name": "Contact Us",
+      "icon": "envelope",
       "url": "mailto:founders@elodin.systems"
+    },
+    {
+      "name": "Blog",
+      "icon": "rss",
+      "url": "https://elodin.systems/blog"
+    }
+  ],
+  "topbarLinks": [
+    {
+      "name": "Dashboard",
+      "url": "https://app.elodin.systems"
     }
   ],
   "topbarCtaButton": {
-    "name": "Dashboard",
-    "url": "https://app.elodin.systems"
+    "type": "github",
+    "url": "https://github.com/elodin-sys/elodin"
   },
   "versions": ["v0.3.32"],
   "navigation": [
@@ -35,17 +47,14 @@
       "pages": [
         "reference/overview",
         "reference/python-api",
-        "reference/replays"
+        "reference/replays",
+        "reference/changelog"
       ],
       "version": "v0.3.32"
     },
     {
       "group": "The Tao of Elodin",
       "pages": ["tao/what", "tao/ecs", "tao/monte-carlo", "tao/data-flow"]
-    },
-    {
-      "group": "Updates",
-      "pages": ["updates/monthly-updates", "updates/changelog"]
     }
   ],
   "feedback": {

@@ -5,6 +5,8 @@ icon: house
 ---
 ## Install
 
+### Python SDK
+
 Install the Elodin Python SDK using `pip`:
 ```sh
 pip install -U elodin
@@ -14,7 +16,10 @@ pip install -U elodin
 The SDK is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
 </Warning>
 
+### Elodin Client
+
 Download the Elodin Client:
+
 | File                                                    | Platform            | Checksum                        |
 | ------------------------------------------------------- | ------------------- | ------------------------------- |
 | [elodin-aarch64-apple-darwin.tar.gz][elodin-macos]      | Apple Silicon macOS | [sha256][elodin-macos-sha256]   |
@@ -30,7 +35,10 @@ Download the Elodin Client:
 
 ## Start Simulating
 
-1. Download the [three-body.py] example code from our Github repo: [elodin-sys/elodin].
+1. Create a new simulation using the three-body orbit template.
+    ```sh
+    elodin create --template three-body
+    ```
 2. Launch the simulation using the `elodin` CLI.
     <Warning>
     This command is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
@@ -51,19 +59,16 @@ To use Elodin on Windows, the simulation server must be run in Windows Subsystem
 2. Run the simulation server in WSL.
     <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
     ```sh
-    python three-body.py run --watch
+    python3 three-body.py run --watch
     ```
 3. Run `elodin.exe` in Windows to launch the Elodin Client.
-
-[elodin-sys/elodin]: https://github.com/elodin-sys/elodin
-[three-body.py]: https://raw.githubusercontent.com/elodin-sys/elodin/main/libs/nox-py/examples/three-body.py
 
 ## Perform Analysis
 
 To analyze simulation data, use the `Exec` API to run the simulation for some number of ticks and collect the historical component data as a [Polars DataFrame].
 The DataFrame can then be used to generate plots or perform other methods of data analysis.
 
-Run the [ball/plot.py] example code to see this in action.
+Run the [examples/ball/plot.py] example code to see this in action.
 
 <Note>
 The `ball/plot.py` example depends on `matplotlib`. Install it using `pip`:
@@ -73,11 +78,13 @@ pip install -U matplotlib
 </Note>
 
 ```sh
-python examples/ball/plot.py
+git clone https://github.com/elodin-sys/elodin.git
+cd elodin
+python3 examples/ball/plot.py
 ```
 
 [Polars DataFrame]: https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe
-[ball/plot.py]: https://github.com/elodin-sys/elodin/blob/main/examples/ball/plot.py
+[examples/ball/plot.py]: https://github.com/elodin-sys/elodin/blob/main/examples/ball/plot.py
 
 ## Monte Carlo
 
@@ -89,10 +96,14 @@ Run Monte Carlo simulations to explore the state space.
     elodin login
     ```
 3. Clone the [Elodin Github] repository locally to access the bouncing ball [example code], which includes random sampling and asserts.
+    ```sh
+    git clone https://github.com/elodin-sys/elodin.git
+    cd elodin
+    ```
 4. Start a 300 sample Monte Carlo run with a maximum sim duration of 15s.
     <Note>Add `--open` to automatically open the dashboard url in the browser.</Note>
     ```sh
-    elodin monte-carlo run --name ball examples/ball/main.py --max-duration 15 --samples 300
+    elodin monte-carlo run --name ball examples/ball/main.py --max-duration 15 --samples 100
     ```
 
 [Elodin Github]: https://github.com/elodin-sys/elodin
