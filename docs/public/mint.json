@@ -36,7 +36,7 @@
     "type": "github",
     "url": "https://github.com/elodin-sys/elodin"
   },
-  "versions": ["v0.3.32"],
+  "versions": ["v0.4.0"],
   "navigation": [
     {
       "group": "Get Started",
@@ -50,7 +50,7 @@
         "reference/replays",
         "reference/changelog"
       ],
-      "version": "v0.3.32"
+      "version": "v0.4.0"
     },
     {
       "group": "The Tao of Elodin",
