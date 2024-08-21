@@ -16,7 +16,7 @@ ATC_ACCEL_P_MAX = 110000.0  # (centi-degrees/s^2)
 ATC_ACCEL_R_MAX = 110000.0  # (centi-degrees/s^2)
 ATC_ACCEL_Y_MAX = 27000.0  # (centi-degrees/s^2)
 
-# Roll, pitch, and yaw angle PID gains
+# Roll, pitch, and yaw angle P gains
 ATC_ANG_RLL_P = 4.0
 ATC_ANG_PIT_P = 4.0
 ATC_ANG_YAW_P = 1.0
@@ -24,12 +24,12 @@ ATC_ANG_YAW_P = 1.0
 # Roll rate PID gains
 ATC_RAT_RLL_P = 0.40
 ATC_RAT_RLL_I = 0.02
-ATC_RAT_RLL_D = 0.10
+ATC_RAT_RLL_D = 0.05
 
 # Pitch rate PID gains
 ATC_RAT_PIT_P = 0.40
 ATC_RAT_PIT_I = 0.02
-ATC_RAT_PIT_D = 0.10
+ATC_RAT_PIT_D = 0.05
 
 # Yaw rate PID gains
 ATC_RAT_YAW_P = 2.50

@@ -215,12 +215,12 @@ def rate_pid_state(
         1.0 / dt,
     )
 
-    e_prev, i_prev, _ = state
+    e_prev, i_prev, d_prev = state
     e = target - gyro
     e = e_filter.apply(e_prev, e)
     i = i_prev + (e * dt)
     d = (e - e_prev) / dt
-    d = d_filter.apply(i_prev, d)
+    d = d_filter.apply(d_prev, d)
 
     return jnp.array([e, i, d])
 
