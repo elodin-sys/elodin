@@ -8,6 +8,9 @@
   - This archetype is only associated with a single managed entity and contains global variables that can be accessed by any system.
   - Currently, it contains `el.SimulationTick` and `el.SimulationTimeStep` which are automatically set to the current tick and simulation time step respectively.
 
+- Add icon for the editor on windows
+- **(fix)** Fix cutoff titlebar in editor on browser and windows
+
 ## [v0.3.30]
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
 
@@ -97,7 +100,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 ## [v0.3.24]
 - Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
 - Add `max_ticks` parameter to `WorldBuilder.run`. The simulation will run until the specified number of ticks is reached.
-- Add body frame visualization option. 
+- Add body frame visualization option.
   To try it out, either open the command palette and type `Toggle Body Axes` or add the following code to your simulation file:
   ```python
     w.spawn(el.BodyAxes(entity, scale=1.0))

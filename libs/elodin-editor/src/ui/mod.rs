@@ -243,7 +243,7 @@ impl RootWidgetSystem for Titlebar<'_> {
         let titlebar_height = if cfg!(target_os = "macos") {
             52.0
         } else {
-            16.0
+            34.0
         };
         let traffic_light_offset = if cfg!(target_os = "macos") { 72.0 } else { 0.0 };
         let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };

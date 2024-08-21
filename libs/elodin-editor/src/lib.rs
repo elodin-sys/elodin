@@ -419,9 +419,96 @@ fn setup_titlebar(
     }
 }
 
-fn setup_window_icon() {
+fn setup_window_icon(
+    _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    // this is load bearing, because it ensures that there is at
+    // least one window spawned
+    _winit_windows: NonSend<bevy::winit::WinitWindows>,
+) {
     #[cfg(target_os = "macos")]
-    set_icon_mac()
+    set_icon_mac();
+
+    if !_windows.is_empty() {
+        #[cfg(target_os = "windows")]
+        set_icon_windows();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_icon_windows() {
+    use winapi::um::winuser;
+    let png_bytes = include_bytes!("../assets/win-512x512@2x.png");
+    let unscaled_image =
+        image::ImageReader::with_format(std::io::Cursor::new(png_bytes), image::ImageFormat::Png)
+            .decode()
+            .unwrap();
+    let window_handle = unsafe { winuser::GetActiveWindow() };
+    if window_handle.is_null() {
+        return;
+    }
+
+    fn resize_image(image: &image::DynamicImage, size: usize) -> Option<Vec<u8>> {
+        let image_scaled =
+            image::imageops::resize(image, size as _, size as _, image::imageops::Lanczos3);
+        let mut image_scaled_bytes: Vec<u8> = Vec::new();
+        if image_scaled
+            .write_to(
+                &mut std::io::Cursor::new(&mut image_scaled_bytes),
+                image::ImageFormat::Png,
+            )
+            .is_ok()
+        {
+            Some(image_scaled_bytes)
+        } else {
+            None
+        }
+    }
+
+    let icon_size_big = unsafe { winuser::GetSystemMetrics(winuser::SM_CXICON) };
+    let Some(big_image_bytes) = resize_image(&unscaled_image, icon_size_big as _) else {
+        return;
+    };
+
+    unsafe {
+        let icon = winuser::CreateIconFromResourceEx(
+            big_image_bytes.as_ptr() as *mut _,
+            big_image_bytes.len() as u32,
+            1,          // Means this is an icon, not a cursor.
+            0x00030000, // Version number of the HICON
+            icon_size_big,
+            icon_size_big,
+            winuser::LR_DEFAULTCOLOR,
+        );
+        winuser::SendMessageW(
+            window_handle,
+            winuser::WM_SETICON,
+            winuser::ICON_BIG as usize,
+            icon as isize,
+        );
+    }
+
+    let icon_size_small = unsafe { winuser::GetSystemMetrics(winuser::SM_CXSMICON) };
+    let Some(small_image_bytes) = resize_image(&unscaled_image, icon_size_small as _) else {
+        return;
+    };
+
+    unsafe {
+        let icon = winuser::CreateIconFromResourceEx(
+            small_image_bytes.as_ptr() as *mut _,
+            small_image_bytes.len() as u32,
+            1,          // Means this is an icon, not a cursor.
+            0x00030000, // Version number of the HICON
+            icon_size_small,
+            icon_size_small,
+            winuser::LR_DEFAULTCOLOR,
+        );
+        winuser::SendMessageW(
+            window_handle,
+            winuser::WM_SETICON,
+            winuser::ICON_SMALL as usize,
+            icon as isize,
+        );
+    }
 }
 
 /// source: https://github.com/emilk/egui/blob/15370bbea0b468cf719a75cc6d1e39eb00c420d8/crates/eframe/src/native/app_icon.rs#L199C1-L268C2
