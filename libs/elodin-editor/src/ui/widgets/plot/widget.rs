@@ -15,11 +15,11 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use conduit::{
+use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
+use impeller::{
     bevy::EntityMap, query::MetadataStore, well_known::EntityMetadata, ComponentId, ControlMsg,
     EntityId,
 };
-use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
 use itertools::{Itertools, MinMaxResult};
 use std::{
     fmt::Debug,
@@ -311,7 +311,7 @@ impl Plot {
                                         chunk.unfetched.remove_range(start as u32..end as u32);
                                         control_msg.send(ControlMsg::Query {
                                             time_range,
-                                            query: conduit::Query {
+                                            query: impeller::Query {
                                                 component_id: *component_id,
                                                 with_component_ids: vec![],
                                                 entity_ids: vec![*entity_id],

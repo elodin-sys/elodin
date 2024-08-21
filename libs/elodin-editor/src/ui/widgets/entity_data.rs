@@ -9,7 +9,7 @@ use bevy::{
     prelude::ResMut,
 };
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use conduit::bevy::ConduitMsgReceiver;
+use impeller::bevy::ImpellerMsgReceiver;
 
 use super::plot::{self, CollectedGraphData, GraphState, Line};
 use super::plot_3d;
@@ -27,7 +27,7 @@ pub type Plot3dData = (
 pub fn collect_entity_data(
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut graphs: Query<&mut GraphState>,
-    reader: Res<ConduitMsgReceiver>,
+    reader: Res<ImpellerMsgReceiver>,
     mut lines: ResMut<Assets<Line>>,
     mut collected_graph_data_3d: ResMut<plot_3d::data::CollectedGraphData>,
     mut plots_3d: Query<Plot3dData, Without<FloatingOrigin>>,

@@ -13,12 +13,12 @@ use bevy_egui::{
 
 use big_space::GridCell;
 
-use conduit::{
+use egui_tiles::TileId;
+use impeller::{
     bevy::{ComponentValueMap, Received},
     well_known::EntityMetadata,
     ComponentId, EntityId,
 };
-use egui_tiles::TileId;
 use widgets::{command_palette::CommandPaletteState, timeline};
 use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
@@ -71,8 +71,8 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: conduit::EntityId) -> bool {
-        matches!(self, SelectedObject::Entity(pair) if pair.conduit == id)
+    pub fn is_entity_selected(&self, id: impeller::EntityId) -> bool {
+        matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
     pub fn is_tile_selected(&self, tile_id: TileId) -> bool {
@@ -104,7 +104,7 @@ pub struct ViewportRect(pub Option<egui::Rect>);
 #[derive(Clone, Copy, Debug)]
 pub struct EntityPair {
     pub bevy: Entity,
-    pub conduit: EntityId,
+    pub impeller: EntityId,
 }
 
 pub fn shortcuts(
@@ -444,7 +444,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
             entities_meta
                 .iter()
-                .find(|(id, _, _, _)| hovered_entity_pair.conduit == **id)
+                .find(|(id, _, _, _)| hovered_entity_pair.impeller == **id)
                 .map(|(_, _, _, metadata)| metadata.to_owned())
         } else {
             None

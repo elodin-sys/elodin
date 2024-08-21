@@ -1,13 +1,13 @@
 use std::{path::PathBuf, sync::atomic::Ordering};
 
 use crate::{Compiled, Error, WorldExec};
-use conduit::{
+use impeller::{
     client::{Msg, MsgPair},
     query::MetadataStore,
     Connection, ControlMsg, Packet, Payload, StreamId, SubscriptionManager,
 };
 
-pub struct ConduitExec {
+pub struct ImpellerExec {
     sub_manager: SubscriptionManager,
     connections: Vec<Connection>,
     rx: flume::Receiver<MsgPair>,
@@ -16,7 +16,7 @@ pub struct ConduitExec {
     replay_dir: PathBuf,
 }
 
-impl ConduitExec {
+impl ImpellerExec {
     pub fn new(exec: WorldExec<Compiled>, rx: flume::Receiver<MsgPair>) -> Self {
         let mut metadata_store = MetadataStore::default();
         for (_, metadata) in exec.world.component_map.values() {
@@ -220,12 +220,12 @@ pub fn spawn_tcp_server(
 ) -> Result<(), Error> {
     use std::time::{Duration, Instant};
 
-    use conduit::server::TcpServer;
+    use impeller::server::TcpServer;
 
     let (tx, rx) = flume::unbounded();
     let exec = exec.compile(client)?;
-    let mut conduit_exec = ConduitExec::new(exec, rx);
-    let time_step = conduit_exec.run_time_step();
+    let mut impeller_exec = ImpellerExec::new(exec, rx);
+    let time_step = impeller_exec.run_time_step();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
@@ -236,7 +236,7 @@ pub fn spawn_tcp_server(
     });
     let mut start = Instant::now();
     loop {
-        conduit_exec.run()?;
+        impeller_exec.run()?;
         if check_canceled() {
             break Ok(());
         }

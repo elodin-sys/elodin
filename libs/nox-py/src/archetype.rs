@@ -1,6 +1,6 @@
 use crate::*;
 
-use conduit::ArchetypeName;
+use impeller::ArchetypeName;
 
 use numpy::PyUntypedArray;
 

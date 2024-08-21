@@ -6,7 +6,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui::{self, emath::Numeric, Response};
-use conduit::{bevy::Tick, ControlMsg};
+use impeller::{bevy::Tick, ControlMsg};
 use nalgebra::clamp;
 
 use crate::ui::{colors, ViewportRange};

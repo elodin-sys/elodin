@@ -39,7 +39,7 @@ impl PyAsset {
 #[derive(Clone)]
 #[pyclass]
 pub struct Handle {
-    pub inner: conduit::Handle<()>,
+    pub inner: impeller::Handle<()>,
 }
 
 #[pymethods]
@@ -66,9 +66,9 @@ impl Handle {
     #[classattr]
     fn metadata() -> Metadata {
         Metadata {
-            inner: conduit::Metadata {
+            inner: impeller::Metadata {
                 name: Cow::Borrowed("handle"),
-                component_type: conduit::ComponentType::u64(),
+                component_type: impeller::ComponentType::u64(),
                 asset: true,
                 tags: Default::default(),
             },

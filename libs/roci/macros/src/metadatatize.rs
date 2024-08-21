@@ -25,7 +25,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         entity_id,
     } = Metadatatize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let conduit = quote! { #crate_name::conduit };
+    let impeller = quote! { #crate_name::impeller };
     let fields = data.take_struct().unwrap();
     let ids = fields.fields.iter().map(|field| {
         let ident = field.ident.as_ref().expect("only named fields allowed");
@@ -33,12 +33,12 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         if entity_id.is_some() {
             let component_id = match &field.component_id {
                 Some(c) => quote! {
-                    #crate_name::conduit::ComponentId::new(#c)
+                    #crate_name::impeller::ComponentId::new(#c)
                 },
                 None => {
                     let ty = &field.ty;
                     quote! {
-                        #crate_name::conduit::ComponentId::new(<#ty as #crate_name::conduit::Component>::NAME)
+                        #crate_name::impeller::ComponentId::new(<#ty as #crate_name::impeller::Component>::NAME)
                     }
                 },
             };
@@ -46,7 +46,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
             let const_name = format!("{const_name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
             quote! {
-                const #const_name: #conduit::ComponentId =  #component_id;
+                const #const_name: #impeller::ComponentId =  #component_id;
             }
         }else{
             quote! {
@@ -66,7 +66,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                 },
                 None => {
                     quote! {
-                        <#ty as #crate_name::conduit::Component>::NAME
+                        <#ty as #crate_name::impeller::Component>::NAME
                     }
                 }
             };
@@ -82,9 +82,9 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
             let metadata_name = syn::Ident::new(&metadata_name, Span::call_site());
             quote! {
                 #const_name => {
-                    static #metadata_name: #conduit::Metadata = #conduit::Metadata {
+                    static #metadata_name: #impeller::Metadata = #impeller::Metadata {
                         name: std::borrow::Cow::Borrowed(#component_name),
-                        component_type: <#ty as #conduit::ConstComponent>::TY,
+                        component_type: <#ty as #impeller::ConstComponent>::TY,
                         tags: None,
                         asset: false,
                     };
@@ -106,14 +106,14 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                 },
                 None => {
                     quote! {
-                        <#ty as #crate_name::conduit::Component>::NAME
+                        <#ty as #crate_name::impeller::Component>::NAME
                     }
                 }
             };
             quote! {
-                .chain(std::iter::once(#conduit::Metadata {
+                .chain(std::iter::once(#impeller::Metadata {
                     name: std::borrow::Cow::Borrowed(#component_name),
-                    component_type: <#ty as #conduit::ConstComponent>::TY,
+                    component_type: <#ty as #impeller::ConstComponent>::TY,
                     tags: None,
                     asset: false,
                 }))
@@ -126,8 +126,8 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
     });
     quote! {
         impl #crate_name::Metadatatize for #ident #generics #where_clause {
-            fn get_metadata(&self, component_id: #conduit::ComponentId) -> Option<&#conduit::Metadata> {
-                use #conduit::ValueRepr;
+            fn get_metadata(&self, component_id: #impeller::ComponentId) -> Option<&#impeller::Metadata> {
+                use #impeller::ValueRepr;
                 #(#ids)*
                 match component_id {
                     #(#match_arms)*
@@ -135,7 +135,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                 }
             }
 
-            fn metadata() -> impl Iterator<Item = #conduit::Metadata> {
+            fn metadata() -> impl Iterator<Item = #impeller::Metadata> {
                 std::iter::empty()
                 #(#metadata_items)*
             }

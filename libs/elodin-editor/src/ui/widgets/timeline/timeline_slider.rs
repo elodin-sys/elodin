@@ -7,7 +7,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use conduit::{bevy::Tick, ControlMsg};
+use impeller::{bevy::Tick, ControlMsg};
 
 use crate::ui::{colors, utils, widgets::WidgetSystem};
 

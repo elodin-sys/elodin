@@ -23,17 +23,17 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         entity_id,
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let conduit = quote! { #crate_name::conduit };
+    let impeller = quote! { #crate_name::impeller };
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
         let ty = &field.ty;
         let component_id = match &field.component_id {
             Some(c) => quote! {
-                #crate_name::conduit::ComponentId::new(#c)
+                #crate_name::impeller::ComponentId::new(#c)
             },
             None => {
                 quote! {
-                    #crate_name::conduit::ComponentId::new(<#ty as #crate_name::conduit::Component>::NAME)
+                    #crate_name::impeller::ComponentId::new(<#ty as #crate_name::impeller::Component>::NAME)
                 }
             },
         };
@@ -42,7 +42,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
             quote! {
                 output.apply_value(
                     #component_id,
-                     #conduit::EntityId(#id),
+                     #impeller::EntityId(#id),
                     self.#ident.fixed_dim_component_value().clone(),
                 );
             }
@@ -58,7 +58,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         let entity_id = field.entity_id.or(entity_id);
         if entity_id.is_some() {
             quote! {
-                <#ty as #crate_name::conduit::ConstComponent>::MAX_SIZE +
+                <#ty as #crate_name::impeller::ConstComponent>::MAX_SIZE +
             }
         } else {
             quote! {
@@ -70,7 +70,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     quote! {
         impl #crate_name::Componentize for #ident #generics #where_clause {
             fn sink_columns(&self, output: &mut impl #crate_name::Decomponentize) {
-                use #conduit::ValueRepr;
+                use #impeller::ValueRepr;
                 #(#sink_calls)*
             }
 

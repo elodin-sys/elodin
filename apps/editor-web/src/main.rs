@@ -4,10 +4,10 @@ use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::schedule::IntoSystemConfigs;
 use bevy::ecs::system::Res;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
-use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-use conduit::bevy_sync::SyncPlugin;
 use elodin_editor::ui::FullscreenState;
 use elodin_editor::EditorPlugin;
+use impeller::bevy::{ImpellerSubscribePlugin, Subscriptions};
+use impeller::bevy_sync::SyncPlugin;
 use tracing::error;
 
 mod web_sock;
@@ -16,7 +16,7 @@ fn main() {
     //tracing_wasm::set_as_global_default();
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let url = get_url().unwrap();
-    let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
+    let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
     web_sock::spawn_wasm(url, bevy_tx).unwrap();
     App::new()
         .add_plugins(EditorPlugin::default())

@@ -4,7 +4,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use conduit::{
+use impeller::{
     bevy::{MaxTick, Tick, TimeStep},
     ControlMsg,
 };

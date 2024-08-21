@@ -2,12 +2,12 @@ use std::{marker::PhantomData, ops::DerefMut};
 
 use crate::{
     bevy::{
-        AppExt, AssetAdapter, ComponentValueMap, ConduitSubscribePlugin, EntityMap, SimPeer,
+        AppExt, AssetAdapter, ComponentValueMap, EntityMap, ImpellerSubscribePlugin, SimPeer,
         Subscriptions,
     },
     client::MsgPair,
     well_known::{
-        self, BodyAxes, EntityMetadata, Glb, Line3d, Material, Mesh as ConduitMesh, Panel,
+        self, BodyAxes, EntityMetadata, Glb, Line3d, Material, Mesh as ImpellerMesh, Panel,
         VectorArrow, WorldPos,
     },
     EntityId,
@@ -18,7 +18,7 @@ use big_space::GridCell;
 use serde::de::DeserializeOwned;
 
 pub struct SyncPlugin {
-    pub plugin: ConduitSubscribePlugin,
+    pub plugin: ImpellerSubscribePlugin,
     pub subscriptions: Subscriptions,
     pub enable_pbr: bool,
 }
@@ -26,7 +26,7 @@ pub struct SyncPlugin {
 impl SyncPlugin {
     pub fn new(rx: flume::Receiver<MsgPair>) -> Self {
         Self {
-            plugin: ConduitSubscribePlugin::new(rx),
+            plugin: ImpellerSubscribePlugin::new(rx),
             subscriptions: Subscriptions::default(),
             enable_pbr: true,
         }
@@ -42,24 +42,24 @@ impl Plugin for SyncPlugin {
             .insert_resource(SimPeer::default())
             .insert_resource(self.subscriptions.clone())
             .insert_resource(EntityMap::default())
-            .add_conduit_component::<WorldPos>()
-            .add_conduit_component::<well_known::Camera>()
-            .add_conduit_asset::<VectorArrow>(Box::new(SyncPostcardAdapter::<VectorArrow>::new(
+            .add_impeller_component::<WorldPos>()
+            .add_impeller_component::<well_known::Camera>()
+            .add_impeller_asset::<VectorArrow>(Box::new(SyncPostcardAdapter::<VectorArrow>::new(
                 None,
             )))
-            .add_conduit_asset::<BodyAxes>(Box::new(SyncPostcardAdapter::<BodyAxes>::new(None)))
-            .add_conduit_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
-            .add_conduit_asset::<Line3d>(Box::new(SyncPostcardAdapter::<Line3d>::new(None)))
-            .add_conduit_asset::<EntityMetadata>(Box::new(
+            .add_impeller_asset::<BodyAxes>(Box::new(SyncPostcardAdapter::<BodyAxes>::new(None)))
+            .add_impeller_asset::<Panel>(Box::new(SyncPostcardAdapter::<Panel>::new(None)))
+            .add_impeller_asset::<Line3d>(Box::new(SyncPostcardAdapter::<Line3d>::new(None)))
+            .add_impeller_asset::<EntityMetadata>(Box::new(
                 SyncPostcardAdapter::<EntityMetadata>::new(None),
             ))
-            .add_conduit_asset::<ConduitMesh>(Box::new(SyncPostcardAdapter::<ConduitMesh>::new(
+            .add_impeller_asset::<ImpellerMesh>(Box::new(SyncPostcardAdapter::<ImpellerMesh>::new(
                 self.enable_pbr.then_some(sync_mesh),
             )))
-            .add_conduit_asset::<Material>(Box::new(SyncPostcardAdapter::<Material>::new(
+            .add_impeller_asset::<Material>(Box::new(SyncPostcardAdapter::<Material>::new(
                 self.enable_pbr.then_some(sync_material),
             )))
-            .add_conduit_asset::<Glb>(Box::new(SyncPostcardAdapter::<Glb>::new(
+            .add_impeller_asset::<Glb>(Box::new(SyncPostcardAdapter::<Glb>::new(
                 self.enable_pbr.then_some(sync_glb),
             )));
     }
@@ -142,7 +142,7 @@ impl<T> core::hash::Hash for AssetHandle<T> {
 }
 
 #[derive(Default)]
-struct SyncedMeshes(HashMap<AssetHandle<ConduitMesh>, Handle<Mesh>>);
+struct SyncedMeshes(HashMap<AssetHandle<ImpellerMesh>, Handle<Mesh>>);
 #[derive(Default)]
 struct SyncedMaterials(HashMap<AssetHandle<Material>, Handle<StandardMaterial>>);
 #[derive(Default)]
@@ -153,8 +153,8 @@ struct SyncedPbr;
 fn sync_mesh_to_bevy(
     mesh: Query<(
         Entity,
-        &ConduitMesh,
-        &AssetHandle<ConduitMesh>,
+        &ImpellerMesh,
+        &AssetHandle<ImpellerMesh>,
         Option<&SyncedPbr>,
     )>,
     mut mesh_assets: ResMut<Assets<Mesh>>,

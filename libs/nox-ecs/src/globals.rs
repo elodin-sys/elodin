@@ -1,4 +1,4 @@
-use conduit::DEFAULT_TIME_STEP;
+use impeller::DEFAULT_TIME_STEP;
 use nox::Scalar;
 
 use crate::{Archetype, Component, ComponentArray};

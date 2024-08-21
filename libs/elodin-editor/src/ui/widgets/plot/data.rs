@@ -6,8 +6,8 @@ use bevy::{
     log::warn,
     prelude::Resource,
 };
-use conduit::bytes::Bytes;
-use conduit::{
+use impeller::bytes::Bytes;
+use impeller::{
     client::Msg, ser_de::ColumnValue, ComponentId, ComponentValue, ControlMsg, EntityId,
 };
 use itertools::Itertools;

@@ -1,13 +1,13 @@
 use anyhow::Context;
 use bevy::window::WindowResized;
 use bevy::{prelude::*, utils::tracing};
-use conduit::bevy::{ConduitSubscribePlugin, Subscriptions};
-use conduit::bevy_sync::SyncPlugin;
-use conduit::World;
-use conduit::{client::MsgPair, server::handle_socket};
-use conduit::{serve_replay, Replay};
 use core::fmt;
 use elodin_editor::EditorPlugin;
+use impeller::bevy::{ImpellerSubscribePlugin, Subscriptions};
+use impeller::bevy_sync::SyncPlugin;
+use impeller::World;
+use impeller::{client::MsgPair, server::handle_socket};
+use impeller::{serve_replay, Replay};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
@@ -68,7 +68,7 @@ impl std::str::FromStr for Simulator {
 
 impl Cli {
     pub fn editor(&self, args: Args) -> anyhow::Result<()> {
-        let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
+        let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
 
         if let Simulator::File(path) = &args.sim {
             std::process::Command::new("python3")

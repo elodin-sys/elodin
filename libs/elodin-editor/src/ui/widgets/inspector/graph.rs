@@ -6,8 +6,8 @@ use bevy::ecs::{
 use bevy_egui::egui;
 use smallvec::SmallVec;
 
-use conduit::{bevy::MaxTick, query::MetadataStore, ComponentId, EntityId};
 use egui::Align;
+use impeller::{bevy::MaxTick, query::MetadataStore, ComponentId, EntityId};
 
 use crate::ui::{
     colors::{self, with_opacity},

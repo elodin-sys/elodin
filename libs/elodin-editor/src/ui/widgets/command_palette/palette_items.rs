@@ -12,13 +12,13 @@ use bevy::{
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
-use conduit::{
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use impeller::{
     bevy::Simulating,
     query::MetadataStore,
     well_known::{BodyAxes, EntityMetadata},
     ComponentId, ControlMsg,
 };
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,

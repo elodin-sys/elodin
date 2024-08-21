@@ -2,8 +2,8 @@ use std::io::{BufRead, BufReader};
 
 use roci::Metadatatize;
 use roci::{
-    conduit::Query,
     drivers::{os_sleep_driver, Driver, Hz},
+    impeller::Query,
     tokio, Componentize, Decomponentize, System,
 };
 

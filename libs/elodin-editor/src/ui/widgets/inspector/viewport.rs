@@ -14,7 +14,7 @@ use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::{well_known::WorldPos, ComponentExt};
+use impeller::{well_known::WorldPos, ComponentExt};
 
 use crate::ui::widgets::label::label_with_buttons;
 use crate::ui::widgets::WidgetSystem;

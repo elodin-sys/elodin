@@ -9,9 +9,9 @@ publish = false
 [dependencies]
 roci.workspace = true
 roci.features = ["tokio", "std", "csv"]
-conduit.workspace = true
-conduit.features = ["nox"]
-conduit.default-features = false
+impeller.workspace = true
+impeller.features = ["nox"]
+impeller.default-features = false
 nox.workspace = true
 nox.default-features = false
 roci-adcs.workspace = true

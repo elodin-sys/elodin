@@ -8,7 +8,7 @@ use bevy::{
     window::Window,
 };
 use bevy_egui::{egui, EguiContexts};
-use conduit::{query::MetadataStore, well_known::WorldPos, ComponentExt};
+use impeller::{query::MetadataStore, well_known::WorldPos, ComponentExt};
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,

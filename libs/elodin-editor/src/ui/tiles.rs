@@ -11,13 +11,13 @@ use bevy_egui::{
 };
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use conduit::{
+use egui_tiles::{Container, Tile, TileId, Tiles};
+use impeller::{
     bevy::{EntityMap, Tick, TimeStep},
     query::MetadataStore,
     well_known::{EntityMetadata, Graph, Panel, Viewport},
     ComponentId, ControlMsg, EntityId,
 };
-use egui_tiles::{Container, Tile, TileId, Tiles};
 
 use super::{
     colors, images,
@@ -906,7 +906,7 @@ pub struct SyncedViewport;
 
 #[derive(SystemParam)]
 pub struct SyncViewportParams<'w, 's> {
-    panels: Query<'w, 's, (Entity, &'static conduit::well_known::Panel), Without<SyncedViewport>>,
+    panels: Query<'w, 's, (Entity, &'static impeller::well_known::Panel), Without<SyncedViewport>>,
     commands: Commands<'w, 's>,
     tile_state: ResMut<'w, TileState>,
     asset_server: Res<'w, AssetServer>,
@@ -973,7 +973,7 @@ fn spawn_panel(
     hdr_enabled: &mut ResMut<HdrEnabled>,
 ) -> Option<TileId> {
     match panel {
-        conduit::well_known::Panel::Viewport(viewport) => {
+        impeller::well_known::Panel::Viewport(viewport) => {
             let label = viewport_label(viewport, entity_map, entity_metadata);
             let pane = ViewportPane::spawn(
                 commands,
@@ -1014,7 +1014,7 @@ fn spawn_panel(
             hdr_enabled.0 |= viewport.hdr;
             ui_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
         }
-        conduit::well_known::Panel::VSplit(split) => {
+        impeller::well_known::Panel::VSplit(split) => {
             let tile_id = ui_state.insert_tile(
                 Tile::Container(Container::new_linear(
                     egui_tiles::LinearDir::Vertical,
@@ -1042,7 +1042,7 @@ fn spawn_panel(
             });
             tile_id
         }
-        conduit::well_known::Panel::HSplit(split) => {
+        impeller::well_known::Panel::HSplit(split) => {
             let tile_id = ui_state.insert_tile(
                 Tile::Container(Container::new_linear(
                     egui_tiles::LinearDir::Horizontal,
@@ -1070,7 +1070,7 @@ fn spawn_panel(
             });
             tile_id
         }
-        conduit::well_known::Panel::Graph(graph) => {
+        impeller::well_known::Panel::Graph(graph) => {
             let mut entities = BTreeMap::<EntityId, GraphStateEntity>::default();
             for entity in graph.entities.iter() {
                 let mut components: BTreeMap<ComponentId, Vec<(bool, Color32)>> = BTreeMap::new();

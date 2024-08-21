@@ -23,7 +23,7 @@ use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
 use bevy_mod_picking::prelude::*;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use conduit::{
+use impeller::{
     well_known::{Viewport, WorldPos},
     ControlMsg, EntityId,
 };
@@ -305,7 +305,7 @@ fn spawn_main_camera(
             last_anchor_depth: 2.0,
             ..Default::default()
         },
-        conduit::bevy::Persistent,
+        impeller::bevy::Persistent,
         GridHandle { grid: grid_id },
     ));
 
@@ -574,7 +574,7 @@ fn make_entities_selectable(
                     hovered_entity.0 = if viewport_contains_pointer.0 {
                         Some(EntityPair {
                             bevy: entity,
-                            conduit: entity_id,
+                            impeller: entity_id,
                         })
                     }
                     else {

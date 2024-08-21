@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::transform::components::Transform;
-use conduit::{
-    bevy::{ConduitSubscribePlugin, Subscriptions},
+use impeller::{
+    bevy::{ImpellerSubscribePlugin, Subscriptions},
     bevy_sync::SyncPlugin,
     client::MsgPair,
     server::handle_socket,
@@ -45,7 +45,7 @@ impl InitUserModule for ElodinModule {
 impl UserModule for ElodinModule {
     fn init(&self, app: &mut App) {
         let addr = "127.0.0.1:2240".parse().expect("failed to parse address");
-        let (sub, bevy_tx) = ConduitSubscribePlugin::pair();
+        let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
         app.add_plugins(SimClient { addr, bevy_tx })
             .add_plugins(SyncPlugin {
                 plugin: sub,

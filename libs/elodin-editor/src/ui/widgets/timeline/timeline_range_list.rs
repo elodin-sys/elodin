@@ -2,7 +2,7 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use conduit::bevy::MaxTick;
+use impeller::bevy::MaxTick;
 
 use crate::ui::{
     colors::{self, with_opacity},

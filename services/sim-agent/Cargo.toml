@@ -32,9 +32,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 
 # elodin
-conduit.path = "../../libs/conduit"
-conduit.default-features = false
-conduit.features = ["tokio"]
+impeller.path = "../../libs/impeller"
+impeller.default-features = false
+impeller.features = ["tokio"]
 
 # types
 serde.version = "1.0"
