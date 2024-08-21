@@ -11,6 +11,8 @@
 - Add icon for the editor on windows
 - **(fix)** Fix cutoff titlebar in editor on browser and windows
 
+- Add support for panning and zooming plots in the editor
+
 ## [v0.3.30]
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
 

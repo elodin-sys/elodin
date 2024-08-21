@@ -2,11 +2,17 @@ use bevy::{
     asset::{Assets, Handle},
     ecs::{
         entity::Entity,
-        event::EventWriter,
-        system::{Commands, Query},
+        event::{EventReader, EventWriter},
+        query::With,
+        system::{Commands, Local, Query, Res},
     },
-    math::{DVec2, Rect},
-    render::camera::{OrthographicProjection, Projection, ScalingMode},
+    input::{
+        mouse::{MouseButton, MouseScrollUnit, MouseWheel},
+        ButtonInput,
+    },
+    math::{DVec2, Rect, Vec2},
+    render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
+    window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
 use conduit::{
@@ -18,6 +24,7 @@ use itertools::{Itertools, MinMaxResult};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
+    time::{Duration, Instant},
 };
 
 use crate::ui::{
@@ -58,6 +65,8 @@ pub struct Plot {
 
     show_modal: bool,
     show_legend: bool,
+
+    zoom_offset: DVec2,
 }
 
 fn range_x_from_rect(rect: &egui::Rect, invert: bool) -> RangeInclusive<f32> {
@@ -122,6 +131,7 @@ impl Plot {
 
             show_modal: true,
             show_legend: false,
+            zoom_offset: DVec2::ZERO,
         }
     }
 
@@ -187,19 +197,38 @@ impl Plot {
         }
         self.steps_x = ((self.inner_rect.width() / 50.0) as usize).max(1);
 
-        self.bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
+        let original_bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
+        let bounds_size = DVec2::new(original_bounds.width(), original_bounds.height());
+        let outer_ratio = self.rect.size() / self.inner_rect.size();
+        let outer_ratio = Vec2::new(outer_ratio.x, outer_ratio.y).as_dvec2();
+        let pan_offset = graph_state.pan_offset.as_dvec2() * bounds_size * DVec2::new(-1.0, 1.0);
+        self.bounds = original_bounds.clone().offset(pan_offset * outer_ratio);
+        let new_bounds = bounds_size * graph_state.zoom_factor as f64;
+        let offset = new_bounds - bounds_size;
+        self.bounds.min_x -= offset.x / 2.0;
+        self.bounds.max_x += offset.x / 2.0;
+        self.bounds.min_y -= offset.y / 2.0;
+        self.bounds.max_y += offset.y / 2.0;
+
         let y_range = self.bounds.max_y - self.bounds.min_y;
         let full_y_range = (self.rect.height() / self.inner_rect.height()) as f64 * y_range;
         let y_delta = full_y_range - y_range;
         let mut new_bounds = self.bounds.clone();
         new_bounds.min_y -= y_delta / 2.0;
         new_bounds.max_y -= y_delta / 2.0;
+        let x_range = 1.0 / (self.bounds.max_x - self.bounds.min_x);
+        let viewport_origin = DVec2::new(
+            (offset.x / 2.0 - pan_offset.x) * x_range,
+            -(new_bounds.min_y / full_y_range),
+        );
+        self.zoom_offset = viewport_origin;
+        let viewport_origin = viewport_origin.as_vec2();
         commands
             .entity(graph_id)
             .insert(Projection::Orthographic(OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
-                viewport_origin: DVec2::new(0.0, -(new_bounds.min_y / full_y_range)).as_vec2(),
+                viewport_origin,
                 scaling_mode: ScalingMode::Fixed {
                     width: (new_bounds.max_x - new_bounds.min_x) as f32,
                     height: full_y_range as f32,
@@ -701,6 +730,8 @@ impl Plot {
         }
     }
 
+    pub fn get_x_tick(&self) {}
+
     pub fn render(
         &self,
         ui: &mut egui::Ui,
@@ -756,11 +787,17 @@ impl Plot {
 
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
 
-                let x_offset = pointer_pos.x - self.inner_rect.min.x;
-                let x_range = self.bounds.max_x - self.bounds.min_x;
-                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width());
+                let inner_point_pos = pointer_pos - self.inner_rect.min;
+                let unscaled_tick_range = (self.tick_range.end - self.tick_range.start) as f64;
+                let tick_range = unscaled_tick_range * graph_state.zoom_factor as f64;
+                let total_offset = self.zoom_offset.x as f32;
+                let total_offset_pixels = total_offset * self.inner_rect.width();
+                let x_pos = (inner_point_pos.x - total_offset_pixels) * tick_range as f32
+                    / self.inner_rect.width();
                 let x_tick = x_pos as usize;
-                self.draw_cursor(ui, pointer_pos, x_offset, self.inner_rect);
+                let x_index = x_tick - self.tick_range.start as usize;
+
+                self.draw_cursor(ui, pointer_pos, inner_point_pos.x, self.inner_rect);
 
                 // Draw highlight circles on lines
 
@@ -773,7 +810,7 @@ impl Plot {
                     let Some(line) = lines.get(line_handle) else {
                         continue;
                     };
-                    let x_index = x_tick / line.data.chunk_size;
+                    let x_index = x_index / line.data.chunk_size;
                     let Some(y) = line.data.averaged_data.get(x_index) else {
                         continue;
                     };
@@ -787,6 +824,18 @@ impl Plot {
                         6.0,
                         colors::PRIMARY_SMOKE,
                         egui::Stroke::new(2.0, *color),
+                    );
+                }
+
+                if self.show_modal {
+                    self.draw_modal(
+                        ui,
+                        lines,
+                        line_handles,
+                        graph_state,
+                        collected_graph_data,
+                        pointer_pos,
+                        x_index,
                     );
                 }
             }
@@ -818,26 +867,6 @@ impl Plot {
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 colors::WHITE,
             );
-        }
-
-        if let Some(pointer_pos) = pointer_pos {
-            if self.inner_rect.contains(pointer_pos) && self.show_modal && ui.ui_contains_pointer()
-            {
-                let x_offset = pointer_pos.x - self.inner_rect.min.x;
-                let x_range = self.bounds.max_x - self.bounds.min_x;
-                let x_pos = x_offset * (x_range as f32 / self.inner_rect.width());
-                let x_tick = x_pos as usize;
-
-                self.draw_modal(
-                    ui,
-                    lines,
-                    line_handles,
-                    graph_state,
-                    collected_graph_data,
-                    pointer_pos,
-                    x_tick,
-                );
-            }
         }
 
         // Draw legend
@@ -895,6 +924,14 @@ impl PlotBounds {
 
     pub fn range_y_f32(&self) -> RangeInclusive<f32> {
         (self.min_y as f32)..=(self.max_y as f32)
+    }
+
+    pub fn offset(mut self, offset: DVec2) -> Self {
+        self.min_x += offset.x;
+        self.max_x += offset.x;
+        self.min_y += offset.y;
+        self.max_y += offset.y;
+        self
     }
 }
 
@@ -955,4 +992,154 @@ impl PlotPoint {
             ),
         )
     }
+}
+
+pub fn zoom_graph(
+    mut query: Query<(&mut GraphState, &Camera)>,
+    scroll_events: EventReader<MouseWheel>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+) {
+    const ZOOM_SENSITIVITY: f32 = 0.001;
+
+    let scroll_offset = scroll_offset_from_events(scroll_events);
+    if scroll_offset == 0. {
+        return;
+    }
+
+    let Ok(window) = primary_window.get_single() else {
+        return;
+    };
+
+    let cursor_pos = window.physical_cursor_position();
+
+    for (mut graph_state, camera) in &mut query {
+        let Some(cursor_pos) = cursor_pos else {
+            continue;
+        };
+
+        let Some(viewport) = &camera.viewport else {
+            continue;
+        };
+
+        let viewport_rect = Rect::new(
+            viewport.physical_position.x as f32,
+            viewport.physical_position.y as f32,
+            viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
+            viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
+        );
+        if !viewport_rect.contains(cursor_pos) {
+            continue;
+        }
+
+        let old_scale = graph_state.zoom_factor;
+        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY;
+        graph_state.zoom_factor = graph_state.zoom_factor.clamp(0.0, 1.0);
+
+        let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
+            - viewport.physical_size.as_vec2() / 2.;
+        let cursor_normalized_screen_pos = cursor_pos / viewport.physical_size.as_vec2();
+        let cursor_normalized_screen_pos = Vec2::new(
+            cursor_normalized_screen_pos.x,
+            cursor_normalized_screen_pos.y,
+        );
+
+        let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
+
+        graph_state.pan_offset -= delta;
+    }
+}
+
+pub fn pan_graph(
+    mut query: Query<(&mut GraphState, &Camera)>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    mut last_pos: Local<Option<Vec2>>,
+) {
+    let Ok(window) = primary_window.get_single() else {
+        return;
+    };
+
+    let cursor_pos = window.physical_cursor_position();
+
+    if !mouse_buttons.pressed(MouseButton::Left) || mouse_buttons.just_pressed(MouseButton::Left) {
+        *last_pos = None;
+        return;
+    }
+    let Some(cursor_pos) = cursor_pos else { return };
+
+    let delta_device_pixels = cursor_pos - last_pos.unwrap_or(cursor_pos);
+
+    for (mut graph_state, camera) in &mut query {
+        let Some(viewport) = &camera.viewport else {
+            continue;
+        };
+
+        let viewport_rect = Rect::new(
+            viewport.physical_position.x as f32,
+            viewport.physical_position.y as f32,
+            viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
+            viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
+        );
+        if !viewport_rect.contains(cursor_pos) {
+            continue;
+        }
+
+        let delta = delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor;
+        graph_state.pan_offset += delta;
+    }
+
+    *last_pos = Some(cursor_pos);
+}
+
+pub fn reset_graph(
+    mut last_click: Local<Option<Instant>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut query: Query<(&mut GraphState, &Camera)>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+) {
+    if mouse_buttons.just_released(MouseButton::Left) {
+        *last_click = Some(Instant::now());
+    }
+
+    let Ok(window) = primary_window.get_single() else {
+        return;
+    };
+
+    let cursor_pos = window.physical_cursor_position();
+    let Some(cursor_pos) = cursor_pos else { return };
+
+    if mouse_buttons.just_pressed(MouseButton::Left)
+        && last_click
+            .map(|t| t.elapsed() < Duration::from_millis(250))
+            .unwrap_or_default()
+    {
+        for (mut graph_state, camera) in &mut query {
+            let Some(viewport) = &camera.viewport else {
+                continue;
+            };
+
+            let viewport_rect = Rect::new(
+                viewport.physical_position.x as f32,
+                viewport.physical_position.y as f32,
+                viewport.physical_size.x as f32 + viewport.physical_position.x as f32,
+                viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
+            );
+            if !viewport_rect.contains(cursor_pos) {
+                continue;
+            }
+            graph_state.pan_offset = Vec2::ZERO;
+            graph_state.zoom_factor = 1.0;
+        }
+    }
+}
+
+fn scroll_offset_from_events(mut scroll_events: EventReader<MouseWheel>) -> f32 {
+    let pixels_per_line = 100.; // Maybe make configurable?
+    scroll_events
+        .read()
+        .map(|ev| match ev.unit {
+            MouseScrollUnit::Pixel => ev.y,
+            MouseScrollUnit::Line => ev.y * pixels_per_line,
+        })
+        .sum::<f32>()
 }
