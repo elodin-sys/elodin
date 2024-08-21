@@ -1,17 +1,17 @@
 # Changelog
 
 ## [unreleased]
+- **(fix)** Fix cutoff titlebar in editor on browser and windows.
 - **(breaking)** Replace `el.Time` and `el.advance_time` with `el.SimulationTick` and `el.SimulationTimeStep`.
   - The simulation tick is automatically advanced by a built-in system.
   - The simulation time step is set to the same value as the "sim_time_step" provided in `World.run`.
 - Add a built-in `SystemGlobals` archetype that is automatically spawned for every simulation.
   - This archetype is only associated with a single managed entity and contains global variables that can be accessed by any system.
   - Currently, it contains `el.SimulationTick` and `el.SimulationTimeStep` which are automatically set to the current tick and simulation time step respectively.
-
-- Add icon for the editor on windows
-- **(fix)** Fix cutoff titlebar in editor on browser and windows
-
-- Add support for panning and zooming plots in the editor
+- Add icon for the editor on windows.
+- Add support for panning and zooming plots in the editor.
+- Enable vsync on Windows and Linux.
+- Don't throttle FPS when cursor is not moving on Windows and Linux.
 
 ## [v0.3.30]
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
