@@ -9,20 +9,21 @@ use bevy::ecs::query::Has;
 use bevy::ecs::schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::ecs::world::{Mut, World};
-use bevy::math::Vec4;
+use bevy::math::{FloatOrd, Vec4};
 use bevy::pbr::SetMeshViewBindGroup;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
 use bevy::render::render_phase::{
     DrawFunctions, PhaseItemExtraIndex, RenderCommandResult, SetItemPipeline,
     ViewSortedRenderPhases,
 };
+
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
 use bevy::{
     app::Plugin,
     asset::{load_internal_asset, Handle},
-    core_pipeline::core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT},
+    core_pipeline::core_2d::Transparent2d,
     ecs::{
         component::Component,
         system::{
@@ -69,7 +70,7 @@ impl Plugin for PlotGpuPlugin {
         };
 
         render_app
-            .add_render_command::<Transparent3d, DrawLine3d>()
+            .add_render_command::<Transparent2d, DrawLine2d>()
             .init_resource::<SpecializedRenderPipelines<LinePipeline>>()
             .configure_sets(
                 Render,
@@ -228,13 +229,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             }),
             layout,
             primitive: PrimitiveState::default(),
-            depth_stencil: Some(DepthStencilState {
-                format: CORE_3D_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Always,
-                stencil: StencilState::default(),
-                bias: DepthBiasState::default(),
-            }),
+            depth_stencil: None,
             multisample: MultisampleState {
                 count: key.view_key.msaa_samples(),
                 mask: !0,
@@ -330,7 +325,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
     }
 }
 
-type DrawLine3d = (
+type DrawLine2d = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
     SetLineBindGroup,
@@ -424,7 +419,7 @@ fn extract_lines(
 type ViewQuery = (
     Entity,
     &'static ExtractedView,
-    //&'static mut ViewSortedRenderPhases<Transparent3d>,
+    //&'static mut ViewSortedRenderPhases<Transparent2d>,
     Option<&'static RenderLayers>,
     (
         Has<NormalPrepass>,
@@ -436,16 +431,16 @@ type ViewQuery = (
 
 #[allow(clippy::too_many_arguments)]
 fn queue_line(
-    draw_functions: Res<DrawFunctions<Transparent3d>>,
+    draw_functions: Res<DrawFunctions<Transparent2d>>,
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
     msaa: Res<Msaa>,
     lines: Query<(Entity, &Handle<Line>, &LineConfig)>,
     mut views: Query<ViewQuery>,
-    mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
+    mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
 ) {
-    let draw_function = draw_functions.read().get_id::<DrawLine3d>().unwrap();
+    let draw_function = draw_functions.read().get_id::<DrawLine2d>().unwrap();
 
     for (
         view_entity,
@@ -487,13 +482,13 @@ fn queue_line(
             let pipeline =
                 pipelines.specialize(&pipeline_cache, &pipeline, LinePipelineKey { view_key });
 
-            transparent_phase.add(Transparent3d {
+            transparent_phase.add(Transparent2d {
                 entity,
                 draw_function,
                 pipeline,
-                distance: 0.,
                 batch_range: 0..1,
                 extra_index: PhaseItemExtraIndex::NONE,
+                sort_key: FloatOrd(0.0),
             });
         }
     }

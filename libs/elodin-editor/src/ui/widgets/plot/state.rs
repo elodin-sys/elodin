@@ -22,7 +22,7 @@ pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 #[derive(Bundle)]
 pub struct GraphBundle {
     pub graph_state: GraphState,
-    pub camera: Camera3dBundle,
+    pub camera: Camera2dBundle,
     pub viewport_rect: ViewportRect,
     pub render_layers: RenderLayers,
     pub main_camera: MainCamera,
@@ -35,6 +35,8 @@ pub struct GraphState {
     pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
+    pub zoom_factor: f32,
+    pub pan_offset: Vec2,
 }
 
 impl GraphBundle {
@@ -48,14 +50,14 @@ impl GraphBundle {
             todo!("ran out of layers")
         };
         let render_layers = RenderLayers::layer(layer);
-        let camera = Camera3dBundle {
+        let camera = Camera2dBundle {
             camera: Camera {
                 order: 2,
                 hdr: false,
                 ..Default::default()
             },
             tonemapping: Tonemapping::None,
-            projection: Projection::Orthographic(OrthographicProjection {
+            projection: OrthographicProjection {
                 near: 0.0,
                 far: 1000.0,
                 viewport_origin: Vec2::new(0.0, 0.0),
@@ -65,7 +67,7 @@ impl GraphBundle {
                 },
                 scale: 1.0,
                 area: Rect::new(0., 0., 500., 1.),
-            }),
+            },
             ..Default::default()
         };
         let graph_state = GraphState {
@@ -74,6 +76,8 @@ impl GraphBundle {
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,
+            zoom_factor: 1.0,
+            pan_offset: Vec2::ZERO,
         };
         GraphBundle {
             graph_state,
