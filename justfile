@@ -43,7 +43,7 @@ clean-dev-branch branch_codename:
   kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"
 
 sync-open-source:
-  git filter-repo --refs main --path examples --path libs/roci --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --prune-empty always --target ../elodin
+  git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --prune-empty always --target ../elodin
   cd ../elodin; git fetch origin main; git rebase origin/main --committer-date-is-author-date
 
 [confirm("Are you sure you want to force push to elodin-sys/elodin?")]
@@ -100,7 +100,9 @@ promote tag:
   gh release download {{tag}} --pattern 'elodin-*' --dir $dir
   gsutil -m cp -r "$dir/*" "gs://elodin-releases/{{tag}}/"
   gsutil -m cp -r "gs://elodin-releases/{{tag}}/*" "gs://elodin-releases/latest/"
-  twine upload "$dir/*.whl"
+  uvx twine upload "$dir/*.whl"
+  git branch -f prod {{tag}}
+  git push origin prod
 
 public-changelog:
   #!/usr/bin/env sh
