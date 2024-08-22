@@ -161,12 +161,7 @@ impl PolarsWorld {
         let keys = vec![EntityId::NAME, "tick"];
         tables
             .try_fold(init, |agg, df| {
-                agg.join(
-                    df,
-                    &keys,
-                    &keys,
-                    JoinArgs::new(JoinType::Outer { coalesce: true }),
-                )
+                agg.join(df, &keys, &keys, JoinArgs::new(JoinType::Full))
             })
             .map_err(Error::from)
     }

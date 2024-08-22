@@ -14,8 +14,8 @@ xla = ["dep:xla", "lapack-src"]
 shared = []
 
 [dependencies]
-nalgebra = "0.32"
-ndarray = "0.15"
+nalgebra = "0.33"
+ndarray = "0.16"
 num-traits = "0.2.15"
 simba = "0.8.1"
 boxcar = "0.2"
@@ -55,4 +55,4 @@ openblas-src.version = "0.10"
 openblas-src.features = ["system"]
 openblas-src.optional = true
 [target.'cfg(target_os = "macos")'.dependencies]
-lapack-src = { version = "0.8", features = ["accelerate"], optional = true }
+lapack-src = { version = "0.10", features = ["accelerate"], optional = true }

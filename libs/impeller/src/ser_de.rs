@@ -245,7 +245,7 @@ impl ComponentType {
                     })
                     .collect::<Result<_, Error>>()?;
                 let array = array.into_dyn();
-                let array = array.into_shape(shape)?;
+                let array = array.into_shape_with_order(shape)?;
 
                 Ok(ndarray::CowArray::from(array))
             }
