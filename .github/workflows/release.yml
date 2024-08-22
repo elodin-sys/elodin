@@ -211,7 +211,7 @@ jobs:
             ${{ env.BUILD_MANIFEST_NAME }}
 
   linux-wheel:
-    runs-on: "ubuntu-20.04"
+    runs-on: "ubuntu-22.04"
     needs:
       - plan
     if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
