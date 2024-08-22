@@ -80,6 +80,20 @@ fn configure_default_fonts() -> FontDefinitions {
         .or_default()
         .push("ibm_plex_mono_medium".to_owned());
 
+    if cfg!(target_os = "windows") {
+        let buf = std::fs::read("C:\\Windows\\Fonts\\SegoeIcons.ttf").unwrap();
+        {
+            fonts
+                .font_data
+                .insert("segeo_icons".to_owned(), egui::FontData::from_owned(buf));
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .push("segeo_icons".to_string());
+        }
+    }
+
     fonts
 }
 

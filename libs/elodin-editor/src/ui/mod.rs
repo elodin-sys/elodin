@@ -13,6 +13,7 @@ use bevy_egui::{
 
 use big_space::GridCell;
 
+use egui::Rounding;
 use egui_tiles::TileId;
 use impeller::{
     bevy::{ComponentValueMap, Received},
@@ -213,12 +214,23 @@ pub struct TitlebarIcons {
 }
 
 #[derive(SystemParam)]
-pub struct Titlebar<'w> {
+pub struct Titlebar<'w, 's> {
     sidebar_state: ResMut<'w, SidebarState>,
     fullscreen_state: ResMut<'w, FullscreenState>,
+    app_exit: EventWriter<'w, AppExit>,
+    windows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Window,
+            &'static bevy::window::PrimaryWindow,
+        ),
+    >,
+    winit_windows: NonSend<'w, bevy::winit::WinitWindows>,
 }
 
-impl RootWidgetSystem for Titlebar<'_> {
+impl RootWidgetSystem for Titlebar<'_, '_> {
     type Args = TitlebarIcons;
     type Output = ();
 
@@ -228,7 +240,7 @@ impl RootWidgetSystem for Titlebar<'_> {
         ctx: &mut egui::Context,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let mut state_mut = state.get_mut(world);
 
         let mut sidebar_state = state_mut.sidebar_state;
         let mut fullscreen_state = state_mut.fullscreen_state;
@@ -242,13 +254,27 @@ impl RootWidgetSystem for Titlebar<'_> {
 
         let titlebar_height = if cfg!(target_os = "macos") {
             52.0
+        } else if cfg!(target_os = "windows") {
+            45.0
         } else {
             34.0
         };
         let traffic_light_offset = if cfg!(target_os = "macos") { 72.0 } else { 0.0 };
         let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
-        let titlebar_margin = if cfg!(target_os = "macos") { 8.0 } else { 4.0 };
+        let titlebar_margin = if cfg!(target_os = "macos") {
+            8.0
+        } else if cfg!(target_os = "windows") {
+            0.0
+        } else {
+            4.0
+        };
+        let titlebar_right_margin = if cfg!(target_os = "windows") {
+            0.0
+        } else {
+            16.0
+        };
 
+        theme::set_theme(ctx);
         egui::TopBottomPanel::top("title_bar")
             .frame(
                 egui::Frame {
@@ -256,7 +282,11 @@ impl RootWidgetSystem for Titlebar<'_> {
                     stroke: egui::Stroke::new(0.0, colors::BORDER_GREY),
                     ..Default::default()
                 }
-                .inner_margin(Margin::same(titlebar_margin).left(16.0).right(16.0)),
+                .inner_margin(
+                    Margin::same(titlebar_margin)
+                        .left(16.0)
+                        .right(titlebar_right_margin),
+                ),
             )
             .exact_height(titlebar_height)
             .resizable(false)
@@ -284,6 +314,89 @@ impl RootWidgetSystem for Titlebar<'_> {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if cfg!(target_os = "windows") {
+                            let (window_id, _, _) = state_mut.windows.single();
+                            let winit_window =
+                                state_mut.winit_windows.get_window(window_id).unwrap();
+                            ui.horizontal_centered(|ui| {
+                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
+                                    egui::Color32::from_hex("#E81123").expect("invalid red color");
+
+                                ui.style_mut().visuals.widgets.hovered.rounding = Rounding {
+                                    nw: 0.0,
+                                    ne: 4.0,
+                                    sw: 0.0,
+                                    se: 0.0,
+                                };
+
+                                if ui
+                                    .add_sized(
+                                        egui::vec2(45.0, 40.0),
+                                        egui::Button::new(
+                                            RichText::new("\u{e8bb}")
+                                                .font(egui::FontId {
+                                                    size: 10.0,
+                                                    family: egui::FontFamily::Proportional,
+                                                })
+                                                .line_height(Some(11.0)),
+                                        )
+                                        .stroke(egui::Stroke::NONE),
+                                    )
+                                    .clicked()
+                                {
+                                    state_mut.app_exit.send(AppExit::Success);
+                                }
+                                ui.add_space(2.0);
+                            });
+
+                            let maximized = winit_window.is_maximized();
+                            ui.scope(|ui| {
+                                ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
+                                    egui::Color32::from_hex("#4E4D53").expect("invalid red color");
+                                ui.style_mut().visuals.widgets.hovered.rounding = Rounding::ZERO;
+                                if ui
+                                    .add_sized(
+                                        egui::vec2(45.0, 40.0),
+                                        egui::Button::new(
+                                            RichText::new(if maximized {
+                                                "\u{e923}"
+                                            } else {
+                                                "\u{e922}"
+                                            })
+                                            .font(egui::FontId {
+                                                size: 10.0,
+                                                family: egui::FontFamily::Proportional,
+                                            })
+                                            .line_height(Some(11.0)),
+                                        )
+                                        .stroke(egui::Stroke::NONE),
+                                    )
+                                    .clicked()
+                                {
+                                    winit_window.set_maximized(!maximized);
+                                }
+
+                                ui.add_space(2.0);
+                                if ui
+                                    .add_sized(
+                                        egui::vec2(45.0, 40.0),
+                                        egui::Button::new(
+                                            RichText::new("\u{e921}")
+                                                .font(egui::FontId {
+                                                    size: 10.0,
+                                                    family: egui::FontFamily::Proportional,
+                                                })
+                                                .line_height(Some(11.0)),
+                                        )
+                                        .stroke(egui::Stroke::NONE),
+                                    )
+                                    .clicked()
+                                {
+                                    winit_window.set_minimized(true);
+                                }
+                            });
+                            ui.add_space(8.0);
+                        }
                         if ui
                             .add(
                                 EImageButton::new(icon_side_bar_right)
