@@ -40,3 +40,9 @@ ring = "0.17"
 
 # machine id
 machine-uid = "0.5.1"
+
+[build-dependencies]
+anyhow = "1.0.79"
+ignore = "0.4"
+tar = "0.4.40"
+zstd = "0.13.0"

@@ -1,12 +1,18 @@
 use super::Cli;
 use std::path::Path;
 
+const BALL_EXAMPLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ball.tar.zst"));
+const CUBE_SAT_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/cube-sat.py");
+const ROCKET_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/rocket.py");
+const THREE_BODY_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/three-body.py");
+
 #[derive(clap::ValueEnum, Clone, Default)]
 enum TemplateType {
     #[default]
     Rocket,
     CubeSat,
     ThreeBody,
+    Ball,
 }
 
 #[derive(clap::Args, Clone, Default)]
@@ -21,25 +27,25 @@ pub struct Args {
 
 impl Cli {
     pub fn create_template(&self, args: &Args) -> anyhow::Result<()> {
-        let (template_filename, template_code) = match args.template {
-            TemplateType::CubeSat => (
-                "cube-sat.py",
-                include_str!("../../../../libs/nox-py/examples/cube-sat.py"),
-            ),
-            TemplateType::Rocket => (
-                "rocket.py",
-                include_str!("../../../../libs/nox-py/examples/rocket.py"),
-            ),
-            TemplateType::ThreeBody => (
-                "three-body.py",
-                include_str!("../../../../libs/nox-py/examples/three-body.py"),
-            ),
-        };
-
         let path = Path::new(&args.path);
         std::fs::create_dir_all(path)?;
-        std::fs::write(path.join(template_filename), template_code.as_bytes())?;
 
+        match args.template {
+            TemplateType::CubeSat => std::fs::write(path.join("cube-sat.py"), CUBE_SAT_EXAMPLE)?,
+            TemplateType::Rocket => std::fs::write(path.join("rocket.py"), ROCKET_EXAMPLE)?,
+            TemplateType::ThreeBody => {
+                std::fs::write(path.join("three-body.py"), THREE_BODY_EXAMPLE)?
+            }
+            TemplateType::Ball => Self::write_dir(&path.join("ball"), BALL_EXAMPLE)?,
+        }
+
+        Ok(())
+    }
+
+    fn write_dir(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+        let tar = zstd::stream::Decoder::new(data)?;
+        let mut archive = tar::Archive::new(tar);
+        archive.unpack(path)?;
         Ok(())
     }
 }
