@@ -5,19 +5,6 @@ icon: house
 ---
 ## Install
 
-### Python SDK
-
-Install the Elodin Python SDK using `pip`:
-```sh
-pip install -U elodin
-```
-
-<Warning>
-The SDK is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
-</Warning>
-
-### Elodin Client
-
 Download the Elodin Client:
 
 | File                                                    | Platform            | Checksum                        |
@@ -33,35 +20,60 @@ Download the Elodin Client:
 [elodin-windows]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip
 [elodin-windows-sha256]: https://storage.googleapis.com/elodin-releases/latest/elodin-x86_64-pc-windows-msvc.zip.sha256
 
+Install the Elodin Python SDK using `pip`:
+
+<Warning>
+Only Linux distributions with glibc 2.35+ are supported.
+This includes Ubuntu 22.04+, Debian 12+, Fedora 35+, NixOS 21.11+, and other recent distributions.
+</Warning>
+
+<Warning>
+The SDK is only supported on Linux and macOS. Windows users can still use Elodin by installing and running the simulation server in WSL.
+Install WSL by following the instructions [here](https://docs.microsoft.com/en-us/windows/wsl/install).
+Then, install the Elodin Python SDK in WSL.
+</Warning>
+
+```sh
+pip install -U elodin
+```
+
 ## Start Simulating
+
+### Windows (WSL)
+
+To use Elodin on Windows, the simulation server must run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows.
+
+In a Windows terminal:
+
+1. Create a new simulation using the three-body orbit template.
+    ```sh
+    .\elodin.exe create --template three-body
+    ```
+2. Launch the Elodin Client.
+    ```sh
+    .\elodin.exe
+    ```
+
+In a WSL terminal that's pointed to the same directory as the Windows terminal:
+
+<Info>An easy way to open a WSL terminal in the current directory is to run `wsl` in the Windows terminal.</Info>
+
+1. Run the simulation server.
+    <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
+    ```sh
+    python3 three-body.py run --watch
+    ```
+
+### Linux / macOS
 
 1. Create a new simulation using the three-body orbit template.
     ```sh
     elodin create --template three-body
     ```
 2. Launch the simulation using the `elodin` CLI.
-    <Warning>
-    This command is only supported on Linux and macOS. Windows users can still use Elodin by running the simulation server in WSL. See the [Windows](#windows) section below for instructions.
-    </Warning>
     ```sh
     elodin editor three-body.py
     ```
-
-### Windows
-
-To use Elodin on Windows, the simulation server must be run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows. Follow these steps to get started:
-
-1. Install WSL by following the instructions [here](https://docs.microsoft.com/en-us/windows/wsl/install).
-2. Install the Elodin Python SDK in WSL.
-    ```sh
-    pip install -U elodin
-    ```
-2. Run the simulation server in WSL.
-    <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
-    ```sh
-    python3 three-body.py run --watch
-    ```
-3. Run `elodin.exe` in Windows to launch the Elodin Client.
 
 ## Perform Analysis
 
@@ -100,7 +112,7 @@ Run Monte Carlo simulations to explore the state space.
     git clone https://github.com/elodin-sys/elodin.git
     cd elodin
     ```
-4. Start a 300 sample Monte Carlo run with a maximum sim duration of 15s.
+4. Start a 100 sample Monte Carlo run with a maximum sim duration of 15s.
     <Note>Add `--open` to automatically open the dashboard url in the browser.</Note>
     ```sh
     elodin monte-carlo run --name ball examples/ball/main.py --max-duration 15 --samples 100
