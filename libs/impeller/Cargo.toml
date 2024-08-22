@@ -71,14 +71,14 @@ fastrand.version = "2"
 fastrand.optional = true
 
 # well-known
-nalgebra.version = "0.32"
+nalgebra.version = "0.33"
 nalgebra.features = ["serde-serialize", "bytemuck"]
 nalgebra.optional = true
 
 # types
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union", "serde", "const_new"]
-ndarray.version = "0.15"
+ndarray.version = "0.16"
 ndarray.features = ["serde"]
 ndarray.default-features = false
 bytes.version = "1.5"
@@ -93,10 +93,10 @@ ustr = { version = "1.0.0", features = ["serde"] }
 embedded-io-async.version = "0.6.1"
 embedded-io-async.optional = true
 
-polars.version = "0.39"
+polars.version = "0.41"
 polars.features = ["parquet", "dtype-array", "lazy"]
 polars.optional = true
-polars-arrow.version = "0.39"
+polars-arrow.version = "0.41"
 polars-arrow.features = ["arrow_rs"]
 polars-arrow.optional = true
 arrow.version = "52.0"
