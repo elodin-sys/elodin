@@ -106,8 +106,11 @@ dependencies = [
  "roci-adcs",
  "serde",
  "serialport",
+ "thingbuf",
  "thiserror",
  "toml 0.8.19",
+ "tracing",
+ "tracing-subscriber",
  "wmm",
 ]
 
@@ -3192,6 +3195,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90eeab0aa92f3f9b4e87f258c72b139c207d251f9cbc1080a0086b86a8870dd3"
+dependencies = [
+ "nix 0.29.0",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "cursor-icon"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6260,6 +6273,20 @@ checksum = "9380b911e3e96d10c1f415da0876389aaf1b56759054eeb0de7df940c456ba1a"
 dependencies = [
  "autocfg",
  "rawpointer",
+]
+
+[[package]]
+name = "mcu-client"
+version = "0.4.0"
+dependencies = [
+ "arrayvec",
+ "ctrlc",
+ "enumflags2",
+ "impeller",
+ "nox",
+ "roci",
+ "serialport",
+ "thiserror",
 ]
 
 [[package]]
