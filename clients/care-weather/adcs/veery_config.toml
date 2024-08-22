@@ -94,12 +94,13 @@ com_b = [0.0, 0.0, 0.0]
 spacecraft_mass = 1.0
 
 [mcu]
-enable_gps = false
+enable_gps = true
 arm_reaction_wheels = true
-path = "/dev/cu.usbmodem11201"
 #adcs_format = 35 # all sensors - reaction wheel RPMs, accel
-adcs_format = 291 # all sensors - accel
+adcs_format = 547 # all sensors - reaction wheel RPMs, accel
+#adcs_format = 291 # all sensors - accel
 gps_update_interval = 1000
 gps_cycle_duration = 20
 gps_cycle_interval = 10
-use_radio = true
+com_type = "stdio"
+#path = "/dev/tty.usbmodem2079328738311"

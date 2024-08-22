@@ -5,7 +5,6 @@ import os
 import jax
 from dataclasses import dataclass, field
 
-
 TIME_STEP = 1.0 / 60.0
 
 j = np.array([15204079.70002, 14621352.61765, 6237758.3131]) * 1e-9
@@ -76,6 +75,14 @@ RWSpeedSetpoint = ty.Annotated[
     ),
 ]
 
+AttMrpBn = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "att_mrp_bn",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+    ),
+]
+
 
 @dataclass
 class Determination(el.Archetype):
@@ -87,6 +94,7 @@ class Determination(el.Archetype):
     sun_pos: SunPos = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     sun_sensors: SunSensors = field(default_factory=lambda: np.zeros(6))
     rw_speed: RWSpeed = field(default_factory=lambda: np.zeros(3))
+    att_mrp_bn: AttMrpBn = field(default_factory=lambda: np.zeros(3))
 
 
 @dataclass
@@ -203,6 +211,7 @@ def noop(
     sun_sensor: SunSensors,
     rw_speed: RWSpeed,
     rw_speed_setpoint: RWSpeedSetpoint,
+    att_mrp_bn: AttMrpBn,
 ) -> tuple[
     el.WorldPos,
     MagRef,
@@ -214,6 +223,7 @@ def noop(
     SunSensors,
     RWSpeed,
     RWSpeedSetpoint,
+    AttMrpBn
 ]:
     return (
         pos,
@@ -226,6 +236,7 @@ def noop(
         sun_sensor,
         rw_speed,
         rw_speed_setpoint,
+        att_mrp_bn
     )
 
 

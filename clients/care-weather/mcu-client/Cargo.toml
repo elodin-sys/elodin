@@ -1,0 +1,21 @@
+[package]
+name = "mcu-client"
+edition = "2021"
+publish = false
+version.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serialport = "4.3.0"
+roci.workspace = true
+roci.features = ["tokio", "std"]
+thiserror = "1.0.61"
+arrayvec = "0.7.4"
+enumflags2 = { version = "0.7.10", features = ["serde"] }
+nox.workspace = true
+nox.default-features = false
+ctrlc = "3.4.4"
+impeller.workspace = true
+impeller.features = ["nox"]
+impeller.default-features = false

@@ -37,3 +37,10 @@ anyhow = "1"
 
 # time
 hifitime = "3.9"
+
+# logs
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+# coms
+thingbuf = "0.1.6"

@@ -26,6 +26,7 @@ members = [
     "libs/wmm",
     "clients/care-weather/adcs",
     "clients/care-weather/helmholtz-chamber",
+    "clients/care-weather/mcu-client",
 ]
 
 [workspace.package]

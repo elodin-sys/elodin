@@ -7,6 +7,11 @@ To set up LITL (laptop in the loop) testing.
 #### Dependencies
 - Rust - https://rustup.rs
 - Elodin - https://docs.elodin.systems/quickstart.
+- Packages - clang & openblas
+``` sh
+sudo apt install clang libclang-dev libopenblas-dev # ubuntu
+sudo dnf install clang libstdc++-static clang-tools-extra openblas-devel # fedora / rhel
+```
 
 #### Usage
 
@@ -15,7 +20,7 @@ To set up LITL (laptop in the loop) testing.
 2. Next, you can start the dashboard visualizer. Right now, this must be started before running the adcs process
 
 ``` sh
-elodin dash.py
+elodin editor dash.py
 ```
 
 3. Now, finally, you can run the `adcs` process with `cargo run`

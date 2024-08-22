@@ -180,9 +180,7 @@ impl<const HZ: usize> System for Determination<HZ> {
                 .normalize()
         };
 
-        if let Ok(_time) = Epoch::now() {
-            // NOTE: hard coding time for chamber simulations
-            let time = Epoch::from_gregorian_utc_hms(2024, 6, 26, 23, 0, 0);
+        if let Ok(time) = Epoch::now() {
             world.mag_ref = self
                 .override_mag_ref
                 .map(Tensor::from_buf)
@@ -201,8 +199,10 @@ impl<const HZ: usize> System for Determination<HZ> {
                 .map(Tensor::from_buf)
                 .unwrap_or_else(|| nox_frames::earth::sun_vec(time))
                 .normalize();
+            // world.mag_ref = tensor![0., 0000., 1000.];
+            //world.sun_ref = tensor![1., 0., 0.];
         } else {
-            println!("failed to get current time");
+            tracing::warn!("failed to get current time");
         }
         let hard_iron_cal: Tensor<f64, _, _> =
             Vector::from_buf(world.mag_value) - Vector::from_buf(self.mag_cal.h);

@@ -12,6 +12,7 @@ mod guidance;
 mod log;
 pub mod mcu;
 mod sim_adapter;
+mod stdio;
 
 const HZ: usize = 10;
 
@@ -41,6 +42,16 @@ impl Config {
                 .unwrap_or_else(|_| "/etc/care-weather/adcs.toml".to_string()),
             "./config.toml".to_string(),
         ];
+        if !config_paths
+            .iter()
+            .any(|path| std::fs::metadata(path).is_ok())
+        {
+            std::fs::create_dir_all("/etc/care-weather")?;
+            std::fs::write(
+                "/etc/care-weather/adcs.toml",
+                include_str!("../veery_config.toml"),
+            )?;
+        }
         for path in config_paths {
             let Ok(config) = std::fs::read_to_string(path) else {
                 continue;
@@ -52,6 +63,7 @@ impl Config {
 }
 
 fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let config = Config::parse()?;
     let Config {
         determination,
@@ -64,7 +76,8 @@ fn main() -> anyhow::Result<()> {
     let _guidance = guidance::Guidance::<HZ>::new(guidance.sigma_r0r);
     let control = control::Control::<HZ>::new(control);
     let (tx, _) = tokio::tcp_connect::<Hz<HZ>>(
-        "127.0.0.1:2240".parse().unwrap(),
+        //"127.0.0.1:2240".parse().unwrap(),
+        "192.168.0.5:2240".parse().unwrap(),
         &[],
         sim_adapter::TxWorld::metadata(),
     );
@@ -73,7 +86,6 @@ fn main() -> anyhow::Result<()> {
     mcu_driver.print_info().unwrap();
     let sim_adapter = sim_adapter::SimAdapter;
     let csv_logger = roci::csv::CSVLogger::<log::World, Hz<HZ>>::try_from_path(data_log_path)?;
-
-    os_sleep_driver(sim_adapter.pipe(mcu_driver).pipe(tx).pipe(csv_logger)).run();
+    os_sleep_driver(mcu_driver.pipe(sim_adapter).pipe(tx).pipe(csv_logger)).run();
     Ok(())
 }

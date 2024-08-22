@@ -56,7 +56,7 @@ const HZ: usize = 10;
 
 fn main() {
     let (tx, rx) = tokio::tcp_connect::<Hz<HZ>>(
-        "127.0.0.1:2240".parse().unwrap(),
+        "127.0.0.1:2241".parse().unwrap(),
         &[Query::with_id("mag_ref")],
         World::metadata().filter(|x| x.component_name() == "chamber_mag_reading"),
     );
