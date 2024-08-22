@@ -55,13 +55,13 @@ tonic-health = "0.12"
 bytes = "1.6"
 axum.version = "0.7"
 axum.features = ["ws"]
-tower.version = "0.4"
-tower.features = ["steer"]
+tower.version = "0.5.0"
+tower.features = ["steer", "make"]
 hyper = "1.4"
 tower-http = "0.5"
 
 # sql
-sea-orm.version = "0.12"
+sea-orm.version = "1.0"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]
 atc-entity.path = "../../libs/atc/entity"
 atc-migration.path = "../../libs/atc/migration"
@@ -74,7 +74,7 @@ ring = "0.17"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # k8s
-kube = { version = "0.92", features = ["runtime", "derive"] }
+kube = { version = "0.93", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.22", features = ["latest"] }
 
 # queue
@@ -88,5 +88,5 @@ chrono = "0.4"
 google-cloud-storage = { version = "0.20.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
 
 # stripe
-async-stripe.version = "0.37"
+async-stripe.version = "0.38"
 async-stripe.features = ["runtime-tokio-hyper-rustls"]
