@@ -69,7 +69,7 @@ objc = "0.2.7"
 
 # windows
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser"] }
+winapi = { version = "0.3", features = ["winuser", "dwmapi", "uxtheme"] }
 image.version = "0.25"
 image.default-features = false
 image.features = ["png"]

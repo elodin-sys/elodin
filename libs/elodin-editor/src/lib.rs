@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::plugins::editor_cam_touch;
 use bevy::{
     asset::embedded_asset,
     core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
@@ -29,8 +30,6 @@ use impeller::{
 };
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{tiles, EntityPair, HoveredEntity};
-
-use crate::plugins::editor_cam_touch;
 
 pub mod chunks;
 mod plugins;
@@ -128,6 +127,7 @@ impl Plugin for EditorPlugin {
                             },
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
+                            decorations: !cfg!(target_os = "windows"),
                             ..default()
                         }),
                         ..default()
@@ -165,6 +165,9 @@ impl Plugin for EditorPlugin {
                 default_color: Color::WHITE,
             })
             .insert_resource(ClearColor(Color::NONE));
+        if cfg!(target_os = "windows") {
+            app.add_systems(Update, handle_drag_resize);
+        }
 
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
@@ -429,6 +432,56 @@ fn setup_titlebar(
     }
 }
 
+fn handle_drag_resize(
+    windows: Query<(Entity, &Window, &bevy::window::PrimaryWindow)>,
+    winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut just_set_cursor: Local<bool>,
+) {
+    for (id, window, _) in &windows {
+        let Some(cursor_pos) = window.physical_cursor_position() else {
+            continue;
+        };
+        let size = window.physical_size().as_vec2();
+        let window = winit_windows.get_window(id).unwrap();
+        const RESIZE_ZONE: f32 = 5.0;
+        let resize_west = cursor_pos.x < RESIZE_ZONE;
+        let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
+        let resize_north = cursor_pos.y < RESIZE_ZONE;
+        let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
+        if cursor_pos.y < 45.0
+            && !resize_north
+            && !resize_east
+            && !resize_west
+            && mouse_buttons.pressed(MouseButton::Left)
+        {
+            let _ = window.drag_window();
+        }
+        let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
+            (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
+            (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
+
+            (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
+            (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
+            (true, _, _, _) => Some(winit::window::ResizeDirection::West),
+            (_, true, _, _) => Some(winit::window::ResizeDirection::East),
+            (_, _, true, _) => Some(winit::window::ResizeDirection::North),
+            (_, _, _, true) => Some(winit::window::ResizeDirection::South),
+            _ => None,
+        };
+        if let Some(resize_dir) = resize_dir {
+            if mouse_buttons.pressed(MouseButton::Left) {
+                let _ = window.drag_resize_window(resize_dir);
+            }
+            window.set_cursor(winit::window::CursorIcon::from(resize_dir));
+            *just_set_cursor = true
+        } else if *just_set_cursor {
+            *just_set_cursor = false;
+            window.set_cursor(winit::window::CursorIcon::Default);
+        }
+    }
+}
+
 fn setup_window_icon(
     _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
     // this is load bearing, because it ensures that there is at
@@ -455,6 +508,18 @@ fn set_icon_windows() {
     let window_handle = unsafe { winuser::GetActiveWindow() };
     if window_handle.is_null() {
         return;
+    }
+
+    unsafe {
+        let margins = winapi::um::uxtheme::MARGINS {
+            cxLeftWidth: 0,
+            cxRightWidth: 0,
+            cyTopHeight: -40,
+            cyBottomHeight: 40,
+        };
+        winapi::um::dwmapi::DwmExtendFrameIntoClientArea(window_handle, &margins);
+        let mut rect = winapi::shared::windef::RECT::default();
+        winapi::um::winuser::GetWindowRect(window_handle, &mut rect);
     }
 
     fn resize_image(image: &image::DynamicImage, size: usize) -> Option<Vec<u8>> {
