@@ -19,7 +19,7 @@ that allows you to build your own physics engine.
 - `libs/nox-py`: Python version of `nox-ecs`, that works with JAX
 - `libs/nox-ecs-macros`: Derive macros to generate implementations of
 ECS and Nox traits.
-- `libs/conduit`: Column-based protocol for transferring ECS data
+- `libs/impeller`: Column-based protocol for transferring ECS data
 between different systems.
 - `libs/xla-rs`: Rust bindings to XLA's C++ API (originally based on
 https://github.com/LaurentMazare/xla-rs).
