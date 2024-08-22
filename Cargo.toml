@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "libs/conduit",
+    "libs/impeller",
     "libs/nox",
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
@@ -11,3 +11,13 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
+
+[workspace.dependencies]
+roci.path = "libs/roci"
+roci.default-features = false
+roci-adcs.path = "libs/roci/adcs"
+nox.path = "libs/nox"
+nox.default-features = false
+nox-ecs.path = "libs/nox-ecs"
+impeller.path = "libs/impeller"
+impeller.default-features = false
