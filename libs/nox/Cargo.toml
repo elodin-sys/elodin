@@ -1,7 +1,10 @@
 [package]
 name = "nox"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "Tensor library that compiles to XLA (like JAX, but for Rust)."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/elodin-sys/elodin"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -32,18 +35,14 @@ dyn-stack = "0.10.0"
 stackalloc = "1.2.1"
 
 
-# xla-rs - a wrapper around raw xla
-xla.path = "../xla-rs"
-xla.optional = true
+# noxla - a wrapper around raw xla
+xla = { optional = true, workspace = true }
 
 # jax
 pyo3.version = "0.21.0"
 pyo3.optional = true
 numpy.version = "0.21.0"
 numpy.optional = true
-
-# macros
-nox-ecs-macros.path = "../nox-ecs-macros"
 
 # debug
 indent_write = "2.2.0"
