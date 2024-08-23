@@ -1,7 +1,10 @@
 [package]
 name = "impeller"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "Column-based protocol for transferring ECS data between different systems."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/elodin-sys/elodin"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
