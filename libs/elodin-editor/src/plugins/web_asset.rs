@@ -6,14 +6,16 @@ use bevy::asset::io::*;
 use bevy::prelude::*;
 use reqwest::StatusCode;
 
+use super::asset_cache::{self, CachedAsset};
+
 #[derive(Default)]
 pub struct WebAssetPlugin;
 
-#[derive(Clone)]
 struct Client {
     #[allow(dead_code)]
     rt: Runtime,
     source: Source,
+    cache: Box<dyn asset_cache::AssetCache>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,31 +93,58 @@ impl Client {
         Ok(url)
     }
 
-    async fn get(&self, url: String) -> Result<Vec<u8>, AssetReaderError> {
+    async fn get(
+        &self,
+        url: String,
+        cached_asset: Option<CachedAsset>,
+    ) -> Result<(Vec<u8>, Option<String>), AssetReaderError> {
         self.rt
             .spawn(async move {
-                let bytes = reqwest::get(url)
-                    .await
-                    .and_then(|r| r.error_for_status())
-                    .map_err(http_err)?
-                    .bytes()
-                    .await
-                    .map_err(http_err)?;
-                Ok(bytes.to_vec())
+                let client = reqwest::Client::new();
+                let mut request = client.get(&url);
+                if let Some(CachedAsset { etag, .. }) = &cached_asset {
+                    request = request.header("If-None-Match", etag);
+                }
+                let response = request.send().await.map_err(http_err)?;
+                if let Some(CachedAsset { data, .. }) = cached_asset {
+                    if response.status() == StatusCode::NOT_MODIFIED {
+                        return Ok((data, None));
+                    }
+                }
+                let etag = response
+                    .headers()
+                    .get("ETag")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_owned());
+
+                let data = response.bytes().await.map_err(http_err)?.to_vec();
+                Ok((data, etag))
             })
             .await
     }
 
     fn asset_source(rt: Runtime, source: Source) -> AssetSourceBuilder {
-        let client = Client { rt, source };
-        AssetSource::build().with_reader(move || Box::new(client.clone()))
+        AssetSource::build().with_reader(move || {
+            let rt = rt.clone();
+            let cache = Box::new(asset_cache::cache());
+            Box::new(Client { rt, source, cache })
+        })
     }
 }
 
 impl AssetReader for Client {
     async fn read<'a>(&'a self, path: &'a Path) -> Result<Box<Reader<'a>>, AssetReaderError> {
         let url = self.url(path)?;
-        let bytes = self.get(url).await?;
+        let cached_asset = self.cache.get(&url);
+
+        let (bytes, etag) = self.get(url.clone(), cached_asset).await?;
+        if let Some(etag) = etag {
+            let cached_asset = CachedAsset {
+                data: bytes.clone(),
+                etag,
+            };
+            self.cache.put(&url, cached_asset);
+        }
         let reader = VecReader::new(bytes);
         Ok(Box::new(reader) as Box<Reader<'a>>)
     }
