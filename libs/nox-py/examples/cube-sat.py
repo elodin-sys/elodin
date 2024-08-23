@@ -563,8 +563,8 @@ sat = w.spawn(
         KalmanFilter(
             np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
         ),
-        Debug(0.0),
-        w.glb("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb"),
+        Debug(np.float64(0.0)),
+        w.glb("https://storage.googleapis.com/elodin-assets/oresat-low.glb"),
     ],
     name="OreSat",
 )
@@ -694,7 +694,7 @@ w.spawn(
             ),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb"),
+        w.glb("https://storage.googleapis.com/elodin-assets/earth.glb"),
     ],
     name="Earth",
 )

@@ -474,7 +474,7 @@ rocket = w.spawn(
             inertia=el.SpatialInertia(3.0, jnp.array([0.1, 1.0, 1.0])),
         ),
         Rocket(),
-        w.glb("https://storage.googleapis.com/elodin-marketing/models/rocket.glb"),
+        w.glb("https://storage.googleapis.com/elodin-assets/rocket.glb"),
     ],
     name="Rocket",
 )
