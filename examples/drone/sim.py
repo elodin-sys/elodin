@@ -128,7 +128,7 @@ def world() -> el.World:
                 world_pos=Config.GLOBAL.spatial_transform,
                 inertia=Config.GLOBAL.spatial_inertia,
             ),
-            world.glb(Config.GLOBAL.absolute_glb_path),
+            world.glb(Config.GLOBAL.drone_glb),
             Drone(),
             motors.Motors(),
             sensors.IMU(),

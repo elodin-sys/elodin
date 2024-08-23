@@ -378,7 +378,7 @@ w = el.World()
 
 sat_ids = []
 
-scene = w.glb("https://storage.googleapis.com/elodin-marketing/models/oresat-low.glb")
+scene = w.glb("https://storage.googleapis.com/elodin-assets/oresat-low.glb")
 
 
 def spawn_sat(x, y, w: el.World):
@@ -485,7 +485,7 @@ w.spawn(
             ),
             inertia=el.SpatialInertia(1.0),
         ),
-        w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb"),
+        w.glb("https://storage.googleapis.com/elodin-assets/earth.glb"),
     ],
     name="Earth",
 )
