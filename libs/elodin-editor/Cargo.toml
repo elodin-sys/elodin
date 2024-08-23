@@ -3,6 +3,7 @@ name = "elodin-editor"
 description = "Elodin Editor"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [package.metadata.bundle]
 name = "Elodin Editor"

@@ -10,7 +10,7 @@ members = [
     "libs/nox-ecs-macros",
     "libs/nox-py",
     "libs/nox-frames",
-    "libs/xla-rs",
+    "libs/noxla",
     "libs/atc/migration",
     "libs/atc/entity",
     "libs/redmq",
@@ -86,6 +86,7 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
+xla = { package = "noxla", path = "libs/noxla" }
 roci.path = "libs/roci"
 roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"

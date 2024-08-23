@@ -5453,7 +5453,7 @@ dependencies = [
 
 [[package]]
 name = "impeller"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "arrow",
  "bevy",
@@ -6829,7 +6829,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "boxcar",
@@ -6842,7 +6842,7 @@ dependencies = [
  "lapack-src",
  "nalgebra",
  "ndarray 0.16.1",
- "nox-ecs-macros",
+ "noxla",
  "num-traits",
  "numpy",
  "openblas-src",
@@ -6853,7 +6853,6 @@ dependencies = [
  "smallvec",
  "stackalloc",
  "thiserror",
- "xla",
 ]
 
 [[package]]
@@ -6940,6 +6939,30 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
+]
+
+[[package]]
+name = "noxla"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cc",
+ "cpp",
+ "cpp_build",
+ "cxx",
+ "find_cuda_helper",
+ "flate2",
+ "lapack-src",
+ "lapack-sys",
+ "libc",
+ "num-derive",
+ "num-traits",
+ "openblas-src",
+ "tar",
+ "thiserror",
+ "ureq",
+ "zip",
 ]
 
 [[package]]
@@ -12550,30 +12573,6 @@ name = "xkeysym"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
-
-[[package]]
-name = "xla"
-version = "0.1.6"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cc",
- "cpp",
- "cpp_build",
- "cxx",
- "find_cuda_helper",
- "flate2",
- "lapack-src",
- "lapack-sys",
- "libc",
- "num-derive",
- "num-traits",
- "openblas-src",
- "tar",
- "thiserror",
- "ureq",
- "zip",
-]
 
 [[package]]
 name = "xml-rs"
