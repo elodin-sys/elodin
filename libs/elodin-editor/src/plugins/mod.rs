@@ -1,3 +1,4 @@
+mod asset_cache;
 pub mod editor_cam_touch;
 pub mod gizmos;
 pub mod navigation_gizmo;

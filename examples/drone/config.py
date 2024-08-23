@@ -3,7 +3,6 @@ import jax
 import jax.numpy as jnp
 import typing as ty
 import elodin as el
-import os
 
 import util
 
@@ -45,10 +44,6 @@ class Config:
 
     # Enable sensor noise
     sensor_noise: bool
-
-    @property
-    def absolute_glb_path(self) -> str:
-        return os.path.join(os.path.dirname(__file__), self.drone_glb)
 
     @property
     def dt(self) -> float:

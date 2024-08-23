@@ -42,6 +42,9 @@ clean-dev-branch branch_codename:
   kubectl get namespace elodin-app-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-app-{{branch_codename}} || echo "elodin-app-{{branch_codename}} already deleted"
   kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"
 
+sync-assets:
+  gsutil rsync -r assets gs://elodin-assets
+
 sync-open-source:
   git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --prune-empty always --target ../elodin
   cd ../elodin; git fetch origin main; git rebase origin/main --committer-date-is-author-date

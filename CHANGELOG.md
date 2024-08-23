@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- Add local cache for remote GLB assets to improve model load times and reduce network usage.
 
 ## v0.4.0
 - **(fix)** Fix cutoff titlebar in editor on browser and windows.
@@ -183,7 +184,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
     ```python
     # before:
     w.spawn(el.Body(pbr = w.insert_asset( el.Pbr(el.Mesh.sphere(0.2), el.Material.color(0.0, 10.0, 10.0)))))
-    w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-marketing/models/earth.glb"))))
+    w.spawn(el.Body(w.insert_asset(el.Pbr.from_url("https://storage.googleapis.com/elodin-assets/earth.glb"))))
     # after
     w.spawn([
       el.Body(),
@@ -191,7 +192,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
     ])
     w.spawn([
       el.Body(),
-      w.glb("https://storage.googleapis.com/elodin-marketing/models/earth.glb")
+      w.glb("https://storage.googleapis.com/elodin-assets/earth.glb")
     ])
     ```
 - **(breaking)** Remove `SpatialInertia.from_mass()`.
