@@ -14,6 +14,10 @@ fn main() -> anyhow::Result<()> {
     let dest_path = out_dir.join("ball.tar.zst");
     bundle_example(ball_example_dir, dest_path)?;
 
+    let drone_example_dir = examples_dir.join("drone");
+    let dest_path = out_dir.join("drone.tar.zst");
+    bundle_example(drone_example_dir, dest_path)?;
+
     Ok(())
 }
 

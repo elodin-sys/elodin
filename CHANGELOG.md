@@ -2,6 +2,7 @@
 
 ## unreleased
 - Add local cache for remote GLB assets to improve model load times and reduce network usage.
+- Add more built-in templates for creating new simulations (`ball` and `drone`).
 
 ## v0.4.0
 - **(fix)** Fix cutoff titlebar in editor on browser and windows.

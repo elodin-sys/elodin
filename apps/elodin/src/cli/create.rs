@@ -2,6 +2,7 @@ use super::Cli;
 use std::path::Path;
 
 const BALL_EXAMPLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ball.tar.zst"));
+const DRONE_EXAMPLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/drone.tar.zst"));
 const CUBE_SAT_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/cube-sat.py");
 const ROCKET_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/rocket.py");
 const THREE_BODY_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/examples/three-body.py");
@@ -10,6 +11,7 @@ const THREE_BODY_EXAMPLE: &[u8] = include_bytes!("../../../../libs/nox-py/exampl
 enum TemplateType {
     #[default]
     Rocket,
+    Drone,
     CubeSat,
     ThreeBody,
     Ball,
@@ -37,6 +39,7 @@ impl Cli {
                 std::fs::write(path.join("three-body.py"), THREE_BODY_EXAMPLE)?
             }
             TemplateType::Ball => Self::write_dir(&path.join("ball"), BALL_EXAMPLE)?,
+            TemplateType::Drone => Self::write_dir(&path.join("drone"), DRONE_EXAMPLE)?,
         }
 
         Ok(())
