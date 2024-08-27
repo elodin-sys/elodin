@@ -13,6 +13,7 @@ pub struct Model {
     pub status: Status,
     pub max_duration: i64,
     pub started: Option<ChronoDateTimeUtc>,
+    pub billed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

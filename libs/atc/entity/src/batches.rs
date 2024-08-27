@@ -12,6 +12,7 @@ pub struct Model {
     pub failures: Vec<u8>,
     pub finished: Option<ChronoDateTimeUtc>,
     pub status: Status,
+    pub runtime: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

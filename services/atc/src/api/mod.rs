@@ -29,7 +29,7 @@ mod billing_account;
 mod license;
 mod monte_carlo;
 mod sandbox;
-mod stripe;
+pub(crate) mod stripe;
 mod user;
 mod utils;
 use utils::*;
