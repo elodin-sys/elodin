@@ -6,11 +6,16 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use chrono::{DateTime, Utc};
 use elodin_types::api::{GetStripeSubscriptionStatusReq, LicenseType, StripeSubscriptionStatus};
+use migration::Expr;
+use reqwest::Client;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter, Set, Unchanged,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    FromQueryResult, JoinType, QueryFilter, QuerySelect, Set, Unchanged, Value,
 };
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, str::FromStr};
 use stripe::{Customer, CustomerId, Event, EventObject, EventType, PriceId};
 use tracing::warn;
 use uuid::Uuid;
@@ -294,4 +299,159 @@ impl Api {
             trial_end: sub.trial_end,
         })
     }
+}
+
+#[derive(FromQueryResult, Debug, Serialize, Deserialize)]
+pub struct MonteCarloBilling {
+    pub id: Uuid,
+    pub name: String,
+    pub user_id: Uuid,
+    pub started: Option<DateTime<Utc>>,
+    pub customer_id: String,
+    pub usage_subscription_id: Option<String>,
+    pub runtime_sum: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StripePlanSimple {
+    pub id: String,
+    pub meter: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StripeSubscriptionSimple {
+    pub id: String,
+    pub plan: StripePlanSimple,
+}
+
+pub(crate) async fn sync_monte_carlo_billing(
+    client: &Client,
+    db_connection: &DatabaseConnection,
+    stripe_secret_key: &String,
+) -> Result<(), Error> {
+    let stripe_base_url = "https://api.stripe.com/v1";
+
+    tracing::debug!("checking latest completed monte-carlo runs not saved in the stripe");
+
+    // NOTE: Query monte-carlo runs with an attached total runtime and billing information
+    let mc_run_billings = atc_entity::MonteCarloRun::find()
+        .select_only()
+        .columns([
+            atc_entity::mc_run::Column::Id,
+            atc_entity::mc_run::Column::Name,
+            atc_entity::mc_run::Column::UserId,
+            atc_entity::mc_run::Column::Started,
+        ])
+        .column_as(
+            atc_entity::billing_account::Column::UsageSubscriptionId,
+            "usage_subscription_id",
+        )
+        .column_as(
+            atc_entity::billing_account::Column::CustomerId,
+            "customer_id",
+        )
+        .column_as(atc_entity::batches::Column::Runtime.sum(), "runtime_sum")
+        .filter(atc_entity::mc_run::Column::Billed.eq(false))
+        .filter(atc_entity::mc_run::Column::Status.eq(atc_entity::mc_run::Status::Done))
+        .join_rev(
+            JoinType::InnerJoin,
+            atc_entity::Batches::belongs_to(atc_entity::MonteCarloRun)
+                .from(atc_entity::batches::Column::RunId)
+                .to(atc_entity::mc_run::Column::Id)
+                .into(),
+        )
+        .join_rev(
+            JoinType::LeftJoin,
+            atc_entity::BillingAccount::belongs_to(atc_entity::MonteCarloRun)
+                .from(atc_entity::billing_account::Column::OwnerUserId)
+                .to(atc_entity::mc_run::Column::UserId)
+                .into(),
+        )
+        .group_by(atc_entity::mc_run::Column::Id)
+        .group_by(atc_entity::billing_account::Column::UsageSubscriptionId)
+        .group_by(atc_entity::billing_account::Column::CustomerId)
+        .into_model::<MonteCarloBilling>()
+        .all(db_connection)
+        .await?;
+
+    let amount_of_mc_runs_to_bill = mc_run_billings.len();
+    tracing::debug!(%amount_of_mc_runs_to_bill, "got information about latest completed monte-carlo runs");
+
+    let mut billed_mc_run_ids = vec![];
+
+    for mc_run_billing in mc_run_billings {
+        let Some(usage_subscription_id) = mc_run_billing.usage_subscription_id else {
+            tracing::error!(%mc_run_billing.user_id, "user is missing usage_subscription_id, skipping");
+            continue;
+        };
+
+        let runtime_min_str =
+            ((mc_run_billing.runtime_sum as f64 / 60.0).ceil() as u64).to_string();
+        let timestamp_str = mc_run_billing
+            .started
+            .map(|t| (t.timestamp() as u64).to_string());
+        let mc_run_id_str = mc_run_billing.id.to_string();
+
+        let sub_url = format!("{stripe_base_url}/subscriptions/{usage_subscription_id}");
+
+        let stripe_subscription = client
+            .get(sub_url)
+            .basic_auth(stripe_secret_key, Some(""))
+            .send()
+            .await?
+            .json::<StripeSubscriptionSimple>()
+            .await?;
+
+        tracing::debug!(%stripe_subscription.id, %mc_run_id_str, "received subscription information from stripe");
+
+        let meter_event_url = format!("{stripe_base_url}/billing/meter_events");
+
+        let mut meter_event_params = HashMap::new();
+        meter_event_params.insert("event_name", String::from("monte_carlo_minutes"));
+        meter_event_params.insert("payload[value]", runtime_min_str);
+        meter_event_params.insert("payload[stripe_customer_id]", mc_run_billing.customer_id);
+        meter_event_params.insert(
+            "identifier",
+            format!("{mc_run_id_str}/{}", mc_run_billing.name),
+        );
+        if let Some(timestamp_str) = timestamp_str {
+            meter_event_params.insert("timestamp", timestamp_str);
+        }
+
+        let meter_event_res = client
+            .post(meter_event_url)
+            .basic_auth(stripe_secret_key, Some(""))
+            .form(&meter_event_params)
+            .send()
+            .await?;
+
+        let create_meter_event_response_status = meter_event_res.status();
+        tracing::debug!(%create_meter_event_response_status, "received response from stripe");
+
+        if !meter_event_res.status().is_success() {
+            let create_meter_event_response = meter_event_res.text().await?;
+            tracing::error!(%create_meter_event_response, "something went wrong during the creation of a meter_event");
+        } else {
+            billed_mc_run_ids.push(mc_run_billing.id);
+        }
+    }
+
+    let amount_of_billed_mc_runs = billed_mc_run_ids.len();
+
+    if amount_of_billed_mc_runs > 0 {
+        tracing::debug!(%amount_of_billed_mc_runs, "updating billed monte-carlo runs in the database");
+
+        let update_query = atc_entity::MonteCarloRun::update_many()
+            .col_expr(
+                atc_entity::mc_run::Column::Billed,
+                Expr::value(Value::Bool(Some(true))),
+            )
+            .filter(atc_entity::mc_run::Column::Id.is_in(billed_mc_run_ids))
+            .exec(db_connection)
+            .await?;
+
+        tracing::debug!(%update_query.rows_affected, "finished updating `monte_carlo_runs` table");
+    }
+
+    Ok(())
 }

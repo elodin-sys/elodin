@@ -53,6 +53,7 @@ impl api::Api {
             metadata: sea_orm::Set(metadata),
             max_duration: sea_orm::Set(max_duration),
             started: sea_orm::Set(None),
+            billed: sea_orm::Set(false),
         }
         .insert(txn)
         .await?;
@@ -69,6 +70,7 @@ impl api::Api {
                 failures: sea_orm::Set(failures),
                 finished: sea_orm::Set(None),
                 status: sea_orm::Set(batches::Status::Pending),
+                runtime: sea_orm::Set(0),
             }
             .insert(txn)
             .await?;

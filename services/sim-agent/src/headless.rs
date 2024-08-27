@@ -3,6 +3,7 @@ use std::io::{BufRead, Seek};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use atc_entity::batches;
 use atc_entity::events::DbExt;
 use elodin_types::{sandbox::*, Batch, BitVec, SampleMetadata, BATCH_TOPIC};
 use fred::prelude::*;
@@ -85,15 +86,18 @@ impl Runner {
             .await?
             .ok_or_else(|| anyhow::anyhow!("monte carlo run {} not found", run_id))?;
 
+        let run_max_duration = run.max_duration as usize;
+        let mut run_active = run.into_active_model();
+
         let temp_dir = tempfile::tempdir()?;
-        let artifacts = self.download_artifacts(&temp_dir, run.id).await?;
+        let artifacts = self.download_artifacts(&temp_dir, run_id).await?;
         let context_dir = artifacts.join("context");
         let run_exec = WorldExec::read_from_dir(artifacts)?;
         let run_exec = run_exec.compile(self.nox_client.clone())?;
 
         for b in batches {
             let txn = self.db.begin().await?;
-            let mut batch = atc_entity::Batches::find_by_id((run.id, b.batch_no as i32))
+            let mut batch = atc_entity::Batches::find_by_id((run_id, b.batch_no as i32))
                 .one(&txn)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("batch {}/{} not found", run_id, b.batch_no))?
@@ -104,7 +108,7 @@ impl Runner {
 
             let start_time = chrono::Utc::now();
             let failed = self
-                .process_batch(&run, &batch, &run_exec, &context_dir)
+                .process_batch(run_id, run_max_duration, &batch, &run_exec, &context_dir)
                 .instrument(tracing::info_span!("batch", no = %b.batch_no))
                 .await
                 .inspect_err(|err| tracing::error!(?err, "batch failed"))
@@ -118,14 +122,28 @@ impl Runner {
             batch.failures = sea_orm::Set(failed.to_bytes());
             batch.finished = sea_orm::Set(Some(finish_time));
             batch.status = sea_orm::Set(atc_entity::batches::Status::Done);
+            batch.runtime = sea_orm::Set(runtime.as_secs() as i32);
             batch.update_with_event(&self.db, &self.redis).await?;
         }
+
+        let not_done_batches_count = atc_entity::Batches::find()
+            .filter(batches::Column::RunId.eq(run_id))
+            .filter(batches::Column::Status.ne(atc_entity::batches::Status::Done))
+            .count(&self.db)
+            .await?;
+
+        if not_done_batches_count == 0 {
+            run_active.status = sea_orm::Set(atc_entity::mc_run::Status::Done);
+            run_active.update(&self.db).await?;
+        }
+
         Ok(())
     }
 
     async fn process_batch(
         &mut self,
-        run: &atc_entity::mc_run::Model,
+        run_id: Uuid,
+        run_max_duration: usize,
         batch: &atc_entity::batches::Model,
         run_exec: &WorldExec<Compiled>,
         context_dir: &Path,
@@ -149,7 +167,7 @@ impl Runner {
                     .iter_mut()
                     .for_each(|s| *s = sample_no as u64);
             }
-            block_in_place(|| self.run_sim(run.max_duration as usize, &mut sample_exec))?;
+            block_in_place(|| self.run_sim(run_max_duration, &mut sample_exec))?;
 
             let profile = sample_exec
                 .profile()
@@ -157,7 +175,7 @@ impl Runner {
                 .map(|(k, v)| (k.to_string(), v))
                 .collect();
             let sample_metadata = SampleMetadata {
-                run_id: run.id,
+                run_id,
                 batch_no,
                 sample_no,
                 profile,
@@ -170,7 +188,7 @@ impl Runner {
         let mut batch_tar = write_results_tar(context_dir, batch_worlds)?;
         let batch_tar_zst = compress(&mut batch_tar)?;
         tracing::debug!(elapsed = ?archive_start.elapsed(), "wrote batch archive");
-        let file_name = format!("runs/{}/batches/{}.tar.zst", run.id, batch_no);
+        let file_name = format!("runs/{}/batches/{}.tar.zst", run_id, batch_no);
         self.upload_archive(batch_tar_zst, file_name.clone());
 
         // run pytest:

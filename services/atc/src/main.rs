@@ -1,4 +1,6 @@
-use api::Api;
+use std::time::Duration;
+
+use api::{stripe::sync_monte_carlo_billing, Api};
 use atc_entity::{events, vm};
 use config::Config;
 use fred::prelude::*;
@@ -99,11 +101,24 @@ async fn main() -> anyhow::Result<()> {
             sandbox_events,
             monte_carlo_run_events,
             monte_carlo_batch_events,
-            stripe,
+            stripe.clone(),
             stripe_webhook_secret,
         )
         .await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();
+
+        let db_connection = db.clone();
+        let stripe_secret_key = api_config.stripe_secret_key.clone();
+
+        services.spawn(async move {
+            let client = reqwest::Client::new();
+
+            loop {
+                tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+
+                sync_monte_carlo_billing(&client, &db_connection, &stripe_secret_key).await?;
+            }
+        });
         services.spawn(async move {
             // don't add graceful shutdown for API server because "always be serving" is the best strategy for no downtime
             // load balancers and ingress should be responsible for draining connections instead of the application
