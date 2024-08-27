@@ -48,6 +48,7 @@ bevy.default-features = false
 bevy.features = ["bevy_pbr", "bevy_scene"]
 bevy.optional = true
 big_space.git = "https://github.com/elodin-sys/big_space.git"
+big_space.version = "0.5.0"
 big_space.branch = "no_prop_rot_v0.14"
 big_space.optional = true
 flume.version = "0.11"
