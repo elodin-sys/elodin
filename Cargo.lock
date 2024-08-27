@@ -9076,7 +9076,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "bbqueue",
  "bytes",
@@ -9108,7 +9108,7 @@ dependencies = [
 
 [[package]]
 name = "roci-macros"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "convert_case",
  "darling 0.20.10",
