@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+
+## v0.4.1
 - Add local cache for remote GLB assets to improve model load times and reduce network usage.
 - Add more built-in templates for creating new simulations (`ball` and `drone`).
 
