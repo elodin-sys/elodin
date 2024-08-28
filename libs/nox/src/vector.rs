@@ -46,7 +46,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
         <Const<1> as DimMul<Const<N>>>::Output: Dim,
     {
         let arr = arr.map(|x| x.inner);
-        let inner = R::concat_many(&arr[..], 0);
+        let inner = R::concat_many(arr, 0);
         Vector {
             inner,
             phantom: PhantomData,
@@ -106,12 +106,6 @@ impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
     /// Normalizes the vector to a unit vector.
     pub fn normalize(&self) -> Self {
         self / self.norm()
-    }
-
-    pub fn outer<const N2: usize>(&self, other: &Vector<T, N2, R>) -> Matrix<T, N, N2, R> {
-        let a: Matrix<T, N2, N, R> = self.clone().broadcast();
-        let b: Matrix<T, N, N2, R> = other.clone().broadcast();
-        a.transpose() * b
     }
 }
 

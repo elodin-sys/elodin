@@ -1,17 +1,17 @@
-use crate::XlaDim;
 use crate::{
-    AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDims, DefaultMap, Dim,
-    DimConcat, Field, FromOp, IntoOp, MapDim, MappedDim, NonScalarDim, Noxpr, Op, ReplaceMappedDim,
-    Scalar, Tensor, TensorItem, Vector,
+    AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDims, ConstDim,
+    DefaultMap, Dim, DimConcat, Field, FromOp, IntoOp, MappedDim, NonScalarDim, Noxpr, Op,
+    ReplaceDim, ReplaceMappedDim, Scalar, Tensor, TensorItem, Vector,
 };
 use nalgebra::Const;
-use smallvec::smallvec;
+use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
-impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Array<T, D>> for Tensor<T, D, Op> {
+impl<T: Field + ArrayElement + NativeType, D: Dim> From<Array<T, D>> for Tensor<T, D, Op> {
     fn from(arr: Array<T, D>) -> Self {
-        let shape = D::shape();
+        let shape = D::array_shape(&arr.buf);
+        let shape: SmallVec<[i64; 4]> = shape.as_ref().iter().map(|&x| x as i64).collect();
         let lit = T::create_r1(arr.buf.as_buf())
             .reshape(&shape)
             .expect("reshape failed");
@@ -29,7 +29,7 @@ impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Array<T, D>> fo
     }
 }
 
-impl<T: Field + ArrayElement + NativeType, D: Dim + XlaDim> From<Tensor<T, D, ArrayRepr>>
+impl<T: Field + ArrayElement + NativeType, D: Dim> From<Tensor<T, D, ArrayRepr>>
     for Tensor<T, D, Op>
 {
     fn from(value: Tensor<T, D, ArrayRepr>) -> Self {
@@ -111,7 +111,7 @@ pub trait TensorIndex<T: TensorItem, D: Dim> {
 impl<T: TensorItem, D: Dim + DefaultMap, IT: TensorItem, const N: usize> TensorIndex<T, D>
     for Vector<IT, N, Op>
 where
-    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: Dim,
+    ReplaceMappedDim<D::DefaultMapDim, D, Const<1>>: Dim + ConstDim,
     ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>: Dim,
 {
     type Output = Tensor<T, ReplaceMappedDim<D::DefaultMapDim, D, Const<N>>, Op>;
@@ -120,7 +120,7 @@ where
         let indices = self
             .inner
             .broadcast_in_dim(smallvec![N as i64, 1], smallvec![0]);
-        let slice_shape = ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::shape();
+        let slice_shape = ReplaceMappedDim::<D::DefaultMapDim, D, Const<1>>::xla_shape();
 
         let offset_dims = (1..slice_shape.len() as i64).collect();
         let inner = tensor.inner.gather(
@@ -140,7 +140,7 @@ where
 
 #[allow(clippy::type_complexity)]
 impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
-    pub fn concat_with_dim<OD: Dim, MDim: MapDim<D> + MapDim<OD>>(
+    pub fn concat_with_dim<OD: Dim, MDim: ReplaceDim<D> + ReplaceDim<OD>>(
         &self,
         other: Tensor<T, OD, Op>,
     ) -> Tensor<T, ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>, Op>
@@ -152,7 +152,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     {
         let inner = Noxpr::concat_in_dim(
             vec![self.inner.clone(), other.inner.clone()],
-            <MDim as MapDim<D>>::MAPPED_DIM,
+            <MDim as ReplaceDim<D>>::MAPPED_DIM,
         );
         Tensor {
             inner,

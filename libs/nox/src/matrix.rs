@@ -1,7 +1,9 @@
 //! Provides a Matrix type alias with convenience functions for converting to various representations.
 use std::marker::PhantomData;
 
-use crate::{DefaultRepr, Error, RealField, Repr, Tensor, Vector};
+use crate::{
+    DefaultRepr, Dim, Error, NonScalarDim, NonTupleDim, RealField, Repr, SquareDim, Tensor, Vector,
+};
 use nalgebra::Const;
 
 /// Type alias for a tensor that specifically represents a matrix.
@@ -18,30 +20,27 @@ pub type Matrix6x3<T, R = DefaultRepr> = Matrix<T, 6, 3, R>;
 impl<const R: usize, const C: usize, T: RealField, Rep: Repr> Matrix<T, R, C, Rep> {
     pub fn from_rows(rows: [Vector<T, C, Rep>; R]) -> Self {
         let arr = rows.map(|x| x.inner);
-        let inner = Rep::concat_many(&arr[..], 0);
+        let inner = Rep::concat_many(arr, 0);
         Matrix {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-
-    pub fn row(&self, index: usize) -> Vector<T, C, Rep> {
-        let inner = Rep::row(&self.inner, index);
-        Vector {
             inner,
             phantom: PhantomData,
         }
     }
 }
 
-impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
+impl<T: RealField, D: Dim, R: Repr> Tensor<T, (D, D), R>
+where
+    D: NonTupleDim + NonScalarDim,
+    (D, D): Dim + SquareDim<SideDim = D>,
+{
     pub fn try_inverse(&self) -> Result<Self, Error> {
-        match N {
-            2 => {
-                let m11 = self.get((0, 0));
-                let m12 = self.get((0, 1));
-                let m21 = self.get((1, 0));
-                let m22 = self.get((1, 1));
+        let shape = R::shape(&self.inner);
+        match shape.as_ref().first() {
+            Some(2) => {
+                let m11 = self.get([0, 0]);
+                let m12 = self.get([0, 1]);
+                let m21 = self.get([1, 0]);
+                let m22 = self.get([1, 1]);
 
                 let determinant = &m11 * &m22 - &m21 * &m12;
 
@@ -51,20 +50,20 @@ impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
                     -m21 / &determinant,
                     m11 / &determinant,
                 ];
-                Ok(Tensor::from_scalars(parts))
+                Ok(Tensor::from_scalars_with_shape(parts, &[2, 2]))
             }
-            3 => {
-                let m11 = self.get((0, 0));
-                let m12 = self.get((0, 1));
-                let m13 = self.get((0, 2));
+            Some(3) => {
+                let m11 = self.get([0, 0]);
+                let m12 = self.get([0, 1]);
+                let m13 = self.get([0, 2]);
 
-                let m21 = self.get((1, 0));
-                let m22 = self.get((1, 1));
-                let m23 = self.get((1, 2));
+                let m21 = self.get([1, 0]);
+                let m22 = self.get([1, 1]);
+                let m23 = self.get([1, 2]);
 
-                let m31 = self.get((2, 0));
-                let m32 = self.get((2, 1));
-                let m33 = self.get((2, 2));
+                let m31 = self.get([2, 0]);
+                let m32 = self.get([2, 1]);
+                let m33 = self.get([2, 2]);
 
                 let minor_m12_m23 = &m22 * &m33 - &m32 * &m23;
                 let minor_m11_m23 = &m21 * &m33 - &m31 * &m23;
@@ -84,14 +83,10 @@ impl<T: RealField, const N: usize, R: Repr> Matrix<T, N, N, R> {
                     (&m12 * &m31 - &m32 * &m11) / &determinant,
                     (m11 * m22 - m21 * m12) / &determinant,
                 ];
-                Ok(Tensor::from_scalars(parts))
+                Ok(Tensor::from_scalars_with_shape(parts, &[3, 3]))
             }
             _ => R::try_lu_inverse(&self.inner).map(Tensor::from_inner),
         }
-    }
-
-    pub fn try_cholesky(&self) -> Result<Self, Error> {
-        R::try_cholesky(&self.inner).map(Tensor::from_inner)
     }
 }
 

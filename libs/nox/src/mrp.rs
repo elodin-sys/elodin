@@ -48,12 +48,12 @@ impl<T: RealField, R: Repr> MRP<T, R> {
     pub fn from_rot_matrix(mat: Matrix<T, 3, 3, R>) -> Self {
         // source: Analytical Mechanics of Space Systems, Fourth Edition, Hanspeter Schaub, John L. Junkins
         // eq (3.154)
-        let trace = mat.get((0, 0)) + mat.get((1, 1)) + mat.get((2, 2));
+        let trace = mat.get([0, 0]) + mat.get([1, 1]) + mat.get([2, 2]);
         let zeta = (T::one() + trace).sqrt();
         let vec = Vector::from_scalars([
-            mat.get((1, 2)) - mat.get((2, 1)),
-            mat.get((2, 0)) - mat.get((0, 2)),
-            mat.get((0, 1)) - mat.get((1, 0)),
+            mat.get([1, 2]) - mat.get([2, 1]),
+            mat.get([2, 0]) - mat.get([0, 2]),
+            mat.get([0, 1]) - mat.get([1, 0]),
         ]);
         let inner = -vec / (&zeta * (&zeta + T::two()));
         MRP(inner)
