@@ -1,7 +1,7 @@
 use crate::{
     xla::ElementType, ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim,
-    DotDimensionNums, Error, FromOp, IntoOp, MapDim, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy,
-    Tensor, TensorItem,
+    DotDimensionNums, Error, FromOp, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy,
+    ReplaceDim, Tensor, TensorItem,
 };
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -608,6 +608,9 @@ impl BatchTracer {
                     batch_axis: arg.batch_axis,
                 }
             }
+            NoxprNode::LuInverse(_lu) => {
+                todo!()
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -906,13 +909,13 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     /// Vectorized map of a function over a tensor.
     pub fn vmap<O: TensorItem + IntoOp>(
         &self,
-        func: impl CompFn<(T::Tensor<<D::DefaultMapDim as MapDim<D>>::Item>,), O>,
+        func: impl CompFn<(T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>,), O>,
     ) -> Result<Tensor<O, DefaultMappedDim<D>, crate::Op>, Error> {
         self.vmap_with_dim::<D::DefaultMapDim, O>(func)
     }
 
     /// Vectorized map of a function over a tensor with a specified mapping dimension.
-    pub fn vmap_with_dim<MDim: MapDim<D>, O: TensorItem + IntoOp>(
+    pub fn vmap_with_dim<MDim: ReplaceDim<D>, O: TensorItem + IntoOp>(
         &self,
         func: impl CompFn<(T::Tensor<MDim::Item>,), O>,
     ) -> Result<Tensor<O, MDim::MappedDim, crate::Op>, Error> {
@@ -929,7 +932,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     pub fn scan<O: FromOp + IntoOp>(
         &self,
         initial_state: O,
-        func: impl CompFn<(O, T::Tensor<<D::DefaultMapDim as MapDim<D>>::Item>), O>,
+        func: impl CompFn<(O, T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>), O>,
     ) -> Result<O, Error> {
         let scan_fn = func.build_expr()?;
         let initial_state = initial_state.into_op();

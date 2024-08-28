@@ -1,13 +1,13 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
 use crate::{
-    Array, ArrayRepr, ConcatDim, Dim, DimGet, Field, Repr, Scalar, SquareDim, TransposeDim,
-    TransposedDim,
+    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, Repr, RowDim, Scalar,
+    SquareDim, TransposeDim, TransposedDim,
 };
 use crate::{DefaultRepr, Elem, RealField};
 use approx::{AbsDiffEq, RelativeEq};
 use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
-use smallvec::{smallvec, SmallVec};
+use std::iter::Sum;
 use std::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
@@ -99,6 +99,13 @@ impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn atan2(&self, other: &Self) -> Self {
         Self::from_inner(R::atan2(&self.inner, &other.inner))
     }
+
+    pub fn try_lu_inverse(&self) -> Result<Self, Error>
+    where
+        D: SquareDim,
+    {
+        R::try_lu_inverse(&self.inner).map(Self::from_inner)
+    }
 }
 
 impl<T: TensorItem + Elem, D: Dim, R: Repr> Tensor<T, D, R> {
@@ -110,7 +117,7 @@ impl<T: TensorItem + Elem, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: Field, D: Dim + NonScalarDim, R: Repr> Tensor<T, D, R> {
+impl<T: Field, D: Dim + NonScalarDim + ConstDim, R: Repr> Tensor<T, D, R> {
     pub fn zeros() -> Self {
         T::zero().broadcast()
     }
@@ -150,8 +157,13 @@ pub trait NonScalarDim {}
 pub trait ConstDim {
     const DIM: &'static [usize];
 
-    type DimArr: AsRef<[usize]> + AsMut<[usize]>;
+    type DimArr: AsRef<[usize]> + AsMut<[usize]> + Clone;
     fn const_dim() -> Self::DimArr;
+
+    #[cfg(feature = "noxpr")]
+    fn xla_shape() -> smallvec::SmallVec<[i64; 4]> {
+        Self::DIM.iter().map(|&x| x as i64).collect()
+    }
 }
 
 /// Represents a scalar dimension, which is essentially dimensionless.
@@ -162,29 +174,11 @@ impl NonScalarDim for nalgebra::Dyn {}
 impl<const N: usize> TensorDim for nalgebra::Const<N> {}
 impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
 
-/// Trait for dimensions compatible with XLA computation, defining shape information.
-pub trait XlaDim {
-    /// Returns the shape of the implementing type.
-    fn shape() -> SmallVec<[i64; 4]>;
-}
-
-impl XlaDim for Dyn {
-    fn shape() -> SmallVec<[i64; 4]> {
-        todo!()
-    }
-}
-
 impl ConstDim for ScalarDim {
     const DIM: &'static [usize] = &[];
     type DimArr = [usize; 0];
     fn const_dim() -> Self::DimArr {
         []
-    }
-}
-
-impl XlaDim for ScalarDim {
-    fn shape() -> SmallVec<[i64; 4]> {
-        smallvec![]
     }
 }
 
@@ -195,12 +189,6 @@ impl<const N: usize> ConstDim for Const<N> {
 
     fn const_dim() -> Self::DimArr {
         [N]
-    }
-}
-
-impl<const N: usize> XlaDim for Const<N> {
-    fn shape() -> SmallVec<[i64; 4]> {
-        smallvec![N as i64]
     }
 }
 
@@ -225,16 +213,6 @@ macro_rules! impl_tensor_dim {
             type DimArr = [usize; $num];
             fn const_dim() -> Self::DimArr {
                 [$($ty,)*]
-            }
-        }
-
-        impl<$($ty,)*> XlaDim for ($($ty,)*)
-              where $($ty: XlaDim, )*
-        {
-            fn shape() -> SmallVec<[i64; 4]> {
-                let mut shape = SmallVec::new();
-                $(shape.extend_from_slice(&$ty::shape());)*
-                shape
             }
         }
     }
@@ -364,8 +342,8 @@ impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for &'_ Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem + Field, D: Dim + XlaDim, R: Repr> Tensor<T, D, R> {
-    pub fn fixed_slice<D2: Dim + XlaDim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R> {
+impl<T: TensorItem + Field, D: Dim, R: Repr> Tensor<T, D, R> {
+    pub fn fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R> {
         Tensor::from_inner(R::copy_fixed_slice(&self.inner, offsets))
     }
 }
@@ -441,7 +419,7 @@ impl_prim!(i32);
 
 /// Trait for mapping dimensions in tensor operations.
 /// Allows for transforming and replacing dimensions in tensor types.
-pub trait MapDim<D> {
+pub trait ReplaceDim<D> {
     type Item: Dim;
     type MappedDim: Dim;
     type ReplaceMappedDim<ReplaceDim: Dim>;
@@ -449,14 +427,14 @@ pub trait MapDim<D> {
 }
 
 /// Alias for the mapped dimension type of `T` for dimension `D`.
-pub type MappedDim<T, D> = <T as MapDim<D>>::MappedDim;
+pub type MappedDim<T, D> = <T as ReplaceDim<D>>::MappedDim;
 /// Alias for the type replacing the mapped dimension `T` for dimension `D` with `R`.
-pub type ReplaceMappedDim<T, D, R> = <T as MapDim<D>>::ReplaceMappedDim<R>;
+pub type ReplaceMappedDim<T, D, R> = <T as ReplaceDim<D>>::ReplaceMappedDim<R>;
 
 /// Represents a mapped dimension used for transforming tensor dimensions.
 pub struct Mapped;
 
-impl<D: Dim> MapDim<D> for Mapped {
+impl<D: Dim> ReplaceDim<D> for Mapped {
     type Item = ();
     type MappedDim = D;
     type ReplaceMappedDim<ReplaceDim: Dim> = ReplaceDim;
@@ -470,17 +448,17 @@ where
     Self: Sized,
 {
     /// The default dimension to be mapped, usually the first dim.
-    type DefaultMapDim: MapDim<Self>;
+    type DefaultMapDim: ReplaceDim<Self>;
 }
 
 /// Alias for the default mapped dimension of `D`.
-pub type DefaultMappedDim<D> = <<D as DefaultMap>::DefaultMapDim as MapDim<D>>::MappedDim;
+pub type DefaultMappedDim<D> = <<D as DefaultMap>::DefaultMapDim as ReplaceDim<D>>::MappedDim;
 
 impl DefaultMap for ScalarDim {
     type DefaultMapDim = Const<1>;
 }
 
-impl MapDim<ScalarDim> for Const<1> {
+impl ReplaceDim<ScalarDim> for Const<1> {
     type Item = ();
     type MappedDim = Const<1>;
     type ReplaceMappedDim<ReplaceDim: Dim> = ReplaceDim;
@@ -507,7 +485,7 @@ macro_rules! impl_map {
         impl_map_inner!($num; TT1, TT2, TT3, TT4 ; $($ty),*);
 
         #[allow(unused_parens)]
-        impl<M, $($ty,)*> MapDim<(M, $($ty,)*)> for (Mapped, $($ty,)*)
+        impl<M, $($ty,)*> ReplaceDim<(M, $($ty,)*)> for (Mapped, $($ty,)*)
         where
             M: Dim,
             $($ty: Dim, )*
@@ -540,7 +518,7 @@ macro_rules! impl_map {
 
 macro_rules! impl_map_inner {
     ($num:literal; $($trail_ty:tt),* ; $($ty:tt),*) => {
-        impl<$($ty,)* $($trail_ty,)* M> MapDim<
+        impl<$($ty,)* $($trail_ty,)* M> ReplaceDim<
             ($($ty,)* Mapped, $($trail_ty,)*)
             > for ($($ty,)* M, $($trail_ty,)*)
               where $($ty: Dim, )*
@@ -591,6 +569,7 @@ impl<A: NonScalarDim + NonTupleDim, B: NonScalarDim + NonTupleDim> DimConcat<A, 
 pub trait NonTupleDim {}
 
 impl NonTupleDim for ScalarDim {}
+impl NonTupleDim for Dyn {}
 impl<const N: usize> NonTupleDim for Const<N> {}
 
 // impl<A: NonScalarDim + TensorDim, B: NonScalarDim + TensorDim> DimConcat<A, B> for (A, B) {
@@ -601,27 +580,52 @@ impl<const N: usize> NonTupleDim for Const<N> {}
 pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 
 impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
-    pub fn reshape<D2: Dim>(self) -> Tensor<T1, D2, R>
+    pub fn reshape<D2: Dim + ConstDim>(self) -> Tensor<T1, D2, R>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
-        let inner = R::reshape::<T1, D1, D2>(&self.inner);
+        let inner = R::reshape::<T1, D1, D2>(&self.inner, D2::const_dim());
         Tensor {
             inner,
             phantom: PhantomData,
         }
     }
 
-    pub fn broadcast<D2: Dim>(self) -> Tensor<T1, D2, R>
+    pub fn broadcast<D2: Dim + ConstDim>(self) -> Tensor<T1, D2, R>
     where
         ShapeConstraint: BroadcastDim<D1, D2, Output = D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        let inner = R::broadcast::<D1, D2, T1>(&self.inner);
+        let inner = R::broadcast::<D1, D2, T1>(&self.inner, D2::const_dim());
         Tensor {
             inner,
             phantom: PhantomData,
         }
+    }
+
+    pub fn broadcast_with_shape<D2: Dim>(
+        self,
+        shape: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
+    ) -> Tensor<T1, D2, R>
+    where
+        ShapeConstraint: BroadcastDim<D1, D2, Output = D2>,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
+    {
+        let inner = R::broadcast::<D1, D2, T1>(&self.inner, shape);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn rows_iter(&self) -> impl Iterator<Item = Tensor<T1, RowDim<D1>, R>> + '_
+    where
+        ShapeConstraint: DimRow<D1>,
+    {
+        R::rows_iter(&self.inner).map(|inner| Tensor {
+            inner,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -641,11 +645,11 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
     where
         DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
         DefaultMappedDim<D2>: nalgebra::Dim,
-        D2::DefaultMapDim: MapDim<D1>,
-        D1::DefaultMapDim: MapDim<D2>,
+        D2::DefaultMapDim: ReplaceDim<D1>,
+        D1::DefaultMapDim: ReplaceDim<D2>,
         D1: DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
     {
         let inner = R::concat(&self.inner, &other.inner);
@@ -654,22 +658,28 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
             phantom: PhantomData,
         }
     }
+}
 
-    pub fn concat_in_dim<D2, const N: usize>(
-        args: [Tensor<T1, D1, R>; N],
+impl<T1: Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
+    pub fn concat_in_dim<D2, I: IntoIterator<Item = Tensor<T1, D1, R>>>(
+        args: I,
         dim: usize,
     ) -> Tensor<T1, D2, R>
     where
+        I::IntoIter: ExactSizeIterator,
         D1: Dim,
-        D2: Dim + ConstDim,
+        D2: Dim,
     {
-        let args = args.map(|t| t.inner);
-        let inner = R::concat_many(&args, dim);
+        let inner = R::concat_many(args.into_iter().map(|t| t.inner), dim);
         Tensor {
             inner,
             phantom: PhantomData,
         }
     }
+}
+
+pub trait BaseBroadcastDim<D1, D2> {
+    type Output: Dim;
 }
 
 /// Trait for broadcasting dimensions in tensor operations, used to unify dimensions for element-wise operations.
@@ -680,12 +690,27 @@ pub trait BroadcastDim<D1, D2> {
 /// Alias for the dimension resulting from broadcasting dimensions `D1` and `D2`.
 pub type BroadcastedDim<D1, D2> = <ShapeConstraint as BroadcastDim<D1, D2>>::Output;
 
-impl<const A: usize> BroadcastDim<Const<A>, Const<A>> for ShapeConstraint {
-    type Output = Const<A>;
+/// Alias for the dimension resulting from broadcasting dimensions `D1` and `D2`.
+pub type BaseBroadcastedDim<D1, D2> = <ShapeConstraint as BaseBroadcastDim<D1, D2>>::Output;
+
+impl<const D: usize> BroadcastDim<Const<D>, Const<D>> for ShapeConstraint {
+    type Output = Const<D>;
+}
+
+impl<const D: usize> BaseBroadcastDim<Const<D>, Const<D>> for ShapeConstraint {
+    type Output = Const<D>;
 }
 
 impl BroadcastDim<ScalarDim, ScalarDim> for ShapeConstraint {
     type Output = ScalarDim;
+}
+
+impl BaseBroadcastDim<ScalarDim, ScalarDim> for ShapeConstraint {
+    type Output = ScalarDim;
+}
+
+impl BaseBroadcastDim<nalgebra::Dyn, nalgebra::Dyn> for ShapeConstraint {
+    type Output = nalgebra::Dyn;
 }
 
 impl BroadcastDim<nalgebra::Dyn, nalgebra::Dyn> for ShapeConstraint {
@@ -700,16 +725,26 @@ impl<D: Dim + NotConst1> BroadcastDim<Const<1>, D> for ShapeConstraint {
     type Output = D;
 }
 
-impl<const N1: usize, const N2: usize> BroadcastDim<Const<N2>, (Const<N1>, Const<N2>)>
-    for ShapeConstraint
-{
-    type Output = (Const<N1>, Const<N2>);
+impl<D: Dim + NotConst1> BaseBroadcastDim<D, Const<1>> for ShapeConstraint {
+    type Output = D;
 }
 
-impl<const N1: usize, const N2: usize> BroadcastDim<(Const<N1>, Const<N2>), Const<N2>>
-    for ShapeConstraint
+impl<D: Dim + NotConst1> BaseBroadcastDim<Const<1>, D> for ShapeConstraint {
+    type Output = D;
+}
+
+impl<D1: Dim + NonTupleDim, D2: Dim + NonTupleDim> BroadcastDim<D1, (D2, D1)> for ShapeConstraint
+where
+    (D2, D1): Dim,
 {
-    type Output = (Const<N1>, Const<N2>);
+    type Output = (D2, D1);
+}
+
+impl<D1: Dim + NonTupleDim, D2: Dim + NonTupleDim> BroadcastDim<(D1, D2), D2> for ShapeConstraint
+where
+    (D1, D2): Dim,
+{
+    type Output = (D1, D2);
 }
 
 /// Marker trait for dimension types that are not dynamic, typically used for compile-time fixed dimensions.
@@ -733,20 +768,13 @@ impl<D: Dim + NonScalarDim> BroadcastDim<ScalarDim, D> for ShapeConstraint {
     type Output = D;
 }
 
-impl<const A1: usize, const A2: usize, const B1: usize, const B2: usize>
-    BroadcastDim<(Const<A1>, Const<A2>), (Const<B1>, Const<B2>)> for ShapeConstraint
+impl<A1: Dim, A2: Dim, B1: Dim, B2: Dim> BroadcastDim<(A1, A2), (B1, B2)> for ShapeConstraint
 where
-    ShapeConstraint: BroadcastDim<Const<A1>, Const<B1>>,
-    ShapeConstraint: BroadcastDim<Const<A2>, Const<B2>>,
-    (
-        BroadcastedDim<Const<A1>, Const<B1>>,
-        BroadcastedDim<Const<A2>, Const<B2>>,
-    ): Dim,
+    ShapeConstraint: BaseBroadcastDim<A1, B1>,
+    ShapeConstraint: BaseBroadcastDim<A2, B2>,
+    (BaseBroadcastedDim<A1, B1>, BaseBroadcastedDim<A2, B2>): Dim,
 {
-    type Output = (
-        BroadcastedDim<Const<A1>, Const<B1>>,
-        BroadcastedDim<Const<A2>, Const<B2>>,
-    );
+    type Output = (BaseBroadcastedDim<A1, B1>, BaseBroadcastedDim<A2, B2>);
 }
 
 impl<
@@ -851,7 +879,14 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
     where
         D1: ConstDim,
     {
-        let inner = R::from_scalars(parts.into_iter().map(|t| t.inner));
+        Self::from_scalars_with_shape(parts, D1::DIM)
+    }
+
+    pub fn from_scalars_with_shape(
+        parts: impl IntoIterator<Item = Tensor<T, (), R>>,
+        shape: &[usize],
+    ) -> Tensor<T, D1, R> {
+        let inner = R::from_scalars(parts.into_iter().map(|t| t.inner), shape);
         Tensor {
             inner,
             phantom: PhantomData,
@@ -872,7 +907,6 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
     pub fn transpose(&self) -> Tensor<T, TransposedDim<D1>, R>
     where
         ShapeConstraint: TransposeDim<D1>,
-        TransposedDim<D1>: ConstDim,
     {
         let inner = R::transpose::<T, D1>(&self.inner);
         Tensor {
@@ -883,9 +917,68 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
 
     pub fn from_diag(diag: Tensor<T, D1::SideDim, R>) -> Tensor<T, D1, R>
     where
-        D1: SquareDim + ConstDim + SquareDim,
+        D1: SquareDim,
     {
         let inner = R::from_diag(diag.inner);
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn map<T2: Copy + Default, D2: Dim>(
+        &self,
+        func: impl Fn(Tensor<T, D1::ElemDim, R>) -> Tensor<T2, D2, R>,
+    ) -> Tensor<T2, D1::MappedDim<D2>, R>
+    where
+        D1::MappedDim<D2>: Dim,
+        T: Field,
+        D1: Dim + crate::MappableDim,
+    {
+        let inner = R::map::<T, D1, T2, D2>(&self.inner, |arg_inner| {
+            func(Tensor {
+                inner: arg_inner,
+                phantom: PhantomData,
+            })
+            .inner
+        });
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn outer<D2>(&self, other: &Tensor<T, D2, R>) -> Tensor<T, (D1, D2), R>
+    where
+        (D1, D2): Dim,
+        (D2, D1): Dim,
+        D1: NonTupleDim + NonScalarDim,
+        D2: Dim + NonTupleDim + NonScalarDim,
+        ShapeConstraint: BaseBroadcastDim<D1, D1, Output = D1>,
+        ShapeConstraint: BaseBroadcastDim<D2, D2, Output = D2>,
+    {
+        let a_shape = R::shape(&self.inner);
+        let b_shape = R::shape(&other.inner);
+        let a_broadcast_shape = [b_shape.as_ref()[0], a_shape.as_ref()[0]];
+        let b_broadcast_shape = [a_shape.as_ref()[0], b_shape.as_ref()[0]];
+        let a: Tensor<T, (D2, D1), R> = self.clone().broadcast_with_shape(a_broadcast_shape);
+        let b: Tensor<T, (D1, D2), R> = other.clone().broadcast_with_shape(b_broadcast_shape);
+        a.transpose() * b
+    }
+
+    pub fn try_cholesky(&self) -> Result<Self, Error>
+    where
+        D1: SquareDim,
+        T: RealField,
+    {
+        R::try_cholesky(&self.inner).map(Tensor::from_inner)
+    }
+
+    pub fn row(&self, index: usize) -> Tensor<T, RowDim<D1>, R>
+    where
+        ShapeConstraint: DimRow<D1>,
+    {
+        let inner = R::row(&self.inner, index);
         Tensor {
             inner,
             phantom: PhantomData,
@@ -1008,5 +1101,19 @@ where
         max_relative: <R::Inner<T::Elem, D> as AbsDiffEq>::Epsilon,
     ) -> bool {
         self.inner.relative_eq(&other.inner, epsilon, max_relative)
+    }
+}
+
+impl<T: TensorItem, D: Dim, R: Repr> Sum for Tensor<T, D, R>
+where
+    T: Field,
+    ShapeConstraint: BroadcastDim<D, D, Output = D>,
+{
+    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+        if let Some(first) = iter.next() {
+            iter.fold(first, |acc, x| acc + x)
+        } else {
+            panic!("Cannot compute `sum` of empty iterator.")
+        }
     }
 }

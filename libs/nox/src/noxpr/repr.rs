@@ -1,13 +1,15 @@
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use crate::{ConstDim, Elem, Error, RealField, SquareDim, TransposeDim, TransposedDim};
+use crate::{
+    ConstDim, Elem, Error, NoxprFn, NoxprTy, RealField, SquareDim, TransposeDim, TransposedDim,
+};
 use nalgebra::constraint::ShapeConstraint;
 use smallvec::{smallvec, SmallVec};
 
 use crate::ArrayTy;
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    Dim, DimGet, DotDim, Field, MapDim, Noxpr, Repr, TensorDim, XlaDim,
+    Dim, DimGet, DimRow, DotDim, Field, MappableDim, Noxpr, ReplaceDim, Repr, RowDim,
 };
 
 /// Represents a compute operation.
@@ -93,20 +95,28 @@ macro_rules! dummy_impl_repr {
             {
                 todo!()
             }
-
-            fn concat_many<T1: Field, D1: Dim, D2: Dim>(
-                _args: &[Self::Inner<T1, D1>],
+            fn concat_many<
+                T1: Field,
+                D1: Dim,
+                D2: Dim,
+                I: IntoIterator<Item = Self::Inner<T1, D1>>,
+            >(
+                _args: I,
                 _dim: usize,
-            ) -> Self::Inner<T1, D2> {
+            ) -> Self::Inner<T1, D2>
+            where
+                I::IntoIter: ExactSizeIterator,
+            {
                 todo!()
             }
 
-            fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
+            fn broadcast<D1: Dim, D2: Dim, T1: Field>(
                 _arg: &Self::Inner<T1, D1>,
+                _dim: impl AsMut<[usize]>,
             ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
             where
                 ShapeConstraint: BroadcastDim<D1, D2>,
-                <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+                <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
             {
                 todo!()
             }
@@ -122,11 +132,11 @@ macro_rules! dummy_impl_repr {
             where
                 DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
                 DefaultMappedDim<D2>: nalgebra::Dim,
-                D2::DefaultMapDim: MapDim<D1>,
-                D1::DefaultMapDim: MapDim<D2>,
+                D2::DefaultMapDim: ReplaceDim<D1>,
+                D1::DefaultMapDim: ReplaceDim<D2>,
                 D1: Dim + DefaultMap,
                 AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-                <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+                <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
                 ConcatDim<D1, D2>: Dim,
             {
                 todo!()
@@ -171,6 +181,7 @@ macro_rules! dummy_impl_repr {
 
             fn reshape<T1: Field, D1: Dim, D2: Dim>(
                 _arg: &Self::Inner<T1, D1>,
+                _dim: impl AsMut<[usize]>,
             ) -> Self::Inner<T1, D2>
             where
                 ShapeConstraint: BroadcastDim<D1, D2>,
@@ -191,8 +202,9 @@ macro_rules! dummy_impl_repr {
                 todo!()
             }
 
-            fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+            fn from_scalars<T1: Field, D1: Dim>(
                 _iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+                _shape: &[usize],
             ) -> Self::Inner<T1, D1> {
                 todo!()
             }
@@ -202,7 +214,6 @@ macro_rules! dummy_impl_repr {
             ) -> Self::Inner<T1, TransposedDim<D1>>
             where
                 ShapeConstraint: TransposeDim<D1>,
-                TransposedDim<D1>: ConstDim,
             {
                 todo!()
             }
@@ -211,7 +222,7 @@ macro_rules! dummy_impl_repr {
                 todo!()
             }
 
-            fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
+            fn from_diag<T1: Field, D1: Dim + SquareDim>(
                 _diag: Self::Inner<T1, D1::SideDim>,
             ) -> Self::Inner<T1, D1> {
                 todo!()
@@ -236,6 +247,34 @@ macro_rules! dummy_impl_repr {
             {
                 todo!()
             }
+
+            fn rows_iter<T1: Elem, D1: Dim>(
+                _arg: &Self::Inner<T1, D1>,
+            ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+            where
+                ShapeConstraint: DimRow<D1>,
+            {
+                std::iter::empty()
+            }
+
+            fn map<T1, D1, T2, D2>(
+                _arg: &Self::Inner<T1, D1>,
+                _func: impl Fn(Self::Inner<T1, D1::ElemDim>) -> Self::Inner<T2, D2>,
+            ) -> Self::Inner<T2, D1::MappedDim<D2>>
+            where
+                D1::MappedDim<D2>: Dim,
+                T1: Copy + Default,
+                D1: Dim + MappableDim,
+                T2: Copy + Default,
+                D2: Dim,
+            {
+                todo!()
+            }
+
+            type Shape<D: Dim> = [usize; 0];
+            fn shape<T1: Elem, D1: Dim>(_arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
+                []
+            }
         }
     };
 }
@@ -244,7 +283,7 @@ dummy_impl_repr!(Buffer, xla::PjRtBuffer);
 dummy_impl_repr!(Literal, xla::Literal);
 
 impl Repr for Op {
-    type Inner<T: Elem, D: TensorDim + ArrayDim + XlaDim> = Noxpr;
+    type Inner<T: Elem, D: Dim> = Noxpr;
 
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
@@ -316,24 +355,26 @@ impl Repr for Op {
         Noxpr::dot(left.clone(), right)
     }
 
-    fn concat_many<T1: Field, D1: Dim, D2: Dim>(
-        args: &[Self::Inner<T1, D1>],
+    fn concat_many<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+        args: I,
         dim: usize,
-    ) -> Self::Inner<T1, D2> {
-        Noxpr::concat_in_dim(args.to_vec(), dim)
+    ) -> Self::Inner<T1, D2>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        Noxpr::concat_in_dim(args.into_iter().collect(), dim)
     }
 
     fn get<T1: Field, D1: Dim + DimGet>(
         arg: &Self::Inner<T1, D1>,
         index: D1::Index,
     ) -> Self::Inner<T1, ()> {
-        let offsets = D1::index_as_array(index)
-            .as_ref()
+        let offsets = D1::index_as_slice(&index)
             .iter()
             .map(|&x| x as i64)
             .collect::<SmallVec<[i64; 4]>>();
         let new_offsets = offsets.iter().map(|&x| x + 1).collect();
-        let shape = D1::shape();
+        let shape = arg.shape().unwrap();
         let strides = shape
             .iter()
             .rev()
@@ -348,14 +389,16 @@ impl Repr for Op {
             .reshape(smallvec![])
     }
 
-    fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
+    fn broadcast<D1: Dim, D2: Dim, T1: Field>(
         arg: &Self::Inner<T1, D1>,
+        dim: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        arg.clone().broadcast(D2::shape())
+        let dim = dim.as_ref().iter().map(|&x| x as i64).collect();
+        arg.clone().broadcast(dim)
     }
 
     fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
@@ -376,11 +419,11 @@ impl Repr for Op {
     where
         DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
         DefaultMappedDim<D2>: nalgebra::Dim,
-        D2::DefaultMapDim: MapDim<D1>,
-        D1::DefaultMapDim: MapDim<D2>,
+        D2::DefaultMapDim: ReplaceDim<D1>,
+        D1::DefaultMapDim: ReplaceDim<D2>,
         D1: DefaultMap + Dim,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
     {
         Noxpr::concat_in_dim(vec![left.clone(), right.clone()], 0)
@@ -420,32 +463,46 @@ impl Repr for Op {
         let offsets: SmallVec<_> = offsets.iter().map(|o| *o as i64).collect();
         let new_offsets = offsets
             .iter()
-            .zip(D2::shape())
+            .zip(D2::xla_shape())
             .map(|(a, b)| a + b)
             .collect();
-        let strides = smallvec::smallvec![1i64; offsets.len()]; // TODO(sphw): fix wrong strides
+
+        let shape = arg.shape().unwrap();
+        let strides = shape
+            .iter()
+            .rev()
+            .scan(1, |acc, &x| {
+                let res = *acc;
+                *acc *= x;
+                Some(res)
+            })
+            .collect::<SmallVec<[i64; 4]>>();
         arg.clone().slice(offsets, new_offsets, strides)
     }
 
-    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(
+        arg: &Self::Inner<T1, D1>,
+        dim: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
+    ) -> Self::Inner<T1, D2>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
-        arg.clone().reshape(D2::shape())
+        arg.clone()
+            .reshape(dim.as_ref().iter().map(|&x| x as i64).collect())
     }
 
     fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
-        _arg: &Self::Inner<T1, D1>,
+        arg: &Self::Inner<T1, D1>,
     ) -> Result<Self::Inner<T1, D1>, Error> {
-        // TODO: We will need to use a combination of an XLA custom call and `TriangularSolve` to mimick this
-        todo!()
+        Ok(arg.lu_inverse())
     }
 
-    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
+    fn from_scalars<T1: Field, D1: Dim>(
         iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+        shape: &[usize],
     ) -> Self::Inner<T1, D1> {
         let nodes = iter.into_iter().collect();
-        Noxpr::concat_in_dim(nodes, 0).reshape(D1::shape())
+        Noxpr::concat_in_dim(nodes, 0).reshape(shape.iter().map(|&x| x as i64).collect())
     }
 
     fn transpose<T1: Field, D1: Dim>(
@@ -453,9 +510,9 @@ impl Repr for Op {
     ) -> Self::Inner<T1, TransposedDim<D1>>
     where
         ShapeConstraint: TransposeDim<D1>,
-        TransposedDim<D1>: ConstDim,
     {
-        let d1 = D1::shape()
+        let shape = arg.shape().unwrap();
+        let d1 = shape
             .iter()
             .enumerate()
             .map(|(i, _)| i as i64)
@@ -465,7 +522,7 @@ impl Repr for Op {
     }
 
     fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1> {
-        let shape = D1::shape();
+        let shape = D1::xla_shape();
         let a = Noxpr::iota(
             ArrayTy {
                 element_type: T1::ELEMENT_TY,
@@ -483,10 +540,16 @@ impl Repr for Op {
         a.eq(b).convert(T1::ELEMENT_TY)
     }
 
-    fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
+    fn from_diag<T1: Field, D1: Dim + SquareDim>(
         diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1> {
-        let shape = D1::shape();
+        let side_shape = diag.shape().unwrap();
+        let shape: SmallVec<[i64; 4]> = side_shape
+            .iter()
+            .chain(side_shape.iter())
+            .copied()
+            .collect();
+        //le shape = D1::shape();
         let a = Noxpr::iota(
             ArrayTy {
                 element_type: T1::ELEMENT_TY,
@@ -525,7 +588,7 @@ impl Repr for Op {
     where
         ShapeConstraint: crate::DimRow<D1>,
     {
-        let shape = D1::shape();
+        let shape = arg.shape().unwrap();
         let strides = shape
             .iter()
             .rev()
@@ -539,5 +602,72 @@ impl Repr for Op {
         arg.clone()
             .slice(smallvec![index, 0], smallvec![index + 1, shape[1]], strides)
             .reshape(smallvec![shape[1]])
+    }
+
+    fn map<T1, D1, T2, D2>(
+        arg: &Self::Inner<T1, D1>,
+        func: impl Fn(Self::Inner<T1, D1::ElemDim>) -> Self::Inner<T2, D2>,
+    ) -> Self::Inner<T2, D1::MappedDim<D2>>
+    where
+        D1::MappedDim<D2>: Dim,
+        T1: Field,
+        D1: Dim + MappableDim,
+        T2: Copy + Default,
+        D2: Dim,
+    {
+        let arg_shape = arg.shape().unwrap();
+        let shape: SmallVec<[i64; 4]> = arg_shape.iter().skip(1).copied().collect();
+        let fn_arg = Noxpr::parameter(
+            0,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: T1::ELEMENT_TY,
+                shape,
+            }),
+            "param_0".to_string(),
+        );
+        let inner = func(fn_arg.clone());
+        let func = NoxprFn {
+            inner,
+            args: vec![fn_arg],
+        };
+        Noxpr::vmap_with_axis(func, &[0], std::slice::from_ref(arg)).unwrap()
+    }
+
+    fn rows_iter<T1: Elem, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+    where
+        ShapeConstraint: DimRow<D1>,
+    {
+        let shape = arg.shape().unwrap();
+        let strides = shape
+            .iter()
+            .rev()
+            .scan(1, |acc, &x| {
+                let res = *acc;
+                *acc *= x;
+                Some(res)
+            })
+            .collect::<SmallVec<[i64; 4]>>();
+        (0..shape[0]).map(move |i| {
+            let mut start = shape.clone();
+            let mut stop = shape.clone();
+
+            start[0] = i;
+            for x in &mut start[1..] {
+                *x = 0;
+            }
+            stop[0] = i;
+            arg.clone().slice(start, stop, strides.clone())
+        })
+    }
+
+    type Shape<D: Dim> = SmallVec<[usize; 4]>;
+    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
+        arg.shape()
+            .unwrap()
+            .into_iter()
+            .map(|x| x as usize)
+            .collect()
     }
 }

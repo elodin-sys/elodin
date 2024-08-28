@@ -296,6 +296,10 @@ impl JaxTracer {
                         .call_method_bound(py, "cholesky", (expr,), Some(&kwargs))
                 })?
             }
+            NoxprNode::LuInverse(lu) => {
+                let expr = self.visit(&lu.arg)?;
+                Python::with_gil(|py| self.linalg.call_method1(py, "inv", (expr,)))?
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)

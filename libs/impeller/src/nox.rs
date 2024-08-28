@@ -109,13 +109,13 @@ impl<T: Component + nox::IntoOp + 'static> crate::Archetype for T {
     }
 }
 
-impl<T: Field + PrimitiveTyElement, D: Dim, R: Repr> Component for Tensor<T, D, R> {
+impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: Repr> Component for Tensor<T, D, R> {
     const NAME: &'static str = concat_str!("tensor_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         // If T is an ArrayElement, then it's shape must be ().
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
-            shape: D::shape(),
+            shape: D::xla_shape(),
         }
     }
 }
@@ -341,13 +341,13 @@ impl crate::Archetype for Shape {
 pub trait ComponentValueDimable: ArrayDim {
     type ValueDim: ndarray::Dimension;
 
-    fn value_dim(dim: Self::Dim) -> Self::ValueDim;
+    fn value_dim(dim: Self::Shape) -> Self::ValueDim;
 }
 
 impl ComponentValueDimable for () {
     type ValueDim = ndarray::Ix0;
 
-    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+    fn value_dim(_dim: Self::Shape) -> Self::ValueDim {
         ndarray::Ix0()
     }
 }
@@ -355,7 +355,7 @@ impl ComponentValueDimable for () {
 impl<const N: usize> ComponentValueDimable for Const<N> {
     type ValueDim = ndarray::Ix1;
 
-    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+    fn value_dim(_dim: Self::Shape) -> Self::ValueDim {
         ndarray::Ix1(N)
     }
 }
@@ -363,7 +363,7 @@ impl<const N: usize> ComponentValueDimable for Const<N> {
 impl<const D1: usize, const D2: usize> ComponentValueDimable for (Const<D1>, Const<D2>) {
     type ValueDim = ndarray::Ix2;
 
-    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+    fn value_dim(_dim: Self::Shape) -> Self::ValueDim {
         ndarray::Ix2(D1, D2)
     }
 }
@@ -373,7 +373,7 @@ impl<const D1: usize, const D2: usize, const D3: usize> ComponentValueDimable
 {
     type ValueDim = ndarray::Ix3;
 
-    fn value_dim(_dim: Self::Dim) -> Self::ValueDim {
+    fn value_dim(_dim: Self::Shape) -> Self::ValueDim {
         ndarray::Ix3(D1, D2, D3)
     }
 }
@@ -381,7 +381,7 @@ impl<const D1: usize, const D2: usize, const D3: usize> ComponentValueDimable
 impl ComponentValueDimable for Dyn {
     type ValueDim = ndarray::IxDyn;
 
-    fn value_dim(dim: Self::Dim) -> Self::ValueDim {
+    fn value_dim(dim: Self::Shape) -> Self::ValueDim {
         ndarray::IxDyn(dim.as_ref())
     }
 }
@@ -393,7 +393,7 @@ macro_rules! impl_array_to_value_repr {
 
             fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
                 use nox::ArrayBuf;
-                let dim = D::dim(&self.buf);
+                let dim = D::array_shape(&self.buf);
                 ndarray::ArrayView::from_shape(D::value_dim(dim), &self.buf.as_buf())
                     .ok()
                     .map(ndarray::CowArray::from)
