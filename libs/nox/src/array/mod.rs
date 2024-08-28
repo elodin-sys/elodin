@@ -1,7 +1,7 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
 use crate::{
     AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
-    Elem, Error, Field, MapDim, RealField, ReplaceMappedDim, Repr, ScalarDim, TensorDim, XlaDim,
+    Elem, Error, Field, RealField, ReplaceDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim,
 };
 use approx::{AbsDiffEq, RelativeEq};
 use dyn_stack::ReborrowMut;
@@ -21,6 +21,9 @@ use std::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
 };
+
+mod repr;
+pub use repr::*;
 
 /// A struct representing an array with type-safe dimensions and element type.
 pub struct Array<T: Elem, D: ArrayDim> {
@@ -67,40 +70,48 @@ pub trait ArrayDim: TensorDim {
     type Buf<T>: ArrayBuf<T>
     where
         T: Elem;
-    type Dim: AsRef<[usize]> + AsMut<[usize]> + Clone;
+    type Shape: ArrayShape;
 
     /// Returns the dimensions of the buffer.
-    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim;
+    fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape;
 
     /// Returns the strides of the buffer for multidimensional access.
-    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim;
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape;
+
+    fn is_scalar() -> bool {
+        false
+    }
 }
 
 impl ArrayDim for ScalarDim {
     type Buf<T> = T where T: Elem;
 
-    type Dim = [usize; 0];
+    type Shape = [usize; 0];
 
-    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         []
     }
 
-    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         []
+    }
+
+    fn is_scalar() -> bool {
+        true
     }
 }
 
 impl<const D: usize> ArrayDim for Const<D> {
     type Buf<T> = [T; D] where T: Elem;
 
-    type Dim = [usize; 1];
+    type Shape = [usize; 1];
 
     #[inline]
-    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D]
     }
 
-    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [1]
     }
 }
@@ -108,13 +119,13 @@ impl<const D: usize> ArrayDim for Const<D> {
 impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
     type Buf<T> = [[T; D2]; D1] where T: Elem;
 
-    type Dim = [usize; 2];
+    type Shape = [usize; 2];
 
-    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D1, D2]
     }
 
-    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D2, 1]
     }
 }
@@ -123,14 +134,61 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
     for (Const<D1>, Const<D2>, Const<D3>)
 {
     type Buf<T> = [[[T; D3]; D2]; D1] where T: Elem;
-    type Dim = [usize; 3];
+    type Shape = [usize; 3];
 
-    fn dim<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D1, D2, D3]
     }
 
-    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D3 * D2, D2, 1]
+    }
+}
+
+pub trait ArrayShape: AsRef<[usize]> + AsMut<[usize]> + Clone {
+    fn from_len_elem(len: usize, axis: usize, elem: impl AsRef<[usize]>) -> Self;
+}
+
+impl<const N: usize> ArrayShape for [usize; N] {
+    fn from_len_elem(len: usize, axis: usize, elem: impl AsRef<[usize]>) -> Self {
+        let elem = elem.as_ref();
+        if axis >= N {
+            panic!("the length axis must be within the shape bounds");
+        }
+        if elem.len() == N {
+            let mut out = [0; N];
+            out.copy_from_slice(elem);
+            out[axis] *= len;
+            out
+        } else if elem.len() + 1 == N {
+            let mut out = [0; N];
+            let mut i = 0;
+            for (j, out) in out.iter_mut().enumerate() {
+                if j == axis {
+                    *out = len;
+                } else {
+                    *out = elem[i];
+                    i += 1;
+                }
+            }
+            out
+        } else {
+            panic!("the output rank must be equal or 1 higher than the element rank")
+        }
+        // debug_assert_eq!(
+        //     N,
+        //     elem.len() + 1,
+        //     "the output rank must be 1 higher than the element rank"
+        // );
+        // out
+    }
+}
+impl ArrayShape for SmallVec<[usize; 4]> {
+    fn from_len_elem(len: usize, axis: usize, elem: impl AsRef<[usize]>) -> Self {
+        let elem = elem.as_ref();
+        let mut out: Self = elem.iter().copied().collect();
+        out.insert(axis, len);
+        out
     }
 }
 
@@ -216,18 +274,73 @@ impl<T: Clone + Elem, const D1: usize, const D2: usize, const D3: usize> ArrayBu
 impl ArrayDim for Dyn {
     type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
 
-    type Dim = SmallVec<[usize; 4]>;
+    type Shape = SmallVec<[usize; 4]>;
 
-    fn dim<T: Elem>(buf: &Self::Buf<T>) -> Self::Dim {
+    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
         buf.shape().iter().copied().collect()
     }
 
-    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Dim {
+    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
         buf.strides().iter().map(|x| *x as usize).collect()
     }
 }
 
-impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+impl ArrayDim for (Dyn, Dyn) {
+    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
+
+    type Shape = SmallVec<[usize; 4]>;
+
+    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+        buf.shape().iter().copied().collect()
+    }
+
+    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+        buf.strides().iter().map(|x| *x as usize).collect()
+    }
+}
+
+impl ArrayDim for (Dyn, Dyn, Dyn) {
+    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
+
+    type Shape = SmallVec<[usize; 4]>;
+
+    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+        buf.shape().iter().copied().collect()
+    }
+
+    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+        buf.strides().iter().map(|x| *x as usize).collect()
+    }
+}
+
+macro_rules! impl_dyn_dim {
+    ($($generics: tt),+; $($dim: ty),+) => {
+        impl<$(const $generics: usize,)*> ArrayDim for ($($dim,)+) {
+            type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
+
+            type Shape = SmallVec<[usize; 4]>;
+
+            fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+                buf.shape().iter().copied().collect()
+            }
+
+            fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
+                buf.strides().iter().map(|x| *x as usize).collect()
+            }
+        }
+    };
+}
+
+impl_dyn_dim!(N1; Dyn, Const<N1>);
+impl_dyn_dim!(N1; Const<N1>, Dyn);
+impl_dyn_dim!(N1; Const<N1>, Dyn, Dyn);
+impl_dyn_dim!(N1; Dyn, Const<N1>, Dyn);
+impl_dyn_dim!(N1; Dyn, Dyn, Const<N1>);
+impl_dyn_dim!(N1, N2; Const<N1>, Const<N2>, Dyn);
+impl_dyn_dim!(N1, N2; Const<N1>, Dyn, Const<N2>);
+impl_dyn_dim!(N1, N2; Dyn, Const<N1>, Const<N2>);
+
+impl<T1: Elem, D1: ArrayDim + TensorDim> Array<T1, D1> {
     pub fn zeroed(dims: &[usize]) -> Self {
         Array {
             buf: D1::Buf::<T1>::default(dims),
@@ -237,19 +350,19 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 
 macro_rules! impl_op {
     ($op:tt, $op_trait:tt, $fn_name:tt) => {
-        impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+        impl<T1: Elem, D1: ArrayDim + TensorDim  > Array<T1, D1> {
             #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
-            pub fn $fn_name<D2: ArrayDim + TensorDim + XlaDim>(
+            pub fn $fn_name<D2: ArrayDim + TensorDim>(
                 &self,
                 b: &Array<T1, D2>,
             ) -> Array<T1, BroadcastedDim<D1, D2>>
             where
                 T1: $op_trait<Output = T1>,
                 ShapeConstraint: BroadcastDim<D1, D2>,
-                <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+                <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim ,
             {
-                let d1 = D1::dim(&self.buf);
-                let d2 = D2::dim(&b.buf);
+                let d1 = D1::array_shape(&self.buf);
+                let d2 = D2::array_shape(&b.buf);
 
                 match d1.as_ref().len().cmp(&d2.as_ref().len()) {
                     std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
@@ -293,20 +406,29 @@ macro_rules! impl_op {
     }
 }
 
-impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
-    pub fn reshape<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, D2>
+impl<T1: Elem, D1: Dim> Array<T1, D1> {
+    pub fn reshape<D2: Dim + ConstDim>(&self) -> Array<T1, D2>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
     {
-        let d1 = D1::dim(&self.buf);
+        let shape = D2::const_dim();
+        self.reshape_with_shape(shape)
+    }
 
-        let mut out: Array<T1, D2> = Array::zeroed(d1.as_ref());
-        let mut broadcast_dims = d1.clone();
-        if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
-            todo!("handle unbroadcastable dims");
+    pub fn reshape_with_shape<D2: Dim>(
+        &self,
+        mut shape: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
+    ) -> Array<T1, D2>
+    where
+        ShapeConstraint: BroadcastDim<D1, D2>,
+    {
+        let d1 = D1::array_shape(&self.buf);
+        let mut out: Array<T1, D2> = Array::zeroed(shape.as_ref());
+        if !cobroadcast_dims(shape.as_mut(), d1.as_ref()) {
+            todo!("handle broadcastable dims");
         }
         for (a, out) in self
-            .broadcast_iter(broadcast_dims)
+            .broadcast_iter(shape)
             .unwrap()
             .zip(out.buf.as_mut_buf().iter_mut())
         {
@@ -315,17 +437,28 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         out
     }
 
-    pub fn broadcast<D2: ArrayDim + TensorDim + XlaDim>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
+    pub fn broadcast<D2>(&self) -> Array<T1, BroadcastedDim<D1, D2>>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim,
+        D2: Dim + ConstDim,
     {
-        let d1 = D1::dim(&self.buf);
+        todo!()
+    }
 
-        let mut out: Array<T1, BroadcastedDim<D1, D2>> = Array::zeroed(d1.as_ref());
-        let mut broadcast_dims = d1.clone();
+    pub fn broadcast_with_shape<D2>(
+        &self,
+        mut broadcast_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
+    ) -> Array<T1, BroadcastedDim<D1, D2>>
+    where
+        ShapeConstraint: BroadcastDim<D1, D2>,
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim,
+        D2: Dim,
+    {
+        let d1 = D1::array_shape(&self.buf);
+        let mut out: Array<T1, BroadcastedDim<D1, D2>> = Array::zeroed(broadcast_dims.as_mut());
         if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
-            todo!("handle unbroadcastble dims");
+            todo!("handle broadcastable dims");
         }
         for (a, out) in self
             .broadcast_iter(broadcast_dims)
@@ -345,12 +478,12 @@ impl_op!(/, Div, div);
 
 macro_rules! impl_unary_op {
     ($op_trait:tt, $fn_name:tt) => {
-        impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+        impl<T1: Elem, D1: Dim> Array<T1, D1> {
             pub fn $fn_name(&self) -> Array<T1, D1>
             where
                 T1: $op_trait,
             {
-                let d1 = D1::dim(&self.buf);
+                let d1 = D1::array_shape(&self.buf);
                 let mut out: Array<T1, D1> = Array::zeroed(d1.as_ref());
                 self.buf
                     .as_buf()
@@ -370,12 +503,12 @@ impl_unary_op!(RealField, sin);
 impl_unary_op!(RealField, cos);
 impl_unary_op!(RealField, abs);
 
-impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
+impl<T1: Elem, D1: Dim> Array<T1, D1> {
     pub fn neg(&self) -> Array<T1, D1>
     where
         T1: Neg<Output = T1>,
     {
-        let d1 = D1::dim(&self.buf);
+        let d1 = D1::array_shape(&self.buf);
         let mut out: Array<T1, D1> = Array::zeroed(d1.as_ref());
         self.buf
             .as_buf()
@@ -390,10 +523,11 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     pub fn transpose(&self) -> Array<T1, TransposedDim<D1>>
     where
         ShapeConstraint: TransposeDim<D1>,
-        TransposedDim<D1>: ConstDim,
     {
-        let mut out: Array<T1, TransposedDim<D1>> =
-            Array::zeroed(<TransposedDim<D1> as ConstDim>::DIM);
+        let mut dim = D1::array_shape(&self.buf);
+        let dim = dim.as_mut();
+        dim.swap(0, 1);
+        let mut out: Array<T1, TransposedDim<D1>> = Array::zeroed(dim);
         self.transpose_iter()
             .zip(out.buf.as_mut_buf().iter_mut())
             .for_each(|(a, out)| {
@@ -403,7 +537,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     pub fn transpose_iter(&self) -> impl Iterator<Item = &'_ T1> {
-        let mut dims = D1::dim(&self.buf);
+        let mut dims = D1::array_shape(&self.buf);
         dims.as_mut().reverse();
         let stride = RevStridesIter(D1::strides(&self.buf));
         let mut indexes = dims.clone();
@@ -432,7 +566,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         impl AsRef<[usize]>,
         &'o [usize],
     > {
-        let dims = D1::dim(&self.buf);
+        let dims = D1::array_shape(&self.buf);
         let stride = D1::strides(&self.buf);
         let mut indexes = dims.clone();
         for (offset, index) in offsets
@@ -465,7 +599,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         impl AsRef<[usize]>,
         &'o [usize],
     > {
-        let dims = D1::dim(&self.buf);
+        let dims = D1::array_shape(&self.buf);
         let stride = D1::strides(&self.buf);
         let mut indexes = dims.clone();
         for (offset, index) in offsets
@@ -492,7 +626,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         &'a self,
         new_dims: impl AsMut<[usize]> + AsRef<[usize]> + Clone + 'a,
     ) -> Option<impl Iterator<Item = &'a T1>> {
-        let existing_dims = D1::dim(&self.buf);
+        let existing_dims = D1::array_shape(&self.buf);
         let existing_strides = D1::strides(&self.buf);
         let mut new_strides = new_dims.clone();
         let out_dims = new_dims.clone();
@@ -545,7 +679,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         ShapeConstraint: crate::DotDim<D1, D2>,
         <ShapeConstraint as crate::DotDim<D1, D2>>::Output: Dim + ArrayDim,
     {
-        let dim_left = D1::dim(&self.buf);
+        let dim_left = D1::array_shape(&self.buf);
         let dim_left = dim_left.as_ref();
         let (row_left, col_left) = match dim_left.as_ref().len() {
             2 => (dim_left[0], dim_left[1]),
@@ -554,7 +688,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         };
         let left = faer::mat::from_row_major_slice(self.buf.as_buf(), row_left, col_left);
 
-        let dim_right = D2::dim(&right.buf);
+        let dim_right = D2::array_shape(&right.buf);
         let dim_right = dim_right.as_ref();
         let row_right = dim_right.as_ref().first().copied().unwrap_or(1);
         let col_right = dim_right.as_ref().get(1).copied().unwrap_or(1);
@@ -586,15 +720,15 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     where
         DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
         DefaultMappedDim<D2>: nalgebra::Dim,
-        D2::DefaultMapDim: MapDim<D1>,
-        D1::DefaultMapDim: MapDim<D2>,
+        D2::DefaultMapDim: ReplaceDim<D1>,
+        D1::DefaultMapDim: ReplaceDim<D2>,
         D1: DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim,
     {
-        let d1 = D1::dim(&self.buf);
-        let d2 = D2::dim(&right.buf);
+        let d1 = D1::array_shape(&self.buf);
+        let d2 = D2::array_shape(&right.buf);
         let mut out_dims = d2.clone();
         assert_eq!(d1.as_ref().len(), d2.as_ref().len());
         out_dims.as_mut()[0] = d1.as_ref()[0] + d2.as_ref()[0];
@@ -611,79 +745,55 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     }
 
     /// Concatenates multiple arraysinto a single array along a specified dimension.
-    pub fn concat_many<D2: Dim + ConstDim>(
-        args: &[Array<T1, D1>],
+    pub fn concat_many<D2: Dim, I: IntoIterator<Item = Array<T1, D1>>>(
+        args: I,
         dim: usize,
-    ) -> Result<Array<T1, D2>, Error> {
-        let get_d1_dim = |buf: &D1::Buf<T1>| {
-            let d1_dim = D1::dim(buf);
-            let d1_dim = d1_dim.as_ref();
-            let mut d = D2::const_dim();
-            for x in d.as_mut() {
-                *x = 1;
-            }
-            let start = d.as_ref().len() - d1_dim.len();
-            d.as_mut()
-                .get_mut(start..)
-                .ok_or(Error::InvalidConcatDims)?
-                .copy_from_slice(d1_dim);
-            Ok::<_, Error>(d)
-        };
-
-        let mut out_dims = D2::const_dim();
-        if out_dims.as_ref().is_empty() {
+    ) -> Result<Array<T1, D2>, Error>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        let args = args.into_iter();
+        if D1::is_scalar() {
             if dim != 0 {
                 return Err(Error::InvalidConcatDims);
             }
             let mut out: Array<T1, D2> = Array::zeroed(&[args.len()]);
-            args.iter()
-                .flat_map(|a| a.buf.as_buf().iter())
-                .zip(out.buf.as_mut_buf().iter_mut())
-                .for_each(|(a, b)| {
+            let mut out_iter = out.buf.as_mut_buf().iter_mut();
+            for arg in args {
+                for (a, b) in arg.buf.as_buf().iter().zip(&mut out_iter) {
                     *b = *a;
-                });
+                }
+            }
 
             Ok(out)
         } else {
-            for x in out_dims.as_mut() {
-                *x = 0;
-            }
+            let mut out: Option<Array<T1, D2>> = None;
+            let len = args.len();
+            let mut offset = 0;
             for arg in args {
-                let d = get_d1_dim(&arg.buf)?;
-                if d.as_ref().len() != out_dims.as_ref().len() {
-                    return Err(Error::InvalidConcatDims);
+                let arg_shape = D1::array_shape(&arg.buf);
+                let out = out.get_or_insert_with(|| {
+                    let out_shape = D2::Shape::from_len_elem(len, dim, arg_shape.as_ref());
+                    Array::<T1, D2>::zeroed(out_shape.as_ref())
+                });
+                let mut current_offsets = D2::array_shape(&out.buf);
+                let mut elem_shape = D2::array_shape(&out.buf);
+                for x in elem_shape.as_mut() {
+                    *x = 1;
                 }
-                for (i, (a, b)) in out_dims
+                let start = elem_shape.as_ref().len() - arg_shape.as_ref().len();
+                elem_shape
                     .as_mut()
-                    .iter_mut()
-                    .zip(d.as_ref().iter())
-                    .enumerate()
-                {
-                    if i != dim {
-                        *a = *b
-                    } else {
-                        *a += b;
-                    }
-                }
-            }
-            let mut out: Array<T1, D2> = Array::zeroed(out_dims.as_ref());
-            let mut current_offsets = D2::const_dim();
-            let current_offsets = current_offsets.as_mut();
-            current_offsets.iter_mut().for_each(|a| *a = 0);
-            if dim >= current_offsets.len() {
-                return Err(Error::InvalidConcatDims);
-            }
-            for arg in args.iter() {
-                let d = get_d1_dim(&arg.buf)?;
-                let offset = d.as_ref()[dim];
-                for (i, (a, b)) in out_dims.as_ref().iter().zip(d.as_ref().iter()).enumerate() {
-                    if dim != i && a != b {
-                        return Err(Error::InvalidConcatDims);
-                    }
-                }
-                for (i, a) in current_offsets.iter_mut().enumerate() {
+                    .get_mut(start..)
+                    .ok_or(Error::InvalidConcatDims)?
+                    .copy_from_slice(arg_shape.as_ref());
+                let offset_delta = elem_shape.as_ref()[dim];
+
+                for (i, a) in current_offsets.as_mut().iter_mut().enumerate() {
                     if i != dim {
                         *a = 0;
+                    } else {
+                        *a = offset;
                     }
                 }
                 let iter = out.offset_iter_mut(current_offsets.as_ref());
@@ -692,17 +802,17 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
                     stride: iter.stride,
                     indexes: iter.indexes,
                     offsets: &current_offsets,
-                    dims: d,
+                    dims: elem_shape,
                     phantom: PhantomData,
                     bump_index: false,
                 };
                 iter.zip(arg.buf.as_buf().iter()).for_each(|(a, b)| {
                     *a = *b;
                 });
-                current_offsets[dim] += offset;
+                offset += offset_delta;
             }
 
-            Ok(out)
+            out.ok_or(Error::InvalidConcatDims)
         }
     }
 
@@ -717,7 +827,7 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
 
     pub fn copy_fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Array<T1, D2> {
         let mut out: Array<T1, D2> = Array::zeroed(D2::DIM);
-        let in_dim = D1::dim(&self.buf);
+        let in_dim = D1::array_shape(&self.buf);
         assert!(
             in_dim.as_ref().len() == D2::DIM.len(),
             "source array rank is different than slice array"
@@ -794,12 +904,11 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         Ok(out)
     }
 
-    pub fn from_scalars(iter: impl IntoIterator<Item = Array<T1, ()>>) -> Self
+    pub fn from_scalars(iter: impl IntoIterator<Item = Array<T1, ()>>, shape: &[usize]) -> Self
     where
-        D1: ConstDim,
         T1: Field,
     {
-        let mut out: Array<T1, D1> = Array::zeroed(D1::DIM);
+        let mut out: Array<T1, D1> = Array::zeroed(shape);
         out.buf
             .as_mut_buf()
             .iter_mut()
@@ -835,12 +944,16 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
         out
     }
 
-    pub fn from_diag(diag: Array<T1, D1::SideDim>) -> Self
+    pub fn from_diag<S: Dim>(diag: Array<T1, S>) -> Self
     where
-        D1: SquareDim + ConstDim,
+        D1: SquareDim<SideDim = S>,
         T1: Field,
     {
-        let mut out: Array<T1, D1> = Array::zeroed(D1::DIM);
+        let mut out_dim = [0, 0];
+        let diag_dim = D1::SideDim::array_shape(&diag.buf);
+        out_dim[0] = diag_dim.as_ref()[0];
+        out_dim[1] = diag_dim.as_ref()[0];
+        let mut out: Array<T1, D1> = Array::zeroed(&out_dim);
         let len = out.buf.as_buf().len();
         out.offset_iter_mut(&[0, 0, 0])
             .enumerate()
@@ -913,8 +1026,9 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
     where
         ShapeConstraint: DimRow<D1>,
     {
-        let dim = D1::dim(&self.buf);
-        let out_size = dim.as_ref()[1];
+        let dim = D1::array_shape(&self.buf);
+        let dim = dim.as_ref();
+        let out_size = if dim.len() == 1 { 1 } else { dim[1] };
         let mut out: Array<T1, RowDim<D1>> = Array::zeroed(&[out_size]);
         let offsets = &[index, 0];
         let iter = self.offset_iter(offsets);
@@ -931,6 +1045,62 @@ impl<T1: Elem, D1: ArrayDim + TensorDim + XlaDim> Array<T1, D1> {
             *out = *a;
         }
         out
+    }
+
+    pub fn rows_iter(&self) -> impl Iterator<Item = Array<T1, RowDim<D1>>> + '_
+    where
+        ShapeConstraint: DimRow<D1>,
+    {
+        let dim = D1::array_shape(&self.buf);
+        let len = dim.as_ref()[0];
+        (0..len).map(|i| self.row(i))
+    }
+
+    pub fn map<T2: Copy + Default, D2: Dim>(
+        &self,
+        func: impl Fn(Array<T1, D1::ElemDim>) -> Array<T2, D2>,
+    ) -> Array<T2, D1::MappedDim<D2>>
+    where
+        D1: MappableDim,
+        D1::MappedDim<D2>: Dim,
+    {
+        let dim = D1::array_shape(&self.buf);
+        let elem_dim = &dim.as_ref()[1..];
+        let elem_size: usize = elem_dim.as_ref().iter().sum();
+        let mut out: Option<(<D2 as ArrayDim>::Shape, _)> = None;
+        let len = dim.as_ref()[1];
+        for (i, chunk) in self.buf.as_buf().chunks_exact(elem_size).enumerate() {
+            let mut elem = Array::<T1, D1::ElemDim>::zeroed(elem_dim);
+            elem.buf.as_mut_buf().copy_from_slice(chunk);
+            let new_elem = func(elem);
+            let new_elem_dim = D2::array_shape(&new_elem.buf);
+            let (out_elem_dim, arr) = out.get_or_insert_with(|| {
+                let out_dim = <D1::MappedDim<D2> as ArrayDim>::Shape::from_len_elem(
+                    len,
+                    0,
+                    new_elem_dim.as_ref(),
+                );
+                (
+                    new_elem_dim.clone(),
+                    Array::<T2, D1::MappedDim<D2>>::zeroed(out_dim.as_ref()),
+                )
+            });
+            if out_elem_dim.as_ref() != new_elem_dim.as_ref() {
+                panic!("map must return the same dimension elements")
+            }
+            let out_elem_size: usize = out_elem_dim.as_ref().iter().sum();
+            arr.buf.as_mut_buf()[i * out_elem_size..((i + 1) * out_elem_size)]
+                .copy_from_slice(new_elem.buf.as_buf());
+        }
+        let (_, arr) = out.unwrap();
+        arr
+    }
+
+    pub fn to_dyn(&self) -> Array<T1, Dyn> {
+        let shape = D1::array_shape(&self.buf);
+        let shape = shape.as_ref();
+        let buf = ndarray::Array::from_shape_vec(shape, self.buf.as_buf().to_vec()).unwrap();
+        Array { buf }
     }
 }
 
@@ -968,6 +1138,20 @@ impl<const N: usize> SquareDim for (Const<N>, Const<N>) {
     }
 }
 
+impl SquareDim for (Dyn, Dyn) {
+    type SideDim = Dyn;
+    type IPIV = Vec<u32>;
+
+    fn ipiv<T: Elem>(buf: &Self::Buf<T>) -> Self::IPIV {
+        let n = buf.shape()[0];
+        vec![0; n]
+    }
+
+    fn order<T: Elem>(buf: &Self::Buf<T>) -> usize {
+        buf.shape()[0]
+    }
+}
+
 /// Represents a type resulting from combining dimensions of two arrays during concatenation operations.
 pub type ConcatDim<D1, D2> = ReplaceMappedDim<
     <D2 as DefaultMap>::DefaultMapDim,
@@ -1002,33 +1186,38 @@ pub trait DimGet: Dim {
 
     fn get<T: Elem>(index: Self::Index, buf: &Self::Buf<T>) -> T;
 
-    type IndexArray: AsRef<[usize]>;
-    fn index_as_array(index: Self::Index) -> Self::IndexArray;
+    fn index_as_slice(index: &Self::Index) -> &[usize];
 }
 
-impl<const N: usize> DimGet for Const<N> {
+impl<D: Dim + crate::NonTupleDim + crate::NonScalarDim> DimGet for D {
     type Index = usize;
 
     fn get<T: Elem>(index: Self::Index, buf: &Self::Buf<T>) -> T {
-        buf[index]
+        buf.as_buf()[index]
     }
 
-    type IndexArray = [usize; 1];
-    fn index_as_array(index: Self::Index) -> Self::IndexArray {
-        [index]
+    fn index_as_slice(index: &Self::Index) -> &[usize] {
+        std::slice::from_ref(index)
     }
 }
 
-impl<const A: usize, const B: usize> DimGet for (Const<A>, Const<B>) {
-    type Index = (usize, usize);
+impl<
+        D1: Dim + crate::NonTupleDim + crate::NonScalarDim,
+        D2: crate::NonTupleDim + crate::NonScalarDim,
+    > DimGet for (D1, D2)
+where
+    (D1, D2): Dim,
+{
+    type Index = [usize; 2];
 
-    fn get<T: Elem>((a, b): Self::Index, buf: &Self::Buf<T>) -> T {
-        buf[a][b]
+    fn get<T: Elem>([a, b]: Self::Index, buf: &Self::Buf<T>) -> T {
+        let dim = Self::array_shape(buf);
+        let index = a * dim.as_ref()[1] + b;
+        buf.as_buf()[index]
     }
 
-    type IndexArray = [usize; 2];
-    fn index_as_array(index: Self::Index) -> Self::IndexArray {
-        [index.0, index.1]
+    fn index_as_slice(index: &Self::Index) -> &[usize] {
+        index
     }
 }
 
@@ -1052,6 +1241,24 @@ pub trait DimRow<D1> {
 
 impl<D1: Dim, D2: Dim> DimRow<(D1, D2)> for ShapeConstraint {
     type RowDim = D2;
+}
+
+impl<D1: Dim + crate::NonTupleDim> DimRow<D1> for ShapeConstraint {
+    type RowDim = ();
+}
+
+pub trait MappableDim {
+    type MappedDim<D>
+    where
+        D: Dim;
+
+    type ElemDim: Dim;
+}
+
+impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
+    type MappedDim<D> = (D1, D) where D: Dim;
+
+    type ElemDim = D2;
 }
 
 fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
@@ -1240,224 +1447,6 @@ impl<
                 x,
             )
         })
-    }
-}
-
-/// Backend implementation for local computation on arrays.
-pub struct ArrayRepr;
-
-impl Repr for ArrayRepr {
-    type Inner<T, D: Dim> = Array<T, D> where T: Elem ;
-
-    fn add<T, D1, D2>(
-        left: &Self::Inner<T, D1>,
-        right: &Self::Inner<T, D2>,
-    ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
-    where
-        T: Add<Output = T> + Elem,
-        D1: ArrayDim + TensorDim + XlaDim,
-        D2: ArrayDim + TensorDim + XlaDim,
-        ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
-    {
-        left.add(right)
-    }
-
-    fn sub<T, D1, D2>(
-        left: &Self::Inner<T, D1>,
-        right: &Self::Inner<T, D2>,
-    ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
-    where
-        T: Sub<Output = T> + Elem,
-        D1: crate::Dim + ArrayDim,
-        D2: crate::Dim + ArrayDim,
-        ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-    {
-        left.sub(right)
-    }
-
-    fn mul<T, D1, D2>(
-        left: &Self::Inner<T, D1>,
-        right: &Self::Inner<T, D2>,
-    ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
-    where
-        T: Mul<Output = T> + Elem,
-        D1: crate::Dim + ArrayDim,
-        D2: crate::Dim + ArrayDim,
-        ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-    {
-        left.mul(right)
-    }
-
-    fn div<T, D1, D2>(
-        left: &Self::Inner<T, D1>,
-        right: &Self::Inner<T, D2>,
-    ) -> Self::Inner<T, BroadcastedDim<D1, D2>>
-    where
-        T: Div<Output = T> + Elem,
-        D1: crate::Dim + ArrayDim,
-        D2: crate::Dim + ArrayDim,
-        ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: crate::Dim + ArrayDim,
-    {
-        left.div(right)
-    }
-
-    fn dot<T, D1, D2>(
-        left: &Self::Inner<T, D1>,
-        right: &Self::Inner<T, D2>,
-    ) -> Self::Inner<T, <ShapeConstraint as crate::DotDim<D1, D2>>::Output>
-    where
-        T: RealField + Div<Output = T> + Elem,
-        D1: Dim + ArrayDim,
-        D2: Dim + ArrayDim,
-        ShapeConstraint: crate::DotDim<D1, D2>,
-        <ShapeConstraint as crate::DotDim<D1, D2>>::Output: Dim + ArrayDim,
-    {
-        left.dot(right)
-    }
-
-    fn concat_many<T1: Field, D1: Dim, D2: Dim + ConstDim>(
-        args: &[Self::Inner<T1, D1>],
-        dim: usize,
-    ) -> Self::Inner<T1, D2> {
-        Array::concat_many(args, dim).unwrap()
-    }
-
-    fn get<T1: Field, D1: Dim + DimGet>(
-        arg: &Self::Inner<T1, D1>,
-        index: D1::Index,
-    ) -> Self::Inner<T1, ()> {
-        arg.get(index)
-    }
-
-    fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
-        arg: &Self::Inner<T1, D1>,
-    ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
-    where
-        ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim,
-    {
-        arg.broadcast()
-    }
-
-    fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
-        Array { buf: value }
-    }
-
-    fn concat<T1: Field, D1, D2: Dim + DefaultMap>(
-        left: &Self::Inner<T1, D1>,
-        right: &Self::Inner<T1, D2>,
-    ) -> Self::Inner<T1, ConcatDim<D1, D2>>
-    where
-        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
-        DefaultMappedDim<D2>: nalgebra::Dim,
-        D2::DefaultMapDim: MapDim<D1>,
-        D1::DefaultMapDim: MapDim<D2>,
-        D1: Dim + DefaultMap,
-        AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
-        ConcatDim<D1, D2>: Dim,
-    {
-        left.concat(right)
-    }
-
-    fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
-    where
-        T1: Field + Neg<Output = T1>,
-    {
-        arg.neg()
-    }
-
-    fn sqrt<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
-        arg.sqrt()
-    }
-
-    fn atan2<T1: Field + RealField, D1: Dim>(
-        left: &Self::Inner<T1, D1>,
-        right: &Self::Inner<T1, D1>,
-    ) -> Self::Inner<T1, D1> {
-        left.atan2(right)
-    }
-
-    fn sin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
-        arg.sin()
-    }
-
-    fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
-        arg.cos()
-    }
-
-    fn abs<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
-        arg.abs()
-    }
-
-    fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
-        arg: &Self::Inner<T1, D1>,
-        offsets: &[usize],
-    ) -> Self::Inner<T1, D2> {
-        arg.copy_fixed_slice(offsets)
-    }
-
-    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
-    where
-        ShapeConstraint: BroadcastDim<D1, D2>,
-    {
-        arg.reshape()
-    }
-
-    fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
-        arg: &Self::Inner<T1, D1>,
-    ) -> Result<Self::Inner<T1, D1>, Error> {
-        arg.try_lu_inverse()
-    }
-
-    fn from_scalars<T1: Field, D1: Dim + ConstDim>(
-        iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
-    ) -> Self::Inner<T1, D1> {
-        Array::from_scalars(iter)
-    }
-
-    fn transpose<T1: Field, D1: Dim>(
-        arg: &Self::Inner<T1, D1>,
-    ) -> Self::Inner<T1, TransposedDim<D1>>
-    where
-        ShapeConstraint: TransposeDim<D1>,
-        TransposedDim<D1>: ConstDim,
-    {
-        arg.transpose()
-    }
-
-    fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1> {
-        Array::eye()
-    }
-
-    fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
-        diag: Self::Inner<T1, D1::SideDim>,
-    ) -> Self::Inner<T1, D1> {
-        Array::from_diag(diag)
-    }
-
-    fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
-        arg.clone()
-    }
-
-    fn try_cholesky<T1: RealField, D1: Dim + SquareDim>(
-        arg: &Self::Inner<T1, D1>,
-    ) -> Result<Self::Inner<T1, D1>, Error> {
-        arg.try_cholesky()
-    }
-
-    fn row<T1: Field, D1: Dim>(
-        arg: &Self::Inner<T1, D1>,
-        index: usize,
-    ) -> Self::Inner<T1, crate::RowDim<D1>>
-    where
-        ShapeConstraint: crate::DimRow<D1>,
-    {
-        arg.row(index)
     }
 }
 
@@ -1670,10 +1659,10 @@ mod tests {
         let c: Array<f32, (Const<4>, Const<2>)> = a.concat(&b);
         assert_eq!(c.buf, [[0., 1.], [4., 2.], [1., 1.], [2., 2.]]);
 
-        let a: Array<f32, Const<1>> = Array { buf: [1.0] };
-        let b: Array<f32, Const<1>> = Array { buf: [2.0] };
-        let c: Array<f32, Const<1>> = Array { buf: [3.0] };
-        let d: Array<f32, Const<3>> = Array::concat_many(&[a, b, c], 0).unwrap();
+        let a: Array<f32, ()> = Array { buf: 1.0 };
+        let b: Array<f32, ()> = Array { buf: 2.0 };
+        let c: Array<f32, ()> = Array { buf: 3.0 };
+        let d: Array<f32, Const<3>> = Array::concat_many([a, b, c], 0).unwrap();
         assert_eq!(d.buf, [1.0, 2.0, 3.0]);
     }
 
@@ -1688,7 +1677,7 @@ mod tests {
         let c: Array<f32, Const<3>> = Array {
             buf: [7.0, 8.0, 9.0],
         };
-        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many(&[a, b, c], 0).unwrap();
+        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many([a, b, c], 0).unwrap();
         assert_eq!(d.buf, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0],]);
     }
 
@@ -1716,12 +1705,12 @@ mod tests {
     fn test_concat_many_dim() {
         let a: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
         let b: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
-        let c: Array<f32, (Const<2>, Const<4>)> = Array::concat_many(&[a, b], 1).unwrap();
+        let c: Array<f32, (Const<2>, Const<4>)> = Array::concat_many([a, b], 1).unwrap();
         assert_eq!(c, array![[0.0, 1.0, 0.0, 1.0], [2.0, 3.0, 2.0, 3.0]]);
 
         let a: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
         let b: Array<f32, (Const<2>, Const<2>)> = array![[0.0, 1.0], [2.0, 3.0]];
-        let c: Array<f32, (Const<4>, Const<2>)> = Array::concat_many(&[a, b], 0).unwrap();
+        let c: Array<f32, (Const<4>, Const<2>)> = Array::concat_many([a, b], 0).unwrap();
         assert_eq!(c, array![[0., 1.], [2., 3.], [0., 1.], [2., 3.]]);
 
         let a: Array<f32, Const<3>> = Array {
@@ -1733,7 +1722,7 @@ mod tests {
         let c: Array<f32, Const<3>> = Array {
             buf: [7.0, 8.0, 9.0],
         };
-        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many(&[a, b, c], 0).unwrap();
+        let d: Array<f32, (Const<3>, Const<3>)> = Array::concat_many([a, b, c], 0).unwrap();
         assert_eq!(d.buf, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0],]);
     }
 
@@ -1822,7 +1811,6 @@ mod tests {
         assert_eq!(a, array![[2.0, 0.0], [0.0, 4.0]]);
         let a = array![[1., 2., 3.], [0., 2., 3.], [0., 0., 1.]];
         let b = a.dot(&a.transpose());
-        println!("{:?}", b);
         assert_relative_eq!(
             b.try_cholesky().unwrap().transpose(),
             array![
@@ -1848,5 +1836,44 @@ mod tests {
         assert_eq!(array![1., 2.], a.row(0));
         assert_eq!(array![5., 8.], a.row(1));
         assert_eq!(array![9., 9.], a.row(2));
+    }
+
+    #[test]
+    fn test_partial_dyn_mat() {
+        let a: Array<f64, (Dyn, Dyn)> = Array {
+            buf: ndarray::array![[1.0, 2.0], [3.0, 4.0]].into_dyn(),
+        };
+        let b: Array<f64, (Dyn, Dyn)> = Array {
+            buf: ndarray::array![[1.0, 2.0], [3.0, 4.0]].into_dyn(),
+        };
+        let c = a.dot(&b);
+        let expected: Array<f64, (Dyn, Dyn)> = Array {
+            buf: ndarray::array![[7.0, 10.0], [15.0, 22.0]].into_dyn(),
+        };
+
+        assert_eq!(c, expected)
+    }
+
+    #[test]
+    fn test_map() {
+        let a = array![[1.0, 2.0], [5.0, 8.0], [9.0, 9.0]];
+        let out: Array<f64, (Const<3>, Const<2>)> =
+            a.map(|x: Array<f64, Const<2>>| array![2.0f64, 3.0].add(&x));
+        assert_eq!(out, array![[3.0, 5.0], [7.0, 11.0], [11.0, 12.0]]);
+
+        let a = array![[1.0, 2.0], [5.0, 8.0], [9.0, 9.0]];
+        let out: Array<f64, (Const<3>, Const<1>)> =
+            a.map(|x: Array<f64, Const<2>>| x.copy_fixed_slice::<Const<1>>(&[0]));
+        assert_eq!(out, array![[1.0,], [5.0,], [9.0,]]);
+    }
+
+    #[test]
+    fn test_rows_iter() {
+        let a = array![[1.0, 2.0], [5.0, 8.0], [9.0, 9.0]];
+        let rows: Vec<_> = a.rows_iter().collect();
+        assert_eq!(
+            rows,
+            vec![array![1.0, 2.0], array![5.0, 8.0], array![9.0, 9.0]]
+        );
     }
 }
