@@ -79,6 +79,7 @@ pub enum NoxprNode {
 
     // Triangle
     Cholesky(Cholesky),
+    LuInverse(LuInverse),
 }
 
 /// Represents a constant value within the Noxpr.
@@ -512,6 +513,11 @@ pub struct Call {
 pub struct Cholesky {
     pub arg: Noxpr,
     pub upper: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LuInverse {
+    pub arg: Noxpr,
 }
 
 /// A unique identifier for `Noxpr` expressions to facilitate caching and optimization.
@@ -963,6 +969,7 @@ impl Noxpr {
             NoxprNode::Select(select) => select.on_true.ty(),
             NoxprNode::Call(c) => Some(c.comp.ty.clone()),
             NoxprNode::Cholesky(c) => c.arg.ty(),
+            NoxprNode::LuInverse(lu) => lu.arg.ty(),
         }
     }
 
@@ -1031,6 +1038,7 @@ impl Noxpr {
             NoxprNode::Select(c) => c.on_true.element_type(),
             NoxprNode::Call(c) => c.comp.func.inner.element_type(),
             NoxprNode::Cholesky(c) => c.arg.element_type(),
+            NoxprNode::LuInverse(lu) => lu.arg.element_type(),
         }
     }
 
@@ -1180,6 +1188,7 @@ impl Noxpr {
                 }
             }
             NoxprNode::Cholesky(c) => c.arg.shape(),
+            NoxprNode::LuInverse(lu) => lu.arg.shape(),
         }
     }
 
@@ -1263,6 +1272,7 @@ impl Noxpr {
             NoxprNode::Select(_) => "Select",
             NoxprNode::Call(_) => "Call",
             NoxprNode::Cholesky(_) => "Cholesky",
+            NoxprNode::LuInverse(_) => "LuInverse",
         }
     }
 
@@ -1298,6 +1308,10 @@ impl Noxpr {
             arg: self.clone(),
             upper,
         }))
+    }
+
+    pub fn lu_inverse(&self) -> Noxpr {
+        Noxpr::new(NoxprNode::LuInverse(LuInverse { arg: self.clone() }))
     }
 }
 
@@ -1682,6 +1696,9 @@ impl XlaTracer {
                 let arg = self.visit(&c.arg)?;
                 arg.cholesky(!c.upper)
             }
+            NoxprNode::LuInverse(_) => {
+                todo!() // TODO: add this when we get custom calls
+            }
         };
         self.cache.insert(id, op.clone());
         Ok(op)
@@ -1925,6 +1942,7 @@ impl ReplacementTracer {
                 }))
             }
             NoxprNode::Cholesky(c) => self.visit(&c.arg).cholesky(c.upper),
+            NoxprNode::LuInverse(lu) => self.visit(&lu.arg).lu_inverse(),
         };
         self.cache.insert(id, expr.clone());
         expr
@@ -2248,6 +2266,12 @@ impl PrettyPrintTracer {
                 let arg = self.visit(&c.arg, writer)?;
                 let num = self.print_var(id, writer)?;
                 write!(writer, "cholesky(var_{}, upper = {})", arg, c.upper)?;
+                Ok(num)
+            }
+            NoxprNode::LuInverse(c) => {
+                let arg = self.visit(&c.arg, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "lu_inverse(var_{})", arg,)?;
                 Ok(num)
             }
         };

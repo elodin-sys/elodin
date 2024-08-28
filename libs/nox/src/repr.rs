@@ -3,16 +3,17 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    DimGet, DotDim, Field, MapDim, TensorDim, XlaDim,
+    DimGet, DotDim, Field, ReplaceDim, TensorDim,
 };
 use crate::{
-    ConstDim, DimRow, Elem, Error, RealField, RowDim, SquareDim, TransposeDim, TransposedDim,
+    ConstDim, DimRow, Elem, Error, MappableDim, RealField, RowDim, SquareDim, TransposeDim,
+    TransposedDim,
 };
 use nalgebra::constraint::ShapeConstraint;
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
-pub trait Dim: ArrayDim + TensorDim + XlaDim {}
-impl<D: ArrayDim + TensorDim + XlaDim> Dim for D {}
+pub trait Dim: ArrayDim + TensorDim {}
+impl<D: ArrayDim + TensorDim> Dim for D {}
 
 /// Represents the interface for data representations in tensor operations.
 pub trait Repr {
@@ -88,18 +89,20 @@ pub trait Repr {
     where
         DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
         DefaultMappedDim<D2>: nalgebra::Dim,
-        D2::DefaultMapDim: MapDim<D1>,
-        D1::DefaultMapDim: MapDim<D2>,
+        D2::DefaultMapDim: ReplaceDim<D1>,
+        D1::DefaultMapDim: ReplaceDim<D2>,
         D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as MapDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim;
 
     /// Concatenates multiple tensors along the first dimension
-    fn concat_many<T1: Field, D1: Dim, D2: Dim + ConstDim>(
-        args: &[Self::Inner<T1, D1>],
+    fn concat_many<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+        args: I,
         dim: usize,
-    ) -> Self::Inner<T1, D2>;
+    ) -> Self::Inner<T1, D2>
+    where
+        I::IntoIter: ExactSizeIterator;
 
     /// Retrieves a specific tensor based on an index within a dimension.
     fn get<T1: Field, D1: Dim + DimGet>(
@@ -107,12 +110,13 @@ pub trait Repr {
         index: D1::Index,
     ) -> Self::Inner<T1, ()>;
 
-    fn broadcast<D1: Dim, D2: ArrayDim + TensorDim + XlaDim, T1: Field>(
+    fn broadcast<D1: Dim, D2: Dim, T1: Field>(
         arg: &Self::Inner<T1, D1>,
+        dim: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
     ) -> Self::Inner<T1, BroadcastedDim<D1, D2>>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
-        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim + XlaDim;
+        <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim;
 
     fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()>;
 
@@ -138,7 +142,10 @@ pub trait Repr {
         offsets: &[usize],
     ) -> Self::Inner<T1, D2>;
 
-    fn reshape<T1: Field, D1: Dim, D2: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D2>
+    fn reshape<T1: Field, D1: Dim, D2: Dim>(
+        arg: &Self::Inner<T1, D1>,
+        dim: impl AsMut<[usize]> + AsRef<[usize]> + Clone,
+    ) -> Self::Inner<T1, D2>
     where
         ShapeConstraint: BroadcastDim<D1, D2>;
 
@@ -146,20 +153,20 @@ pub trait Repr {
         arg: &Self::Inner<T1, D1>,
     ) -> Result<Self::Inner<T1, D1>, Error>;
 
-    fn from_scalars<T1: Field, D1: ConstDim + Dim>(
+    fn from_scalars<T1: Field, D1: Dim>(
         iter: impl IntoIterator<Item = Self::Inner<T1, ()>>,
+        shape: &[usize],
     ) -> Self::Inner<T1, D1>;
 
     fn transpose<T1: Field, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
     ) -> Self::Inner<T1, TransposedDim<D1>>
     where
-        ShapeConstraint: TransposeDim<D1>,
-        TransposedDim<D1>: ConstDim;
+        ShapeConstraint: TransposeDim<D1>;
 
     fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1>;
 
-    fn from_diag<T1: Field, D1: Dim + SquareDim + ConstDim>(
+    fn from_diag<T1: Field, D1: Dim + SquareDim>(
         diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1>;
 
@@ -175,4 +182,24 @@ pub trait Repr {
     ) -> Self::Inner<T1, RowDim<D1>>
     where
         ShapeConstraint: DimRow<D1>;
+
+    fn rows_iter<T1: Elem, D1: Dim>(
+        arg: &Self::Inner<T1, D1>,
+    ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+    where
+        ShapeConstraint: DimRow<D1>;
+
+    fn map<T1, D1, T2, D2>(
+        arg: &Self::Inner<T1, D1>,
+        func: impl Fn(Self::Inner<T1, D1::ElemDim>) -> Self::Inner<T2, D2>,
+    ) -> Self::Inner<T2, D1::MappedDim<D2>>
+    where
+        D1::MappedDim<D2>: Dim,
+        T1: Field,
+        D1: Dim + MappableDim,
+        T2: Copy + Default,
+        D2: Dim;
+
+    type Shape<D: Dim>: AsRef<[usize]> + AsMut<[usize]> + Clone;
+    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1>;
 }

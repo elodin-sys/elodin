@@ -1,175 +1,289 @@
-use nox::{Error, Matrix, Repr, Scalar, Vector};
+#![allow(clippy::type_complexity)]
 
-pub fn unscented_transform<const N: usize, const S: usize, R: Repr>(
-    points: &Matrix<f64, S, N, R>,
-    mean_weights: &Vector<f64, S, R>,
-    covar_weights: &Vector<f64, S, R>,
-) -> (Vector<f64, N, R>, Matrix<f64, N, N, R>) {
-    let x_hat = points.transpose().dot(mean_weights);
+use nox::{
+    nalgebra::{constraint::ShapeConstraint, Const},
+    BaseBroadcastDim, BroadcastDim, Dim, Error, Matrix, NonScalarDim, NonTupleDim, Repr, Scalar,
+    SquareDim, Tensor, Vector,
+};
+
+pub fn unscented_transform<N, S, R>(
+    points: &Tensor<f64, (S, N), R>,
+    mean_weights: &Tensor<f64, S, R>,
+    covar_weights: &Tensor<f64, S, R>,
+) -> (Tensor<f64, N, R>, Tensor<f64, (N, N), R>)
+where
+    (N, S): Dim,
+    (S, N): Dim,
+    (N, N): Dim,
+    N: Dim + NonScalarDim + NonTupleDim,
+    S: Dim + NonScalarDim + NonTupleDim,
+    (S, S): SquareDim<SideDim = S>,
+    R: Repr,
+{
+    let points_t = points.transpose();
+    let x_hat = points_t.dot(mean_weights);
     let y = points - &x_hat;
-    let covar = y
-        .transpose()
-        .dot(&Matrix::from_diag(covar_weights.clone()).dot(&y));
+    let covar_weights_diag: Tensor<f64, (S, S), R> = Tensor::from_diag(covar_weights.clone());
+    let covar = y.transpose().dot(&covar_weights_diag.dot(&y));
     (x_hat, covar)
 }
 
-pub fn cross_covar<const N: usize, const Z: usize, const S: usize, R: Repr>(
-    x_hat: &Vector<f64, N, R>,
-    z_hat: &Vector<f64, Z, R>,
-    points_x: Matrix<f64, S, N, R>,
-    points_z: Matrix<f64, S, Z, R>,
-    covar_weights: Vector<f64, S, R>,
-) -> Matrix<f64, N, Z, R> {
-    let mut covar = Matrix::zeros();
-    for i in 0..S {
-        let x = points_x.row(i);
-        let z = points_z.row(i);
-        let weight = covar_weights.get(i);
-        let delta_x = x - x_hat;
-        let delta_z = z - z_hat;
-        covar = covar + weight * delta_x.outer(&delta_z);
-    }
-    covar
+pub fn cross_covar<N, Z, S, R>(
+    x_hat: &Tensor<f64, N, R>,
+    z_hat: &Tensor<f64, Z, R>,
+    points_x: Tensor<f64, (S, N), R>,
+    points_z: Tensor<f64, (S, Z), R>,
+    covar_weights: Tensor<f64, S, R>,
+) -> Tensor<f64, (N, Z), R>
+where
+    N: Dim + NonTupleDim + NonScalarDim,
+    Z: Dim + NonTupleDim + NonScalarDim,
+    S: Dim + NonTupleDim + NonScalarDim,
+    ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
+    ShapeConstraint: BaseBroadcastDim<Z, Z, Output = Z>,
+    (N, Z): Dim,
+    (S, N): Dim,
+    (S, Z): Dim,
+    (Z, N): Dim,
+    R: Repr,
+{
+    let delta_x = points_x - x_hat;
+    let delta_z = points_z - z_hat;
+    delta_x
+        .rows_iter()
+        .zip(delta_z.rows_iter())
+        .zip(covar_weights.rows_iter())
+        .map(|((delta_x, delta_z), weight)| weight * delta_x.outer(&delta_z))
+        .sum()
 }
 
-pub fn predict<const S: usize, const N: usize, R: Repr>(
-    sigma_points: Matrix<f64, S, N, R>,
-    prop_fn: impl Fn(Vector<f64, N, R>) -> Vector<f64, N, R>,
-    mean_weights: &Vector<f64, S, R>,
-    covar_weights: &Vector<f64, S, R>,
-    prop_covar: &Matrix<f64, N, N, R>,
+pub fn predict<S, N, R>(
+    sigma_points: Tensor<f64, (S, N), R>,
+    prop_fn: impl Fn(Tensor<f64, N, R>) -> Tensor<f64, N, R>,
+    mean_weights: &Tensor<f64, S, R>,
+    covar_weights: &Tensor<f64, S, R>,
+    prop_covar: &Tensor<f64, (N, N), R>,
 ) -> (
-    Matrix<f64, S, N, R>,
-    Vector<f64, N, R>,
-    Matrix<f64, N, N, R>,
-) {
-    let mut i = 0;
-    let points = Matrix::from_rows([0; S].map(|_| {
-        let point = sigma_points.row(i);
-        let point = prop_fn(point);
-        i += 1;
-        point
-    }));
-    let (x_hat, covar) = unscented_transform(&points, mean_weights, covar_weights);
+    Tensor<f64, (S, N), R>,
+    Tensor<f64, N, R>,
+    Tensor<f64, (N, N), R>,
+)
+where
+    S: Dim + NonTupleDim + NonScalarDim,
+    N: Dim + NonTupleDim + NonScalarDim,
+    ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
+    (S, N): Dim,
+    (N, N): Dim + SquareDim<SideDim = N>,
+    (S, S): Dim + SquareDim<SideDim = S>,
+    (N, S): Dim,
+    R: Repr,
+{
+    let points = sigma_points.map(prop_fn);
+    let (x_hat, covar) = unscented_transform::<N, S, R>(&points, mean_weights, covar_weights);
     let covar = covar + prop_covar;
     (points, x_hat, covar)
 }
 
-pub fn innovate<const S: usize, const N: usize, const Z: usize, R: Repr>(
-    x_points: &Matrix<f64, S, N, R>,
-    z: &Vector<f64, Z, R>,
-    measure_fn: impl for<'a> Fn(Vector<f64, N, R>, Vector<f64, Z, R>) -> Vector<f64, Z, R>,
-    mean_weights: &Vector<f64, S, R>,
-    covar_weights: &Vector<f64, S, R>,
-    noise_covar: &Matrix<f64, Z, Z, R>,
+pub fn innovate<S, N, Z, R>(
+    x_points: &Tensor<f64, (S, N), R>,
+    z: &Tensor<f64, Z, R>,
+    measure_fn: impl for<'a> Fn(Tensor<f64, N, R>, Tensor<f64, Z, R>) -> Tensor<f64, Z, R>,
+    mean_weights: &Tensor<f64, S, R>,
+    covar_weights: &Tensor<f64, S, R>,
+    noise_covar: &Tensor<f64, (Z, Z), R>,
 ) -> (
-    Matrix<f64, S, Z, R>,
-    Vector<f64, Z, R>,
-    Matrix<f64, Z, Z, R>,
-) {
-    let mut i = 0;
-    let points = Matrix::from_rows([0; S].map(|_| {
-        let point = x_points.row(i);
-        let point = measure_fn(point, z.clone());
-        i += 1;
-        point
-    }));
+    Tensor<f64, (S, Z), R>,
+    Tensor<f64, Z, R>,
+    Tensor<f64, (Z, Z), R>,
+)
+where
+    S: Dim + NonTupleDim + NonScalarDim,
+    N: Dim + NonTupleDim + NonScalarDim,
+    Z: Dim + NonTupleDim + NonScalarDim,
+    R: Repr,
+    ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
+    ShapeConstraint: BaseBroadcastDim<Z, Z, Output = Z>,
+    (S, N): Dim,
+    (Z, Z): Dim + SquareDim<SideDim = Z>,
+    (N, N): Dim + SquareDim<SideDim = N>,
+    (S, S): Dim + SquareDim<SideDim = S>,
+    (N, S): Dim,
+    (S, Z): Dim,
+    (Z, S): Dim,
+{
+    let points = x_points.map(|point| measure_fn(point, z.clone()));
     let (z_hat, measure_covar) = unscented_transform(&points, mean_weights, covar_weights);
     let measure_covar = measure_covar + noise_covar;
     (points, z_hat, measure_covar)
 }
 
-pub struct MerweConfig<const N: usize> {
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct UncheckedMerweConfig {
     pub alpha: f64,
     pub beta: f64,
     pub kappa: f64,
     pub lambda: f64,
+    pub n: usize,
 }
 
-impl<const N: usize> MerweConfig<N> {
-    pub fn new(alpha: f64, beta: f64, kappa: f64) -> Self {
-        let n = N as f64;
-        let lambda = alpha.powi(2) * (n + kappa) - n;
+pub struct MerweConfig<const N: usize> {
+    pub unchecked_config: UncheckedMerweConfig,
+}
+
+impl UncheckedMerweConfig {
+    pub fn new(n: usize, alpha: f64, beta: f64, kappa: f64) -> Self {
+        let lambda = alpha.powi(2) * (n as f64 + kappa) - n as f64;
 
         Self {
             alpha,
             beta,
             kappa,
             lambda,
+            n,
         }
     }
 
-    pub fn sigma_points<const S: usize, R: Repr>(
+    pub fn sigma_points<N, S, R>(
         &self,
-        x: Vector<f64, N, R>,
-        sigma: Matrix<f64, N, N, R>,
-    ) -> Result<Matrix<f64, S, N, R>, nox::Error> {
+        x: Tensor<f64, N, R>,
+        sigma: Tensor<f64, (N, N), R>,
+    ) -> Result<Tensor<f64, (S, N), R>, nox::Error>
+    where
+        (N, N): Dim + SquareDim<SideDim = N>,
+        ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
+        ShapeConstraint: BroadcastDim<N, N, Output = N>,
+        R: Repr + 'static,
+        N: Dim + NonScalarDim + 'static,
+        (S, N): Dim,
+    {
+        let s = 2 * self.n + 1;
         let lambda = self.lambda;
-        debug_assert_eq!(S, 2 * N + 1, "S must be 2 * N + 1");
-        let mut i = 0;
-        let u = ((N as f64 + lambda) * sigma).try_cholesky()?.transpose();
-        let points = [0u8; S].map(|_| {
-            let point = match i {
+        let u = ((self.n as f64 + lambda) * sigma)
+            .try_cholesky()?
+            .transpose();
+        Ok(Tensor::concat_in_dim(
+            (0..s).map(move |i| match i {
                 0 => x.clone(),
-                i if (1..=N).contains(&i) => &x + u.row(i - 1),
-                _ => &x - u.row(i - N - 1),
-            };
-            i += 1;
-            point
-        });
-        Ok(Matrix::from_rows(points))
+                i if (1..=self.n).contains(&i) => &x + u.row(i - 1),
+                _ => &x - u.row(i - self.n - 1),
+            }),
+            0,
+        ))
     }
 
-    pub fn mean_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
-        let n = N as f64;
+    pub fn mean_weights<S: Dim, R: Repr>(&self) -> Tensor<f64, S, R> {
+        let s = 2 * self.n + 1;
+        let n = self.n as f64;
         let lambda = self.lambda;
-        assert_eq!(S, N * 2 + 1, "S must be 2 * n + 1");
         let w_i = self.shared_weight();
         let w_0: Scalar<f64, R> = (lambda / (n + lambda)).into();
-        Vector::from_scalars((0..S).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }))
+        Tensor::concat_in_dim(
+            (0..s).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }),
+            0,
+        )
     }
 
-    pub fn covariance_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
+    pub fn covariance_weights<S: Dim, R: Repr>(&self) -> Tensor<f64, S, R> {
         let Self {
             lambda,
             alpha,
             beta,
+            n,
             ..
         } = self;
-        assert_eq!(S, N * 2 + 1, "S must be 2 * n + 1");
-        let n = N as f64;
+        let s = 2 * *n + 1;
+        let n = *n as f64;
         let w_i = self.shared_weight();
         let w_0: Scalar<f64, R> = (lambda / (n + lambda) + (1. - alpha.powi(2) + beta)).into();
-        Vector::from_scalars((0..S).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }))
+        Tensor::concat_in_dim(
+            (0..s).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }),
+            0,
+        )
     }
 
     /// Calculated the shared weight used by both the covariance and mean weights
     pub fn shared_weight<R: Repr>(&self) -> Scalar<f64, R> {
         let lambda = self.lambda;
-        let n = N as f64;
+        let n = self.n as f64;
         let w = 1.0 / (2.0 * (n + lambda));
         w.into()
     }
 }
 
-pub struct State<const N: usize, const Z: usize, const S: usize, R: Repr> {
-    pub x_hat: Vector<f64, N, R>,
-    pub covar: Matrix<f64, N, N, R>,
-    pub prop_covar: Matrix<f64, N, N, R>,
-    pub noise_covar: Matrix<f64, Z, Z, R>,
-    pub config: MerweConfig<N>,
+impl<const N: usize> MerweConfig<N> {
+    pub fn new(alpha: f64, beta: f64, kappa: f64) -> Self {
+        Self {
+            unchecked_config: UncheckedMerweConfig::new(N, alpha, beta, kappa),
+        }
+    }
+
+    pub fn sigma_points<const S: usize, R: Repr + 'static>(
+        &self,
+        x: Vector<f64, N, R>,
+        sigma: Matrix<f64, N, N, R>,
+    ) -> Result<Matrix<f64, S, N, R>, nox::Error> {
+        debug_assert_eq!(S, 2 * N + 1, "S must be 2 * N + 1");
+        self.unchecked_config.sigma_points(x, sigma)
+    }
+
+    pub fn mean_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
+        self.unchecked_config.mean_weights()
+    }
+
+    pub fn covariance_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
+        self.unchecked_config.covariance_weights()
+    }
+
+    /// Calculated the shared weight used by both the covariance and mean weights
+    pub fn shared_weight<R: Repr>(&self) -> Scalar<f64, R> {
+        self.unchecked_config.shared_weight()
+    }
 }
 
-impl<const N: usize, const Z: usize, const S: usize, R: Repr> State<N, Z, S, R> {
-    pub fn update(
+#[doc(hidden)]
+pub struct UncheckedState<N: Dim, Z: Dim, R: Repr>
+where
+    (N, N): Dim,
+    (Z, Z): Dim,
+{
+    pub x_hat: Tensor<f64, N, R>,
+    pub covar: Tensor<f64, (N, N), R>,
+    pub prop_covar: Tensor<f64, (N, N), R>,
+    pub noise_covar: Tensor<f64, (Z, Z), R>,
+}
+
+impl<N: Dim, Z: Dim, R: Repr + 'static> UncheckedState<N, Z, R>
+where
+    N: NonScalarDim + NonTupleDim + 'static,
+    Z: NonScalarDim + NonTupleDim,
+    (N, N): Dim + SquareDim<SideDim = N>,
+    (Z, Z): Dim + SquareDim<SideDim = Z>,
+    ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
+    ShapeConstraint: BroadcastDim<N, N, Output = N>,
+    ShapeConstraint: BaseBroadcastDim<Z, Z, Output = Z>,
+    ShapeConstraint: BroadcastDim<Z, Z, Output = Z>,
+{
+    pub fn update<S>(
         mut self,
-        z: Vector<f64, Z, R>,
-        prop_fn: impl Fn(Vector<f64, N, R>) -> Vector<f64, N, R>,
-        measure_fn: impl Fn(Vector<f64, N, R>, Vector<f64, Z, R>) -> Vector<f64, Z, R>,
-    ) -> Result<Self, Error> {
-        let sigma_points = self.config.sigma_points::<S, _>(self.x_hat, self.covar)?;
-        let mean_weights = self.config.mean_weights::<S, _>();
-        let covar_weights = self.config.covariance_weights::<S, _>();
+        config: UncheckedMerweConfig,
+        z: Tensor<f64, Z, R>,
+        prop_fn: impl Fn(Tensor<f64, N, R>) -> Tensor<f64, N, R>,
+        measure_fn: impl Fn(Tensor<f64, N, R>, Tensor<f64, Z, R>) -> Tensor<f64, Z, R>,
+    ) -> Result<Self, Error>
+    where
+        S: Dim + NonTupleDim + NonScalarDim,
+        (S, S): SquareDim<SideDim = S>,
+        (S, N): Dim,
+        (N, S): Dim,
+        (S, Z): Dim,
+        (Z, S): Dim,
+        (N, Z): Dim,
+        (Z, N): Dim,
+    {
+        let sigma_points = config.sigma_points::<N, S, R>(self.x_hat, self.covar)?;
+        let mean_weights = config.mean_weights::<S, R>();
+        let covar_weights = config.covariance_weights::<S, _>();
         let (points_x, x_hat, covar) = predict(
             sigma_points,
             prop_fn,
@@ -195,10 +309,54 @@ impl<const N: usize, const Z: usize, const S: usize, R: Repr> State<N, Z, S, R> 
     }
 }
 
+pub struct State<const N: usize, const Z: usize, const S: usize, R: Repr> {
+    pub x_hat: Vector<f64, N, R>,
+    pub covar: Matrix<f64, N, N, R>,
+    pub prop_covar: Matrix<f64, N, N, R>,
+    pub noise_covar: Matrix<f64, Z, Z, R>,
+    pub config: MerweConfig<N>,
+}
+
+impl<const N: usize, const Z: usize, const S: usize, R: Repr + 'static> State<N, Z, S, R> {
+    pub fn update(
+        self,
+        z: Vector<f64, Z, R>,
+        prop_fn: impl Fn(Vector<f64, N, R>) -> Vector<f64, N, R>,
+        measure_fn: impl Fn(Vector<f64, N, R>, Vector<f64, Z, R>) -> Vector<f64, Z, R>,
+    ) -> Result<Self, Error> {
+        let Self {
+            x_hat,
+            covar,
+            prop_covar,
+            noise_covar,
+            config,
+        } = self;
+        let unchecked_state = UncheckedState {
+            x_hat,
+            covar,
+            prop_covar,
+            noise_covar,
+        };
+        let UncheckedState {
+            x_hat,
+            covar,
+            prop_covar,
+            noise_covar,
+        } = unchecked_state.update::<Const<S>>(config.unchecked_config, z, prop_fn, measure_fn)?;
+        Ok(State {
+            x_hat,
+            covar,
+            prop_covar,
+            noise_covar,
+            config,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use nox::{tensor, ArrayRepr, Matrix4};
+    use nox::{nalgebra::Dyn, tensor, ArrayRepr, Matrix3, Matrix4};
 
     use super::*;
 
@@ -222,7 +380,7 @@ mod tests {
     #[test]
     fn test_mean_weights() {
         let config = MerweConfig::<3>::new(1., 1., 2.);
-        assert_eq!(config.lambda, 2.0);
+        assert_eq!(config.unchecked_config.lambda, 2.0);
         let weights = config.mean_weights();
         assert_eq!(weights, tensor![0.4, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]);
     }
@@ -230,7 +388,7 @@ mod tests {
     #[test]
     fn test_mean_covars() {
         let config = MerweConfig::<3>::new(1., 2., 2.);
-        assert_eq!(config.lambda, 2.0);
+        assert_eq!(config.unchecked_config.lambda, 2.0);
         let weights = config.covariance_weights::<7, ArrayRepr>();
         assert_eq!(weights, tensor![2.4, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,]);
     }
