@@ -1,7 +1,8 @@
 //! Defines traits and structures for constructing functions and transforming them into computational graphs.
 use crate::{
-    ArrayTy, Builder, Comp, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem, XlaDim,
+    ArrayTy, Builder, Comp, ConstDim, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem,
 };
+use smallvec::SmallVec;
 use std::{any, marker::PhantomData};
 use xla::ArrayElement;
 
@@ -75,18 +76,20 @@ impl<'b> FromBuilder for &'b Builder {
     }
 }
 
-impl<T: TensorItem, D: Dim> FromBuilder for Tensor<T, D, Op>
+impl<T, D> FromBuilder for Tensor<T, D, Op>
 where
-    T::Dim: Dim,
+    T::Dim: Dim + ConstDim,
     T::Elem: ArrayElement,
+    T: TensorItem,
+    D: Dim + ConstDim,
 {
     type Item<'a> = Self;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
         let mut params = builder.params.borrow_mut();
         let i = params.len() as i64;
-        let mut shape = D::shape();
-        shape.extend_from_slice(T::Dim::shape().as_ref());
+        let mut shape: SmallVec<[i64; 4]> = D::DIM.iter().map(|&x| x as i64).collect();
+        shape.extend(T::Dim::DIM.iter().map(|&x| x as i64));
         let inner = Noxpr::parameter(
             i,
             NoxprTy::ArrayTy(ArrayTy {
