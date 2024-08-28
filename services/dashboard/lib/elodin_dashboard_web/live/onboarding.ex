@@ -194,10 +194,20 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           <%= @title %><%= render_slot(@title_note) %>
         </div>
         <div class="flex w-full items-center justify-between">
-          <.link href={@download_href} class="underline underline-offset-4 text-primary-creame">
+          <.link
+            href={@download_href}
+            target="_blank"
+            rel="noreferrer"
+            class="underline underline-offset-4 text-primary-creame"
+          >
             <%= @download_title %>
           </.link>
-          <.link href={@sha_href} class="underline underline-offset-4 text-primary-creame">
+          <.link
+            href={@sha_href}
+            target="_blank"
+            rel="noreferrer"
+            class="underline underline-offset-4 text-primary-creame"
+          >
             sha256
           </.link>
         </div>
