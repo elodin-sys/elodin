@@ -264,8 +264,8 @@ fn spawn_main_camera(
                 settings: bevy_infinite_grid::InfiniteGridSettings {
                     minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
                     major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                    z_axis_color: Color::Srgba(Srgba::hex("#264FFF").unwrap()),
-                    x_axis_color: Color::Srgba(Srgba::hex("#EE3A43").unwrap()),
+                    z_axis_color: crate::ui::colors::bevy::GREEN,
+                    x_axis_color: crate::ui::colors::bevy::RED,
                     fadeout_distance: 50_000.0,
                     scale: 0.1,
                     ..Default::default()
