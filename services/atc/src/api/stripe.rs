@@ -205,19 +205,21 @@ fn sub_status_active(status: &stripe::SubscriptionStatus) -> bool {
     }
 }
 
-pub fn get_price_id_and_trial(
+pub fn get_subscription_config(
     stripe_plans_config: &StripePlansConfig,
     license_type: elodin_types::api::LicenseType,
-) -> Option<(String, u64)> {
+) -> Option<(String, u64, u32)> {
     match license_type {
         elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => None,
         elodin_types::api::LicenseType::NonCommercial => Some((
             stripe_plans_config.non_commercial_price.to_string(),
             30 * 3600 * 24,
+            60,
         )),
         elodin_types::api::LicenseType::Commercial => Some((
             stripe_plans_config.commercial_price.to_string(),
             5 * 3600 * 24,
+            60000,
         )),
     }
 }
@@ -264,7 +266,7 @@ impl Api {
         )
         .await?;
 
-        let Some((price_id_str, _)) = get_price_id_and_trial(
+        let Some((price_id_str, _, monte_carlo_credit)) = get_subscription_config(
             &self.stripe_plans_config,
             billing_account.seat_license_type.into(),
         ) else {
@@ -273,6 +275,7 @@ impl Api {
                 subscription_end: 0,
                 trial_start: None,
                 trial_end: None,
+                monte_carlo_credit: 0,
             });
         };
 
@@ -297,6 +300,7 @@ impl Api {
             subscription_end: sub.current_period_end,
             trial_start: sub.trial_start,
             trial_end: sub.trial_end,
+            monte_carlo_credit,
         })
     }
 }
@@ -322,6 +326,12 @@ pub struct StripePlanSimple {
 pub struct StripeSubscriptionSimple {
     pub id: String,
     pub plan: StripePlanSimple,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StripeMeterSimple {
+    pub id: String,
+    pub event_name: String,
 }
 
 pub(crate) async fn sync_monte_carlo_billing(
@@ -393,7 +403,6 @@ pub(crate) async fn sync_monte_carlo_billing(
         let mc_run_id_str = mc_run_billing.id.to_string();
 
         let sub_url = format!("{stripe_base_url}/subscriptions/{usage_subscription_id}");
-
         let stripe_subscription = client
             .get(sub_url)
             .basic_auth(stripe_secret_key, Some(""))
@@ -402,12 +411,24 @@ pub(crate) async fn sync_monte_carlo_billing(
             .json::<StripeSubscriptionSimple>()
             .await?;
 
-        tracing::debug!(%stripe_subscription.id, %mc_run_id_str, "received subscription information from stripe");
+        let meter_url = format!(
+            "{stripe_base_url}/billing/meters/{}",
+            stripe_subscription.plan.meter
+        );
+        let stripe_meter = client
+            .get(meter_url)
+            .basic_auth(stripe_secret_key, Some(""))
+            .send()
+            .await?
+            .json::<StripeMeterSimple>()
+            .await?;
+
+        tracing::debug!(%stripe_subscription.id, %stripe_meter.event_name, %mc_run_id_str, "received subscription information from stripe");
 
         let meter_event_url = format!("{stripe_base_url}/billing/meter_events");
 
         let mut meter_event_params = HashMap::new();
-        meter_event_params.insert("event_name", String::from("monte_carlo_minutes"));
+        meter_event_params.insert("event_name", stripe_meter.event_name);
         meter_event_params.insert("payload[value]", runtime_min_str);
         meter_event_params.insert("payload[stripe_customer_id]", mc_run_billing.customer_id);
         meter_event_params.insert(

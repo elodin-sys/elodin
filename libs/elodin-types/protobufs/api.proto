@@ -50,6 +50,7 @@ message CurrentUserResp {
     optional bytes billing_account_id = 6;
     optional StripeSubscriptionStatus subscription_status = 7;
     optional OnboardingData onboarding_data = 8;
+    uint32 monte_carlo_minutes_used = 9;
 }
 
 enum LicenseType {
@@ -232,6 +233,7 @@ message StripeSubscriptionStatus {
     int64 subscription_end = 2;
     optional int64 trial_start = 3;
     optional int64 trial_end = 4;
+    uint32 monte_carlo_credit = 5;
 }
 
 

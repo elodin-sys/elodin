@@ -67,6 +67,8 @@ defmodule Elodin.Types.Api.CurrentUserResp do
     proto3_optional: true,
     type: Elodin.Types.Api.OnboardingData,
     json_name: "onboardingData"
+
+  field :monte_carlo_minutes_used, 9, type: :uint32
 end
 
 defmodule Elodin.Types.Api.CreateUserReq do
@@ -363,6 +365,7 @@ defmodule Elodin.Types.Api.StripeSubscriptionStatus do
   field :subscription_end, 2, type: :int64
   field :trial_start, 3, proto3_optional: true, type: :int64
   field :trial_end, 4, proto3_optional: true, type: :int64
+  field :monte_carlo_credit, 5, type: :uint32
 end
 
 defmodule Elodin.Types.Api.GenerateLicenseReq do

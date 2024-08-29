@@ -62,6 +62,15 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
           []
       end
 
+    subscription = socket.assigns.current_user["subscription_status"]
+    has_subscription = subscription != nil
+
+    subscription_end =
+      if(has_subscription && subscription.subscription_end != nil,
+        do: DateTime.from_unix!(subscription.subscription_end),
+        else: DateTime.utc_now()
+      )
+
     {:ok,
      socket
      |> stream(:grid, grid)
@@ -69,7 +78,13 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
      |> assign(:project, project)
      |> assign(:run, run)
      |> assign(:samples, samples |> Enum.to_list())
-     |> assign(:project_runs, monte_carlo_runs)}
+     |> assign(:project_runs, monte_carlo_runs)
+     |> assign(:monte_carlo_reset_date, subscription_end)
+     |> assign(
+       :monte_carlo_free_credit,
+       if(has_subscription, do: subscription.monte_carlo_credit, else: 0)
+     )
+     |> assign(:monte_carlo_minutes_used, socket.assigns.current_user["monte_carlo_minutes_used"])}
   end
 
   defp spawn_batch_event_task(pid, token, uuid) do
@@ -257,7 +272,14 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
   def render(assigns) do
     ~H"""
     <.navbar_layout current_user={@current_user}>
-      <.sidebar project={@project} project_run={@run.id} project_runs={@project_runs} />
+      <.sidebar
+        project={@project}
+        project_run={@run.id}
+        project_runs={@project_runs}
+        monte_carlo_reset_date={@monte_carlo_reset_date}
+        monte_carlo_free_credit={@monte_carlo_free_credit}
+        monte_carlo_minutes_used={@monte_carlo_minutes_used}
+      />
 
       <div class="flex grow overflow-scroll">
         <div class="flex flex-col min-h-full p-6 bg-black-primary">

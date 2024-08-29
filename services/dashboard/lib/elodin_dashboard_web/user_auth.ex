@@ -35,7 +35,8 @@ defmodule ElodinDashboardWeb.UserAuth do
            "id" => user.id,
            "billing_account_id" => user.billing_account_id,
            "subscription_status" => user.subscription_status,
-           "onboarding_data" => user.onboarding_data
+           "onboarding_data" => user.onboarding_data,
+           "monte_carlo_minutes_used" => user.monte_carlo_minutes_used
          }}
 
       {:error, err} ->

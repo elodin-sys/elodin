@@ -27,7 +27,7 @@ use crate::config::ApiConfig;
 
 mod billing_account;
 mod license;
-mod monte_carlo;
+pub(crate) mod monte_carlo;
 mod sandbox;
 pub(crate) mod stripe;
 mod user;
