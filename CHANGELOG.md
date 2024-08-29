@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Fix inconsistent axes colors in the editor. Now, +X is red, +Y is green, and +Z is blue across both the navigation widget and the grid lines.
 
 ## v0.4.1
 - Add local cache for remote GLB assets to improve model load times and reduce network usage.
