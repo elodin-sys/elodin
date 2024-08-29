@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
             let client = reqwest::Client::new();
 
             loop {
-                tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+                tokio::time::sleep(Duration::from_secs(5 * 60)).await;
 
                 sync_monte_carlo_billing(&client, &db_connection, &stripe_secret_key).await?;
             }

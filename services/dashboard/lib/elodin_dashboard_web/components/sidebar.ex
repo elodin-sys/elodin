@@ -35,6 +35,9 @@ defmodule ElodinDashboardWeb.SidebarComponents do
   attr(:project_run, :string, default: nil)
   attr(:projects, :list, default: [%{value: "project", label: "Project"}])
   attr(:project_runs, :list, default: [])
+  attr(:monte_carlo_minutes_used, :integer, default: 0)
+  attr(:monte_carlo_free_credit, :integer, default: 0)
+  attr(:monte_carlo_reset_date, DateTime, default: nil)
 
   def sidebar(assigns) do
     ~H"""
@@ -69,6 +72,14 @@ defmodule ElodinDashboardWeb.SidebarComponents do
             />
           <% end %>
         </div>
+      </div>
+
+      <div class="mx-4">
+        <.monte_carlo_usage_bar
+          minutes_used={@monte_carlo_minutes_used}
+          free_minutes_total={@monte_carlo_free_credit}
+          refresh_date={@monte_carlo_reset_date}
+        />
       </div>
 
       <div class="m-4">

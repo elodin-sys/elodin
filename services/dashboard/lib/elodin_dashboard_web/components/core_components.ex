@@ -66,6 +66,86 @@ defmodule ElodinDashboardWeb.CoreComponents do
     """
   end
 
+  attr(:minutes_used, :integer, default: 0)
+  attr(:free_minutes_total, :integer, default: 60)
+  attr(:refresh_date, DateTime, default: nil)
+
+  def monte_carlo_usage_bar(assigns) do
+    refresh_date =
+      if(assigns.refresh_date != nil, do: assigns.refresh_date, else: Date.utc_today())
+
+    past_free_allowance = assigns.minutes_used > assigns.free_minutes_total
+
+    assigns =
+      assigns
+      |> assign(
+        :value,
+        if(
+          past_free_allowance,
+          do: assigns.free_minutes_total / assigns.minutes_used,
+          else: assigns.minutes_used / assigns.free_minutes_total
+        )
+      )
+      |> assign(:past_free_allowance, past_free_allowance)
+      |> assign(
+        :refresh_date,
+        Calendar.Strftime.strftime!(refresh_date, "%b %d/%y") |> String.upcase()
+      )
+
+    ~H"""
+    <div class="flex flex-col gap-4 p-4 bg-primary-onyx rounded-lg tracking-elo-mono-medium">
+      <div class="w-full font-mono text-sm">
+        MONTE CARLO COMPUTE
+      </div>
+
+      <hr class="border-primary-onyx-9" />
+
+      <div class="flex flex-col gap-3">
+        <div class="w-full font-mono text-sm text-primary-creame-60">
+          USAGE MINUTES
+        </div>
+
+        <div class="w-full h-1.5 flex">
+          <%= if @value > 0.0 do %>
+            <div
+              class={["h-full rounded bg-mint", if(@value < 1.0, do: "mr-1", else: "")]}
+              style={"width: #{@value * 100.0}%;"}
+            />
+          <% end %>
+
+          <%= if @value < 1.0 do %>
+            <div
+              class={[
+                "h-full rounded",
+                if(@past_free_allowance, do: "bg-yolk", else: "border border-primary-creame-10")
+              ]}
+              style={"width: #{(1.0 - @value) * 100}%;"}
+            />
+          <% end %>
+        </div>
+
+        <div class="w-full font-mono text-sm">
+          <%= @minutes_used %>
+          <span class="text-primary-creame-60">
+            OF <%= @free_minutes_total %> MIN
+          </span>
+        </div>
+      </div>
+
+      <hr class="border-primary-onyx-9" />
+
+      <div class="w-full font-mono text-sm flex justify-between">
+        <span class="text-primary-creame-60">
+          MINUTES REFRESH
+        </span>
+        <span class="text-primary-creame">
+          <%= @refresh_date %>
+        </span>
+      </div>
+    </div>
+    """
+  end
+
   attr(:number, :float, default: 50.0)
   attr(:value, :float, default: 50.0)
   attr(:label, :string, default: "LABEL")

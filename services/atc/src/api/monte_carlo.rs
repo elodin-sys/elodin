@@ -1,10 +1,13 @@
+use crate::error::Error;
 use crate::monte_carlo::{BATCH_SIZE, MAX_SAMPLE_COUNT};
 use crate::{api, error};
 
 use atc_entity::{batches, mc_run};
+use chrono::{DateTime, Months};
 use elodin_types::{api::*, Batch, BATCH_TOPIC};
 use futures::StreamExt;
-use sea_orm::{prelude::*, QueryOrder};
+use sea_orm::{prelude::*, FromQueryResult, JoinType, QueryOrder, QuerySelect};
+use serde::{Deserialize, Serialize};
 
 impl api::Api {
     pub async fn list_monte_carlo_runs(
@@ -218,4 +221,51 @@ impl api::Api {
             .await?;
         Ok(GetMonteCarloResultsResp { download_url })
     }
+}
+
+#[derive(FromQueryResult, Debug, Serialize, Deserialize)]
+pub struct MonteCarloRuntime {
+    pub id: Uuid,
+    pub runtime_sum: i64,
+}
+
+pub(crate) async fn get_monte_carlo_runtime_for_current_month(
+    db_connection: &DatabaseConnection,
+    user_id: Uuid,
+    subscription_end: i64,
+) -> Result<u32, Error> {
+    let billing_period_end = DateTime::from_timestamp_millis(subscription_end * 1000);
+    let billing_period_start =
+        billing_period_end.and_then(|dt| dt.checked_sub_months(Months::new(1)));
+
+    tracing::debug!(%user_id, "requesting monte-carlo runtime, period: {billing_period_start:?}-{billing_period_end:?}");
+
+    let mc_run_billings = atc_entity::MonteCarloRun::find()
+        .select_only()
+        .columns([atc_entity::mc_run::Column::Id])
+        .column_as(atc_entity::batches::Column::Runtime.sum(), "runtime_sum")
+        .filter(atc_entity::mc_run::Column::Billed.eq(true))
+        .filter(atc_entity::mc_run::Column::UserId.eq(user_id))
+        .filter(atc_entity::mc_run::Column::Started.gt(billing_period_start))
+        .filter(atc_entity::mc_run::Column::Started.lte(billing_period_end))
+        .join_rev(
+            JoinType::InnerJoin,
+            atc_entity::Batches::belongs_to(atc_entity::MonteCarloRun)
+                .from(atc_entity::batches::Column::RunId)
+                .to(atc_entity::mc_run::Column::Id)
+                .into(),
+        )
+        .group_by(atc_entity::mc_run::Column::Id)
+        .into_model::<MonteCarloRuntime>()
+        .all(db_connection)
+        .await?;
+
+    let minutes_used: u32 = mc_run_billings
+        .iter()
+        .map(|mc_run| (mc_run.runtime_sum as f64 / 60.0).ceil() as u32)
+        .sum();
+
+    tracing::debug!(%minutes_used, "current billing period");
+
+    Ok(minutes_used)
 }

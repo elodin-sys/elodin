@@ -1,3 +1,4 @@
+use super::monte_carlo::get_monte_carlo_runtime_for_current_month;
 use super::{Api, Claims, CurrentUser, UserInfo};
 use crate::error::Error;
 use atc_entity::events::DbExt;
@@ -19,17 +20,25 @@ impl Api {
             .onboarding_data
             .and_then(|data| serde_json::from_value(data).ok());
 
-        let (billing_account_id, subscription_status) =
+        let (billing_account_id, subscription_status, monte_carlo_minutes_used) =
             if let Some(billing_account_id) = user.billing_account_id {
+                let subscription_status = self
+                    .get_subscription_status(billing_account_id, user.id, &self.db)
+                    .await?;
+                let monte_carlo_minutes_used = get_monte_carlo_runtime_for_current_month(
+                    &self.db,
+                    user.id,
+                    subscription_status.subscription_end,
+                )
+                .await?;
+
                 (
                     Some(billing_account_id.as_bytes().to_vec()),
-                    Some(
-                        self.get_subscription_status(billing_account_id, user.id, &self.db)
-                            .await?,
-                    ),
+                    Some(subscription_status),
+                    monte_carlo_minutes_used,
                 )
             } else {
-                (None, None)
+                (None, None, 0)
             };
 
         Ok(CurrentUserResp {
@@ -41,6 +50,7 @@ impl Api {
             billing_account_id,
             subscription_status,
             onboarding_data,
+            monte_carlo_minutes_used,
         })
     }
 
