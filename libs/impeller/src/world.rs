@@ -237,6 +237,13 @@ impl World {
         self.history.push(self.host.clone());
         self.tick += 1;
     }
+
+    pub fn ensure_history(&mut self) {
+        if self.history.is_empty() {
+            // Push the initial state into history
+            self.history.push(self.host.clone());
+        }
+    }
 }
 
 impl Clone for World {

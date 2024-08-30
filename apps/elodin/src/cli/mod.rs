@@ -78,10 +78,10 @@ impl Cli {
             println!("You can log in using this command:");
             println!("    elodin login\n");
 
-            println!("Please be aware that you will need the Elodin Python SDK, which can be installed using `pip`:");
+            println!("Ensure the Elodin Python SDK is installed in your preferred Python virtual environment:");
             println!("    pip install -U elodin\n");
 
-            println!("For more information, you can always take a look at our docs https://docs.elodin.systems");
+            println!("Check out our docs (at https://docs.elodin.systems) for more information.");
             std::process::exit(0);
         }
 
