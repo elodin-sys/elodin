@@ -96,8 +96,16 @@ pub trait Repr {
         <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
         ConcatDim<D1, D2>: Dim;
 
-    /// Concatenates multiple tensors along the first dimension
+    /// Concatenates multiple tensors along the specified dimension
     fn concat_many<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+        args: I,
+        dim: usize,
+    ) -> Self::Inner<T1, D2>
+    where
+        I::IntoIter: ExactSizeIterator;
+
+    /// Stacks multiple tensors along specified dimension, creating a new dimension if neccesary
+    fn stack<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
         args: I,
         dim: usize,
     ) -> Self::Inner<T1, D2>
@@ -185,7 +193,7 @@ pub trait Repr {
 
     fn rows_iter<T1: Elem, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
-    ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+    ) -> impl ExactSizeIterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
     where
         ShapeConstraint: DimRow<D1>;
 

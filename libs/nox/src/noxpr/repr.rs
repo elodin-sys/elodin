@@ -110,6 +110,16 @@ macro_rules! dummy_impl_repr {
                 todo!()
             }
 
+            fn stack<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+                _args: I,
+                _dim: usize,
+            ) -> Self::Inner<T1, D2>
+            where
+                I::IntoIter: ExactSizeIterator,
+            {
+                todo!()
+            }
+
             fn broadcast<D1: Dim, D2: Dim, T1: Field>(
                 _arg: &Self::Inner<T1, D1>,
                 _dim: impl AsMut<[usize]>,
@@ -250,7 +260,7 @@ macro_rules! dummy_impl_repr {
 
             fn rows_iter<T1: Elem, D1: Dim>(
                 _arg: &Self::Inner<T1, D1>,
-            ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+            ) -> impl ExactSizeIterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
             where
                 ShapeConstraint: DimRow<D1>,
             {
@@ -282,6 +292,45 @@ macro_rules! dummy_impl_repr {
 dummy_impl_repr!(Buffer, xla::PjRtBuffer);
 dummy_impl_repr!(Literal, xla::Literal);
 
+impl Op {
+    fn cobroadcast<T: Elem, D1: Dim, D2: Dim>(left: &Noxpr, right: &Noxpr) -> (Noxpr, Noxpr) {
+        let d1 = Self::shape::<T, D1>(left);
+        let d2 = Self::shape::<T, D2>(right);
+
+        let broadcast_dims = match d1.as_ref().len().cmp(&d2.as_ref().len()) {
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                let mut broadcast_dims = d2.clone();
+                if !crate::cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
+                    panic!(
+                        "unbroadcastable dims {:?} {:?}",
+                        broadcast_dims.as_mut(),
+                        d2.as_ref()
+                    );
+                }
+                broadcast_dims
+            }
+            std::cmp::Ordering::Greater => {
+                let mut broadcast_dims = d1.clone();
+                if !crate::cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
+                    panic!(
+                        "unbroadcastable dims {:?} {:?}",
+                        broadcast_dims.as_mut(),
+                        d2.as_ref()
+                    );
+                }
+                broadcast_dims
+            }
+        };
+        let broadcast_dims: SmallVec<[i64; 4]> =
+            broadcast_dims.into_iter().map(|x| x as i64).collect();
+
+        (
+            left.clone().broadcast_to(broadcast_dims.clone()),
+            right.clone().broadcast_to(broadcast_dims),
+        )
+    }
+}
+
 impl Repr for Op {
     type Inner<T: Elem, D: Dim> = Noxpr;
 
@@ -296,7 +345,8 @@ impl Repr for Op {
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        Noxpr::add(left.clone(), right.clone())
+        let (left, right) = Self::cobroadcast::<T, D1, D2>(left, right);
+        Noxpr::add(left, right)
     }
 
     fn sub<T, D1, D2>(
@@ -310,7 +360,9 @@ impl Repr for Op {
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        Noxpr::sub(left.clone(), right.clone())
+        let (left, right) = Self::cobroadcast::<T, D1, D2>(left, right);
+
+        Noxpr::sub(left, right)
     }
 
     fn mul<T, D1, D2>(
@@ -324,7 +376,8 @@ impl Repr for Op {
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        Noxpr::mul(left.clone(), right.clone())
+        let (left, right) = Self::cobroadcast::<T, D1, D2>(left, right);
+        Noxpr::mul(left, right)
     }
 
     fn div<T, D1, D2>(
@@ -338,7 +391,8 @@ impl Repr for Op {
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
-        Noxpr::div(left.clone(), right.clone())
+        let (left, right) = Self::cobroadcast::<T, D1, D2>(left, right);
+        Noxpr::div(left, right)
     }
 
     fn dot<T, D1, D2>(
@@ -363,6 +417,26 @@ impl Repr for Op {
         I::IntoIter: ExactSizeIterator,
     {
         Noxpr::concat_in_dim(args.into_iter().collect(), dim)
+    }
+
+    fn stack<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+        args: I,
+        dim: usize,
+    ) -> Self::Inner<T1, D2>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        Noxpr::concat_in_dim(
+            args.into_iter()
+                .map(|a| {
+                    let mut new_shape = a.shape().unwrap();
+                    new_shape.insert(dim, 1);
+                    a.broadcast_to(new_shape)
+                })
+                .collect(),
+            dim,
+        )
+        //Noxpr::concat_in_dim(args.into_iter().collect(), dim)
     }
 
     fn get<T1: Field, D1: Dim + DimGet>(
@@ -398,7 +472,7 @@ impl Repr for Op {
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim,
     {
         let dim = dim.as_ref().iter().map(|&x| x as i64).collect();
-        arg.clone().broadcast(dim)
+        arg.clone().broadcast_to(dim)
     }
 
     fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
@@ -564,9 +638,10 @@ impl Repr for Op {
             },
             1,
         );
-        let zero = T1::zero::<Op>().inner.broadcast(shape.clone());
+        let zero = T1::zero::<Op>().inner.broadcast_to(shape.clone());
         let diag = diag.broadcast_in_dim(shape.clone(), smallvec![0]);
-        a.eq(b).select(diag, zero)
+        let case = a.eq(b);
+        case.select(diag, zero)
     }
 
     fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
@@ -635,21 +710,23 @@ impl Repr for Op {
 
     fn rows_iter<T1: Elem, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
-    ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+    ) -> impl ExactSizeIterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
     where
         ShapeConstraint: DimRow<D1>,
     {
         let shape = arg.shape().unwrap();
-        let strides = shape
-            .iter()
+        let strides = std::iter::once(1)
+            .chain(shape.iter().skip(1).copied())
             .rev()
-            .scan(1, |acc, &x| {
+            .scan(1, |acc, x| {
                 let res = *acc;
                 *acc *= x;
                 Some(res)
             })
             .collect::<SmallVec<[i64; 4]>>();
-        (0..shape[0]).map(move |i| {
+        let row_shape: SmallVec<[i64; 4]> = shape.iter().skip(1).copied().collect();
+        (0..shape[0] as usize).map(move |i| {
+            let i = i as i64;
             let mut start = shape.clone();
             let mut stop = shape.clone();
 
@@ -657,8 +734,10 @@ impl Repr for Op {
             for x in &mut start[1..] {
                 *x = 0;
             }
-            stop[0] = i;
-            arg.clone().slice(start, stop, strides.clone())
+            stop[0] = i + 1;
+            arg.clone()
+                .slice(start, stop, strides.clone())
+                .reshape(row_shape.clone())
         })
     }
 
