@@ -9,8 +9,6 @@ import filter
 import params
 from config import Config
 
-enable_sensor_noise = True
-
 # sensors
 SensorTick = ty.Annotated[jax.Array, el.Component("sensor_tick", el.ComponentType.U64)]
 Gyro = ty.Annotated[
@@ -157,7 +155,7 @@ def gyro(
 ) -> tuple[GyroLPFDelay, Gyro]:
     dt = Config.GLOBAL.fast_loop_time_step
     body_v = p.angular().inverse() @ v.angular()
-    if enable_sensor_noise:
+    if Config.GLOBAL.sensor_noise:
         body_v = gyro_noise.sample(body_v, bias, tick)
     lpf = filter.BiquadLPF(params.INS_GYRO_FILTER, 1.0 / dt)
     new_delay = lpf.apply(delay, body_v)
@@ -174,7 +172,7 @@ def accel(
 ) -> tuple[AccelLPFDelay, Accel]:
     dt = Config.GLOBAL.fast_loop_time_step
     body_a = p.angular().inverse() @ (a.linear() / 9.81 + jnp.array([0, 0, 1]))
-    if enable_sensor_noise:
+    if Config.GLOBAL.sensor_noise:
         body_a = accel_noise.sample(body_a, bias, tick)
     lpf = filter.BiquadLPF(params.INS_ACCEL_FILTER, 1.0 / dt)
     new_delay = lpf.apply(delay, body_a)
@@ -191,9 +189,8 @@ def mag(
     dt = Config.GLOBAL.fast_loop_time_step
     data_rate = 1.0 / 100.0
     tick_rate = round(data_rate / dt)
-    assert tick_rate == 9
     body_mag_ref = p.angular().inverse() @ jnp.array([0.0, 1.0, 0.0])
-    if enable_sensor_noise:
+    if Config.GLOBAL.sensor_noise:
         body_mag_ref = mag_noise.sample(body_mag_ref, bias, tick)
     return jax.lax.cond(
         tick % tick_rate == 0,
