@@ -97,6 +97,12 @@ impl Cli {
             max_duration,
             metadata: serde_json::to_string(&metadata)?,
         };
+
+        let artifacts_file = tokio::task::spawn_blocking(|| prepare_artifacts(file))
+            .await
+            .unwrap()?;
+        let artifacts_file = tokio::fs::File::from_std(artifacts_file);
+
         let mut client = self.client().await?;
         let create_res = client
             .create_monte_carlo_run(create_req)
@@ -105,10 +111,6 @@ impl Cli {
         let id = uuid::Uuid::from_slice(&create_res.id)?;
         let upload_url = create_res.upload_url;
 
-        let artifacts_file = tokio::task::spawn_blocking(|| prepare_artifacts(file))
-            .await
-            .unwrap()?;
-        let artifacts_file = tokio::fs::File::from_std(artifacts_file);
         reqwest::Client::new()
             .put(&upload_url)
             .body(artifacts_file)
@@ -185,12 +187,12 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     let context_dir = file.parent().unwrap();
 
     // copy the context directory to the temp dir:
-    let dir_size = get_dir_size(context_dir)?;
-    if dir_size > 10_000_000 {
-        anyhow::bail!("Project folder size is too big ({} bytes)", dir_size);
-    }
-
-    copy_dir::copy_dir(context_dir, tmp_dir.path().join("context"))?;
+    copy_source_to_dest(
+        context_dir,
+        &tmp_dir.path().join("context"),
+        10_000,     // 10,000 file limit
+        10_000_000, // 10MB size limit
+    )?;
 
     let archive_file = tempfile::tempfile()?;
     let buf = std::io::BufWriter::new(archive_file);
@@ -205,24 +207,36 @@ fn prepare_artifacts(file: PathBuf) -> anyhow::Result<std::fs::File> {
     Ok(archive_file)
 }
 
-pub fn get_dir_size(path: &Path) -> anyhow::Result<u64> {
-    let path_metadata = path.symlink_metadata()?;
-    let mut size_in_bytes = 0;
-
-    if path_metadata.is_dir() {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let entry_metadata = entry.metadata()?;
-
-            if entry_metadata.is_dir() {
-                size_in_bytes += get_dir_size(&entry.path())?;
-            } else {
-                size_in_bytes += entry_metadata.len();
-            }
+fn copy_source_to_dest(
+    src: &Path,
+    dst: &Path,
+    mut file_limit: usize,
+    mut size_limit: u64,
+) -> anyhow::Result<()> {
+    fs::create_dir(dst)?;
+    for entry in ignore::Walk::new(src) {
+        if file_limit == 0 {
+            anyhow::bail!("File limit exceeded");
         }
-    } else {
-        size_in_bytes = path_metadata.len();
-    }
+        if size_limit == 0 {
+            anyhow::bail!("Size limit exceeded");
+        }
 
-    Ok(size_in_bytes)
+        let path = entry?.into_path();
+        let relative_path = path.strip_prefix(src)?;
+        let dst_path = dst.join(relative_path);
+
+        if path.is_dir() {
+            if !dst_path.exists() {
+                fs::create_dir(&dst_path)?;
+            }
+            continue;
+        } else if path.is_file() {
+            let file_size = path.metadata()?.len();
+            fs::copy(path, dst_path)?;
+            file_limit -= 1;
+            size_limit = size_limit.saturating_sub(file_size);
+        }
+    }
+    Ok(())
 }

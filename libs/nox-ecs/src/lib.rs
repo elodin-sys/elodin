@@ -268,10 +268,8 @@ where
 
     pub fn build(mut self) -> Result<WorldExec, Error> {
         self.world.add_globals();
-        let tick_exec = self.pipe.build(&mut self.world)?;
-        let startup_exec = increment_sim_tick
-            .pipe(self.startup_sys)
-            .build(&mut self.world)?;
+        let tick_exec = increment_sim_tick.pipe(self.pipe).build(&mut self.world)?;
+        let startup_exec = self.startup_sys.build(&mut self.world)?;
         let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
         Ok(world_exec)
     }
@@ -526,7 +524,9 @@ impl WorldExec<Compiled> {
         self.profiler.copy_to_client.observe(start);
         if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.run(&mut self.client_buffers)?;
+            self.copy_to_host()?;
         }
+        self.world.ensure_history();
         self.tick_exec.run(&mut self.client_buffers)?;
         self.profiler.execute_buffers.observe(start);
         self.copy_to_host()?;
