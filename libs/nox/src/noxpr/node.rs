@@ -8,6 +8,7 @@ use std::{
 
 use crate::Error;
 use itertools::Itertools;
+use pyo3::types::PyAnyMethods;
 use smallvec::{smallvec, SmallVec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
@@ -642,6 +643,14 @@ impl Noxpr {
         Self::new(NoxprNode::Broadcast(Broadcast { expr: self, sizes }))
     }
 
+    /// Creates a broadcasted expression.
+    pub fn broadcast_to(self, shape: SmallVec<[i64; 4]>) -> Self {
+        let arr_shape = self.shape().unwrap();
+        let n_lead = shape.len() - arr_shape.len();
+        let broadcast_dims = (n_lead..shape.len()).map(|x| x as i64).collect();
+        self.broadcast_in_dim(shape, broadcast_dims)
+    }
+
     /// Creates a transposed `Noxpr`.
     pub fn transpose(self, permuation: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Transpose(Transpose {
@@ -1170,7 +1179,9 @@ impl Noxpr {
             NoxprNode::Scan(s) => s.initial_state.shape(),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
-                let shape = o.getattr(py, "shape").ok()?.extract::<Vec<i64>>(py).ok()?;
+                let jnp = py.import_bound("jax.numpy").unwrap();
+                let o = jnp.call_method1("array", (o,)).ok()?;
+                let shape = o.getattr("shape").ok()?.extract::<Vec<i64>>().ok()?;
                 Some(SmallVec::from_vec(shape))
             }),
             NoxprNode::Convert(c) => c.arg.shape(),
@@ -1236,7 +1247,7 @@ impl Noxpr {
             NoxprNode::Tuple(_) => "Tuple",
             NoxprNode::GetTupleElement(_) => "GetTupleElement",
             NoxprNode::Constant(_) => "Constant",
-            NoxprNode::Iota(_) => todo!(),
+            NoxprNode::Iota(_) => "Iota",
             NoxprNode::Add(_) => "Add",
             NoxprNode::Sub(_) => "Sub",
             NoxprNode::Mul(_) => "Mul",

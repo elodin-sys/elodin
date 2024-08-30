@@ -618,7 +618,7 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
         }
     }
 
-    pub fn rows_iter(&self) -> impl Iterator<Item = Tensor<T1, RowDim<D1>, R>> + '_
+    pub fn rows_iter(&self) -> impl ExactSizeIterator<Item = Tensor<T1, RowDim<D1>, R>> + '_
     where
         ShapeConstraint: DimRow<D1>,
     {
@@ -671,10 +671,20 @@ impl<T1: Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
         D2: Dim,
     {
         let inner = R::concat_many(args.into_iter().map(|t| t.inner), dim);
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
+        Tensor::from_inner(inner)
+    }
+
+    pub fn stack<D2, I: IntoIterator<Item = Tensor<T1, D1, R>>>(
+        args: I,
+        dim: usize,
+    ) -> Tensor<T1, D2, R>
+    where
+        I::IntoIter: ExactSizeIterator,
+        D1: Dim,
+        D2: Dim,
+    {
+        let inner = R::stack(args.into_iter().map(|t| t.inner), dim);
+        Tensor::from_inner(inner)
     }
 }
 
@@ -959,8 +969,11 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
     {
         let a_shape = R::shape(&self.inner);
         let b_shape = R::shape(&other.inner);
-        let a_broadcast_shape = [b_shape.as_ref()[0], a_shape.as_ref()[0]];
-        let b_broadcast_shape = [a_shape.as_ref()[0], b_shape.as_ref()[0]];
+        let a_dim = a_shape.as_ref().first().copied().unwrap_or(1);
+        let b_dim = b_shape.as_ref().first().copied().unwrap_or(1);
+
+        let a_broadcast_shape = [b_dim, a_dim];
+        let b_broadcast_shape = [a_dim, b_dim];
         let a: Tensor<T, (D2, D1), R> = self.clone().broadcast_with_shape(a_broadcast_shape);
         let b: Tensor<T, (D1, D2), R> = other.clone().broadcast_with_shape(b_broadcast_shape);
         a.transpose() * b
