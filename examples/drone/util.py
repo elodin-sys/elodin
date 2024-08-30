@@ -1,19 +1,20 @@
 import jax
 from jax import numpy as jnp
+from jax.typing import ArrayLike
 import elodin as el
+import numpy as np
+
+from numpy._typing import NDArray
 
 
-def motor_positions(angles: jax.Array, distance: float) -> jax.Array:
+def motor_positions(
+    angles: NDArray[np.float64], distance: float
+) -> NDArray[np.float64]:
     # for each angle, calculate the x and y position of the motor
     x = jnp.cos(angles)
     y = jnp.sin(angles)
     z = jnp.zeros_like(angles)
-    return jnp.stack([x, y, z], axis=-1) * distance
-
-
-def motor_torque_axes(motor_positions: jax.Array) -> jax.Array:
-    thrust_dir = jnp.array([0.0, 0.0, 1.0])
-    return jnp.cross(motor_positions, thrust_dir)
+    return np.stack([x, y, z], axis=-1) * distance
 
 
 # Closeness of two quaternions in terms of the angle of rotation
@@ -22,7 +23,7 @@ def motor_torque_axes(motor_positions: jax.Array) -> jax.Array:
 # Distance function is "Inner Product of Unit Quaternions"
 # from "Metrics for 3D Rotations: Comparison and Analysis"" by Du Q. Huynh
 # Also: https://math.stackexchange.com/a/90098
-def quat_dist(q1: el.Quaternion, q2: el.Quaternion) -> jnp.float64:
+def quat_dist(q1: el.Quaternion, q2: el.Quaternion) -> jax.Array:
     return 2 * jnp.arccos(jnp.abs(jnp.dot(q1.vector(), q2.vector())))
 
 
@@ -82,8 +83,8 @@ def quat_from_axis_angle(v: jax.Array) -> el.Quaternion:
 
 # Convert Euler angles in 3-2-1 sequence (roll, pitch, yaw) to a quaternion.
 # https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles#Euler_angles_(in_3-2-1_sequence)_to_quaternion_conversion
-def euler_to_quat(euler: jax.Array) -> el.Quaternion:
-    roll, pitch, yaw = euler
+def euler_to_quat(euler: ArrayLike) -> el.Quaternion:
+    roll, pitch, yaw = jnp.array(euler)
     cy = jnp.cos(yaw * 0.5)
     sy = jnp.sin(yaw * 0.5)
     cp = jnp.cos(pitch * 0.5)
