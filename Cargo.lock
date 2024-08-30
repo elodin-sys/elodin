@@ -6921,6 +6921,7 @@ dependencies = [
  "postcard",
  "pyo3",
  "pyo3-polars",
+ "roci-adcs",
  "serde_json",
  "tempfile",
  "thiserror",

@@ -29,6 +29,7 @@ mod query;
 mod sim_runner;
 mod spatial;
 mod system;
+mod ukf;
 mod well_known;
 mod world_builder;
 
@@ -185,5 +186,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
+    ukf::register(m)?;
     Ok(())
 }
