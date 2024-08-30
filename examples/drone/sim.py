@@ -3,7 +3,6 @@ from dataclasses import field, dataclass
 import jax
 import typing as ty
 import jax.numpy as jnp
-from functools import partial
 
 import params
 import sensors
@@ -11,19 +10,6 @@ import mekf
 import control
 import motors
 from config import Config
-
-# The thrust + current information is from https://www.rcgroups.com/forums/showthread.php?2376436-Multistar-Elite-2216-920kv-3S-and-4S-Prop-Data.
-# The KV rating is from the product page: http://www.hexsoon.com/en/product/product-57-913.html.
-# Most of this data is kind of garbage, but it's a start.
-KV = 920.0  # Motor KV rating
-opt_current = 1.36  # Current at optimal thrust efficiency (A)
-opt_thrust = 155.0 * 9.81 / 1000  # Thrust at optimal thrust efficiency (N)
-max_thrust = 990.0 * 9.81 / 1000  # Maximum thrust (N)
-
-# Calculate torque-thrust ratio at optimal thrust efficiency
-KT = 60.0 / (2 * jnp.pi * KV)  # Motor torque coefficient
-opt_torque = KT * opt_current  # Torque at optimal thrust efficiency
-torque_ratio = opt_torque / opt_thrust  # Torque-thrust ratio
 
 
 BodyThrust = ty.Annotated[
@@ -72,23 +58,25 @@ class Drone(el.Archetype):
 
 
 @el.map
-def motor_thrust_response(pwm: motors.MotorPwm, prev_thrust: Thrust) -> Thrust:
-    poly_coefs = jnp.array([params.MOT_THST_EXPO, 1 - params.MOT_THST_EXPO, 0.0])
-    remove_thrust_curve_scaling = partial(jnp.polyval, poly_coefs)
-    thrust = remove_thrust_curve_scaling(pwm / motors.MAX_PWM_THROTTLE) * max_thrust
+def motor_thrust_response(
+    pwm: motors.MotorPwm, prev_thrust: Thrust, prev_torque: Torque
+) -> tuple[Thrust, Torque]:
     dt = Config.GLOBAL.fast_loop_time_step
+    pwm_ref, thrust_ref, torque_ref = Config.GLOBAL.thrust_curve()
+    _, _, yaw_factor, _ = Config.GLOBAL.frame.motor_matrix
+
+    thrust = jnp.interp(pwm, pwm_ref, thrust_ref)
+    torque = jnp.interp(pwm, pwm_ref, torque_ref) * yaw_factor
+
     alpha = dt / (dt + params.MOT_TIME_CONST)
-    return prev_thrust + alpha * (thrust - prev_thrust)
-
-
-@el.map
-def motor_torque(thrust: Thrust) -> Torque:
-    return thrust * torque_ratio
+    thrust = prev_thrust + alpha * (thrust - prev_thrust)
+    torque = prev_torque + alpha * (torque - prev_torque)
+    return thrust, torque
 
 
 @el.map
 def body_thrust(thrust: Thrust, torque: Torque) -> BodyThrust:
-    yaw_torque_sum = jnp.sum(torque * Config.GLOBAL.motor_spin_dir)
+    yaw_torque_sum = jnp.sum(torque)
     body_thrust = el.SpatialForce(linear=jnp.array([0.0, 0.0, jnp.sum(thrust)]))
     yaw_torque = el.SpatialForce(torque=jnp.array([0.0, 0.0, yaw_torque_sum]))
     # additional torque from differential thrust:
@@ -148,24 +136,53 @@ def world() -> el.World:
                     pos=[-0.5, -3.0, 0.5],
                     looking_at=[0.0, 0.0, 0.5],
                 ),
-                el.Panel.graph(el.GraphEntity(drone, mekf.AttEstError)),
             ),
             el.Panel.vsplit(
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorInput)),
-                el.Panel.graph(el.GraphEntity(drone, Thrust)),
+                el.Panel.graph(el.GraphEntity(drone, control.AngleDesired)),
                 el.Panel.graph(
                     el.GraphEntity(
                         drone,
-                        control.AngVelSetpoint,
-                        control.EulerRateTarget,
-                        sensors.Gyro,
-                    ),
-                    name="Drone: rate_control",
+                        *el.Component.index(el.WorldPos)[:4],
+                        control.AttitudeTarget,
+                    )
                 ),
+                el.Panel.graph(el.GraphEntity(drone, control.AngVelSetpoint)),
             ),
             active=True,
         ),
         name="Viewport",
+    )
+    world.spawn(
+        el.Panel.hsplit(
+            el.Panel.vsplit(
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorInput)),
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorThrust)),
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorActuator)),
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorPwm)),
+            ),
+            el.Panel.vsplit(
+                el.Panel.graph(el.GraphEntity(drone, Thrust)),
+            ),
+        ),
+        name="Motor Panel",
+    )
+    world.spawn(
+        el.Panel.hsplit(
+            el.Panel.vsplit(
+                el.Panel.graph(el.GraphEntity(drone, control.RatePIDState)),
+            ),
+            el.Panel.vsplit(
+                el.Panel.graph(
+                    el.GraphEntity(
+                        drone,
+                        sensors.Gyro,
+                        control.AngVelSetpoint,
+                    ),
+                    name="Drone: rate_control",
+                ),
+            ),
+        ),
+        name="Rate Control Panel",
     )
     return world
 
@@ -179,23 +196,14 @@ def inner_loop(run_count: int, system: el.System) -> el.System:
 
 def system() -> el.System:
     non_effectors = (
-        mekf.update_filter
-        | mekf.att_est_error
-        | control.attitude_flight_plan
+        control.attitude_flight_plan
         | control.update_target_attitude
         | control.attitude_control
         | control.rate_pid_state
         | control.rate_control
         | motors.output
     )
-    effectors = (
-        gravity
-        | drag
-        | motor_thrust_response
-        | motor_torque
-        | body_thrust
-        | apply_body_forces
-    )
+    effectors = gravity | drag | motor_thrust_response | body_thrust | apply_body_forces
 
     INNER_RUN_COUNT = round(Config.GLOBAL.dt / Config.GLOBAL.fast_loop_time_step)
     assert INNER_RUN_COUNT == 3
