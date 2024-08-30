@@ -23,13 +23,14 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
 
 impl World {
     pub fn polars(&self) -> Result<PolarsWorld, Error> {
+        let host = self.history.is_empty().then_some(&self.host);
         PolarsWorld::new(
             &self.component_map,
             self.run_time_step.0,
             self.sim_time_step.0,
             &self.entity_ids,
             &self.history,
-            &self.host,
+            host,
             self.output_time_step.clone().map(|d| d.time_step),
             self.max_tick,
         )
@@ -99,7 +100,7 @@ impl PolarsWorld {
         sim_time_step: Duration,
         entity_ids: &ustr::UstrMap<Vec<u8>>,
         history: &[Buffers],
-        host: &Buffers,
+        host: Option<&Buffers>,
         output_time_step: Option<Duration>,
         max_ticks: u64,
     ) -> Result<Self, Error> {
@@ -113,7 +114,7 @@ impl PolarsWorld {
                 archetype_metadata
             },
         );
-        let ticks = history.len() + 1;
+        let ticks = history.len() + host.iter().len();
         let mut archetypes = ustr::UstrMap::default();
         for (archetype_name, components) in archetype_metadata.iter() {
             let entity_buf = &entity_ids[archetype_name];
@@ -131,7 +132,7 @@ impl PolarsWorld {
                     let component_id = metadata.component_id();
                     let buf = history
                         .iter()
-                        .chain(std::iter::once(host))
+                        .chain(host.into_iter())
                         .map(|buffers| buffers[&component_id].as_slice())
                         .collect::<Vec<&[u8]>>()
                         .concat();
@@ -161,7 +162,12 @@ impl PolarsWorld {
         let keys = vec![EntityId::NAME, "tick"];
         tables
             .try_fold(init, |agg, df| {
-                agg.join(df, &keys, &keys, JoinArgs::new(JoinType::Full))
+                agg.join(
+                    df,
+                    &keys,
+                    &keys,
+                    JoinArgs::new(JoinType::Full).with_coalesce(JoinCoalesce::CoalesceColumns),
+                )
             })
             .map_err(Error::from)
     }
