@@ -1047,7 +1047,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         out
     }
 
-    pub fn rows_iter(&self) -> impl Iterator<Item = Array<T1, RowDim<D1>>> + '_
+    pub fn rows_iter(&self) -> impl ExactSizeIterator<Item = Array<T1, RowDim<D1>>> + '_
     where
         ShapeConstraint: DimRow<D1>,
     {
@@ -1261,7 +1261,7 @@ impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
     type ElemDim = D2;
 }
 
-fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
+pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
         if *output == *other || *other == 1 {
             continue;

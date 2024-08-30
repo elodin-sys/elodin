@@ -85,6 +85,16 @@ impl Repr for ArrayRepr {
         Array::concat_many(args, dim).unwrap()
     }
 
+    fn stack<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
+        args: I,
+        dim: usize,
+    ) -> Self::Inner<T1, D2>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        Array::concat_many(args, dim).unwrap()
+    }
+
     fn get<T1: Field, D1: Dim + DimGet>(
         arg: &Self::Inner<T1, D1>,
         index: D1::Index,
@@ -239,7 +249,7 @@ impl Repr for ArrayRepr {
 
     fn rows_iter<T1: Elem, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
-    ) -> impl Iterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
+    ) -> impl ExactSizeIterator<Item = Self::Inner<T1, RowDim<D1>>> + '_
     where
         ShapeConstraint: DimRow<D1>,
     {

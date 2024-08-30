@@ -78,7 +78,7 @@ where
     (N, S): Dim,
     R: Repr,
 {
-    let points = sigma_points.map(prop_fn);
+    let points = Tensor::stack(sigma_points.rows_iter().map(prop_fn), 0);
     let (x_hat, covar) = unscented_transform::<N, S, R>(&points, mean_weights, covar_weights);
     let covar = covar + prop_covar;
     (points, x_hat, covar)
@@ -111,7 +111,12 @@ where
     (S, Z): Dim,
     (Z, S): Dim,
 {
-    let points = x_points.map(|point| measure_fn(point, z.clone()));
+    let points = Tensor::stack(
+        x_points
+            .rows_iter()
+            .map(|point| measure_fn(point, z.clone())),
+        0,
+    );
     let (z_hat, measure_covar) = unscented_transform(&points, mean_weights, covar_weights);
     let measure_covar = measure_covar + noise_covar;
     (points, z_hat, measure_covar)
@@ -162,7 +167,7 @@ impl UncheckedMerweConfig {
         let u = ((self.n as f64 + lambda) * sigma)
             .try_cholesky()?
             .transpose();
-        Ok(Tensor::concat_in_dim(
+        Ok(Tensor::stack(
             (0..s).map(move |i| match i {
                 0 => x.clone(),
                 i if (1..=self.n).contains(&i) => &x + u.row(i - 1),
@@ -178,7 +183,7 @@ impl UncheckedMerweConfig {
         let lambda = self.lambda;
         let w_i = self.shared_weight();
         let w_0: Scalar<f64, R> = (lambda / (n + lambda)).into();
-        Tensor::concat_in_dim(
+        Tensor::stack(
             (0..s).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }),
             0,
         )
@@ -196,7 +201,7 @@ impl UncheckedMerweConfig {
         let n = *n as f64;
         let w_i = self.shared_weight();
         let w_0: Scalar<f64, R> = (lambda / (n + lambda) + (1. - alpha.powi(2) + beta)).into();
-        Tensor::concat_in_dim(
+        Tensor::stack(
             (0..s).map(|i| if i == 0 { w_0.clone() } else { w_i.clone() }),
             0,
         )
@@ -281,9 +286,10 @@ where
         (N, Z): Dim,
         (Z, N): Dim,
     {
-        let sigma_points = config.sigma_points::<N, S, R>(self.x_hat, self.covar)?;
+        let sigma_points =
+            config.sigma_points::<N, S, R>(self.x_hat.clone(), self.covar.clone())?;
         let mean_weights = config.mean_weights::<S, R>();
-        let covar_weights = config.covariance_weights::<S, _>();
+        let covar_weights = config.covariance_weights::<S, R>();
         let (points_x, x_hat, covar) = predict(
             sigma_points,
             prop_fn,
@@ -305,6 +311,7 @@ where
         let y = z - z_hat;
         self.x_hat = x_hat + kalman_gain.dot(&y);
         self.covar = covar - kalman_gain.dot(&z_covar.dot(&kalman_gain.transpose()));
+
         Ok(self)
     }
 }

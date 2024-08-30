@@ -83,10 +83,13 @@ impl JaxTracer {
                 Python::with_gil(|py| PyTuple::new_bound(py, elems).into_py(py))
             }
             NoxprNode::Iota(i) => Python::with_gil(|py| {
-                let size = i.shape.shape[i.dim];
                 let dtype = dtype(&i.shape.element_type)?;
                 self.lax
-                    .call_method1(py, "iota", (dtype, size))
+                    .call_method1(
+                        py,
+                        "broadcasted_iota",
+                        (dtype, i.shape.shape.to_vec(), i.dim),
+                    )
                     .map_err(Error::PyO3)
             })?,
             NoxprNode::Add(op) => self.visit_binary_lax(op, "add")?,
@@ -185,12 +188,7 @@ impl JaxTracer {
                         .call_method1(
                             py,
                             "slice",
-                            (
-                                expr,
-                                s.start_indices.to_vec(),
-                                s.stop_indices.to_vec(),
-                                s.strides.to_vec(),
-                            ),
+                            (expr, s.start_indices.to_vec(), s.stop_indices.to_vec()),
                         )
                         .map_err(Error::PyO3)
                 })?
