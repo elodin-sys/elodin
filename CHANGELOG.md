@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+
+## v0.5.0
 - **(fix)** Fix inconsistent axes colors in the editor. Now, +X is red, +Y is green, and +Z is blue across both the navigation widget and the grid lines.
 - Respect `.gitignore` when uploading simulation artifacts for monte carlo runs. Also, ignore hidden files and directories.
 
