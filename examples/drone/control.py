@@ -13,22 +13,6 @@ from config import Config
 
 AC_ATTITUDE_THRUST_ERROR_ANGLE = 30.0 * jnp.pi / 180.0  # 30 degrees
 
-rate_pid_gains = jnp.array(
-    [
-        [params.ATC_RAT_RLL_P, params.ATC_RAT_PIT_P, params.ATC_RAT_YAW_P],  # P
-        [params.ATC_RAT_RLL_I, params.ATC_RAT_PIT_I, params.ATC_RAT_YAW_I],  # I
-        [params.ATC_RAT_RLL_D, params.ATC_RAT_PIT_D, params.ATC_RAT_YAW_D],  # D
-    ]
-)  # ruff: nofmt
-
-angle_p_gains = jnp.array(
-    [
-        params.ATC_ANG_RLL_P,
-        params.ATC_ANG_PIT_P,
-        params.ATC_ANG_YAW_P,
-    ]
-)  # P (roll, pitch, yaw)
-
 AngleDesired = ty.Annotated[
     jax.Array,
     el.Component(
@@ -216,7 +200,11 @@ def rate_pid_state(
     )
 
     e_prev, i_prev, d_prev = state
-    e = target - gyro
+
+    gyro_x, gyro_y, gyro_z = gyro
+    gyro_rpy = jnp.array([gyro_y, gyro_x, gyro_z])
+
+    e = target - gyro_rpy
     e = e_filter.apply(e_prev, e)
     i = i_prev + (e * dt)
     d = (e - e_prev) / dt
@@ -227,11 +215,11 @@ def rate_pid_state(
 
 @el.map
 def rate_control(state: RatePIDState) -> motors.MotorInput:
-    Kp, Ki, Kd = rate_pid_gains
-    e, i, d = state
-    mv = Kp * e + Ki * i + Kd * d
+    # set throttle to hover + 5% for maneuvering
+    hover = Config.GLOBAL.control.motor_thrust_hover + 0.05
+    mv = jnp.sum(state * Config.GLOBAL.control.rate_pid_gains, axis=0)
     roll_mv, pitch_mv, yaw_mv = mv
-    return jnp.array([roll_mv, pitch_mv, yaw_mv, 0.2])
+    return jnp.array([roll_mv, pitch_mv, yaw_mv, hover])
 
 
 @el.map
@@ -241,6 +229,9 @@ def update_target_attitude(
     euler_rate_target: EulerRateTarget,
 ) -> tuple[AttitudeTarget, EulerRateTarget]:
     dt = Config.GLOBAL.dt
+    atc_input_tc = Config.GLOBAL.control.attitude_control_input_tc
+    y_rate_tc = Config.GLOBAL.control.pilot_yaw_rate_tc
+
     roll_desired, pitch_desired, yaw_rate_desired = angle_desired
     roll_target, pitch_target, yaw_target = util.quat_to_euler(att_target)
     roll_rate_target, pitch_rate_target, yaw_rate_target = euler_rate_target
@@ -258,17 +249,17 @@ def update_target_attitude(
         roll_rate_target,
         roll_accel_limit,
         dt,
-        params.ATC_INPUT_TC,
+        atc_input_tc,
     )
     pitch_rate_target = shape_angle(
         util.normalize_angle(pitch_desired - pitch_target),
         pitch_rate_target,
         pitch_accel_limit,
         dt,
-        params.ATC_INPUT_TC,
+        atc_input_tc,
     )
     yaw_rate_target = shape_euler_rate(
-        yaw_rate_target, yaw_rate_desired, yaw_accel_limit, dt, params.PILOT_Y_RATE_TC
+        yaw_rate_target, yaw_rate_desired, yaw_accel_limit, dt, y_rate_tc
     )
     euler_rate_target = jnp.array(
         [roll_rate_target, pitch_rate_target, yaw_rate_target]
@@ -290,12 +281,21 @@ def attitude_control(
 ) -> AngVelSetpoint:
     att_body = pos.angular()
     target_to_body_rotation = att_body.inverse() * att_target
-    ang_vel_target = jnp.nan_to_num(
+    ang_vel_target_rpy = jnp.nan_to_num(
         util.euler_to_angular_rate(att_target, euler_rate_target)
     )
-    ang_vel_body_feedforward = target_to_body_rotation @ ang_vel_target
+    ang_vel_target_xyz = jnp.array(
+        [
+            ang_vel_target_rpy[1],
+            ang_vel_target_rpy[0],
+            ang_vel_target_rpy[2],
+        ]
+    )
+    ang_vel_body_feedforward = target_to_body_rotation @ ang_vel_target_xyz
     att_error, thrust_error_angle = thrust_vector_rotation_angles(att_target, att_body)
-    ang_vel_body = att_error * angle_p_gains
+    att_error_x, att_error_y, att_error_z = att_error
+    att_error_rpy = jnp.array([att_error_y, att_error_x, att_error_z])
+    ang_vel_body = att_error_rpy * Config.GLOBAL.control.angle_p_gains
 
     def feedforward(ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro):
         feedforward_scalar = (
@@ -417,6 +417,7 @@ def rate_flight_plan(
             [0.0, 0.4, 0.0],
             [0.0, 0.4, 0.0],
             [0.0, -0.7, 0.0],
+            [0.0, 0.0, 0.0],
         ]
     )
     roll_test_points = jnp.array(
@@ -425,6 +426,7 @@ def rate_flight_plan(
             [-0.2, 0.0, 0.0],
             [0.4, 0.0, 0.0],
             [-0.2, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
         ]
     )
     yaw_test_points = jnp.array(
