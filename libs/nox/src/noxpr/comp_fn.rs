@@ -1,7 +1,5 @@
 //! Defines traits and structures for constructing functions and transforming them into computational graphs.
-use crate::{
-    ArrayTy, Builder, Comp, ConstDim, Dim, IntoOp, Noxpr, NoxprFn, NoxprTy, Op, Tensor, TensorItem,
-};
+use crate::{ArrayTy, Builder, Comp, ConstDim, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
 use smallvec::SmallVec;
 use std::{any, marker::PhantomData};
 use xla::ArrayElement;
@@ -14,20 +12,20 @@ pub trait CompFn<T, R>: Send + Sync {
     /// Builds the computational graph (`NoxprFn`) of the function.
     fn build_expr(&self) -> Result<NoxprFn, crate::Error>
     where
-        R: IntoOp,
+        R: ReprMonad<Op>,
     {
         let mut builder = Builder::new();
         let res = self.compute(&mut builder);
         let inner = if !builder.mut_params.is_empty() {
             let mut tuple = Vec::with_capacity(builder.mut_params.count() + 1);
-            let res_op = res.into_op();
+            let res_op = res.into_inner();
             tuple.push(res_op);
             for o in builder.mut_params.into_iter() {
                 tuple.insert(1, o.into_inner().inner);
             }
             Noxpr::tuple(tuple)
         } else {
-            res.into_op()
+            res.into_inner()
         };
         Ok(NoxprFn {
             inner,
@@ -40,7 +38,7 @@ pub trait CompFn<T, R>: Send + Sync {
     /// This method is a convenience function that builds the expression and compiles it into a ready-to-execute form.
     fn build(&self) -> Result<Comp<T, R>, crate::Error>
     where
-        R: IntoOp,
+        R: ReprMonad<Op>,
     {
         let expr = self.build_expr()?;
         let op = expr.build(any::type_name::<Self>())?;
@@ -76,33 +74,27 @@ impl<'b> FromBuilder for &'b Builder {
     }
 }
 
-impl<T, D> FromBuilder for Tensor<T, D, Op>
+impl<M: ReprMonad<Op>> FromBuilder for M
 where
-    T::Dim: Dim + ConstDim,
-    T::Elem: ArrayElement,
-    T: TensorItem,
-    D: Dim + ConstDim,
+    M::Elem: ArrayElement,
+    M::Dim: ConstDim,
 {
-    type Item<'a> = Self;
+    type Item<'a> = M;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {
         let mut params = builder.params.borrow_mut();
         let i = params.len() as i64;
-        let mut shape: SmallVec<[i64; 4]> = D::DIM.iter().map(|&x| x as i64).collect();
-        shape.extend(T::Dim::DIM.iter().map(|&x| x as i64));
+        let shape: SmallVec<[i64; 4]> = M::Dim::DIM.iter().map(|&x| x as i64).collect();
         let inner = Noxpr::parameter(
             i,
             NoxprTy::ArrayTy(ArrayTy {
-                element_type: T::Elem::TY,
+                element_type: M::Elem::TY,
                 shape,
             }),
             format!("param_{}", i),
         );
         params.push(inner.clone());
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
+        M::from_inner(inner)
     }
 }
 

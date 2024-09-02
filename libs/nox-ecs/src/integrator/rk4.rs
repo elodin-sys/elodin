@@ -2,7 +2,7 @@ use crate::globals::SimulationTimeStep;
 use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
 use crate::{ComponentArray, ComponentGroup, Error, Query};
 use impeller::World;
-use nox::{IntoOp, Scalar};
+use nox::Scalar;
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};
 
@@ -54,15 +54,9 @@ impl<Pipe, U, DU> System for Rk4<U, DU, Pipe>
 where
     Query<U>: SystemParam<Item = Query<U>> + Clone,
     Query<DU>: SystemParam<Item = Query<DU>> + Clone,
-    U: Add<DU, Output = U>
-        + ComponentGroup
-        + IntoOp
-        + for<'a> nox::FromBuilder<Item<'a> = U>
-        + Send
-        + Sync,
+    U: Add<DU, Output = U> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = U> + Send + Sync,
     DU: Add<DU, Output = DU>
         + ComponentGroup
-        + IntoOp
         + for<'a> nox::FromBuilder<Item<'a> = DU>
         + Send
         + Sync,
@@ -135,14 +129,14 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::tensor;
+    use nox::{tensor, Op, Repr};
     use nox::{Scalar, SpatialMotion, SpatialTransform};
-    use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
+    use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 
     #[test]
     fn test_simple_rk4() {
-        #[derive(Clone, Component)]
-        struct X(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct X<R: Repr = Op>(Scalar<f64, R>);
 
         impl Add<V> for X {
             type Output = X;
@@ -152,8 +146,8 @@ mod tests {
             }
         }
 
-        #[derive(Clone, Component)]
-        struct V(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct V<R: Repr = Op>(Scalar<f64, R>);
 
         impl Add for V {
             type Output = V;
@@ -198,20 +192,20 @@ mod tests {
 
     #[test]
     fn test_six_dof() {
-        #[derive(Clone, Component)]
-        struct X(SpatialTransform<f64>);
-        #[derive(Clone, Component)]
-        struct V(SpatialMotion<f64>);
-        #[derive(Clone, Component)]
-        struct A(SpatialMotion<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct X<R: Repr = Op>(SpatialTransform<f64, R>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct V<R: Repr = Op>(SpatialMotion<f64, R>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct A<R: Repr = Op>(SpatialMotion<f64, R>);
 
-        #[derive(FromBuilder, ComponentGroup, IntoOp)]
+        #[derive(FromBuilder, ComponentGroup)]
         struct U {
             x: X,
             v: V,
         }
 
-        #[derive(FromBuilder, ComponentGroup, IntoOp)]
+        #[derive(FromBuilder, ComponentGroup)]
         struct DU {
             v: V,
             a: A,

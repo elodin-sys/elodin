@@ -102,9 +102,11 @@ impl Plugin for SimClient {
 pub fn sync_pos(mut query: Query<(&mut Transform, &WorldPos)>) {
     query.iter_mut().for_each(|(mut transform, pos)| {
         let WorldPos { pos, att } = pos;
+        let [x, y, z] = pos.parts().map(|x| x.into_buf());
+        let [i, j, k, w] = att.parts().map(|x| x.into_buf());
         *transform = bevy::prelude::Transform {
-            translation: Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
-            rotation: Quat::from_xyzw(att.i as f32, att.j as f32, att.k as f32, att.w as f32),
+            translation: Vec3::new(x as f32, y as f32, z as f32),
+            rotation: Quat::from_xyzw(i as f32, j as f32, k as f32, w as f32),
             ..Default::default()
         }
     });

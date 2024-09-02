@@ -13,7 +13,8 @@ osx_minimum_system_version = "10.11"
 
 [dependencies]
 # math
-nalgebra = "0.33"
+nox.path = "../nox"
+nox.default-features = false
 
 # bevy
 bevy.version = "0.14"

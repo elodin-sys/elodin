@@ -7,7 +7,6 @@ use bevy::{
 };
 use bevy_egui::EguiContexts;
 use egui::{epaint::Shadow, Margin, Modifiers};
-use nalgebra::clamp;
 
 use crate::ui::{
     colors::{self, with_opacity},
@@ -111,7 +110,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         }
 
         let screen_rect = ctx.screen_rect();
-        let palette_width = clamp(screen_rect.width() / 2.0, 500.0, 900.0);
+        let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
         let palette_size = egui::vec2(palette_width, 800.0);
         let palette_min = egui::pos2(
             screen_rect.center().x - palette_width / 2.0,
@@ -306,7 +305,7 @@ impl WidgetSystem for PaletteItems<'_> {
         let mut palette_items_filtered = page.filter(&filter);
         let row_margin = egui::Margin::symmetric(16.0, 12.0);
         let row_height = ui.spacing().interact_size.y + row_margin.sum().y;
-        let max_visible_rows = clamp(palette_items_filtered.len(), 0, 10);
+        let max_visible_rows = palette_items_filtered.len().clamp(0, 10);
         if down_pressed {
             selected_index =
                 (selected_index + 1).min(palette_items_filtered.len().saturating_sub(1));

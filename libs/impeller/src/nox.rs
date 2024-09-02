@@ -1,9 +1,9 @@
 use core::mem;
-use nalgebra::{Const, Dyn};
 use nox::{
     Array, ArrayDim, ArrayRepr, ConstDim, Dim, Field, Quaternion, Repr, SpatialForce,
     SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
+use nox::{Const, Dyn};
 use smallvec::{smallvec, SmallVec};
 
 #[cfg(feature = "xla")]
@@ -89,7 +89,7 @@ impl From<ComponentType> for ArrayTy {
 }
 
 #[cfg(feature = "xla")]
-impl<T: Component + nox::IntoOp + 'static> crate::Archetype for T {
+impl<T: Component + nox::ReprMonad<nox::Op> + 'static> crate::Archetype for T {
     fn name() -> ArchetypeName {
         ArchetypeName::from(T::NAME)
     }
@@ -101,7 +101,7 @@ impl<T: Component + nox::IntoOp + 'static> crate::Archetype for T {
     fn insert_into_world(self, world: &mut crate::World) {
         use std::ops::Deref;
         let mut col = world.column_mut::<T>().unwrap();
-        let op = self.into_op();
+        let op = self.into_inner();
         let NoxprNode::Constant(c) = op.deref() else {
             panic!("push into host column must be constant expr");
         };
@@ -115,7 +115,7 @@ impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: Repr> Component for Te
         // If T is an ArrayElement, then it's shape must be ().
         ComponentType {
             primitive_ty: T::PRIMITIVE_TY,
-            shape: D::xla_shape(),
+            shape: D::DIM.iter().map(|&x| x as i64).collect(),
         }
     }
 }

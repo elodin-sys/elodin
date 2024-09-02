@@ -1,173 +1,88 @@
 //! Traits and implementations for data transfer between host and XLA devices, buffer management, and XLA client operations.
-use std::{borrow::Borrow, ops::Deref};
+use std::marker::PhantomData;
 
-use crate::{Buffer, Client, Dim, Noxpr, Op, Tensor, TensorItem};
+use bytemuck::AnyBitPattern;
+use smallvec::SmallVec;
+use xla::{ArrayElement, PjRtBuffer, Shape};
 
-/// Defines a trait for converting host data types into computation graph nodes.
-pub trait FromHost {
-    /// Type of the host data that can be converted.
-    type HostTy;
+use crate::{ArrayBuf, ArrayRepr, Client, Dim, Error, ReprMonad, Tensor, TensorItem};
 
-    /// Converts a native host type into an instance of the implementing type, using a provided client.
-    fn from_host(client: &Client, native: Self::HostTy) -> Self;
+pub struct TypedBuffer<T> {
+    pub buffer: PjRtBuffer,
+    phantom_data: PhantomData<T>,
 }
 
-/// Defines a trait for constructing objects from PJRT buffers.
-pub trait FromPjrtBuffer {
-    /// Constructs an object from PJRT buffers.
-    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self;
-}
-
-/// Provides a mechanism to retrieve a reference to an underlying PJRT buffer.
-pub trait AsBuffer {
-    /// Returns a reference to an associated PJRT buffer.
-    fn as_buffer(&self) -> &xla::PjRtBuffer;
-}
-
-impl<'a, A: AsBuffer> AsBuffer for &'a mut A {
-    fn as_buffer(&self) -> &xla::PjRtBuffer {
-        A::as_buffer(*self)
+impl<T> TypedBuffer<T>
+where
+    T: FromTypedBuffers<TypedBuffers = Self>,
+{
+    pub fn to_host(&self) -> T {
+        T::from_typed_buffers(self).unwrap()
     }
 }
 
-/// A trait for converting computation graph nodes into instances of the implementing type.
-pub trait FromOp {
-    /// Constructs an instance of the implementing type from a computation graph node.
-    fn from_op(noxpr: Noxpr) -> Self;
+pub trait AsTypedBuffer<T> {
+    fn as_typed_buffer(&self, client: &Client) -> Result<impl AsRef<TypedBuffer<T>>, Error>;
 }
 
-/// A trait for converting instances into computation graph nodes.
-pub trait IntoOp {
-    /// Converts an instance into a computation graph node.
-    fn into_op(self) -> Noxpr;
-}
-
-impl IntoOp for () {
-    fn into_op(self) -> Noxpr {
-        Noxpr::tuple(vec![])
+impl<T> AsRef<TypedBuffer<T>> for TypedBuffer<T> {
+    fn as_ref(&self) -> &TypedBuffer<T> {
+        self
     }
 }
 
-/// Defines a trait to represent the buffer form of a type.
-pub trait BufferForm {
-    /// The type of the buffer that represents the data.
-    type BufferTy;
-}
-
-/// Defines operations for managing buffer arguments, allowing for checking mutable borrow status and buffer manipulation.
-pub trait BufferArg<BufferTy> {
-    /// Determines if the buffer is currently mutably borrowed.
-    ///
-    /// By default, returns false, indicating no mutable borrow.
-    fn is_mut_borrowed() -> bool {
-        false
-    }
-
-    /// Retrieves the buffer associated with this object, possibly in a borrowed state.
-    ///
-    /// `client`: The client associated with the buffer's lifecycle.
-    fn as_buffer(&self, client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer>;
-
-    /// Replaces the current buffer with a new one.
-    ///
-    /// `new_buffer`: The new buffer to set.
-    fn replace_buffer(&mut self, _new_buffer: xla::PjRtBuffer) {}
-}
-
-impl<T: TensorItem, R: Dim> FromPjrtBuffer for Tensor<T, R, Buffer> {
-    fn from_pjrt(pjrt: Vec<xla::PjRtBuffer>) -> Self {
-        let inner = pjrt.into_iter().next().unwrap();
-        Tensor {
-            inner,
-            phantom: std::marker::PhantomData,
-        }
+impl<T: TensorItem, D: Dim> AsTypedBuffer<Tensor<T, D, ArrayRepr>> for Tensor<T, D, ArrayRepr>
+where
+    T::Elem: ArrayElement,
+{
+    fn as_typed_buffer(
+        &self,
+        client: &Client,
+    ) -> Result<impl AsRef<TypedBuffer<Tensor<T, D, ArrayRepr>>>, Error> {
+        let shape = D::array_shape(&self.inner.buf);
+        let shape = shape
+            .as_ref()
+            .iter()
+            .map(|&x| x as i64)
+            .collect::<SmallVec<[i64; 4]>>();
+        let buffer = client.copy_host_buffer(self.inner.buf.as_buf(), &shape)?;
+        Ok(TypedBuffer {
+            buffer,
+            phantom_data: PhantomData,
+        })
     }
 }
 
-impl BufferForm for () {
-    type BufferTy = ();
+pub trait FromTypedBuffers: Sized {
+    type TypedBuffers;
+    fn from_typed_buffers(buffers: &Self::TypedBuffers) -> Result<Self, Error>;
+
+    fn from_pjrt_buffers(buffers: &mut Vec<PjRtBuffer>) -> Self::TypedBuffers;
 }
 
-impl FromPjrtBuffer for () {
-    fn from_pjrt(_pjrt: Vec<xla::PjRtBuffer>) -> Self {}
-}
+impl<M: ReprMonad<ArrayRepr>> FromTypedBuffers for M
+where
+    M::Elem: ArrayElement + AnyBitPattern,
+{
+    type TypedBuffers = TypedBuffer<M>;
 
-impl<T: TensorItem, R: Dim> BufferForm for Tensor<T, R, Op> {
-    type BufferTy = Tensor<T, R, Buffer>;
-}
-
-impl<'a, T: TensorItem, R: Dim> BufferForm for &'a mut Tensor<T, R, Op> {
-    type BufferTy = &'a mut Tensor<T, R, Buffer>;
-}
-
-impl<'a, T: TensorItem, R: Dim> BufferArg<Self> for &'a mut Tensor<T, R, Buffer> {
-    fn is_mut_borrowed() -> bool {
-        true
+    fn from_typed_buffers(buffers: &Self::TypedBuffers) -> Result<Self, Error> {
+        let literal = buffers.buffer.to_literal_sync()?;
+        let buf = literal.typed_buf()?;
+        let Shape::Array(shape) = literal.shape()? else {
+            return Err(Error::IncompatibleDType);
+        };
+        let dims: SmallVec<[usize; 4]> = shape.dims().iter().map(|&x| x as usize).collect();
+        let mut array = crate::Array::<M::Elem, M::Dim>::zeroed(&dims);
+        array.buf.as_mut_buf().copy_from_slice(buf);
+        Ok(M::from_inner(array))
     }
-    fn as_buffer(&self, _client: &Client) -> MaybeOwned<'_, xla::PjRtBuffer> {
-        MaybeOwned::borrow(&self.inner)
-    }
 
-    fn replace_buffer(&mut self, new_buffer: xla::PjRtBuffer) {
-        self.inner = new_buffer;
-    }
-}
-
-// This macro allows us to implement `BufferForm` for a series of tuples easily.
-// This essentially a workaround for Rust lacking variadic types / generics.
-macro_rules! impl_buffer_form {
-      ($($ty:tt),+) => {
-        impl<$($ty,)*> BufferForm for ($($ty,)*)
-              where $($ty: BufferForm, )*
-        {
-            type BufferTy = ($($ty::BufferTy,)*);
-        }
-      }
-}
-
-impl_buffer_form!(T1);
-impl_buffer_form!(T1, T2);
-impl_buffer_form!(T1, T2, T3);
-impl_buffer_form!(T1, T2, T3, T4);
-impl_buffer_form!(T1, T2, T3, T4, T5);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
-impl_buffer_form!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
-
-/// A wrapper to manage ownership of resources, allowing for both owned and borrowed references.
-pub enum MaybeOwned<'a, T> {
-    Owned(T),
-    Borrowed(&'a T),
-}
-
-impl<'a, T> MaybeOwned<'a, T> {
-    /// Constructs a `MaybeOwned` as a borrowed reference.
-    fn borrow(val: &'a T) -> Self {
-        MaybeOwned::Borrowed(val)
-    }
-}
-
-impl<'a, T> Borrow<T> for MaybeOwned<'a, T> {
-    /// Provides a reference to the owned or borrowed value.
-    fn borrow(&self) -> &T {
-        match self {
-            MaybeOwned::Borrowed(b) => b,
-            MaybeOwned::Owned(b) => b,
-        }
-    }
-}
-
-impl<'a, T> Deref for MaybeOwned<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            MaybeOwned::Owned(b) => b,
-            MaybeOwned::Borrowed(b) => b,
+    fn from_pjrt_buffers(buffers: &mut Vec<PjRtBuffer>) -> Self::TypedBuffers {
+        let buffer = buffers.pop().unwrap();
+        TypedBuffer {
+            buffer,
+            phantom_data: PhantomData,
         }
     }
 }

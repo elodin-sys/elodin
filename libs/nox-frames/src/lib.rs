@@ -6,8 +6,8 @@ pub mod iers;
 use std::ops::Mul;
 
 use nox::{
-    nalgebra::{constraint::ShapeConstraint, Const},
-    ArrayDim, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, RealField, Repr, Tensor,
+    ArrayDim, Const, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, RealField, Repr,
+    ShapeConstraint, Tensor,
 };
 
 pub trait Frame {}

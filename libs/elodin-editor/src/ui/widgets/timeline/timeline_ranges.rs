@@ -7,7 +7,6 @@ use bevy::ecs::{
 };
 use bevy_egui::egui::{self, emath::Numeric, Response};
 use impeller::{bevy::Tick, ControlMsg};
-use nalgebra::clamp;
 
 use crate::ui::{colors, ViewportRange};
 use crate::ui::{
@@ -122,8 +121,12 @@ pub fn timeline_range(
         let center_delta = new_center - center;
 
         range.values = (
-            clamp(start_f64 + center_delta, *full_range_min, *full_range_max).floor() as u64,
-            clamp(end_f64 + center_delta, *full_range_min, *full_range_max).floor() as u64,
+            (start_f64 + center_delta)
+                .clamp(*full_range_min, *full_range_max)
+                .floor() as u64,
+            (end_f64 + center_delta)
+                .clamp(*full_range_min, *full_range_max)
+                .floor() as u64,
         );
 
         response.changed();

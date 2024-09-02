@@ -1,12 +1,12 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
 use crate::{
-    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, Repr, RowDim, Scalar,
-    SquareDim, TransposeDim, TransposedDim,
+    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, Repr, ReprMonad, RowDim,
+    Scalar, SquareDim, TransposeDim, TransposedDim,
 };
+use crate::{Const, Dyn, ShapeConstraint};
 use crate::{DefaultRepr, Elem, RealField};
 use approx::{AbsDiffEq, RelativeEq};
-use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use std::iter::Sum;
 use std::{
     marker::PhantomData,
@@ -15,7 +15,15 @@ use std::{
 
 /// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound(
+            deserialize = "R::Inner<T::Elem, D>: serde::Deserialize<'de>",
+            serialize = "R::Inner<T::Elem, D>: serde::Serialize"
+        ))
+    )]
     pub(crate) inner: R::Inner<T::Elem, D>,
     pub(crate) phantom: PhantomData<(T, D)>,
 }
@@ -108,7 +116,7 @@ impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem + Elem, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
     pub fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
         Self {
             inner,
@@ -150,7 +158,9 @@ impl<T: TensorItem + Elem, D: Dim> Tensor<T, D, ArrayRepr> {
 }
 
 /// Represents a dimensionality of a tensor. This trait is a marker for types that can specify tensor dimensions.
-pub trait TensorDim {}
+pub trait TensorDim {
+    fn name() -> Self;
+}
 /// Represents non-scalar dimensions, i.e., dimensions other than `()`.
 pub trait NonScalarDim {}
 /// Represents constant dimensions, specified at compile-time.
@@ -168,11 +178,21 @@ pub trait ConstDim {
 
 /// Represents a scalar dimension, which is essentially dimensionless.
 pub type ScalarDim = ();
-impl TensorDim for ScalarDim {}
-impl TensorDim for nalgebra::Dyn {}
-impl NonScalarDim for nalgebra::Dyn {}
-impl<const N: usize> TensorDim for nalgebra::Const<N> {}
-impl<const N: usize> NonScalarDim for nalgebra::Const<N> {}
+impl TensorDim for ScalarDim {
+    fn name() -> Self {}
+}
+impl TensorDim for Dyn {
+    fn name() -> Self {
+        Self
+    }
+}
+impl NonScalarDim for Dyn {}
+impl<const N: usize> TensorDim for Const<N> {
+    fn name() -> Self {
+        Self
+    }
+}
+impl<const N: usize> NonScalarDim for Const<N> {}
 
 impl ConstDim for ScalarDim {
     const DIM: &'static [usize] = &[];
@@ -199,6 +219,9 @@ macro_rules! impl_tensor_dim {
         impl<$($ty,)*> TensorDim for ($($ty,)*)
               where $($ty: TensorDim, )*
         {
+            fn name() -> Self {
+                ($($ty::name(),)*)
+            }
         }
 
         impl<$($ty,)*> NonScalarDim for ($($ty,)*)
@@ -630,7 +653,7 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
 }
 
 /// Alias for the result of adding dimensions `A` and `B`.
-pub type AddDim<A, B> = <A as nalgebra::DimAdd<B>>::Output;
+pub type AddDim<A, B> = <A as crate::DimAdd<B>>::Output;
 
 #[allow(clippy::type_complexity)]
 impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
@@ -643,13 +666,13 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
         R,
     >
     where
-        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
-        DefaultMappedDim<D2>: nalgebra::Dim,
+        DefaultMappedDim<D1>: crate::DimAdd<DefaultMappedDim<D2>> + crate::Dim,
+        DefaultMappedDim<D2>: crate::Dim,
         D2::DefaultMapDim: ReplaceDim<D1>,
         D1::DefaultMapDim: ReplaceDim<D2>,
         D1: DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: crate::Dim,
         ConcatDim<D1, D2>: Dim,
     {
         let inner = R::concat(&self.inner, &other.inner);
@@ -719,12 +742,12 @@ impl BaseBroadcastDim<ScalarDim, ScalarDim> for ShapeConstraint {
     type Output = ScalarDim;
 }
 
-impl BaseBroadcastDim<nalgebra::Dyn, nalgebra::Dyn> for ShapeConstraint {
-    type Output = nalgebra::Dyn;
+impl BaseBroadcastDim<Dyn, Dyn> for ShapeConstraint {
+    type Output = Dyn;
 }
 
-impl BroadcastDim<nalgebra::Dyn, nalgebra::Dyn> for ShapeConstraint {
-    type Output = nalgebra::Dyn;
+impl BroadcastDim<Dyn, Dyn> for ShapeConstraint {
+    type Output = Dyn;
 }
 
 impl<D: Dim + NotConst1> BroadcastDim<D, Const<1>> for ShapeConstraint {
@@ -762,12 +785,12 @@ pub trait NotDyn {}
 impl<const N: usize> NotDyn for Const<N> {}
 impl NotDyn for ScalarDim {}
 
-impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<D, nalgebra::Dyn> for ShapeConstraint {
-    type Output = nalgebra::Dyn;
+impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<D, Dyn> for ShapeConstraint {
+    type Output = Dyn;
 }
 
-impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<nalgebra::Dyn, D> for ShapeConstraint {
-    type Output = nalgebra::Dyn;
+impl<D: Dim + NotDyn + NonScalarDim> BroadcastDim<Dyn, D> for ShapeConstraint {
+    type Output = Dyn;
 }
 
 impl<D: Dim + NonScalarDim> BroadcastDim<D, ScalarDim> for ShapeConstraint {
@@ -1127,6 +1150,35 @@ where
             iter.fold(first, |acc, x| acc + x)
         } else {
             panic!("Cannot compute `sum` of empty iterator.")
+        }
+    }
+}
+
+impl<T: TensorItem, R: Repr, D: Dim> ReprMonad<R> for Tensor<T, D, R> {
+    type Elem = T::Elem;
+    type Dim = D;
+
+    type Map<N: Repr> = Tensor<T, D, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(<R as Repr>::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        Tensor::from_inner(func(self.inner))
+    }
+
+    fn inner(&self) -> &<R as Repr>::Inner<Self::Elem, Self::Dim> {
+        &self.inner
+    }
+
+    fn into_inner(self) -> <R as Repr>::Inner<Self::Elem, Self::Dim> {
+        self.inner
+    }
+
+    fn from_inner(inner: <R as Repr>::Inner<Self::Elem, Self::Dim>) -> Self {
+        Tensor {
+            inner,
+            phantom: PhantomData,
         }
     }
 }

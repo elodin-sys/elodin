@@ -12,7 +12,7 @@ use impeller::{
     bevy::{ComponentValueMap, EntityMap},
     well_known::{BodyAxes, VectorArrow, WorldPos},
 };
-use nalgebra::{UnitQuaternion, Vector3};
+use nox::{Quaternion, Vector3};
 
 pub struct GizmoPlugin;
 
@@ -73,7 +73,7 @@ fn render_vector_arrow(
             }
         };
         let vec = WorldPos {
-            att: UnitQuaternion::identity(),
+            att: Quaternion::identity(),
             pos: vec,
         }
         .bevy_pos()

@@ -1,20 +1,19 @@
-use nox::{IntoOp, Scalar};
-
-use nox_ecs_macros::Component;
+use nox::{Op, Repr, ReprMonad, Scalar};
+use nox_ecs_macros::{Component, ReprMonad};
 
 pub trait Component:
-    impeller::Component + IntoOp + for<'a> nox::FromBuilder<Item<'a> = Self>
+    impeller::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
 {
 }
 
-#[derive(Component)]
-pub struct WorldPos(pub nox::SpatialTransform<f64>);
+#[derive(Component, ReprMonad)]
+pub struct WorldPos<R: Repr = Op>(pub nox::SpatialTransform<f64, R>);
 
-#[derive(Component)]
-pub struct Seed(pub Scalar<u64>);
+#[derive(Component, ReprMonad)]
+pub struct Seed<R: Repr = Op>(pub Scalar<u64, R>);
 
-#[derive(Component)]
-pub struct Time(pub Scalar<f64>);
+#[derive(Component, ReprMonad)]
+pub struct Time<R: Repr = Op>(pub Scalar<f64, R>);
 
 impl Seed {
     pub fn zero() -> Self {
@@ -32,10 +31,11 @@ impl Time {
 mod tests {
     use crate::{Seed, WorldPos};
     use impeller::Component;
+    use nox::Op;
 
     #[test]
     fn component_names() {
-        assert_eq!(WorldPos::NAME, "world_pos");
-        assert_eq!(Seed::NAME, "seed");
+        assert_eq!(WorldPos::<Op>::NAME, "world_pos");
+        assert_eq!(Seed::<Op>::NAME, "seed");
     }
 }
