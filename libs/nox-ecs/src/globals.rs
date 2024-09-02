@@ -1,13 +1,16 @@
 use impeller::DEFAULT_TIME_STEP;
+use nox::Op;
+use nox::Repr;
 use nox::Scalar;
+use nox_ecs_macros::ReprMonad;
 
 use crate::{Archetype, Component, ComponentArray};
 
-#[derive(Component, Clone)]
-pub struct SimulationTimeStep(pub Scalar<f64>);
+#[derive(Component, Clone, ReprMonad)]
+pub struct SimulationTimeStep<R: Repr = Op>(pub Scalar<f64, R>);
 
-#[derive(Component, Clone)]
-pub struct SimulationTick(pub Scalar<u64>);
+#[derive(Component, Clone, ReprMonad)]
+pub struct SimulationTick<R: Repr = Op>(pub Scalar<u64, R>);
 
 impl Default for SimulationTimeStep {
     fn default() -> Self {

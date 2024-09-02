@@ -27,6 +27,16 @@ pub fn component_group(input: TokenStream) -> TokenStream {
         .iter()
         .map(|f| f.ty.clone())
         .collect::<Vec<_>>();
+    let noxpr_fields: Vec<_> = fields
+        .fields
+        .iter()
+        .map(|x| {
+            let ident = &x.ident;
+            quote! {
+                self.#ident.into_noxpr(),
+            }
+        })
+        .collect();
     quote! {
         impl #generics #crate_name::ComponentGroup for #ident #generics #where_clause {
             type Params = (Self,);
@@ -60,6 +70,13 @@ pub fn component_group(input: TokenStream) -> TokenStream {
 
             fn map_axes() -> &'static [usize] {
                 <(#(#params,)*)>::map_axes()
+            }
+
+
+            fn into_noxpr(self) -> #crate_name::nox::Noxpr {
+              #crate_name::nox::Noxpr::tuple(vec![
+                  #(#noxpr_fields)*
+              ])
             }
         }
     }

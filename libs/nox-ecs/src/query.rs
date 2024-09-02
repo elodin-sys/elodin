@@ -1,6 +1,6 @@
 use crate::{system::SystemBuilder, Component, ComponentArray, ComponentExt, Error, SystemParam};
 use impeller::{ComponentId, ComponentType, EntityId};
-use nox::{xla, ArrayTy, CompFn, IntoOp, Noxpr};
+use nox::{xla, ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad};
 use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -60,6 +60,8 @@ pub trait ComponentGroup {
     fn component_count() -> usize;
 
     fn map_axes() -> &'static [usize];
+
+    fn into_noxpr(self) -> Noxpr;
 }
 
 macro_rules! impl_group {
@@ -115,6 +117,14 @@ macro_rules! impl_group {
           fn map_axes() -> &'static [usize] {
               &[0; $num]
           }
+
+          #[allow(non_snake_case)]
+          fn into_noxpr(self) -> Noxpr {
+              let ($($param,)*) = self;
+              Noxpr::tuple(vec![
+                  $($param.into_noxpr(),)*
+              ])
+          }
         }
     }
 }
@@ -153,6 +163,10 @@ where
 
     fn component_ids() -> impl Iterator<Item = ComponentId> {
         std::iter::once(T::COMPONENT_ID)
+    }
+
+    fn into_noxpr(self) -> Noxpr {
+        self.into_inner()
     }
 }
 
@@ -262,11 +276,29 @@ impl<G: ComponentGroup> Query<G> {
 }
 
 impl<G: ComponentGroup> Query<G> {
-    pub fn map<O: ComponentGroup + IntoOp>(
+    pub fn map<O: ComponentGroup>(
         &self,
         func: impl CompFn<G::Params, O>,
     ) -> Result<Query<O>, Error> {
-        let func = func.build_expr()?;
+        let mut builder = Builder::new();
+        let res = func.compute(&mut builder);
+        let inner = if !builder.mut_params.is_empty() {
+            let mut tuple = Vec::with_capacity(builder.mut_params.count() + 1);
+            let res_op = res.into_noxpr();
+            tuple.push(res_op);
+            for o in builder.mut_params.into_iter() {
+                tuple.insert(1, o.into_inner().into_inner());
+            }
+            Noxpr::tuple(tuple)
+        } else {
+            res.into_noxpr()
+        };
+        let func = NoxprFn {
+            inner,
+            args: builder.params.into_inner(),
+        };
+
+        //let func = func.build_expr()?;
         let map_axes: SmallVec<[usize; 4]> = smallvec![0; G::component_count()];
         let buffer = Noxpr::vmap_with_axis(func, &map_axes, &self.exprs)?;
         let exprs = if O::component_count() == 1 {
@@ -462,16 +494,16 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 mod tests {
     use super::*;
     use crate::{Archetype, IntoSystemExt};
-    use nox::Scalar;
-    use nox_ecs_macros::{ComponentGroup, FromBuilder};
+    use nox::{Op, Repr, Scalar};
+    use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 
     #[test]
     fn test_cross_archetype_join() {
-        #[derive(Clone, Component)]
-        struct X(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct X<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Clone, Component)]
-        struct E(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct E<R: Repr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -510,14 +542,14 @@ mod tests {
 
     #[test]
     fn component_group() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct B(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct B<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct C(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct C<R: Repr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {

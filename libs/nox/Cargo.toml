@@ -12,28 +12,34 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["jax", "noxpr", "xla"]
 jax = ["pyo3", "numpy", "noxpr"]
 cuda = ["shared"]
-noxpr = ["xla"]
+noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
 xla = ["dep:xla", "lapack-src"]
 shared = []
+serde = ["dep:serde"]
 
 [dependencies]
-nalgebra = "0.33"
+typenum = "1.17.0"
 ndarray = "0.16"
 num-traits = "0.2.15"
-simba = "0.8.1"
-boxcar = "0.2"
-paste = "1.0.14"
 thiserror = "1.0"
-smallvec.version = "1.11.2"
-smallvec.features = ["const_generics", "union"]
-itertools = "0.12.0"
 seq-macro = "0.3.5"
-fn-traits = "0.1.2"
+fn-traits = "0.2"
 faer = "0.19.1"
 bytemuck.version = "1.14"
 dyn-stack = "0.10.0"
 stackalloc = "1.2.1"
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
 
+# noxpr
+boxcar.version = "0.2"
+boxcar.optional = true
+paste.version = "1.0.14"
+paste.optional = true
+itertools.version = "0.12.0"
+itertools.optional = true
+indent_write.version = "2.2.0"
+indent_write.optional = true
 
 # noxla - a wrapper around raw xla
 xla = { optional = true, workspace = true }
@@ -45,8 +51,11 @@ numpy.version = "0.21.0"
 numpy.optional = true
 
 # debug
-indent_write = "2.2.0"
 approx = "0.5"
+
+# serialize
+serde.version = "1"
+serde.optional = true
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 lapack-src = { version = "0.10", features = ["openblas"], optional = true }

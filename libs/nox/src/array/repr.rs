@@ -122,13 +122,13 @@ impl Repr for ArrayRepr {
         right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
     where
-        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
-        DefaultMappedDim<D2>: nalgebra::Dim,
+        DefaultMappedDim<D1>: crate::DimAdd<DefaultMappedDim<D2>> + crate::Dim,
+        DefaultMappedDim<D2>: crate::Dim,
         D2::DefaultMapDim: ReplaceDim<D1>,
         D1::DefaultMapDim: ReplaceDim<D2>,
         D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: crate::Dim,
         ConcatDim<D1, D2>: Dim,
     {
         left.concat(right)

@@ -1,8 +1,9 @@
 use crate::*;
 
 use impeller::well_known::{Graph, GraphComponent, Split};
+use nox_ecs::impeller;
 use nox_ecs::impeller::Asset;
-use nox_ecs::{impeller, nox::nalgebra::Vector3};
+use nox_ecs::nox::Vector3;
 use numpy::PyArrayLike1;
 use pyo3::exceptions::PyValueError;
 

@@ -12,11 +12,11 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["rand", "std", "embedded-io-async", "flume"]
 tokio = ["dep:tokio", "tokio-util", "futures", "tracing", "flume"]
 bevy = ["dep:bevy", "flume", "big_space", "tracing"]
-nox = ["dep:nox", "nalgebra"]
+nox = ["dep:nox"]
 rand = ["fastrand"]
-well-known = ["nalgebra"]
+well-known = ["nox"]
 std = ["bytes/std", "postcard/use-std", "ndarray/std", "well-known"]
-xla = ["nox/xla"]
+xla = ["nox/xla", "nox/noxpr"]
 polars = ["dep:polars", "polars-arrow", "arrow", "std"]
 
 [dependencies]
@@ -68,16 +68,12 @@ thiserror = "1"
 # nox
 nox.workspace = true
 nox.default-features = false
+nox.features = ["serde"]
 nox.optional = true
 
 # rand
 fastrand.version = "2"
 fastrand.optional = true
-
-# well-known
-nalgebra.version = "0.33"
-nalgebra.features = ["serde-serialize", "bytemuck"]
-nalgebra.optional = true
 
 # types
 smallvec.version = "1.11.2"

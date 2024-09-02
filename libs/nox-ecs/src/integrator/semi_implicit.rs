@@ -1,7 +1,7 @@
 use crate::globals::SimulationTimeStep;
 use crate::{ComponentArray, ComponentGroup, ErasedSystem, IntoSystem, Query};
 use crate::{System, SystemParam};
-use nox::{IntoOp, Scalar};
+use nox::Scalar;
 use std::ops::Add;
 use std::ops::Mul;
 
@@ -19,9 +19,9 @@ where
     Query<X>: SystemParam<Item = Query<X>> + Clone,
     Query<V>: SystemParam<Item = Query<V>> + Clone,
     Query<A>: SystemParam<Item = Query<A>> + Clone,
-    X: Add<V, Output = X> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = X>,
-    V: Add<A, Output = V> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = V>,
-    A: ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = A>,
+    X: Add<V, Output = X> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = X>,
+    V: Add<A, Output = V> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = V>,
+    A: ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = A>,
     f64: Mul<V, Output = V>,
     f64: Mul<A, Output = A>,
 {
@@ -44,9 +44,9 @@ where
     Query<X>: SystemParam<Item = Query<X>> + Clone,
     Query<V>: SystemParam<Item = Query<V>> + Clone,
     Query<A>: SystemParam<Item = Query<A>> + Clone,
-    X: Add<V, Output = X> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = X>,
-    V: Add<A, Output = V> + ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = V>,
-    A: ComponentGroup + IntoOp + for<'a> nox::FromBuilder<Item<'a> = A>,
+    X: Add<V, Output = X> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = X>,
+    V: Add<A, Output = V> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = V>,
+    A: ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = A>,
     Scalar<f64>: Mul<V, Output = V>,
     Scalar<f64>: Mul<A, Output = A>,
 {
@@ -65,12 +65,13 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::{tensor, Scalar, SpatialMotion, SpatialTransform};
+    use nox::{tensor, Op, Repr, Scalar, SpatialMotion, SpatialTransform};
+    use nox_ecs_macros::ReprMonad;
 
     #[test]
     fn test_simple_semi_implicit_vertlet() {
-        #[derive(Clone, Component)]
-        struct X(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct X<R: Repr = Op>(Scalar<f64, R>);
 
         impl Add<V> for X {
             type Output = X;
@@ -80,8 +81,8 @@ mod tests {
             }
         }
 
-        #[derive(Clone, Component)]
-        struct V(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct V<R: Repr = Op>(Scalar<f64, R>);
 
         impl Add<A> for V {
             type Output = V;
@@ -99,8 +100,8 @@ mod tests {
             }
         }
 
-        #[derive(Clone, Component)]
-        struct A(Scalar<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         impl Mul<A> for Scalar<f64> {
             type Output = A;
@@ -133,12 +134,12 @@ mod tests {
 
     #[test]
     fn test_six_dof() {
-        #[derive(Clone, Component)]
-        struct X(SpatialTransform<f64>);
-        #[derive(Clone, Component)]
-        struct V(SpatialMotion<f64>);
-        #[derive(Clone, Component)]
-        struct A(SpatialMotion<f64>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct X<R: Repr = Op>(SpatialTransform<f64, R>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct V<R: Repr = Op>(SpatialMotion<f64, R>);
+        #[derive(Clone, Component, ReprMonad)]
+        struct A<R: Repr = Op>(SpatialMotion<f64, R>);
 
         impl Add<V> for X {
             type Output = X;

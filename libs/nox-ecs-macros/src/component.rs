@@ -25,32 +25,17 @@ pub fn component(input: TokenStream) -> TokenStream {
     } = Component::from_derive_input(&input).unwrap();
     let fields = data.take_struct().unwrap();
     let ty = &fields.fields[0];
-    let where_clause = &generics.where_clause;
     let name = name.unwrap_or(ident.to_string().to_case(Case::Snake));
+
+    let comp_where = if let Some(where_clause) = generics.where_clause.clone() {
+        quote! { #where_clause, Self: #crate_name::nox::ReprMonad<#crate_name::nox::Op>
+        Self: #crate_name::nox::FromBuilder }
+    } else {
+        quote! { where Self: #crate_name::nox::ReprMonad<#crate_name::nox::Op> + for<'a> #crate_name::nox::FromBuilder<Item<'a> = Self> }
+    };
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
-        impl #crate_name::nox::IntoOp for #ident #generics #where_clause {
-            fn into_op(self) -> #crate_name::nox::Noxpr {
-                use #crate_name::nox::IntoOp;
-                self.0.into_op()
-            }
-        }
-
-        impl #crate_name::nox::FromOp for #ident #generics #where_clause {
-            fn from_op(noxpr: #crate_name::nox::Noxpr) -> Self {
-                Self(<#ty as #crate_name::nox::FromOp>::from_op(noxpr))
-            }
-        }
-
-        impl #crate_name::nox::FromBuilder for #ident #generics #where_clause {
-            type Item<'a> = Self;
-
-            fn from_builder(builder: &#crate_name::nox::Builder) -> Self::Item<'_> {
-                Self(<#ty as #crate_name::nox::FromBuilder>::from_builder(builder))
-            }
-        }
-
-
-        impl #crate_name::impeller::Component for #ident #generics #where_clause {
+        impl #impl_generics #crate_name::impeller::Component for #ident #ty_generics #where_clause {
             const NAME: &'static str = #name;
 
             fn component_type() -> #crate_name::impeller::ComponentType {
@@ -58,7 +43,8 @@ pub fn component(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #crate_name::Component for #ident #generics #where_clause {}
+        impl #impl_generics #crate_name::Component for #ident #ty_generics #comp_where
+        {}
     }
     .into()
 }

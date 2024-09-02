@@ -67,6 +67,9 @@ pub trait RealField:
     fn sin(self) -> Self;
     fn abs(self) -> Self;
     fn atan2(self, other: Self) -> Self;
+    fn max(self, other: Self) -> Self;
+    fn copysign(self, sign: Self) -> Self;
+    fn neg_one() -> Self;
 }
 
 macro_rules! impl_real_field {
@@ -90,6 +93,18 @@ macro_rules! impl_real_field {
 
             fn atan2(self, other: Self) -> Self {
                 self.atan2(other)
+            }
+
+            fn max(self, other: Self) -> Self {
+                self.max(other)
+            }
+
+            fn copysign(self, sign: Self) -> Self {
+                self.copysign(sign)
+            }
+
+            fn neg_one() -> Self {
+                -1.0
             }
         }
     };

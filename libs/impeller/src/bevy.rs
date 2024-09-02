@@ -20,6 +20,7 @@ use bevy::math::DQuat;
 use bevy::math::DVec3;
 use bevy::prelude::*;
 use bytes::Bytes;
+use nox::Tensor;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -676,16 +677,15 @@ pub struct SimPeer {
 
 impl WorldPos {
     pub fn bevy_pos(&self) -> DVec3 {
-        let pos = self.pos;
-        DVec3::new(pos.x, pos.z, -pos.y)
+        let [x, y, z] = self.pos.parts().map(Tensor::into_buf);
+        DVec3::new(x, z, -y)
     }
 
     pub fn bevy_att(&self) -> DQuat {
-        let att = self.att;
-        let x = att.i;
-        let y = att.k;
-        let z = -att.j;
-        let w = att.w;
+        let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
+        let x = i;
+        let y = k;
+        let z = -j;
         DQuat::from_xyzw(x, y, z, w)
     }
 }
