@@ -1,5 +1,5 @@
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use ndarray::{array, CowArray, Ix1};
+use nox::{ArrayRepr, Quaternion, Tensor, Vector3};
 use smallvec::smallvec;
 
 use crate::{ComponentType, ComponentValue, PrimitiveTy, ValueRepr};
@@ -20,8 +20,8 @@ pub use viewer::*;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct WorldPos {
-    pub att: UnitQuaternion<f64>,
-    pub pos: Vector3<f64>,
+    pub att: Quaternion<f64, ArrayRepr>,
+    pub pos: Vector3<f64, ArrayRepr>,
 }
 
 impl crate::Component for WorldPos {
@@ -40,15 +40,9 @@ impl ValueRepr for WorldPos {
     type ValueDim = ndarray::Ix1;
 
     fn fixed_dim_component_value(&self) -> ComponentValue<'_, Self::ValueDim> {
-        let arr = array![
-            self.att.coords.x,
-            self.att.coords.y,
-            self.att.coords.z,
-            self.att.coords.w,
-            self.pos.x,
-            self.pos.y,
-            self.pos.z
-        ];
+        let [qx, qy, qz, w] = self.att.parts().map(Tensor::into_buf);
+        let [x, y, z] = self.pos.parts().map(Tensor::into_buf);
+        let arr = array![qx, qy, qz, w, x, y, z];
         ComponentValue::F64(CowArray::from(arr))
     }
 
@@ -67,7 +61,7 @@ impl ValueRepr for WorldPos {
         let arr = arr.into_dimensionality::<Ix1>().ok()?;
         let arr = arr.as_slice()?;
         Some(WorldPos {
-            att: UnitQuaternion::from_quaternion(Quaternion::new(arr[3], arr[0], arr[1], arr[2])),
+            att: Quaternion::new(arr[3], arr[0], arr[1], arr[2]),
             pos: Vector3::new(arr[4], arr[5], arr[6]),
         })
     }
@@ -75,14 +69,13 @@ impl ValueRepr for WorldPos {
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::UnitQuaternion;
 
     use super::*;
 
     #[test]
     fn test_world_pos() {
         let world_pos = WorldPos {
-            att: UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f64::consts::FRAC_PI_2),
+            att: Quaternion::from_axis_angle(Vector3::y_axis(), std::f64::consts::FRAC_PI_2),
             pos: Vector3::new(1.0, 2.0, 3.0),
         };
         let val = world_pos.component_value();

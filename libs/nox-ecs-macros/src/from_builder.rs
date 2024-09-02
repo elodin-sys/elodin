@@ -1,3 +1,4 @@
+use crate::is_repr_bound;
 use darling::ast::{self};
 use darling::FromDeriveInput;
 use proc_macro::TokenStream;
@@ -21,11 +22,17 @@ pub fn from_builder(input: TokenStream) -> TokenStream {
         data,
     } = FromBuilder::from_derive_input(&input).unwrap();
     let fields = data.take_struct().unwrap();
-    let fields = fields.fields.iter().map(|f| {
+    let fields = fields.fields.iter().enumerate().map(|(i, f)| {
         let ty = &f.ty;
-        let field_ident = &f.ident;
-        quote! {
-            #field_ident: <#ty as #crate_name::FromBuilder>::from_builder(builder),
+        if let Some(field_ident) = &f.ident {
+            quote! {
+                #field_ident: <#ty as #crate_name::FromBuilder>::from_builder(builder),
+            }
+        } else {
+            let i = syn::Index::from(i);
+            quote! {
+                #i: <#ty as #crate_name::FromBuilder>::from_builder(builder),
+            }
         }
     });
     let where_clause_predicates = &generics.where_clause.as_ref().map(|w| &w.predicates);
@@ -36,6 +43,9 @@ pub fn from_builder(input: TokenStream) -> TokenStream {
             let syn::GenericParam::Type(t) = p else {
                 return None;
             };
+            if t.bounds.iter().any(is_repr_bound) {
+                return None;
+            }
             let ident = &t.ident;
             Some(quote! { #ident: #crate_name::xla::ArrayElement + #crate_name::xla::NativeType, })
         })
@@ -47,9 +57,11 @@ pub fn from_builder(input: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
-    let generic_idents = generics.type_params().map(|p| &p.ident);
+
+    let (impl_generics, ty_generics, _) = generics.split_for_impl();
+
     quote! {
-          impl #generics #crate_name::FromBuilder for #ident<#(#generic_idents,)*> #where_clause {
+          impl #impl_generics #crate_name::FromBuilder for #ident #ty_generics #where_clause {
             type Item<'a> = Self;
 
             fn from_builder(builder: &#crate_name::Builder) -> Self::Item<'_> {

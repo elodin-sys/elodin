@@ -3,6 +3,7 @@ use crate::{
     AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
     Elem, Error, Field, RealField, ReplaceDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim,
 };
+use crate::{Const, Dyn, ShapeConstraint};
 use approx::{AbsDiffEq, RelativeEq};
 use dyn_stack::ReborrowMut;
 use faer::{
@@ -14,7 +15,6 @@ use faer::{
     },
     Parallelism,
 };
-use nalgebra::{constraint::ShapeConstraint, Const, Dyn};
 use smallvec::SmallVec;
 use std::default::Default;
 use std::{
@@ -26,7 +26,15 @@ mod repr;
 pub use repr::*;
 
 /// A struct representing an array with type-safe dimensions and element type.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Array<T: Elem, D: ArrayDim> {
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound(
+            deserialize = "D::Buf<T>: serde::Deserialize<'de>",
+            serialize = "D::Buf<T>: serde::Serialize"
+        ))
+    )]
     pub buf: D::Buf<T>,
 }
 
@@ -718,13 +726,13 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         right: &Array<T1, D2>,
     ) -> Array<T1, ConcatDim<D1, D2>>
     where
-        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
-        DefaultMappedDim<D2>: nalgebra::Dim,
+        DefaultMappedDim<D1>: crate::DimAdd<DefaultMappedDim<D2>> + crate::Dim,
+        DefaultMappedDim<D2>: crate::Dim,
         D2::DefaultMapDim: ReplaceDim<D1>,
         D1::DefaultMapDim: ReplaceDim<D2>,
         D1: DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: crate::Dim,
         ConcatDim<D1, D2>: Dim,
     {
         let d1 = D1::array_shape(&self.buf);
@@ -1164,7 +1172,7 @@ pub type ConcatManyDim<D1, const N: usize> =
     ReplaceMappedDim<<D1 as DefaultMap>::DefaultMapDim, D1, MulDim<DefaultMappedDim<D1>, Const<N>>>;
 
 /// Represents a type resulting from multiplication operations between two dimensions.
-pub type MulDim<A, B> = <A as nalgebra::DimMul<B>>::Output;
+pub type MulDim<A, B> = <A as crate::DimMul<B>>::Output;
 
 pub trait TransposeDim<D: Dim> {
     type Output: Dim;

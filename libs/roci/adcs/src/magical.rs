@@ -2,7 +2,7 @@
 //!
 //! Source: https://doi.org/10.1109/JSEN.2019.2919179
 
-use nox::{nalgebra::Const, ArrayRepr, Tensor};
+use nox::{ArrayRepr, Const, Tensor};
 use nox::{Field, Matrix, Matrix3, Vector};
 
 fn calibration_step<const N: usize>(

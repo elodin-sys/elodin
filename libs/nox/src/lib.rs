@@ -5,6 +5,7 @@
 extern crate lapack_src as _;
 
 mod array;
+mod dim;
 mod error;
 mod fields;
 mod matrix;
@@ -17,6 +18,7 @@ mod tensor;
 mod vector;
 
 pub use array::*;
+pub use dim::*;
 pub use error::*;
 pub use fields::*;
 pub use matrix::*;
@@ -27,8 +29,6 @@ pub use scalar::*;
 pub use spatial::*;
 pub use tensor::*;
 pub use vector::*;
-
-pub use nalgebra;
 
 #[cfg(feature = "jax")]
 pub mod jax;

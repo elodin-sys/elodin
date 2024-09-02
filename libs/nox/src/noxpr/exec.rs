@@ -1,5 +1,5 @@
 //! Provides functionality for executing operations and transferring data between host and client device.
-use crate::{AsBuffer, BufferArg, BufferForm, Client, FromPjrtBuffer};
+use crate::{ArrayRepr, AsTypedBuffer, Client, FromTypedBuffers, Op, ReprMonad};
 use paste::paste;
 use std::marker::PhantomData;
 
@@ -9,15 +9,6 @@ pub struct Exec<T, R> {
     pub(crate) phantom: PhantomData<(T, R)>,
 }
 
-/// Defines a trait for converting computation results from client device representations to host types.
-pub trait ToHost {
-    /// The type of data to be transferred to the host.
-    type HostTy;
-
-    /// Transfers data from the client device to the host.
-    fn to_host(&self) -> Self::HostTy;
-}
-
 // This macro allows us to implement the run function for a series of tuples easily.
 // This essentially a workaround for Rust lacking variadic types / generics.
 macro_rules! impl_exec {
@@ -25,26 +16,20 @@ macro_rules! impl_exec {
         #[allow(non_snake_case, clippy::too_many_arguments, non_camel_case_types, unused_variables, unused_mut)]
         impl<$($ty,)* R> Exec<($($ty,)*), R>
         where
-            R: BufferForm,
-            R::BufferTy: FromPjrtBuffer,
-            $($ty: AsBuffer, )*
+            R: ReprMonad<Op>,
+            R::Map<ArrayRepr>: FromTypedBuffers,
+            $($ty: ReprMonad<Op>, )*
         {
             paste! {
                 #[doc = "Executes the compiled XLA computation with provided arguments."]
-                pub fn run<$([<arg_$ty>]: BufferArg<$ty>,)*>(&self, client: &Client, $(mut $ty: [<arg_$ty>],)*) -> Result<R::BufferTy, xla::Error> {
+                pub fn run(&self, client: &Client, $(mut $ty: impl AsTypedBuffer<$ty::Map<ArrayRepr>>,)*) -> Result<<R::Map<ArrayRepr> as FromTypedBuffers>::TypedBuffers, xla::Error> {
                     let mut args = xla::BufferArgsRef::default();
                     $(
-                        let [<buf_$ty>] = $ty.as_buffer(client);
-                        args.push(&[<buf_$ty>]);
+                        let $ty = $ty.as_typed_buffer(client).unwrap();
+                        args.push(&$ty.as_ref().buffer);
                     )*
                     let mut res = self.exec.execute_buffers(args.untuple_result(true))?;
-                    $(
-                        if [<arg_$ty>]::is_mut_borrowed() {
-                            let buf = res.pop().unwrap();
-                            $ty.replace_buffer(buf);
-                        }
-                    )*
-                    Ok(R::BufferTy::from_pjrt(res))
+                    Ok(<R::Map<ArrayRepr> as FromTypedBuffers>::from_pjrt_buffers(&mut res))
                 }
             }
         }
