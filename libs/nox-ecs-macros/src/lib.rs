@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use proc_macro_crate::{crate_name, FoundCrate};
 use quote::quote;
-use syn::Ident;
+use syn::{Ident, TypeParamBound};
 
 extern crate proc_macro;
 
@@ -12,6 +12,7 @@ mod component_group;
 mod from_builder;
 mod from_op;
 mod into_op;
+mod repr_monad;
 
 #[proc_macro_derive(Component, attributes(nox))]
 pub fn component(input: TokenStream) -> TokenStream {
@@ -55,6 +56,11 @@ pub(crate) fn nox_ecs_crate_name() -> proc_macro2::TokenStream {
     }
 }
 
+#[proc_macro_derive(ReprMonad, attributes(nox))]
+pub fn repr_monad(input: TokenStream) -> TokenStream {
+    repr_monad::repr_monad(input)
+}
+
 pub(crate) fn nox_crate_name() -> proc_macro2::TokenStream {
     let name = crate_name("nox").expect("nox is present in `Cargo.toml`");
 
@@ -65,4 +71,11 @@ pub(crate) fn nox_crate_name() -> proc_macro2::TokenStream {
             quote!( #ident )
         }
     }
+}
+
+pub(crate) fn is_repr_bound(bound: &TypeParamBound) -> bool {
+    let TypeParamBound::Trait(t) = bound else {
+        return false;
+    };
+    t.path.is_ident("Repr") || t.path.is_ident("nox::Repr")
 }

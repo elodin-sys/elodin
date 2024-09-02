@@ -1,10 +1,8 @@
 use super::*;
 
 use impeller::{ComponentExt, ComponentId};
-use nox_ecs::{
-    graph::{exprs_from_edges_queries, GraphQuery},
-    nox::IntoOp,
-};
+use nox_ecs::graph::{exprs_from_edges_queries, GraphQuery};
+use nox_ecs::nox::ReprMonad;
 use pyo3::types::{PyDict, PyList};
 
 #[pyclass]
@@ -118,7 +116,7 @@ impl Edge {
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
-        let jax = self.inner.clone().into_op().to_jax()?;
+        let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
     }
 

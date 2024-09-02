@@ -86,11 +86,21 @@ impl AssetStore {
 #[cfg(feature = "xla")]
 mod nox_impl {
     use super::*;
-    use nox::{FromBuilder, IntoOp, Noxpr, NoxprScalarExt};
+    use crate::{types::ComponentExt, Archetype, ArchetypeName};
+    use nox::FromBuilder;
 
-    impl<T> IntoOp for Handle<T> {
-        fn into_op(self) -> Noxpr {
-            self.id.constant()
+    impl<T: Asset + 'static> Archetype for Handle<T> {
+        fn name() -> crate::ArchetypeName {
+            ArchetypeName::from(Self::NAME)
+        }
+
+        fn components() -> Vec<crate::Metadata> {
+            vec![Self::metadata()]
+        }
+
+        fn insert_into_world(self, world: &mut crate::World) {
+            let mut col = world.column_mut::<Self>().unwrap();
+            col.push_raw(&self.id.to_le_bytes());
         }
     }
 

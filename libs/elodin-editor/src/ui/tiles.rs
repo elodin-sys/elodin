@@ -18,6 +18,7 @@ use impeller::{
     well_known::{EntityMetadata, Graph, Panel, Viewport},
     ComponentId, ControlMsg, EntityId,
 };
+use nox::Tensor;
 
 use super::{
     colors, images,
@@ -995,15 +996,11 @@ fn spawn_panel(
                 }
             };
             // Convert from Z-up to Y-up
-            let pos = [viewport.pos.x, viewport.pos.z, -viewport.pos.y];
+            let pos = [viewport.pos.x(), viewport.pos.z(), -viewport.pos.y()].map(Tensor::into_buf);
+            let [i, j, k, w] = viewport.rotation.parts().map(Tensor::into_buf);
             camera.insert(Transform {
                 translation: Vec3::from_array(pos),
-                rotation: Quat::from_xyzw(
-                    viewport.rotation.i,
-                    viewport.rotation.j,
-                    viewport.rotation.k,
-                    viewport.rotation.w,
-                ),
+                rotation: Quat::from_xyzw(i, j, k, w),
                 ..Default::default()
             });
             if !viewport.track_rotation {
@@ -1164,7 +1161,12 @@ fn viewport_label(
         })
         .unwrap_or_else(|| {
             let pos = viewport.pos;
-            format!("Viewport({},{},{})", pos.x, pos.y, pos.z)
+            format!(
+                "Viewport({},{},{})",
+                pos.x().into_buf(),
+                pos.y().into_buf(),
+                pos.z().into_buf(),
+            )
         })
 }
 

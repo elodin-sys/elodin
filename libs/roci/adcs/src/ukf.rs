@@ -1,9 +1,8 @@
 #![allow(clippy::type_complexity)]
 
 use nox::{
-    nalgebra::{constraint::ShapeConstraint, Const},
-    BaseBroadcastDim, BroadcastDim, Dim, Error, Matrix, NonScalarDim, NonTupleDim, Repr, Scalar,
-    SquareDim, Tensor, Vector,
+    BaseBroadcastDim, BroadcastDim, Const, Dim, Error, Matrix, NonScalarDim, NonTupleDim, Repr,
+    Scalar, ShapeConstraint, SquareDim, Tensor, Vector,
 };
 
 pub fn unscented_transform<N, S, R>(
@@ -363,7 +362,7 @@ impl<const N: usize, const Z: usize, const S: usize, R: Repr + 'static> State<N,
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use nox::{nalgebra::Dyn, tensor, ArrayRepr, Matrix3, Matrix4};
+    use nox::{tensor, ArrayRepr, Matrix4};
 
     use super::*;
 

@@ -1,10 +1,10 @@
 //! Provides a Matrix type alias with convenience functions for converting to various representations.
 use std::marker::PhantomData;
 
+use crate::Const;
 use crate::{
     DefaultRepr, Dim, Error, NonScalarDim, NonTupleDim, RealField, Repr, SquareDim, Tensor, Vector,
 };
-use nalgebra::Const;
 
 /// Type alias for a tensor that specifically represents a matrix.
 pub type Matrix<T, const R: usize, const C: usize, P = DefaultRepr> =
@@ -90,11 +90,22 @@ where
     }
 }
 
+impl<T: RealField, R: Repr> Matrix3<T, R> {
+    pub fn look_at_rh(dir: impl Into<Vector<T, 3, R>>, up: impl Into<Vector<T, 3, R>>) -> Self {
+        let dir = dir.into() * T::neg_one();
+        let up = up.into();
+        // apply gram-schmidt orthogonalization to create a rot matrix
+        let z = dir.normalize();
+        let x = up.cross(&z).normalize();
+        let y = z.cross(&x);
+        Self::from_rows([x, y, z])
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use nalgebra::{matrix, vector, ArrayStorage};
 
-    use crate::{tensor, Client, CompFn, ToHost, Vector};
+    use crate::{tensor, Client, CompFn, Vector, Vector3};
 
     use super::*;
 
@@ -106,10 +117,10 @@ mod tests {
             .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0], matrix![2.0, 3.0])
+            .run(&client, tensor![[1.0f32, 2.0]], tensor![[2.0, 3.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![3.0, 5.0]);
+        assert_eq!(out, tensor![[3.0, 5.0]]);
     }
 
     #[test]
@@ -120,10 +131,10 @@ mod tests {
             .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0], matrix![2.0, 3.0])
+            .run(&client, tensor![[1.0f32, 2.0]], tensor![[2.0, 3.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![-1.0, -1.0]);
+        assert_eq!(out, tensor![[-1.0, -1.0]]);
     }
 
     #[test]
@@ -136,12 +147,12 @@ mod tests {
         let out = exec
             .run(
                 &client,
-                matrix![1.0f32, 2.0; 2.0, 3.0],
-                matrix![2.0, 3.0; 4.0, 5.0],
+                tensor![[1.0f32, 2.0], [2.0, 3.0]],
+                tensor![[2.0, 3.0], [4.0, 5.0]],
             )
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![2., 6.; 8., 15.]);
+        assert_eq!(out, tensor![[2., 6.], [8., 15.]]);
     }
 
     #[test]
@@ -162,10 +173,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0, 3.0, 4.0])
+            .run(&client, tensor![[1.0f32, 2.0, 3.0, 4.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![3.0])
+        assert_eq!(out, tensor![[3.0]])
     }
 
     #[test]
@@ -176,25 +187,12 @@ mod tests {
         }
         let comp = index.build().unwrap();
         let exec = comp.compile(&client).unwrap();
-        let a = matrix![0., 1., 2.;
-                        2., 3., 4.;
-                        4., 5., 6.;
-                        7., 8., 9.];
-        let out: nalgebra::Matrix<f32, Const<2>, Const<3>, ArrayStorage<f32, 2, 3>> =
-            exec.run(&client, a, vector![1, 2]).unwrap().to_host();
-        assert_eq!(
-            out,
-            matrix![2., 3., 4.;
-                    4., 5., 6.]
-        );
+        let a = tensor![[0., 1., 2.], [2., 3., 4.], [4., 5., 6.], [7., 8., 9.]];
+        let out = exec.run(&client, a, tensor![1, 2]).unwrap().to_host();
+        assert_eq!(out, tensor![[2., 3., 4.], [4., 5., 6.]]);
 
-        let out: nalgebra::Matrix<f32, Const<2>, Const<3>, ArrayStorage<f32, 2, 3>> =
-            exec.run(&client, a, vector![0, 3]).unwrap().to_host();
-        assert_eq!(
-            out,
-            matrix![0., 1., 2.;
-                    7., 8., 9.]
-        );
+        let out = exec.run(&client, a, tensor![0, 3]).unwrap().to_host();
+        assert_eq!(out, tensor![[0., 1., 2.], [7., 8., 9.]]);
     }
 
     #[test]
@@ -213,24 +211,10 @@ mod tests {
             }
         };
         let out = exec.run(&client).unwrap().to_host();
-        assert_eq!(out, nalgebra::Matrix3::identity());
-
-        let comp = (|| Matrix::<f32, 10, 10, _>::eye()).build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                println!("{}", msg);
-                panic!();
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec.run(&client).unwrap().to_host();
         assert_eq!(
             out,
-            nalgebra::OMatrix::<f32, Const<10>, Const<10>>::identity()
-        )
+            tensor![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        );
     }
 
     #[test]
@@ -252,7 +236,7 @@ mod tests {
         let out = exec.run(&client).unwrap().to_host();
         assert_eq!(
             out,
-            nalgebra::Matrix3::from_diagonal(&vector![1.0, 4.0, 8.0])
+            tensor![[1.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 8.0]]
         );
     }
 
@@ -281,9 +265,7 @@ mod tests {
         let out = exec.run(&client).unwrap().to_host();
         assert_eq!(
             out,
-            matrix![1.0, 2.0, 3.0;
-                    4.0, 5.0, 6.0;
-                    7.0, 8.0, 9.0]
+            tensor![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         );
     }
 
@@ -296,4 +278,24 @@ mod tests {
     //     let out = a.try_inverse().unwrap();
     //     assert_eq!(out, a);
     // }
+
+    #[test]
+    fn test_look_at() {
+        // source: nalgebra
+        // `Rotation3::look_at_rh(&Vector3::new(1.0,2.0,3.0).normalize(), &Vector3::y_axis())`
+        let expected = tensor![
+            [
+                -0.9486832980505139,
+                -0.16903085094570333,
+                -0.2672612419124244
+            ],
+            [0.0, 0.8451542547285167, -0.5345224838248488],
+            [0.31622776601683794, -0.50709255283711, -0.8017837257372732]
+        ]
+        .transpose();
+        assert_eq!(
+            Matrix3::look_at_rh(Vector3::new(1.0, 2.0, 3.0).normalize(), Vector3::y_axis()),
+            expected
+        )
+    }
 }

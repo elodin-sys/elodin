@@ -1,6 +1,6 @@
 use bytes::Buf;
 use impeller::{ComponentId, ComponentType, ComponentValue, EntityId};
-use nox::{xla::Literal, ArrayTy, CompFn, FromBuilder, IntoOp, Noxpr, NoxprFn, NoxprTy};
+use nox::{xla::Literal, ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{Component, ComponentArray, ComponentGroup, Query};
@@ -32,8 +32,21 @@ impl Edge {
     }
 }
 
-impl IntoOp for Edge {
-    fn into_op(self) -> Noxpr {
+impl ReprMonad<Op> for Edge {
+    type Elem = u64;
+
+    type Dim = Const<2>;
+
+    type Map<T: nox::Repr> = Self;
+
+    fn map<N: nox::Repr>(
+        self,
+        _func: impl Fn(Noxpr) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        unimplemented!()
+    }
+
+    fn into_inner(self) -> Noxpr {
         Noxpr::constant(
             Literal::vector(&[self.from.0, self.to.0]),
             ArrayTy {
@@ -42,13 +55,13 @@ impl IntoOp for Edge {
             },
         )
     }
-}
 
-impl FromBuilder for Edge {
-    type Item<'a> = Self;
+    fn inner(&self) -> &Noxpr {
+        unimplemented!()
+    }
 
-    fn from_builder(_builder: &nox::Builder) -> Self::Item<'_> {
-        todo!()
+    fn from_inner(_inner: Noxpr) -> Self {
+        unimplemented!()
     }
 }
 
@@ -208,15 +221,32 @@ pub fn exprs_from_edges_queries<A, B>(
 impl<E> GraphQuery<E> {
     /// Folds over each edge of a graph, using the `from` EntityId
     /// to form th resulting `ComponentArray`
-    pub fn edge_fold<I: ComponentGroup + IntoOp, F: ComponentGroup, T: ComponentGroup>(
+    pub fn edge_fold<I: ComponentGroup, F: ComponentGroup, T: ComponentGroup>(
         &self,
         from_query: &Query<F>,
         to_query: &Query<T>,
         init: I,
         func: impl CompFn<(I, (F::Params, T::Params)), I>,
     ) -> ComponentArray<I> {
-        let scan_func = func.build_expr().unwrap();
-        let init_op = init.into_op();
+        let mut builder = Builder::new();
+        let res = func.compute(&mut builder);
+        let inner = if !builder.mut_params.is_empty() {
+            let mut tuple = Vec::with_capacity(builder.mut_params.count() + 1);
+            let res_op = res.into_noxpr();
+            tuple.push(res_op);
+            for o in builder.mut_params.into_iter() {
+                tuple.insert(1, o.into_inner().into_inner());
+            }
+            Noxpr::tuple(tuple)
+        } else {
+            res.into_noxpr()
+        };
+        let scan_func = NoxprFn {
+            inner,
+            args: builder.params.into_inner(),
+        };
+
+        let init_op = init.into_noxpr();
         let mut output_array: Option<ComponentArray<I>> = None;
         let exprs = exprs_from_edges_queries(&self.edges, from_query.clone(), to_query.clone());
         for (len, (from, to)) in exprs.iter() {
@@ -286,7 +316,8 @@ impl<E> GraphQuery<E> {
 #[cfg(test)]
 mod tests {
 
-    use nox::{tensor, Matrix, Scalar, Vector};
+    use nox::{tensor, Matrix, Repr, Scalar, Vector};
+    use nox_ecs_macros::ReprMonad;
 
     use crate::IntoSystemExt;
 
@@ -294,8 +325,8 @@ mod tests {
 
     #[test]
     fn test_fold_graph() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         fn fold_system(g: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
             g.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
@@ -324,8 +355,8 @@ mod tests {
 
     #[test]
     fn test_single_graph() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
             query.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
@@ -350,8 +381,8 @@ mod tests {
 
     #[test]
     fn test_complex_graph_compile() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         fn fold_system(query: GraphQuery<Edge>, a: Query<A>) -> ComponentArray<A> {
             query.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
@@ -378,11 +409,11 @@ mod tests {
 
     #[test]
     fn test_total_fold_graph() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct B(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct B<R: Repr = Op>(Scalar<f64, R>);
 
         fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
             g.edge_fold(&a, &a, A(5.0.into()), |acc: A, (_, b): (A, A)| {
@@ -405,8 +436,8 @@ mod tests {
 
     #[test]
     fn test_total_fold_vector_graph() {
-        #[derive(Component)]
-        struct A(Vector<f64, 2>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Vector<f64, 2, R>);
 
         fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
             g.edge_fold(
@@ -434,8 +465,8 @@ mod tests {
 
     #[test]
     fn test_total_fold_matrix_graph() {
-        #[derive(Component)]
-        struct A(Matrix<f64, 2, 2>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Matrix<f64, 2, 2, R>);
 
         fn fold_system(g: GraphQuery<TotalEdge>, a: Query<A>) -> ComponentArray<A> {
             g.edge_fold(

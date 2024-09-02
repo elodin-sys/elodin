@@ -1,12 +1,26 @@
 //! Provides functionality to handle quaternions, which are constructs used to represent and manipulate spatial orientations and rotations in 3D space.
+use crate::ArrayRepr;
+use crate::Const;
 use crate::DefaultRepr;
-use nalgebra::Const;
+use crate::Elem;
+use crate::Matrix3;
+use crate::ReprMonad;
 use std::ops::{Add, Mul};
 
 use crate::{Field, RealField, Repr, Scalar, TensorItem, Vector, MRP};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
-pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(pub Vector<T, 4, P>);
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound(
+            deserialize = "Vector<T, 4, P>: serde::Deserialize<'de>",
+            serialize = "Vector<T, 4, P>: serde::Serialize"
+        ))
+    )]
+    pub Vector<T, 4, P>,
+);
 impl<T: Field, R: Repr> Clone for Quaternion<T, R>
 where
     R::Inner<T::Elem, Const<4>>: Clone,
@@ -16,11 +30,44 @@ where
     }
 }
 
+impl<T: TensorItem, R: Repr> ReprMonad<R> for Quaternion<T, R> {
+    type Elem = T::Elem;
+
+    type Dim = Const<4>;
+
+    type Map<N: Repr> = Quaternion<T, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        Quaternion(self.0.map(func))
+    }
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim> {
+        self.0.into_inner()
+    }
+
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim> {
+        self.0.inner()
+    }
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self {
+        Quaternion(Vector::from_inner(inner))
+    }
+}
+
 impl<T: Field, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy {}
 
 impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
     fn default() -> Self {
         Self::identity()
+    }
+}
+
+impl<T: Elem + PartialEq> PartialEq for Quaternion<T, ArrayRepr> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -130,6 +177,39 @@ impl<T: RealField, R: Repr> Quaternion<T, R> {
     }
 }
 
+impl<T: RealField> Quaternion<T, ArrayRepr> {
+    pub fn from_rot_mat(mat: Matrix3<T, ArrayRepr>) -> Self {
+        let m00 = mat.get([0, 0]).into_buf();
+        let m01 = mat.get([0, 1]).into_buf();
+        let m02 = mat.get([0, 2]).into_buf();
+
+        let m10 = mat.get([1, 0]).into_buf();
+        let m11 = mat.get([1, 1]).into_buf();
+        let m12 = mat.get([1, 2]).into_buf();
+
+        let m20 = mat.get([2, 0]).into_buf();
+        let m21 = mat.get([2, 1]).into_buf();
+        let m22 = mat.get([2, 2]).into_buf();
+        let w = (T::one_prim() + m00 + m11 + m22).max(T::zero_prim()).sqrt() / T::two_prim();
+        let x = (T::one_prim() + m00 - m11 - m22).max(T::zero_prim()).sqrt() / T::two_prim();
+        let y = (T::one_prim() - m00 + m11 - m22).max(T::zero_prim()).sqrt() / T::two_prim();
+        let z = (T::one_prim() - m00 - m11 + m22).max(T::zero_prim()).sqrt() / T::two_prim();
+        Quaternion::new(
+            w,
+            x.copysign(m21 - m12),
+            y.copysign(m02 - m20),
+            z.copysign(m10 - m01),
+        )
+    }
+
+    pub fn look_at_rh(
+        dir: impl Into<Vector<T, 3, ArrayRepr>>,
+        up: impl Into<Vector<T, 3, ArrayRepr>>,
+    ) -> Self {
+        Self::from_rot_mat(Matrix3::look_at_rh(dir, up))
+    }
+}
+
 impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
     fn from(mrp: &'a MRP<T, R>) -> Self {
         let MRP(mrp) = mrp;
@@ -235,104 +315,72 @@ impl<'a, T: RealField, R: Repr> Add<&'a Quaternion<T, R>> for Quaternion<T, R> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Client, CompFn, ToHost};
-    use nalgebra::vector;
-    use nalgebra::{UnitQuaternion, Vector3};
+
+    use approx::assert_relative_eq;
+
+    use crate::{tensor, ArrayRepr, Vector3};
 
     use super::*;
 
     #[test]
     fn test_quat_mult() {
-        let client = Client::cpu().unwrap();
-        let comp = (|a: Quaternion<f32>, b: Quaternion<f32>| -> Quaternion<f32> { a * b })
-            .build()
-            .unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let out = exec
-            .run(
-                &client,
-                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
-                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 1.0).into_inner(),
-            )
-            .unwrap()
-            .to_host();
-        let correct_out = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner()
-            * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 1.0).into_inner();
+        let out = Quaternion::from_axis_angle(Vector3::x_axis(), 3.0)
+            * Quaternion::from_axis_angle(Vector3::x_axis(), 1.0);
 
-        assert_eq!(out, correct_out)
+        assert_eq!(
+            out.0,
+            tensor![0.9092974268256817, 0.0, 0.0, -0.4161468365471424]
+        )
     }
 
     #[test]
     fn test_quat_inverse() {
-        let client = Client::cpu().unwrap();
-        let comp = (|a: Quaternion<f32>| -> Quaternion<f32> { a.inverse() })
-            .build()
-            .unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let out = exec
-            .run(
-                &client,
-                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
-            )
-            .unwrap()
-            .to_host();
-        let correct_out = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0)
-            .into_inner()
-            .try_inverse()
-            .unwrap();
-
-        assert_eq!(out, correct_out)
+        let out = Quaternion::from_axis_angle(Vector3::x_axis(), 3.0).inverse();
+        assert_eq!(
+            out.0,
+            tensor![-0.9974949866040544, -0.0, -0.0, 0.0707372016677029]
+        )
     }
 
     #[test]
     fn test_quat_vec_mult() {
-        let client = Client::cpu().unwrap();
-        let comp = (|a: Quaternion<f32>, b: Vector<f32, 3>| -> Vector<f32, 3> { a * b })
-            .build()
-            .unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let out = exec
-            .run(
-                &client,
-                UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0).into_inner(),
-                vector![1.0, 2.0, 3.0],
-            )
-            .unwrap()
-            .to_host();
-        let correct_out =
-            UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 3.0) * vector![1.0, 2.0, 3.0];
+        let out = Quaternion::from_axis_angle(Vector3::x_axis(), 3.0) * tensor![1.0, 2.0, 3.0];
 
-        approx::assert_relative_eq!(out, correct_out, epsilon = 1.0e-6);
+        approx::assert_relative_eq!(
+            out,
+            tensor![1.0, -2.4033450173804924, -2.6877374736816018],
+            epsilon = 1.0e-6
+        );
     }
 
     #[test]
     fn test_quat_convention() {
-        let client = Client::cpu().unwrap();
-        let comp = (|a: Quaternion<f32>, b: Quaternion<f32>| -> Quaternion<f32> { a * b })
-            .build()
-            .unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let out = exec
-            .run(
-                &client,
-                nalgebra::Quaternion::new(0.0, 1.0, 0.0, 0.0),
-                nalgebra::Quaternion::new(0.0, 0.0, 1.0, 0.0),
-            )
-            .unwrap()
-            .to_host();
-        assert_eq!(nalgebra::Quaternion::new(0.0, 0.0, 0.0, 1.0), out);
+        let out: Quaternion<f64, ArrayRepr> =
+            Quaternion::new(0.0, 1.0, 0.0, 0.0) * Quaternion::new(0.0, 0.0, 1.0, 0.0);
+        assert_eq!(Quaternion::new(0.0, 0.0, 0.0, 1.0).0, out.0);
     }
 
     #[test]
     fn test_quat_mrp_conversion() {
-        let client = Client::cpu().unwrap();
-        let comp = (|q: Quaternion<f32>| -> Quaternion<f32> { Quaternion::from(&q.mrp()) })
-            .build()
-            .unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let q = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1.0);
-        let out = exec.run(&client, q.into_inner()).unwrap().to_host();
-        let correct_out = q.into_inner();
-        approx::assert_relative_eq!(out, correct_out, epsilon = 1.0e-6);
+        let input: Quaternion<f64, crate::ArrayRepr> =
+            Quaternion::from_axis_angle(Vector3::z_axis(), 3.14);
+        let q = Quaternion::from(&input.mrp());
+        approx::assert_relative_eq!(input.0, q.0, epsilon = 1.0e-6);
+    }
+
+    #[test]
+    fn test_quat_mat_conv() {
+        let mat = tensor![
+            [0.34202014332566877, 0.9396926207859083, 0.0],
+            [-0.9396926207859083, 0.34202014332566877, 0.0],
+            [0.0, 0.0, 0.9999999999999999],
+        ]
+        .transpose();
+        let quat = Quaternion::from_rot_mat(mat);
+        assert_relative_eq!(
+            quat.0,
+            tensor![0.0, 0.0, 0.573576436351046, 0.8191520442889918],
+            epsilon = 1e-8,
+        );
     }
 }

@@ -4,9 +4,9 @@ use std::cell::{RefCell, UnsafeCell};
 
 /// A builder for constructing tensor computations and managing tensor parameters.
 pub struct Builder {
-    pub(crate) params: RefCell<Vec<Noxpr>>,
-    pub(crate) mut_params: boxcar::Vec<UnsafeCell<Tensor<f32, ScalarDim, Op>>>,
-    pub(crate) aliased_indexes: Vec<(u64, u64)>,
+    pub params: RefCell<Vec<Noxpr>>,
+    pub mut_params: boxcar::Vec<UnsafeCell<Tensor<f32, ScalarDim, Op>>>,
+    pub aliased_indexes: Vec<(u64, u64)>,
 }
 
 impl Builder {
