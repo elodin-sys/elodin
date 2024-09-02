@@ -4,7 +4,7 @@ use crate::*;
 
 impl<T: TensorItem, D: Dim> FromPyObject<'_> for Tensor<T, D, Op> {
     fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let tensor = Tensor::from_op(Noxpr::jax(ToPyObject::to_object(&ob, ob.py())));
+        let tensor = Tensor::from_inner(Noxpr::jax(ToPyObject::to_object(&ob, ob.py())));
         Ok(tensor)
     }
 }

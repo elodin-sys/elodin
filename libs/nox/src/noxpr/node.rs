@@ -8,7 +8,6 @@ use std::{
 
 use crate::Error;
 use itertools::Itertools;
-use pyo3::types::PyAnyMethods;
 use smallvec::{smallvec, SmallVec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
@@ -1179,6 +1178,7 @@ impl Noxpr {
             NoxprNode::Scan(s) => s.initial_state.shape(),
             #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
+                use pyo3::prelude::PyAnyMethods;
                 let jnp = py.import_bound("jax.numpy").unwrap();
                 let o = jnp.call_method1("array", (o,)).ok()?;
                 let shape = o.getattr("shape").ok()?.extract::<Vec<i64>>().ok()?;
@@ -2310,9 +2310,7 @@ impl PrettyPrintTracer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Client, Collapse, CompFn, Matrix, Scalar, Tensor, ToHost, Vector};
-    use nalgebra::{matrix, vector, Const};
-    use smallvec::smallvec;
+    use crate::{tensor, Client, Collapse, CompFn, Const, Matrix, Scalar, Tensor, Vector};
 
     #[test]
     fn test_scalar_add_vmap() {
@@ -2331,10 +2329,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0, 5.0, 6.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0, 5.0, 6.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![2.0, 3.0, 4.0, 6.0, 7.0])
+        assert_eq!(out, tensor![2.0, 3.0, 4.0, 6.0, 7.0])
     }
 
     #[test]
@@ -2354,10 +2352,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, vector![4.0f32, 9.0, 16.0, 25.0, 36.0])
+            .run(&client, tensor![4.0f32, 9.0, 16.0, 25.0, 36.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![2.0, 3.0, 4.0, 5.0, 6.0])
+        assert_eq!(out, tensor![2.0, 3.0, 4.0, 5.0, 6.0])
     }
 
     #[test]
@@ -2377,10 +2375,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, vector![4.0f32, 9.0, 16.0, 25.0, 36.0])
+            .run(&client, tensor![4.0f32, 9.0, 16.0, 25.0, 36.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![1.0, 1.0, 1.0, 1.0, 1.0])
+        assert_eq!(out, tensor![1.0, 1.0, 1.0, 1.0, 1.0])
     }
 
     #[test]
@@ -2400,10 +2398,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0, 2.0; 3.0, 4.0])
+            .run(&client, tensor![[1.0, 2.0], [3.0, 4.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![1.0, 2.0; 3.0, 4.0])
+        assert_eq!(out, tensor![[1.0, 2.0], [3.0, 4.0]])
     }
 
     #[test]
@@ -2429,12 +2427,17 @@ mod tests {
         let out = exec
             .run(
                 &client,
-                [matrix![1.0, 2.0; 3.0, 4.0f32], matrix![5.0, 8.0; 9.0, 10.0]],
+                tensor![[[1.0, 2.0], [3.0, 4.0f32]], [[5.0, 8.0], [9.0, 10.0]]],
             )
-            .unwrap();
-        let lit = out.inner.to_literal_sync().unwrap();
-        let buf = lit.typed_buf::<f32>().unwrap();
-        assert_eq!(buf, &[7.0, 15.0, 10.0, 22.0, 97.0, 135.0, 120.0, 172.0]);
+            .unwrap()
+            .to_host();
+        assert_eq!(
+            out,
+            tensor![
+                [[7.0, 10.0], [15.0, 22.0,]],
+                [[97.0, 120.0,], [135.0, 172.0]]
+            ]
+        );
     }
 
     #[test]
@@ -2442,7 +2445,7 @@ mod tests {
         let a = &[1, 6];
         let b = &[];
         let out = crate::broadcast_dims(a, b);
-        assert_eq!(out, Some(smallvec![1, 6]))
+        assert_eq!(out, Some(smallvec::smallvec![1, 6]))
     }
 
     #[test]
@@ -2465,10 +2468,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0, 0.0, 0.0; 0.0, 4.0, 0.0])
+            .run(&client, tensor![[1.0, 0.0, 0.0], [0.0, 4.0, 0.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, matrix![1.0, 0.0, 0.0; 0.0, 1.0, 0.0])
+        assert_eq!(out, tensor![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
     }
 
     #[test]
@@ -2488,10 +2491,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0, 5.0, 6.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0, 5.0, 6.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, 17.0)
+        assert_eq!(out, 17.0.into())
     }
 
     #[test]
@@ -2512,10 +2515,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![10.0, 14.0])
+        assert_eq!(out, tensor![10.0, 14.0])
     }
 
     #[test]
@@ -2535,10 +2538,10 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![0.0, 0.0])
+        assert_eq!(out, tensor![0.0, 0.0])
     }
 
     #[test]
@@ -2548,8 +2551,6 @@ mod tests {
             mat.vmap(|vec: Vector<f32, 2>| vec.scan(Scalar::from(0f32), |acc, x| acc + x).unwrap())
                 .unwrap()
                 .collapse()
-            // mat.scan(Vector::<f32, 2>::zeros(), |acc, x| acc + x)
-            //     .unwrap()
         }
         let comp = add_one.build().unwrap();
         let exec = match comp.compile(&client) {
@@ -2562,9 +2563,9 @@ mod tests {
             }
         };
         let out = exec
-            .run(&client, matrix![1.0f32, 2.0; 3.0, 5.0;  6.0, 7.0])
+            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![3.0, 8.0, 13.0])
+        assert_eq!(out, tensor![3.0, 8.0, 13.0])
     }
 }

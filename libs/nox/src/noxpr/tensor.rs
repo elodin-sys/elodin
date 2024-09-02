@@ -1,9 +1,8 @@
 use crate::{
-    AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, AsBuffer, Buffer, ConcatDims, ConstDim,
-    DefaultMap, Dim, DimConcat, Field, FromOp, IntoOp, MappedDim, NonScalarDim, Noxpr, Op,
-    ReplaceDim, ReplaceMappedDim, Scalar, Tensor, TensorItem, Vector,
+    AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim,
+    DimConcat, Field, MappedDim, NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad,
+    Scalar, Tensor, TensorItem, Vector,
 };
-use nalgebra::Const;
 use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
@@ -37,15 +36,6 @@ impl<T: Field + ArrayElement + NativeType, D: Dim> From<Tensor<T, D, ArrayRepr>>
     }
 }
 
-impl<T: TensorItem, D: Dim> FromOp for Tensor<T, D, Op> {
-    fn from_op(inner: Noxpr) -> Self {
-        Tensor {
-            inner,
-            phantom: PhantomData,
-        }
-    }
-}
-
 /// Trait for collapsing a tensor into a simpler form, typically by reducing its dimensionality.
 pub trait Collapse {
     type Out;
@@ -55,12 +45,12 @@ pub trait Collapse {
 
 impl<T: TensorItem> Collapse for Scalar<T, Op>
 where
-    T::Item: IntoOp + FromOp,
+    T::Item: ReprMonad<Op>,
 {
     type Out = <T as TensorItem>::Item;
 
     fn collapse(self) -> Self::Out {
-        T::Item::from_op(self.inner)
+        T::Item::from_inner(self.inner)
     }
 }
 
@@ -79,12 +69,6 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim> IntoOp for Tensor<T, D, Op> {
-    fn into_op(self) -> Noxpr {
-        self.inner
-    }
-}
-
 impl<T: TensorItem, D: Dim> TensorItem for Tensor<T, D, Op> {
     type Item = T::Item; // NOTE: this bound might be wrong
 
@@ -92,12 +76,6 @@ impl<T: TensorItem, D: Dim> TensorItem for Tensor<T, D, Op> {
     type Tensor<TD: Dim> = Tensor<T, TD, Op>;
 
     type Elem = T::Elem;
-}
-
-impl<T: TensorItem, D: Dim> AsBuffer for Tensor<T, D, Buffer> {
-    fn as_buffer(&self) -> &xla::PjRtBuffer {
-        &self.inner
-    }
 }
 
 /// Trait for indexing into tensors, allowing for the extraction of sub-tensors or elements based on indices.
@@ -145,8 +123,8 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
         other: Tensor<T, OD, Op>,
     ) -> Tensor<T, ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>, Op>
     where
-        MappedDim<MDim, D>: nalgebra::DimAdd<MappedDim<MDim, OD>> + nalgebra::Dim,
-        MappedDim<MDim, OD>: nalgebra::Dim,
+        MappedDim<MDim, D>: crate::DimAdd<MappedDim<MDim, OD>> + crate::Dim,
+        MappedDim<MDim, OD>: crate::Dim,
         AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>: Dim,
         ReplaceMappedDim<MDim, D, AddDim<MappedDim<MDim, D>, MappedDim<MDim, OD>>>: Dim,
     {
@@ -169,6 +147,6 @@ impl<T: Field, D: Dim> Tensor<T, D, Op> {
 
 impl<T: TensorItem, D: Dim> Tensor<T, D, Op> {
     pub fn log(&self) -> Self {
-        Self::from_op(self.inner.clone().log())
+        Self::from_inner(self.inner.clone().log())
     }
 }

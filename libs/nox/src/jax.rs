@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 use xla::{ArrayElement, ElementType, Literal};
 
-use crate::{BinaryOp, CompFn, Error, IntoOp, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprNode};
+use crate::{BinaryOp, CompFn, Error, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprNode, ReprMonad};
 
 impl Noxpr {
     /// Converts a `Noxpr` expression to a `Jax` operation using a tracer.
@@ -441,7 +441,7 @@ pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
 }
 
 /// Executes a computational function and converts the result to a `Jax` operation.
-pub fn call_comp_fn<T, R: IntoOp>(
+pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
     func: impl CompFn<T, R>,
     args: &[PyObject],
 ) -> Result<PyObject, Error> {

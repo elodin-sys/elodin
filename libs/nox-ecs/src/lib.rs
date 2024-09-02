@@ -5,7 +5,7 @@ use impeller::{
     Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
 };
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
-use nox::{ArrayTy, Client, CompFn, FromOp, Noxpr};
+use nox::{ArrayTy, Client, CompFn, Noxpr};
 use profile::Profiler;
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
@@ -81,7 +81,7 @@ impl<T> ComponentArray<T> {
     }
 }
 
-impl<T: impeller::Component + FromOp> ComponentArray<T> {
+impl<T: Component> ComponentArray<T> {
     pub fn get(&self, offset: i64) -> T {
         let ty: ArrayTy = T::component_type().into();
         let shape = ty.shape;
@@ -96,7 +96,7 @@ impl<T: impeller::Component + FromOp> ComponentArray<T> {
             .clone()
             .slice(start_indices, stop_indices, strides)
             .reshape(shape);
-        T::from_op(op)
+        T::from_inner(op)
     }
 }
 
@@ -658,8 +658,10 @@ mod tests {
     };
     use impeller::well_known::Glb;
     use nox::{
-        tensor, Scalar, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector,
+        tensor, Op, Repr, Scalar, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform,
+        Vector,
     };
+    use nox_ecs_macros::ReprMonad;
     use polars::{
         chunked_array::builder::{ListBuilderTrait, ListPrimitiveChunkedBuilder},
         datatypes::{DataType, Float64Type},
@@ -667,14 +669,14 @@ mod tests {
 
     #[test]
     fn test_simple() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct B(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct B<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct C(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct C<R: Repr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -706,11 +708,11 @@ mod tests {
 
     #[test]
     fn test_get_scalar() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
-        #[derive(Component)]
-        struct B(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct B<R: Repr = Op>(Scalar<f64, R>);
 
         fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
             v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
@@ -727,11 +729,11 @@ mod tests {
 
     #[test]
     fn test_get_tensor() {
-        #[derive(Component)]
-        struct A(Vector<f64, 3>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Vector<f64, 3, R>);
 
-        #[derive(Component)]
-        struct B(Vector<f64, 3>);
+        #[derive(Component, ReprMonad)]
+        struct B<R: Repr = Op>(Vector<f64, 3, R>);
 
         fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
             v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
@@ -751,8 +753,8 @@ mod tests {
 
     #[test]
     fn test_assets() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -769,8 +771,8 @@ mod tests {
 
     #[test]
     fn test_startup() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
             a.map(|a: A| A(a.0 * 3.0)).unwrap()
@@ -793,8 +795,8 @@ mod tests {
 
     #[test]
     fn test_write_read() {
-        #[derive(Component)]
-        struct A(Scalar<f64>);
+        #[derive(Component, ReprMonad)]
+        struct A<R: Repr = Op>(Scalar<f64, R>);
 
         fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
             a.map(|a: A| A(a.0 * 3.0)).unwrap()

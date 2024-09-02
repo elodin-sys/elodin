@@ -3,21 +3,16 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    DimGet, DotDim, Field, ReplaceDim, TensorDim,
+    Dim, DimGet, DotDim, Field, ReplaceDim,
 };
 use crate::{
-    ConstDim, DimRow, Elem, Error, MappableDim, RealField, RowDim, SquareDim, TransposeDim,
-    TransposedDim,
+    ConstDim, DimRow, Elem, Error, MappableDim, RealField, RowDim, ShapeConstraint, SquareDim,
+    TransposeDim, TransposedDim,
 };
-use nalgebra::constraint::ShapeConstraint;
-
-/// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.
-pub trait Dim: ArrayDim + TensorDim {}
-impl<D: ArrayDim + TensorDim> Dim for D {}
 
 /// Represents the interface for data representations in tensor operations.
 pub trait Repr {
-    type Inner<T, D: Dim>
+    type Inner<T, D: Dim>: Clone
     where
         T: Elem;
 
@@ -87,13 +82,13 @@ pub trait Repr {
         right: &Self::Inner<T1, D2>,
     ) -> Self::Inner<T1, ConcatDim<D1, D2>>
     where
-        DefaultMappedDim<D1>: nalgebra::DimAdd<DefaultMappedDim<D2>> + nalgebra::Dim,
-        DefaultMappedDim<D2>: nalgebra::Dim,
+        DefaultMappedDim<D1>: crate::DimAdd<DefaultMappedDim<D2>> + crate::Dim,
+        DefaultMappedDim<D2>: crate::Dim,
         D2::DefaultMapDim: ReplaceDim<D1>,
         D1::DefaultMapDim: ReplaceDim<D2>,
         D1: Dim + DefaultMap,
         AddDim<DefaultMappedDim<D1>, DefaultMappedDim<D2>>: Dim,
-        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: nalgebra::Dim,
+        <<D2 as DefaultMap>::DefaultMapDim as ReplaceDim<D1>>::MappedDim: crate::Dim,
         ConcatDim<D1, D2>: Dim;
 
     /// Concatenates multiple tensors along the specified dimension
@@ -210,4 +205,20 @@ pub trait Repr {
 
     type Shape<D: Dim>: AsRef<[usize]> + AsMut<[usize]> + Clone;
     fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1>;
+}
+
+pub trait ReprMonad<R: Repr> {
+    type Elem: Elem;
+    type Dim: Dim;
+    type Map<T: Repr>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N>;
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim>;
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim>;
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self;
 }

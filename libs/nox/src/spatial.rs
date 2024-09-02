@@ -1,16 +1,10 @@
 //! Provides abstractions for rigid body dynamics in 3D space.
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
-use crate::ArrayRepr;
-use crate::DefaultRepr;
-use crate::Field;
-use crate::RealField;
-use crate::Repr;
-use crate::Tensor;
-use crate::TensorItem;
-use crate::MRP;
-use crate::{Quaternion, Scalar, Vector};
-use nalgebra::Const;
+use crate::{
+    ArrayRepr, Const, DefaultRepr, Field, Quaternion, RealField, Repr, ReprMonad, Scalar, Tensor,
+    TensorItem, Vector, MRP,
+};
 use std::ops::Div;
 use std::ops::{Add, Mul};
 
@@ -49,6 +43,35 @@ where
         f.debug_tuple("SpatialTransform")
             .field(&self.inner)
             .finish()
+    }
+}
+
+impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialTransform<T, R> {
+    type Elem = T;
+    type Dim = Const<7>;
+    type Map<N: Repr> = SpatialTransform<T, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        SpatialTransform {
+            inner: Tensor::from_inner(func(self.inner.inner)),
+        }
+    }
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim> {
+        self.inner.inner
+    }
+
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim> {
+        &self.inner.inner
+    }
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self {
+        SpatialTransform {
+            inner: Tensor::from_inner(inner),
+        }
     }
 }
 
@@ -146,6 +169,35 @@ where
     }
 }
 
+impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialForce<T, R> {
+    type Elem = T;
+    type Dim = Const<6>;
+    type Map<N: Repr> = SpatialForce<T, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        SpatialForce {
+            inner: Tensor::from_inner(func(self.inner.inner)),
+        }
+    }
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim> {
+        self.inner.inner
+    }
+
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim> {
+        &self.inner.inner
+    }
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self {
+        SpatialForce {
+            inner: Tensor::from_inner(inner),
+        }
+    }
+}
+
 impl<T: RealField, R: Repr> SpatialForce<T, R> {
     /// Constructs a new spatial force from a torque component (Vector) and a force component (Vector).
     pub fn new(torque: impl Into<Vector<T, 3, R>>, force: impl Into<Vector<T, 3, R>>) -> Self {
@@ -204,6 +256,36 @@ impl<T: RealField, R: Repr> Add for SpatialForce<T, R> {
 pub struct SpatialInertia<T: TensorItem, R: Repr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
+
+impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialInertia<T, R> {
+    type Elem = T;
+    type Dim = Const<7>;
+    type Map<N: Repr> = SpatialInertia<T, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        SpatialInertia {
+            inner: Tensor::from_inner(func(self.inner.inner)),
+        }
+    }
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim> {
+        self.inner.inner
+    }
+
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim> {
+        &self.inner.inner
+    }
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self {
+        SpatialInertia {
+            inner: Tensor::from_inner(inner),
+        }
+    }
+}
+
 impl<T: Field, R: Repr> Clone for SpatialInertia<T, R>
 where
     Vector<T, 7, R>: Clone,
@@ -308,6 +390,35 @@ where
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialMotion<T, R> {
+    type Elem = T;
+    type Dim = Const<6>;
+    type Map<N: Repr> = SpatialMotion<T, N>;
+
+    fn map<N: Repr>(
+        self,
+        func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        SpatialMotion {
+            inner: Tensor::from_inner(func(self.inner.inner)),
+        }
+    }
+
+    fn into_inner(self) -> R::Inner<Self::Elem, Self::Dim> {
+        self.inner.inner
+    }
+
+    fn inner(&self) -> &R::Inner<Self::Elem, Self::Dim> {
+        &self.inner.inner
+    }
+
+    fn from_inner(inner: R::Inner<Self::Elem, Self::Dim>) -> Self {
+        SpatialMotion {
+            inner: Tensor::from_inner(inner),
         }
     }
 }
@@ -479,38 +590,27 @@ impl<T: RealField, R: Repr> Mul<SpatialForce<T, R>> for Quaternion<T, R> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{tensor, CompFn, ToHost};
+    use crate::tensor;
     use approx::assert_relative_eq;
-    use nalgebra::vector;
 
     use super::*;
 
     #[test]
     fn test_spatial_transform_mul() {
-        let f = || -> Vector<f64, 7> {
-            let a = SpatialTransform::new(
-                Quaternion::<_, ArrayRepr>::from_axis_angle(
-                    tensor![0.0, 0.0, 1.0],
-                    45f64.to_radians(),
-                ),
-                tensor![1.0, 0.0, 0.0],
-            );
-            let b = SpatialTransform::new(
-                Quaternion::<_, ArrayRepr>::from_axis_angle(
-                    tensor![0.0, 0.0, 1.0],
-                    -45f64.to_radians(),
-                ),
-                tensor![0.0, 2.0, 0.0],
-            );
-            (a * b).inner
-        };
-        let client = crate::Client::cpu().unwrap();
-        let comp = f.build().unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let res = exec.run(&client).unwrap().to_host();
+        let a = SpatialTransform::new(
+            Quaternion::<_, ArrayRepr>::from_axis_angle(tensor![0.0, 0.0, 1.0], 45f64.to_radians()),
+            tensor![1.0, 0.0, 0.0],
+        );
+        let b = SpatialTransform::new(
+            Quaternion::<_, ArrayRepr>::from_axis_angle(
+                tensor![0.0, 0.0, 1.0],
+                -45f64.to_radians(),
+            ),
+            tensor![0.0, 2.0, 0.0],
+        );
         assert_eq!(
-            res,
-            vector![
+            (a * b).inner,
+            tensor![
                 0.0,
                 0.0,
                 0.0,
@@ -524,21 +624,15 @@ mod tests {
 
     #[test]
     fn test_spatial_transform_add() {
-        let f = || -> Vector<f64, 7> {
-            let a = SpatialTransform::new(
-                Quaternion::<_, ArrayRepr>::identity(),
-                tensor![0.0, 0.0, 0.0],
-            );
-            let b = SpatialMotion::new(tensor![0.0, 0.0, 1.0], tensor![0.0, 0.0, 0.0]);
-            (a + b).inner
-        };
-        let client = crate::Client::cpu().unwrap();
-        let comp = f.build().unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let res = exec.run(&client).unwrap().to_host();
+        let a = SpatialTransform::new(
+            Quaternion::<_, ArrayRepr>::identity(),
+            tensor![0.0, 0.0, 0.0],
+        );
+        let b = SpatialMotion::new(tensor![0.0, 0.0, 1.0], tensor![0.0, 0.0, 0.0]);
+
         assert_eq!(
-            res,
-            vector![
+            (a + b).inner,
+            tensor![
                 0.0,
                 0.0,
                 0.4472135954999579,
@@ -552,24 +646,18 @@ mod tests {
 
     #[test]
     fn test_spatial_transform_integrate() {
-        let f = || -> Vector<f64, 7> {
-            let a = SpatialTransform::new(
-                Quaternion::<_, ArrayRepr>::identity(),
-                tensor![0.0, 0.0, 0.0],
-            );
-            (0..20)
-                .fold(a, |acc, _| {
-                    acc + SpatialMotion::new(tensor![0.0, 0.0, 0.25 / 20.0], tensor![0.0, 0.0, 0.0])
-                })
-                .inner
-        };
-        let client = crate::Client::cpu().unwrap();
-        let comp = f.build().unwrap();
-        let exec = comp.compile(&client).unwrap();
-        let res = exec.run(&client).unwrap().to_host();
+        let a = SpatialTransform::new(
+            Quaternion::<_, ArrayRepr>::identity(),
+            tensor![0.0, 0.0, 0.0],
+        );
+        let out = (0..20)
+            .fold(a, |acc, _| {
+                acc + SpatialMotion::new(tensor![0.0, 0.0, 0.25 / 20.0], tensor![0.0, 0.0, 0.0])
+            })
+            .inner;
         assert_relative_eq!(
-            res,
-            vector![
+            out,
+            tensor![
                 0.0,
                 0.0,
                 0.12467473338522769,

@@ -1,7 +1,7 @@
-use nox::{Scalar, SpatialForce, SpatialInertia, SpatialMotion};
+use nox::{Op, Repr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
-use nox_ecs_macros::{ComponentGroup, FromBuilder, IntoOp};
+use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 use std::ops::{Add, Mul};
 use std::sync::Arc;
 
@@ -10,18 +10,30 @@ use crate::{
     Rk4Ext,
 };
 
-#[derive(Clone, Component)]
-pub struct WorldVel(pub SpatialMotion<f64>);
-#[derive(Clone, Component)]
-pub struct WorldAccel(pub SpatialMotion<f64>);
+#[derive(Component, ReprMonad)]
+pub struct WorldVel<R: Repr = Op>(pub SpatialMotion<f64, R>);
+#[derive(Component, ReprMonad)]
+pub struct WorldAccel<R: Repr = Op>(pub SpatialMotion<f64, R>);
 
-#[derive(FromBuilder, ComponentGroup, IntoOp)]
+impl Clone for WorldVel {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl Clone for WorldAccel {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+#[derive(FromBuilder, ComponentGroup)]
 struct U {
     x: WorldPos,
     v: WorldVel,
 }
 
-#[derive(FromBuilder, ComponentGroup, IntoOp)]
+#[derive(FromBuilder, ComponentGroup)]
 struct DU {
     v: WorldVel,
     a: WorldAccel,
@@ -119,10 +131,10 @@ impl Mul<WorldAccel> for Scalar<f64> {
     }
 }
 
-#[derive(Clone, Component)]
-pub struct Force(pub SpatialForce<f64>);
-#[derive(Clone, Component)]
-pub struct Inertia(pub SpatialInertia<f64>);
+#[derive(Clone, Component, ReprMonad)]
+pub struct Force<R: Repr = Op>(pub SpatialForce<f64, R>);
+#[derive(Clone, Component, ReprMonad)]
+pub struct Inertia<R: Repr = Op>(pub SpatialInertia<f64, R>);
 
 fn calc_accel(q: Query<(Force, Inertia, WorldPos)>) -> Query<WorldAccel> {
     q.map(|force: Force, inertia: Inertia, pos: WorldPos| {
@@ -202,10 +214,11 @@ mod tests {
     use approx::assert_relative_eq;
     use impeller::ComponentExt;
     use impeller::ComponentId;
-    use nox::nalgebra::{UnitQuaternion, Vector3};
     use nox::tensor;
     use nox::ArrayRepr;
+    use nox::Quaternion;
     use nox::SpatialTransform;
+    use nox::Vector3;
     use std::f64::consts::FRAC_PI_2;
 
     #[test]
@@ -267,7 +280,7 @@ mod tests {
 
     fn expect_angular_accel(
         client: &nox::Client,
-        rot: UnitQuaternion<f64>,
+        rot: Quaternion<f64, ArrayRepr>,
         inertia_diag: [f64; 3],
         torque: [f64; 3],
         angular_accel: [f64; 3],
@@ -281,10 +294,10 @@ mod tests {
             .unwrap()
         };
 
-        let quat_vec = rot.vector();
+        let [x, y, z, w] = rot.parts().map(|x| x.into_buf());
         let body = Body {
             pos: WorldPos(SpatialTransform {
-                inner: tensor![quat_vec[0], quat_vec[1], quat_vec[2], rot.w, 0.0, 0.0, 0.0].into(),
+                inner: tensor![x, y, z, w, 0.0, 0.0, 0.0].into(),
             }),
             vel: WorldVel(SpatialMotion {
                 inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
@@ -325,7 +338,7 @@ mod tests {
             exec.run().unwrap();
         }
         let actual = exec
-            .column_at_tick(WorldAccel::COMPONENT_ID, 120)
+            .column_at_tick(WorldAccel::<Op>::COMPONENT_ID, 120)
             .unwrap()
             .typed_buf::<[f64; 6]>()
             .unwrap()[0];
@@ -344,7 +357,7 @@ mod tests {
         // = 1 rad/s^2 angular acceleration along x-axis
         expect_angular_accel(
             &client,
-            UnitQuaternion::default(),
+            Quaternion::default(),
             [1.0, 1e6, 1e6],
             [1.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -354,7 +367,7 @@ mod tests {
         // = 0 angular acceleration because inertia frame is rotated
         expect_angular_accel(
             &client,
-            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),
             [1.0, 1e6, 1e6],
             [1.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
@@ -364,7 +377,7 @@ mod tests {
         // = 1 rad/s^2 angular acceleration along z-axis (in world frame)
         expect_angular_accel(
             &client,
-            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),
             [1.0, 1e6, 1e6],
             [0.0, 0.0, 1.0],
             [0.0, 0.0, 1.0],
@@ -372,7 +385,7 @@ mod tests {
         // same as above, but with a torque along multiple axes
         expect_angular_accel(
             &client,
-            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0 * FRAC_PI_2),
+            Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),
             [1.0, 1e6, 1e6],
             [0.0, 1.0, 1.0],
             [0.0, 0.0, 1.0],

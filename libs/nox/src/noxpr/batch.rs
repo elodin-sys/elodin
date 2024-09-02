@@ -1,7 +1,7 @@
 use crate::{
     xla::ElementType, ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim,
-    DotDimensionNums, Error, FromOp, IntoOp, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy,
-    ReplaceDim, Tensor, TensorItem,
+    DotDimensionNums, Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad,
+    Tensor, TensorItem,
 };
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -9,6 +9,8 @@ use std::{
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
 };
+
+use super::Op;
 
 /// Helper class for tracing batch operations, useful for operations like batched matrix multiplication.
 #[derive(Clone)]
@@ -907,7 +909,7 @@ impl Noxpr {
 
 impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     /// Vectorized map of a function over a tensor.
-    pub fn vmap<O: TensorItem + IntoOp>(
+    pub fn vmap<O: TensorItem + ReprMonad<Op>>(
         &self,
         func: impl CompFn<(T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>,), O>,
     ) -> Result<Tensor<O, DefaultMappedDim<D>, crate::Op>, Error> {
@@ -915,7 +917,7 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     }
 
     /// Vectorized map of a function over a tensor with a specified mapping dimension.
-    pub fn vmap_with_dim<MDim: ReplaceDim<D>, O: TensorItem + IntoOp>(
+    pub fn vmap_with_dim<MDim: ReplaceDim<D>, O: TensorItem + ReprMonad<Op>>(
         &self,
         func: impl CompFn<(T::Tensor<MDim::Item>,), O>,
     ) -> Result<Tensor<O, MDim::MappedDim, crate::Op>, Error> {
@@ -929,14 +931,14 @@ impl<T: TensorItem, D: Dim + DefaultMap> Tensor<T, D, crate::Op> {
     }
 
     /// Applies a scan operation over a tensor, accumulating results using a specified function.
-    pub fn scan<O: FromOp + IntoOp>(
+    pub fn scan<O: ReprMonad<Op>>(
         &self,
         initial_state: O,
         func: impl CompFn<(O, T::Tensor<<D::DefaultMapDim as ReplaceDim<D>>::Item>), O>,
     ) -> Result<O, Error> {
         let scan_fn = func.build_expr()?;
-        let initial_state = initial_state.into_op();
-        let res = Noxpr::scan(vec![self.inner.clone()], initial_state, scan_fn);
-        Ok(O::from_op(res))
+        let initial_state = initial_state.into_inner();
+        let res = Noxpr::scan(vec![self.inner.clone()], initial_state.clone(), scan_fn);
+        Ok(O::from_inner(res))
     }
 }

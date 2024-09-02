@@ -2,7 +2,7 @@
 use crate::{
     tensor, ArrayRepr, DefaultRepr, Dim, Field, Matrix, RealField, Repr, Scalar, Tensor, TensorItem,
 };
-use nalgebra::{Const, DimMul, ToTypenum};
+use crate::{Const, DimMul, ToTypenum};
 
 use std::marker::PhantomData;
 
@@ -18,6 +18,18 @@ impl<T: Field, R: Repr> Vector<T, 3, R> {
         z: impl Into<Scalar<T, R>>,
     ) -> Self {
         Self::from_arr([x.into(), y.into(), z.into()])
+    }
+
+    pub fn x(&self) -> Scalar<T, R> {
+        self.get(0)
+    }
+
+    pub fn y(&self) -> Scalar<T, R> {
+        self.get(1)
+    }
+
+    pub fn z(&self) -> Scalar<T, R> {
+        self.get(2)
     }
 }
 
@@ -111,12 +123,10 @@ impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
 
 #[cfg(test)]
 mod tests {
+
     use std::f64::consts::FRAC_PI_4;
 
-    use nalgebra::{matrix, vector};
-
     use super::*;
-    use crate::ToHost;
     use crate::*;
 
     #[test]
@@ -127,8 +137,16 @@ mod tests {
         }
         let comp = from_arr.build().unwrap();
         let exec = comp.compile(&client).unwrap();
-        let out = exec.run(&client, 1.0f32, 2.0, 3.0).unwrap().to_host();
-        assert_eq!(out, vector![1.0, 2.0, 3.0]);
+        let out = exec
+            .run(
+                &client,
+                Scalar::from(1.0f32),
+                Scalar::from(2.0),
+                Scalar::from(3.0),
+            )
+            .unwrap()
+            .to_host();
+        assert_eq!(out, tensor![1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -137,10 +155,10 @@ mod tests {
         let comp = (|vec: Vector<f32, 3>| 2.0 * vec).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![2.0, 4.0, 6.0]);
+        assert_eq!(out, tensor![2.0, 4.0, 6.0]);
     }
 
     #[test]
@@ -149,10 +167,10 @@ mod tests {
         let comp = (|a: Vector<f32, 3>, b| a.dot(&b)).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0], vector![2.0, 3.0, 4.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0], tensor![2.0, 3.0, 4.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, 20.0)
+        assert_eq!(out, 20.0.into())
     }
 
     #[test]
@@ -161,10 +179,10 @@ mod tests {
         let comp = (|a: Vector<f32, 3>| a.norm_squared()).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, 14.0)
+        assert_eq!(out, 14.0.into())
     }
 
     #[test]
@@ -173,10 +191,10 @@ mod tests {
         let comp = (|a: Vector<f32, 3>| a.norm()).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![1.0f32, 2.0, 3.0])
+            .run(&client, tensor![1.0f32, 2.0, 3.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, 14.0f32.sqrt())
+        assert_eq!(out, 14.0f32.sqrt().into())
     }
 
     #[test]
@@ -187,10 +205,10 @@ mod tests {
             .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![2.0f32], vector![2.0])
+            .run(&client, tensor![2.0f32], tensor![2.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![4.0f32])
+        assert_eq!(out, tensor![4.0f32])
     }
 
     #[test]
@@ -199,10 +217,10 @@ mod tests {
         let comp = (|a: Vector<f32, 3>| a.extend(1.0)).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![2.0f32, 1.0, 2.0])
+            .run(&client, tensor![2.0f32, 1.0, 2.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![2.0, 1.0, 2.0, 1.0])
+        assert_eq!(out, tensor![2.0, 1.0, 2.0, 1.0])
     }
 
     #[test]
@@ -211,10 +229,10 @@ mod tests {
         let comp = (|a: Vector<f32, 3>| a.abs()).build().unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![-2.0f32, 1.0, -2.0])
+            .run(&client, tensor![-2.0f32, 1.0, -2.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![2.0, 1.0, 2.0])
+        assert_eq!(out, tensor![2.0, 1.0, 2.0])
     }
 
     #[test]
@@ -225,10 +243,10 @@ mod tests {
             .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![3.0, -3.0], vector![-3.0, 3.0])
+            .run(&client, tensor![3.0, -3.0], tensor![-3.0, 3.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![-FRAC_PI_4, 3.0 * FRAC_PI_4])
+        assert_eq!(out, tensor![-FRAC_PI_4, 3.0 * FRAC_PI_4])
     }
 
     #[test]
@@ -239,10 +257,10 @@ mod tests {
             .unwrap();
         let exec = comp.compile(&client).unwrap();
         let out = exec
-            .run(&client, vector![1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0])
+            .run(&client, tensor![1.0, 0.0, 0.0], tensor![0.0, 1.0, 0.0])
             .unwrap()
             .to_host();
-        assert_eq!(out, vector![0.0, 0.0, 1.0])
+        assert_eq!(out, tensor![0.0, 0.0, 1.0])
     }
 
     #[test]
@@ -250,14 +268,10 @@ mod tests {
         let client = Client::cpu().unwrap();
         let comp = (|a: Vector<f32, 3>| a.skew()).build().unwrap();
         let exec = comp.compile(&client).unwrap();
-        let out = exec.run(&client, vector![1.0, 2.0, 3.0]).unwrap().to_host();
+        let out = exec.run(&client, tensor![1.0, 2.0, 3.0]).unwrap().to_host();
         assert_eq!(
             out,
-            matrix![
-                0.0, -3.0, 2.0;
-                3.0, 0.0, -1.0;
-                -2.0, 1.0, 0.0
-            ]
+            tensor![[0.0, -3.0, 2.0], [3.0, 0.0, -1.0], [-2.0, 1.0, 0.0],]
         )
     }
 
