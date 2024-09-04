@@ -1,4 +1,7 @@
-use crate::{config::StripePlansConfig, error::Error};
+use crate::{
+    config::{StripePlanConfig, StripePlansConfig},
+    error::Error,
+};
 use atc_entity::{billing_account, events::DbExt, user};
 use axum::{
     async_trait,
@@ -81,14 +84,31 @@ pub async fn stripe_webhook(
                         };
                         let price_id = price.id.to_string();
                         let new_license_type = match price_id.as_str() {
-                            id if id == context.stripe_plans_config.commercial_price => {
+                            id if id
+                                == context.stripe_plans_config.commercial.subscription_price =>
+                            {
                                 LicenseType::Commercial
                             }
-                            id if id == context.stripe_plans_config.non_commercial_price => {
+                            id if id
+                                == context
+                                    .stripe_plans_config
+                                    .non_commercial
+                                    .subscription_price =>
+                            {
                                 LicenseType::NonCommercial
                             }
-                            id if id == context.stripe_plans_config.monte_carlo_price => {
-                                warn!("found monte carlo price in seat subscription");
+                            id if id
+                                == context.stripe_plans_config.commercial.monte_carlo_price =>
+                            {
+                                warn!("found commercial monte carlo price in seat subscription");
+                                continue;
+                            }
+                            id if id
+                                == context.stripe_plans_config.non_commercial.monte_carlo_price =>
+                            {
+                                warn!(
+                                    "found non_commercial monte carlo price in seat subscription"
+                                );
                                 continue;
                             }
                             price_id => {
@@ -134,8 +154,13 @@ pub async fn stripe_webhook(
                 }
                 Some("monte-carlo") => {
                     let monte_carlo_present = sub.items.data.iter().any(|item| {
-                        item.price.as_ref().map(|price| price.id.as_str())
-                            == Some(&context.stripe_plans_config.monte_carlo_price)
+                        let sub_price_id = item.price.as_ref().map(|price| price.id.as_str());
+                        sub_price_id
+                            == Some(&context.stripe_plans_config.commercial.monte_carlo_price)
+                            || sub_price_id
+                                == Some(
+                                    &context.stripe_plans_config.non_commercial.monte_carlo_price,
+                                )
                     });
                     let Some(billing_account) =
                         billing_account::Entity::find_by_id(billing_account_id)
@@ -208,19 +233,11 @@ fn sub_status_active(status: &stripe::SubscriptionStatus) -> bool {
 pub fn get_subscription_config(
     stripe_plans_config: &StripePlansConfig,
     license_type: elodin_types::api::LicenseType,
-) -> Option<(String, u64, u32)> {
+) -> Option<&StripePlanConfig> {
     match license_type {
         elodin_types::api::LicenseType::None | elodin_types::api::LicenseType::GodTier => None,
-        elodin_types::api::LicenseType::NonCommercial => Some((
-            stripe_plans_config.non_commercial_price.to_string(),
-            30 * 3600 * 24,
-            60,
-        )),
-        elodin_types::api::LicenseType::Commercial => Some((
-            stripe_plans_config.commercial_price.to_string(),
-            5 * 3600 * 24,
-            60000,
-        )),
+        elodin_types::api::LicenseType::NonCommercial => Some(&stripe_plans_config.non_commercial),
+        elodin_types::api::LicenseType::Commercial => Some(&stripe_plans_config.commercial),
     }
 }
 
@@ -266,7 +283,7 @@ impl Api {
         )
         .await?;
 
-        let Some((price_id_str, _, monte_carlo_credit)) = get_subscription_config(
+        let Some(sub_config) = get_subscription_config(
             &self.stripe_plans_config,
             billing_account.seat_license_type.into(),
         ) else {
@@ -279,7 +296,7 @@ impl Api {
             });
         };
 
-        let Ok(price_id) = PriceId::from_str(&price_id_str) else {
+        let Ok(price_id) = PriceId::from_str(&sub_config.subscription_price) else {
             return Err(Error::NotFound);
         };
 
@@ -300,7 +317,7 @@ impl Api {
             subscription_end: sub.current_period_end,
             trial_start: sub.trial_start,
             trial_end: sub.trial_end,
-            monte_carlo_credit,
+            monte_carlo_credit: sub_config.monte_carlo_credit,
         })
     }
 }
