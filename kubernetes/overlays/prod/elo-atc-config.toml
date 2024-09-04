@@ -8,10 +8,17 @@ address = "[::]:50051"
 auth0.domain = "auth.elodin.systems"
 auth0.client_id = "Fduve612Omqy9gUXGxcZ5RoTP9IJ6gly"
 
-[api.stripe_plans]
-monte_carlo_price = "price_1PNiPIG68UBhCjJFC2y1bniB"
-commercial_price = "price_1PNiPLG68UBhCjJFu1uqwQjz"
-non_commercial_price = "price_1PNiPNG68UBhCjJFUif13UWF"
+[api.stripe_plans.commercial]
+monte_carlo_price = "price_1PvIiOG68UBhCjJFki88Q0Os"
+subscription_price = "price_1PNiPLG68UBhCjJFu1uqwQjz"
+trial_length = 432000   # 5 days
+monte_carlo_credit = 60000
+
+[api.stripe_plans.non_commercial]
+monte_carlo_price = "price_1PvIkBG68UBhCjJFYbfQoV5S"
+subscription_price = "price_1PNiPNG68UBhCjJFUif13UWF"
+trial_length = 2592000  # 30 days
+monte_carlo_credit = 60
 
 [orca]
 vm_namespace = "elodin-vms-prod"

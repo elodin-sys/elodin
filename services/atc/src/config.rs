@@ -28,9 +28,16 @@ pub struct ApiConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct StripePlansConfig {
+    pub commercial: StripePlanConfig,
+    pub non_commercial: StripePlanConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StripePlanConfig {
     pub monte_carlo_price: String,
-    pub commercial_price: String,
-    pub non_commercial_price: String,
+    pub subscription_price: String,
+    pub trial_length: u64,
+    pub monte_carlo_credit: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

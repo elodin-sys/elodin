@@ -55,21 +55,21 @@ impl Api {
         .insert_with_event(&self.db, &self.redis)
         .await?;
         if existing_accounts.is_empty() {
-            let (price_id, trial_length, _) =
+            let sub_config =
                 get_subscription_config(&self.stripe_plans_config, req.trial_license_type())
                     .ok_or(Error::InvalidLicenseType)?;
             let trial_end = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-                + trial_length;
+                + sub_config.trial_length;
             let trial_end = trial_end as i64;
             stripe::Subscription::create(
                     &self.stripe,
                     stripe::CreateSubscription {
                         trial_end: Some(Scheduled::at(trial_end)),
                         items: Some(vec![stripe::CreateSubscriptionItems {
-                            price: Some(price_id),
+                            price: Some(sub_config.subscription_price.to_string()),
                             ..Default::default()
                         }]),
                         trial_settings: Some(stripe::CreateSubscriptionTrialSettings {
@@ -97,26 +97,26 @@ impl Api {
             }
             .update_with_event(&self.db, &self.redis)
             .await?;
-        }
 
-        stripe::Subscription::create(
-            &self.stripe,
-            stripe::CreateSubscription {
-                items: Some(vec![stripe::CreateSubscriptionItems {
-                    price: Some(self.stripe_plans_config.monte_carlo_price.to_string()),
-                    ..Default::default()
-                }]),
-                metadata: Some(std::collections::HashMap::from([
-                    ("sub_type".to_string(), "monte-carlo".to_string()),
-                    (
-                        "billing_account_id".to_string(),
-                        billing_account_id.to_string(),
-                    ),
-                ])),
-                ..stripe::CreateSubscription::new(customer.id.clone())
-            },
-        )
-        .await?;
+            stripe::Subscription::create(
+                &self.stripe,
+                stripe::CreateSubscription {
+                    items: Some(vec![stripe::CreateSubscriptionItems {
+                        price: Some(sub_config.monte_carlo_price.to_string()),
+                        ..Default::default()
+                    }]),
+                    metadata: Some(std::collections::HashMap::from([
+                        ("sub_type".to_string(), "monte-carlo".to_string()),
+                        (
+                            "billing_account_id".to_string(),
+                            billing_account_id.to_string(),
+                        ),
+                    ])),
+                    ..stripe::CreateSubscription::new(customer.id.clone())
+                },
+            )
+            .await?;
+        }
 
         Ok(BillingAccount {
             id: billing_account_id.as_bytes().to_vec(),
