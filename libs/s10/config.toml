@@ -1,0 +1,5 @@
+[[tasks]]
+type = "watch"
+cmd = "python3"
+args = ["test.py"]
+restart_policy = "instant"
