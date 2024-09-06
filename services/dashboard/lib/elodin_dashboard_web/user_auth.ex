@@ -40,6 +40,8 @@ defmodule ElodinDashboardWeb.UserAuth do
          }}
 
       {:error, err} ->
+        Logger.warning("get_user_by_token error: #{inspect(err)}")
+
         {:error, err}
     end
   end
@@ -82,11 +84,27 @@ defmodule ElodinDashboardWeb.UserAuth do
 
     query_params =
       case get_user_by_token(access_token) do
+        # User is not found in the database by auth0 id
         {:error, %GRPC.RPCError{status: 5}} ->
-          ElodinDashboard.Atc.create_user(struct(Elodin.Types.Api.CreateUserReq), access_token)
+          case ElodinDashboard.Atc.create_user(
+                 struct(Elodin.Types.Api.CreateUserReq),
+                 access_token
+               ) do
+            {:ok, _} ->
+              nil
+
+            # Duplicate users_email_key in the database
+            {:error, %GRPC.RPCError{status: 13}} ->
+              nil
+
+            {:error, err} ->
+              Logger.warning("create_user error: #{inspect(err)}")
+          end
+
           "?onboarding=1"
 
-        {:error, _} ->
+        {:error, err} ->
+          Logger.warning("log_in_user error: #{inspect(err)}")
           ""
 
         {:ok, _} ->

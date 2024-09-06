@@ -10,6 +10,8 @@ use sea_orm::{DatabaseTransaction, Unchanged};
 
 impl Api {
     pub async fn current_user(&self, claims: Claims) -> Result<CurrentUserResp, Error> {
+        tracing::debug!(%claims.sub, "get current_user");
+
         let user = atc_entity::User::find()
             .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
             .one(&self.db)
@@ -62,6 +64,9 @@ impl Api {
         let id = Uuid::now_v7();
         let name = req.name.unwrap_or(userinfo.name);
         let email = req.email.unwrap_or(userinfo.email);
+
+        tracing::debug!(%id, %email, "create user");
+
         user::ActiveModel {
             id: Set(id),
             email: Set(email),
