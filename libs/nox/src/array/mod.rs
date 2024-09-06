@@ -879,27 +879,31 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
                 lu_in_place_req::<u32, T1>(n, n, Parallelism::None, Default::default())
                     .map_err(|_| Error::SizeOverflow)?,
             );
-        stackalloc::alloca_zeroed(req.unaligned_bytes_required(), move |work| {
-            let mut stack = dyn_stack::PodStack::new(work);
-            let mut perm = D1::ipiv(&self.buf);
-            let mut perm_inv = D1::ipiv(&self.buf);
-            let mut mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
-            let (_info, row_perm) = faer::linalg::lu::partial_pivoting::compute::lu_in_place(
-                mat.rb_mut(),
-                perm.as_mut(),
-                perm_inv.as_mut(),
-                Parallelism::None,
-                stack.rb_mut(),
-                Default::default(),
-            );
-            faer::linalg::lu::partial_pivoting::inverse::invert_in_place(
-                mat,
-                row_perm,
-                Parallelism::None,
-                stack,
-            );
-            Ok(())
-        })
+        inplace_it::inplace_or_alloc_array(
+            req.unaligned_bytes_required(),
+            |work: inplace_it::UninitializedSliceMemoryGuard<u8>| {
+                let mut work = work.init(|_| 0);
+                let mut stack = dyn_stack::PodStack::new(&mut work);
+                let mut perm = D1::ipiv(&self.buf);
+                let mut perm_inv = D1::ipiv(&self.buf);
+                let mut mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
+                let (_info, row_perm) = faer::linalg::lu::partial_pivoting::compute::lu_in_place(
+                    mat.rb_mut(),
+                    perm.as_mut(),
+                    perm_inv.as_mut(),
+                    Parallelism::None,
+                    stack.rb_mut(),
+                    Default::default(),
+                );
+                faer::linalg::lu::partial_pivoting::inverse::invert_in_place(
+                    mat,
+                    row_perm,
+                    Parallelism::None,
+                    stack,
+                );
+                Ok(())
+            },
+        )
     }
 
     pub fn try_lu_inverse(&self) -> Result<Self, Error>
@@ -1001,16 +1005,20 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         let req = cholesky_in_place_req::<T1>(n, Parallelism::None, Default::default())
             .map_err(|_| Error::SizeOverflow)?;
         let mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
-        stackalloc::alloca_zeroed(req.unaligned_bytes_required(), move |work| {
-            let stack = dyn_stack::PodStack::new(work);
-            cholesky_in_place(
-                mat,
-                Default::default(),
-                Parallelism::None,
-                stack,
-                Default::default(),
-            )
-        })?;
+        inplace_it::inplace_or_alloc_array(
+            req.unaligned_bytes_required(),
+            |work: inplace_it::UninitializedSliceMemoryGuard<u8>| {
+                let mut work = work.init(|_| 0);
+                let stack = dyn_stack::PodStack::new(&mut work);
+                cholesky_in_place(
+                    mat,
+                    Default::default(),
+                    Parallelism::None,
+                    stack,
+                    Default::default(),
+                )
+            },
+        )?;
 
         for i in 0..n {
             for j in i + 1..n {
