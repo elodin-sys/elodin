@@ -18,6 +18,8 @@ impl Api {
     ) -> Result<BillingAccount, Error> {
         let billing_account_id = Uuid::now_v7();
 
+        tracing::debug!(%billing_account_id, %user.id, %user.email, "create billing account");
+
         let existing_accounts = billing_account::Entity::find()
             .filter(billing_account::Column::OwnerUserId.eq(user.id))
             .all(txn)

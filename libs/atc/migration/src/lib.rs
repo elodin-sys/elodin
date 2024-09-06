@@ -17,6 +17,7 @@ mod m20240430_044605_add_license_state;
 mod m20240502_161407_add_billing_account_seat_count;
 mod m20240502_233542_add_onboarding_data;
 mod m20240821_134416_add_monte_carlo_billed_runtime;
+mod m20240829_133724_remove_email_constraint;
 
 pub struct Migrator;
 
@@ -41,6 +42,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20240502_161407_add_billing_account_seat_count::Migration),
             Box::new(m20240502_233542_add_onboarding_data::Migration),
             Box::new(m20240821_134416_add_monte_carlo_billed_runtime::Migration),
+            Box::new(m20240829_133724_remove_email_constraint::Migration),
         ]
     }
 }
