@@ -1,0 +1,39 @@
+[package]
+name = "s10"
+edition = "2021"
+version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["posix", "serde"]
+posix = ["std", "tokio", "tokio-util", "async-watcher", "futures"]
+std = []
+serde = ["dep:serde", "toml"]
+
+[dependencies]
+# types
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union", "serde", "const_new"]
+ustr = { version = "1.0.0", features = ["serde"] }
+
+# serde
+serde.version = "1.0"
+serde.optional = true
+serde.features = ["derive"]
+toml.version = "0.8"
+toml.optional = true
+
+# async - posix
+tokio.version = "1.40.0"
+tokio.features = ["full"]
+tokio.optional = true
+tokio-util.version = "0.7.11"
+tokio-util.features = ["rt"]
+tokio-util.optional = true
+async-watcher.version = "0.3"
+async-watcher.optional = true
+futures.version = "0.3.30"
+futures.optional = true
+
+# posix
+nu-ansi-term = "0.49"
