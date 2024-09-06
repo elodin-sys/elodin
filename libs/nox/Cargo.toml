@@ -27,7 +27,7 @@ fn-traits = "0.2"
 faer = "0.19.1"
 bytemuck.version = "1.14"
 dyn-stack = "0.10.0"
-stackalloc = "1.2.1"
+inplace_it = "0.3.5"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
 
