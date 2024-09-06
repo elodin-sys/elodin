@@ -66,7 +66,8 @@ defmodule ElodinDashboardWeb.OnboardingLive do
        socket
        |> assign(page: page)
        |> assign(sub_type: sub_type)
-       |> assign(is_desktop: device_type == "desktop")
+       # NOTE(sphw): temporarily disabled as macOS safari seems to detect as mobile
+       |> assign(is_desktop: true)
        |> assign(ignore_device: ignore_device)
        |> assign(loading: false)
        |> assign(selected_usecases: MapSet.new())}
