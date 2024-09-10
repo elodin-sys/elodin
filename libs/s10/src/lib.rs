@@ -1,12 +1,5 @@
-#![cfg_attr(not(feature = "std"), no_std)]
+pub mod recipe;
 
-#[cfg(feature = "posix")]
-pub mod posix;
+pub mod error;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", serde(tag = "type", rename_all = "kebab-case"))]
-pub enum Task {
-    Process(posix::Process),
-    Watch(posix::Watcher),
-}
+pub mod watch;
