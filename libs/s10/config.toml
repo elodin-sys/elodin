@@ -1,5 +1,16 @@
-[[tasks]]
-type = "watch"
-cmd = "python3"
-args = ["test.py"]
-restart_policy = "instant"
+[default]
+type = "group"
+recipes = ["atc", "dashboard"]
+
+[atc]
+type = "cargo"
+path = "../../services/atc"
+cwd = "../../services/atc"
+env = {"RUST_LOG" = "atc=trace,info"}
+
+[dashboard]
+type = "process"
+cmd = "mix"
+args = ["phx.server"]
+cwd = "../../services/dashboard"
+no_watch = true

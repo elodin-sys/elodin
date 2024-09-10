@@ -1,45 +1,53 @@
 use async_watcher::{notify::RecursiveMode, AsyncDebouncer};
 use core::time::Duration;
 use std::{io, path::PathBuf};
+use tokio::task::JoinSet;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::posix;
+use crate::recipe::Recipe;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Watcher {
-    #[cfg_attr(feature = "serde", serde(flatten))]
-    process: posix::Process,
-    watch_dir: Option<PathBuf>,
-    #[cfg_attr(feature = "serde", serde(default = "default_timeout"))]
+    pub recipe: Recipe,
     timeout: Duration,
 }
 
-fn default_timeout() -> Duration {
-    Duration::from_millis(500)
-}
-
 impl Watcher {
-    pub async fn run(self, cancel_token: CancellationToken) -> io::Result<()> {
+    pub fn new(recipe: Recipe) -> Self {
+        Self {
+            recipe,
+            timeout: Duration::from_millis(200),
+        }
+    }
+
+    pub async fn run(
+        self,
+        name: String,
+        release: bool,
+        cancel_token: CancellationToken,
+        watch_dirs: impl Iterator<Item = PathBuf>,
+    ) -> io::Result<()> {
         let (mut debouncer, mut file_events) = AsyncDebouncer::new_with_channel(self.timeout, None)
             .await
             .map_err(io::Error::other)?;
-        let watch_dir = self
-            .watch_dir
-            .or(self.process.cwd.clone())
-            .unwrap_or(std::env::current_dir()?);
-        debouncer
-            .watcher()
-            .watch(&watch_dir, RecursiveMode::Recursive)
-            .map_err(io::Error::other)?;
+        for watch_dir in watch_dirs {
+            debouncer
+                .watcher()
+                .watch(&watch_dir, RecursiveMode::Recursive)
+                .map_err(io::Error::other)?;
+        }
         let mut proc_cancel_token;
         loop {
             proc_cancel_token = cancel_token.child_token();
-            let tracker = tokio_util::task::task_tracker::TaskTracker::new();
-            tracker.spawn(self.process.clone().run(proc_cancel_token.clone()));
+            let mut set = JoinSet::new();
+            set.spawn(
+                self.recipe
+                    .clone()
+                    .run(name.clone(), release, proc_cancel_token.clone()),
+            );
             tokio::select! {
-                _ = tracker.wait() => {
+                _ = set.join_next() => {
                     break;
                 }
                 _ = cancel_token.cancelled() => {
@@ -53,7 +61,7 @@ impl Watcher {
                         eprintln!("errors occured while watching dir {:?}", errors);
                     }
                     proc_cancel_token.cancel();
-                    tracker.wait().await;
+                    set.join_next().await;
                 }
             }
         }
