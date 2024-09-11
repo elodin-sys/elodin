@@ -186,7 +186,7 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
 
     @el.system
     def multi_out_sys(query: el.Query[A]) -> el.Query[C, D]:
-        return query.map(tuple[C, D], lambda a: ...)
+        return query.map((C, D), lambda a: ...)
     ```
 
 ### _class_ `elodin.GraphQuery`
