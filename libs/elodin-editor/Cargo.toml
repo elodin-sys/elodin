@@ -19,15 +19,14 @@ nox.default-features = false
 # bevy
 bevy.version = "0.14"
 bevy.features = ["wayland", ]
-bevy_egui.version = "0.28"
+bevy_egui.version = "0.29"
 egui.version = "0.28"
 egui.features = ["rayon"]
 egui_tiles = "0.9"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid.git = "https://github.com/tychedelia/bevy_infinite_grid.git"
-bevy_infinite_grid.branch = "main"
+bevy_infinite_grid = "0.13"
 bevy_mod_picking = { version = "0.20.0", default-features = false, features = [
     "backend_raycast",
 ] }

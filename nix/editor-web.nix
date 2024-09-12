@@ -19,8 +19,9 @@ let
   wasm = craneLib.buildPackage (commonArgs // {
     inherit cargoArtifacts;
   });
+  wasm-bindgen-cli = config.packages.wasm-bindgen-cli;
   bundle = pkgs.runCommand "editor-web-bundle" {} ''
-    ${pkgs.wasm-bindgen-cli}/bin/wasm-bindgen --out-dir $out --target web ${wasm}/bin/editor-web.wasm
+    ${wasm-bindgen-cli}/bin/wasm-bindgen --out-dir $out --target web ${wasm}/bin/editor-web.wasm
   '';
 in
 {

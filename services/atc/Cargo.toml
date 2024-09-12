@@ -88,5 +88,5 @@ chrono = "0.4"
 google-cloud-storage = { version = "0.20.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
 
 # stripe
-async-stripe.version = "0.38"
+async-stripe.version = "0.39"
 async-stripe.features = ["runtime-tokio-hyper-rustls"]

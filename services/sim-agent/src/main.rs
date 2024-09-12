@@ -95,7 +95,7 @@ impl ControlService {
         info!(api.addr = ?address, "control api listening");
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
-            .build()
+            .build_v1()
             .unwrap();
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();

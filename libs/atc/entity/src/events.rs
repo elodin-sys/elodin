@@ -57,7 +57,7 @@ where
         let topic_name = <Self::Entity as EntityTrait>::Model::topic_name();
         let event = DbEvent::Update(model);
         let buf = serde_json::to_string(&event)?;
-        redis.publish(&topic_name, buf).await?;
+        let _: () = redis.publish(&topic_name, buf).await?;
         let DbEvent::Update(model) = event else {
             unreachable!()
         };
@@ -74,7 +74,7 @@ where
         let topic_name = <Self::Entity as EntityTrait>::Model::topic_name();
         let event = DbEvent::Insert(model);
         let buf = serde_json::to_string(&event)?;
-        redis.publish(&topic_name, buf).await?;
+        let _: () = redis.publish(&topic_name, buf).await?;
         let DbEvent::Insert(model) = event else {
             unreachable!()
         };
@@ -109,7 +109,7 @@ where
         Self::delete_by_id(id).exec(db).await?;
         let event = DbEvent::Delete(model);
         let buf = serde_json::to_string(&event)?;
-        redis.publish(&topic_name, buf).await?;
+        let _: () = redis.publish(&topic_name, buf).await?;
         let DbEvent::Delete(model) = event else {
             unreachable!()
         };

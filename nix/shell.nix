@@ -4,7 +4,7 @@
       name = "elo-rust-shell";
       buildInputs = with pkgs;
         [
-          config.packages.buildkite-test-collector
+          buildkite-test-collector-rust
           rustToolchain
           pkg-config
           python3
@@ -42,8 +42,12 @@
       buildInputs = with pkgs;
         [
           elixir
+          cacert
         ];
       doCheck = false;
+      shellHook = ''
+        export HEX_CACERTS_PATH="/etc/ssl/certs/ca-bundle.crt"
+      '';
     };
     node = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
       name = "elo-node-shell";

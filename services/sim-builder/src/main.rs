@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
 
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
-        .build()?;
+        .build_v1()?;
 
     let routes = Routes::default()
         .add_service(reflection)
