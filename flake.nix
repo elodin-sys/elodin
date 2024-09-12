@@ -8,9 +8,7 @@
     };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-      };
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     crane = {
       url = "github:ipetkov/crane";
@@ -44,13 +42,13 @@
             flakeInputs = inputs;
             rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           };
-          buildkite-test-collector = {
-            version = "0.1.2";
-            hash = "sha256-ukBXUuy2rbyDWZD14Uf1AQQ7XiBB0jFHhcFmMOxV0V4";
-            cargoHash = "sha256-6uMd+E95qlk/cVOzJwE5ZUaUsWkCmKLd3TbDSqIihic";
+          wasm-bindgen-cli = {
+            version = "0.2.93";
+            hash = "sha256-DDdu5mM3gneraM85pAepBXWn3TMofarVR4NbjMdz3r0=";
+            cargoHash = "sha256-birrg+XABBHHKJxfTKAMSlmTVYLmnmqMDfRnmG6g/YQ=";
           };
           imports = [
-            ./nix/buildkite.nix
+            ./nix/wasm-bindgen-cli.nix
             ./nix/shell.nix
             ./nix/atc.nix
             ./nix/sim-agent.nix

@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, pin::Pin, time::Duration};
 use tokio::sync::broadcast;
 use tonic::async_trait;
-use tonic::{transport::Server, Response, Status};
+use tonic::service::Routes;
+use tonic::{Response, Status};
 use tower::{make::Shared, steer::Steer};
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{info, Span};
@@ -143,13 +144,14 @@ impl Api {
         let svc = api_server::ApiServer::new(self);
         let reflection = tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(elodin_types::FILE_DESCRIPTOR_SET)
-            .build()?;
+            .build_v1()?;
 
-        let grpc = Server::builder()
+        let grpc = Routes::default()
             .add_service(health_service)
             .add_service(svc)
             .add_service(reflection)
-            .into_router();
+            .prepare()
+            .into_axum_router();
         let service = Steer::new(
             vec![rest, grpc],
             |req: &Request<Body>, _services: &[_]| {

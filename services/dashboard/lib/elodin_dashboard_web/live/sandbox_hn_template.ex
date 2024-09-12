@@ -25,7 +25,6 @@ defmodule ElodinDashboardWeb.SandboxHNTemplateLive do
 
   def render(assigns) do
     ~H"""
-
     """
   end
 end

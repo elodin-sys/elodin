@@ -184,7 +184,7 @@ pub async fn get_userinfo(
     access_token: &str,
 ) -> Result<UserInfo, Error> {
     client
-        .get(&format!("https://{}/userinfo", domain))
+        .get(format!("https://{}/userinfo", domain))
         .bearer_auth(access_token)
         .send()
         .await?

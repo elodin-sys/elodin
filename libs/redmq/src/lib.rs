@@ -73,7 +73,7 @@ impl MsgQueue {
     pub async fn send<M: Message>(&self, topic: &str, entries: Vec<M>) -> RedisResult<Vec<String>> {
         let pipeline = self.client.pipeline();
         for entry in entries {
-            pipeline
+            let _: () = pipeline
                 .xadd(topic, false, None, "*", to_redis(&entry))
                 .await?;
         }
@@ -187,7 +187,7 @@ impl MsgQueue {
 
             if !bad_ids.is_empty() {
                 // auto-ack bad messages
-                self.client.xack(topic, &self.group, bad_ids).await?;
+                let _: () = self.client.xack(topic, &self.group, bad_ids).await?;
             }
 
             if !entries.is_empty() {
