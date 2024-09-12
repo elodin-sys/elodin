@@ -43,11 +43,13 @@
         [
           elixir
           cacert
+          esbuild
+          tailwindcss
         ];
       doCheck = false;
-      shellHook = ''
-        export HEX_CACERTS_PATH="/etc/ssl/certs/ca-bundle.crt"
-      '';
+      HEX_CACERTS_PATH = "/etc/ssl/certs/ca-bundle.crt";
+      ESBUILD_BIN = "${pkgs.esbuild}/bin/esbuild";
+      TAILWIND_BIN = "${pkgs.tailwindcss}/bin/tailwindcss";
     };
     node = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
       name = "elo-node-shell";
