@@ -1,0 +1,40 @@
+<!-- This page is for testing our Editor-Web WASM bundle in isolation, see Readme -->
+
+<html lang="en"></html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        background: linear-gradient(
+          135deg,
+          white 0%,
+          white 49%,
+          black 49%,
+          black 51%,
+          white 51%,
+          white 100%
+        ) repeat;
+        background-size: 20px 20px;
+      }
+      canvas {
+        background-color: white;
+      }
+    </style>
+    <title>Wasm Testing Page</title>
+  </head>
+  <script type="module">
+    // Error.stackTraceLimit = Infinity;
+    import init from './assets/editor-web.js'
+    init().catch((error) => {
+      if (!error.message.startsWith("Using exceptions for control flow,")) {
+        throw error;
+      }
+    });
+  </script>
+  
+  <!-- start a sandbox, and replace the data websocket url below with a running backend one -->
+  <div id="editor-container" data-ws-url="wss://app.elodin.dev/sim/ws/0191e229-e860-7c31-83d6-cf2fa597bfde?token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ink1dWd2U0tBaS1jNzFoY3RPOE9sWiJ9.eyJpc3MiOiJodHRwczovL2F1dGguZWxvZGluLnN5c3RlbXMvIiwic3ViIjoiYXV0aDB8NjZkYTRmYzQ1YmZmZDg2N2M1NmM3ZTI0IiwiYXVkIjpbImh0dHBzOi8vYXV0aC5lbG9kaW4uc3lzdGVtcy9hdGMiLCJodHRwczovL2Vsb2Rpbi51cy5hdXRoMC5jb20vdXNlcmluZm8iXSwiaWF0IjoxNzI2MDc2MjY5LCJleHAiOjE3MjYxNjI2NjksInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwiLCJhenAiOiJGZHV2ZTYxMk9tcXk5Z1VYR3hjWjVSb1RQOUlKNmdseSJ9.wrBWKIzG4z44Q9UEyfRX6LCbDnAhKl4FOCAE7og8qIVMdH0XCYBgE84EdokWMs8MLXMlydhAPwXbUCtRgLQlRQnwzaDX2ySD31h0A2JOtkei6DZI716Lp1-tSQsaRRMOZToEqD5FnEslWMhERF-ugOWbghilUoYffZ-F35f1_XMrCZtB8-5Kasd4wLoD1hMTX9qMzOR9djnKMIvC6WnvtNf4aRZMBZZqU3ZWDsympaCXa9kIY4lEa6snznUerfkmgCvT9HuGk7bzStC0ZrYDv_-iH3gxALaY4-I2miXd6guRCH7j8a-r2XTnq3dL1Vdy9YSHjOr5np9_deiO5h5ZdA">
+    <canvas id="editor">
+    </div>
+  </div>
+</html>
