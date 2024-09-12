@@ -29,7 +29,11 @@ Hooks.CodeEditorHook = CodeEditorHook
 Hooks.EditorWasmHook = {
     async mounted() {
       await waitForElm("#editor");
-      await editor_init("/assets/wasm/editor-web_bg.wasm")
+      await editor_init("/assets/wasm/editor-web_bg.wasm").catch((error) => {
+        if (!error.message.startsWith("Using exceptions for control flow,")) {
+          throw error;
+        }
+      });
     }
 }
 

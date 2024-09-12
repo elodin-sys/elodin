@@ -138,7 +138,7 @@ pub struct LineUniform {
     pub model: Mat4,
     pub perspective: u32,
     #[cfg(target_arch = "wasm32")]
-    pub _padding: [f32; 3],
+    pub _padding: f32,
 }
 
 impl LineUniform {

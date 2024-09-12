@@ -8,7 +8,7 @@
 ## Run locally
 
 - Build [`apps/editor-web`](../../apps/editor-web/README.md)
-- Run [`server/atc`](../atc/README.md)
+- Run [`services/atc`](../atc/README.md)
 - Run `mix setup` to install and set up dependencies
 - Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
 
