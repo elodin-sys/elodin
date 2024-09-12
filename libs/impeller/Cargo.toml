@@ -99,7 +99,7 @@ polars.optional = true
 polars-arrow.version = "0.41"
 polars-arrow.features = ["arrow_rs"]
 polars-arrow.optional = true
-arrow.version = "52.0"
+arrow.version = "53.0"
 arrow.optional = true
 
 # macros
