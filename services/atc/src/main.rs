@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use api::{stripe::sync_monte_carlo_billing, Api};
 use atc_entity::{events, vm};
-use config::Config;
+use config::{Config, ElodinEnvironment};
 use fred::prelude::*;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
@@ -22,8 +22,16 @@ mod sandbox;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
     let config = Config::new()?;
+
+    match config.env {
+        ElodinEnvironment::Local | ElodinEnvironment::DevBranch => {
+            tracing_subscriber::fmt().init();
+        }
+        ElodinEnvironment::Dev | ElodinEnvironment::Prod => {
+            tracing_subscriber::fmt().json().init();
+        }
+    };
     info!(?config, "config");
 
     // this cancellation token is hooked into all of the spawned tasks
@@ -66,32 +74,33 @@ async fn main() -> anyhow::Result<()> {
         let monte_carlo_run_events = events::subscribe(&redis_builder).await?;
         let monte_carlo_batch_events = events::subscribe(&redis_builder).await?;
         let msg_queue = redmq::MsgQueue::new(&redis, "atc", &config.pod_name).await?;
-        let stripe = stripe::Client::new(api_config.stripe_secret_key.clone());
-        let stripe_webhook_secret = if let Some(secret) = api_config.stripe_webhook_secret.clone() {
-            secret
-        } else {
-            let endpoint = stripe::WebhookEndpoint::create(
-                &stripe,
-                stripe::CreateWebhookEndpoint::new(
-                    vec![
-                        EventFilter::CustomerSubscriptionPaused,
-                        EventFilter::CustomerSubscriptionDeleted,
-                        EventFilter::CustomerSubscriptionCreated,
-                        EventFilter::CustomerSubscriptionUpdated,
-                        EventFilter::CustomerSubscriptionResumed,
-                        EventFilter::CustomerSubscriptionTrialWillEnd,
-                        EventFilter::CustomerSubscriptionPendingUpdateExpired,
-                        EventFilter::CustomerSubscriptionPendingUpdateApplied,
-                    ],
-                    &format!("{}/stripe/webhook", api_config.base_url),
-                ),
-            )
-            .await?;
-            stripe_webhook_id = Some(endpoint.id.clone());
-            endpoint
-                .secret
-                .ok_or_else(|| anyhow::anyhow!("stripe webhook secret not found"))?
-        };
+        let stripe = stripe::Client::new(api_config.stripe_secret_key.expose_secret().to_string());
+        let stripe_webhook_secret =
+            if let Some(secret) = api_config.stripe_webhook_secret.expose_secret().clone() {
+                secret.to_string()
+            } else {
+                let endpoint = stripe::WebhookEndpoint::create(
+                    &stripe,
+                    stripe::CreateWebhookEndpoint::new(
+                        vec![
+                            EventFilter::CustomerSubscriptionPaused,
+                            EventFilter::CustomerSubscriptionDeleted,
+                            EventFilter::CustomerSubscriptionCreated,
+                            EventFilter::CustomerSubscriptionUpdated,
+                            EventFilter::CustomerSubscriptionResumed,
+                            EventFilter::CustomerSubscriptionTrialWillEnd,
+                            EventFilter::CustomerSubscriptionPendingUpdateExpired,
+                            EventFilter::CustomerSubscriptionPendingUpdateApplied,
+                        ],
+                        &format!("{}/stripe/webhook", api_config.base_url),
+                    ),
+                )
+                .await?;
+                stripe_webhook_id = Some(endpoint.id.clone());
+                endpoint
+                    .secret
+                    .ok_or_else(|| anyhow::anyhow!("stripe webhook secret not found"))?
+            };
         let api = Api::new(
             api_config.clone(),
             db.clone(),
@@ -102,13 +111,13 @@ async fn main() -> anyhow::Result<()> {
             monte_carlo_run_events,
             monte_carlo_batch_events,
             stripe.clone(),
-            stripe_webhook_secret,
+            stripe_webhook_secret.to_string(),
         )
         .await?;
         let cancel_on_drop = cancel_token.clone().drop_guard();
 
         let db_connection = db.clone();
-        let stripe_secret_key = api_config.stripe_secret_key.clone();
+        let stripe_secret_key = api_config.stripe_secret_key.expose_secret().to_string();
 
         services.spawn(async move {
             let client = reqwest::Client::new();
@@ -144,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     // cleanup webhook
     if let Some(stripe_webhook_id) = stripe_webhook_id {
         stripe::WebhookEndpoint::delete(
-            &stripe::Client::new(config.api.unwrap().stripe_secret_key),
+            &stripe::Client::new(config.api.unwrap().stripe_secret_key.expose_secret()),
             &stripe_webhook_id,
         )
         .await?;

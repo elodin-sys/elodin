@@ -1,4 +1,6 @@
 use config::{ConfigError, Environment, File};
+use redact::serde::redact_secret;
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::{net::SocketAddr, time::Duration};
@@ -14,6 +16,16 @@ pub struct Config {
     pub redis_url: String,
     pub migrate: bool,
     pub pod_name: String,
+    pub env: ElodinEnvironment,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum ElodinEnvironment {
+    Local,
+    DevBranch,
+    Dev,
+    Prod,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -21,8 +33,10 @@ pub struct ApiConfig {
     pub address: SocketAddr,
     pub auth0: Auth0Config,
     pub base_url: String,
-    pub stripe_secret_key: String,
-    pub stripe_webhook_secret: Option<String>,
+    #[serde(serialize_with = "redact_secret")]
+    pub stripe_secret_key: Secret<String>,
+    #[serde(serialize_with = "redact_secret")]
+    pub stripe_webhook_secret: Secret<Option<String>>,
     pub stripe_plans: StripePlansConfig,
 }
 
