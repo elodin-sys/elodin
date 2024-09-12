@@ -1,7 +1,8 @@
 database_url = "postgres://sphw:@localhost/atc_dev"
 redis_url = "redis://localhost:6379"
-pod_name="elo-atc"
+pod_name = "elo-atc"
 migrate = true
+env = "local"
 
 [api]
 address = "[::]:50051"

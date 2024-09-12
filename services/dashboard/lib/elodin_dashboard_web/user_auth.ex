@@ -98,13 +98,13 @@ defmodule ElodinDashboardWeb.UserAuth do
               nil
 
             {:error, err} ->
-              Logger.warning("create_user error: #{inspect(err)}")
+              Logger.error("create_user: #{inspect(err)}")
           end
 
           "?onboarding=1"
 
         {:error, err} ->
-          Logger.warning("log_in_user error: #{inspect(err)}")
+          Logger.error("log_in_user: #{inspect(err)}")
           ""
 
         {:ok, _} ->

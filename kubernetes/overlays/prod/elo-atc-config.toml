@@ -2,6 +2,7 @@
 database_url = "postgresql://postgres:secret@postgres.elodin-app-prod.svc.cluster.local:5432/postgres"
 redis_url = "redis://redis.elodin-app-prod.svc.cluster.local:6379"
 migrate = true
+env = "prod"
 
 [api]
 address = "[::]:50051"

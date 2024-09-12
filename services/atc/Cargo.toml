@@ -27,7 +27,9 @@ enumflags2.features = ["serde"]
 # logs
 tracing = "0.1"
 tracing-subscriber.version = "0.3"
-tracing-subscriber.features = ["env-filter"]
+tracing-subscriber.features = ["env-filter","json"]
+redact.version = "0.1.10"
+redact.features = ["serde"]
 
 # config
 config.version = "0.14"
