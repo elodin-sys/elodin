@@ -1,10 +1,9 @@
-import numpy as np
 import elodin as el
 import jax.numpy as jnp
-
-from sim import world, system
-from config import Config, Frame, Control
+import numpy as np
 import util
+from config import Config, Control, Frame
+from sim import system, world
 
 EDU_450_CONFIG = Config(
     control=Control(
@@ -26,9 +25,7 @@ EDU_450_CONFIG = Config(
     inertia_diagonal=np.array([0.1, 0.1, 0.2]),
     start_pos=np.array([0.0, 0.0, 2.0]),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
-    motor_positions=util.motor_positions(
-        np.pi * np.array([0.25, -0.75, 0.75, -0.25]), 0.24
-    ),
+    motor_positions=util.motor_positions(np.pi * np.array([0.25, -0.75, 0.75, -0.25]), 0.24),
     motor_thrust_directions=np.array(
         [
             [0.0, 0.0, 1.0],

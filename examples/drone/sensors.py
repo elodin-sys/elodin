@@ -1,11 +1,11 @@
-import elodin as el
-from dataclasses import field, dataclass
-import jax
 import typing as ty
+from dataclasses import dataclass, field
+
+import elodin as el
+import filter
+import jax
 import jax.numpy as jnp
 import jax.random as rng
-
-import filter
 import params
 from config import Config
 
@@ -221,12 +221,4 @@ def gravity_accel(p: el.WorldPos, a: Accel) -> GravityAccel:
     return p.angular().inverse() @ jnp.array([0.0, 0.0, 1.0])
 
 
-imu = (
-    advance_sensor_tick
-    | update_gyro_noise
-    | gyro
-    | accel
-    | accel_health
-    | mag
-    | gravity_accel
-)
+imu = advance_sensor_tick | update_gyro_noise | gyro | accel | accel_health | mag | gravity_accel
