@@ -1,10 +1,11 @@
-from elodin.elodin import Quaternion
+from dataclasses import dataclass
+from typing import Annotated
+
+import elodin as el
 import jax
 import jax.numpy as np
+from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
-from dataclasses import dataclass
-import elodin as el
-from typing import Annotated
 
 rw_force_clamp = 0.02
 G = 6.6743e-11  #
@@ -449,7 +450,7 @@ def spawn_sat(x, y, w: el.World):
 
 
 sat = spawn_sat(0, 0, w)
-count = 80
+count = 20
 bound = int(count**0.5 / 2)
 for x in range(-bound, bound):
     for y in range(-bound, bound):
@@ -467,7 +468,7 @@ w.spawn(
         ),
         el.Panel.graph(
             *[
-                el.GraphEntity(sat_id, el.Component.index(el.WorldPos)[:4])
+                el.GraphEntity(sat_id, *el.Component.index(el.WorldPos)[:4])
                 for sat_id in sat_ids
             ]
         ),
