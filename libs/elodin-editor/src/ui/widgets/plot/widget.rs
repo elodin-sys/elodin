@@ -11,7 +11,6 @@ use bevy::{
         ButtonInput,
     },
     math::{DVec2, Rect, Vec2},
-    prelude::{Timer, TimerMode},
     render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
@@ -26,6 +25,7 @@ use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
+use web_time::{Duration, Instant};
 
 use crate::ui::{
     colors::{self, with_opacity, ColorExt},
@@ -1092,13 +1092,13 @@ pub fn pan_graph(
 }
 
 pub fn reset_graph(
-    mut last_click_timer: Local<Timer>,
+    mut last_click: Local<Option<Instant>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&mut GraphState, &Camera)>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
 ) {
     if mouse_buttons.just_released(MouseButton::Left) {
-        *last_click_timer = Timer::from_seconds(0.25, TimerMode::Once);
+        *last_click = Some(Instant::now());
     }
 
     let Ok(window) = primary_window.get_single() else {
@@ -1108,7 +1108,11 @@ pub fn reset_graph(
     let cursor_pos = window.physical_cursor_position();
     let Some(cursor_pos) = cursor_pos else { return };
 
-    if mouse_buttons.just_pressed(MouseButton::Left) && !last_click_timer.finished() {
+    if mouse_buttons.just_pressed(MouseButton::Left)
+        && last_click
+            .map(|t| t.elapsed() < Duration::from_millis(250))
+            .unwrap_or_default()
+    {
         for (mut graph_state, camera) in &mut query {
             let Some(viewport) = &camera.viewport else {
                 continue;
