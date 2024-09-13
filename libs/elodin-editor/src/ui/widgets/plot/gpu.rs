@@ -123,7 +123,7 @@ pub struct LineUniform {
     pub color: Vec4,
     pub chunk_size: f32,
     #[cfg(target_arch = "wasm32")]
-    _padding: [f32; 2],
+    _padding: bevy::math::Vec2,
 }
 
 impl LineUniform {
@@ -131,9 +131,9 @@ impl LineUniform {
         Self {
             line_width,
             color: Vec4::from_array(color.to_linear().to_f32_array()),
+            chunk_size: 1.0,
             #[cfg(target_arch = "wasm32")]
             _padding: Default::default(),
-            chunk_size: 1.0,
         }
     }
 }
