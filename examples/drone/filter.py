@@ -1,6 +1,7 @@
+import math
+
 import jax
 from jax import numpy as jnp
-import math
 from jax.typing import ArrayLike
 
 
@@ -18,9 +19,7 @@ class LPF:
     def apply(self, y_n1: jax.Array, x_n: jax.Array) -> jax.Array:
         return y_n1 + self.alpha * (x_n - y_n1)
 
-    def freq_response(
-        self, freq: jax.typing.ArrayLike, sample_freq: float
-    ) -> jax.Array:
+    def freq_response(self, freq: jax.typing.ArrayLike, sample_freq: float) -> jax.Array:
         alpha = self.alpha
         phi = jnp.exp(-1j * 2 * jnp.pi * freq / sample_freq)
         return 1 / jnp.abs(1 - alpha * (1 - phi))
@@ -61,18 +60,14 @@ class BiquadLPF:
         y_n = b0 * x_n + b1 * x_n1 + b2 * x_n2 - a1 * y_n1 - a2 * y_n2
         return jnp.array([x_n, x_n1, y_n, y_n1])
 
-    def freq_response(
-        self, freq: jax.typing.ArrayLike, sample_freq: float
-    ) -> jax.Array:
+    def freq_response(self, freq: jax.typing.ArrayLike, sample_freq: float) -> jax.Array:
         b0, b1, b2, a1, a2 = self.coefs
         phi = (jnp.sin(jnp.pi * freq * 2 / (2 * sample_freq))) ** 2
         r = (
             (b0 + b1 + b2) ** 2
             - 4 * (b0 * b1 + 4 * b0 * b2 + b1 * b2) * phi
             + 16 * b0 * b2 * phi * phi
-        ) / (
-            (1 + a1 + a2) ** 2 - 4 * (a1 + 4 * a2 + a1 * a2) * phi + 16 * a2 * phi * phi
-        )
+        ) / ((1 + a1 + a2) ** 2 - 4 * (a1 + 4 * a2 + a1 * a2) * phi + 16 * a2 * phi * phi)
         return r**0.5
 
 

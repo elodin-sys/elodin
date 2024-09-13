@@ -1,11 +1,12 @@
 import typing as ty
+from dataclasses import field
+
 import elodin as el
 import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as la
-from dataclasses import field
-from jax.scipy.ndimage import map_coordinates
 import polars as pl
+from jax.scipy.ndimage import map_coordinates
 
 TIME_STEP = 1.0 / 120.0
 lp_sample_freq = round(1.0 / TIME_STEP)
@@ -46,17 +47,11 @@ AeroForce = ty.Annotated[
     ),
 ]
 
-CenterOfGravity = ty.Annotated[
-    jax.Array, el.Component("center_of_gravity", el.ComponentType.F64)
-]
+CenterOfGravity = ty.Annotated[jax.Array, el.Component("center_of_gravity", el.ComponentType.F64)]
 
-DynamicPressure = ty.Annotated[
-    jax.Array, el.Component("dynamic_pressure", el.ComponentType.F64)
-]
+DynamicPressure = ty.Annotated[jax.Array, el.Component("dynamic_pressure", el.ComponentType.F64)]
 
-AngleOfAttack = ty.Annotated[
-    jax.Array, el.Component("angle_of_attack", el.ComponentType.F64)
-]
+AngleOfAttack = ty.Annotated[jax.Array, el.Component("angle_of_attack", el.ComponentType.F64)]
 
 Mach = ty.Annotated[jax.Array, el.Component("mach", el.ComponentType.F64)]
 
@@ -204,10 +199,7 @@ def quat_to_euler(q: el.Quaternion) -> jax.Array:
     x, y, z, w = q.vector()
     roll = jnp.arctan2(2 * (w * x + y * z), 1 - 2 * (x**2 + y**2))
     pitch = (
-        2
-        * jnp.atan2(
-            jnp.sqrt(1 + 2 * (w * y - x * z)), jnp.sqrt(1 - 2 * (w * y - x * z))
-        )
+        2 * jnp.atan2(jnp.sqrt(1 + 2 * (w * y - x * z)), jnp.sqrt(1 - 2 * (w * y - x * z)))
         - jnp.pi / 2
     )
     yaw = jnp.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
@@ -252,9 +244,7 @@ def to_coord(s: pl.Series, val: jax.Array) -> jax.Array:
 @el.dataclass
 class Rocket(el.Archetype):
     angle_of_attack: AngleOfAttack = field(default_factory=lambda: jnp.array([0.0]))
-    aero_coefs: AeroCoefs = field(
-        default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    )
+    aero_coefs: AeroCoefs = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
     center_of_gravity: CenterOfGravity = field(default_factory=lambda: jnp.float64(0.2))
     mach: Mach = field(default_factory=lambda: jnp.float64(0.0))
     dynamic_pressure: DynamicPressure = field(default_factory=lambda: jnp.float64(0.0))
@@ -271,9 +261,7 @@ class Rocket(el.Archetype):
         default_factory=lambda: jnp.array([0.0, 0.0, 0.0])
     )
     pitch_pid: PitchPID = field(default_factory=lambda: jnp.array(pitch_pid))
-    pitch_pid_state: PitchPIDState = field(
-        default_factory=lambda: jnp.array([0.0, 0.0, 0.0])
-    )
+    pitch_pid_state: PitchPIDState = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0]))
     accel_setpoint: AccelSetpoint = field(default_factory=lambda: jnp.array([0.0, 0.0]))
     accel_setpoint_smooth: AccelSetpointSmooth = field(
         default_factory=lambda: jnp.array([0.0, 0.0])
@@ -338,9 +326,7 @@ def aero_coefs(
         to_coord(aero_df["Delta"], fin_deflect),
         to_coord(aero_df["Alphac"], jnp.abs(angle_of_attack)),
     ]
-    coefs = jnp.array(
-        [map_coordinates(coef, coords, 1, mode="nearest") for coef in aero]
-    )
+    coefs = jnp.array([map_coordinates(coef, coords, 1, mode="nearest") for coef in aero])
     coefs = jnp.array(
         [
             0.0,
@@ -424,9 +410,7 @@ def v_rel_accel_filtered(s: VRelAccelBuffer) -> VRelAccelFiltered:
 
 
 @el.map
-def accel_setpoint_smooth(
-    a: AccelSetpoint, a_s: AccelSetpointSmooth
-) -> AccelSetpointSmooth:
+def accel_setpoint_smooth(a: AccelSetpoint, a_s: AccelSetpointSmooth) -> AccelSetpointSmooth:
     dt = TIME_STEP
     exp_decay_constant = 0.5
     return a_s + (a - a_s) * jnp.exp(-exp_decay_constant * dt)

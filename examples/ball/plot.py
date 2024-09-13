@@ -1,8 +1,9 @@
-import polars as pl
-from sim import world, system
+import argparse
+
 import matplotlib.pyplot as plt
 import numpy as np
-import argparse
+import polars as pl
+from sim import system, world
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
