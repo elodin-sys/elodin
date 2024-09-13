@@ -52,9 +52,7 @@ class Sensors(el.Archetype):
 def fake_magnetometer_ref(pos: el.WorldPos) -> MagReadingRef:
     key = jax.random.key(jax.lax.convert_element_type(pos.linear()[0], "int64"))
     noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-        [1.0, 0.0, 0.0]
-    )
+    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array([1.0, 0.0, 0.0])
 
 
 @el.map
@@ -66,9 +64,7 @@ def fake_magnetometer_body(_: el.WorldPos) -> MagReadingBody:
 def fake_star_ref(pos: el.WorldPos) -> StarReadingRef:
     key = jax.random.key(jax.lax.convert_element_type(pos.linear()[1], "int64"))
     noise = 0.01 * jax.random.normal(key, shape=(4,))
-    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array(
-        [0.0, 0.0, 1.0]
-    )
+    return el.Quaternion(pos.angular().vector() + noise).normalize() @ np.array([0.0, 0.0, 1.0])
 
 
 @el.map
@@ -94,9 +90,7 @@ sensors = (
 # source: Optimal Estimation of Dynamic Systems, 2nd Edition - Chapter 7
 
 
-def calculate_covariance(
-    sigma_g: jax.Array, sigma_b: jax.Array, dt: float
-) -> jax.Array:
+def calculate_covariance(sigma_g: jax.Array, sigma_b: jax.Array, dt: float) -> jax.Array:
     variance_g = np.diag(sigma_g * sigma_g * dt)
     variance_b = np.diag(sigma_b * sigma_b * dt)
     Q_00 = variance_g + variance_b * dt**2 / 3
@@ -106,14 +100,10 @@ def calculate_covariance(
     return np.block([[Q_00, Q_01], [Q_10, Q_11]])
 
 
-Q = calculate_covariance(
-    np.array([0.1, 0.1, 0.1]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
-)
+Q = calculate_covariance(np.array([0.1, 0.1, 0.1]), np.array([0.01, 0.01, 0.01]), 1 / 120.0)
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
-P = Annotated[
-    jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))
-]
+P = Annotated[jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))]
 AttEst = Annotated[el.Quaternion, el.Component("att_est")]  # q_hat
 AngVelEst = Annotated[
     jax.Array, el.Component("ang_vel_est", el.ComponentType(el.PrimitiveType.F64, (3,)))
@@ -144,9 +134,7 @@ def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
     return q_hat.normalize()
 
 
-def propogate_state_covariance(
-    big_p: jax.Array, omega: jax.Array, dt: float
-) -> jax.Array:
+def propogate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) -> jax.Array:
     omega_norm = la.norm(omega)
     s = np.sin(omega_norm * dt)
     c = np.cos(omega_norm * dt)
@@ -232,9 +220,7 @@ UserGoal = Annotated[
     jax.Array, el.Component("euler_input", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
 
-RWAxis = Annotated[
-    jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))
-]
+RWAxis = Annotated[jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))]
 
 RWForce = Annotated[el.SpatialForce, el.Component("rw_force")]
 
@@ -409,12 +395,8 @@ def spawn_sat(x, y, w: el.World):
         name=f"Sat {sat_num} Reaction Wheel 3",
     )
 
-    rot_x = el.Quaternion.from_axis_angle(
-        np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x)
-    )
-    rot_y = el.Quaternion.from_axis_angle(
-        np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y)
-    )
+    rot_x = el.Quaternion.from_axis_angle(np.array([0.0, 1.0, 0.0]), np.radians(0.00003 * x))
+    rot_y = el.Quaternion.from_axis_angle(np.array([0.0, 0.0, 1.0]), np.radians(0.00003 * y))
     rot = rot_x * rot_y
     ang_vel = jax.random.normal(rand_key, shape=(3,))
     ang_vel = ang_vel / la.norm(ang_vel) * 3.0
@@ -434,9 +416,7 @@ def spawn_sat(x, y, w: el.World):
             ),
             UserInput(np.array([0.0, 0.0, 0.0])),
             Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
-            KalmanFilter(
-                np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
-            ),
+            KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
             scene,
         ],
         name=f"OreSat {sat_num}",
@@ -467,10 +447,7 @@ w.spawn(
             active=True,
         ),
         el.Panel.graph(
-            *[
-                el.GraphEntity(sat_id, *el.Component.index(el.WorldPos)[:4])
-                for sat_id in sat_ids
-            ]
+            *[el.GraphEntity(sat_id, *el.Component.index(el.WorldPos)[:4]) for sat_id in sat_ids]
         ),
         active=True,
     ),
@@ -481,9 +458,7 @@ w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
-            world_vel=el.SpatialMotion(
-                angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
-            ),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
         w.glb("https://storage.googleapis.com/elodin-assets/earth.glb"),

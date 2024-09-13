@@ -1,18 +1,21 @@
 from __future__ import annotations
+
 from collections.abc import Sequence
-import jax
 from typing import (
+    Annotated,
     Any,
-    Optional,
-    Union,
-    Tuple,
     ClassVar,
     List,
+    Optional,
     Protocol,
-    Annotated,
+    Tuple,
+    Union,
     overload,
 )
+
+import jax
 import polars as pl
+
 from elodin import Archetype
 
 class PrimitiveType:
@@ -49,9 +52,7 @@ class WorldBuilder:
         archetypes: Asset | Archetype | list[Archetype],
         name: Optional[str] = None,
     ) -> EntityId: ...
-    def insert(
-        self, id: EntityId, archetypes: Asset | Archetype | Sequence[Archetype]
-    ): ...
+    def insert(self, id: EntityId, archetypes: Asset | Archetype | Sequence[Archetype]): ...
     def insert_asset(self, asset: Asset) -> Handle: ...
     def run(
         self,
@@ -222,9 +223,7 @@ class Quaternion:
     @staticmethod
     def identity() -> Quaternion: ...
     @staticmethod
-    def from_axis_angle(
-        axis: jax.typing.ArrayLike, angle: jax.typing.ArrayLike
-    ) -> Quaternion: ...
+    def from_axis_angle(axis: jax.typing.ArrayLike, angle: jax.typing.ArrayLike) -> Quaternion: ...
     def vector(self) -> jax.Array: ...
     def normalize(self) -> Quaternion: ...
     def __mul__(self, other: Quaternion) -> Quaternion: ...
@@ -291,9 +290,7 @@ class GraphQueryInner:
         self, from_query: QueryInner, to_query: QueryInner
     ) -> dict[int, Tuple[list[jax.Array], list[jax.Array]]]: ...
     @staticmethod
-    def from_builder(
-        builder: SystemBuilder, edge_name: str, reverse: bool
-    ) -> GraphQueryInner: ...
+    def from_builder(builder: SystemBuilder, edge_name: str, reverse: bool) -> GraphQueryInner: ...
     @staticmethod
     def from_builder_total_edge(builder: SystemBuilder) -> GraphQueryInner: ...
     def map(

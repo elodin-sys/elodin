@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
-import jax
 import sys
-import numpy
+
+import jax
 import jax.numpy as np
 import jax.numpy.linalg as la
 import matplotlib.pyplot as plt
+import numpy
 
 
 def estimate_step(y, m):

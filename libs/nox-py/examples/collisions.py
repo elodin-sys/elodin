@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-import jax
+
 import elodin as el
+import jax
 from jax import numpy as np
 from jax.numpy import linalg as la
 
@@ -82,9 +83,7 @@ def collison_impulse_static(
     inverse_inertia_a = 1.0 / inertia_a.inertia_diag()
     v = vel_a.linear()
     jr_top = np.dot(-1 * (1 + elasticity) * v, norm)
-    jr_bottom = inverse_mass_a + (
-        inverse_inertia_a * np.cross(np.cross(r_a, norm), r_a)
-    ).dot(norm)
+    jr_bottom = inverse_mass_a + (inverse_inertia_a * np.cross(np.cross(r_a, norm), r_a)).dot(norm)
     jr = jr_top / jr_bottom
     impulse = jr / mass_a * norm
     return el.SpatialMotion(linear=impulse)
@@ -135,16 +134,12 @@ def collide(
         r_b = norm * 0.4
         impulse = jax.lax.cond(
             dist <= 0.8,
-            lambda: collison_impulse(
-                norm, r_a, r_b, vel_a, inertia_a, vel_b, inertia_b
-            ),
+            lambda: collison_impulse(norm, r_a, r_b, vel_a, inertia_a, vel_b, inertia_b),
             lambda: el.SpatialMotion.zero(),
         )
         return acc + impulse
 
-    impulse = graph.edge_fold(
-        query, query, el.WorldVel, el.SpatialMotion.zero(), collide_inner
-    )
+    impulse = graph.edge_fold(query, query, el.WorldVel, el.SpatialMotion.zero(), collide_inner)
     return vel.join(impulse).map(el.WorldVel, lambda vel, impulse: vel + impulse)
 
 
@@ -154,18 +149,14 @@ balls = []
 mesh = world.insert_asset(el.Mesh.sphere(0.2))
 for i in range(1, 200):
     key = jax.random.key(i)
-    pos = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0) + np.array(
-        [0.0, 0.0, 7.0]
-    )
+    pos = jax.random.uniform(key, shape=(3,), minval=-5.0, maxval=5.0) + np.array([0.0, 0.0, 7.0])
     [r, g, b] = jax.random.uniform(key, shape=(3,), minval=0.0, maxval=1.0) * 2.0
     color = world.insert_asset(el.Material.color(r, g, b))
     ball = world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(linear=pos),
-                world_vel=el.SpatialMotion(
-                    linear=jax.random.normal(key, shape=(3,)) * 3.0
-                ),
+                world_vel=el.SpatialMotion(linear=jax.random.normal(key, shape=(3,)) * 3.0),
             ),
             el.Shape(mesh, color),
         ],
@@ -186,9 +177,7 @@ world.spawn(
     name="Viewport",
 )
 world.spawn(
-    el.Panel.graph(
-        *[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]
-    ),
+    el.Panel.graph(*[el.GraphEntity(b, *el.Component.index(el.WorldPos)[4:]) for b in balls]),
 )
 
 

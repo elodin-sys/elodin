@@ -1,33 +1,34 @@
 # ruff: noqa: F403
 # ruff: noqa: F405
 
-from .elodin import *
-import types
-from typing import (
-    Protocol,
-    Generic,
-    TypeVar,
-    Any,
-    Callable,
-    Annotated,
-    Type,
-    Union,
-    Optional,
-    Tuple,
-)
-from typing_extensions import TypeVarTuple, Unpack
-from dataclasses import dataclass
-from jax.tree_util import tree_flatten, tree_unflatten
-import inspect
-import jax
-import typing
-import numpy
 import code
+import inspect
+import re
 import readline
 import rlcompleter
-import re
-import pytest
+import types
+import typing
+from dataclasses import dataclass
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Generic,
+    Optional,
+    Protocol,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
+import jax
+import numpy
+import pytest
+from jax.tree_util import tree_flatten, tree_unflatten
+from typing_extensions import TypeVarTuple, Unpack
+
+from .elodin import *
 
 __doc__ = elodin.__doc__
 
@@ -119,9 +120,7 @@ class Query(Generic[Unpack[A]]):
 
     def map(
         self,
-        out_tps: Union[
-            Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]
-        ],
+        out_tps: Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]],
         f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], T]],
     ) -> "Query[Unpack[S]]":
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
@@ -166,9 +165,7 @@ class Query(Generic[Unpack[A]]):
         return ids
 
     @staticmethod
-    def from_builder(
-        new_tp: type[Any], builder: SystemBuilder, args: list[Any]
-    ) -> "Query[Any]":
+    def from_builder(new_tp: type[Any], builder: SystemBuilder, args: list[Any]) -> "Query[Any]":
         t_args = typing.get_args(new_tp)
         ids = []
         component_data = []
@@ -194,9 +191,7 @@ class Query(Generic[Unpack[A]]):
 
 
 def map(
-    func: Callable[
-        ..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]
-    ],
+    func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]],
 ) -> System:
     sig = inspect.signature(func)
     tys = list(sig.parameters.values())
@@ -241,9 +236,7 @@ class GraphQuery(Generic[E]):
         self.inner = inner
 
     @staticmethod
-    def from_builder(
-        new_tp: type[Any], builder: SystemBuilder, _: list[Any]
-    ) -> "GraphQuery[E]":
+    def from_builder(new_tp: type[Any], builder: SystemBuilder, _: list[Any]) -> "GraphQuery[E]":
         t_args = typing.get_args(new_tp)
         edge_ty = t_args[0]
         if isinstance(edge_ty, type(TotalEdge)):
@@ -288,12 +281,8 @@ class GraphQuery(Generic[E]):
                 def scan_inner(xs, to):
                     xs = tree_unflatten(init_value_tree, xs)
                     args = [
-                        from_array(data, x)
-                        for (x, data) in zip(f, from_query.component_classes)
-                    ] + [
-                        from_array(data, x)
-                        for (x, data) in zip(to, to_query.component_classes)
-                    ]
+                        from_array(data, x) for (x, data) in zip(f, from_query.component_classes)
+                    ] + [from_array(data, x) for (x, data) in zip(to, to_query.component_classes)]
                     o = fn(xs, *args)
                     o_flat, _ = tree_flatten(o)
                     return (o_flat, 0)
@@ -306,9 +295,7 @@ class GraphQuery(Generic[E]):
             if len(out_bufs) == 0:
                 out_bufs = new_bufs
             else:
-                out_bufs = [
-                    jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)
-                ]
+                out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
         component_data = Metadata.of(out_tp)
         return Query(
             self.inner.map(
@@ -331,10 +318,7 @@ class Archetype(Protocol):
         return snake_case_pattern.sub("_", cls.__name__).lower()
 
     def component_data(self) -> list[Metadata]:
-        return [
-            Metadata.of(v)
-            for v in typing.get_type_hints(self, include_extras=True).values()
-        ]
+        return [Metadata.of(v) for v in typing.get_type_hints(self, include_extras=True).values()]
 
     def arrays(self) -> list[numpy.ndarray]:
         return [
@@ -349,12 +333,8 @@ jax.tree_util.register_pytree_node(
     SpatialTransform.flatten,
     SpatialTransform.unflatten,
 )
-jax.tree_util.register_pytree_node(
-    SpatialMotion, SpatialMotion.flatten, SpatialMotion.unflatten
-)
-jax.tree_util.register_pytree_node(
-    SpatialForce, SpatialForce.flatten, SpatialForce.unflatten
-)
+jax.tree_util.register_pytree_node(SpatialMotion, SpatialMotion.flatten, SpatialMotion.unflatten)
+jax.tree_util.register_pytree_node(SpatialForce, SpatialForce.flatten, SpatialForce.unflatten)
 jax.tree_util.register_pytree_node(
     SpatialInertia,
     SpatialInertia.flatten,
@@ -396,9 +376,7 @@ Inertia = Annotated[
     SpatialInertia,
     Component("inertia", metadata={"priority": 5}),
 ]
-Seed = Annotated[
-    jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})
-]
+Seed = Annotated[jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})]
 SimulationTick = Annotated[
     jax.Array, Component("simulation_tick", ComponentType.F64, metadata={"priority": 7})
 ]
