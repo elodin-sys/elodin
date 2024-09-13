@@ -31,7 +31,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2"
 repository = "https://github.com/elodin-sys/paracosm"
 
 # Config for 'cargo dist'
@@ -90,19 +90,19 @@ lto = "thin"
 # set workspace version as the version of xla
 xla.package = "noxla"
 xla.path = "libs/noxla"
-xla.version = "0.6.1"
+xla.version = "0.6.2"
 roci-macros.path = "libs/roci/macros"
-roci-macros.version = "0.6.1"
+roci-macros.version = "0.6.2"
 roci.path = "libs/roci"
 roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
-nox.version = "0.6.1"
+nox.version = "0.6.2"
 nox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
 impeller.path = "libs/impeller"
 impeller.default-features = false
-impeller.version = "0.6.1"
+impeller.version = "0.6.2"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
