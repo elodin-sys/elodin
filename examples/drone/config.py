@@ -1,13 +1,12 @@
-from dataclasses import dataclass
-import numpy as np
-import typing as ty
-import elodin as el
 import os
+import typing as ty
+from dataclasses import dataclass
 from enum import Enum
 
-from numpy._typing import NDArray
-
+import elodin as el
+import numpy as np
 import util
+from numpy._typing import NDArray
 
 
 class Frame(Enum):

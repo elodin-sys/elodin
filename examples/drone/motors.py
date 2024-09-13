@@ -1,9 +1,9 @@
-import elodin as el
 import typing as ty
-from dataclasses import field, dataclass
+from dataclasses import dataclass, field
+
+import elodin as el
 import jax
 import jax.numpy as jnp
-
 import params
 from config import Config
 
@@ -60,17 +60,13 @@ class Motors(el.Archetype):
 @el.map
 def motor_input_to_thrust(inputs: MotorInput) -> MotorThrust:
     mot_thst_hover = Config.GLOBAL.control.motor_thrust_hover
-    roll_factor, pitch_factor, yaw_factor, throttle_factor = (
-        Config.GLOBAL.frame.motor_matrix
-    )
+    roll_factor, pitch_factor, yaw_factor, throttle_factor = Config.GLOBAL.frame.motor_matrix
     # roll input range: -1 to 1
     # pitch input range: -1 to 1
     # yaw input range: -1 to 1
     # throttle input range: 0 to 1
     roll, pitch, yaw, throttle = inputs
-    throttle_avg_max = (
-        THROTTLE_RPY_MIX * mot_thst_hover + (1 - THROTTLE_RPY_MIX) * throttle
-    )
+    throttle_avg_max = THROTTLE_RPY_MIX * mot_thst_hover + (1 - THROTTLE_RPY_MIX) * throttle
     # allows for raising throttle above pilot input but still below hover throttle
     throttle_avg_max = jnp.clip(throttle_avg_max, throttle, 1.0)
     # throttle providing maximum roll, pitch and yaw range
@@ -130,10 +126,7 @@ def motor_thrust_to_actuator(linear_throttle: MotorThrust) -> MotorActuator:
 
 @el.map
 def motor_actuator_to_pwm(actuator: MotorActuator) -> MotorPwm:
-    return (
-        actuator * (params.MOT_PWM_THST_MAX - params.MOT_PWM_THST_MIN)
-        + params.MOT_PWM_THST_MIN
-    )
+    return actuator * (params.MOT_PWM_THST_MAX - params.MOT_PWM_THST_MIN) + params.MOT_PWM_THST_MIN
 
 
 output = motor_input_to_thrust | motor_thrust_to_actuator | motor_actuator_to_pwm

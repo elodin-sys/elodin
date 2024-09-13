@@ -1,9 +1,10 @@
-import jax.numpy as np
-import elodin as el
-import typing as ty
 import os
-import jax
+import typing as ty
 from dataclasses import dataclass, field
+
+import elodin as el
+import jax
+import jax.numpy as np
 
 TIME_STEP = 1.0 / 60.0
 
@@ -223,7 +224,7 @@ def noop(
     SunSensors,
     RWSpeed,
     RWSpeedSetpoint,
-    AttMrpBn
+    AttMrpBn,
 ]:
     return (
         pos,
@@ -236,7 +237,7 @@ def noop(
         sun_sensor,
         rw_speed,
         rw_speed_setpoint,
-        att_mrp_bn
+        att_mrp_bn,
     )
 
 

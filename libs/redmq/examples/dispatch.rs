@@ -32,7 +32,7 @@ async fn main() -> RedisResult<()> {
 
     let client = RedisClient::default();
     client.init().await?;
-    client.flushall(false).await?;
+    let _: () = client.flushall(false).await?;
 
     for i in 0..WORKERS {
         let mq = redmq::MsgQueue::new(&client, "worker", i.to_string()).await?;

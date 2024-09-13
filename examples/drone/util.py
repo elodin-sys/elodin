@@ -1,15 +1,12 @@
+import elodin as el
 import jax
+import numpy as np
 from jax import numpy as jnp
 from jax.typing import ArrayLike
-import elodin as el
-import numpy as np
-
 from numpy._typing import NDArray
 
 
-def motor_positions(
-    angles: NDArray[np.float64], distance: float
-) -> NDArray[np.float64]:
+def motor_positions(angles: NDArray[np.float64], distance: float) -> NDArray[np.float64]:
     # for each angle, calculate the x and y position of the motor
     x = jnp.cos(angles)
     y = jnp.sin(angles)
@@ -30,11 +27,7 @@ def quat_dist(q1: el.Quaternion, q2: el.Quaternion) -> jax.Array:
 def quat_to_matrix(q: el.Quaternion) -> jax.Array:
     q0, q1, q2, s = q.vector()
     v = jnp.array([q0, q1, q2])
-    return (
-        2.0 * jnp.outer(v, v)
-        + jnp.identity(3) * (s**2 - jnp.dot(v, v))
-        + 2.0 * s * el.skew(v)
-    )
+    return 2.0 * jnp.outer(v, v) + jnp.identity(3) * (s**2 - jnp.dot(v, v)) + 2.0 * s * el.skew(v)
 
 
 # Convert a quaternion to Euler angles in 3-2-1 sequence (roll, pitch, yaw).

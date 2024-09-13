@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 #
-from elodin.elodin import Quaternion
+
+import elodin as el
 import jax
 import jax.numpy as np
+from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
-from dataclasses import dataclass
-import elodin as el
 
 
-def calculate_covariance(
-    sigma_g: jax.Array, sigma_b: jax.Array, dt: float
-) -> jax.Array:
+def calculate_covariance(sigma_g: jax.Array, sigma_b: jax.Array, dt: float) -> jax.Array:
     variance_g = np.diag(sigma_g * sigma_g * dt)
     variance_b = np.diag(sigma_b * sigma_b * dt)
     Q_00 = variance_g + variance_b * dt**2 / 3
@@ -20,9 +18,7 @@ def calculate_covariance(
     return np.block([[Q_00, Q_01], [Q_10, Q_11]])
 
 
-Q = calculate_covariance(
-    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 120.0
-)
+Q = calculate_covariance(np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), 1 / 120.0)
 print(f"Q = {repr(Q)}")
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 
@@ -50,9 +46,7 @@ def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
     return q_hat.normalize()
 
 
-def propogate_state_covariance(
-    big_p: jax.Array, omega: jax.Array, dt: float
-) -> jax.Array:
+def propogate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) -> jax.Array:
     omega_norm = la.norm(omega)
     s = np.sin(omega_norm * dt)
     c = np.cos(omega_norm * dt)

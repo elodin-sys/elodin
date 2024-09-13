@@ -1,10 +1,10 @@
-import jax.numpy as np
-import elodin as el
-import typing as ty
 import os
-import jax
+import typing as ty
 from dataclasses import dataclass, field
 
+import elodin as el
+import jax
+import jax.numpy as np
 
 TIME_STEP = 1.0 / 60.0
 

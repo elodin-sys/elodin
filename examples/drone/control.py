@@ -1,14 +1,14 @@
+import typing as ty
+from dataclasses import dataclass, field
+
 import elodin as el
+import filter
 import jax
 import jax.numpy as jnp
-import typing as ty
-from dataclasses import field, dataclass
-
-import sensors
-import params
-import util
 import motors
-import filter
+import params
+import sensors
+import util
 from config import Config
 
 AC_ATTITUDE_THRUST_ERROR_ANGLE = 30.0 * jnp.pi / 180.0  # 30 degrees
@@ -115,9 +115,7 @@ def angular_to_euler_accel_limit(att: el.Quaternion, ang_rate: jax.Array) -> jax
     yaw_rate = jnp.min(
         jnp.array(
             [
-                jnp.min(
-                    jnp.array([x_rate / sin_theta, y_rate / (sin_phi * cos_theta)])
-                ),
+                jnp.min(jnp.array([x_rate / sin_theta, y_rate / (sin_phi * cos_theta)])),
                 z_rate / (cos_phi * cos_theta),
             ]
         )
@@ -174,9 +172,7 @@ class AttitudeController(el.Archetype):
 
 
 @el.map
-def rate_pid_state(
-    state: RatePIDState, target: AngVelSetpoint, gyro: sensors.Gyro
-) -> RatePIDState:
+def rate_pid_state(state: RatePIDState, target: AngVelSetpoint, gyro: sensors.Gyro) -> RatePIDState:
     dt = Config.GLOBAL.dt
     e_filter = filter.LPF(
         jnp.array(
@@ -261,12 +257,8 @@ def update_target_attitude(
     yaw_rate_target = shape_euler_rate(
         yaw_rate_target, yaw_rate_desired, yaw_accel_limit, dt, y_rate_tc
     )
-    euler_rate_target = jnp.array(
-        [roll_rate_target, pitch_rate_target, yaw_rate_target]
-    )
-    ang_vel_target = jnp.nan_to_num(
-        util.euler_to_angular_rate(att_target, euler_rate_target)
-    )
+    euler_rate_target = jnp.array([roll_rate_target, pitch_rate_target, yaw_rate_target])
+    ang_vel_target = jnp.nan_to_num(util.euler_to_angular_rate(att_target, euler_rate_target))
     att_target = att_target * util.quat_from_axis_angle(ang_vel_target * dt)
     return att_target, euler_rate_target
 
@@ -281,9 +273,7 @@ def attitude_control(
 ) -> AngVelSetpoint:
     att_body = pos.angular()
     target_to_body_rotation = att_body.inverse() * att_target
-    ang_vel_target_rpy = jnp.nan_to_num(
-        util.euler_to_angular_rate(att_target, euler_rate_target)
-    )
+    ang_vel_target_rpy = jnp.nan_to_num(util.euler_to_angular_rate(att_target, euler_rate_target))
     ang_vel_target_xyz = jnp.array(
         [
             ang_vel_target_rpy[1],
@@ -300,15 +290,10 @@ def attitude_control(
     def feedforward(ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro):
         feedforward_scalar = (
             1.0
-            - (thrust_error_angle - AC_ATTITUDE_THRUST_ERROR_ANGLE)
-            / AC_ATTITUDE_THRUST_ERROR_ANGLE
+            - (thrust_error_angle - AC_ATTITUDE_THRUST_ERROR_ANGLE) / AC_ATTITUDE_THRUST_ERROR_ANGLE
         )
-        ang_vel_body.at[0].set(
-            ang_vel_body[0] + ang_vel_body_feedforward[0] * feedforward_scalar
-        )
-        ang_vel_body.at[1].set(
-            ang_vel_body[1] + ang_vel_body_feedforward[1] * feedforward_scalar
-        )
+        ang_vel_body.at[0].set(ang_vel_body[0] + ang_vel_body_feedforward[0] * feedforward_scalar)
+        ang_vel_body.at[1].set(ang_vel_body[1] + ang_vel_body_feedforward[1] * feedforward_scalar)
         ang_vel_body.at[2].set(ang_vel_body[2] + ang_vel_body_feedforward[2])
         ang_vel_body.at[2].set(
             gyro[2] * (1.0 - feedforward_scalar) + ang_vel_body[2] * feedforward_scalar
@@ -320,9 +305,7 @@ def attitude_control(
         lambda _: ang_vel_body.at[2].set(gyro[2]),
         lambda _: jax.lax.cond(
             thrust_error_angle > AC_ATTITUDE_THRUST_ERROR_ANGLE,
-            lambda _: feedforward(
-                ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro
-            ),
+            lambda _: feedforward(ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro),
             lambda _: ang_vel_body + ang_vel_body_feedforward,
             operand=None,
         ),

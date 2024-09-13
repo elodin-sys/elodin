@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import math
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
 
 
 @dataclass
@@ -54,9 +55,5 @@ moi_talon_pitch = platform.moi_object(talon_mass, talon_pitch_oscillation_time_p
 print(f"Platform MOI: {moi_platform:.4f}")
 print(f"Square MOI: {moi_square:.4f}")
 print(f"Square MOI (theoretical): {moi_square_theoretical:.4f}")
-print(
-    f"Talon MOI (r,p,y): {moi_talon_roll:.4f}, {moi_talon_pitch:.4f}, {moi_talon_yaw:.4f}"
-)
-print(
-    f"Talon MOI (x,y,z): {moi_talon_pitch:.4f}, {moi_talon_roll:.4f}, {moi_talon_yaw:.4f}"
-)
+print(f"Talon MOI (r,p,y): {moi_talon_roll:.4f}, {moi_talon_pitch:.4f}, {moi_talon_yaw:.4f}")
+print(f"Talon MOI (x,y,z): {moi_talon_pitch:.4f}, {moi_talon_roll:.4f}, {moi_talon_yaw:.4f}")

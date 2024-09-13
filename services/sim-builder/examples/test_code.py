@@ -8,5 +8,6 @@ if sys.argv.count("--dir") != 0:
     with open(outfile, "w") as file:
         file.write("helloworld\n")
 
+
 def test_hello():
     assert True
