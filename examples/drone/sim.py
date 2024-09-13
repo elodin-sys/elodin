@@ -1,16 +1,15 @@
-import elodin as el
-from dataclasses import field, dataclass
-import jax
 import typing as ty
-import jax.numpy as jnp
+from dataclasses import dataclass, field
 
+import control
+import elodin as el
+import jax
+import jax.numpy as jnp
+import mekf
+import motors
 import params
 import sensors
-import mekf
-import control
-import motors
 from config import Config
-
 
 BodyThrust = ty.Annotated[
     el.SpatialForce,

@@ -1,6 +1,7 @@
-import polars as pl
-import numpy as np
 from typing import cast
+
+import numpy as np
+import polars as pl
 
 
 def test_origin_drift(df: pl.DataFrame):

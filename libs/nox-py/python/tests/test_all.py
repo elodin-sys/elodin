@@ -1,10 +1,11 @@
+import typing as ty
+from dataclasses import dataclass
+
+import elodin as el
 import jax
 import jax.numpy as np
-from jax import random
-import elodin as el
-import typing as ty
 from elodin import ukf
-from dataclasses import dataclass
+from jax import random
 
 X = ty.Annotated[jax.Array, el.Component("x", el.ComponentType.F64)]
 Y = ty.Annotated[jax.Array, el.Component("y", el.ComponentType.F64)]
@@ -76,9 +77,7 @@ def test_six_dof():
 
 def test_spatial_integration():
     @el.map
-    def integrate_velocity(
-        world_pos: el.WorldPos, world_vel: el.WorldVel
-    ) -> el.WorldPos:
+    def integrate_velocity(world_pos: el.WorldPos, world_vel: el.WorldVel) -> el.WorldPos:
         linear = world_pos.linear() + world_vel.linear()
         angular = world_pos.angular().integrate_body(world_vel.angular())
         return el.SpatialTransform(linear=linear, angular=angular)
@@ -102,9 +101,7 @@ def test_spatial_integration():
     exec.run()
     pos = exec.column_array(el.Component.name(el.WorldPos))
     assert (pos[4:] == [2.0, 0.0, 0.0]).all()
-    assert np.allclose(
-        pos.to_numpy()[0][:4], np.array([0.97151626, 0.0, 0.0, 0.23697292])
-    )
+    assert np.allclose(pos.to_numpy()[0][:4], np.array([0.97151626, 0.0, 0.0, 0.23697292]))
 
 
 def test_graph():
@@ -260,9 +257,7 @@ def test_six_dof_ang_vel_int():
     # value from Julia and Simulink
     assert np.isclose(
         x.to_numpy()[0],
-        np.array(
-            [0.45936268493243, 0.45936268493243, 0.0, 0.76024459707606, 0.0, 0.0, 0.0]
-        ),
+        np.array([0.45936268493243, 0.45936268493243, 0.0, 0.76024459707606, 0.0, 0.0, 0.0]),
         rtol=1e-5,
     ).all()
 
@@ -397,9 +392,7 @@ def test_ukf_simple_linear():
     )
     noise_covar = np.diag(np.array([z_std**2, z_std**2]))
 
-    state = ukf.UKFState(
-        x_hat, covar, prop_covar, noise_covar, alpha=0.1, beta=2.0, kappa=-1.0
-    )
+    state = ukf.UKFState(x_hat, covar, prop_covar, noise_covar, alpha=0.1, beta=2.0, kappa=-1.0)
 
     # Define propagation and measurement functions
     def prop_fn(x):

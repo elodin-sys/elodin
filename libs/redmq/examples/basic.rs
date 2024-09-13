@@ -13,7 +13,7 @@ async fn main() -> RedisResult<()> {
 
     let client = RedisClient::default();
     client.init().await?;
-    client.flushall(false).await?;
+    let _: () = client.flushall(false).await?;
 
     // send ping
     let mq = redmq::MsgQueue::new(&client, "pinger", "").await?;

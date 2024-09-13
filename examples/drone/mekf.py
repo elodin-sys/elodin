@@ -1,14 +1,14 @@
-from numpy.typing import NDArray
-import elodin as el
-from dataclasses import field, dataclass
 import typing as ty
+from dataclasses import dataclass, field
+
+import elodin as el
 import jax
 import jax.numpy as jnp
 import numpy as np
-
 import util
-from sensors import Gyro, Accel, Magnetometer, AccelHealth
 from config import Config
+from numpy.typing import NDArray
+from sensors import Accel, AccelHealth, Gyro, Magnetometer
 
 # TODO: incorporate GNSS, barometer, etc.
 
@@ -107,9 +107,7 @@ def process_covariance(dt: float) -> NDArray[np.float64]:
 
 @dataclass
 class MEKF(el.Archetype):
-    est_cov: EstCov = field(
-        default_factory=lambda: jnp.identity(18) * estimate_covariance
-    )
+    est_cov: EstCov = field(default_factory=lambda: jnp.identity(18) * estimate_covariance)
     att_est: AttEst = field(default_factory=lambda: el.Quaternion.identity())
     gyro_bias_est: GyroBiasEst = field(default_factory=lambda: jnp.zeros(3))
     accel_bias_est: AccelBiasEst = field(default_factory=lambda: jnp.zeros(3))
@@ -117,9 +115,7 @@ class MEKF(el.Archetype):
     att_est_error: AttEstError = field(default_factory=lambda: jnp.float64(0.0))
 
 
-def integrate_angular_velocity(
-    q: el.Quaternion, w: jax.Array, dt: float
-) -> el.Quaternion:
+def integrate_angular_velocity(q: el.Quaternion, w: jax.Array, dt: float) -> el.Quaternion:
     return (q + q * el.Quaternion(jnp.array([*(0.5 * w * dt), 0.0]))).normalize()
 
 

@@ -1,0 +1,6 @@
+[tool.ruff]
+line-length = 100
+extend-exclude = ["vendor", "basilisk"]
+
+[tool.ruff.lint]
+extend-select = ["I"]

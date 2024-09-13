@@ -1,6 +1,6 @@
+import elodin as el
 from jax import numpy as np
 from jax.numpy import linalg as la
-import elodin as el
 
 TIME_STEP = 1.0 / 120.0
 
@@ -20,9 +20,7 @@ def gravity(
         f = G * M * m * r / (norm * norm * norm)
         return el.SpatialForce(linear=force.force() - f)
 
-    return graph.edge_fold(
-        query, query, el.Force, el.SpatialForce.zero(), gravity_inner
-    )
+    return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
 
 
 w = el.World()

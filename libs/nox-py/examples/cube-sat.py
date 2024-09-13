@@ -1,11 +1,11 @@
-from elodin.elodin import Quaternion
+from dataclasses import dataclass, field
+from typing import Annotated
+
+import elodin as el
 import jax
 import jax.numpy as np
+from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
-from dataclasses import dataclass
-import elodin as el
-from typing import Annotated
-from dataclasses import field
 
 angular_vel_axis = np.array([1.0, 1.0, 1.0])
 angular_vel_axis = angular_vel_axis / la.norm(angular_vel_axis)
@@ -96,15 +96,11 @@ def sun_sensor(
     sun_pos: el.Query[SunPos, el.WorldPos],
 ) -> el.Query[CssValue]:
     def inner(acc, css_normal, fov, sun_pos, world_pos):
-        key = jax.random.key(
-            jax.lax.convert_element_type(world_pos.linear()[1], "int64")
-        )
+        key = jax.random.key(jax.lax.convert_element_type(world_pos.linear()[1], "int64"))
         noise = 0.01 * jax.random.normal(key, shape=())
         sun_pos_b = world_pos.angular().inverse() @ sun_pos
         cos = np.dot(css_normal, sun_pos_b)
-        return (
-            acc + jax.lax.select((np.abs(np.acos(cos)) < fov).all(), cos, 0.0) + noise
-        )
+        return acc + jax.lax.select((np.abs(np.acos(cos)) < fov).all(), cos, 0.0) + noise
 
     return sensor.edge_fold(css_normal, sun_pos, CssValue, np.array(0.0), inner)
 
@@ -159,19 +155,13 @@ def gyro_omega(pos: el.WorldPos, vel: el.WorldVel) -> GyroOmega:
     return (pos.angular().inverse() @ vel.angular()) + noise + 2.0
 
 
-sensors = (
-    sun_sensor_sys.pipe(fake_magnetometer_body)
-    .pipe(fake_magnetometer_ref)
-    .pipe(gyro_omega)
-)
+sensors = sun_sensor_sys.pipe(fake_magnetometer_body).pipe(fake_magnetometer_ref).pipe(gyro_omega)
 
 # attitude det - mekf
 # source: Optimal Estimation of Dynamic Systems, 2nd Edition - Chapter 7
 
 
-def calculate_covariance(
-    sigma_g: jax.Array, sigma_b: jax.Array, dt: float
-) -> jax.Array:
+def calculate_covariance(sigma_g: jax.Array, sigma_b: jax.Array, dt: float) -> jax.Array:
     variance_g = np.diag(sigma_g * sigma_g * dt)
     variance_b = np.diag(sigma_b * sigma_b * dt)
     Q_00 = variance_g + variance_b * dt**2 / 3
@@ -181,14 +171,10 @@ def calculate_covariance(
     return np.block([[Q_00, Q_01], [Q_10, Q_11]])
 
 
-Q = calculate_covariance(
-    np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), TIME_STEP
-)
+Q = calculate_covariance(np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), TIME_STEP)
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
-P = Annotated[
-    jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))
-]
+P = Annotated[jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))]
 AttEst = Annotated[el.Quaternion, el.Component("att_est")]  # q_hat
 AngVelEst = Annotated[
     jax.Array, el.Component("ang_vel_est", el.ComponentType(el.PrimitiveType.F64, (3,)))
@@ -219,9 +205,7 @@ def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
     return q_hat.normalize()
 
 
-def propogate_state_covariance(
-    big_p: jax.Array, omega: jax.Array, dt: float
-) -> jax.Array:
+def propogate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) -> jax.Array:
     omega_norm = la.norm(omega)
     s = np.sin(omega_norm * dt)
     c = np.cos(omega_norm * dt)
@@ -384,9 +368,7 @@ def control(att_est: AttEst, ang_vel: AngVelEst, goal: Goal) -> ControlForce:
 
 RWEdge = Annotated[el.Edge, el.Component("rw_edge")]
 
-RWAxis = Annotated[
-    jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))
-]
+RWAxis = Annotated[jax.Array, el.Component("rw_axis", el.ComponentType(el.PrimitiveType.F64, (3,)))]
 
 RWForce = Annotated[el.SpatialForce, el.Component("rw_force")]
 RWAngMomentum = Annotated[
@@ -457,13 +439,9 @@ def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFr
 
 
 @el.map
-def saturate_force(
-    force: RWForce, ang_momentum: RWAngMomentum
-) -> tuple[RWForce, RWAngMomentum]:
+def saturate_force(force: RWForce, ang_momentum: RWAngMomentum) -> tuple[RWForce, RWAngMomentum]:
     new_ang_momentum = ang_momentum + force.torque() * TIME_STEP
-    torque = jax.lax.select(
-        np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3)
-    )
+    torque = jax.lax.select(np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3))
     torque = np.clip(torque, -rw_force_clamp, rw_force_clamp)
     return (el.SpatialForce(torque=torque), ang_momentum + torque * TIME_STEP)
 
@@ -494,8 +472,7 @@ def rw_effector(
         rw_query,
         el.Force,
         el.SpatialForce.zero(),
-        lambda f, pos, force: f
-        + el.SpatialForce(torque=pos.angular() @ force.torque()),
+        lambda f, pos, force: f + el.SpatialForce(torque=pos.angular() @ force.torque()),
     )
 
 
@@ -548,9 +525,7 @@ sat = w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0]) * radius),
-            world_vel=el.SpatialMotion(
-                initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity
-            ),
+            world_vel=el.SpatialMotion(initial_angular_vel, np.array([0.0, 1.0, 0.0]) * velocity),
             inertia=el.SpatialInertia(2825.2 / 1000.0, j),
             # Credit to the OreSat program https://www.oresat.org for the model above
         ),
@@ -560,9 +535,7 @@ sat = w.spawn(
         ),
         UserInput(np.array([0.0, 0.0, 0.0])),
         Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
-        KalmanFilter(
-            np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)
-        ),
+        KalmanFilter(np.identity(6), el.Quaternion.identity(), np.zeros(3), np.zeros(3)),
         Debug(np.float64(0.0)),
         w.glb("https://storage.googleapis.com/elodin-assets/oresat-low.glb"),
     ],
@@ -689,9 +662,7 @@ w.spawn(
     [
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
-            world_vel=el.SpatialMotion(
-                angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5
-            ),
+            world_vel=el.SpatialMotion(angular=np.array([0.0, 0.0, 1.0]) * 7.2921159e-5),
             inertia=el.SpatialInertia(1.0),
         ),
         w.glb("https://storage.googleapis.com/elodin-assets/earth.glb"),

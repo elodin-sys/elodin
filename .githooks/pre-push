@@ -1,5 +1,10 @@
+set -ex
+
 remote="$1"
 url="$2"
+
+uvx ruff format --check --silent
+uvx ruff check --silent
 
 zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
 

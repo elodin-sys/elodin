@@ -1,10 +1,11 @@
-import jax
 import typing
+from dataclasses import field
+
 import elodin as el
+import jax
 from jax import numpy as jnp
 from jax import random
 from jax.numpy import linalg as la
-from dataclasses import field
 
 TIME_STEP = 1.0 / 120.0
 
@@ -33,9 +34,7 @@ def sample_wind(s: el.Query[el.Seed], q: el.Query[Wind]) -> el.Query[Wind]:
 
 
 @el.system
-def apply_wind(
-    w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]
-) -> el.Query[el.Force]:
+def apply_wind(w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]) -> el.Query[el.Force]:
     def apply_wind_inner(f, v):
         v_diff = w[0] - v.linear()
         v_diff_dir = v_diff / la.norm(v_diff)
@@ -56,9 +55,7 @@ def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
 def bounce(p: el.WorldPos, v: el.WorldVel) -> el.WorldVel:
     return jax.lax.cond(
         jax.lax.max(p.linear()[2], v.linear()[2]) < 0.0,
-        lambda _: el.SpatialMotion(
-            linear=v.linear() * jnp.array([1.0, 1.0, -1.0]) * 0.85
-        ),
+        lambda _: el.SpatialMotion(linear=v.linear() * jnp.array([1.0, 1.0, -1.0]) * 0.85),
         lambda _: v,
         operand=None,
     )

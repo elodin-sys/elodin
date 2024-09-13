@@ -1,6 +1,5 @@
 import elodin as el
 import jax.numpy as jnp
-
 import util
 
 
@@ -45,9 +44,7 @@ def check_quat_euler_conversion(axis, angle, euler_expected):
 
 
 def test_quat_euler_conversion():
-    check_quat_euler_conversion(
-        jnp.array([1.0, 0.0, 0.0]), 0.0, jnp.array([0.0, 0.0, 0.0])
-    )
+    check_quat_euler_conversion(jnp.array([1.0, 0.0, 0.0]), 0.0, jnp.array([0.0, 0.0, 0.0]))
     check_quat_euler_conversion(
         jnp.array([1.0, 0.0, 0.0]), jnp.pi / 2, jnp.array([jnp.pi / 2, 0.0, 0.0])
     )
