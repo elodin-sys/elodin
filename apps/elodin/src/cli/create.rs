@@ -1,5 +1,5 @@
 use super::Cli;
-use std::path::Path;
+use std::{io, path::Path};
 
 const BALL_EXAMPLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ball.tar.zst"));
 const DRONE_EXAMPLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/drone.tar.zst"));
@@ -28,7 +28,7 @@ pub struct Args {
 }
 
 impl Cli {
-    pub fn create_template(&self, args: &Args) -> anyhow::Result<()> {
+    pub fn create_template(&self, args: &Args) -> io::Result<()> {
         let path = Path::new(&args.path);
         std::fs::create_dir_all(path)?;
 
@@ -45,7 +45,7 @@ impl Cli {
         Ok(())
     }
 
-    fn write_dir(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+    fn write_dir(path: &Path, data: &[u8]) -> io::Result<()> {
         let tar = zstd::stream::Decoder::new(data)?;
         let mut archive = tar::Archive::new(tar);
         archive.unpack(path)?;

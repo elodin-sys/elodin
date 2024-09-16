@@ -43,25 +43,21 @@ pip install -U elodin
 
 To use Elodin on Windows, the simulation server must run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows.
 
-In a Windows terminal:
+In a Windows terminal launch the Elodin app.
+
+```sh
+.\elodin.exe
+```
+
+In a WSL terminal download and install `elodin` binary into your path then run:
 
 1. Create a new simulation using the three-body orbit template.
     ```sh
-    .\elodin.exe create --template three-body
+    elodin create --template three-body
     ```
-2. Launch the Elodin Client.
+2. Run the simulation server.
     ```sh
-    .\elodin.exe
-    ```
-
-In a WSL terminal that's pointed to the same directory as the Windows terminal:
-
-<Info>An easy way to open a WSL terminal in the current directory is to run `wsl` in the Windows terminal.</Info>
-
-1. Run the simulation server.
-    <Note>The `--watch` argument enables live-reload. The simulation will restart to pickup the changes whenever the file is updated.</Note>
-    ```sh
-    python3 three-body.py run --watch
+    elodin run three-body.py
     ```
 
 ### Linux / macOS

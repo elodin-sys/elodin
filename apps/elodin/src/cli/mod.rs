@@ -1,5 +1,9 @@
-use anyhow::Context;
 use clap::{Parser, Subcommand};
+use miette::miette;
+use miette::Context;
+use miette::IntoDiagnostic;
+use tokio_util::sync::CancellationToken;
+use tracing_subscriber::EnvFilter;
 
 mod auth;
 mod create;
@@ -24,6 +28,8 @@ enum Commands {
     MonteCarlo(monte_carlo::Args),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
+    // Run an Elodin simulaton in headless mode
+    Run(editor::Args),
     /// Create template
     Create(create::Args),
 }
@@ -33,8 +39,14 @@ impl Cli {
         Self::parse()
     }
 
-    pub fn run(self) {
-        tracing_subscriber::fmt::init();
+    pub fn run(self) -> miette::Result<()> {
+        let _ = tracing_subscriber::fmt::fmt()
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive("info".parse().expect("invalid filter"))
+                    .from_env_lossy(),
+            )
+            .try_init();
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -50,27 +62,31 @@ impl Cli {
             Some(Commands::Login) | Some(Commands::Create(_)) | None => {}
             // licensed commands
             _ => {
-                rt.block_on(self.verify_license_key());
+                rt.block_on(self.verify_license_key())?;
             }
         }
-        let res = match &self.command {
+        match &self.command {
             Some(Commands::Login) => rt.block_on(self.login()),
             Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
-            Some(Commands::Editor(args)) => self.editor(args.clone()),
-            Some(Commands::Create(args)) => self.create_template(args),
-            None => self.editor(editor::Args::default()),
-        };
-        if let Err(err) = res {
-            eprintln!("Error: {:#}", err);
-            std::process::exit(1);
+            Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
+            Some(Commands::Run(args)) => self
+                .run_sim(args, rt, CancellationToken::new())?
+                .join()
+                .map_err(|_| miette!("join error"))?,
+            Some(Commands::Create(args)) => self.create_template(args).into_diagnostic(),
+            None => self.clone().editor(editor::Args::default(), rt),
         }
     }
 
-    fn first_launch(&self) -> anyhow::Result<()> {
-        let dirs = self.dirs().context("failed to get data directory")?;
+    fn first_launch(&self) -> miette::Result<()> {
+        let dirs = self
+            .dirs()
+            .ok_or_else(|| miette!("failed to get data directory"))?;
         let data_dir = dirs.data_dir();
         let is_first_launch = !data_dir.exists();
-        std::fs::create_dir_all(data_dir).context("failed to create data directory")?;
+        std::fs::create_dir_all(data_dir)
+            .into_diagnostic()
+            .context("failed to create data directory")?;
 
         if is_first_launch {
             println!("This is your first use of the Elodin CLI!\n");
