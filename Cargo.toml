@@ -6,13 +6,17 @@ members = [
     "libs/nox-ecs",
     "libs/nox-ecs-macros",
     "libs/nox-py",
-    "libs/xla-rs",
+    "libs/noxla",
+    "libs/s10",
 ]
 
 [workspace.package]
 version = "0.1.0"
+repository = "https://github.com/elodin-sys/elodin"
 
 [workspace.dependencies]
+xla.package = "noxla"
+xla.path = "libs/noxla"
 roci.path = "libs/roci"
 roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"
