@@ -46,7 +46,7 @@ sync-assets:
   gsutil rsync -r assets gs://elodin-assets
 
 sync-open-source:
-  git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --path libs/noxla --prune-empty always --target ../elodin
+  git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --path libs/noxla --path libs/s10 --prune-empty always --target ../elodin
   cd ../elodin; git fetch origin main; git rebase origin/main --committer-date-is-author-date
 
 [confirm("Are you sure you want to force push to elodin-sys/elodin?")]
