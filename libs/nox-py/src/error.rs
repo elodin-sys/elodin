@@ -28,8 +28,6 @@ pub enum Error {
     Impeller(#[from] impeller::Error),
     #[error("polars error {0}")]
     Polars(#[from] polars::error::PolarsError),
-    #[error("serde error {0}")]
-    Serde(#[from] serde_json::Error),
 }
 
 impl From<Error> for PyErr {
