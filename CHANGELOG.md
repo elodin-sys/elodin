@@ -1,6 +1,15 @@
 # Changelog
 
 ## unreleased
+- Add ability to run processes alongside simulations.
+  You can now add sidecar processes that are started alongside the main simulation. This is super useful for testing out flight software alongside your simulation.
+  ```python
+  world.recipe(el.s10.Recipe.Process(name = "test", cmd = "yes", args = [], cwd = None, env = {}, restart_policy = el.s10.RestartPolicy.Never, no_watch = False)) # to run an arbitrary process
+
+  world.recipe(el.s10.Recipe.Cargo(name = "test", path = "./test-crate", args = [], cwd = None, env = {}, restart_policy = el.s10.RestartPolicy.Never, package = None, bin = None)) # to build and run a crate
+  ```
+- **(breaking)** Replace `--watch` option with `elodin run`.
+As part of adding process supervision to Elodin, we refactored how watching a simulation works. Now instead of running `python3 sim.py run --watch`, you run `elodin run sim.py`.
 
 ## v0.6.2
 - **(fix)** Various WASM editor bug fixes.

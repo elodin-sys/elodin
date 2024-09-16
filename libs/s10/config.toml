@@ -1,16 +1,3 @@
 [default]
-type = "group"
-recipes = ["atc", "dashboard"]
-
-[atc]
-type = "cargo"
-path = "../../services/atc"
-cwd = "../../services/atc"
-env = {"RUST_LOG" = "atc=trace,info"}
-
-[dashboard]
-type = "process"
-cmd = "mix"
-args = ["phx.server"]
-cwd = "../../services/dashboard"
-no_watch = true
+type = "sim"
+path = "../nox-py/examples/cube-sat.py"

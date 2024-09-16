@@ -1,5 +1,5 @@
 mod cli;
 
-fn main() {
-    cli::Cli::from_os_args().run();
+fn main() -> miette::Result<()> {
+    cli::Cli::from_os_args().run()
 }

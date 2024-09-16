@@ -1,6 +1,8 @@
-use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{prelude::*, TimeDelta};
+use miette::Diagnostic;
+use miette::{diagnostic, Context, IntoDiagnostic};
+use thiserror::Error;
 use tonic::{metadata, service};
 
 use super::Cli;
@@ -64,36 +66,60 @@ impl service::Interceptor for AuthInterceptor {
     }
 }
 
+#[derive(Error, Diagnostic, Debug)]
+#[diagnostic(help("please run `elodin login`"))]
+pub enum AuthError {
+    #[error(transparent)]
+    #[diagnostic(code(elodin::io_error))]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    #[diagnostic(code(elodin::json_parse_error))]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    #[diagnostic(code(elodin::base64_decode_error))]
+    Base64(#[from] base64::DecodeError),
+    #[error("access token has expired")]
+    #[diagnostic(code(elodin::access_token_expired))]
+    AccessTokenExpired,
+    #[error("invalid access token")]
+    #[diagnostic(code(elodin::invalid_access_token))]
+    InvalidAccessToken,
+    #[error("failed to access data directory")]
+    #[diagnostic(code(elodin::no_data_dir))]
+    NoDataDir,
+    #[error("access token missing")]
+    #[diagnostic(code(elodin::no_access_token))]
+    NoAccessToken,
+}
+
 impl Cli {
-    pub fn auth_interceptor(&self) -> anyhow::Result<AuthInterceptor> {
+    pub fn auth_interceptor(&self) -> miette::Result<AuthInterceptor> {
         let access_token = self.access_token()?;
-        let access_token = format!("Bearer {access_token}").parse()?;
+        let access_token = format!("Bearer {access_token}").parse().into_diagnostic()?;
         Ok(AuthInterceptor { access_token })
     }
 
-    fn access_token(&self) -> anyhow::Result<String> {
-        (|| {
-            let dirs = self
-                .dirs()
-                .ok_or(anyhow::anyhow!("failed to get data directory"))?;
-            let data_dir = dirs.data_dir();
-            let access_token_path = data_dir.join("access_token");
-            let access_token = std::fs::read_to_string(access_token_path)?;
-            let payload = access_token
-                .split('.')
-                .nth(1)
-                .ok_or(anyhow::anyhow!("Invalid access token"))?;
-            let payload = URL_SAFE_NO_PAD.decode(payload)?;
-            let payload = serde_json::from_slice::<AcessTokenPayload>(&payload)?;
-            if Utc::now() > payload.exp {
-                anyhow::bail!("Access token has expired");
-            }
-            Ok(access_token)
-        })()
-        .context("Please run `elodin login`")
+    fn access_token(&self) -> Result<String, AuthError> {
+        let dirs = self.dirs().ok_or(AuthError::NoDataDir)?;
+        let data_dir = dirs.data_dir();
+        let access_token_path = data_dir.join("access_token");
+        if !access_token_path.exists() {
+            return Err(AuthError::NoAccessToken);
+        }
+        let access_token = std::fs::read_to_string(access_token_path)?;
+        let payload = access_token
+            .split('.')
+            .nth(1)
+            .ok_or(AuthError::InvalidAccessToken)?;
+        let payload = URL_SAFE_NO_PAD.decode(payload)?;
+        let payload = serde_json::from_slice::<AcessTokenPayload>(&payload)?;
+        if Utc::now() > payload.exp {
+            return Err(AuthError::AccessTokenExpired);
+        }
+        Ok(access_token)
     }
 
-    pub async fn login(&self) -> anyhow::Result<()> {
+    pub async fn login(&self) -> miette::Result<()> {
         let dev = self.is_dev();
         let client_id = if dev { DEV_CLIENT_ID } else { PROD_CLIENT_ID };
         let auth_url = if dev { DEV_AUTH_URL } else { PROD_AUTH_URL };
@@ -104,7 +130,8 @@ impl Cli {
             .timeout(timeout)
             .connect_timeout(timeout)
             .https_only(true)
-            .build()?;
+            .build()
+            .into_diagnostic()?;
 
         // request device activation
         let res = client
@@ -115,10 +142,13 @@ impl Cli {
                 ("audience", &audience),
             ])
             .send()
-            .await?
-            .error_for_status()?
+            .await
+            .into_diagnostic()?
+            .error_for_status()
+            .into_diagnostic()?
             .json::<DeviceCodeResponse>()
-            .await?;
+            .await
+            .into_diagnostic()?;
         let DeviceCodeResponse {
             device_code,
             user_code,
@@ -131,7 +161,7 @@ impl Cli {
         let expires_in_mins = expires_in / 60;
         println!("Login via the browser: {verification_uri_complete}.");
         println!("You should see the following code: {user_code}, which expires in {expires_in_mins} minutes.");
-        opener::open_browser(verification_uri_complete)?;
+        opener::open_browser(verification_uri_complete).into_diagnostic()?;
 
         // request access token
         loop {
@@ -143,31 +173,33 @@ impl Cli {
                     ("device_code", &device_code),
                 ])
                 .send()
-                .await?;
+                .await
+                .into_diagnostic()?;
 
             if res.status().is_success() {
-                let token_res = res.json::<TokenResponse>().await?;
-
+                let token_res = res.json::<TokenResponse>().await.into_diagnostic()?;
                 let expires_in = TimeDelta::try_seconds(token_res.expires_in as i64).unwrap();
                 let expires_at = Utc::now() + expires_in;
                 let dirs = self.dirs().expect("failed to get data directory");
                 let data_dir = dirs.data_dir();
-                std::fs::create_dir_all(data_dir).context("failed to create data directory")?;
+                std::fs::create_dir_all(data_dir)
+                    .into_diagnostic()
+                    .context("failed to create data directory")?;
                 let id_token_path = data_dir.join("id_token");
                 let access_token_path = data_dir.join("access_token");
                 let expires_at_path = data_dir.join("expires_at");
-                std::fs::write(id_token_path, token_res.id_token)?;
-                std::fs::write(access_token_path, token_res.access_token)?;
-                std::fs::write(expires_at_path, expires_at.to_rfc3339())?;
+                std::fs::write(id_token_path, token_res.id_token).into_diagnostic()?;
+                std::fs::write(access_token_path, token_res.access_token).into_diagnostic()?;
+                std::fs::write(expires_at_path, expires_at.to_rfc3339()).into_diagnostic()?;
                 println!("Logged in successfully.");
                 return Ok(());
             } else if res.status().is_client_error() {
-                let err_res = res.json::<ErrorResponse>().await?;
+                let err_res = res.json::<ErrorResponse>().await.into_diagnostic()?;
                 match err_res.error.as_str() {
                     "authorization_pending" => {}
                     "slow_down" => interval += 1,
-                    "expired_token" => anyhow::bail!("Authentication flow has expired"),
-                    err => anyhow::bail!("Failed to authenticate: {err}"),
+                    "expired_token" => miette::bail!("Authentication flow has expired"),
+                    err => miette::bail!("Failed to authenticate: {err}"),
                 }
             }
             tokio::time::sleep(tokio::time::Duration::from_secs(interval as u64)).await;

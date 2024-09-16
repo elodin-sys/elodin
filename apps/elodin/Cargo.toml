@@ -5,7 +5,9 @@ repository.workspace = true
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.79"
+thiserror = "1.0"
+miette.version = "7.2"
+miette.features = ["fancy"]
 base64 = "0.22.1"
 chrono = { version = "0.4.33", features = ["serde"] }
 clap = { version = "4.4.18", features = ["derive"] }
@@ -15,12 +17,15 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 # serialization
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
+toml.version = "0.8"
 postcard = "1"
 
 ignore = "0.4"
 tar = "0.4.40"
 tempfile = "3.10.0"
 tokio = { version = "1.35.1", features = ["full"] }
+tokio-util.version = "0.7.11"
+tokio-util.features = ["rt"]
 tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
 uuid = "1.7.0"
 directories = "5.0.1"
@@ -40,6 +45,8 @@ ring = "0.17"
 
 # machine id
 machine-uid = "0.5.1"
+
+s10.path = "../../libs/s10"
 
 [build-dependencies]
 anyhow = "1.0.79"

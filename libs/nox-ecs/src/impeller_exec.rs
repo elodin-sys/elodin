@@ -100,6 +100,10 @@ impl ImpellerExec {
         &self.connections
     }
 
+    pub fn into_connections(self) -> Vec<Connection> {
+        self.connections
+    }
+
     pub fn add_connection(&mut self, conn: Connection) -> Result<(), Error> {
         let already_exits = self.connections.iter().any(|c| c.tx.same_channel(&conn.tx));
         if already_exits {
