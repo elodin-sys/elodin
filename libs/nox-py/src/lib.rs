@@ -26,7 +26,7 @@ mod graph;
 mod impeller_client;
 mod linalg;
 mod query;
-mod sim_runner;
+mod s10;
 mod spatial;
 mod system;
 mod ukf;
@@ -187,5 +187,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     ukf::register(m)?;
+    s10::register(m)?;
     Ok(())
 }

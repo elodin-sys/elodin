@@ -9,7 +9,7 @@ repository = "https://github.com/elodin-sys/elodin"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["jax", "noxpr", "xla"]
+default = ["noxpr", "xla"]
 jax = ["pyo3", "numpy", "noxpr"]
 cuda = ["shared"]
 noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]

@@ -1,16 +1,40 @@
-use crate::sim_runner::{Args, SimSupervisor};
 use crate::*;
+use ::s10::{cli::run_recipe, GroupRecipe, SimRecipe};
 use clap::Parser;
+use miette::miette;
 use nox_ecs::{
     impeller, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
     WorldExt,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time::Duration};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub enum Args {
+    Build {
+        #[arg(long)]
+        dir: PathBuf,
+    },
+    Run {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+    },
+    Plan {
+        #[arg(default_value = "0.0.0.0:2240")]
+        addr: SocketAddr,
+    },
+    #[clap(hide = true)]
+    Bench {
+        #[arg(long, default_value = "1000")]
+        ticks: usize,
+    },
+}
 
 #[pyclass(subclass)]
 #[derive(Default)]
 pub struct WorldBuilder {
     pub world: World,
+    pub recipes: HashMap<String, ::s10::Recipe>,
 }
 
 impl WorldBuilder {
@@ -29,6 +53,23 @@ impl WorldBuilder {
             .entry(archetype_name)
             .or_default()
             .extend_from_slice(&entity_id.inner.0.to_le_bytes());
+    }
+
+    fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr) -> ::s10::Recipe {
+        let sim = SimRecipe { path, addr };
+        let group = GroupRecipe {
+            refs: vec![],
+            recipes: self
+                .recipes
+                .iter()
+                .map(|(n, r)| (n.clone(), r.clone()))
+                .chain(std::iter::once((
+                    "sim".to_string(),
+                    ::s10::Recipe::Sim(sim),
+                )))
+                .collect(),
+        };
+        ::s10::Recipe::Group(group)
     }
 }
 
@@ -97,6 +138,11 @@ impl WorldBuilder {
         let asset = PyAsset::try_new(py, asset)?;
         let inner = self.world.assets.insert_bytes(asset.bytes()?);
         Ok(Handle { inner })
+    }
+
+    fn recipe(&mut self, recipe: crate::s10::Recipe) -> PyResult<()> {
+        self.recipes.insert(recipe.name(), recipe.to_rust()?);
+        Ok(())
     }
 
     #[cfg(feature = "server")]
@@ -208,41 +254,41 @@ impl WorldBuilder {
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
-            Args::Repl { addr } => Ok(Some(addr.to_string())),
-            Args::Run {
-                addr,
-                no_repl,
-                watch,
-            } => {
-                if !watch {
-                    let exec = self.build_uncompiled(
-                        py,
-                        sys,
-                        sim_time_step,
-                        run_time_step,
-                        output_time_step,
-                        max_ticks,
-                    )?;
-                    let client = match client {
-                        Some(c) => c.client.clone(),
-                        None => nox::Client::cpu()?,
-                    };
-                    if no_repl {
-                        spawn_tcp_server(addr, exec, client, || py.check_signals().is_err())?;
-                        Ok(None)
-                    } else {
-                        std::thread::spawn(move || {
-                            spawn_tcp_server(addr, exec, client, || false).unwrap()
-                        });
-                        Ok(Some(addr.to_string()))
-                    }
-                } else if no_repl {
-                    SimSupervisor::run(path).unwrap();
-                    Ok(None)
-                } else {
-                    let _ = SimSupervisor::spawn(path);
-                    Ok(Some(addr.to_string()))
-                }
+            Args::Run { addr } => {
+                let exec = self.build_uncompiled(
+                    py,
+                    sys,
+                    sim_time_step,
+                    run_time_step,
+                    output_time_step,
+                    max_ticks,
+                )?;
+                let client = match client {
+                    Some(c) => c.client.clone(),
+                    None => nox::Client::cpu()?,
+                };
+                let recipes = self.recipes.clone();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .map_err(|err| miette!("rt err {}", err))
+                        .unwrap();
+                    let group = ::s10::Recipe::Group(GroupRecipe {
+                        recipes,
+                        ..Default::default()
+                    });
+                    rt.block_on(run_recipe("world".to_string(), group, false, false))
+                        .unwrap();
+                });
+                spawn_tcp_server(addr, exec, client, || py.check_signals().is_err())?;
+                Ok(None)
+            }
+            Args::Plan { addr } => {
+                let recipe = self.sim_recipe(path, addr);
+                let json = serde_json::to_string(&recipe)
+                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                println!("{}", json);
+                Ok(None)
             }
             Args::Bench { ticks } => {
                 let mut exec = self.build(
