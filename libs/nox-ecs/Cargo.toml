@@ -11,6 +11,7 @@ default = ["tokio"]
 tokio = ["dep:tokio", "futures", "impeller/tokio"]
 cuda = ["nox/cuda"]
 shared = ["nox/shared"]
+pyo3 = ["dep:pyo3", "nox/jax"]
 
 [dependencies]
 # nox

@@ -4,6 +4,7 @@ use futures::{
     future::{maybe_done, BoxFuture},
     pin_mut, FutureExt,
 };
+use miette::Diagnostic;
 use nu_ansi_term::{Color, Style};
 use std::{
     collections::HashMap,
@@ -11,7 +12,9 @@ use std::{
     io::{self, stdout, Write},
     path::PathBuf,
     process::Stdio,
+    time::Duration,
 };
+use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
@@ -19,7 +22,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::Error, watch::Watcher};
+use crate::{error::Error, sim::SimRecipe, watch::watch};
+
+pub const DEFAULT_WATCH_TIMEOUT: Duration = Duration::from_millis(200);
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -28,6 +33,7 @@ pub enum Recipe {
     Cargo(CargoRecipe),
     Process(ProcessRecipe),
     Group(GroupRecipe),
+    Sim(SimRecipe),
 }
 
 impl Recipe {
@@ -41,6 +47,7 @@ impl Recipe {
             Recipe::Cargo(c) => c.run(name, release, cancel_token).boxed(),
             Recipe::Process(p) => p.run(name, cancel_token).boxed(),
             Recipe::Group(g) => g.run(release, cancel_token).boxed(),
+            Recipe::Sim(s) => s.run(cancel_token).boxed(),
         }
     }
 
@@ -52,15 +59,19 @@ impl Recipe {
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
             Recipe::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
-            Recipe::Process(p) => p.watch(name, release, cancel_token).boxed(),
+            Recipe::Process(p) => p.watch(name, cancel_token).boxed(),
             Recipe::Group(g) => g.watch(release, cancel_token).boxed(),
+            Recipe::Sim(s) => s.watch(cancel_token).boxed(),
         }
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default)]
 pub struct GroupRecipe {
-    pub recipes: Vec<GroupItem>,
+    #[serde(default)]
+    pub refs: Vec<String>,
+    #[serde(default)]
+    pub recipes: HashMap<String, Recipe>,
 }
 
 impl GroupRecipe {
@@ -68,14 +79,8 @@ impl GroupRecipe {
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
-            .map(|r| {
-                let (r, name) = match r {
-                    GroupItem::Recipe { recipe, name } => (recipe, name),
-                    GroupItem::Ref(r) => {
-                        return Err(Error::UnresolvedRecipe(r));
-                    }
-                };
-                let token = cancel_token.child_token();
+            .map(|(name, r)| {
+                let token = cancel_token.clone();
                 Ok(r.run(name, release, token))
             })
             .collect::<Result<_, Error>>()?;
@@ -90,14 +95,8 @@ impl GroupRecipe {
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
-            .map(|r| {
-                let (r, name) = match r {
-                    GroupItem::Recipe { recipe, name } => (recipe, name),
-                    GroupItem::Ref(r) => {
-                        return Err(Error::UnresolvedRecipe(r));
-                    }
-                };
-                let token = cancel_token.child_token();
+            .map(|(name, r)| {
+                let token = cancel_token.clone();
                 Ok(r.watch(name, release, token))
             })
             .collect::<Result<_, Error>>()?;
@@ -110,18 +109,11 @@ impl GroupRecipe {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum GroupItem {
-    Ref(String),
-    Recipe { name: String, recipe: Recipe },
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ProcessRecipe {
-    cmd: String,
+    pub cmd: String,
     #[serde(flatten)]
-    process_args: ProcessArgs,
-    no_watch: bool,
+    pub process_args: ProcessArgs,
+    pub no_watch: bool,
 }
 
 impl ProcessRecipe {
@@ -130,44 +122,41 @@ impl ProcessRecipe {
         Ok(())
     }
 
-    pub async fn watch(
-        self,
-        name: String,
-        release: bool,
-        cancel_token: CancellationToken,
-    ) -> Result<(), Error> {
+    pub async fn watch(self, name: String, cancel_token: CancellationToken) -> Result<(), Error> {
         if self.no_watch {
             return self.run(name, cancel_token).await;
         }
         let dirs = self.process_args.watch_dirs();
-        let watcher = Watcher::new(Recipe::Process(self));
-        watcher
-            .run(name.clone(), release, cancel_token, dirs)
-            .await
-            .map_err(Error::from)
+        watch(
+            DEFAULT_WATCH_TIMEOUT,
+            |token| self.clone().run(name.clone(), token),
+            cancel_token,
+            dirs,
+        )
+        .await
     }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct CargoRecipe {
-    path: PathBuf,
-    package: Option<String>,
-    bin: Option<String>,
+    pub path: PathBuf,
+    pub package: Option<String>,
+    pub bin: Option<String>,
     #[serde(default)]
-    features: Vec<String>,
+    pub features: Vec<String>,
     #[serde(flatten)]
-    process_args: ProcessArgs,
+    pub process_args: ProcessArgs,
     #[serde(default)]
-    destination: Destination,
+    pub destination: Destination,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-struct ProcessArgs {
+pub struct ProcessArgs {
     #[serde(default)]
-    args: Vec<String>,
-    cwd: Option<String>,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
     #[serde(default)]
-    env: HashMap<String, String>,
+    pub env: HashMap<String, String>,
     #[serde(default)]
     pub restart_policy: RestartPolicy,
 }
@@ -186,7 +175,7 @@ impl ProcessArgs {
         name: String,
         cmd: String,
         cancel_token: CancellationToken,
-    ) -> io::Result<()> {
+    ) -> Result<(), ProcessError> {
         loop {
             let mut child = Command::new(&cmd);
             child
@@ -197,15 +186,19 @@ impl ProcessArgs {
             if let Some(cwd) = &self.cwd {
                 child.current_dir(cwd);
             }
-            let mut child = child.spawn()?;
+            let mut child = child.spawn().map_err(|source| ProcessError::Spawn {
+                source,
+                cmd: cmd.clone(),
+                recipe: name.clone(),
+            })?;
             let stdout = child
                 .stdout
                 .take()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing child stdout"))?;
+                .ok_or(ProcessError::ProcessMissingStdout)?;
             let stderr = child
                 .stderr
                 .take()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing child stderr"))?;
+                .ok_or(ProcessError::ProcessMissingStderr)?;
 
             let stdout_name = name.clone();
             let stderr_name = name.clone();
@@ -224,9 +217,10 @@ impl ProcessArgs {
                         }else{
                             Color::Red
                         };
-                        println!("{}{}{} killed with code {}", color.paint("["), color.paint(&cmd), color.paint("]"), color.paint(code.to_string()))
+                        let style = Style::new().bold().fg(color);
+                        println!("{} killed with code {}", style.paint(&name), style.paint(code.to_string()))
                     }else{
-                        println!("[{}] killed by signal", &cmd)
+                        println!("{} killed by signal", Style::new().bold().paint(&name))
                     }
                     match self.restart_policy {
                         RestartPolicy::Never => {
@@ -244,6 +238,26 @@ impl ProcessArgs {
     pub fn watch_dirs(&self) -> impl Iterator<Item = PathBuf> {
         self.cwd.clone().into_iter().map(PathBuf::from)
     }
+}
+
+#[derive(Error, Diagnostic, Debug)]
+pub enum ProcessError {
+    #[error("error while running `{cmd}` for recipe \"{recipe}\"")]
+    #[diagnostic(
+        help = "try checking the cmd and args for {recipe}",
+        code = "elodin::recipe_spawn_error"
+    )]
+    Spawn {
+        source: io::Error,
+        cmd: String,
+        recipe: String,
+    },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("process missing stdout")]
+    ProcessMissingStdout,
+    #[error("process missing stderr")]
+    ProcessMissingStderr,
 }
 
 async fn print_logs(
@@ -281,7 +295,11 @@ fn cargo_path() -> PathBuf {
 }
 
 impl CargoRecipe {
-    pub async fn build(&mut self, release: bool) -> Result<Utf8PathBuf, Error> {
+    pub async fn build(
+        &mut self,
+        release: bool,
+        cancel_token: CancellationToken,
+    ) -> Result<Utf8PathBuf, Error> {
         let mut cmd = Command::new(cargo_path());
         let manifest_path = if self.path.is_dir() {
             self.path.join("Cargo.toml")
@@ -312,8 +330,17 @@ impl CargoRecipe {
         if release {
             cmd.arg("--release");
         }
-        let output = cmd.spawn()?.wait_with_output().await?;
-        if output.status.code() != Some(0) {
+        let mut child = cmd.spawn()?;
+        let status = tokio::select! {
+             _ = cancel_token.cancelled() => {
+                child.kill().await?;
+                return Err(Error::PackageBuild(package_name.to_string()));
+            }
+            res = child.wait() => {
+                res?
+            }
+        };
+        if status.code() != Some(0) {
             return Err(Error::PackageBuild(package_name.to_string()));
         }
         let target_dir = &metadata.target_directory;
@@ -331,7 +358,7 @@ impl CargoRecipe {
         release: bool,
         cancel_token: CancellationToken,
     ) -> Result<(), Error> {
-        let path = self.build(release).await?;
+        let path = self.build(release, cancel_token.clone()).await?;
         self.process_args
             .run(name, path.to_string(), cancel_token)
             .await?;
@@ -345,11 +372,14 @@ impl CargoRecipe {
         cancel_token: CancellationToken,
     ) -> Result<(), Error> {
         let dirs = self.watch_dirs();
-        let watcher = Watcher::new(Recipe::Cargo(self));
-        watcher
-            .run(name.clone(), release, cancel_token, dirs)
-            .await
-            .map_err(Error::from)
+
+        watch(
+            DEFAULT_WATCH_TIMEOUT,
+            |token| self.clone().run(name.clone(), release, token),
+            cancel_token,
+            dirs,
+        )
+        .await
     }
 
     pub fn watch_dirs(&self) -> impl Iterator<Item = PathBuf> {
@@ -367,7 +397,7 @@ impl CargoRecipe {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 #[derive(Debug, Clone, Default)]
-enum Destination {
+pub enum Destination {
     #[default]
     Local,
 }
