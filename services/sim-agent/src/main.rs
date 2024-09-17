@@ -8,7 +8,7 @@ use elodin_types::sandbox::{
 };
 use impeller::client::MsgPair;
 use impeller::server::TcpServer;
-use nox::Client;
+use nox_ecs::nox::Client;
 use nox_ecs::{Compiled, ImpellerExec, WorldExec};
 use std::{io::Seek, time::Duration};
 use std::{net::SocketAddr, thread, time::Instant};

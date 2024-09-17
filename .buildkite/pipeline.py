@@ -77,11 +77,9 @@ test_steps = [
                     "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
                 },
             ),
-            nix_step(
+            rust_step(
                 label="cargo fmt",
                 command="cargo fmt --check",
-                flake=".#rust",
-                emoji=":crab:",
             ),
         ],
     ),
@@ -98,10 +96,6 @@ test_steps = [
                 command="ruff format --check; ruff check",
                 flake=".#python",
             ),
-            # rust_step(
-            #   label = "mypy", emoji = ":python:",
-            #   command = "cd libs/nox-py && python3 -m venv .venv && .venv/bin/pip install mypy && .venv/bin/mypy . --check-untyped-defs",
-            # ), # TODO(sphw): replace with pyright
         ],
     ),
     group(

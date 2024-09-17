@@ -2,7 +2,6 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::Context;
 use elodin_types::sandbox::{sandbox_server::Sandbox, *};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -117,15 +116,23 @@ async fn build(code: String) -> anyhow::Result<String> {
     let start = Instant::now();
     let artifact_dir = tempfile::tempdir()?;
     tracing::debug!(dir = %artifact_dir.path().display(), "building artifacts");
-    let build_dir_str = artifact_dir.path().to_string_lossy().to_string();
-    let args = vec!["code.py", "build", "--dir", &build_dir_str];
-    pyo3::Python::with_gil(|py| {
-        py.import_bound("sys")?
-            .into_gil_ref()
-            .setattr("argv", args)?;
-        py.run_bound(&code, None, None)
-    })
-    .context("python command failed")?;
+
+    let mut code_file = tempfile::NamedTempFile::new()?;
+    code_file.write_all(code.as_bytes())?;
+    let code_path = code_file.into_temp_path();
+
+    let status = tokio::process::Command::new("python")
+        .arg(&code_path)
+        .arg("build")
+        .arg("--dir")
+        .arg(artifact_dir.path())
+        .spawn()?
+        .wait()
+        .await?;
+    if !status.success() {
+        return Err(anyhow::anyhow!("build failed: {:?}", status));
+    }
+
     tracing::debug!(elapsed = ?start.elapsed(), "built artifacts");
 
     let file_name = format!("{}.tar", uuid::Uuid::now_v7());
