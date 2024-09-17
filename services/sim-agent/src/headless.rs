@@ -11,7 +11,7 @@ use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
 use google_cloud_storage::http::objects::download::Range;
 use google_cloud_storage::http::objects::get::GetObjectRequest;
 use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-use nox::Client as NoxClient;
+use nox_ecs::nox::Client as NoxClient;
 use nox_ecs::Compiled;
 use nox_ecs::{Seed, WorldExec};
 use sea_orm::{prelude::*, IntoActiveModel, TransactionTrait};

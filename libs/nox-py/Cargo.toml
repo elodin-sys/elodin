@@ -6,7 +6,7 @@ readme = "README.md"
 publish = false
 
 [features]
-publish = ["pyo3/extension-module"]
+publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
 server = ["axum", "futures", "tokio-util/io"]
 cuda = ["nox-ecs/cuda"]
 shared = ["nox-ecs/shared"]
@@ -21,8 +21,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # python
 polars = "0.41"
-pyo3.version = "0.21.0"
-pyo3.features = ["abi3-py310"]
+pyo3 = "0.21.0"
 pyo3-polars = "0.15.0"
 numpy.version = "0.21"
 

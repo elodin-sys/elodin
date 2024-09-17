@@ -199,7 +199,6 @@ mod tests {
     fn test_eye() {
         let client = Client::cpu().unwrap();
         let comp = (|| Matrix::<f32, 3, 3, _>::eye()).build().unwrap();
-        println!("got comp");
         let exec = match comp.compile(&client) {
             Ok(exec) => exec,
             Err(xla::Error::XlaError { msg, .. }) => {
