@@ -25,7 +25,7 @@ dynamic = ["version"]
 
 [tool.maturin]
 python-source = "python"
-features = ["pyo3/extension-module"]
+features = ["publish"]
 
 [project.entry-points.pytest11]
 elodin = "elodin"
