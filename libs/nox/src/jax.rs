@@ -457,14 +457,68 @@ pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
 #[cfg(test)]
 mod tests {
     use numpy::PyArrayLike0;
+    use std::sync::Once;
 
     use crate::Scalar;
 
     use super::*;
 
+    use pyo3::ffi;
+    use std::ffi::{CStr, CString};
+
+    // Like `pyo3::prepare_freethreaded_python` but with venv support.
+    fn prepare_python() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            if std::env::var("VIRTUAL_ENV").unwrap_or_default().is_empty()
+                || !std::env::var("PYTHONHOME").unwrap_or_default().is_empty()
+            {
+                // no virtual environment found
+                pyo3::prepare_freethreaded_python();
+                return;
+            }
+
+            let stdlib_path = env!("PYTHON_STDLIB_PATH");
+            let purelib_path = env!("PYTHON_PURELIB_PATH");
+
+            unsafe {
+                if ffi::Py_IsInitialized() == 0 {
+                    let mut config: ffi::PyConfig = std::mem::zeroed();
+                    ffi::PyConfig_InitPythonConfig(&mut config);
+
+                    config.module_search_paths_set = 2;
+                    for path in [stdlib_path, purelib_path] {
+                        let path_cstring = CString::new(path).unwrap();
+                        let path_wchar =
+                            ffi::Py_DecodeLocale(path_cstring.as_ptr(), std::ptr::null_mut());
+                        let append_status = ffi::PyWideStringList_Append(
+                            &mut config.module_search_paths,
+                            path_wchar,
+                        );
+                        if append_status._type == ffi::_PyStatus_TYPE::_PyStatus_TYPE_ERROR {
+                            panic!(
+                                "Failed to append path to module search paths: {}",
+                                CStr::from_ptr(append_status.err_msg).to_string_lossy()
+                            );
+                        }
+                    }
+
+                    // Initialize Python with the config
+                    let init_status = ffi::Py_InitializeFromConfig(&mut config);
+                    if init_status._type == ffi::_PyStatus_TYPE::_PyStatus_TYPE_ERROR {
+                        panic!(
+                            "Failed to initialize Python: {}",
+                            CStr::from_ptr(init_status.err_msg).to_string_lossy()
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     #[test]
     fn test_add() {
-        pyo3::prepare_freethreaded_python();
+        prepare_python();
         let a: Scalar<f32> = 1.0f32.into();
         let b: Scalar<f32> = 2.0f32.into();
         let c = a + b;

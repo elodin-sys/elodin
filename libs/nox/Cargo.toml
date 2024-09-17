@@ -10,7 +10,7 @@ repository = "https://github.com/elodin-sys/elodin"
 
 [features]
 default = ["noxpr", "xla"]
-jax = ["pyo3", "numpy", "noxpr"]
+jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
 cuda = ["shared"]
 noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
 xla = ["dep:xla", "lapack-src"]
@@ -64,3 +64,8 @@ openblas-src.features = ["system"]
 openblas-src.optional = true
 [target.'cfg(target_os = "macos")'.dependencies]
 lapack-src = { version = "0.10", features = ["accelerate"], optional = true }
+
+[build-dependencies]
+which = "6.0.3"
+pyo3-build-config.version = "0.21.0"
+pyo3-build-config.optional = true
