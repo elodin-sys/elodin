@@ -1,4 +1,5 @@
 defmodule ElodinDashboardWeb.OnboardingLive do
+  require Logger
   use ElodinDashboardWeb, :live_view
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
@@ -13,6 +14,23 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     sub_type = params["sub_type"]
     ignore_device = params["ignore_device"] == "1"
 
+    user_agent = get_connect_info(socket, :user_agent)
+
+    device_type =
+      case UAInspector.parse(user_agent) do
+        %UAInspector.Result{device: %UAInspector.Result.Device{type: dt}} -> dt
+        _ -> "unknown"
+      end
+
+    Logger.info(
+      "onboarding page accessed",
+      user: current_user["email"],
+      onboarding_page: page_num,
+      subscription_type: sub_type,
+      device_type: device_type,
+      user_agent: user_agent
+    )
+
     if current_user["billing_account_id"] == nil do
       tier =
         case sub_type do
@@ -20,32 +38,37 @@ defmodule ElodinDashboardWeb.OnboardingLive do
           "commercial" -> 2
         end
 
-      {:ok, resp} =
-        Atc.create_billing_account(
-          %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
-          current_user["token"]
-        )
+      case Atc.create_billing_account(
+             %Api.CreateBillingAccountReq{trial_license_type: tier, name: "Default Account"},
+             current_user["token"]
+           ) do
+        {:ok, resp} ->
+          billing_account_id = resp.id
 
-      current_user = Map.put(current_user, "billing_account_id", resp.id)
+          Logger.info(
+            "onboarding page - create_billing_account success",
+            user: current_user["email"],
+            onboarding_page: page_num,
+            subscription_type: sub_type,
+            billing_account_id: billing_account_id
+          )
+
+          current_user = Map.put(current_user, "billing_account_id", billing_account_id)
+
+        err ->
+          Logger.error(
+            "onboarding page - create_billing_account error",
+            user: current_user["email"],
+            onboarding_page: page_num,
+            subscription_type: sub_type,
+            error: inspect(err)
+          )
+      end
+
       page_num = "1"
     end
 
-    device_type =
-      case UAInspector.parse(get_connect_info(socket, :user_agent)) do
-        %UAInspector.Result{device: %UAInspector.Result.Device{type: dt}} -> dt
-        _ -> "unknown"
-      end
-
-    {min_page, max_page} =
-      IO.inspect(
-        cond do
-          current_user["onboarding_data"] == nil ->
-            {1, 3}
-
-          true ->
-            {4, 1000}
-        end
-      )
+    {min_page, max_page} = if(current_user["onboarding_data"] == nil, do: {1, 3}, else: {4, 1000})
 
     param_page =
       case Integer.parse(page_num || "4") do
@@ -67,6 +90,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
        |> assign(page: page)
        |> assign(sub_type: sub_type)
        # NOTE(sphw): temporarily disabled as macOS safari seems to detect as mobile
+       #  |> assign(is_desktop: device_type == "desktop")
        |> assign(is_desktop: true)
        |> assign(ignore_device: ignore_device)
        |> assign(loading: false)
@@ -98,17 +122,14 @@ defmodule ElodinDashboardWeb.OnboardingLive do
     sub_type = socket.assigns[:sub_type]
     query = if(socket.assigns[:ignore_device], do: "?ignore_device=1", else: "")
 
-    # NOTE: Temporary disable due to serialization issues inside of the posthog package
-    # Posthog.capture("user_onboarding_next_page", %{
-    #   distinct_id: socket.assigns[:current_user]["email"],
-    #   "$lib": "posthog-elixir",
-    #   "$current_url": socket.assigns[:uri],
-    #   properties: %{
-    #     subscription_type: sub_type,
-    #     page: page,
-    #     is_desktop: socket.assigns[:is_desktop]
-    #   }
-    # })
+    Logger.info(
+      "user_onboarding next_page clicked",
+      user: socket.assigns[:current_user]["email"],
+      onboarding_page: page,
+      current_url: socket.assigns[:uri],
+      subscription_type: socket.assigns[:sub_type],
+      is_desktop: socket.assigns[:is_desktop]
+    )
 
     {:noreply, push_redirect(socket, to: "/onboard/#{sub_type}/#{page}#{query}")}
   end
@@ -138,16 +159,13 @@ defmodule ElodinDashboardWeb.OnboardingLive do
       socket.assigns[:current_user]["token"]
     )
 
-    # NOTE: Temporary disable due to serialization issues inside of the posthog package
-    # Posthog.capture("user_onboarding_poll_answered", %{
-    #   distinct_id: socket.assigns[:current_user]["id"],
-    #   "$lib": "posthog-elixir",
-    #   "$current_url": socket.assigns[:uri],
-    #   properties: %{
-    #     subscription_type: socket.assigns[:sub_type],
-    #     is_desktop: socket.assigns[:is_desktop]
-    #   }
-    # })
+    Logger.info(
+      "user_onboarding poll answered",
+      user: socket.assigns[:current_user]["email"],
+      current_url: socket.assigns[:uri],
+      subscription_type: socket.assigns[:sub_type],
+      is_desktop: socket.assigns[:is_desktop]
+    )
 
     {:noreply, socket |> assign(:page, 4) |> assign(:loading, false)}
   end

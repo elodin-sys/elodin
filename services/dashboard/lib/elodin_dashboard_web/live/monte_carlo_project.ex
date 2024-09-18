@@ -1,4 +1,5 @@
 defmodule ElodinDashboardWeb.MonteCarloProjectLive do
+  require Logger
   use ElodinDashboardWeb, :live_view
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
@@ -7,6 +8,11 @@ defmodule ElodinDashboardWeb.MonteCarloProjectLive do
 
   def mount(%{"project" => project}, _, socket) do
     token = socket.assigns[:current_user]["token"]
+
+    Logger.info("monte-carlo project page accessed",
+      montecarlo_project: project,
+      user: socket.assigns[:current_user]["email"]
+    )
 
     monte_carlo_runs =
       case Atc.list_monte_carlo_runs(%Api.ListMonteCarloRunsReq{}, token) do
@@ -24,7 +30,14 @@ defmodule ElodinDashboardWeb.MonteCarloProjectLive do
             }
           end)
 
-        {:error, _} ->
+        {:error, err} ->
+          Logger.error(
+            "monte-carlo project page - list_monte_carlo_runs - error",
+            montecarlo_project: project,
+            user: socket.assigns[:current_user]["email"],
+            error: inspect(err)
+          )
+
           []
       end
 

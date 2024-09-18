@@ -1,4 +1,5 @@
 defmodule ElodinDashboardWeb.MonteCarloRunLive do
+  require Logger
   use ElodinDashboardWeb, :live_view
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
@@ -9,6 +10,13 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
 
   def mount(%{"project" => project, "run" => run_id}, _, socket) do
     token = socket.assigns[:current_user]["token"]
+
+    Logger.info(
+      "monte-carlo run page accessed",
+      montecarlo_project: project,
+      montecarlo_run_id: run_id,
+      user: socket.assigns[:current_user]["email"]
+    )
 
     case UUID.info(run_id) do
       {:ok, _} -> with_run_data(socket, token, project, run_id)

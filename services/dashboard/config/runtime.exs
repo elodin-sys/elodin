@@ -21,12 +21,6 @@ if System.get_env("PHX_SERVER") do
 end
 
 if config_env() == :prod do
-  config :posthog,
-    api_url: "https://us.i.posthog.com",
-    api_key:
-      System.get_env("POSTHOG_API_KEY") ||
-        raise("environment variable POSTHOG_API_KEY is missing.")
-
   config :elodin_dashboard, ElodinDashboard.Atc,
     internal_addr:
       System.get_env("ATC_INTERNAL_ADDR") ||
