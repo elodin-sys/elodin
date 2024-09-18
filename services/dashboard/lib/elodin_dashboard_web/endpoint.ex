@@ -40,7 +40,10 @@ defmodule ElodinDashboardWeb.Endpoint do
   )
 
   plug(Plug.RequestId)
-  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint], log: {__MODULE__, :log_level, []})
+
+  def log_level(%{path_info: ["healthz" | _]}), do: false
+  def log_level(_), do: :info
 
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

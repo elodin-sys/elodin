@@ -36,11 +36,6 @@ spec:
             secretKeyRef:
               name: elo-dashboard-secret
               key: AUTH_CLIENT_SECRET
-        - name: POSTHOG_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: elo-dashboard-secret
-              key: POSTHOG_API_KEY
         envFrom:
         - configMapRef:
             name: elo-dashboard

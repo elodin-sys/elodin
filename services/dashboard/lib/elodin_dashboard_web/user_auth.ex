@@ -1,6 +1,6 @@
 defmodule ElodinDashboardWeb.UserAuth do
   use ElodinDashboardWeb, :verified_routes
-  import Logger
+  require Logger
   import Plug.Conn
   import Phoenix.Controller
 
@@ -26,6 +26,8 @@ defmodule ElodinDashboardWeb.UserAuth do
   def get_user_by_token(token) do
     case ElodinDashboard.Atc.current_user(struct(Elodin.Types.Api.CurrentUserReq), token) do
       {:ok, user} ->
+        Logger.info("get_user_by_token success", user: user.email)
+
         {:ok,
          %{
            "token" => token,
@@ -40,7 +42,7 @@ defmodule ElodinDashboardWeb.UserAuth do
          }}
 
       {:error, err} ->
-        Logger.warning("get_user_by_token error: #{inspect(err)}")
+        Logger.warning("get_user_by_token error", error: inspect(err))
 
         {:error, err}
     end
@@ -98,13 +100,14 @@ defmodule ElodinDashboardWeb.UserAuth do
               nil
 
             {:error, err} ->
-              Logger.error("create_user: #{inspect(err)}")
+              Logger.error("create_user error", error: inspect(err))
           end
 
           "?onboarding=1"
 
         {:error, err} ->
-          Logger.error("log_in_user: #{inspect(err)}")
+          Logger.error("log_in_user error", error: inspect(err))
+
           ""
 
         {:ok, _} ->

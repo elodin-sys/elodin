@@ -1,4 +1,5 @@
 defmodule ElodinDashboardWeb.EditorLive do
+  require Logger
   use ElodinDashboardWeb, :live_view
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
@@ -9,6 +10,12 @@ defmodule ElodinDashboardWeb.EditorLive do
 
   def mount(%{"id" => id}, _, socket) do
     token = socket.assigns[:current_user]["token"]
+
+    Logger.info("editor page accessed",
+      user: socket.assigns[:current_user]["email"],
+      sandbox_id: id
+    )
+
     atc_config = Application.get_env(:elodin_dashboard, Atc)
     scheme = if atc_config[:tls], do: "wss", else: "ws"
 

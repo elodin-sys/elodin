@@ -1,6 +1,6 @@
 defmodule ElodinDashboardWeb.SandboxPickerLive do
   use ElodinDashboardWeb, :live_view
-  import Logger
+  require Logger
   alias Elodin.Types.Api
   alias ElodinDashboard.Atc
   alias ElodinDashboard.NameGen
@@ -10,7 +10,26 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
   import ElodinDashboardWeb.ModalComponents
 
   def mount(params, _, socket) do
-    token = socket.assigns[:current_user]["token"]
+    current_user = socket.assigns[:current_user]
+    token = current_user["token"]
+
+    if current_user["subscription_status"] != nil do
+      subscription_status = current_user["subscription_status"]
+
+      Logger.info(
+        "sandbox picker page accessed",
+        user: current_user["email"],
+        subscription_end: subscription_status.subscription_end,
+        trial_start: subscription_status.trial_start,
+        trial_end: subscription_status.trial_end,
+        monte_carlo_credit: subscription_status.monte_carlo_credit
+      )
+    else
+      Logger.error(
+        "sandbox picker page accessed - subscription_status is missing",
+        user: current_user["email"]
+      )
+    end
 
     new_form = to_form(%{"name" => NameGen.generate()})
 
@@ -21,6 +40,12 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
             %{id: UUID.binary_to_string!(s.id), name: s.name}
           end)
 
+        Logger.info(
+          "sandbox picker page - list_sandboxes success",
+          user: current_user["email"],
+          sandbox_template: params["template"]
+        )
+
         {:ok,
          socket
          |> assign(:sandboxes, sandboxes)
@@ -30,6 +55,13 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
          |> assign(:onboarding_step, 1)}
 
       {:error, err} ->
+        Logger.error(
+          "sandbox picker page - list_sandboxes error",
+          user: current_user["email"],
+          sandbox_template: params["template"],
+          error: inspect(err)
+        )
+
         {:ok,
          socket
          |> put_flash(:error, "Error creating sandbox: #{err}")
@@ -53,12 +85,28 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       {:ok, sandbox} ->
         id = UUID.binary_to_string!(sandbox.id)
 
+        Logger.info(
+          "sandbox picker page - create_sandbox success",
+          user: socket.assigns[:current_user]["email"],
+          sandbox_name: name,
+          sandbox_id: id,
+          sandbox_template: template
+        )
+
         {:noreply,
          socket
          |> put_flash(:info, "Successfully created sandbox #{name}")
          |> redirect(to: ~p"/sandbox/#{id}")}
 
       {:error, err} ->
+        Logger.error(
+          "sandbox picker page - create_sandbox error",
+          user: socket.assigns[:current_user]["email"],
+          sandbox_name: name,
+          sandbox_template: template,
+          error: inspect(err)
+        )
+
         {:noreply, socket |> put_flash(:error, "Error creating sandbox: #{err}")}
     end
   end
@@ -68,12 +116,26 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
     case Atc.delete_sandbox(%Api.DeleteSandboxReq{id: UUID.string_to_binary!(id)}, token) do
       {:ok, sandbox} ->
+        Logger.info(
+          "sandbox picker page - delete_sandbox success",
+          user: socket.assigns[:current_user]["email"],
+          sandbox_id: id,
+          sandbox_name: sandbox.name
+        )
+
         {:noreply,
          socket
          |> put_flash(:info, "Successfully deleted sandbox #{sandbox.name}")
          |> redirect(to: ~p"/")}
 
       {:error, err} ->
+        Logger.error(
+          "sandbox picker page - delete_sandbox error",
+          user: socket.assigns[:current_user]["email"],
+          sandbox_id: id,
+          error: inspect(err)
+        )
+
         {:noreply, socket |> put_flash(:error, "Error deleting sandbox: #{err}")}
     end
   end
