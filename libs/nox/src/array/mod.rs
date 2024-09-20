@@ -22,6 +22,7 @@ use std::{
     ops::{Add, Div, Mul, Neg, Sub},
 };
 
+mod dynamic;
 mod repr;
 pub use repr::*;
 
@@ -207,20 +208,6 @@ pub trait ArrayBuf<T>: Clone {
     fn default(dims: &[usize]) -> Self;
 }
 
-impl<T: Clone + Elem> ArrayBuf<T> for ndarray::ArrayD<T> {
-    fn as_buf(&self) -> &[T] {
-        self.as_slice().expect("ndarray in non-standard order")
-    }
-
-    fn as_mut_buf(&mut self) -> &mut [T] {
-        self.as_slice_mut().expect("ndarray in non-standard order")
-    }
-
-    fn default(dims: &[usize]) -> Self {
-        ndarray::ArrayD::default(dims)
-    }
-}
-
 impl<T: Elem + Clone> ArrayBuf<T> for T {
     fn as_buf(&self) -> &[T] {
         core::slice::from_ref(self)
@@ -278,75 +265,6 @@ impl<T: Clone + Elem, const D1: usize, const D2: usize, const D3: usize> ArrayBu
         [[[T::default(); D1]; D2]; D3]
     }
 }
-
-impl ArrayDim for Dyn {
-    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
-
-    type Shape = SmallVec<[usize; 4]>;
-
-    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.shape().iter().copied().collect()
-    }
-
-    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.strides().iter().map(|x| *x as usize).collect()
-    }
-}
-
-impl ArrayDim for (Dyn, Dyn) {
-    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
-
-    type Shape = SmallVec<[usize; 4]>;
-
-    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.shape().iter().copied().collect()
-    }
-
-    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.strides().iter().map(|x| *x as usize).collect()
-    }
-}
-
-impl ArrayDim for (Dyn, Dyn, Dyn) {
-    type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
-
-    type Shape = SmallVec<[usize; 4]>;
-
-    fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.shape().iter().copied().collect()
-    }
-
-    fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-        buf.strides().iter().map(|x| *x as usize).collect()
-    }
-}
-
-macro_rules! impl_dyn_dim {
-    ($($generics: tt),+; $($dim: ty),+) => {
-        impl<$(const $generics: usize,)*> ArrayDim for ($($dim,)+) {
-            type Buf<T> = ndarray::ArrayD<T> where T: Clone + Elem;
-
-            type Shape = SmallVec<[usize; 4]>;
-
-            fn array_shape<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-                buf.shape().iter().copied().collect()
-            }
-
-            fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
-                buf.strides().iter().map(|x| *x as usize).collect()
-            }
-        }
-    };
-}
-
-impl_dyn_dim!(N1; Dyn, Const<N1>);
-impl_dyn_dim!(N1; Const<N1>, Dyn);
-impl_dyn_dim!(N1; Const<N1>, Dyn, Dyn);
-impl_dyn_dim!(N1; Dyn, Const<N1>, Dyn);
-impl_dyn_dim!(N1; Dyn, Dyn, Const<N1>);
-impl_dyn_dim!(N1, N2; Const<N1>, Const<N2>, Dyn);
-impl_dyn_dim!(N1, N2; Const<N1>, Dyn, Const<N2>);
-impl_dyn_dim!(N1, N2; Dyn, Const<N1>, Const<N2>);
 
 impl<T1: Elem, D1: ArrayDim + TensorDim> Array<T1, D1> {
     pub fn zeroed(dims: &[usize]) -> Self {
@@ -1114,9 +1032,16 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
 
     pub fn to_dyn(&self) -> Array<T1, Dyn> {
         let shape = D1::array_shape(&self.buf);
-        let shape = shape.as_ref();
-        let buf = ndarray::Array::from_shape_vec(shape, self.buf.as_buf().to_vec()).unwrap();
+        let shape = SmallVec::from_slice(shape.as_ref());
+        let buf = dynamic::DynArray::from_shape_vec(shape, self.buf.as_buf().to_vec()).unwrap();
         Array { buf }
+    }
+
+    pub fn cast_dyn<D2>(self) -> Array<T1, D2>
+    where
+        D2: ArrayDim<Buf<T1> = D1::Buf<T1>>,
+    {
+        Array { buf: self.buf }
     }
 }
 
@@ -1856,16 +1781,11 @@ mod tests {
 
     #[test]
     fn test_partial_dyn_mat() {
-        let a: Array<f64, (Dyn, Dyn)> = Array {
-            buf: ndarray::array![[1.0, 2.0], [3.0, 4.0]].into_dyn(),
-        };
-        let b: Array<f64, (Dyn, Dyn)> = Array {
-            buf: ndarray::array![[1.0, 2.0], [3.0, 4.0]].into_dyn(),
-        };
+        let a: Array<f64, (Dyn, Dyn)> = array![[1.0, 2.0], [3.0, 4.0]].to_dyn().cast_dyn();
+        let b: Array<f64, (Dyn, Dyn)> = array![[1.0, 2.0], [3.0, 4.0]].to_dyn().cast_dyn();
         let c = a.dot(&b);
-        let expected: Array<f64, (Dyn, Dyn)> = Array {
-            buf: ndarray::array![[7.0, 10.0], [15.0, 22.0]].into_dyn(),
-        };
+        let expected: Array<f64, (Dyn, Dyn)> =
+            array![[7.0, 10.0], [15.0, 22.0]].to_dyn().cast_dyn();
 
         assert_eq!(c, expected)
     }
