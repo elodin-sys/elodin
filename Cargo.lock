@@ -6863,7 +6863,6 @@ dependencies = [
  "inplace_it",
  "itertools 0.12.1",
  "lapack-src",
- "ndarray 0.16.1",
  "noxla",
  "num-traits",
  "numpy",
