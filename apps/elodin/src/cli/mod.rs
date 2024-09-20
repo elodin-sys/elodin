@@ -40,12 +40,14 @@ impl Cli {
     }
 
     pub fn run(self) -> miette::Result<()> {
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            EnvFilter::builder().from_env_lossy()
+        } else {
+            EnvFilter::builder()
+                .parse_lossy("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")
+        };
         let _ = tracing_subscriber::fmt::fmt()
-            .with_env_filter(
-                EnvFilter::builder()
-                    .with_default_directive("info".parse().expect("invalid filter"))
-                    .from_env_lossy(),
-            )
+            .with_env_filter(filter)
             .try_init();
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()

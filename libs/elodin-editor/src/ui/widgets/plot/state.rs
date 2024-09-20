@@ -35,7 +35,7 @@ pub struct GraphState {
     pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
-    pub zoom_factor: f32,
+    pub zoom_factor: Vec2,
     pub pan_offset: Vec2,
 }
 
@@ -76,7 +76,7 @@ impl GraphBundle {
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,
-            zoom_factor: 1.0,
+            zoom_factor: Vec2::ONE,
             pan_offset: Vec2::ZERO,
         };
         GraphBundle {

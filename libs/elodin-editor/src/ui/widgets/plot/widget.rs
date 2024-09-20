@@ -7,6 +7,7 @@ use bevy::{
         system::{Commands, Local, Query, Res},
     },
     input::{
+        keyboard::KeyCode,
         mouse::{MouseButton, MouseScrollUnit, MouseWheel},
         ButtonInput,
     },
@@ -203,7 +204,7 @@ impl Plot {
         let outer_ratio = Vec2::new(outer_ratio.x, outer_ratio.y).as_dvec2();
         let pan_offset = graph_state.pan_offset.as_dvec2() * bounds_size * DVec2::new(-1.0, 1.0);
         self.bounds = original_bounds.clone().offset(pan_offset * outer_ratio);
-        let new_bounds = bounds_size * graph_state.zoom_factor as f64;
+        let new_bounds = bounds_size * graph_state.zoom_factor.as_dvec2();
         let offset = new_bounds - bounds_size;
         self.bounds.min_x -= offset.x / 2.0;
         self.bounds.max_x += offset.x / 2.0;
@@ -789,7 +790,7 @@ impl Plot {
 
                 let inner_point_pos = pointer_pos - self.inner_rect.min;
                 let unscaled_tick_range = (self.tick_range.end - self.tick_range.start) as f64;
-                let tick_range = unscaled_tick_range * graph_state.zoom_factor as f64;
+                let tick_range = unscaled_tick_range * graph_state.zoom_factor.x as f64;
                 let total_offset = self.zoom_offset.x as f32;
                 let total_offset_pixels = total_offset * self.inner_rect.width();
                 let x_pos = (inner_point_pos.x - total_offset_pixels) * tick_range as f32
@@ -998,6 +999,7 @@ pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
     scroll_events: EventReader<MouseWheel>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     const ZOOM_SENSITIVITY: f32 = 0.001;
 
@@ -1031,9 +1033,17 @@ pub fn zoom_graph(
             continue;
         }
 
+        let offset_mask = if keys.pressed(KeyCode::ControlLeft) {
+            Vec2::new(1.0, 0.0)
+        } else if keys.pressed(KeyCode::ShiftLeft) {
+            Vec2::new(0.0, 1.0)
+        } else {
+            Vec2::new(1.0, 1.0)
+        };
+
         let old_scale = graph_state.zoom_factor;
-        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY;
-        graph_state.zoom_factor = graph_state.zoom_factor.clamp(0.0, 1.0);
+        graph_state.zoom_factor *= 1. - scroll_offset * ZOOM_SENSITIVITY * offset_mask;
+        graph_state.zoom_factor = graph_state.zoom_factor.clamp(Vec2::ZERO, Vec2::ONE);
 
         let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
             - viewport.physical_size.as_vec2() / 2.;
@@ -1045,7 +1055,7 @@ pub fn zoom_graph(
 
         let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
 
-        graph_state.pan_offset -= delta;
+        graph_state.pan_offset -= delta * offset_mask;
     }
 }
 
@@ -1054,6 +1064,7 @@ pub fn pan_graph(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut last_pos: Local<Option<Vec2>>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     let Ok(window) = primary_window.get_single() else {
         return;
@@ -1084,7 +1095,16 @@ pub fn pan_graph(
             continue;
         }
 
-        let delta = delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor;
+        let offset_mask = if keys.pressed(KeyCode::ControlLeft) {
+            Vec2::new(1.0, 0.0)
+        } else if keys.pressed(KeyCode::ShiftLeft) {
+            Vec2::new(0.0, 1.0)
+        } else {
+            Vec2::new(1.0, 1.0)
+        };
+
+        let delta =
+            delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
         graph_state.pan_offset += delta;
     }
 
@@ -1128,7 +1148,7 @@ pub fn reset_graph(
                 continue;
             }
             graph_state.pan_offset = Vec2::ZERO;
-            graph_state.zoom_factor = 1.0;
+            graph_state.zoom_factor = Vec2::ONE;
         }
     }
 }
