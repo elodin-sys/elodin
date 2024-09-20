@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+- Add locking axis when panning and zooming plots.
+  Now you can just move the x or y axis when panning or zooming a plot. Hold down Ctrl to only move along the x axis, and hold down Shift to only move along the y axis.
 - Add ability to run processes alongside simulations.
   You can now add sidecar processes that are started alongside the main simulation. This is super useful for testing out flight software alongside your simulation.
   ```python
