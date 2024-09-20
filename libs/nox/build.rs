@@ -1,3 +1,4 @@
+#[cfg(feature = "jax")]
 fn run_python_command(cmd: &str) -> String {
     let output = std::process::Command::new("python3")
         .arg("-c")

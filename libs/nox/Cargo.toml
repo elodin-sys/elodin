@@ -19,7 +19,6 @@ serde = ["dep:serde"]
 
 [dependencies]
 typenum = "1.17.0"
-ndarray = "0.16"
 num-traits = "0.2.15"
 thiserror = "1.0"
 seq-macro = "0.3.5"
