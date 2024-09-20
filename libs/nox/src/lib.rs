@@ -17,6 +17,8 @@ mod spatial;
 mod tensor;
 mod vector;
 
+pub mod utils;
+
 pub use array::*;
 pub use dim::*;
 pub use error::*;
