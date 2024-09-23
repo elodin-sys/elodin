@@ -1,0 +1,29 @@
+[package]
+name = "roci-multicopter"
+edition = "2021"
+version = "0.1.0"
+
+[lib]
+harness = false
+
+[[test]]
+name = "integration"
+harness = false
+
+[dependencies]
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+cortex-m = { version = "0.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7"
+embedded-hal = { version = "1.0", features=["defmt-03"] }
+critical-section = "1.1"
+cortex-m-semihosting = "0.5"
+
+hal = { package = "stm32-hal2", version = "1.8", features = ["h747cm7", "h7rt"]}
+fugit = { version = "0.3.7", features = ["defmt"] }
+
+paste = "1.0"
+
+[dev-dependencies]
+defmt-test = "0.3"
