@@ -67,7 +67,7 @@ test_steps = [
         steps=[
             rust_step(
                 label="clippy",
-                command="cargo clippy -- -Dwarnings",
+                command="cargo clippy -- -Dwarnings; cd fsw/multicopter && cargo clippy -- -Dwarnings",
             ),
             rust_step(
                 label="cargo test",
@@ -79,7 +79,7 @@ test_steps = [
             ),
             rust_step(
                 label="cargo fmt",
-                command="cargo fmt --check",
+                command="cargo fmt --check; cargo fmt --check --manifest-path fsw/multicopter/Cargo.toml",
             ),
         ],
     ),

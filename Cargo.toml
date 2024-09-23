@@ -29,6 +29,9 @@ members = [
     "clients/care-weather/mcu-client",
     "libs/s10",
 ]
+exclude = [
+    "fsw/multicopter",
+]
 
 [workspace.package]
 version = "0.6.2"
