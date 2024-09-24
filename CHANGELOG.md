@@ -1,6 +1,10 @@
 # Changelog
 
 ## unreleased
+
+## 0.7.0
+- **(breaking)** Replace `--watch` option with `elodin run`.
+As part of adding process supervision to Elodin, we refactored how watching a simulation works. Now instead of running `python3 sim.py run --watch`, you run `elodin run sim.py`.
 - Add locking axis when panning and zooming plots.
   Now you can just move the x or y axis when panning or zooming a plot. Hold down Ctrl to only move along the x axis, and hold down Shift to only move along the y axis.
 - Add ability to run processes alongside simulations.
@@ -10,8 +14,6 @@
 
   world.recipe(el.s10.Recipe.Cargo(name = "test", path = "./test-crate", args = [], cwd = None, env = {}, restart_policy = el.s10.RestartPolicy.Never, package = None, bin = None)) # to build and run a crate
   ```
-- **(breaking)** Replace `--watch` option with `elodin run`.
-As part of adding process supervision to Elodin, we refactored how watching a simulation works. Now instead of running `python3 sim.py run --watch`, you run `elodin run sim.py`.
 
 ## v0.6.2
 - **(fix)** Various WASM editor bug fixes.
