@@ -2,6 +2,7 @@
 name = "roci-multicopter"
 edition = "2021"
 version = "0.1.0"
+publish = false
 
 [lib]
 harness = false
