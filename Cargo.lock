@@ -3574,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "elodin"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5016,7 +5016,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helmholtz-chamber"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "roci",
  "serialport",
@@ -5425,7 +5425,7 @@ dependencies = [
 
 [[package]]
 name = "impeller"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arrow",
  "bevy",
@@ -6297,7 +6297,7 @@ dependencies = [
 
 [[package]]
 name = "mcu-client"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arrayvec",
  "ctrlc",
@@ -6817,7 +6817,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "approx",
  "boxcar",
@@ -6899,7 +6899,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "axum",
  "bytes",
@@ -6934,7 +6934,7 @@ dependencies = [
 
 [[package]]
 name = "noxla"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -9026,7 +9026,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bbqueue",
  "bytes",
@@ -9058,7 +9058,7 @@ dependencies = [
 
 [[package]]
 name = "roci-macros"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "convert_case",
  "darling",
@@ -9322,7 +9322,7 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "s10"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -12354,7 +12354,7 @@ checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wmm"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "approx",
  "bindgen 0.70.1",
