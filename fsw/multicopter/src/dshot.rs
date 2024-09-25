@@ -33,7 +33,7 @@ where
     dma::Dma<D>: HalDmaExt<HalDmaReg = D>,
     timer::Timer<T>: HalTimerExt<HalTimerReg = T> + DmaMuxInput,
 {
-    pub fn new<B: AsMut<[u8]>>(
+    pub fn new<B: AsMut<[u8]> + 'static>(
         mut pwm_timer: timer::Timer<T>,
         dma: DmaCh<'a, CHANNEL, D>,
         alloc: &mut DmaAlloc<B>,
@@ -44,7 +44,7 @@ where
         let max_duty_cycle = pwm_timer.max_duty_cycle() as u16;
         Self {
             pwm_timer,
-            dma_buf: dma.buf(alloc),
+            dma_buf: DmaBuf::new(dma, alloc),
             max_duty_cycle,
         }
     }
