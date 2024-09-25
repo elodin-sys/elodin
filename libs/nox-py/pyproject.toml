@@ -11,7 +11,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "jax",
+    "jax==0.4.31",
     "numpy",
     "typing-extensions",
     "polars",
