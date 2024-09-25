@@ -5,8 +5,6 @@ use hal::{clocks::Clocks, dma, pac, timer};
 use crate::arena::DmaAlloc;
 use crate::dma::DmaBuf;
 
-const HI_DUTY_CYCLE: f32 = 0.75;
-const LO_DUTY_CYCLE: f32 = HI_DUTY_CYCLE / 2.;
 const TIMX_CCR1_OFFSET: u8 = 0x34;
 
 pub trait HalTimerRegExt: Sized {
@@ -35,6 +33,7 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
     type HalTimerReg: HalTimerRegExt;
 
     fn enable_pwm(&mut self);
+    fn enable_dma_interrupt(&mut self);
     fn max_duty_cycle(&self) -> u32;
     #[allow(clippy::too_many_arguments)]
     /// # Safety
@@ -67,8 +66,7 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         dma_buf.transfer_in_progress = false;
 
         let base_addr = TIMX_CCR1_OFFSET / 4;
-        // let burst_len = 4u8;
-        let burst_len = 1u8;
+        let burst_len = 4u8;
         assert_eq!(dma_buf.staging_buf.len() % burst_len as usize, 0);
         let dma_channel = DmaCh::<CHANNEL, H>::dma_channel();
         let channel_cfg = dma::ChannelCfg::default();
@@ -108,12 +106,6 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
     fn ch4(&self) -> TimCh<4, Self::HalTimerReg> {
         self.ch()
     }
-    fn lo(&self) -> u16 {
-        (self.max_duty_cycle() as f32 * LO_DUTY_CYCLE) as u16
-    }
-    fn hi(&self) -> u16 {
-        (self.max_duty_cycle() as f32 * HI_DUTY_CYCLE) as u16
-    }
 }
 
 pub trait HalDmaExt: Sized + BorrowMut<dma::Dma<Self::HalDmaReg>> {
@@ -131,7 +123,6 @@ pub trait HalDmaExt: Sized + BorrowMut<dma::Dma<Self::HalDmaReg>> {
 
 pub trait DmaMuxInput {
     const DMA_INPUT: dma::DmaInput;
-    fn prepare(&mut self) {}
 }
 
 pub struct TimCh<'a, const CHANNEL: u8, H: HalTimerRegExt> {
@@ -172,6 +163,9 @@ macro_rules! impl_hal_timer {
                 self.enable_pwm_output(timer::TimChannel::C2, timer::OutputCompare::Pwm1, 0.);
                 self.enable_pwm_output(timer::TimChannel::C3, timer::OutputCompare::Pwm1, 0.);
                 self.enable_pwm_output(timer::TimChannel::C4, timer::OutputCompare::Pwm1, 0.);
+            }
+            fn enable_dma_interrupt(&mut self) {
+                self.enable_interrupt(timer::TimerInterrupt::UpdateDma);
             }
             fn max_duty_cycle(&self) -> u32 {
                 self.get_max_duty().into()
@@ -268,9 +262,6 @@ macro_rules! impl_timer_dma_mux {
         paste::paste! {
         impl DmaMuxInput for timer::Timer<pac::[<TIM $tim>]> {
             const DMA_INPUT: dma::DmaInput = dma::DmaInput::[<Tim $tim Up>];
-            fn prepare(&mut self) {
-                self.enable_interrupt(timer::TimerInterrupt::UpdateDma);
-            }
         }
         }
     };
@@ -298,8 +289,7 @@ where
         }
     }
 
-    pub fn mux<M: DmaMuxInput>(&self, input: &mut M) {
-        input.prepare();
+    pub fn mux<M: DmaMuxInput>(&self, _: &mut M) {
         dma::mux(H::dma_periph(), Self::dma_channel(), M::DMA_INPUT);
     }
 
@@ -312,7 +302,7 @@ where
     }
 
     pub fn buf<const N: usize, B: AsMut<[u8]>>(
-        &'a mut self,
+        self,
         alloc: &mut DmaAlloc<B>,
     ) -> DmaBuf<'a, N, CHANNEL, H> {
         DmaBuf::new(self, alloc)
