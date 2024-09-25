@@ -51,10 +51,12 @@ impl RootWidgetSystem for CommandPalette<'_> {
 
         let mut command_palette_state = state_mut.command_palette_state;
         let kbd = state_mut.kbd;
-
-        if kbd.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight])
-            && kbd.just_pressed(KeyCode::KeyP)
-        {
+        let cmd_pressed = if cfg!(target_os = "macos") {
+            kbd.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight])
+        } else {
+            kbd.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        };
+        if cmd_pressed && kbd.just_pressed(KeyCode::KeyP) {
             command_palette_state.show = !command_palette_state.show;
             if command_palette_state.show {
                 command_palette_state.input_focus = true;
