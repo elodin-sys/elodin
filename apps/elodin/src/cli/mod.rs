@@ -28,7 +28,8 @@ enum Commands {
     MonteCarlo(monte_carlo::Args),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
-    // Run an Elodin simulaton in headless mode
+    /// Run an Elodin simulaton in headless mode
+    #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
     /// Create template
     Create(create::Args),
@@ -71,6 +72,7 @@ impl Cli {
             Some(Commands::Login) => rt.block_on(self.login()),
             Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
+            #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self
                 .run_sim(args, rt, CancellationToken::new())?
                 .join()

@@ -6,7 +6,6 @@ use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
 use elodin_types::Metadata;
 use miette::IntoDiagnostic;
-use s10::python_command;
 use tonic::transport::ClientTlsConfig;
 use tonic::{service::interceptor::InterceptedService, transport};
 
@@ -22,6 +21,7 @@ pub struct Args {
 #[derive(Subcommand, Clone)]
 enum Commands {
     /// Create and submit a Monte Carlo run
+    #[cfg(not(target_os = "windows"))]
     Run(RunArgs),
     /// Download the results of a Monte Carlo sample
     DownloadResults(DownloadArgs),
@@ -81,11 +81,13 @@ impl Cli {
 
     pub async fn monte_carlo(&self, args: &Args) -> miette::Result<()> {
         match &args.command {
+            #[cfg(not(target_os = "windows"))]
             Commands::Run(run_args) => self.monte_carlo_run(run_args).await,
             Commands::DownloadResults(download_args) => self.download_results(download_args).await,
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     async fn monte_carlo_run(&self, args: &RunArgs) -> miette::Result<()> {
         let RunArgs {
             name,
@@ -180,13 +182,14 @@ impl Cli {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn prepare_artifacts(file: PathBuf) -> miette::Result<std::fs::File> {
     let tmp_dir = tempfile::tempdir().into_diagnostic()?;
     if !file.is_file() {
         miette::bail!("Not a file: {}", file.display());
     }
 
-    let status = python_command()?
+    let status = s10::python_command()?
         .arg(&file)
         .arg("build")
         .arg("--dir")
