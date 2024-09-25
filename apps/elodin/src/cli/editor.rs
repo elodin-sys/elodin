@@ -69,6 +69,7 @@ impl std::str::FromStr for Simulator {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn run_recipe(path: PathBuf, cancel_token: CancellationToken) -> miette::Result<()> {
     let path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -107,6 +108,7 @@ async fn run_recipe(path: PathBuf, cancel_token: CancellationToken) -> miette::R
 }
 
 impl Cli {
+    #[cfg(not(target_os = "windows"))]
     pub fn run_sim(
         &self,
         args: &Args,
@@ -131,6 +133,24 @@ impl Cli {
             })
         });
         Ok(thread)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn run_sim(
+        &self,
+        _args: &Args,
+        rt: Runtime,
+        cancel_token: CancellationToken,
+    ) -> miette::Result<JoinHandle<miette::Result<()>>> {
+        Ok(std::thread::spawn(move || {
+            rt.block_on(async move {
+                tokio::spawn(async move {
+                    let _drop = cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
+                    tokio::signal::ctrl_c().await
+                });
+                Ok(())
+            })
+        }))
     }
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {

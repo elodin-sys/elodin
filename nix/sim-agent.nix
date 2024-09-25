@@ -37,7 +37,9 @@ let
         python3
         protobuf
         openssl
-        openblasCompat
+        gfortran
+        gfortran.cc.lib
+        cmake
       ]
       ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
     XLA_EXTENSION_DIR = "${xla_ext}";

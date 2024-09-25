@@ -46,7 +46,13 @@ ring = "0.17"
 # machine id
 machine-uid = "0.5.1"
 
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 s10.path = "../../libs/s10"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+s10.path = "../../libs/s10"
+s10.default-features = false
+
 
 [build-dependencies]
 anyhow = "1.0.79"
