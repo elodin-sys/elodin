@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{error::Error, sim::SimRecipe, watch::watch};
+use crate::{error::Error, watch::watch};
 
 pub const DEFAULT_WATCH_TIMEOUT: Duration = Duration::from_millis(200);
 
@@ -33,7 +33,8 @@ pub enum Recipe {
     Cargo(CargoRecipe),
     Process(ProcessRecipe),
     Group(GroupRecipe),
-    Sim(SimRecipe),
+    #[cfg(feature = "nox-ecs")]
+    Sim(crate::sim::SimRecipe),
 }
 
 impl Recipe {
@@ -47,6 +48,7 @@ impl Recipe {
             Recipe::Cargo(c) => c.run(name, release, cancel_token).boxed(),
             Recipe::Process(p) => p.run(name, cancel_token).boxed(),
             Recipe::Group(g) => g.run(release, cancel_token).boxed(),
+            #[cfg(feature = "nox-ecs")]
             Recipe::Sim(s) => s.run(cancel_token).boxed(),
         }
     }
@@ -61,6 +63,7 @@ impl Recipe {
             Recipe::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
             Recipe::Process(p) => p.watch(name, cancel_token).boxed(),
             Recipe::Group(g) => g.watch(release, cancel_token).boxed(),
+            #[cfg(feature = "nox-ecs")]
             Recipe::Sim(s) => s.watch(cancel_token).boxed(),
         }
     }

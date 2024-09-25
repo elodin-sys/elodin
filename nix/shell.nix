@@ -29,10 +29,10 @@
           fontconfig
           maturin
           cmake
-          openblasCompat
-          lapack
           openssl
           libclang
+          gfortran
+          gfortran.cc.lib
         ];
       LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
       doCheck = false;
