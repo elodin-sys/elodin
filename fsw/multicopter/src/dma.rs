@@ -2,17 +2,14 @@ use crate::arena::*;
 use crate::peripheral::*;
 
 pub struct DmaBuf<'a, const N: usize, const CHANNEL: u8, H: HalDmaRegExt> {
-    pub dma_ch: &'a mut DmaCh<'a, CHANNEL, H>,
+    pub dma_ch: DmaCh<'a, CHANNEL, H>,
     pub shared_buf: &'a mut [u16; N],
     pub staging_buf: &'a mut [u16; N],
     pub transfer_in_progress: bool,
 }
 
 impl<'a, const N: usize, const CHANNEL: u8, H: HalDmaRegExt> DmaBuf<'a, N, CHANNEL, H> {
-    pub fn new<B: AsMut<[u8]>>(
-        dma_ch: &'a mut DmaCh<'a, CHANNEL, H>,
-        alloc: &mut DmaAlloc<B>,
-    ) -> Self {
+    pub fn new<B: AsMut<[u8]>>(dma_ch: DmaCh<'a, CHANNEL, H>, alloc: &mut DmaAlloc<B>) -> Self {
         let shared_buf: &'a mut [u16; N] = alloc.leak([0; N]);
         let staging_buf: &'a mut [u16; N] = alloc.leak([0; N]);
         Self {
@@ -21,9 +18,5 @@ impl<'a, const N: usize, const CHANNEL: u8, H: HalDmaRegExt> DmaBuf<'a, N, CHANN
             staging_buf,
             transfer_in_progress: false,
         }
-    }
-
-    pub fn write(&mut self, buf: &[u16; N]) {
-        self.staging_buf.copy_from_slice(buf);
     }
 }

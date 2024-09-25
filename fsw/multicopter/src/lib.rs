@@ -9,6 +9,7 @@ use panic_probe as _;
 
 pub mod arena;
 pub mod dma;
+pub mod dshot;
 pub mod peripheral;
 pub mod pin;
 
