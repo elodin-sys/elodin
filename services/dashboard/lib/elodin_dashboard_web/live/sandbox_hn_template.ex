@@ -12,7 +12,7 @@ defmodule ElodinDashboardWeb.SandboxHNTemplateLive do
   def mount(%{"template" => template}, _, socket) do
     Logger.info(
       "sandbox hn demo page accessed",
-      user: "anonymous",
+      user_email: "anonymous",
       sandbox_template: template
     )
 
@@ -22,7 +22,7 @@ defmodule ElodinDashboardWeb.SandboxHNTemplateLive do
 
         Logger.info(
           "sandbox hn demo page - create_sandbox success",
-          user: "anonymous",
+          user_email: "anonymous",
           sandbox_id: id
         )
 
@@ -34,7 +34,7 @@ defmodule ElodinDashboardWeb.SandboxHNTemplateLive do
       err ->
         Logger.error(
           "sandbox hn demo page - create_sandbox error",
-          user: "anonymous",
+          user_email: "anonymous",
           error: inspect(err)
         )
 

@@ -20,7 +20,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 use stripe::{Customer, CustomerId, Event, EventObject, EventType, PriceId};
-use tracing::warn;
 use uuid::Uuid;
 
 use super::{Api, AxumContext, CurrentUser};
@@ -70,7 +69,10 @@ pub async fn stripe_webhook(
             let Some(billing_account_id) =
                 sub.metadata.get("billing_account_id").map(|s| s.as_str())
             else {
-                warn!("no billing account id in subscription metadata");
+                tracing::warn!(
+                    subscription_id = ?sub.id,
+                    "no billing_account_id in subscription metadata",
+                );
                 return Ok(());
             };
             let billing_account_id = Uuid::parse_str(billing_account_id)?;
@@ -100,26 +102,37 @@ pub async fn stripe_webhook(
                             id if id
                                 == context.stripe_plans_config.commercial.monte_carlo_price =>
                             {
-                                warn!("found commercial monte carlo price in seat subscription");
+                                tracing::warn!(
+                                    ?billing_account_id,
+                                    price_id = id,
+                                    "found commercial monte carlo price in seat subscription"
+                                );
                                 continue;
                             }
                             id if id
                                 == context.stripe_plans_config.non_commercial.monte_carlo_price =>
                             {
-                                warn!(
+                                tracing::warn!(
+                                    ?billing_account_id,
+                                    price_id = id,
                                     "found non_commercial monte carlo price in seat subscription"
                                 );
                                 continue;
                             }
                             price_id => {
-                                warn!(?price_id, "unknown price id in seat subscription");
+                                tracing::warn!(
+                                    ?billing_account_id,
+                                    ?price_id,
+                                    "unknown price id in seat subscription"
+                                );
                                 continue;
                             }
                         };
                         if license_type == LicenseType::None {
                             license_type = new_license_type;
                         } else if license_type != new_license_type {
-                            warn!(
+                            tracing::warn!(
+                                ?billing_account_id,
                                 ?license_type,
                                 ?new_license_type,
                                 "multiple seat types in one subscription is unsupported"
@@ -182,7 +195,7 @@ pub async fn stripe_webhook(
                     Ok(())
                 }
                 sub_type => {
-                    warn!(?sub_type, "unknown subscription type");
+                    tracing::warn!(?billing_account_id, ?sub_type, "unknown subscription type");
                     Ok(())
                 }
             };
@@ -260,6 +273,8 @@ impl Api {
         user_id: Uuid,
         txn: &impl ConnectionTrait,
     ) -> Result<StripeSubscriptionStatus, Error> {
+        tracing::debug!(%user_id, %billing_account_id, "get_subscription_status");
+
         let Some(billing_account) = billing_account::Entity::find_by_id(billing_account_id)
             .filter(billing_account::Column::OwnerUserId.eq(user_id))
             .one(txn)
@@ -358,7 +373,10 @@ pub(crate) async fn sync_monte_carlo_billing(
 ) -> Result<(), Error> {
     let stripe_base_url = "https://api.stripe.com/v1";
 
-    tracing::debug!("checking latest completed monte-carlo runs not saved in the stripe");
+    tracing::info!(
+        atc_job = "sync_monte_carlo_billing",
+        "sync_monte_carlo_billing - start"
+    );
 
     // NOTE: Query monte-carlo runs with an attached total runtime and billing information
     let mc_run_billings = atc_entity::MonteCarloRun::find()
@@ -401,14 +419,21 @@ pub(crate) async fn sync_monte_carlo_billing(
         .all(db_connection)
         .await?;
 
-    let amount_of_mc_runs_to_bill = mc_run_billings.len();
-    tracing::debug!(%amount_of_mc_runs_to_bill, "got information about latest completed monte-carlo runs");
+    tracing::debug!(
+        atc_job = "sync_monte_carlo_billing",
+        amount_of_mc_runs_to_bill = %mc_run_billings.len(),
+        "sync_monte_carlo_billing - received latest completed monte-carlo runs"
+    );
 
     let mut billed_mc_run_ids = vec![];
 
     for mc_run_billing in mc_run_billings {
         let Some(usage_subscription_id) = mc_run_billing.usage_subscription_id else {
-            tracing::error!(%mc_run_billing.user_id, "user is missing usage_subscription_id, skipping");
+            tracing::error!(
+                atc_job = "sync_monte_carlo_billing",
+                user_id = %mc_run_billing.user_id,
+                "sync_monte_carlo_billing - user is missing usage_subscription_id"
+            );
             continue;
         };
 
@@ -440,12 +465,18 @@ pub(crate) async fn sync_monte_carlo_billing(
             .json::<StripeMeterSimple>()
             .await?;
 
-        tracing::debug!(%stripe_subscription.id, %stripe_meter.event_name, %mc_run_id_str, "received subscription information from stripe");
+        tracing::debug!(
+            atc_job = "sync_monte_carlo_billing",
+            subscription_id = %stripe_subscription.id,
+            stripe_meter_event_name = %stripe_meter.event_name,
+            mc_run_id = %mc_run_id_str,
+            "sync_monte_carlo_billing - received subscription information from stripe"
+        );
 
         let meter_event_url = format!("{stripe_base_url}/billing/meter_events");
 
         let mut meter_event_params = HashMap::new();
-        meter_event_params.insert("event_name", stripe_meter.event_name);
+        meter_event_params.insert("event_name", stripe_meter.event_name.clone());
         meter_event_params.insert("payload[value]", runtime_min_str);
         meter_event_params.insert("payload[stripe_customer_id]", mc_run_billing.customer_id);
         meter_event_params.insert(
@@ -463,13 +494,30 @@ pub(crate) async fn sync_monte_carlo_billing(
             .send()
             .await?;
 
-        let create_meter_event_response_status = meter_event_res.status();
-        tracing::debug!(%create_meter_event_response_status, "received response from stripe");
+        let meter_event_res_status = meter_event_res.status();
 
         if !meter_event_res.status().is_success() {
             let create_meter_event_response = meter_event_res.text().await?;
-            tracing::error!(%create_meter_event_response, "something went wrong during the creation of a meter_event");
+
+            tracing::error!(
+                atc_job = "sync_monte_carlo_billing",
+                subscription_id = %stripe_subscription.id,
+                stripe_meter_event_name = %stripe_meter.event_name,
+                mc_run_id = %mc_run_id_str,
+                create_meter_event_response_status = %meter_event_res_status,
+                error = %create_meter_event_response,
+                "sync_monte_carlo_billing - create meter_event - error"
+            );
         } else {
+            tracing::debug!(
+                atc_job = "sync_monte_carlo_billing",
+                subscription_id = %stripe_subscription.id,
+                stripe_meter_event_name = %stripe_meter.event_name,
+                mc_run_id = %mc_run_id_str,
+                create_meter_event_response_status = %meter_event_res_status,
+                "sync_monte_carlo_billing - create meter_event - success"
+            );
+
             billed_mc_run_ids.push(mc_run_billing.id);
         }
     }
@@ -477,7 +525,11 @@ pub(crate) async fn sync_monte_carlo_billing(
     let amount_of_billed_mc_runs = billed_mc_run_ids.len();
 
     if amount_of_billed_mc_runs > 0 {
-        tracing::debug!(%amount_of_billed_mc_runs, "updating billed monte-carlo runs in the database");
+        tracing::debug!(
+            atc_job = "sync_monte_carlo_billing",
+            %amount_of_billed_mc_runs,
+            "sync_monte_carlo_billing - updating billed monte-carlo runs in the database"
+        );
 
         let update_query = atc_entity::MonteCarloRun::update_many()
             .col_expr(
@@ -488,7 +540,12 @@ pub(crate) async fn sync_monte_carlo_billing(
             .exec(db_connection)
             .await?;
 
-        tracing::debug!(%update_query.rows_affected, "finished updating `monte_carlo_runs` table");
+        tracing::debug!(
+            atc_job = "sync_monte_carlo_billing",
+            %amount_of_billed_mc_runs,
+            amount_of_billed_mc_runs_affected = %update_query.rows_affected,
+            "sync_monte_carlo_billing - finished updating `monte_carlo_runs` table"
+        );
     }
 
     Ok(())

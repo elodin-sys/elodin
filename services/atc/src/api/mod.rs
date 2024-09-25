@@ -22,7 +22,7 @@ use tonic::service::Routes;
 use tonic::{Response, Status};
 use tower::{make::Shared, steer::Steer};
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
-use tracing::{info, Span};
+use tracing::{Instrument, Span};
 
 use crate::config::ApiConfig;
 
@@ -104,7 +104,7 @@ impl Api {
 
     pub async fn run(self) -> anyhow::Result<()> {
         let address = self.address;
-        info!(api.addr = ?address, "api listening");
+        tracing::info!(api.addr = ?address, "api listening");
 
         let rest = axum::Router::new()
             .layer(

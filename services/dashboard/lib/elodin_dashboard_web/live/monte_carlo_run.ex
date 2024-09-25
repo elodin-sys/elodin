@@ -15,7 +15,7 @@ defmodule ElodinDashboardWeb.MonteCarloRunLive do
       "monte-carlo run page accessed",
       montecarlo_project: project,
       montecarlo_run_id: run_id,
-      user: socket.assigns[:current_user]["email"]
+      user_email: socket.assigns[:current_user]["email"]
     )
 
     case UUID.info(run_id) do

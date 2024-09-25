@@ -12,7 +12,7 @@ defmodule ElodinDashboardWeb.EditorLive do
     token = socket.assigns[:current_user]["token"]
 
     Logger.info("editor page accessed",
-      user: socket.assigns[:current_user]["email"],
+      user_email: socket.assigns[:current_user]["email"],
       sandbox_id: id
     )
 

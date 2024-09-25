@@ -18,7 +18,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
       Logger.info(
         "sandbox picker page accessed",
-        user: current_user["email"],
+        user_email: current_user["email"],
         subscription_end: subscription_status.subscription_end,
         trial_start: subscription_status.trial_start,
         trial_end: subscription_status.trial_end,
@@ -27,7 +27,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
     else
       Logger.error(
         "sandbox picker page accessed - subscription_status is missing",
-        user: current_user["email"]
+        user_email: current_user["email"]
       )
     end
 
@@ -42,7 +42,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
         Logger.info(
           "sandbox picker page - list_sandboxes success",
-          user: current_user["email"],
+          user_email: current_user["email"],
           sandbox_template: params["template"]
         )
 
@@ -57,7 +57,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       {:error, err} ->
         Logger.error(
           "sandbox picker page - list_sandboxes error",
-          user: current_user["email"],
+          user_email: current_user["email"],
           sandbox_template: params["template"],
           error: inspect(err)
         )
@@ -87,7 +87,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
         Logger.info(
           "sandbox picker page - create_sandbox success",
-          user: socket.assigns[:current_user]["email"],
+          user_email: socket.assigns[:current_user]["email"],
           sandbox_name: name,
           sandbox_id: id,
           sandbox_template: template
@@ -101,7 +101,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       {:error, err} ->
         Logger.error(
           "sandbox picker page - create_sandbox error",
-          user: socket.assigns[:current_user]["email"],
+          user_email: socket.assigns[:current_user]["email"],
           sandbox_name: name,
           sandbox_template: template,
           error: inspect(err)
@@ -118,7 +118,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       {:ok, sandbox} ->
         Logger.info(
           "sandbox picker page - delete_sandbox success",
-          user: socket.assigns[:current_user]["email"],
+          user_email: socket.assigns[:current_user]["email"],
           sandbox_id: id,
           sandbox_name: sandbox.name
         )
@@ -131,7 +131,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       {:error, err} ->
         Logger.error(
           "sandbox picker page - delete_sandbox error",
-          user: socket.assigns[:current_user]["email"],
+          user_email: socket.assigns[:current_user]["email"],
           sandbox_id: id,
           error: inspect(err)
         )

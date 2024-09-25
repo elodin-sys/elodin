@@ -24,7 +24,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
     Logger.info(
       "onboarding page accessed",
-      user: current_user["email"],
+      user_email: current_user["email"],
       onboarding_page: page_num,
       subscription_type: sub_type,
       device_type: device_type,
@@ -47,7 +47,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
           Logger.info(
             "onboarding page - create_billing_account success",
-            user: current_user["email"],
+            user_email: current_user["email"],
             onboarding_page: page_num,
             subscription_type: sub_type,
             billing_account_id: billing_account_id
@@ -58,7 +58,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
         err ->
           Logger.error(
             "onboarding page - create_billing_account error",
-            user: current_user["email"],
+            user_email: current_user["email"],
             onboarding_page: page_num,
             subscription_type: sub_type,
             error: inspect(err)
@@ -124,7 +124,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
     Logger.info(
       "user_onboarding next_page clicked",
-      user: socket.assigns[:current_user]["email"],
+      user_email: socket.assigns[:current_user]["email"],
       onboarding_page: page,
       current_url: socket.assigns[:uri],
       subscription_type: socket.assigns[:sub_type],
@@ -161,7 +161,7 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
     Logger.info(
       "user_onboarding poll answered",
-      user: socket.assigns[:current_user]["email"],
+      user_email: socket.assigns[:current_user]["email"],
       current_url: socket.assigns[:uri],
       subscription_type: socket.assigns[:sub_type],
       is_desktop: socket.assigns[:is_desktop]

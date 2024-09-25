@@ -26,7 +26,7 @@ defmodule ElodinDashboardWeb.UserAuth do
   def get_user_by_token(token) do
     case ElodinDashboard.Atc.current_user(struct(Elodin.Types.Api.CurrentUserReq), token) do
       {:ok, user} ->
-        Logger.info("get_user_by_token success", user: user.email)
+        Logger.info("get_user_by_token success", user_email: user.email)
 
         {:ok,
          %{
