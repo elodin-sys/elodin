@@ -1,4 +1,0 @@
-[toolchain]
-channel = "1.80.1"
-targets = [ "thumbv7em-none-eabihf" ]
-profile = "default"
