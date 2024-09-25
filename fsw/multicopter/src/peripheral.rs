@@ -2,7 +2,6 @@ use core::borrow::{Borrow, BorrowMut};
 
 use hal::{clocks::Clocks, dma, pac, timer};
 
-use crate::arena::DmaAlloc;
 use crate::dma::DmaBuf;
 
 const TIMX_CCR1_OFFSET: u8 = 0x34;
@@ -299,13 +298,6 @@ where
             Self::dma_channel(),
             dma::DmaInterrupt::TransferComplete,
         );
-    }
-
-    pub fn buf<const N: usize, B: AsMut<[u8]>>(
-        self,
-        alloc: &mut DmaAlloc<B>,
-    ) -> DmaBuf<'a, N, CHANNEL, H> {
-        DmaBuf::new(self, alloc)
     }
 
     pub fn transfer_complete(&mut self) -> bool {
