@@ -15,6 +15,8 @@ impl api::Api {
         _req: ListMonteCarloRunsReq,
         api::CurrentUser { user, .. }: api::CurrentUser,
     ) -> Result<ListMonteCarloRunsResp, error::Error> {
+        tracing::debug!("list monte-carlo runs");
+
         let mc_runs = atc_entity::MonteCarloRun::find()
             .filter(mc_run::Column::UserId.eq(user.id))
             .all(&self.db)
@@ -22,6 +24,8 @@ impl api::Api {
             .into_iter()
             .map(MonteCarloRun::from)
             .collect::<Vec<_>>();
+
+        tracing::debug!(mc_run_count = ?mc_runs.len(), "list monte-carlo runs - done");
 
         Ok(ListMonteCarloRunsResp {
             monte_carlo_runs: mc_runs,
@@ -34,7 +38,7 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
         txn: &sea_orm::DatabaseTransaction,
     ) -> Result<CreateMonteCarloRunResp, error::Error> {
-        tracing::debug!(%user.id, "create monte carlo run");
+        tracing::debug!("create monte carlo run");
 
         let id = Uuid::now_v7();
         let upload_url = self.sim_storage_client.upload_artifacts_url(id).await?;
@@ -78,7 +82,7 @@ impl api::Api {
             .insert(txn)
             .await?;
         }
-        tracing::debug!(%user.id, id = %mc_run.id, "created monte carlo run");
+        tracing::debug!(mc_run_id = ?id, "create monte carlo run - done");
 
         Ok(CreateMonteCarloRunResp {
             id: mc_run.id.as_bytes().to_vec(),
@@ -94,7 +98,7 @@ impl api::Api {
     ) -> Result<StartMonteCarloRunResp, error::Error> {
         let id = req.id()?;
         let start_time = chrono::Utc::now();
-        tracing::debug!(%user.id, %id, "start monte carlo run");
+        tracing::debug!(mc_run_id = ?id, "start monte carlo run");
 
         let mc_run = atc_entity::MonteCarloRun::find_by_id(id)
             .filter(mc_run::Column::UserId.eq(user.id))
@@ -112,12 +116,12 @@ impl api::Api {
         let mc_run = mc_run.update(txn).await?;
 
         self.spawn_batches(&mc_run).await?;
-        tracing::debug!(%user.id, %id, "started monte carlo run");
+        tracing::debug!(mc_run_id = ?id, "start monte carlo run - done");
         Ok(StartMonteCarloRunResp {})
     }
 
     async fn spawn_batches(&self, run: &mc_run::Model) -> Result<(), error::Error> {
-        tracing::debug!(%run.id, %run.name, "spawning batches");
+        tracing::debug!(mc_run_id = ?run.id, mc_run_name = ?run.name, "spawn monte carlo run batches");
         let samples = run.samples as usize;
         let batch_count = samples.div_ceil(BATCH_SIZE);
         let batches = (0..batch_count)
@@ -138,6 +142,8 @@ impl api::Api {
     ) -> Result<MonteCarloRun, error::Error> {
         let id = req.id()?;
 
+        tracing::debug!(mc_run_id = ?id, "get monte-carlo run");
+
         let mc_run = atc_entity::MonteCarloRun::find_by_id(id)
             .filter(mc_run::Column::UserId.eq(user.id))
             .one(&self.db)
@@ -148,7 +154,13 @@ impl api::Api {
             .order_by_asc(batches::Column::BatchNumber)
             .all(&self.db)
             .await?;
-        let batches = batches.into_iter().map(|b| b.into()).collect();
+        let batches = batches
+            .into_iter()
+            .map(|b| b.into())
+            .collect::<Vec<MonteCarloBatch>>();
+
+        tracing::debug!(mc_run_id = ?id, batch_count = ?batches.len(), "get monte-carlo run - done");
+
         Ok(MonteCarloRun {
             batches,
             ..mc_run.into()
@@ -161,6 +173,9 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
     ) -> Result<<super::Api as api_server::Api>::MonteCarloRunEventsStream, error::Error> {
         let id = req.id()?;
+
+        tracing::debug!(mc_run_id = ?id, "get monte-carlo run events");
+
         let _ = atc_entity::MonteCarloRun::find_by_id(id)
             .filter(mc_run::Column::UserId.eq(user.id))
             .one(&self.db)
@@ -187,6 +202,9 @@ impl api::Api {
         api::CurrentUser { user, .. }: api::CurrentUser,
     ) -> Result<<super::Api as api_server::Api>::MonteCarloBatchEventsStream, error::Error> {
         let id = req.id()?;
+
+        tracing::debug!(mc_run_id = ?id, "get monte-carlo batch events");
+
         let _ = atc_entity::MonteCarloRun::find_by_id(id)
             .filter(mc_run::Column::UserId.eq(user.id))
             .one(&self.db)
@@ -210,15 +228,18 @@ impl api::Api {
     pub async fn get_monte_carlo_results(
         &self,
         req: GetMonteCarloResultsReq,
-        api::CurrentUser { user, .. }: api::CurrentUser,
+        api::CurrentUser { .. }: api::CurrentUser,
     ) -> Result<GetMonteCarloResultsResp, error::Error> {
-        tracing::debug!(%user.id, "get sample results");
+        tracing::debug!("get monte-carlo sample results");
         let GetMonteCarloResultsReq { id, batch_number } = req;
         let id = Uuid::from_slice(&id).map_err(|_| error::Error::InvalidRequest)?;
         let download_url = self
             .sim_storage_client
             .download_results_url(id, batch_number)
             .await?;
+
+        tracing::debug!(%download_url, "get monte-carlo sample results - done");
+
         Ok(GetMonteCarloResultsResp { download_url })
     }
 }
@@ -238,7 +259,16 @@ pub(crate) async fn get_monte_carlo_runtime_for_current_month(
     let billing_period_start =
         billing_period_end.and_then(|dt| dt.checked_sub_months(Months::new(1)));
 
-    tracing::debug!(%user_id, "requesting monte-carlo runtime, period: {billing_period_start:?}-{billing_period_end:?}");
+    let tracing_debug_span = tracing::debug_span!(
+        "get_monte_carlo_runtime_for_current_month",
+        %user_id,
+        ?billing_period_start,
+        ?billing_period_end,
+    );
+
+    tracing_debug_span.in_scope(|| {
+        tracing::debug!("get monte-carlo runtime for current period - start");
+    });
 
     let mc_run_billings = atc_entity::MonteCarloRun::find()
         .select_only()
@@ -265,7 +295,9 @@ pub(crate) async fn get_monte_carlo_runtime_for_current_month(
         .map(|mc_run| (mc_run.runtime_sum as f64 / 60.0).ceil() as u32)
         .sum();
 
-    tracing::debug!(%minutes_used, "current billing period");
+    tracing_debug_span.in_scope(|| {
+        tracing::debug!(%minutes_used, "get monte-carlo runtime for current period - done");
+    });
 
     Ok(minutes_used)
 }

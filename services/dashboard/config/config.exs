@@ -61,7 +61,7 @@ config :logger, :console,
   metadata: [
     :request_id,
     :line,
-    :user,
+    :user_email,
     :error,
     :sandbox_id,
     :sandbox_name,

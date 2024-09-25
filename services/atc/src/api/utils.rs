@@ -9,7 +9,6 @@ use jsonwebtoken::{
 use reqwest::Client;
 use std::str::FromStr;
 use tonic::{Request, Response, Status};
-use tracing::warn;
 
 impl super::Api {
     pub async fn authed_route<Req, Resp, RespFuture>(
@@ -87,7 +86,15 @@ macro_rules! current_user_route_txn {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| Error::Unauthorized)?;
-                let res = $handler($self, req, CurrentUser { user, claims }, &txn).await;
+                let tracing_debug_span = tracing::debug_span!(
+                    "current_user_route_txn",
+                    user_id = ?user.id,
+                    user_email = ?user.email
+                );
+
+                let res = $handler($self, req, CurrentUser { user, claims }, &txn)
+                .instrument(tracing_debug_span)
+                .await;
                 if res.is_ok() {
                     txn.commit().await?;
                 } else {
@@ -110,7 +117,15 @@ macro_rules! current_user_route {
                     .one(&$self.db)
                     .await?
                     .ok_or_else(|| Error::Unauthorized)?;
-                $handler($self, req, CurrentUser { user, claims }).await
+                let tracing_debug_span = tracing::debug_span!(
+                    "current_user_route",
+                    user_id = ?user.id,
+                    user_email = ?user.email
+                );
+
+                $handler($self, req, CurrentUser { user, claims })
+                    .instrument(tracing_debug_span)
+                    .await
             })
             .await
     };
@@ -127,9 +142,21 @@ macro_rules! optional_current_user_route {
                         .one(&$self.db)
                         .await?
                         .ok_or_else(|| Error::Unauthorized)?;
-                    $handler($self, req, Some(CurrentUser { user, claims })).await
+
+                    let tracing_debug_span = tracing::debug_span!(
+                        "optional_current_user_route",
+                        user_id = ?user.id,
+                        user_email = ?user.email
+                    );
+
+                    $handler($self, req, Some(CurrentUser { user, claims })).instrument(tracing_debug_span).await
                 } else {
-                    $handler($self, req, None).await
+                    let tracing_debug_span = tracing::debug_span!(
+                        "optional_current_user_route",
+                        user_id = "anonymous",
+                        user_email = "anonymous"
+                    );
+                    $handler($self, req, None).instrument(tracing_debug_span).await
                 }
             })
             .await
@@ -142,17 +169,31 @@ macro_rules! optional_current_user_route_txn {
         $self
             .authed_route($req, move |req, claims| async move {
                 let txn = $self.db.begin().await?;
-                let user = if let Some(claims) = claims {
+                let (user, tracing_span) = if let Some(claims) = claims {
                     let user = atc_entity::User::find()
                         .filter(atc_entity::user::Column::Auth0Id.eq(&claims.sub))
                         .one(&$self.db)
                         .await?
                         .ok_or_else(|| Error::Unauthorized)?;
-                    Some(CurrentUser { user, claims })
+
+                    let tracing_debug_span = tracing::debug_span!(
+                        "optional_current_user_route_txn",
+                        user_id = ?user.id,
+                        user_email = ?user.email
+                    );
+
+                    (Some(CurrentUser { user, claims }), tracing_debug_span)
                 } else {
-                    None
+
+                    let tracing_debug_span = tracing::debug_span!(
+                        "optional_current_user_route_txn",
+                        user_id = "anonymous",
+                        user_email = "anonymous"
+                    );
+
+                    (None, tracing_debug_span)
                 };
-                let res = $handler($self, req, user, &txn).await;
+                let res = $handler($self, req, user, &txn).instrument(tracing_span).await;
                 if res.is_ok() {
                     txn.commit().await?;
                 } else {
@@ -223,14 +264,14 @@ pub fn validate_auth_header(
             j.common
                 .key_algorithm
                 .ok_or_else(|| {
-                    warn!("missing key algo field in jwks");
+                    tracing::warn!("missing key algo field in jwks");
                     Error::Unauthorized
                 })?
                 .to_string()
                 .as_str(),
         )
         .map_err(|_| {
-            warn!("invalid jwks algo");
+            tracing::warn!("invalid jwks algo");
             Error::Unauthorized
         })?,
     );

@@ -15,7 +15,6 @@ use kube::{
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, Unchanged};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, trace, warn};
 use uuid::Uuid;
 
 use crate::{config::OrcaConfig, error::Error, sandbox::update_sandbox_code};
@@ -64,7 +63,7 @@ impl Orca {
             };
             let msg = match msg {
                 Err(err) => {
-                    error!(?err, "error event");
+                    tracing::error!(?err, "error event");
                     continue;
                 }
                 Ok(msg) => msg,
@@ -72,26 +71,26 @@ impl Orca {
             match msg {
                 OrcaMsg::K8sEvent(Event::Apply(pod)) => {
                     if let Err(err) = self.handle_pod_change(&pod).await {
-                        warn!(?err, "error handling pod update");
+                        tracing::warn!(?err, "error handling pod update");
                     }
                 }
                 OrcaMsg::K8sEvent(Event::Delete(pod)) => {
                     if let Err(err) = self.handle_pod_deleted(&pod).await {
-                        warn!(?err, "error handling pod deleted");
+                        tracing::warn!(?err, "error handling pod deleted");
                     }
                 }
                 OrcaMsg::K8sEvent(Event::InitApply(_) | Event::Init | Event::InitDone) => {
                     // ingore init events for now
                 }
                 OrcaMsg::DbEvent(DbEvent::Insert(vm)) => {
-                    trace!(?vm, "vm insert event");
+                    tracing::trace!(?vm, "vm insert event");
                     if let Err(err) = self.spawn_vm(vm.id).await {
-                        error!(?err, "error spawning vm");
+                        tracing::error!(?vm, ?err, "error spawning vm");
                     }
                 }
                 OrcaMsg::DbEvent(DbEvent::Delete(vm)) => {
                     if let Err(err) = self.handle_vm_deleted(&vm).await {
-                        warn!(?err, "error handling vm deleted");
+                        tracing::warn!(?vm, ?err, "error handling vm deleted");
                     }
                 }
                 OrcaMsg::DbEvent(DbEvent::Update(_vm)) => {}
@@ -171,7 +170,7 @@ impl Orca {
             .one(&self.db)
             .await?
         else {
-            warn!(?vm, "vm has invalid sandbox id");
+            tracing::warn!(?sandbox_id, ?vm, "vm has invalid sandbox id");
             return Ok(());
         };
         let new_sandbox_state = match vm.status {
@@ -191,7 +190,11 @@ impl Orca {
             (sandbox::Status::Running, sandbox::Status::Running) => {}
             (_, sandbox::Status::Running) => {
                 let Some(ref pod_ip) = vm.pod_ip else {
-                    warn!("supposed to be unreachable - vm with out pod ip running");
+                    tracing::warn!(
+                        ?sandbox_id,
+                        ?vm,
+                        "supposed to be unreachable - vm with out pod ip running"
+                    );
                     return Err(Error::VMBootFailed("pod missing ip".to_string()));
                 };
                 update_sandbox_code(pod_ip, sandbox.code).await?;

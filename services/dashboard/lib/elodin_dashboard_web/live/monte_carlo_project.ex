@@ -11,7 +11,7 @@ defmodule ElodinDashboardWeb.MonteCarloProjectLive do
 
     Logger.info("monte-carlo project page accessed",
       montecarlo_project: project,
-      user: socket.assigns[:current_user]["email"]
+      user_email: socket.assigns[:current_user]["email"]
     )
 
     monte_carlo_runs =
@@ -34,7 +34,7 @@ defmodule ElodinDashboardWeb.MonteCarloProjectLive do
           Logger.error(
             "monte-carlo project page - list_monte_carlo_runs - error",
             montecarlo_project: project,
-            user: socket.assigns[:current_user]["email"],
+            user_email: socket.assigns[:current_user]["email"],
             error: inspect(err)
           )
 

@@ -9,7 +9,7 @@ use sea_orm::Database;
 use stripe::EventFilter;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn, Instrument};
+use tracing::Instrument;
 
 use crate::{orca::Orca, sandbox::garbage_collect};
 
@@ -26,13 +26,20 @@ async fn main() -> anyhow::Result<()> {
 
     match config.env {
         ElodinEnvironment::Local | ElodinEnvironment::DevBranch => {
-            tracing_subscriber::fmt().init();
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .with_env_filter("atc=debug")
+                .init();
         }
         ElodinEnvironment::Dev | ElodinEnvironment::Prod => {
-            tracing_subscriber::fmt().json().init();
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .with_env_filter("atc=debug")
+                .json()
+                .init();
         }
     };
-    info!(?config, "config");
+    tracing::info!(?config, "config");
 
     // this cancellation token is hooked into all of the spawned tasks
     // any of them can trigger a full shutdown via a dead-man's switch
@@ -42,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         // initiate graceful shutdown on sigterm (but not sigint or ctrl+c)
         let sigterm = SignalKind::terminate();
         signal(sigterm).unwrap().recv().await;
-        warn!("received SIGTERM, initiating graceful shutdown");
+        tracing::warn!("received SIGTERM, initiating graceful shutdown");
         signal_cancel_token.cancel();
     });
 
@@ -149,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
 
     // wait for cancellation
     cancel_token.cancelled().await;
-    info!("waiting for services to terminate gracefully");
+    tracing::info!("waiting for services to terminate gracefully");
     // cleanup webhook
     if let Some(stripe_webhook_id) = stripe_webhook_id {
         stripe::WebhookEndpoint::delete(

@@ -18,7 +18,16 @@ impl Api {
     ) -> Result<BillingAccount, Error> {
         let billing_account_id = Uuid::now_v7();
 
-        tracing::debug!(%billing_account_id, %user.id, %user.email, "create billing account");
+        let tracing_info_span = tracing::info_span!(
+            "create_billing_account",
+            %billing_account_id,
+            user_id = %user.id,
+            user_email = %user.email
+        );
+
+        tracing_info_span.in_scope(|| {
+            tracing::info!("create billing account - start");
+        });
 
         let existing_accounts = billing_account::Entity::find()
             .filter(billing_account::Column::OwnerUserId.eq(user.id))
@@ -120,10 +129,16 @@ impl Api {
             .await?;
         }
 
+        let customer_id = customer.id.to_string();
+
+        tracing_info_span.in_scope(|| {
+            tracing::info!(customer_id = %customer_id, "create billing account - done");
+        });
+
         Ok(BillingAccount {
             id: billing_account_id.as_bytes().to_vec(),
             name: req.name,
-            customer_id: customer.id.to_string(),
+            customer_id,
         })
     }
 }

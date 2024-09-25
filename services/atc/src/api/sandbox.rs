@@ -29,7 +29,6 @@ use tokio_util::{
     bytes::Bytes,
     codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
-use tracing::trace;
 
 impl Api {
     pub async fn get_sandbox(
@@ -39,11 +38,15 @@ impl Api {
         txn: &DatabaseTransaction,
     ) -> Result<Sandbox, Error> {
         let id = req.id()?;
+
+        tracing::debug!(sandbox_id = ?id, "get sandbox");
+
         let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id).one(txn).await? else {
             return Err(Error::NotFound);
         };
         if sandbox.user_id.is_some() {
             let CurrentUser { user, .. } = user.ok_or(Error::Unauthorized)?;
+
             if !user
                 .permissions
                 .has_perm(&id, EntityType::Sandbox, Verb::Read.into())
@@ -61,6 +64,8 @@ impl Api {
         CurrentUser { user, .. }: CurrentUser,
         txn: &DatabaseTransaction,
     ) -> Result<ListSandboxesResp, Error> {
+        tracing::debug!("list sandbox");
+
         let ids: Vec<Uuid> = if let Some(ref page) = req.page {
             if page.last_id.is_empty() {
                 user.permissions
@@ -109,6 +114,9 @@ impl Api {
         } else {
             None
         };
+
+        tracing::debug!(sandbox_count = ?sandboxes.len(), "list sandbox - done");
+
         Ok(ListSandboxesResp {
             sandboxes,
             next_page,
@@ -138,6 +146,9 @@ impl Api {
         };
         let id = Uuid::now_v7();
         let user_id = user.as_ref().map(|u| u.user.id);
+
+        tracing::debug!(sandbox_id = ?id, "create sandbox");
+
         sandbox::ActiveModel {
             id: Set(id),
             user_id: Set(user_id),
@@ -174,6 +185,9 @@ impl Api {
         txn: &DatabaseTransaction,
     ) -> Result<UpdateSandboxResp, Error> {
         let id = req.id()?;
+
+        tracing::debug!(sandbox_id = ?id, "update sandbox");
+
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
         };
@@ -226,6 +240,9 @@ impl Api {
         user: Option<CurrentUser>,
     ) -> Result<BootSandboxResp, Error> {
         let id = req.id()?;
+
+        tracing::debug!(sandbox_id = ?id, "boot sandbox");
+
         let Some(sandbox) = sandbox::Entity::find_by_id(id).one(&self.db).await? else {
             return Err(Error::NotFound);
         };
@@ -282,6 +299,8 @@ impl Api {
     ) -> Result<Sandbox, Error> {
         let id = req.id()?;
 
+        tracing::debug!(sandbox_id = ?id, "delete sandbox");
+
         if !user
             .permissions
             .has_perm(&id, EntityType::Sandbox, Verb::Delete.into())
@@ -316,6 +335,8 @@ impl Api {
         user: Option<CurrentUser>,
     ) -> Result<<Api as api_server::Api>::SandboxEventsStream, Error> {
         let id = req.id()?;
+
+        tracing::debug!(sandbox_id = ?id, "get sandbox events");
 
         let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(id)
             .one(&self.db)
@@ -361,7 +382,7 @@ pub async fn sim_socket(
     State(context): State<AxumContext>,
     auth: Query<WsAuth>,
 ) -> Result<impl IntoResponse, Error> {
-    trace!(?sandbox_id, "sandbox id");
+    tracing::trace!(?sandbox_id, "sandbox sim_socket");
     let Some(sandbox) = atc_entity::sandbox::Entity::find_by_id(sandbox_id)
         .one(&context.db)
         .await?
@@ -391,7 +412,7 @@ pub async fn sim_socket(
             return Err(Error::Unauthorized);
         }
     }
-    trace!(?sandbox, "found sandbox");
+    tracing::trace!(?sandbox_id, ?sandbox, "found sandbox");
     let Some(vm_id) = sandbox.vm_id else {
         return Err(Error::SandboxNotBooted);
     };
@@ -405,14 +426,14 @@ pub async fn sim_socket(
     let Ok(ip) = format!("{}:3563", pod_ip).parse() else {
         return Err(Error::VMBootFailed("vm has invalid ip".to_string()));
     };
-    tracing::debug!(%ip, "connecting to sim-agent");
+    tracing::debug!(?sandbox_id, %ip, "connecting to sim-agent");
     let sim_stream = sim_socket.connect(ip).await?;
     let (rx, tx) = sim_stream.into_split();
     let sim_tx = FramedWrite::new(tx, LengthDelimitedCodec::new());
     let sim_rx = FramedRead::new(rx, LengthDelimitedCodec::new());
 
     Ok(ws.on_upgrade(move |socket| async move {
-        tracing::debug!(%ip, "upgraded to websocket");
+        tracing::debug!(?sandbox_id, %ip, "upgraded to websocket");
         let (ws_tx, ws_rx) = socket.split();
         let ws_rx = ws_rx
             .try_filter_map(|msg| async move {
@@ -424,13 +445,13 @@ pub async fn sim_socket(
             .map_err(|err| std::io::Error::new(io::ErrorKind::Other, err));
         let ws_to_sim = ws_rx
             .inspect_ok(|b| {
-                tracing::trace!(bytes = b.len(), "ws -> sim");
+                tracing::trace!(?sandbox_id, bytes = b.len(), "ws -> sim");
             })
             .forward(sim_tx)
             .map_err(Error::from);
         let sim_to_ws = sim_rx
             .inspect_ok(|b| {
-                tracing::trace!(bytes = b.len(), "sim -> ws");
+                tracing::trace!(?sandbox_id, bytes = b.len(), "sim -> ws");
             })
             .map(|m| m.map(|b| ws::Message::Binary(b.to_vec())))
             .map_err(axum::Error::new)
@@ -441,7 +462,7 @@ pub async fn sim_socket(
             res = sim_to_ws=> { res}
         };
         if let Err(err) = res {
-            tracing::error!(?err, "error in sim proxy");
+            tracing::error!(?sandbox_id, error = ?err, "error in sim proxy");
         }
     }))
 }
