@@ -17,11 +17,10 @@ dependencies = [
     "polars",
     "pytest"
 ]
+
 [project.optional-dependencies]
-tests = [
-    "pytest",
-]
-dynamic = ["version"]
+tests = ["pytest"]
+dynamic = []
 
 [tool.maturin]
 python-source = "python"
