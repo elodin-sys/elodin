@@ -6,6 +6,7 @@ use clap::Subcommand;
 use elodin_types::api::{api_client::ApiClient, *};
 use elodin_types::Metadata;
 use miette::IntoDiagnostic;
+use s10::python_command;
 use tonic::transport::ClientTlsConfig;
 use tonic::{service::interceptor::InterceptedService, transport};
 
@@ -185,7 +186,7 @@ fn prepare_artifacts(file: PathBuf) -> miette::Result<std::fs::File> {
         miette::bail!("Not a file: {}", file.display());
     }
 
-    let status = std::process::Command::new("python3")
+    let status = python_command()?
         .arg(&file)
         .arg("build")
         .arg("--dir")

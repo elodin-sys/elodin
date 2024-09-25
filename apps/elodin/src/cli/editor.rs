@@ -87,7 +87,7 @@ async fn run_recipe(path: PathBuf, cancel_token: CancellationToken) -> miette::R
     let recipe: s10::Recipe = match path.extension().and_then(|ext| ext.to_str()) {
         Some("toml") => toml::from_str(&contents).into_diagnostic()?,
         Some("py") => {
-            let output = std::process::Command::new("python3")
+            let output = s10::python_command()?
                 .arg(path)
                 .arg("plan")
                 .output()

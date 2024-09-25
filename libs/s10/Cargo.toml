@@ -52,3 +52,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # watch
 async-watcher.version = "0.3"
 ignore.version = "0.4"
+
+# python run
+which = "6.0.3"
