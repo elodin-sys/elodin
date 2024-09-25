@@ -23,7 +23,8 @@ pub enum Error {
     UnresolvedRecipe(String),
     #[error("failed to build sim {0:?}")]
     SimBuildFailed(Option<i32>),
-    #[error("nox ecs {0}")]
+    #[cfg_attr(feature = "nox-ecs", error("nox ecs {0}"))]
+    #[cfg(feature = "nox-ecs")]
     NoxEcs(#[from] nox_ecs::Error),
     #[error("join error")]
     JoinError,

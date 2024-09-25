@@ -5,6 +5,8 @@ version.workspace = true
 repository.workspace = true
 
 [features]
+default = ["nox-ecs"]
+nox-ecs = ["dep:nox-ecs", "flume", "tempfile"]
 
 [dependencies]
 # types
@@ -42,8 +44,11 @@ clap.features = ["derive"]
 
 # nox-ecs
 nox-ecs.path = "../nox-ecs"
-tempfile = "3.10.0"
-flume = "0.11"
+nox-ecs.optional = true
+tempfile.version = "3.10.0"
+tempfile.optional = true
+flume.version = "0.11"
+flume.optional = true
 
 # logs
 tracing = "0.1"
