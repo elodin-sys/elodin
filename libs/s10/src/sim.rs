@@ -12,6 +12,7 @@ use std::{
 use tokio::{process::Command, sync::Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
+use which::which;
 
 use crate::{error::Error, recipe::DEFAULT_WATCH_TIMEOUT, watch::watch};
 
@@ -34,7 +35,7 @@ impl SimRecipe {
         let mut start = Instant::now();
         info!("building sim");
 
-        let status = Command::new("python3")
+        let status = python_tokio_command()?
             .arg(&self.path)
             .arg("build")
             .arg("--dir")
@@ -145,4 +146,20 @@ fn run_exec(
             return Ok(impeller_exec.into_connections());
         }
     }
+}
+
+pub fn python_command() -> Result<std::process::Command, Error> {
+    if let Ok(uv) = which("uv") {
+        let mut cmd = std::process::Command::new(uv);
+        cmd.arg("run");
+        Ok(cmd)
+    } else if let Ok(py) = which("python3") {
+        Ok(std::process::Command::new(py))
+    } else {
+        Err(Error::PythonNotFound)
+    }
+}
+
+pub fn python_tokio_command() -> Result<Command, Error> {
+    Ok(python_command()?.into())
 }

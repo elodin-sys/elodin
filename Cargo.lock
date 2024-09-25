@@ -9442,6 +9442,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ustr",
+ "which 6.0.3",
 ]
 
 [[package]]

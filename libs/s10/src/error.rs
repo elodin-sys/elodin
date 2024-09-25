@@ -32,4 +32,9 @@ pub enum Error {
     Process(#[from] ProcessError),
     #[error(transparent)]
     Ignore(#[from] ignore::Error),
+    #[error("neither uv or python could be found")]
+    #[diagnostic(
+        help = "please install either uv (https://github.com/astral-sh/uv) or python 3 > 3.10"
+    )]
+    PythonNotFound,
 }
