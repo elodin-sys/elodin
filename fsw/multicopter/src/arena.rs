@@ -30,12 +30,12 @@ impl DmaAlloc<&'static mut [u8; 4096]> {
     }
 }
 
-impl<B: AsMut<[u8]>> DmaAlloc<B> {
+impl<'a, B: AsMut<[u8]> + 'a> DmaAlloc<B> {
     const fn new(buf: B) -> Self {
         Self { buf, pos: 0 }
     }
 
-    pub fn leak<'a, T>(&mut self, val: T) -> &'a mut T {
+    pub fn leak<T>(&mut self, val: T) -> &'a mut T {
         let buf = self.buf.as_mut();
         let size = core::mem::size_of::<T>();
         let align = core::mem::align_of::<T>();
