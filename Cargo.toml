@@ -74,7 +74,7 @@ libxkbcommon-dev = '*'
 protobuf-compiler = '*'
 gfortran = '*'
 gfortran-12 = '*'
-libgfortran12-dev = '*'
+libgfortran-12-dev = '*'
 
 [workspace.metadata.dist.dependencies.chocolatey]
 cmake = '*'

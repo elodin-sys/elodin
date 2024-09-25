@@ -230,7 +230,7 @@ jobs:
             curl libssl-dev \
             protobuf-compiler \
             g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 \
-            libwayland-dev libxkbcommon-dev libopenblas-dev
+            libwayland-dev libxkbcommon-dev libopenblas-dev gfortran gfortran-12 libgfortran-12-dev
       - name: Install Python dependencies
         run: |
           pip install patchelf jax typing_extensions
