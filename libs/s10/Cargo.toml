@@ -4,10 +4,6 @@ edition = "2021"
 version.workspace = true
 repository.workspace = true
 
-[features]
-default = ["nox-ecs"]
-nox-ecs = ["dep:nox-ecs", "flume", "tempfile"]
-
 [dependencies]
 # types
 smallvec.version = "1.11.2"
@@ -42,13 +38,6 @@ interpolator.version = "0.5.0"
 clap.version = "4.5.17"
 clap.features = ["derive"]
 
-# nox-ecs
-nox-ecs.path = "../nox-ecs"
-nox-ecs.optional = true
-tempfile.version = "3.10.0"
-tempfile.optional = true
-flume.version = "0.11"
-flume.optional = true
 
 # logs
 tracing = "0.1"
@@ -60,3 +49,8 @@ ignore.version = "0.4"
 
 # python run
 which = "6.0.3"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+nox-ecs.path = "../nox-ecs"
+tempfile.version = "3.10.0"
+flume.version = "0.11"
