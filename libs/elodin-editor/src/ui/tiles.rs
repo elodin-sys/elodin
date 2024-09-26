@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use bevy::{
     ecs::system::{SystemParam, SystemState},
+    input::keyboard::Key,
     prelude::*,
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion};
@@ -32,7 +33,7 @@ use super::{
     HdrEnabled, SelectedObject, ViewportRect,
 };
 use crate::{
-    plugins::navigation_gizmo::RenderLayerAlloc,
+    plugins::{navigation_gizmo::RenderLayerAlloc, LogicalKeyState},
     spawn_main_camera,
     ui::widgets::plot::{CollectedGraphData, GraphStateEntity},
     MainCamera,
@@ -1103,9 +1104,9 @@ fn spawn_panel(
     }
 }
 
-pub fn shortcuts(kbd: Res<ButtonInput<KeyCode>>, mut ui_state: ResMut<TileState>) {
+pub fn shortcuts(key_state: Res<LogicalKeyState>, mut ui_state: ResMut<TileState>) {
     // tab switching
-    if kbd.pressed(KeyCode::ControlLeft) && kbd.just_pressed(KeyCode::Tab) {
+    if key_state.pressed(&Key::Control) && key_state.pressed(&Key::Tab) {
         // TODO(sphw): we should have a more intelligent focus system
         let Some(tile_id) = ui_state.tree.root() else {
             return;
@@ -1126,7 +1127,7 @@ pub fn shortcuts(kbd: Res<ButtonInput<KeyCode>>, mut ui_state: ResMut<TileState>
         let Some(index) = tabs.children.iter().position(|x| *x == active_id) else {
             return;
         };
-        let offset = if kbd.pressed(KeyCode::ShiftLeft) {
+        let offset = if key_state.pressed(&Key::Shift) {
             -1
         } else {
             1

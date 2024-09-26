@@ -153,6 +153,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(WireframePlugin)
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::widgets::PlotPlugin)
+            .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Startup, spawn_clear_bg)

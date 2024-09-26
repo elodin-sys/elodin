@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- Use logical scan codes for the editor's key bindings. This means that keyboard shortcuts will respect your keyboard layout. For example, if you remap your Caps Lock key to Ctrl, the editor will treat Caps Lock as Ctrl as well.
 
 ## v0.7.1
 - On Windows, use Ctrl instead of Super for launching the command palette (Ctrl + P).

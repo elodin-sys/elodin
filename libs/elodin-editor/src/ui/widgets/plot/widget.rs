@@ -7,7 +7,7 @@ use bevy::{
         system::{Commands, Local, Query, Res},
     },
     input::{
-        keyboard::KeyCode,
+        keyboard::Key,
         mouse::{MouseButton, MouseScrollUnit, MouseWheel},
         ButtonInput,
     },
@@ -28,15 +28,18 @@ use std::{
 };
 use web_time::{Duration, Instant};
 
-use crate::ui::{
-    colors::{self, with_opacity, ColorExt},
-    utils::{self, format_num, MarginSides},
-    widgets::{
-        plot::{
-            gpu::{LineBundle, LineConfig, LineUniform},
-            CollectedGraphData, GraphState, Line,
+use crate::{
+    plugins::LogicalKeyState,
+    ui::{
+        colors::{self, with_opacity, ColorExt},
+        utils::{self, format_num, MarginSides},
+        widgets::{
+            plot::{
+                gpu::{LineBundle, LineConfig, LineUniform},
+                CollectedGraphData, GraphState, Line,
+            },
+            timeline::timeline_ranges::TimelineRange,
         },
-        timeline::timeline_ranges::TimelineRange,
     },
 };
 
@@ -999,7 +1002,7 @@ pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
     scroll_events: EventReader<MouseWheel>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    key_state: Res<LogicalKeyState>,
 ) {
     const ZOOM_SENSITIVITY: f32 = 0.001;
 
@@ -1033,9 +1036,9 @@ pub fn zoom_graph(
             continue;
         }
 
-        let offset_mask = if keys.pressed(KeyCode::ControlLeft) {
+        let offset_mask = if key_state.pressed(&Key::Control) {
             Vec2::new(1.0, 0.0)
-        } else if keys.pressed(KeyCode::ShiftLeft) {
+        } else if key_state.pressed(&Key::Shift) {
             Vec2::new(0.0, 1.0)
         } else {
             Vec2::new(1.0, 1.0)
@@ -1064,7 +1067,7 @@ pub fn pan_graph(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut last_pos: Local<Option<Vec2>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    key_state: Res<LogicalKeyState>,
 ) {
     let Ok(window) = primary_window.get_single() else {
         return;
@@ -1095,9 +1098,9 @@ pub fn pan_graph(
             continue;
         }
 
-        let offset_mask = if keys.pressed(KeyCode::ControlLeft) {
+        let offset_mask = if key_state.pressed(&Key::Control) {
             Vec2::new(1.0, 0.0)
-        } else if keys.pressed(KeyCode::ShiftLeft) {
+        } else if key_state.pressed(&Key::Shift) {
             Vec2::new(0.0, 1.0)
         } else {
             Vec2::new(1.0, 1.0)
