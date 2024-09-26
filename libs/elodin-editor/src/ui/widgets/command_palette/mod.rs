@@ -3,15 +3,18 @@ use bevy::{
         system::{Local, Res, ResMut, Resource, SystemParam, SystemState},
         world::World,
     },
-    input::{keyboard::KeyCode, ButtonInput},
+    input::keyboard::Key,
 };
 use bevy_egui::EguiContexts;
 use egui::{epaint::Shadow, Margin, Modifiers};
 
-use crate::ui::{
-    colors::{self, with_opacity},
-    images, theme,
-    utils::{MarginSides, Shrink4},
+use crate::{
+    plugins::LogicalKeyState,
+    ui::{
+        colors::{self, with_opacity},
+        images, theme,
+        utils::{MarginSides, Shrink4},
+    },
 };
 
 use self::palette_items::{MatchedPaletteItem, PaletteEvent, PaletteIcon, PalettePage};
@@ -32,7 +35,7 @@ pub struct CommandPaletteState {
 #[derive(SystemParam)]
 pub struct CommandPalette<'w> {
     command_palette_state: ResMut<'w, CommandPaletteState>,
-    kbd: Res<'w, ButtonInput<KeyCode>>,
+    key_state: Res<'w, LogicalKeyState>,
 }
 
 impl RootWidgetSystem for CommandPalette<'_> {
@@ -50,20 +53,20 @@ impl RootWidgetSystem for CommandPalette<'_> {
         let state_mut = state.get_mut(world);
 
         let mut command_palette_state = state_mut.command_palette_state;
-        let kbd = state_mut.kbd;
+        let kbd = state_mut.key_state;
         let cmd_pressed = if cfg!(target_os = "macos") {
-            kbd.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight])
+            kbd.pressed(&Key::Super)
         } else {
-            kbd.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+            kbd.pressed(&Key::Control)
         };
-        if cmd_pressed && kbd.just_pressed(KeyCode::KeyP) {
+        if cmd_pressed && kbd.just_pressed(&Key::Character("p".into())) {
             command_palette_state.show = !command_palette_state.show;
             if command_palette_state.show {
                 command_palette_state.input_focus = true;
             }
         }
 
-        if kbd.just_pressed(KeyCode::Escape) || clicked_elsewhere {
+        if kbd.just_pressed(&Key::Escape) || clicked_elsewhere {
             command_palette_state.show = false;
         }
 
@@ -276,7 +279,7 @@ impl WidgetSystem for PaletteSearch<'_> {
 #[derive(SystemParam)]
 pub struct PaletteItems<'w> {
     command_palette_state: ResMut<'w, CommandPaletteState>,
-    kbd: Res<'w, ButtonInput<KeyCode>>,
+    key_state: Res<'w, LogicalKeyState>,
 }
 
 impl WidgetSystem for PaletteItems<'_> {
@@ -292,9 +295,9 @@ impl WidgetSystem for PaletteItems<'_> {
         let (icons, up_pressed, down_pressed) = args;
         let state_mut = state.get_mut(world);
         let mut command_palette_state = state_mut.command_palette_state;
-        let kbd = state_mut.kbd.clone();
+        let kbd = state_mut.key_state;
         let mut selected_index = command_palette_state.selected_index;
-        let hit_enter = kbd.just_pressed(KeyCode::Enter);
+        let hit_enter = kbd.just_pressed(&Key::Enter);
         let filter = command_palette_state.filter.clone();
 
         if command_palette_state.page_stack.is_empty() {

@@ -3,6 +3,7 @@ use bevy::{
         query::QueryData,
         system::{SystemParam, SystemState},
     },
+    input::keyboard::Key,
     prelude::*,
     render::camera::Viewport,
 };
@@ -23,7 +24,7 @@ use impeller::{
 use widgets::{command_palette::CommandPaletteState, timeline};
 use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
-use crate::{GridHandle, MainCamera};
+use crate::{plugins::LogicalKeyState, GridHandle, MainCamera};
 
 use self::widgets::inspector::{entity::ComponentFilter, Inspector};
 use self::widgets::modal::ModalWithSettings;
@@ -112,11 +113,11 @@ pub fn shortcuts(
     mut paused: ResMut<Paused>,
     timeline_ranges_focused: Res<timeline_ranges::TimelineRangesFocused>,
     command_palette_state: Res<CommandPaletteState>,
-    kbd: Res<ButtonInput<KeyCode>>,
+    key_state: Res<LogicalKeyState>,
 ) {
     let input_has_focus = timeline_ranges_focused.0 || command_palette_state.show;
 
-    if !input_has_focus && kbd.just_pressed(KeyCode::Space) {
+    if !input_has_focus && key_state.just_pressed(&Key::Enter) {
         paused.0 = !paused.0;
     }
 }
