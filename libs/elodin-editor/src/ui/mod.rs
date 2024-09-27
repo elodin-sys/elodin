@@ -117,7 +117,7 @@ pub fn shortcuts(
 ) {
     let input_has_focus = timeline_ranges_focused.0 || command_palette_state.show;
 
-    if !input_has_focus && key_state.just_pressed(&Key::Enter) {
+    if !input_has_focus && key_state.just_pressed(&Key::Space) {
         paused.0 = !paused.0;
     }
 }
