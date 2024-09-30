@@ -7,7 +7,7 @@ use impeller::bevy_sync::SyncPlugin;
 use impeller::World;
 use impeller::{client::MsgPair, server::handle_socket};
 use impeller::{serve_replay, Replay};
-use miette::{miette, IntoDiagnostic};
+use miette::{miette, Context, IntoDiagnostic};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
@@ -70,8 +70,12 @@ impl std::str::FromStr for Simulator {
 }
 
 #[cfg(not(target_os = "windows"))]
-async fn run_recipe(path: PathBuf, cancel_token: CancellationToken) -> miette::Result<()> {
-    let path = if path.is_dir() {
+async fn run_recipe(
+    cache_dir: PathBuf,
+    path: PathBuf,
+    cancel_token: CancellationToken,
+) -> miette::Result<()> {
+    let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
         let py = path.join("main.py");
         if path.join("s10.toml").exists() {
@@ -84,22 +88,38 @@ async fn run_recipe(path: PathBuf, cancel_token: CancellationToken) -> miette::R
     } else {
         path.clone()
     };
-    let contents = std::fs::read_to_string(&path).into_diagnostic()?;
-    let recipe: s10::Recipe = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("toml") => toml::from_str(&contents).into_diagnostic()?,
-        Some("py") => {
-            let output = s10::python_command()?
-                .arg(path)
-                .arg("plan")
-                .output()
-                .into_diagnostic()?;
-            if output.status.code() != Some(0) {
-                return Err(miette!("error loading s10 plan from python file"));
-            }
-            serde_json::from_slice(&output.stdout).into_diagnostic()?
+
+    // If python file, generate s10.toml
+    if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
+        let date_time = chrono::Local::now().to_rfc3339();
+        let out_dir = cache_dir.join(date_time);
+        std::fs::create_dir_all(&out_dir).into_diagnostic()?;
+        let output = s10::python_command()?
+            .arg(path.clone())
+            .arg("plan")
+            .arg(&out_dir)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .output()
+            .into_diagnostic()?;
+        if output.status.code() != Some(0) {
+            return Err(miette!("error generating s10 plan from python file"));
         }
-        _ => return Err(miette!("couldn't identify path type")),
-    };
+        path = out_dir.join("s10.toml");
+    }
+
+    // If not a s10 plan file, bail out
+    if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+        return Err(miette!(
+            "invalid file type, must be a s10 plan or python file"
+        ));
+    }
+
+    let contents = std::fs::read_to_string(&path).into_diagnostic()?;
+    let recipe: s10::Recipe = toml::from_str(&contents)
+        .into_diagnostic()
+        .with_context(|| format!("failed to parse s10 recipe from file: {}", path.display()))?;
+
     recipe
         .watch("sim".to_string(), false, cancel_token.clone())
         .await?;
@@ -116,6 +136,8 @@ impl Cli {
         cancel_token: CancellationToken,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
+        let dirs = self.dirs().into_diagnostic()?;
+        let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
             rt.block_on(async move {
                 let ctrl_c_cancel_token = cancel_token.clone();
@@ -124,7 +146,7 @@ impl Cli {
                     tokio::signal::ctrl_c().await
                 });
                 if let Simulator::File(path) = &sim {
-                    let res = run_recipe(path.clone(), cancel_token.clone()).await;
+                    let res = run_recipe(cache_dir, path.clone(), cancel_token.clone()).await;
                     cancel_token.cancel();
                     res
                 } else {
@@ -214,9 +236,7 @@ impl Cli {
 
     fn window_state_file(&self) -> miette::Result<std::fs::File> {
         use miette::Context;
-        let dirs = self
-            .dirs()
-            .ok_or_else(|| miette!("failed to get data directory"))?;
+        let dirs = self.dirs().into_diagnostic()?;
         let data_dir = dirs.data_dir();
         std::fs::create_dir_all(data_dir)
             .into_diagnostic()

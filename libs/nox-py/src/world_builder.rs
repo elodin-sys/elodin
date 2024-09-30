@@ -20,6 +20,7 @@ pub enum Args {
         addr: SocketAddr,
     },
     Plan {
+        out_dir: PathBuf,
         #[arg(default_value = "0.0.0.0:2240")]
         addr: SocketAddr,
     },
@@ -283,11 +284,12 @@ impl WorldBuilder {
                 spawn_tcp_server(addr, exec, client, || py.check_signals().is_err())?;
                 Ok(None)
             }
-            Args::Plan { addr } => {
+            Args::Plan { addr, out_dir } => {
                 let recipe = self.sim_recipe(path, addr);
-                let json = serde_json::to_string(&recipe)
+                let toml = toml::to_string_pretty(&recipe)
                     .map_err(|err| PyValueError::new_err(err.to_string()))?;
-                println!("{}", json);
+                let plan_path = out_dir.join("s10.toml");
+                std::fs::write(&plan_path, toml)?;
                 Ok(None)
             }
             Args::Bench { ticks } => {

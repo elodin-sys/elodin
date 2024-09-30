@@ -83,9 +83,7 @@ impl Cli {
     }
 
     fn first_launch(&self) -> miette::Result<()> {
-        let dirs = self
-            .dirs()
-            .ok_or_else(|| miette!("failed to get data directory"))?;
+        let dirs = self.dirs().into_diagnostic()?;
         let data_dir = dirs.data_dir();
         let is_first_launch = !data_dir.exists();
         std::fs::create_dir_all(data_dir)
@@ -112,8 +110,11 @@ impl Cli {
         self.url.ends_with("elodin.dev") || self.url.contains("localhost")
     }
 
-    fn dirs(&self) -> Option<directories::ProjectDirs> {
+    fn dirs(&self) -> Result<directories::ProjectDirs, std::io::Error> {
         let app_name = if self.is_dev() { "cli-dev" } else { "cli" };
-        directories::ProjectDirs::from("systems", "elodin", app_name)
+        directories::ProjectDirs::from("systems", "elodin", app_name).ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "failed to get data directory",
+        ))
     }
 }

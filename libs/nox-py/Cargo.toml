@@ -36,6 +36,7 @@ postcard.version = "1.0"
 postcard.features = ["alloc"]
 bytes = "1.5"
 serde_json = "1.0"
+toml = "0.8"
 
 # async
 impeller.path = "../impeller"
