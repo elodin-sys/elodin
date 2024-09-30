@@ -84,9 +84,6 @@ pub enum AuthError {
     #[error("invalid access token")]
     #[diagnostic(code(elodin::invalid_access_token))]
     InvalidAccessToken,
-    #[error("failed to access data directory")]
-    #[diagnostic(code(elodin::no_data_dir))]
-    NoDataDir,
     #[error("access token missing")]
     #[diagnostic(code(elodin::no_access_token))]
     NoAccessToken,
@@ -100,7 +97,7 @@ impl Cli {
     }
 
     fn access_token(&self) -> Result<String, AuthError> {
-        let dirs = self.dirs().ok_or(AuthError::NoDataDir)?;
+        let dirs = self.dirs()?;
         let data_dir = dirs.data_dir();
         let access_token_path = data_dir.join("access_token");
         if !access_token_path.exists() {
@@ -180,7 +177,7 @@ impl Cli {
                 let token_res = res.json::<TokenResponse>().await.into_diagnostic()?;
                 let expires_in = TimeDelta::try_seconds(token_res.expires_in as i64).unwrap();
                 let expires_at = Utc::now() + expires_in;
-                let dirs = self.dirs().expect("failed to get data directory");
+                let dirs = self.dirs().into_diagnostic()?;
                 let data_dir = dirs.data_dir();
                 std::fs::create_dir_all(data_dir)
                     .into_diagnostic()

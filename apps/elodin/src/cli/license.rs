@@ -1,5 +1,5 @@
 use elodin_types::api::{GenerateLicenseReq, LicenseType};
-use miette::{miette, IntoDiagnostic};
+use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -103,7 +103,8 @@ impl Cli {
     fn license_key_inner(&self) -> Result<LicenseKey, LicenseKeyError> {
         let dirs = self
             .dirs()
-            .ok_or_else(|| LicenseKeyError::Other(miette!("failed to get data directory")))?;
+            .into_diagnostic()
+            .map_err(LicenseKeyError::Other)?;
         let data_dir = dirs.data_dir();
         let license_key = data_dir.join("license_key");
         if !license_key.exists() {
@@ -128,9 +129,7 @@ impl Cli {
             .await
             .into_diagnostic()?
             .into_inner();
-        let dirs = self
-            .dirs()
-            .ok_or_else(|| miette!("failed to get data directory"))?;
+        let dirs = self.dirs().into_diagnostic()?;
         let data_dir = dirs.data_dir();
         let license_key = data_dir.join("license_key");
         std::fs::write(license_key, resp.license).into_diagnostic()?;
