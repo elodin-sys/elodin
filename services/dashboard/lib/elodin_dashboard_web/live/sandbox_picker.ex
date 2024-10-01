@@ -31,6 +31,18 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       )
     end
 
+    subscription = current_user["subscription_status"]
+
+    subscription_ended =
+      if(subscription != nil && subscription.subscription_end != nil,
+        do:
+          DateTime.compare(
+            DateTime.utc_now(),
+            DateTime.from_unix!(subscription.subscription_end - 1)
+          ) == :gt,
+        else: false
+      )
+
     new_form = to_form(%{"name" => NameGen.generate()})
 
     case Atc.list_sandboxes(struct(Api.ListSandboxesReq), token) do
@@ -48,6 +60,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
 
         {:ok,
          socket
+         |> assign(:subscription_ended, subscription_ended)
          |> assign(:sandboxes, sandboxes)
          |> assign(:new_form, new_form)
          |> assign(:template, params["template"])
@@ -65,6 +78,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
         {:ok,
          socket
          |> put_flash(:error, "Error creating sandbox: #{err}")
+         |> assign(:subscription_ended, subscription_ended)
          |> assign(:sandboxes, [])
          |> assign(:new_form, new_form)
          |> assign(:template, params["template"])
@@ -157,7 +171,10 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
     <.navbar_layout current_user={@current_user}>
       <:navbar_right>
         <.link patch={~p"/sandbox/new"} phx-click={show_modal("new")}>
-          <.button class="mr-1.5">
+          <.button
+            disabled={@subscription_ended}
+            class={["mr-1.5", @subscription_ended && "opacity-25"]}
+          >
             CREATE NEW
           </.button>
         </.link>

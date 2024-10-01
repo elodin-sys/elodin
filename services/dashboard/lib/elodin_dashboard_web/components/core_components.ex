@@ -235,8 +235,8 @@ defmodule ElodinDashboardWeb.CoreComponents do
       id={@id}
       phx-mounted={@show && show_modal(@id)}
       phx-remove={hide_modal(@id)}
-      data-cancel={if(@can_close, do: JS.exec(@on_cancel, "phx-remove"), else: nil)}
-      class="relative z-50 hidden"
+      data-cancel={if(@can_close, do: JS.exec(@on_cancel, "phx-remove"), else: %JS{})}
+      class="relative z-9 hidden"
     >
       <div
         id={"#{@id}-bg"}
