@@ -6,6 +6,7 @@ artifact_registry := "us-central1-docker.pkg.dev/elodin-infra"
 repo_sim_agent := "elo-sim-agent/x86_64"
 repo_atc := "elo-atc/x86_64"
 repo_dashboard := "elo-dashboard/x86_64"
+repo_docs := "elo-docs/x86_64"
 
 project := "elodin-dev"
 region := "us-central1"
@@ -30,6 +31,7 @@ re-tag-images old_tag new_tag:
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_sim_agent}}:{{old_tag}} {{artifact_registry}}/{{repo_sim_agent}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_atc}}:{{old_tag}} {{artifact_registry}}/{{repo_atc}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_dashboard}}:{{old_tag}} {{artifact_registry}}/{{repo_dashboard}}:{{new_tag}}
+  gcloud artifacts docker tags add {{artifact_registry}}/{{repo_docs}}:{{old_tag}} {{artifact_registry}}/{{repo_docs}}:{{new_tag}}
 
 re-tag-images-main new_tag:
   just re-tag-images $(git rev-parse main) {{new_tag}}
@@ -82,6 +84,9 @@ release tag:
     newTag: {{tag}}
   - name: elodin-infra/elo-sim-agent
     newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
+    newTag: {{tag}}
+  - name: elodin-infra/elo-docs
+    newName: us-central1-docker.pkg.dev/elodin-infra/elo-docs/x86_64
     newTag: {{tag}}
   replacements:
   - source:

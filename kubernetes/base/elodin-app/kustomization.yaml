@@ -8,5 +8,6 @@ resources:
 - ./redis/
 - ./elo-dashboard/
 - ./elo-atc/
+- ./elo-docs/
 
 namespace: elodin-app
