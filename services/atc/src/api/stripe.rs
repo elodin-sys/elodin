@@ -20,6 +20,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 use stripe::{Customer, CustomerId, Event, EventObject, EventType, PriceId};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::{Api, AxumContext, CurrentUser};
@@ -273,67 +274,86 @@ impl Api {
         user_id: Uuid,
         txn: &impl ConnectionTrait,
     ) -> Result<StripeSubscriptionStatus, Error> {
-        tracing::debug!(%user_id, %billing_account_id, "get_subscription_status");
+        let tracing_debug_span = tracing::debug_span!(
+            "get_subscription_status",
+            %user_id,
+            %billing_account_id,
+        );
 
-        let Some(billing_account) = billing_account::Entity::find_by_id(billing_account_id)
-            .filter(billing_account::Column::OwnerUserId.eq(user_id))
-            .one(txn)
-            .await?
-        else {
-            return Err(Error::NotFound);
-        };
+        async {
+            tracing::debug!("get_subscription_status - start");
 
-        let Ok(customer_id) = CustomerId::from_str(&billing_account.customer_id) else {
-            return Err(Error::NotFound);
-        };
+            let Some(billing_account) = billing_account::Entity::find_by_id(billing_account_id)
+                .filter(billing_account::Column::OwnerUserId.eq(user_id))
+                .one(txn)
+                .await?
+            else {
+                tracing::error!("get_subscription_status - billing_account is missing");
+                return Err(Error::NotFound);
+            };
 
-        let customer = Customer::retrieve(&self.stripe, &customer_id, &[]).await?;
+            let Ok(customer_id) = CustomerId::from_str(&billing_account.customer_id) else {
+                tracing::error!("get_subscription_status - customer_id has wrong format");
+                return Err(Error::NotFound);
+            };
 
-        let portal_session = stripe::BillingPortalSession::create(
-            &self.stripe,
-            stripe::CreateBillingPortalSession {
-                return_url: Some(&self.base_url),
-                ..stripe::CreateBillingPortalSession::new(customer.id.clone())
-            },
-        )
-        .await?;
+            let customer = Customer::retrieve(&self.stripe, &customer_id, &[]).await?;
 
-        let Some(sub_config) = get_subscription_config(
-            &self.stripe_plans_config,
-            billing_account.seat_license_type.into(),
-        ) else {
-            return Ok(StripeSubscriptionStatus {
+            let portal_session = stripe::BillingPortalSession::create(
+                &self.stripe,
+                stripe::CreateBillingPortalSession {
+                    return_url: Some(&self.base_url),
+                    ..stripe::CreateBillingPortalSession::new(customer.id.clone())
+                },
+            )
+            .await?;
+
+            let default_subscription_status = StripeSubscriptionStatus {
                 portal_url: portal_session.url,
                 subscription_end: 0,
                 trial_start: None,
                 trial_end: None,
                 monte_carlo_credit: 0,
-            });
-        };
+            };
 
-        let Ok(price_id) = PriceId::from_str(&sub_config.subscription_price) else {
-            return Err(Error::NotFound);
-        };
+            let Some(sub_config) = get_subscription_config(
+                &self.stripe_plans_config,
+                billing_account.seat_license_type.into(),
+            ) else {
+                tracing::debug!("get_subscription_status - subscription_config is None");
+                return Ok(default_subscription_status);
+            };
 
-        let list_subs_params = stripe::ListSubscriptions {
-            customer: Some(customer_id),
-            price: Some(price_id),
-            ..stripe::ListSubscriptions::new()
-        };
+            let Ok(price_id) = PriceId::from_str(&sub_config.subscription_price) else {
+                tracing::error!("get_subscription_status - price_id has wrong format");
+                return Err(Error::NotFound);
+            };
 
-        let subs = stripe::Subscription::list(&self.stripe, &list_subs_params).await?;
-        let Some(sub) = subs.data.first() else {
-            // Subscription should always exists (even if it's ended)
-            return Err(Error::NotFound);
-        };
+            let list_subs_params = stripe::ListSubscriptions {
+                customer: Some(customer_id),
+                price: Some(price_id),
+                ..stripe::ListSubscriptions::new()
+            };
 
-        Ok(StripeSubscriptionStatus {
-            portal_url: portal_session.url,
-            subscription_end: sub.current_period_end,
-            trial_start: sub.trial_start,
-            trial_end: sub.trial_end,
-            monte_carlo_credit: sub_config.monte_carlo_credit,
-        })
+            let subs = stripe::Subscription::list(&self.stripe, &list_subs_params).await?;
+            let Some(sub) = subs.data.first() else {
+                // Subscription should always exists (even if it's ended)
+                tracing::error!(
+                    "get_subscription_status - subscription is missing from list response"
+                );
+                return Ok(default_subscription_status);
+            };
+
+            Ok(StripeSubscriptionStatus {
+                subscription_end: sub.current_period_end,
+                trial_start: sub.trial_start,
+                trial_end: sub.trial_end,
+                monte_carlo_credit: sub_config.monte_carlo_credit,
+                ..default_subscription_status
+            })
+        }
+        .instrument(tracing_debug_span)
+        .await
     }
 }
 
