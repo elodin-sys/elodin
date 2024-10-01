@@ -70,6 +70,7 @@
           docker
           kubectl
           jq
+          yq
           git-filter-repo
           (google-cloud-sdk.withExtraComponents (with google-cloud-sdk.components; [gke-gcloud-auth-plugin]))
         ];

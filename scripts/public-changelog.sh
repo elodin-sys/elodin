@@ -3,7 +3,7 @@
 # Function to convert the changelog
 convert_changelog() {
     local file_path="$1"
-    local formatted_changelog="---\ntitle: Changelog\nicon: bars-staggered\n---\n\n"
+    local formatted_changelog="+++\ntitle = \"Changelog\"\ndescription = \"Changelog\"\ndraft = false\nweight = 100\nsort_by = \"weight\"\ntemplate = \"releases/page.html\"\n\n[extra]\ntoc = true\ntop = false\nicon = \"\"\norder = 1\n+++\n\n"
 
     # Flag to skip the changelog header
     local skip_header=true

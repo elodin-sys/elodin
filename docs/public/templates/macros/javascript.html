@@ -1,0 +1,29 @@
+{% macro javascript() %}
+<script type="text/javascript" src="{{ get_url(path="js/main.js") | safe }}"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="{{ get_url(path="js/tex-mml-chtml.js") | safe }}"></script>
+{% if config.build_search_index %}
+  <script type="text/javascript" src="{{ get_url(path="js/elasticlunr.min.js") | safe }}"></script>
+  <script type="text/javascript" src="{{ get_url(path="search_index." ~ lang ~ ".js") | safe }}"></script>
+  <script type="text/javascript" src="{{ get_url(path="js/search.js") | safe }}"></script>
+{% endif %}
+{% endmacro %}

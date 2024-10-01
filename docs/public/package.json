@@ -1,6 +1,0 @@
-{
-  "name": "docs-public",
-  "dependencies": {
-    "mintlify": "^4.0.136"
-  }
-}

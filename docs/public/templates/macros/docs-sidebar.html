@@ -1,0 +1,37 @@
+{% macro docs_sidebar(current_section) %}
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+        {% set index_path = current_section ~ "/_index.md" |
+        trim_start_matches(pat="/") %} {% set index =
+        get_section(path=index_path) %} {% if index.pages %}
+        <h3>{{ index.title }}</h3>
+        <ul class="list-unstyled">
+            {% for page in index.pages %}
+            <li>
+                <a
+                    class="docs-link {% if current_url == page.permalink %}active{% endif %}"
+                    href="{{ page.permalink | safe }}"
+                    >{{ page.title }}</a
+                >
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %} {% if index.subsections %} {% for s in index.subsections %}
+        {% set subsection = get_section(path=s) %} {% if subsection.pages %}
+        <h3>{{ subsection.title }}</h3>
+        <ul class="list-unstyled">
+            {% for page in subsection.pages %}
+            <li>
+                <a
+                    class="{% if page.extra.icon %}bi-{{ page.extra.icon }}{% endif %} docs-link{% if current_url == page.permalink %} active{% endif %}"
+                    href="{{ page.permalink | safe }}"
+                    >{% if page.extra.icon %}&nbsp;&nbsp;&nbsp;{% endif%}{{
+                    page.title }}</a
+                >
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %} {% endfor %} {% endif %}
+    </nav>
+</div>
+{% endmacro %}

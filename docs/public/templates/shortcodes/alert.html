@@ -1,0 +1,8 @@
+<div class="el-{{kind}} warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bi-{% if kind == "warning" %}exclamation-triangle{% elif kind == "notice" %}exclamation-circle{% elif kind == "info" %}info-circle{% endif %}" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15">{{ body | markdown | safe }}</div>
+    </div>
+</div>

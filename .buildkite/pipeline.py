@@ -115,17 +115,6 @@ test_steps = [
             ),
         ],
     ),
-    group(
-        name=":node: node",
-        steps=[
-            nix_step(
-                label="mintlify broken-links",
-                flake=".#node",
-                emoji=":node:",
-                command="cd docs/public && npx mintlify broken-links",
-            ),
-        ],
-    ),
 ]
 
 cluster_app_deploy_steps = [
