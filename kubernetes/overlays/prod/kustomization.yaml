@@ -3,7 +3,6 @@ kind: Kustomization
 
 resources:
 - ../../base/
-- ../../modules/elo-docs/
 
 replicas:
 - name: sim-agent-balloon
@@ -30,7 +29,7 @@ patches:
             backend:
               service:
                 name: elo-docs
-                port: 
+                port:
                   number: 80
 - target:
     namespace: elodin-app
