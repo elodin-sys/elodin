@@ -14,7 +14,7 @@ spec:
         imagePullPolicy: Always
         image: elodin-infra/elo-docs:latest
         ports:
-        - containerPort: 3000
+        - containerPort: 1111
           name: http
         resources:
           requests:
@@ -22,9 +22,9 @@ spec:
             memory: 1Gi
         readinessProbe:
           httpGet:
-            path: /introduction
-            port: 3000
+            path: /get-started/quickstart
+            port: 1111
         livenessProbe:
           httpGet:
-            path: /introduction
-            port: 3000
+            path: /get-started/quickstart
+            port: 1111

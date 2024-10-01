@@ -1,0 +1,191 @@
+{% macro header(current_section) %}
+<div class="header-bar fixed-top"></div>
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2 d-none d-xl-block" style="margin-bottom: 2px;">
+            <a
+                class="navbar-brand me-auto"
+                href="https://elodin.systems"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="27"
+                    viewBox="0 0 20 23"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+            <select name="version" class="version-select" disabled>
+                <option value="{{ config.extra.version }}" selected>{{ config.extra.version }}</option>
+            </select>
+            </span>
+        </div>
+
+        <div class="col-2 d-none d-lg-block" style="margin-left: 56px; margin-top: -8px;">
+            <form style="width: 264px; height: 28px;">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 25px; margin-top: -4px;">
+            <ul class="navbar-nav main-nav me-auto">
+                {% if lang == config.default_language %} {% set rootsectionpath
+                = "_index.md" %} {% endif %} {% set mainsec =
+                get_section(path=rootsectionpath) %} {% if
+                mainsec.extra.menu.main %} {% for val in mainsec.extra.menu.main
+                %} {% if val.section %}
+                <li
+                    class="nav-item{% if current_section == val.section %} {{ current_section }} active{% endif %}"
+                >
+                    <a
+                        class="nav-link"
+                        href="{{ get_url(path=val.url, trailing_slash=true) | safe }}"
+                        >{{ val.name }}</a
+                    >
+                </li>
+                {% else %}
+                <li class="nav-item">
+                    <a
+                        class="nav-link"
+                        href="{{ val.url }}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >{{ val.name }}</a
+                    >
+                </li>
+                {% endif %} {% endfor %} {% endif %}
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div class="col-2 d-none d-xl-block" style="margin-right: 63px; height: 34px; margin-top: -10px;">
+            <ul class="navbar-nav fork-me">
+                {% if config.extra.menu.social %} {% for val in
+                config.extra.menu.social %}
+                <li class="nav-item">
+                    <a
+                        class="nav-link nav-link-icon bi-{{ val.icon }}"
+                        href="{{ val.url | safe }}"
+                        ><span class="ms-2 visually-hidden"
+                            >{{ val.name }}</span
+                        ></a
+                    >
+                </li>
+                {% endfor %} {% endif %}
+                <li class="nav-item">
+                    <a
+                        class="nav-link nav-link-icon"
+                        href="https://github.com/elodin-sys/elodin"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 22 22" fill="currentColor">
+                              <g clip-path="url(#clip0_93_1282)">
+                                <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.99983C6.47664 1.99983 2 6.58979 2 12.253C2 16.7823 4.86445 20.6259 8.83878 21.9828C9.33908 22.0754 9.51955 21.7598 9.51955 21.4884C9.51955 21.2448 9.51153 20.5992 9.50852 19.7449C6.72629 20.3638 6.13876 18.3695 6.13876 18.3695C5.68558 17.1852 5.02887 16.8696 5.02887 16.8696C4.12152 16.2333 5.09806 16.2477 5.09806 16.2477C6.10267 16.3197 6.62904 17.3045 6.62904 17.3045C7.52136 18.8711 8.97112 18.4188 9.5386 18.1567C9.62984 17.4936 9.89052 17.0413 10.1753 16.7853C7.95548 16.5273 5.62142 15.6474 5.62142 11.7174C5.62142 10.6 6.01143 9.683 6.64809 8.96752C6.54682 8.70744 6.20092 7.66403 6.74734 6.25364C6.74734 6.25364 7.58652 5.97711 9.49649 7.30321C10.3122 7.07569 11.1536 6.95955 11.999 6.95781C12.8444 6.95921 13.6859 7.07536 14.5015 7.30321C16.4125 5.97608 17.2507 6.25364 17.2507 6.25364C17.7971 7.66403 17.4542 8.70744 17.3499 8.96752C17.9916 9.683 18.3766 10.5989 18.3766 11.7174C18.3766 15.6576 16.0405 16.5232 13.8127 16.7771C14.1686 17.0937 14.4895 17.7188 14.4895 18.6748C14.4895 20.0461 14.4774 21.1522 14.4774 21.4884C14.4774 21.7629 14.6559 22.0815 15.1662 21.9808C19.1386 20.6218 22 16.7812 22 12.253C22 6.58979 17.5234 1.99983 12 1.99983Z" fill="currentColor" fill-opacity="100"/>
+                              </g>
+                              <defs>
+                                <clipPath id="clip0_93_1282">
+                                  <rect width="24" height="24" fill="currentColor"/>
+                                </clipPath>
+                              </defs>
+                            </svg>
+                        </a
+                    >
+                </li>
+                <li class="nav-item" style="margin-left: 3px;">
+                    <a
+                        class="nav-link nav-link-icon"
+                        href="https://elodin.app/discord"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 22 22" fill="currentColor">
+                              <g clip-path="url(#clip0_93_1283)">
+                                <path d="M14.8333 4C14.6351 4.35507 14.4584 4.72177 14.3042 5.0981C12.7896 4.85856 11.2468 4.85856 9.73217 5.0981C9.57802 4.72177 9.40134 4.35507 9.20308 4C7.77634 4.24378 6.38936 4.68036 5.08023 5.29775C2.73922 8.67619 1.67756 12.7777 2.08541 16.8677C3.61101 18.0146 5.32326 18.8893 7.14665 19.4532C7.56184 18.9048 7.93239 18.3239 8.25473 17.7162C7.65983 17.4969 7.08804 17.2194 6.54768 16.8877C6.69589 16.7891 6.83608 16.6789 6.96696 16.5582C8.54269 17.3172 10.2692 17.7114 12.0182 17.7114C13.7672 17.7114 15.4937 17.3172 17.0695 16.5582C17.2092 16.678 17.349 16.7878 17.4887 16.8877C16.9454 17.2167 16.3742 17.4973 15.7817 17.7262C16.0907 18.3477 16.4513 18.9421 16.8598 19.5031C18.6809 18.9411 20.3902 18.0662 21.9111 16.9176C22.3287 12.8269 21.2662 8.722 18.9163 5.34767C17.6218 4.71749 16.2486 4.26421 14.8333 4ZM8.70395 14.5318C8.2044 14.4959 7.73816 14.2679 7.40312 13.8956C7.06808 13.5234 6.89029 13.0358 6.90706 12.5352C6.88775 12.034 7.06467 11.545 7.40022 11.1722C7.73576 10.7994 8.20347 10.5721 8.70395 10.5387C9.20442 10.5721 9.67213 10.7994 10.0077 11.1722C10.3432 11.545 10.5201 12.034 10.5008 12.5352C10.5201 13.0364 10.3432 13.5254 10.0077 13.8982C9.67213 14.2711 9.20442 14.4983 8.70395 14.5318ZM15.3325 14.5318C14.8329 14.4959 14.3667 14.2679 14.0316 13.8956C13.6966 13.5234 13.5188 13.0358 13.5356 12.5352C13.5163 12.034 13.6932 11.545 14.0287 11.1722C14.3643 10.7994 14.832 10.5721 15.3325 10.5387C15.8339 10.5696 16.3031 10.7961 16.6391 11.1695C16.9752 11.5429 17.1512 12.0333 17.1294 12.5352C17.1512 13.0371 16.9752 13.5275 16.6391 13.9009C16.3031 14.2743 15.8339 14.5008 15.3325 14.5318Z" fill="currentColor" fill-opacity="100"/>
+                              </g>
+                              <defs>
+                                <clipPath id="clip0_93_1283">
+                                  <rect width="24" height="24" fill="currentColor"/>
+                                </clipPath>
+                              </defs>
+                            </svg>
+                        </a
+                    >
+                </li>
+                <li class="nav-item">
+                    <button
+                        id="mode"
+                        class="btn btn-link order-2 order-md-4"
+                        type="button"
+                        aria-label="Toggle mode"
+                    >
+                        <span class="toggle-dark"
+                            ><svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="feather feather-sun"
+                            >
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line
+                                    x1="4.22"
+                                    y1="4.22"
+                                    x2="5.64"
+                                    y2="5.64"
+                                ></line>
+                                <line
+                                    x1="18.36"
+                                    y1="18.36"
+                                    x2="19.78"
+                                    y2="19.78"
+                                ></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line
+                                    x1="4.22"
+                                    y1="19.78"
+                                    x2="5.64"
+                                    y2="18.36"
+                                ></line>
+                                <line
+                                    x1="18.36"
+                                    y1="5.64"
+                                    x2="19.78"
+                                    y2="4.22"
+                                ></line></svg
+                        ></span>
+                        <span class="toggle-light"
+                            ><svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <g id="icon_24_moon">
+                            <path id="Vector" d="M12.0973 11.903C10.8268 10.632 9.96157 9.01282 9.61092 7.25019C9.26027 5.48756 9.43996 3.66054 10.1273 2C8.16761 2.38579 6.36755 3.34738 4.95733 4.76177C1.01423 8.705 1.01423 15.099 4.95733 19.0422C8.90144 22.9864 15.2942 22.9854 19.2383 19.0422C20.6523 17.6321 21.6138 15.8324 22 13.8731C20.3395 14.5603 18.5126 14.7399 16.75 14.3893C14.9875 14.0386 13.3684 13.1734 12.0973 11.903Z" fill="#FFFBF0" fill-opacity="0.9"/>
+                            </g>
+                            </svg>
+                                <path
+                                    d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                                ></path></svg
+                        ></span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+{% endmacro %}

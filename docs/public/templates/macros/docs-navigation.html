@@ -1,0 +1,26 @@
+{% macro docs_navigation(page, current_section) %}
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+    {% set index_path = current_section ~ "/_index.md" |
+    trim_start_matches(pat="/") %} {% set index = get_section(path=index_path)
+    %} {% if index.subsections %} {% for s in index.subsections %} {% set
+    subsection = get_section(path=s) %} {% if subsection.pages %} {% for p in
+    subsection.pages %} {% if p.extra.order == page.extra.order - 1 %}
+    <a href="{{ p.permalink }}">
+        <div>
+            <div class="footer-card">&larr; {{ p.title }}</div>
+        </div>
+    </a>
+    {% elif p.title == page.title %}
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+    {% endif %} {% if p.extra.order == page.extra.order + 1 %}
+    <a href="{{ p.permalink }}">
+        <div>
+            <div class="footer-card">{{ p.title }} &rarr;</div>
+        </div>
+    </a>
+    {% endif %} {% endfor %} {% endif %} {% endfor %} {% endif %}
+</div>
+{% endmacro %}

@@ -17,10 +17,6 @@
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
-    npmlock2nix = {
-      url = "github:nix-community/npmlock2nix/9197bbf397d76059a76310523d45df10d2e4ca81";
-      flake = false;
-    };
   };
 
   outputs = inputs@{ self, nixpkgs, flake-parts, rust-overlay, systems, ... }:

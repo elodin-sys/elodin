@@ -1,33 +1,26 @@
 { config, self', pkgs, lib, flakeInputs, ... }:
 let
-  nl2nix = import flakeInputs.npmlock2nix { inherit pkgs; };
-
-  node_modules = nl2nix.v2.node_modules {
-    src = ../docs/public;
-    nodejs = pkgs.nodejs_22;
-  };
-
   app = pkgs.stdenv.mkDerivation {
     name = "app";
     src = ../docs/public;
 
-    buildInputs = [ node_modules ];
+    buildInputs = [ pkgs.zola ];
+    buildPhase = "zola build";
 
     installPhase = ''
       mkdir -p $out/app
-      cp -r ${node_modules}/node_modules $out/app
-      cp -r ./. $out/app
+      cp -r ./public $out/app/public
     '';
   };
 
   docker_attrs = {
     name = "elo-docs";
     tag = "latest";
-    contents = [ pkgs.nodejs_22 app pkgs.cacert pkgs.busybox ];
+    contents = [ pkgs.static-web-server app pkgs.cacert pkgs.busybox ];
     config = {
-      Env = ["SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"];
-      Cmd = [ "node_modules/.bin/mintlify" "dev" ];
-      ExposedPorts = { "3000/tcp" = {}; };
+      Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+      Cmd = [ "sh" "-c" "static-web-server -p 1111"];
+      ExposedPorts = { "1111/tcp" = {}; };
       WorkingDir = "/app";
     };
   };

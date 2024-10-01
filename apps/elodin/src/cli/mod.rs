@@ -18,6 +18,8 @@ pub struct Cli {
     url: String,
     #[command(subcommand)]
     command: Option<Commands>,
+    #[arg(long, hide = true)]
+    markdown_help: bool,
 }
 
 #[derive(Subcommand, Clone)]
@@ -41,6 +43,11 @@ impl Cli {
     }
 
     pub fn run(self) -> miette::Result<()> {
+        if self.markdown_help {
+            clap_markdown::print_help_markdown::<Cli>();
+            std::process::exit(0);
+        }
+
         let filter = if std::env::var("RUST_LOG").is_ok() {
             EnvFilter::builder().from_env_lossy()
         } else {

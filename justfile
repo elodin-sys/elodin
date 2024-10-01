@@ -110,7 +110,7 @@ promote tag:
 public-changelog:
   #!/usr/bin/env sh
   cd {{justfile_directory()}}
-  ./scripts/public-changelog.sh CHANGELOG.md > docs/public/reference/changelog.mdx
-  old_version=$(jq -r '.versions[0]' docs/public/mint.json)
+  ./scripts/public-changelog.sh CHANGELOG.md > docs/public/content/releases/changelog.md
+  old_version=$(cat ./docs/public/config.toml | yq -p toml '.extra.version')
   new_version="v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
-  sed -i "" "s/$old_version/$new_version/g" docs/public/mint.json
+  sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
