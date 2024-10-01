@@ -23,7 +23,7 @@ let
     mixFodDeps = beam_pkgs.fetchMixDeps {
       inherit src version;
       pname = "mix-deps-dashboard";
-      hash = "sha256-w1opt7FMFIn/vgtQQ+ffW7L2dnTZTJMrGBbGvYuft2A=";
+      hash = "sha256-3T+VBDdbBgImubjb2COWJHcMsHKJSwT/TguESD+FGMQ=";
     };
     ELODIN_TYPES_PATH = "./vendor/elodin_types";
     preConfigure = ''
