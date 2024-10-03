@@ -389,8 +389,8 @@ impl CargoRecipe {
         iter::once(if self.path.is_dir() {
             self.path.clone()
         } else {
-            self.path
-                .parent()
+            let path = std::fs::canonicalize(&self.path).expect("failed to canoncilize path");
+            path.parent()
                 .expect("manifest path didn't have a parent")
                 .to_path_buf()
         })

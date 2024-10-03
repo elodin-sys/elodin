@@ -78,9 +78,9 @@ impl SimRecipe {
         let dir = if self.path.is_dir() {
             self.path.clone()
         } else {
-            self.path
-                .parent()
-                .expect("path does not a directory")
+            let path = std::fs::canonicalize(&self.path)?;
+            path.parent()
+                .expect("path does not have a parent directory")
                 .to_path_buf()
         };
         let (tx, rx) = flume::unbounded();
