@@ -140,7 +140,7 @@ impl Cli {
 #[derive(miette::Diagnostic, thiserror::Error, Debug)]
 pub enum LicenseKeyError {
     #[error(
-        "Your account does not have an Elodin license. Please purchase on before using the CLI"
+        "Your account does not have an Elodin license. Please purchase one before using the CLI"
     )]
     #[diagnostic(code(elodin::no_license), url("https://www.elodin.systems/pricing"))]
     NoLicenseKey,
