@@ -109,8 +109,6 @@ promote tag:
   gsutil -m cp -r "$dir/*" "gs://elodin-releases/{{tag}}/"
   gsutil -m cp -r "gs://elodin-releases/{{tag}}/*" "gs://elodin-releases/latest/"
   uvx twine upload "$dir/*.whl"
-  git branch -f prod {{tag}}
-  git push origin prod
 
 public-changelog:
   #!/usr/bin/env sh
