@@ -3,8 +3,8 @@
 1. Ensure `CHANGELOG.md` is up to date by inspecting all changes since the last tag. You can do this with `git log $(git describe --tags --abbrev=0).. --oneline`. If there are any public-facing changes that are not in the changelog, add them to the `unreleased` section.
 2. Based on the changes, decide on a patch or minor version bump. If there's a breaking API change, bump the minor version. Since we're in pre-1.0, we can make breaking changes in minor versions.
 3. Add a new section to `CHANGELOG.md` with the new version number and move all changes from the `unreleased` section to the new section. If there are no changes in the `unreleased` section, you can skip this step and the next step.
-4. Run `just public-changelog` to generate the public-facing changelog in the docs site from the `CHANGELOG.md` file.
-5. Update the version in `Cargo.toml` to the new version number. Make sure to update the version numbers in the `[workspace.dependencies]` section as well. Run `cargo check` to ensure that the lock file is updated.
+4. Update the version in `Cargo.toml` to the new version number. Make sure to update the version numbers in the `[workspace.dependencies]` section as well. Run `cargo check` to ensure that the lock file is updated.
+5. Run `just public-changelog` to generate the public-facing changelog in the docs site from the `CHANGELOG.md` file.
 6. Create a new release branch with the new version number. For example, if the new version is `0.1.2`, create a branch named `release/v0.1.2` by running `git checkout -b release/v0.1.2`.
 7. Add and commit the changes to the release branch by running `git commit -am "chore: release v0.1.2"`.
 8. Push the release branch to the remote repository by running `git push -u origin release/v0.1.2`.

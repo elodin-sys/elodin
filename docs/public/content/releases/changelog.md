@@ -14,6 +14,10 @@ order = 1
 +++
 
 
+## v0.7.4
+- **(fix)** Fix bug where `editor run` would fail if the simulation file was in the current directory because it would attempt to get the parent directory without canonicalizing the path.
+- **(fix)** Fix `elodin login` in WSL. Previously, it would fail when attempting to open the browser. Now, it will print the URL to the console and you can copy and paste it into your browser.
+
 ## v0.7.2
 - Use logical scan codes for the editor's key bindings. This means that keyboard shortcuts will respect your keyboard layout. For example, if you remap your Caps Lock key to Ctrl, the editor will treat Caps Lock as Ctrl as well.
 

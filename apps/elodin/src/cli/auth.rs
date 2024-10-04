@@ -158,7 +158,8 @@ impl Cli {
         let expires_in_mins = expires_in / 60;
         println!("Login via the browser: {verification_uri_complete}.");
         println!("You should see the following code: {user_code}, which expires in {expires_in_mins} minutes.");
-        opener::open_browser(verification_uri_complete).into_diagnostic()?;
+        // Open browser if possible
+        let _ = opener::open_browser(verification_uri_complete);
 
         // request access token
         loop {
