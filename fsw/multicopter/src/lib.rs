@@ -8,6 +8,7 @@ use hal as _;
 use panic_probe as _;
 
 pub mod arena;
+pub mod bsp;
 pub mod dma;
 pub mod dshot;
 pub mod peripheral;
