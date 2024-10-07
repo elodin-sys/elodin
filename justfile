@@ -49,19 +49,28 @@ sync-assets:
 
 sync-open-source:
   git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --path libs/noxla --path libs/s10 --prune-empty always --target ../elodin
-  cd ../elodin; git fetch origin main; git rebase origin/main --committer-date-is-author-date
+  (cd ../elodin && \
+   git checkout -b old-main origin/main && \
+   git rebase main --committer-date-is-author-date && \
+   git checkout main && \
+   git reset --hard old-main && \
+   git branch -D old-main)
 
 [confirm("Are you sure you want to force push to elodin-sys/elodin?")]
 force-push-open-source: sync-open-source
   cd ../elodin; git push --force
 
+version:
+  @echo "v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
+
 auto-tag:
   #!/usr/bin/env sh
-  if git tag --points-at HEAD | grep -q .; then
-    echo "HEAD already has a tag"; exit 0
-  fi
   current_tag=$(git describe --tags --abbrev=0)
-  new_tag=$(echo $current_tag | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+  new_tag=$(just version)
+  if [ "$current_tag" = "$new_tag" ]; then
+    echo "Latest tag is already '$new_tag'"; exit 0
+  fi
+  echo "🏷️ Tagging HEAD with '$new_tag'"
   git tag -a $new_tag -m "Elodin $new_tag"
   git push origin $new_tag
   just re-tag-images $(git rev-parse HEAD) $new_tag
@@ -115,5 +124,5 @@ public-changelog:
   cd {{justfile_directory()}}
   ./scripts/public-changelog.sh CHANGELOG.md > docs/public/content/releases/changelog.md
   old_version=$(cat ./docs/public/config.toml | yq -p toml '.extra.version')
-  new_version="v$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "elodin") | .version')"
+  new_version=$(just version)
   sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
