@@ -5,8 +5,9 @@ use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use fugit::RateExtU32 as _;
-use hal::{clocks::Clocks, pac};
+use hal::pac;
 
+use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{arena::DmaAlloc, dshot, peripheral::*, pin::*};
 
 #[cortex_m_rt::entry]
@@ -17,10 +18,15 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
     defmt::info!("Configured peripherals");
 
-    let clock_cfg = Clocks::default();
+    let clock_cfg = bsp::clock_cfg(dp.PWR);
     clock_cfg.setup().unwrap();
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
     defmt::info!("Configured clocks");
+
+    for tick in 0..1000 {
+        delay.delay_ms(10);
+        defmt::info!("Tick {}", tick);
+    }
 
     // Generate a 600kHz PWM signal on TIM3
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
