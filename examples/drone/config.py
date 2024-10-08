@@ -27,7 +27,7 @@ class Frame(Enum):
             throttle_factor = np.ones(4)
         else:
             raise ValueError(f"Unsupported frame: {self}")
-        pitch_factor = np.sin(motor_angles)
+        pitch_factor = -np.sin(motor_angles)
         roll_factor = np.sin(motor_angles - np.pi / 2)
 
         # scale factors to [-0.5, 0.5] for each axis
