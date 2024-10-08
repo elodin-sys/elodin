@@ -197,10 +197,7 @@ def rate_pid_state(state: RatePIDState, target: AngVelSetpoint, gyro: sensors.Gy
 
     e_prev, i_prev, d_prev = state
 
-    gyro_x, gyro_y, gyro_z = gyro
-    gyro_rpy = jnp.array([gyro_y, gyro_x, gyro_z])
-
-    e = target - gyro_rpy
+    e = target - gyro
     e = e_filter.apply(e_prev, e)
     i = i_prev + (e * dt)
     d = (e - e_prev) / dt
@@ -272,20 +269,12 @@ def attitude_control(
     prev_ang_vel_sp: AngVelSetpoint,
 ) -> AngVelSetpoint:
     att_body = pos.angular()
+    att_target = att_target * Config.GLOBAL.attitude
     target_to_body_rotation = att_body.inverse() * att_target
-    ang_vel_target_rpy = jnp.nan_to_num(util.euler_to_angular_rate(att_target, euler_rate_target))
-    ang_vel_target_xyz = jnp.array(
-        [
-            ang_vel_target_rpy[1],
-            ang_vel_target_rpy[0],
-            ang_vel_target_rpy[2],
-        ]
-    )
-    ang_vel_body_feedforward = target_to_body_rotation @ ang_vel_target_xyz
+    ang_vel_target = jnp.nan_to_num(util.euler_to_angular_rate(att_target, euler_rate_target))
+    ang_vel_body_feedforward = target_to_body_rotation @ ang_vel_target
     att_error, thrust_error_angle = thrust_vector_rotation_angles(att_target, att_body)
-    att_error_x, att_error_y, att_error_z = att_error
-    att_error_rpy = jnp.array([att_error_y, att_error_x, att_error_z])
-    ang_vel_body = att_error_rpy * Config.GLOBAL.control.angle_p_gains
+    ang_vel_body = att_error * Config.GLOBAL.control.angle_p_gains
 
     def feedforward(ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro):
         feedforward_scalar = (

@@ -8,8 +8,8 @@ from numpy._typing import NDArray
 
 def motor_positions(angles: NDArray[np.float64], distance: float) -> NDArray[np.float64]:
     # for each angle, calculate the x and y position of the motor
-    x = jnp.cos(angles)
-    y = jnp.sin(angles)
+    x = jnp.sin(angles)
+    y = -jnp.cos(angles)
     z = jnp.zeros_like(angles)
     return np.stack([x, y, z], axis=-1) * distance
 
