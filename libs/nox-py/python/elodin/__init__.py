@@ -435,11 +435,11 @@ class C:
 
 @dataclass
 class Body(Archetype):
-    world_pos: WorldPos = SpatialTransform.zero()
-    world_vel: WorldVel = SpatialMotion.zero()
-    inertia: Inertia = SpatialInertia(1.0)
-    force: Force = SpatialForce.zero()
-    world_accel: WorldAccel = SpatialMotion.zero()
+    world_pos: WorldPos = SpatialTransform()
+    world_vel: WorldVel = SpatialMotion()
+    inertia: Inertia = SpatialInertia(mass=1.0)
+    force: Force = SpatialForce()
+    world_accel: WorldAccel = SpatialMotion()
 
 
 @dataclass

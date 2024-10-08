@@ -44,25 +44,6 @@ impl SpatialTransform {
         }
     }
 
-    #[staticmethod]
-    fn from_linear(arr: PyObject) -> Self {
-        nox::SpatialTransform::from_linear(Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr))).into()
-    }
-
-    #[staticmethod]
-    fn from_angular(quat: Quaternion) -> Self {
-        nox::SpatialTransform::from_angular(quat.inner).into()
-    }
-
-    #[staticmethod]
-    fn from_axis_angle(axis: PyObject, angle: PyObject) -> Self {
-        nox::SpatialTransform::from_axis_angle(
-            Tensor::<_, _, Op>::from_inner(Noxpr::jax(axis)),
-            Tensor::<_, _, Op>::from_inner(Noxpr::jax(angle)),
-        )
-        .into()
-    }
-
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
@@ -81,11 +62,6 @@ impl SpatialTransform {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::SpatialTransform::from_inner(Noxpr::jax(jax)).into()
-    }
-
-    #[staticmethod]
-    pub fn zero() -> Self {
-        nox::SpatialTransform::zero().into()
     }
 
     fn linear(&self) -> Result<PyObject, Error> {
@@ -156,16 +132,6 @@ impl SpatialMotion {
         nox::SpatialMotion::new(angular, linear).into()
     }
 
-    #[staticmethod]
-    fn from_linear(arr: PyObject) -> Self {
-        nox::SpatialMotion::from_linear(Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr))).into()
-    }
-
-    #[staticmethod]
-    fn from_angular(arr: PyObject) -> Self {
-        nox::SpatialMotion::from_angular(Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr))).into()
-    }
-
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
         let jax = self.inner.clone().into_inner().to_jax()?;
         Ok(((jax,), None))
@@ -184,11 +150,6 @@ impl SpatialMotion {
     #[staticmethod]
     fn from_array(jax: PyObject) -> Self {
         nox::SpatialMotion::from_inner(Noxpr::jax(jax)).into()
-    }
-
-    #[staticmethod]
-    pub fn zero() -> Self {
-        nox::SpatialMotion::zero().into()
     }
 
     fn linear(&self) -> Result<PyObject, Error> {
@@ -252,21 +213,6 @@ impl SpatialForce {
                 .unwrap_or_else(Vector::zeros);
             Ok(nox::SpatialForce::new(angular, linear).into())
         }
-    }
-
-    #[staticmethod]
-    fn zero() -> Self {
-        nox::SpatialForce::zero().into()
-    }
-
-    #[staticmethod]
-    fn from_linear(arr: PyObject) -> Self {
-        nox::SpatialForce::from_linear(Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr))).into()
-    }
-
-    #[staticmethod]
-    fn from_torque(arr: PyObject) -> Self {
-        nox::SpatialForce::from_torque(Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr))).into()
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
