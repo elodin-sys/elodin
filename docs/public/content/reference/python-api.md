@@ -72,6 +72,7 @@ An edge is a relationship between two entities. See [elodin.GraphQuery] for info
 
     Create an edge between two entities given their unique ids.
 
+<br></br>
 ## Archetypes
 
 An archetype is a combination of components with a unique name. To define a new archetype, create a subclass of `elodin.Archetype` with the desired components as fields. Here is an example of an archetype for a kalman filter:
@@ -106,6 +107,59 @@ world.insert(
 )
 ```
 
+### _class_ `elodin.Body`
+
+`Body` is an archetype that represents the state of a rigid body with six degrees of freedom. It provides all of the spatial information necessary for the [elodin.six_dof] system
+
+- `__init__(world_pos, world_vel, inertia, force, world_accel)` -> [elodin.Body]
+
+  Create a body archetype initialized to the provided values.
+
+  - `world_pos` : [elodin.SpatialTransform], default is SpatialTransform()
+  - `world_vel` : [elodin.SpatialMotion], default is SpatialMotion()
+  - `inertia` : [elodin.SpatialInertia], default is SpatialInertia(1.0)
+  - `force` : [elodin.SpatialForce], default is SpatialForce()
+  - `world_accel` : [elodin.SpatialMotion], default is SpatialMotion()
+
+  {% alert(kind="warning") %}
+  Inertia is in body frame, all other representations are in the world frame. The Body archetype does not currently provide any derivations for the other values in body frame.
+  {% end %}
+
+### _class_ `elodin.Shape`
+
+`Shape` describes a basic entity for rendering 3D assets in Elodin.
+
+- `__init__(mesh, material)` -> [elodin.Shape]
+
+  Create a shape archetype initialized to the provided mesh and material.
+
+  - `mesh` : handle reference returned from `World.insert_asset()` using the [elodin.Mesh] class.
+  - `material` : handle reference returned from `World.insert_asset()` using the [elodin.Material] class.
+
+#### Example
+
+This example creates a simple simulation with a spinning cuboid body:
+
+```python
+import elodin as el
+import jax.numpy as jnp
+
+@el.map
+def spin(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce(torque=(inertia.mass() * jnp.array([0.0, 1.0, 0.0])))
+
+w = el.World()
+w.spawn(el.Panel.viewport(pos=[0.0, -5.0, 0.0], hdr=True))
+
+mesh = w.insert_asset(el.Mesh.cuboid(0.1, 0.8, 0.3))
+material = w.insert_asset(el.Material.color(25.3, 18.4, 1.0))
+w.spawn([el.Body(), el.Shape(mesh, material)], name="example")
+
+sys = el.six_dof(sys=spin)
+sim = w.run(sys, 1.0 / 120.0)
+```
+
+<br></br>
 ## Systems
 
 Systems are the building blocks of simulation; they are functions that operate on a set of input components and produce a set of output components. Elodin provides decorators that allow for systems to be easily defined from functions.
@@ -168,6 +222,57 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     )
 ```
 
+### `elodin.six_dof`
+
+Elodin has a built-in [6 Degrees of Freedom](https://en.wikipedia.org/wiki/Six_degrees_of_freedom) (6DoF) implementation for simulating [rigid bodies](https://en.m.wikipedia.org/wiki/Rigid_body), such as flight vehicles. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/six_dof.rs).
+
+- `six_dof(time_step, sys, integrator)` -> [elodin.System]
+
+    Create a system that models the 6DoF dynamics of a rigid body in 3D space. The provided set of systems can be integrated as effectors using the provided `integrator` and simulated in a world with a given `time_step`.
+
+    - `time_step` : `float`, The time step used when integrating a body's acceleration into its velocity and position. Defaults to the sim_time_step provided in World.run(...) if unset
+    - `sys` : one or more [elodin.System] instances used as effectors
+    - `integrator` : [elodin.Integrator], default is `Integrator.Rk4`
+
+#### Example
+A simple example of a 6DoF system that models gravity acting on a rigid body in 3D space.
+
+```python
+import elodin as el
+import jax.numpy as jnp
+
+WORLD_SIM_TIME_STEP = 1.0 / 120.0
+
+@el.map
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce(linear=(inertia.mass() * jnp.array([0.0, -9.81, 0.0])))
+
+w = el.World()
+w.spawn(el.Body(), name="example")
+sys = el.six_dof(sys=gravity, integrator=el.Integrator.Rk4)
+sim = w.run(sys, WORLD_SIM_TIME_STEP)
+```
+
+{% alert(kind="warning") %}
+You should never need to use the six_dof time_step parameter unless you need to simulate a sensor at a specific frequency different from the world simulation. This is an advanced feature and should be used with caution, and likely a symptom of needing to move your testing into your flight software & communicate with the simulation over Impel.
+{% end %}
+```python
+# lower frequency time step
+SIX_DOF_TIME_STEP = 1.0 / 60.0
+sys = el.six_dof(time_step=SIX_DOF_TIME_STEP, sys=gravity)
+sim = w.run(sys, WORLD_SIM_TIME_STEP)
+```
+
+### _class_ `elodin.Integrator`
+
+- `elodin.Integrator.Rk4` -> [elodin.Integrator]
+
+    Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods). The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/rk4.rs).
+
+- `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
+
+    Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method). The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/semi_implicit.rs).
+
 ### _class_ `elodin.Query`
 
 `Query` is the primary mechanism for accessing data in Elodin. It is a view into the world state that is filtered by the components specified in the query. Only entities that have been spawned with all of the query's components will be selected for processing. For example, the query `Query[WorldPos, Inertia]` would only select entities that have both a `WorldPos` and an `Inertia` component (typically via the `Body` [archetype](#archetypes)).
@@ -225,6 +330,7 @@ GravityEdge = typing.Annotated[elodin.Edge, elodin.Component("gravity_edge")]
 
     See the [Three-Body Orbit Tutorial](/get-started/3-body) for a practical example of using `edge_fold` to compute gravitational forces between entities.
 
+<br></br>
 ## Primitives
 
 ### _class_ `elodin.PrimitiveType`
@@ -278,7 +384,34 @@ Unit quaternions are used to represent spatial orientations and rotations of bod
 
     Rotate `vector` by computing the matrix product. The vector can be a plain [jax.Array] or one of the following spatial objects: [elodin.SpatialTransform], [elodin.SpatialMotion], [elodin.SpatialForce]. The return type is the same as the input type.
 
+###  _class_ `elodin.Mesh`
 
+A built in class for creating basic 3D meshes.
+
+- `cuboid(x: float, y: float, z: float)` -> [elodin.Mesh]
+
+    Create a cuboid mesh with dimensions `x`, `y`, and `z`.
+    - `x` : `float`
+    - `y` : `float`
+    - `z` : `float`
+
+- `sphere(radius: float)` -> [elodin.Mesh]
+
+    Create a sphere mesh with radius `radius`.
+    - `radius` : `float`
+
+###  _class_ `elodin.Material`
+
+A built in class for creating basic 3D materials.
+
+- `color(r: float, g: float, b: float)` -> [elodin.Material]
+
+    Create a material with RGB color values.
+    - `r` : `float`
+    - `g` : `float`
+    - `b` : `float`
+
+<br></br>
 ## Spatial Vector Algebra
 
 Elodin uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom. You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
@@ -378,11 +511,20 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 [elodin.Edge]: #class-elodin-edge
 [typing.Annotated]: https://docs.python.org/3/library/typing.html#typing.Annotated
 
+[elodin.Body]: #class-elodin-body
+[elodin.Shape]: #class-elodin-shape
+
+[elodin.System]: #elodin-system
 [elodin.Query]: #class-elodin-query
 [elodin.GraphQuery]: #class-elodin-graphquery
+[elodin.six_dof]: #elodin-six-dof
 
+[elodin.Integrator]: #class-elodin-integrator
 [elodin.PrimitiveType]: #class-elodin-primitivetype
 [elodin.Quaternion]: #class-elodin-quaternion
+[elodin.Mesh]: #class-elodin-mesh
+[elodin.Material]: #class-elodin-material
+
 [elodin.SpatialTransform]: #class-elodin-spatialtransform
 [elodin.SpatialMotion]: #class-elodin-spatialmotion
 [elodin.SpatialForce]: #class-elodin-spatialforce

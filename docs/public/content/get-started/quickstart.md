@@ -48,6 +48,8 @@ pip install -U elodin
 
 To use Elodin on Windows, the simulation server must run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows.
 
+[Video Walkthrough](https://www.loom.com/share/efcbf81e43074863807750d4ad2f8d7a?sid=9403e8c8-7893-4299-824e-2dacb6978120)
+
 In a Windows terminal launch the Elodin app.
 
 ```wsl
