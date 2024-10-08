@@ -399,7 +399,7 @@ def actuator_allocator(
         rw_query,
         control_query,
         RWForce,
-        el.SpatialForce.zero(),
+        el.SpatialForce(),
         lambda xs, axis, control_force: xs
         + el.SpatialForce(torque=np.dot(control_force.torque(), axis) * axis),
     )
@@ -454,7 +454,7 @@ class RWRel(el.Archetype):
 @dataclass
 class ReactionWheel(el.Archetype):
     axis: RWAxis
-    rw_force: RWForce = field(default_factory=el.SpatialForce.zero)
+    rw_force: RWForce = field(default_factory=lambda: el.SpatialForce())
     ang_momentum: RWAngMomentum = field(default_factory=lambda: np.zeros(3))
     speed: RWSpeed = field(default_factory=lambda: np.float64(0.0))
     voltage: RWVoltage = field(default_factory=lambda: np.float64(0.0))
@@ -471,7 +471,7 @@ def rw_effector(
         force_query,
         rw_query,
         el.Force,
-        el.SpatialForce.zero(),
+        el.SpatialForce(),
         lambda f, pos, force: f + el.SpatialForce(torque=pos.angular() @ force.torque()),
     )
 
@@ -531,7 +531,7 @@ sat = w.spawn(
         ),
         ControlInput(
             el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
-            el.SpatialForce.zero(),
+            el.SpatialForce(),
         ),
         UserInput(np.array([0.0, 0.0, 0.0])),
         Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),

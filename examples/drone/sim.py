@@ -50,7 +50,7 @@ Torque = ty.Annotated[
 
 @dataclass
 class Drone(el.Archetype):
-    body_thrust: BodyThrust = field(default_factory=lambda: el.SpatialForce.zero())
+    body_thrust: BodyThrust = field(default_factory=lambda: el.SpatialForce())
     body_drag: BodyDrag = field(default_factory=lambda: jnp.zeros(3))
     thrust: Thrust = field(default_factory=lambda: jnp.zeros(4))
     torque: Torque = field(default_factory=lambda: jnp.zeros(4))

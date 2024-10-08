@@ -306,7 +306,7 @@ def actuator_allocator(
         rw_query,
         control_query,
         RWForce,
-        el.SpatialForce.zero(),
+        el.SpatialForce(),
         lambda xs, axis, control_force: xs
         + el.SpatialForce(
             torque=np.clip(
@@ -342,7 +342,7 @@ def rw_effector(
         force_query,
         rw_query,
         el.Force,
-        el.SpatialForce.zero(),
+        el.SpatialForce(),
         lambda f, _, force: f + force,
     )
 
@@ -373,7 +373,7 @@ def spawn_sat(x, y, w: el.World):
     rand_key = jax.random.key(sat_num)
     rw_1 = w.spawn(
         ReactionWheel(
-            rw_force=el.SpatialForce.zero(),
+            rw_force=el.SpatialForce(),
             axis=np.array([1.0, 0.0, 0.0]),
         ),
         name=f"Sat {sat_num} Reaction Wheel 1",
@@ -381,7 +381,7 @@ def spawn_sat(x, y, w: el.World):
 
     rw_2 = w.spawn(
         ReactionWheel(
-            rw_force=el.SpatialForce.zero(),
+            rw_force=el.SpatialForce(),
             axis=np.array([0.0, 1.0, 0.0]),
         ),
         name=f"Sat {sat_num} Reaction Wheel 2",
@@ -389,7 +389,7 @@ def spawn_sat(x, y, w: el.World):
 
     rw_3 = w.spawn(
         ReactionWheel(
-            rw_force=el.SpatialForce.zero(),
+            rw_force=el.SpatialForce(),
             axis=np.array([0.0, 0.0, 1.0]),
         ),
         name=f"Sat {sat_num} Reaction Wheel 3",
@@ -412,7 +412,7 @@ def spawn_sat(x, y, w: el.World):
             b,
             ControlInput(
                 el.Quaternion.from_axis_angle(np.array([1.0, 0.0, 0.0]), np.radians(0)),
-                el.SpatialForce.zero(),
+                el.SpatialForce(),
             ),
             UserInput(np.array([0.0, 0.0, 0.0])),
             Sensors(np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3)),
