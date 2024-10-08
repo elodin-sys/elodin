@@ -58,33 +58,32 @@ class Drone(el.Archetype):
 
 @el.map
 def motor_thrust_response(
-    pwm: motors.MotorPwm, prev_thrust: Thrust, prev_torque: Torque
-) -> tuple[Thrust, Torque]:
+    pwm: motors.MotorPwm, prev_thrust: Thrust, prev_torque: Torque, prev_rpm: motors.MotorRpm
+) -> tuple[Thrust, Torque, motors.MotorRpm]:
     dt = Config.GLOBAL.fast_loop_time_step
-    pwm_ref, thrust_ref, torque_ref = Config.GLOBAL.thrust_curve()
+    pwm_ref, thrust_ref, torque_ref, rpm_ref = Config.GLOBAL.thrust_curve()
     _, _, yaw_factor, _ = Config.GLOBAL.frame.motor_matrix
 
     thrust = jnp.interp(pwm, pwm_ref, thrust_ref)
     torque = jnp.interp(pwm, pwm_ref, torque_ref) * yaw_factor
+    rpm = jnp.interp(pwm, pwm_ref, rpm_ref)
 
     alpha = dt / (dt + params.MOT_TIME_CONST)
     thrust = prev_thrust + alpha * (thrust - prev_thrust)
     torque = prev_torque + alpha * (torque - prev_torque)
-    return thrust, torque
+    rpm = prev_rpm + alpha * (rpm - prev_rpm)
+    return thrust, torque, rpm
 
 
 @el.map
 def body_thrust(thrust: Thrust, torque: Torque) -> BodyThrust:
-    yaw_torque_sum = jnp.sum(torque)
-    body_thrust = el.SpatialForce(linear=jnp.array([0.0, 0.0, jnp.sum(thrust)]))
-    yaw_torque = el.SpatialForce(torque=jnp.array([0.0, 0.0, yaw_torque_sum]))
+    config = Config.GLOBAL
+    thrust_dir = config.motor_thrust_directions
+    torque_dir = config.motor_torque_axes
+    body_thrust = el.SpatialForce(linear=jnp.sum(thrust_dir * thrust[:, None], axis=0))
+    yaw_torque = el.SpatialForce(torque=jnp.sum(thrust_dir * torque[:, None], axis=0))
     # additional torque from differential thrust:
-    pitch_roll_torque = el.SpatialForce(
-        torque=jnp.sum(
-            Config.GLOBAL.motor_torque_axes * thrust[:, None],
-            axis=0,
-        )
-    )
+    pitch_roll_torque = el.SpatialForce(torque=jnp.sum(torque_dir * thrust[:, None], axis=0))
     return body_thrust + yaw_torque + pitch_roll_torque
 
 
@@ -132,7 +131,7 @@ def world() -> el.World:
                     track_rotation=False,
                     active=True,
                     show_grid=True,
-                    pos=[-0.5, -3.0, 0.5],
+                    pos=[-3.0, -0.5, 0.5],
                     looking_at=[0.0, 0.0, 0.5],
                 ),
             ),
@@ -155,9 +154,8 @@ def world() -> el.World:
         el.Panel.hsplit(
             el.Panel.vsplit(
                 el.Panel.graph(el.GraphEntity(drone, motors.MotorInput)),
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorThrust)),
-                el.Panel.graph(el.GraphEntity(drone, motors.MotorActuator)),
                 el.Panel.graph(el.GraphEntity(drone, motors.MotorPwm)),
+                el.Panel.graph(el.GraphEntity(drone, motors.MotorRpm)),
             ),
             el.Panel.vsplit(
                 el.Panel.graph(el.GraphEntity(drone, Thrust)),
