@@ -20,7 +20,7 @@ def gravity(
         f = G * M * m * r / (norm * norm * norm)
         return el.SpatialForce(linear=force.force() - f)
 
-    return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
+    return graph.edge_fold(query, query, el.Force, el.SpatialForce(), gravity_inner)
 
 
 w = el.World()

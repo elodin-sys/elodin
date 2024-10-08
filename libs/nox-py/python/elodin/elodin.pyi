@@ -98,35 +98,11 @@ class SpatialTransform:
         angular: Optional[Quaternion] = None,
         linear: Optional[jax.typing.ArrayLike] = None,
     ): ...
-    @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialTransform:
-        """
-        DEPRECATED: Use `SpatialTransform(linear=...)` instead.
-        """
-    @staticmethod
-    def from_angular(
-        quaternion: jax.typing.ArrayLike | Quaternion,
-    ) -> SpatialTransform:
-        """
-        DEPRECATED: Use `SpatialTransform(angular=...)` instead.
-        """
-    @staticmethod
-    def from_axis_angle(
-        axis: jax.typing.ArrayLike, angle: jax.typing.ArrayLike
-    ) -> SpatialTransform:
-        """
-        DEPRECATED: Use `SpatialTransform(angular=Quaternion.from_axis_angle(...))` instead.
-        """
     def flatten(self) -> Any: ...
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialTransform: ...
-    @staticmethod
-    def zero() -> SpatialTransform:
-        """
-        DEPRECATED: Use `SpatialTransform()` instead.
-        """
     def linear(self) -> jax.Array: ...
     def angular(self) -> Quaternion: ...
     def asarray(self) -> jax.typing.ArrayLike: ...
@@ -149,21 +125,6 @@ class SpatialForce:
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
     def asarray(self) -> jax.typing.ArrayLike: ...
-    @staticmethod
-    def zero() -> SpatialForce:
-        """
-        DEPRECATED: Use `SpatialForce()` instead.
-        """
-    @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialForce:
-        """
-        DEPRECATED: Use `SpatialForce(linear=...)` instead.
-        """
-    @staticmethod
-    def from_torque(torque: jax.typing.ArrayLike) -> SpatialForce:
-        """
-        DEPRECATED: Use `SpatialForce(torque=...)` instead.
-        """
     def force(self) -> jax.typing.ArrayLike: ...
     def torque(self) -> jax.typing.ArrayLike: ...
     def __add__(self, other: SpatialForce) -> SpatialForce: ...
@@ -181,18 +142,6 @@ class SpatialMotion:
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
     def asarray(self) -> jax.typing.ArrayLike: ...
-    @staticmethod
-    def zero() -> SpatialMotion: ...
-    @staticmethod
-    def from_linear(linear: jax.typing.ArrayLike) -> SpatialMotion:
-        """
-        DEPRECATED: Use `SpatialMotion(linear=...)` instead.
-        """
-    @staticmethod
-    def from_angular(angular: jax.typing.ArrayLike) -> SpatialMotion:
-        """
-        DEPRECATED: Use `SpatialMotion(angular=...)` instead.
-        """
     def linear(self) -> jax.Array: ...
     def angular(self) -> jax.Array: ...
     def __add__(self, other: SpatialMotion) -> SpatialMotion: ...
