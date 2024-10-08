@@ -248,7 +248,7 @@ class Rocket(el.Archetype):
     center_of_gravity: CenterOfGravity = field(default_factory=lambda: jnp.float64(0.2))
     mach: Mach = field(default_factory=lambda: jnp.float64(0.0))
     dynamic_pressure: DynamicPressure = field(default_factory=lambda: jnp.float64(0.0))
-    aero_force: AeroForce = field(default_factory=lambda: el.SpatialForce.zero())
+    aero_force: AeroForce = field(default_factory=lambda: el.SpatialForce())
     wind: Wind = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0]))
     motor: Motor = field(default_factory=lambda: jnp.float64(0.0))
     fin_deflect: FinDeflect = field(default_factory=lambda: jnp.float64(0.0))

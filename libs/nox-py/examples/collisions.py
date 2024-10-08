@@ -26,7 +26,7 @@ def bounce(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
             v,
             inertia,
         ),
-        lambda: el.SpatialMotion.zero(),
+        lambda: el.SpatialMotion(),
     )
 
 
@@ -56,7 +56,7 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
                     v,
                     inertia,
                 ),
-                lambda: el.SpatialMotion.zero(),
+                lambda: el.SpatialMotion(),
             )
         else:
             v += jax.lax.cond(
@@ -67,7 +67,7 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
                     v,
                     inertia,
                 ),
-                lambda: el.SpatialMotion.zero(),
+                lambda: el.SpatialMotion(),
             )
     return v
 
@@ -135,11 +135,11 @@ def collide(
         impulse = jax.lax.cond(
             dist <= 0.8,
             lambda: collison_impulse(norm, r_a, r_b, vel_a, inertia_a, vel_b, inertia_b),
-            lambda: el.SpatialMotion.zero(),
+            lambda: el.SpatialMotion(),
         )
         return acc + impulse
 
-    impulse = graph.edge_fold(query, query, el.WorldVel, el.SpatialMotion.zero(), collide_inner)
+    impulse = graph.edge_fold(query, query, el.WorldVel, el.SpatialMotion(), collide_inner)
     return vel.join(impulse).map(el.WorldVel, lambda vel, impulse: vel + impulse)
 
 
