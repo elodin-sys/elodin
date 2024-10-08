@@ -20,31 +20,21 @@ MotorInput = ty.Annotated[
     ),
 ]
 
-MotorThrust = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "motor_thrust",
-        el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "m0,m1,m2,m3"},
-    ),
-]
-
-MotorActuator = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "motor_actuator",
-        el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "m0,m1,m2,m3"},
-    ),
-]
-
-
 MotorPwm = ty.Annotated[
     jax.Array,
     el.Component(
         "motor_pwm",
         el.ComponentType(el.PrimitiveType.F64, (4,)),
-        metadata={"element_names": "m0,m1,m2,m3"},
+        metadata={"element_names": "m1,m2,m3,m4"},
+    ),
+]
+
+MotorRpm = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "motor_rpm",
+        el.ComponentType(el.PrimitiveType.F64, (4,)),
+        metadata={"element_names": "m1,m2,m3,m4"},
     ),
 ]
 
@@ -52,13 +42,12 @@ MotorPwm = ty.Annotated[
 @dataclass
 class Motors(el.Archetype):
     motor_input: MotorInput = field(default_factory=lambda: jnp.zeros(4))
-    motor_thrust: MotorThrust = field(default_factory=lambda: jnp.zeros(4))
-    motor_actuator: MotorActuator = field(default_factory=lambda: jnp.zeros(4))
     motor_pwm: MotorPwm = field(default_factory=lambda: jnp.zeros(4))
+    motor_rpm: MotorRpm = field(default_factory=lambda: jnp.zeros(4))
 
 
 @el.map
-def motor_input_to_thrust(inputs: MotorInput) -> MotorThrust:
+def motor_input_to_pwm(inputs: MotorInput) -> MotorPwm:
     mot_thst_hover = Config.GLOBAL.control.motor_thrust_hover
     roll_factor, pitch_factor, yaw_factor, throttle_factor = Config.GLOBAL.frame.motor_matrix
     # roll input range: -1 to 1
@@ -102,12 +91,8 @@ def motor_input_to_thrust(inputs: MotorInput) -> MotorThrust:
     thr_adj = jnp.where(rpy_scale < 1.0, jnp.float64(0.0), thr_adj)
     thr_adj = jnp.clip(thr_adj, 0.0, 1.0 - (throttle_best_rpy + rpy_high))
 
-    out = (throttle_best_rpy + thr_adj) * throttle_factor + out * rpy_scale
-    return out
+    linear_throttle = (throttle_best_rpy + thr_adj) * throttle_factor + out * rpy_scale
 
-
-@el.map
-def motor_thrust_to_actuator(linear_throttle: MotorThrust) -> MotorActuator:
     def apply_thrust_curve_scaling(y: jax.Array) -> jax.Array:
         # y = ax^2 + bx + c, where b = (1-a), c = 0
         # ax^2 + bx - y = 0
@@ -120,13 +105,9 @@ def motor_thrust_to_actuator(linear_throttle: MotorThrust) -> MotorActuator:
 
     linear_throttle = jnp.clip(linear_throttle, 0.0, 1.0)
     # scale throttle from [0, 1] to [MIN_THROTTLE, MAX_THROTTLE]
-    scaled_throttle = apply_thrust_curve_scaling(linear_throttle)
-    return scaled_throttle
+    actuator = apply_thrust_curve_scaling(linear_throttle)
 
-
-@el.map
-def motor_actuator_to_pwm(actuator: MotorActuator) -> MotorPwm:
     return actuator * (params.MOT_PWM_THST_MAX - params.MOT_PWM_THST_MIN) + params.MOT_PWM_THST_MIN
 
 
-output = motor_input_to_thrust | motor_thrust_to_actuator | motor_actuator_to_pwm
+output = motor_input_to_pwm
