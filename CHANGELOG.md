@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** Remove deprecated `from_linear`, `from_angular`, and `zero` static methods from spatial types. Use the constructor instead with optional arguments.
 
 ## v0.7.4
 - **(fix)** Fix bug where `editor run` would fail if the simulation file was in the current directory because it would attempt to get the parent directory without canonicalizing the path.

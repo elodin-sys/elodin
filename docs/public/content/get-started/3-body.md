@@ -57,7 +57,7 @@ def gravity(
         M = b_inertia.mass()
         norm = la.norm(r)
         f = G * M * m * r / (norm * norm * norm)
-        return el.SpatialForce.from_linear(force.force() - f)
+        return el.SpatialForce(linear=force.force() - f)
 
     return graph.edge_fold(query, query, el.Force, el.SpatialForce.zero(), gravity_inner)
 ```
@@ -69,8 +69,8 @@ w = el.World()
 a = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([0.8822391241, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, 1.0042424155, 0])),
+            world_pos=el.SpatialTransform(linear=np.array([0.8822391241, 0, 0])),
+            world_vel=el.SpatialMotion(linear=np.array([0, 1.0042424155, 0])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(25.3, 18.4, 1.0))),
@@ -80,8 +80,8 @@ a = w.spawn(
 b = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([-0.6432718586, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, -1.6491842814, 0])),
+            world_pos=el.SpatialTransform(linear=np.array([-0.6432718586, 0, 0])),
+            world_vel=el.SpatialMotion(linear=np.array([0, -1.6491842814, 0])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(10.0, 0.0, 10.0))),
@@ -124,8 +124,8 @@ And last but not least, we will add the third body which will make this a stable
 c = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform.from_linear(np.array([-0.2389672654, 0, 0])),
-            world_vel=el.SpatialMotion.from_linear(np.array([0, 0.6449418659, 0.0])),
+            world_pos=el.SpatialTransform(linear=np.array([-0.2389672654, 0, 0])),
+            world_vel=el.SpatialMotion(linear=np.array([0, 0.6449418659, 0.0])),
             inertia=el.SpatialInertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(00.0, 1.0, 10.0))),

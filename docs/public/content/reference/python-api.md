@@ -158,13 +158,13 @@ import elodin as el
 
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
-    return f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0]))
+    return f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0]))
 
 @el.system
 def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     return query.map(
         el.Force,
-        lambda f, inertia: f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+        lambda f, inertia: f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
     )
 ```
 
@@ -183,7 +183,7 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
         return query.map(
             el.Force,
-            lambda f, inertia: f + el.SpatialForce.from_linear(inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+            lambda f, inertia: f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
         )
     ```
 
