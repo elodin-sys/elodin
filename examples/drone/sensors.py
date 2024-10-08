@@ -54,15 +54,6 @@ AccelBias = ty.Annotated[
         metadata={"element_names": "x,y,z"},
     ),
 ]
-# idealized accelerometer that only considers gravity
-GravityAccel = ty.Annotated[
-    jax.Array,
-    el.Component(
-        "gravity_accel",
-        el.ComponentType(el.PrimitiveType.F64, (3,)),
-        metadata={"element_names": "x,y,z"},
-    ),
-]
 AccelLPFDelay = ty.Annotated[
     jax.Array,
     el.Component(
@@ -129,7 +120,6 @@ class IMU(el.Archetype):
     accel_bias: AccelBias = field(default_factory=lambda: jnp.zeros(3))
     mag: Magnetometer = field(default_factory=lambda: jnp.array([0.0, 1.0, 0.0]))
     mag_bias: MagnetometerBias = field(default_factory=lambda: jnp.zeros(3))
-    grav_accel: GravityAccel = field(default_factory=lambda: jnp.zeros(3))
     gyro_lpf_delay: GyroLPFDelay = field(default_factory=lambda: jnp.zeros((4, 3)))
     accel_lpf_delay: AccelLPFDelay = field(default_factory=lambda: jnp.zeros((4, 3)))
 
@@ -216,9 +206,4 @@ def accel_health(accel: Accel, gyro: Gyro) -> AccelHealth:
     return health
 
 
-@el.map
-def gravity_accel(p: el.WorldPos, a: Accel) -> GravityAccel:
-    return p.angular().inverse() @ jnp.array([0.0, 0.0, 1.0])
-
-
-imu = advance_sensor_tick | update_gyro_noise | gyro | accel | accel_health | mag | gravity_accel
+imu = advance_sensor_tick | update_gyro_noise | gyro | accel | accel_health | mag

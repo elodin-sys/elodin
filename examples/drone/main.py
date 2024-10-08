@@ -51,22 +51,17 @@ EDU_450_CONFIG = Config(
 #        X
 # (CCW) 2 4 (CW)
 
-# Body frame coordinate system:
-# +X: right when looking forward with roll angle 0
-# +Y: along the body centerline towards the node
-# +Z: up when looking forward with roll angle 0
-
 q_tilt_right = el.Quaternion.from_axis_angle(
-    axis=np.array([0.0, 1.0, 0.0]),
+    axis=np.array([1.0, 0.0, 0.0]),
     angle=np.deg2rad(5.0),
 )
 q_tilt_left = el.Quaternion.from_axis_angle(
-    axis=np.array([0.0, 1.0, 0.0]),
+    axis=np.array([1.0, 0.0, 0.0]),
     angle=np.deg2rad(-5.0),
 )
 q_tilt_back = el.Quaternion.from_axis_angle(
-    axis=np.array([1.0, 0.0, 0.0]),
-    angle=np.deg2rad(3.75),
+    axis=np.array([0.0, 1.0, 0.0]),
+    angle=np.deg2rad(-3.75),
 )
 up = np.array([0.0, 0.0, 1.0])
 motor_thrust_directions = jnp.array(
@@ -94,15 +89,15 @@ TALON_QUAD_CONFIG = Config(
         attitude_control_input_tc=0.2,  # soft
         pilot_yaw_rate_tc=0.25,  # soft
     ),
-    drone_glb="https://storage.googleapis.com/elodin-assets/talon-quad.glb",
+    drone_glb="https://storage.googleapis.com/elodin-assets/talon-quad-v2.glb",
     mass=2.586,
-    inertia_diagonal=np.array([0.1149, 0.0854, 0.1604]),
+    inertia_diagonal=np.array([0.0854, 0.1149, 0.1604]),
     start_pos=np.array([0.0, 0.0, 2.0]),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
     motor_positions=np.array(
         [
-            [0.2075, -0.2015, -0.2075, 0.2015],  # X position for each motor
-            [0.26, -0.26, 0.26, -0.26],  # Y position for each motor
+            [0.26, -0.26, 0.26, -0.26],  # X position for each motor
+            [-0.2075, 0.2015, 0.2075, -0.2015],  # Y position for each motor
             [-0.0215, 0.0215, -0.0215, 0.0215],  # Z position for each motor
         ]
     ).T,
