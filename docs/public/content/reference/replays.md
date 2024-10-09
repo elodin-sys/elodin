@@ -2,7 +2,7 @@
 title = "Replays"
 description = "Replays"
 draft = false
-weight = 104
+weight = 105
 sort_by = "weight"
 template = "reference/page.html"
 
@@ -10,7 +10,7 @@ template = "reference/page.html"
 toc = true
 top = false
 icon = ""
-order = 4
+order = 5
 +++
 
 Elodin has built-in functionality to save simulation data to a directory. This data can be used to replay the simulation at a later time. This is useful for debugging, testing, and sharing simulations. Replays also enable running simulations in a headless environment, and then replaying them in a graphical environment.

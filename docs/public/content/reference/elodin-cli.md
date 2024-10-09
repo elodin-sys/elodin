@@ -2,7 +2,7 @@
 title = "Elodin CLI"
 description = "Elodin CLI"
 draft = false
-weight = 103
+weight = 104
 sort_by = "weight"
 template = "reference/page.html"
 
@@ -10,7 +10,7 @@ template = "reference/page.html"
 toc = true
 top = false
 icon = ""
-order = 3
+order = 4
 +++
 
 # Command-Line Help for `elodin`
@@ -161,4 +161,3 @@ Create template
     This document was generated automatically by
     <a href="https://crates.io/crates/clap-markdown"><code>clap-markdown</code></a>.
 </i></small>
-
