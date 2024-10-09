@@ -2,7 +2,7 @@
 title = "Python API"
 description = "Python API"
 draft = false
-weight = 102
+weight = 103
 sort_by = "weight"
 template = "reference/page.html"
 
@@ -10,7 +10,7 @@ template = "reference/page.html"
 toc = true
 top = false
 icon = ""
-order = 2
+order = 3
 +++
 
 ## Components

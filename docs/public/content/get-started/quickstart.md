@@ -114,7 +114,7 @@ Run Monte Carlo simulations to explore the state space.
     elodin create --template ball
     ```
 4. Start a 100 sample Monte Carlo run with a maximum sim duration of 15s.
-    <Note>Add `--open` to automatically open the dashboard url in the browser.</Note>
+    {% alert(kind="notice") %}Add `--open` to automatically open the dashboard url in the browser.{% end %}
     ```sh
     elodin monte-carlo run --name ball ball/main.py --max-duration 15 --samples 100
     ```
