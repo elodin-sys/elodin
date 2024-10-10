@@ -8,6 +8,7 @@ use pyo3::{
 use smallvec::SmallVec;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 use xla::{ArrayElement, ElementType, Literal};
+use zerocopy::{FromBytes, Immutable};
 
 use crate::{BinaryOp, CompFn, Error, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprNode, ReprMonad};
 
@@ -401,7 +402,7 @@ impl Default for JaxTracer {
 }
 
 /// Converts a `Literal` to a Jax numpy array.
-fn literal_to_arr<T: ArrayElement + numpy::Element + bytemuck::Pod>(
+fn literal_to_arr<T: ArrayElement + numpy::Element + Immutable + FromBytes>(
     data: &Literal,
     shape: &SmallVec<[i64; 4]>,
     jnp: &PyObject,

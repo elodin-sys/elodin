@@ -1,7 +1,8 @@
 //! Provides a local, non-XLA backend for operating on Tensors.
 use crate::{
     AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DottedDim,
-    Elem, Error, Field, RealField, ReplaceDim, ReplaceMappedDim, Repr, ScalarDim, TensorDim,
+    Elem, Error, Field, OwnedRepr, RealField, ReplaceDim, ReplaceMappedDim, Repr, ScalarDim,
+    TensorDim,
 };
 use crate::{Const, Dyn, ShapeConstraint};
 use approx::{AbsDiffEq, RelativeEq};
@@ -24,7 +25,9 @@ use std::{
 
 mod dynamic;
 mod repr;
+mod view;
 pub use repr::*;
+pub use view::*;
 
 /// A struct representing an array with type-safe dimensions and element type.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -84,6 +87,8 @@ pub trait ArrayDim: TensorDim {
     /// Returns the dimensions of the buffer.
     fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape;
 
+    fn shape_slice<T: Elem>(buf: &Self::Buf<T>) -> &'_ [usize];
+
     /// Returns the strides of the buffer for multidimensional access.
     fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape;
 
@@ -108,6 +113,10 @@ impl ArrayDim for ScalarDim {
     fn is_scalar() -> bool {
         true
     }
+
+    fn shape_slice<T: Elem>(_buf: &Self::Buf<T>) -> &'_ [usize] {
+        &[]
+    }
 }
 
 impl<const D: usize> ArrayDim for Const<D> {
@@ -123,6 +132,10 @@ impl<const D: usize> ArrayDim for Const<D> {
     fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [1]
     }
+
+    fn shape_slice<T: Elem>(_buf: &Self::Buf<T>) -> &'_ [usize] {
+        &[D]
+    }
 }
 
 impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
@@ -136,6 +149,10 @@ impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
 
     fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D2, 1]
+    }
+
+    fn shape_slice<T: Elem>(_buf: &Self::Buf<T>) -> &'_ [usize] {
+        &[D1, D2]
     }
 }
 
@@ -151,6 +168,10 @@ impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
 
     fn strides<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
         [D3 * D2, D2, 1]
+    }
+
+    fn shape_slice<T: Elem>(_buf: &Self::Buf<T>) -> &'_ [usize] {
+        &[D1, D2, D3]
     }
 }
 
@@ -990,7 +1011,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         (0..len).map(|i| self.row(i))
     }
 
-    pub fn map<T2: Copy + Default, D2: Dim>(
+    pub fn map<T2: Elem, D2: Dim>(
         &self,
         func: impl Fn(Array<T1, D1::ElemDim>) -> Array<T2, D2>,
     ) -> Array<T2, D1::MappedDim<D2>>
@@ -1042,6 +1063,14 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         D2: ArrayDim<Buf<T1> = D1::Buf<T1>>,
     {
         Array { buf: self.buf }
+    }
+
+    pub fn view(&self) -> ArrayView<'_, T1> {
+        let dim = D1::shape_slice(&self.buf);
+        ArrayView {
+            buf: self.buf.as_buf(),
+            dim,
+        }
     }
 }
 

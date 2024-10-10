@@ -1,6 +1,6 @@
 use crate::{ArrayElement, Error, NativeType, PrimitiveType, RawShape, Result, Shape, Status};
-use bytemuck::AnyBitPattern;
 use cpp::{cpp, cpp_class};
+use zerocopy::{FromBytes, Immutable};
 
 use num_traits::FromPrimitive;
 use std::pin::Pin;
@@ -47,7 +47,7 @@ impl Literal {
         }
     }
 
-    pub fn typed_buf<T: ArrayElement + AnyBitPattern>(&self) -> Result<&[T]> {
+    pub fn typed_buf<T: ArrayElement + Immutable + FromBytes>(&self) -> Result<&[T]> {
         let ty = self.primitive_type()?.element_type()?;
         if ty != T::TY {
             Err(Error::ElementTypeMismatch {
@@ -55,7 +55,7 @@ impl Literal {
                 on_host: T::TY,
             })?
         }
-        bytemuck::try_cast_slice(self.raw_buf()).map_err(Error::PodCastError)
+        <[T]>::ref_from_bytes(self.raw_buf()).map_err(|_| Error::CastError)
     }
 
     pub fn reshape(&self, dims: &[i64]) -> Result<Literal> {

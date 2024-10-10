@@ -6,18 +6,20 @@ pub mod iers;
 use std::ops::Mul;
 
 use nox::{
-    ArrayDim, Const, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, RealField, Repr,
+    ArrayDim, Const, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, OwnedRepr, RealField,
     ShapeConstraint, Tensor,
 };
 
 pub trait Frame {}
 
-pub struct Transform<T: Field, A: Frame, B: Frame, R: Repr = DefaultRepr> {
+pub struct Transform<T: Field, A: Frame, B: Frame, R: OwnedRepr = DefaultRepr> {
     dcm: Matrix<T, 3, 3, R>,
     phantom: std::marker::PhantomData<(A, B)>,
 }
 
-impl<T: Field, A: Frame, B: Frame, R: Repr> From<Matrix<T, 3, 3, R>> for Transform<T, A, B, R> {
+impl<T: Field, A: Frame, B: Frame, R: OwnedRepr> From<Matrix<T, 3, 3, R>>
+    for Transform<T, A, B, R>
+{
     fn from(val: Matrix<T, 3, 3, R>) -> Self {
         Transform {
             dcm: val,
@@ -28,7 +30,7 @@ impl<T: Field, A: Frame, B: Frame, R: Repr> From<Matrix<T, 3, 3, R>> for Transfo
 
 pub type DCM<T, A, B, R = DefaultRepr> = Transform<T, A, B, R>;
 
-impl<T: RealField, A: Frame, B: Frame, R: Repr> DCM<T, A, B, R> {
+impl<T: RealField, A: Frame, B: Frame, R: OwnedRepr> DCM<T, A, B, R> {
     pub fn dot<D2>(
         &self,
         right: &Tensor<T, D2, R>,
@@ -43,7 +45,9 @@ impl<T: RealField, A: Frame, B: Frame, R: Repr> DCM<T, A, B, R> {
     }
 }
 
-impl<T: RealField, A: Frame, B: Frame, C: Frame, R: Repr> Mul<DCM<T, A, B, R>> for DCM<T, B, C, R> {
+impl<T: RealField, A: Frame, B: Frame, C: Frame, R: OwnedRepr> Mul<DCM<T, A, B, R>>
+    for DCM<T, B, C, R>
+{
     type Output = DCM<T, A, C, R>;
 
     fn mul(self, rhs: DCM<T, A, B, R>) -> Self::Output {
@@ -54,7 +58,7 @@ impl<T: RealField, A: Frame, B: Frame, C: Frame, R: Repr> Mul<DCM<T, A, B, R>> f
     }
 }
 
-impl<T: RealField, A: Frame, B: Frame, R: Repr> Transform<T, A, B, R> {
+impl<T: RealField, A: Frame, B: Frame, R: OwnedRepr> Transform<T, A, B, R> {
     fn inverse(&self) -> Transform<T, B, A, R> {
         Transform {
             dcm: self.dcm.transpose(),

@@ -71,6 +71,10 @@ impl ArrayDim for Dyn {
     fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
         buf.strides.clone()
     }
+
+    fn shape_slice<T: Elem>(buf: &Self::Buf<T>) -> &'_ [usize] {
+        &buf.shape
+    }
 }
 
 impl ArrayDim for (Dyn, Dyn) {
@@ -85,6 +89,10 @@ impl ArrayDim for (Dyn, Dyn) {
     fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
         buf.strides.clone()
     }
+
+    fn shape_slice<T: Elem>(buf: &Self::Buf<T>) -> &'_ [usize] {
+        &buf.shape
+    }
 }
 
 impl ArrayDim for (Dyn, Dyn, Dyn) {
@@ -98,6 +106,10 @@ impl ArrayDim for (Dyn, Dyn, Dyn) {
 
     fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
         buf.strides.clone()
+    }
+
+    fn shape_slice<T: Elem>(buf: &Self::Buf<T>) -> &'_ [usize] {
+        &buf.shape
     }
 }
 
@@ -115,6 +127,10 @@ macro_rules! impl_dyn_dim {
             fn strides<T: Elem>(buf: &Self::Buf<T>) -> Self::Shape {
                 buf.strides.clone()
             }
+
+        fn shape_slice<T: Elem>(buf: &Self::Buf<T>) -> &'_ [usize] {
+            &buf.shape
+        }
         }
     };
 }

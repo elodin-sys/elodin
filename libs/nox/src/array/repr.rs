@@ -4,8 +4,15 @@ use super::*;
 pub struct ArrayRepr;
 
 impl Repr for ArrayRepr {
-    type Inner<T, D: Dim> = Array<T, D> where T: Elem ;
+    type Inner<T, D: Dim> = Array<T, D> where T: Elem;
 
+    type Shape<D: Dim> = D::Shape;
+    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
+        D1::array_shape(&arg.buf)
+    }
+}
+
+impl OwnedRepr for ArrayRepr {
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -239,9 +246,9 @@ impl Repr for ArrayRepr {
     ) -> Self::Inner<T2, D1::MappedDim<D2>>
     where
         D1::MappedDim<D2>: Dim,
-        T1: Copy + Default,
+        T1: Elem + 'static,
         D1: Dim + MappableDim,
-        T2: Copy + Default,
+        T2: Elem + 'static,
         D2: Dim,
     {
         arg.map(func)
@@ -254,10 +261,5 @@ impl Repr for ArrayRepr {
         ShapeConstraint: DimRow<D1>,
     {
         arg.rows_iter()
-    }
-
-    type Shape<D: Dim> = D::Shape;
-    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
-        D1::array_shape(&arg.buf)
     }
 }

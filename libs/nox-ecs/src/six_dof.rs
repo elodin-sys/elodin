@@ -1,4 +1,4 @@
-use nox::{Op, Repr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
+use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
@@ -11,9 +11,9 @@ use crate::{
 };
 
 #[derive(Component, ReprMonad)]
-pub struct WorldVel<R: Repr = Op>(pub SpatialMotion<f64, R>);
+pub struct WorldVel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
 #[derive(Component, ReprMonad)]
-pub struct WorldAccel<R: Repr = Op>(pub SpatialMotion<f64, R>);
+pub struct WorldAccel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
 
 impl Clone for WorldVel {
     fn clone(&self) -> Self {
@@ -132,9 +132,9 @@ impl Mul<WorldAccel> for Scalar<f64> {
 }
 
 #[derive(Clone, Component, ReprMonad)]
-pub struct Force<R: Repr = Op>(pub SpatialForce<f64, R>);
+pub struct Force<R: OwnedRepr = Op>(pub SpatialForce<f64, R>);
 #[derive(Clone, Component, ReprMonad)]
-pub struct Inertia<R: Repr = Op>(pub SpatialInertia<f64, R>);
+pub struct Inertia<R: OwnedRepr = Op>(pub SpatialInertia<f64, R>);
 
 fn calc_accel(q: Query<(Force, Inertia, WorldPos)>) -> Query<WorldAccel> {
     q.map(|force: Force, inertia: Inertia, pos: WorldPos| {

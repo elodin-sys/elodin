@@ -10,12 +10,17 @@ use crate::{
     TransposeDim, TransposedDim,
 };
 
-/// Represents the interface for data representations in tensor operations.
 pub trait Repr {
     type Inner<T, D: Dim>: Clone
     where
         T: Elem;
 
+    type Shape<D: Dim>: AsRef<[usize]> + Clone;
+    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1>;
+}
+
+/// Represents the interface for data representations in tensor operations.
+pub trait OwnedRepr: Repr {
     /// Performs element-wise addition of two tensors, broadcasting as necessary.
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
@@ -200,19 +205,16 @@ pub trait Repr {
         D1::MappedDim<D2>: Dim,
         T1: Field,
         D1: Dim + MappableDim,
-        T2: Copy + Default,
+        T2: Elem + 'static,
         D2: Dim;
-
-    type Shape<D: Dim>: AsRef<[usize]> + AsMut<[usize]> + Clone;
-    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1>;
 }
 
-pub trait ReprMonad<R: Repr> {
+pub trait ReprMonad<R: OwnedRepr> {
     type Elem: Elem;
     type Dim: Dim;
-    type Map<T: Repr>;
+    type Map<T: OwnedRepr>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N>;

@@ -1,6 +1,7 @@
 //! Provides functionality for handling vectors in computational tasks, supporting conversion between host and Nox-specific representations, and enabling vector operations like extension, normalization, and cross products.
 use crate::{
-    tensor, ArrayRepr, DefaultRepr, Dim, Field, Matrix, RealField, Repr, Scalar, Tensor, TensorItem,
+    tensor, ArrayRepr, DefaultRepr, Dim, Field, Matrix, OwnedRepr, RealField, Scalar, Tensor,
+    TensorItem,
 };
 use crate::{Const, DimMul, ToTypenum};
 
@@ -11,7 +12,7 @@ pub type Vector<T, const N: usize, P = DefaultRepr> = Tensor<T, Const<N>, P>;
 
 pub type Vector3<T, R = DefaultRepr> = Vector<T, 3, R>;
 
-impl<T: Field, R: Repr> Vector<T, 3, R> {
+impl<T: Field, R: OwnedRepr> Vector<T, 3, R> {
     pub fn new(
         x: impl Into<Scalar<T, R>>,
         y: impl Into<Scalar<T, R>>,
@@ -33,7 +34,7 @@ impl<T: Field, R: Repr> Vector<T, 3, R> {
     }
 }
 
-impl<T: Field, R: Repr> Vector<T, 3, R>
+impl<T: Field, R: OwnedRepr> Vector<T, 3, R>
 where
     Self: From<Vector<T, 3, ArrayRepr>>,
 {
@@ -48,7 +49,7 @@ where
     }
 }
 
-impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+impl<T: TensorItem + Field, const N: usize, R: OwnedRepr> Vector<T, N, R> {
     /// Creates a vector from an array of scalar references.
     pub fn from_arr(arr: [Scalar<T, R>; N]) -> Self
     where
@@ -66,7 +67,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
     }
 }
 
-impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
+impl<T: TensorItem + Field, const N: usize, R: OwnedRepr> Vector<T, N, R> {
     /// Returns the individual scalar components of the vector as an array.
     pub fn parts(&self) -> [Scalar<T, R>; N] {
         let mut i = 0;
@@ -78,7 +79,7 @@ impl<T: TensorItem + Field, const N: usize, R: Repr> Vector<T, N, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Vector<T, 3, R> {
+impl<T: RealField, R: OwnedRepr> Vector<T, 3, R> {
     /// Computes the cross product of two 3-dimensional vectors.
     pub fn cross(&self, other: &Self) -> Self {
         let [ax, ay, az] = self.parts();
@@ -104,7 +105,7 @@ impl<T: RealField, R: Repr> Vector<T, 3, R> {
     }
 }
 
-impl<T: Field + RealField, const N: usize, R: Repr> Vector<T, N, R> {
+impl<T: Field + RealField, const N: usize, R: OwnedRepr> Vector<T, N, R> {
     /// Computes the norm squared of the vector.
     pub fn norm_squared(&self) -> Scalar<T, R> {
         self.dot(self)
