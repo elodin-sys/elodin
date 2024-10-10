@@ -494,16 +494,16 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 mod tests {
     use super::*;
     use crate::{Archetype, IntoSystemExt};
-    use nox::{Op, Repr, Scalar};
+    use nox::{Op, OwnedRepr, Scalar};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 
     #[test]
     fn test_cross_archetype_join() {
         #[derive(Clone, Component, ReprMonad)]
-        struct X<R: Repr = Op>(Scalar<f64, R>);
+        struct X<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Clone, Component, ReprMonad)]
-        struct E<R: Repr = Op>(Scalar<f64, R>);
+        struct E<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -543,13 +543,13 @@ mod tests {
     #[test]
     fn component_group() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Component, ReprMonad)]
-        struct B<R: Repr = Op>(Scalar<f64, R>);
+        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Component, ReprMonad)]
-        struct C<R: Repr = Op>(Scalar<f64, R>);
+        struct C<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {

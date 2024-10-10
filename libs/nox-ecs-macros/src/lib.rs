@@ -77,5 +77,8 @@ pub(crate) fn is_repr_bound(bound: &TypeParamBound) -> bool {
     let TypeParamBound::Trait(t) = bound else {
         return false;
     };
-    t.path.is_ident("Repr") || t.path.is_ident("nox::Repr")
+    t.path.is_ident("Repr")
+        || t.path.is_ident("nox::Repr")
+        || t.path.is_ident("nox::OwnedRepr")
+        || t.path.is_ident("OwnedRepr")
 }

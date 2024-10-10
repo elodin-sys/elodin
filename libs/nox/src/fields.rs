@@ -5,11 +5,11 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 #[cfg(feature = "xla")]
 use xla::Literal;
 
-use crate::{Repr, Scalar, TensorItem};
+use crate::{OwnedRepr, Scalar, TensorItem};
 
-pub trait Elem: Copy + Default {}
+pub trait Elem: Copy + Default + 'static {}
 
-impl<T> Elem for T where T: Copy + Default {}
+impl<T> Elem for T where T: Copy + Default + 'static {}
 
 /// Represents a mathematical field, supporting basic arithmetic operations,
 /// matrix multiplication, and the generation of standard constants.
@@ -23,17 +23,17 @@ pub trait Field:
     + Div<Output = Self>
 {
     /// Returns a scalar tensor representing the additive identity (zero).
-    fn zero<R: Repr>() -> Scalar<Self, R>
+    fn zero<R: OwnedRepr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
     /// Returns a scalar tensor representing the multiplicative identity (one).
-    fn one<R: Repr>() -> Scalar<Self, R>
+    fn one<R: OwnedRepr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
     /// Returns a scalar tensor representing the integer two.
-    fn two<R: Repr>() -> Scalar<Self, R>
+    fn two<R: OwnedRepr>() -> Scalar<Self, R>
     where
         Self: Sized;
 
@@ -116,7 +116,7 @@ impl_real_field!(f64);
 macro_rules! impl_real_closed_field {
     ($t:ty, $zero:tt, $one:tt, $two:tt) => {
         impl Field for $t {
-            fn zero<R: Repr>() -> Scalar<Self, R> {
+            fn zero<R: OwnedRepr>() -> Scalar<Self, R> {
                 let inner = R::scalar_from_const($zero);
                 Scalar {
                     inner,
@@ -124,7 +124,7 @@ macro_rules! impl_real_closed_field {
                 }
             }
 
-            fn one<R: Repr>() -> Scalar<Self, R> {
+            fn one<R: OwnedRepr>() -> Scalar<Self, R> {
                 let inner = R::scalar_from_const($one);
                 Scalar {
                     inner,
@@ -132,7 +132,7 @@ macro_rules! impl_real_closed_field {
                 }
             }
 
-            fn two<R: Repr>() -> Scalar<Self, R> {
+            fn two<R: OwnedRepr>() -> Scalar<Self, R> {
                 let inner = R::scalar_from_const($two);
                 Scalar {
                     inner,

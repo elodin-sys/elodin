@@ -17,8 +17,8 @@ num-traits = "0.2"
 num-derive = "0.4"
 cpp = "0.5.9"
 cxx = "1.0"
-bytemuck.version = "1.14"
-bytemuck.features = ["derive"]
+zerocopy.version = "0.8"
+zerocopy.features = ["derive"]
 lapack-sys = "0.14.0"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]

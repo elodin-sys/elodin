@@ -1,9 +1,8 @@
 //! Traits and implementations for data transfer between host and XLA devices, buffer management, and XLA client operations.
 use std::marker::PhantomData;
 
-use bytemuck::AnyBitPattern;
 use smallvec::SmallVec;
-use xla::{ArrayElement, PjRtBuffer, Shape};
+use xla::{ArrayElement, NativeType, PjRtBuffer, Shape};
 
 use crate::{ArrayBuf, ArrayRepr, Client, Dim, Error, ReprMonad, Tensor, TensorItem};
 
@@ -62,7 +61,7 @@ pub trait FromTypedBuffers: Sized {
 
 impl<M: ReprMonad<ArrayRepr>> FromTypedBuffers for M
 where
-    M::Elem: ArrayElement + AnyBitPattern,
+    M::Elem: ArrayElement + NativeType,
 {
     type TypedBuffers = TypedBuffer<M>;
 

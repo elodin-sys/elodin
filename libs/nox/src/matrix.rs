@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 
 use crate::Const;
 use crate::{
-    DefaultRepr, Dim, Error, NonScalarDim, NonTupleDim, RealField, Repr, SquareDim, Tensor, Vector,
+    DefaultRepr, Dim, Error, NonScalarDim, NonTupleDim, OwnedRepr, RealField, SquareDim, Tensor,
+    Vector,
 };
 
 /// Type alias for a tensor that specifically represents a matrix.
@@ -17,7 +18,7 @@ pub type Matrix5<T, R = DefaultRepr> = Matrix<T, 5, 5, R>;
 pub type Matrix6<T, R = DefaultRepr> = Matrix<T, 6, 6, R>;
 pub type Matrix6x3<T, R = DefaultRepr> = Matrix<T, 6, 3, R>;
 
-impl<const R: usize, const C: usize, T: RealField, Rep: Repr> Matrix<T, R, C, Rep> {
+impl<const R: usize, const C: usize, T: RealField, Rep: OwnedRepr> Matrix<T, R, C, Rep> {
     pub fn from_rows(rows: [Vector<T, C, Rep>; R]) -> Self {
         let arr = rows.map(|x| x.inner);
         let inner = Rep::concat_many(arr, 0);
@@ -28,7 +29,7 @@ impl<const R: usize, const C: usize, T: RealField, Rep: Repr> Matrix<T, R, C, Re
     }
 }
 
-impl<T: RealField, D: Dim, R: Repr> Tensor<T, (D, D), R>
+impl<T: RealField, D: Dim, R: OwnedRepr> Tensor<T, (D, D), R>
 where
     D: NonTupleDim + NonScalarDim,
     (D, D): Dim + SquareDim<SideDim = D>,
@@ -90,7 +91,7 @@ where
     }
 }
 
-impl<T: RealField, R: Repr> Matrix3<T, R> {
+impl<T: RealField, R: OwnedRepr> Matrix3<T, R> {
     pub fn look_at_rh(dir: impl Into<Vector<T, 3, R>>, up: impl Into<Vector<T, 3, R>>) -> Self {
         let dir = dir.into() * T::neg_one();
         let up = up.into();
