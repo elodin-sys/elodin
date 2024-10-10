@@ -1,8 +1,8 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::ArrayDim;
 use crate::{
-    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, Repr, ReprMonad, RowDim,
-    Scalar, SquareDim, TransposeDim, TransposedDim,
+    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, OwnedRepr, Repr, ReprMonad,
+    RowDim, Scalar, SquareDim, TransposeDim, TransposedDim,
 };
 use crate::{Const, Dyn, ShapeConstraint};
 use crate::{DefaultRepr, Elem, RealField};
@@ -28,9 +28,9 @@ pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
     pub(crate) phantom: PhantomData<(T, D)>,
 }
 
-impl<T: Field, D: Dim, R: Repr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy {}
+impl<T: Field, D: Dim, R: OwnedRepr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy {}
 
-impl<T: TensorItem, D: Dim, P: Repr> std::fmt::Debug for Tensor<T, D, P>
+impl<T: TensorItem, D: Dim, P: OwnedRepr> std::fmt::Debug for Tensor<T, D, P>
 where
     P::Inner<T::Elem, D>: std::fmt::Debug,
 {
@@ -39,7 +39,7 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> PartialEq for Tensor<T, D, R>
+impl<T: TensorItem, D: Dim, R: OwnedRepr> PartialEq for Tensor<T, D, R>
 where
     R::Inner<T::Elem, D>: PartialEq,
 {
@@ -78,7 +78,7 @@ impl<T: Elem> TensorItem for T {
     type Elem = T;
 }
 
-impl<T: Field, D: Dim, R: Repr> Clone for Tensor<T, D, R> {
+impl<T: Field, D: Dim, R: OwnedRepr> Clone for Tensor<T, D, R> {
     fn clone(&self) -> Self {
         Self {
             inner: R::noop(&self.inner),
@@ -87,7 +87,7 @@ impl<T: Field, D: Dim, R: Repr> Clone for Tensor<T, D, R> {
     }
 }
 
-impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: RealField, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn sqrt(&self) -> Self {
         Self::from_inner(R::sqrt(&self.inner))
     }
@@ -116,7 +116,7 @@ impl<T: RealField, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: TensorItem, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn from_inner(inner: R::Inner<T::Elem, D>) -> Self {
         Self {
             inner,
@@ -125,7 +125,7 @@ impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: Field, D: Dim + NonScalarDim + ConstDim, R: Repr> Tensor<T, D, R> {
+impl<T: Field, D: Dim + NonScalarDim + ConstDim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn zeros() -> Self {
         T::zero().broadcast()
     }
@@ -135,7 +135,7 @@ impl<T: Field, D: Dim + NonScalarDim + ConstDim, R: Repr> Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: TensorItem, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn inner(&self) -> &R::Inner<T::Elem, D> {
         &self.inner
     }
@@ -256,7 +256,7 @@ impl_tensor_dim!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
 macro_rules! impl_op {
     ($op: tt, $op_fn:tt, $inner: tt, $($t_bound:tt),+) => {
-        impl<T, D1: Dim, D2: Dim, R: Repr> $op<Tensor<T, D2, R>>
+        impl<T, D1: Dim, D2: Dim, R: OwnedRepr> $op<Tensor<T, D2, R>>
             for Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
@@ -276,7 +276,7 @@ macro_rules! impl_op {
             }
         }
 
-        impl<'a, T, D1: Dim, D2: Dim, R: Repr> $op<&'a Tensor<T, D2, R>>
+        impl<'a, T, D1: Dim, D2: Dim, R: OwnedRepr> $op<&'a Tensor<T, D2, R>>
             for Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
@@ -296,7 +296,7 @@ macro_rules! impl_op {
             }
         }
 
-    impl<'a, 'b, T, D1: Dim, D2: Dim, R: Repr> $op<&'a Tensor<T, D2, R>>
+    impl<'a, 'b, T, D1: Dim, D2: Dim, R: OwnedRepr> $op<&'a Tensor<T, D2, R>>
             for &'b Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
@@ -316,7 +316,7 @@ macro_rules! impl_op {
             }
         }
 
-    impl<'a, T, D1: Dim, D2: Dim, R: Repr> $op<Tensor<T, D2, R>>
+    impl<'a, T, D1: Dim, D2: Dim, R: OwnedRepr> $op<Tensor<T, D2, R>>
             for &'a Tensor<T, D1, R>
         where
             $(T: $t_bound,)+
@@ -343,7 +343,7 @@ impl_op! {Mul, mul, *, Field}
 impl_op! {Div, div, /, Field}
 impl_op! {Sub, sub, -, Field}
 
-impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R> {
+impl<T: Field + Neg<Output = T>, D: Dim, R: OwnedRepr> Neg for Tensor<T, D, R> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -354,7 +354,7 @@ impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for Tensor<T, D, R> {
     }
 }
 
-impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for &'_ Tensor<T, D, R> {
+impl<T: Field + Neg<Output = T>, D: Dim, R: OwnedRepr> Neg for &'_ Tensor<T, D, R> {
     type Output = Tensor<T, D, R>;
 
     fn neg(self) -> Self::Output {
@@ -365,13 +365,13 @@ impl<T: Field + Neg<Output = T>, D: Dim, R: Repr> Neg for &'_ Tensor<T, D, R> {
     }
 }
 
-impl<T: TensorItem + Field, D: Dim, R: Repr> Tensor<T, D, R> {
+impl<T: TensorItem + Field, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     pub fn fixed_slice<D2: Dim + ConstDim>(&self, offsets: &[usize]) -> Tensor<T, D2, R> {
         Tensor::from_inner(R::copy_fixed_slice(&self.inner, offsets))
     }
 }
 
-impl<T: Field, D1: Dim, R: Repr> Mul<T> for Tensor<T, D1, R>
+impl<T: Field, D1: Dim, R: OwnedRepr> Mul<T> for Tensor<T, D1, R>
 where
     ShapeConstraint: BroadcastDim<(), D1>,
 {
@@ -385,7 +385,7 @@ where
     }
 }
 
-impl<T: Field, D1: Dim, R: Repr> Mul<T> for &'_ Tensor<T, D1, R>
+impl<T: Field, D1: Dim, R: OwnedRepr> Mul<T> for &'_ Tensor<T, D1, R>
 where
     ShapeConstraint: BroadcastDim<(), D1>,
 {
@@ -401,7 +401,7 @@ where
 
 macro_rules! impl_prim {
     ($ty:tt) => {
-        impl<D: Dim, R: Repr> Mul<Tensor<$ty, D, R>> for $ty
+        impl<D: Dim, R: OwnedRepr> Mul<Tensor<$ty, D, R>> for $ty
         where
             ShapeConstraint: BroadcastDim<(), D>,
         {
@@ -416,7 +416,7 @@ macro_rules! impl_prim {
             }
         }
 
-        impl<'a, D: Dim, R: Repr> Mul<&'a Tensor<$ty, D, R>> for $ty
+        impl<'a, D: Dim, R: OwnedRepr> Mul<&'a Tensor<$ty, D, R>> for $ty
         where
             ShapeConstraint: BroadcastDim<(), D>,
         {
@@ -602,7 +602,7 @@ impl<const N: usize> NonTupleDim for Const<N> {}
 /// Alias for the dimension resulting from concatenating dimensions `A` and `B`.
 pub type ConcatDims<A, B> = <(A, B) as DimConcat<A, B>>::Output;
 
-impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
+impl<T1: TensorItem + Field, D1: Dim, R: OwnedRepr> Tensor<T1, D1, R> {
     pub fn reshape<D2: Dim + ConstDim>(self) -> Tensor<T1, D2, R>
     where
         ShapeConstraint: BroadcastDim<D1, D2>,
@@ -656,7 +656,7 @@ impl<T1: TensorItem + Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
 pub type AddDim<A, B> = <A as crate::DimAdd<B>>::Output;
 
 #[allow(clippy::type_complexity)]
-impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
+impl<T1: Field, D1: Dim + DefaultMap, R: OwnedRepr> Tensor<T1, D1, R> {
     pub fn concat<D2: Dim + DefaultMap>(
         &self,
         other: Tensor<T1, D2, R>,
@@ -683,7 +683,7 @@ impl<T1: Field, D1: Dim + DefaultMap, R: Repr> Tensor<T1, D1, R> {
     }
 }
 
-impl<T1: Field, D1: Dim, R: Repr> Tensor<T1, D1, R> {
+impl<T1: Field, D1: Dim, R: OwnedRepr> Tensor<T1, D1, R> {
     pub fn concat_in_dim<D2, I: IntoIterator<Item = Tensor<T1, D1, R>>>(
         args: I,
         dim: usize,
@@ -877,7 +877,7 @@ impl DotDim<Dyn, Dyn> for ShapeConstraint {
 /// Alias for the dimension resulting from the dot product of dimensions `D1` and `D2`.
 pub type DottedDim<D1, D2> = <ShapeConstraint as DotDim<D1, D2>>::Output;
 
-impl<T: RealField, D1: Dim, R: Repr> Tensor<T, D1, R> {
+impl<T: RealField, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
     pub fn dot<D2>(
         &self,
         right: &Tensor<T, D2, R>,
@@ -896,7 +896,7 @@ impl<T: RealField, D1: Dim, R: Repr> Tensor<T, D1, R> {
     }
 }
 
-impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
+impl<T: Field, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
     pub fn get(&self, index: D1::Index) -> Tensor<T, (), R>
     where
         D1: DimGet,
@@ -959,7 +959,7 @@ impl<T: Field, D1: Dim, R: Repr> Tensor<T, D1, R> {
         }
     }
 
-    pub fn map<T2: Copy + Default, D2: Dim>(
+    pub fn map<T2: Elem, D2: Dim>(
         &self,
         func: impl Fn(Tensor<T, D1::ElemDim, R>) -> Tensor<T2, D2, R>,
     ) -> Tensor<T2, D1::MappedDim<D2>, R>
@@ -1098,13 +1098,13 @@ macro_rules! tensor {
     }};
 }
 
-impl<T: Field, R: Repr> From<T> for Tensor<T, (), R> {
+impl<T: Field, R: OwnedRepr> From<T> for Tensor<T, (), R> {
     fn from(val: T) -> Self {
         Scalar::from_inner(R::scalar_from_const(val))
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> AbsDiffEq for Tensor<T, D, R>
+impl<T: TensorItem, D: Dim, R: OwnedRepr> AbsDiffEq for Tensor<T, D, R>
 where
     T: Elem,
     R::Inner<T::Elem, D>: AbsDiffEq,
@@ -1120,7 +1120,7 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> RelativeEq for Tensor<T, D, R>
+impl<T: TensorItem, D: Dim, R: OwnedRepr> RelativeEq for Tensor<T, D, R>
 where
     T: Elem,
     R::Inner<T::Elem, D>: RelativeEq + AbsDiffEq,
@@ -1140,7 +1140,7 @@ where
     }
 }
 
-impl<T: TensorItem, D: Dim, R: Repr> Sum for Tensor<T, D, R>
+impl<T: TensorItem, D: Dim, R: OwnedRepr> Sum for Tensor<T, D, R>
 where
     T: Field,
     ShapeConstraint: BroadcastDim<D, D, Output = D>,
@@ -1154,13 +1154,13 @@ where
     }
 }
 
-impl<T: TensorItem, R: Repr, D: Dim> ReprMonad<R> for Tensor<T, D, R> {
+impl<T: TensorItem, R: OwnedRepr, D: Dim> ReprMonad<R> for Tensor<T, D, R> {
     type Elem = T::Elem;
     type Dim = D;
 
-    type Map<N: Repr> = Tensor<T, D, N>;
+    type Map<N: OwnedRepr> = Tensor<T, D, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(<R as Repr>::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {

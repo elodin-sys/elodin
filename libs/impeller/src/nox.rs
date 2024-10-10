@@ -1,6 +1,6 @@
 use core::mem;
 use nox::{
-    Array, ArrayDim, ArrayRepr, ConstDim, Dim, Field, Quaternion, Repr, SpatialForce,
+    Array, ArrayDim, ArrayRepr, ConstDim, Dim, Field, OwnedRepr, Quaternion, SpatialForce,
     SpatialInertia, SpatialMotion, SpatialTransform, Tensor,
 };
 use nox::{Const, Dyn};
@@ -109,7 +109,7 @@ impl<T: Component + nox::ReprMonad<nox::Op> + 'static> crate::Archetype for T {
     }
 }
 
-impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: Repr> Component for Tensor<T, D, R> {
+impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: OwnedRepr> Component for Tensor<T, D, R> {
     const NAME: &'static str = concat_str!("tensor_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         // If T is an ArrayElement, then it's shape must be ().
@@ -144,7 +144,7 @@ where
     }
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> Component for nox::Quaternion<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> Component for nox::Quaternion<T, R> {
     const NAME: &'static str = concat_str!("quaternion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -178,7 +178,7 @@ where
     }
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> Component for nox::SpatialTransform<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> Component for nox::SpatialTransform<T, R> {
     const NAME: &'static str = concat_str!("spatial_transform_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -214,7 +214,7 @@ where
     }
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> Component for SpatialMotion<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> Component for SpatialMotion<T, R> {
     const NAME: &'static str = concat_str!("spatial_motion_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -250,7 +250,7 @@ where
     }
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> Component for nox::SpatialInertia<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> Component for nox::SpatialInertia<T, R> {
     const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -286,7 +286,7 @@ where
     }
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> Component for nox::SpatialForce<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> Component for nox::SpatialForce<T, R> {
     const NAME: &'static str = concat_str!("spatial_force_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
         ComponentType {
@@ -468,7 +468,9 @@ const fn dim_to_smallvec<Dim: ConstDim>() -> SmallVec<[i64; 4]> {
     unsafe { SmallVec::from_const_with_len_unchecked(arr, len) }
 }
 
-impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: Repr> ConstComponent for Tensor<T, D, R> {
+impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: OwnedRepr> ConstComponent
+    for Tensor<T, D, R>
+{
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<D>(),
@@ -499,7 +501,7 @@ const fn size_of_dim<T: Sized, Dim: ConstDim>() -> usize {
     len * size
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialTransform<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> ConstComponent for SpatialTransform<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<7>>(),
@@ -508,7 +510,7 @@ impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialTransform
     const MAX_SIZE: usize = size_of_dim::<T, Const<7>>();
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialMotion<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> ConstComponent for SpatialMotion<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<6>>(),
@@ -517,7 +519,7 @@ impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialMotion<T,
     const MAX_SIZE: usize = size_of_dim::<T, Const<6>>();
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialForce<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> ConstComponent for SpatialForce<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<6>>(),
@@ -526,7 +528,7 @@ impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialForce<T, 
     const MAX_SIZE: usize = size_of_dim::<T, Const<6>>();
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialInertia<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> ConstComponent for SpatialInertia<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<7>>(),
@@ -535,7 +537,7 @@ impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for SpatialInertia<T
     const MAX_SIZE: usize = size_of_dim::<T, Const<7>>();
 }
 
-impl<T: Field + PrimitiveTyElement, R: Repr> ConstComponent for Quaternion<T, R> {
+impl<T: Field + PrimitiveTyElement, R: OwnedRepr> ConstComponent for Quaternion<T, R> {
     const TY: ComponentType = ComponentType {
         primitive_ty: T::PRIMITIVE_TY,
         shape: dim_to_smallvec::<Const<4>>(),

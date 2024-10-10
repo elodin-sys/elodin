@@ -87,6 +87,7 @@ fn add_op() -> Result<()> {
 
 #[test]
 fn copy_to_vec() -> Result<()> {
+    use zerocopy::FromBytes;
     let client = crate::PjRtClient::cpu()?;
     let builder = crate::XlaBuilder::new("test");
     let cst42 = builder.constant(42f32);
@@ -98,7 +99,7 @@ fn copy_to_vec() -> Result<()> {
     let result_literal = result[0].to_literal_sync()?;
     let result_vec = client.to_host_vec(&result[0])?;
     assert_eq!(result_literal.raw_buf(), &result_vec);
-    let typed_buf = bytemuck::try_cast_slice::<u8, f32>(&result_vec).unwrap();
+    let typed_buf = <[f32]>::ref_from_bytes(&result_vec).unwrap();
     assert_eq!(typed_buf, [85., 85.]);
     Ok(())
 }

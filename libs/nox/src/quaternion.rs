@@ -7,11 +7,11 @@ use crate::Matrix3;
 use crate::ReprMonad;
 use std::ops::{Add, Mul};
 
-use crate::{Field, RealField, Repr, Scalar, TensorItem, Vector, MRP};
+use crate::{Field, OwnedRepr, RealField, Scalar, TensorItem, Vector, MRP};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(
+pub struct Quaternion<T: TensorItem, P: OwnedRepr = DefaultRepr>(
     #[cfg_attr(
         feature = "serde",
         serde(bound(
@@ -21,7 +21,7 @@ pub struct Quaternion<T: TensorItem, P: Repr = DefaultRepr>(
     )]
     pub Vector<T, 4, P>,
 );
-impl<T: Field, R: Repr> Clone for Quaternion<T, R>
+impl<T: Field, R: OwnedRepr> Clone for Quaternion<T, R>
 where
     R::Inner<T::Elem, Const<4>>: Clone,
 {
@@ -30,14 +30,14 @@ where
     }
 }
 
-impl<T: TensorItem, R: Repr> ReprMonad<R> for Quaternion<T, R> {
+impl<T: TensorItem, R: OwnedRepr> ReprMonad<R> for Quaternion<T, R> {
     type Elem = T::Elem;
 
     type Dim = Const<4>;
 
-    type Map<N: Repr> = Quaternion<T, N>;
+    type Map<N: OwnedRepr> = Quaternion<T, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {
@@ -57,9 +57,9 @@ impl<T: TensorItem, R: Repr> ReprMonad<R> for Quaternion<T, R> {
     }
 }
 
-impl<T: Field, R: Repr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy {}
+impl<T: Field, R: OwnedRepr> Copy for Quaternion<T, R> where R::Inner<T::Elem, Const<4>>: Copy {}
 
-impl<T: RealField, R: Repr> Default for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Default for Quaternion<T, R> {
     fn default() -> Self {
         Self::identity()
     }
@@ -71,7 +71,7 @@ impl<T: Elem + PartialEq> PartialEq for Quaternion<T, ArrayRepr> {
     }
 }
 
-impl<T: Field, R: Repr> std::fmt::Debug for Quaternion<T, R>
+impl<T: Field, R: OwnedRepr> std::fmt::Debug for Quaternion<T, R>
 where
     R::Inner<T, Const<4>>: std::fmt::Debug,
 {
@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<T: RealField, R: Repr> Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Quaternion<T, R> {
     /// Constructs a new quaternion from individual scalar components.
     pub fn new(
         w: impl Into<Scalar<T, R>>,
@@ -210,7 +210,7 @@ impl<T: RealField> Quaternion<T, ArrayRepr> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> From<&'a MRP<T, R>> for Quaternion<T, R> {
     fn from(mrp: &'a MRP<T, R>) -> Self {
         let MRP(mrp) = mrp;
         let magsq = mrp.norm_squared();
@@ -226,7 +226,7 @@ impl<'a, T: RealField, R: Repr> From<&'a MRP<T, R>> for Quaternion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Mul for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul for Quaternion<T, R> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -234,7 +234,7 @@ impl<T: RealField, R: Repr> Mul for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Mul<&'a Quaternion<T, R>> for Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn mul(self, rhs: &'a Quaternion<T, R>) -> Self::Output {
@@ -242,7 +242,7 @@ impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Mul<Quaternion<T, R>> for &'a Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Mul<Quaternion<T, R>> for &'a Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn mul(self, rhs: Quaternion<T, R>) -> Self::Output {
@@ -250,7 +250,7 @@ impl<'a, T: RealField, R: Repr> Mul<Quaternion<T, R>> for &'a Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for &'a Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Mul<&'a Quaternion<T, R>> for &'a Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn mul(self, rhs: &Quaternion<T, R>) -> Self::Output {
@@ -265,7 +265,7 @@ impl<'a, T: RealField, R: Repr> Mul<&'a Quaternion<T, R>> for &'a Quaternion<T, 
     }
 }
 
-impl<T: RealField, R: Repr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
     type Output = Vector<T, 3, R>;
 
     fn mul(self, rhs: Vector<T, 3, R>) -> Self::Output {
@@ -277,7 +277,7 @@ impl<T: RealField, R: Repr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
     type Output = Vector<T, 3, R>;
 
     fn mul(self, rhs: Vector<T, 3, R>) -> Self::Output {
@@ -289,7 +289,7 @@ impl<'a, T: RealField, R: Repr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Add for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Add for Quaternion<T, R> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -297,7 +297,7 @@ impl<T: RealField, R: Repr> Add for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Add<Quaternion<T, R>> for &'a Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Add<Quaternion<T, R>> for &'a Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn add(self, rhs: Quaternion<T, R>) -> Self::Output {
@@ -305,7 +305,7 @@ impl<'a, T: RealField, R: Repr> Add<Quaternion<T, R>> for &'a Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Add<&'a Quaternion<T, R>> for Quaternion<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Add<&'a Quaternion<T, R>> for Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn add(self, rhs: &'a Quaternion<T, R>) -> Self::Output {

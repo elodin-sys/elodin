@@ -1,8 +1,8 @@
 use std::{marker::PhantomData, ops::Add};
 
-use crate::{Field, Repr, Scalar};
+use crate::{Field, OwnedRepr, Scalar};
 
-impl<T: Field, R: Repr> Add<T> for Scalar<T, R> {
+impl<T: Field, R: OwnedRepr> Add<T> for Scalar<T, R> {
     type Output = Scalar<T, R>;
 
     fn add(self, rhs: T) -> Self::Output {
