@@ -23,7 +23,7 @@ fn main() -> ! {
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
     defmt::info!("Configured clocks");
 
-    for tick in 0..1000 {
+    for tick in 0..100 {
         delay.delay_ms(10);
         defmt::info!("Tick {}", tick);
     }
