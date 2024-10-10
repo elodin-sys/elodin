@@ -1,17 +1,17 @@
 use std::ops::Add;
 
-use crate::{Field, Matrix, Quaternion, RealField, Repr, Scalar, Vector};
+use crate::{Field, Matrix, OwnedRepr, Quaternion, RealField, Scalar, Vector};
 
 /// Modified Rodrigues Parameters
-pub struct MRP<T: Field, R: Repr>(pub Vector<T, 3, R>);
+pub struct MRP<T: Field, R: OwnedRepr>(pub Vector<T, 3, R>);
 
-impl<T: Field, R: Repr> Default for MRP<T, R> {
+impl<T: Field, R: OwnedRepr> Default for MRP<T, R> {
     fn default() -> Self {
         MRP(Vector::zeros())
     }
 }
 
-impl<'a, T: Field, R: Repr> From<&'a Quaternion<T, R>> for MRP<T, R> {
+impl<'a, T: Field, R: OwnedRepr> From<&'a Quaternion<T, R>> for MRP<T, R> {
     fn from(quat: &'a Quaternion<T, R>) -> Self {
         let w = quat.0.get(3);
         let vec: Vector<T, 3, R> = quat.0.fixed_slice(&[0]);
@@ -20,13 +20,13 @@ impl<'a, T: Field, R: Repr> From<&'a Quaternion<T, R>> for MRP<T, R> {
     }
 }
 
-impl<T: Field, R: Repr> From<Quaternion<T, R>> for MRP<T, R> {
+impl<T: Field, R: OwnedRepr> From<Quaternion<T, R>> for MRP<T, R> {
     fn from(quat: Quaternion<T, R>) -> Self {
         MRP::from(&quat)
     }
 }
 
-impl<T: RealField, R: Repr> MRP<T, R> {
+impl<T: RealField, R: OwnedRepr> MRP<T, R> {
     /// Constructs a new MRP from individual scalar components.
     pub fn new(
         x: impl Into<Scalar<T, R>>,
@@ -60,7 +60,7 @@ impl<T: RealField, R: Repr> MRP<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Add for MRP<T, R> {
+impl<T: RealField, R: OwnedRepr> Add for MRP<T, R> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -68,7 +68,7 @@ impl<T: RealField, R: Repr> Add for MRP<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Add<MRP<T, R>> for &'a MRP<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Add<MRP<T, R>> for &'a MRP<T, R> {
     type Output = MRP<T, R>;
 
     fn add(self, rhs: MRP<T, R>) -> Self::Output {
@@ -76,7 +76,7 @@ impl<'a, T: RealField, R: Repr> Add<MRP<T, R>> for &'a MRP<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: Repr> Add<&'a MRP<T, R>> for MRP<T, R> {
+impl<'a, T: RealField, R: OwnedRepr> Add<&'a MRP<T, R>> for MRP<T, R> {
     type Output = MRP<T, R>;
 
     fn add(self, rhs: &'a MRP<T, R>) -> Self::Output {

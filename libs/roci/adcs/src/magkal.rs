@@ -7,7 +7,7 @@
 //!
 //! It estimates scale factors, bias, and nonorthogonality corrections
 
-use nox::{tensor, ArrayRepr, Matrix, Matrix3, Repr, Vector};
+use nox::{tensor, ArrayRepr, Matrix, Matrix3, OwnedRepr, Vector};
 
 use crate::ukf::{self, MerweConfig};
 
@@ -26,7 +26,7 @@ pub fn measure(
     (-1.0 * z_t).dot(&e).dot(&z) + 2.0 * z_t.dot(&c) - b.norm_squared()
 }
 
-pub struct State<R: Repr>(ukf::State<9, 1, 19, R>);
+pub struct State<R: OwnedRepr>(ukf::State<9, 1, 19, R>);
 
 impl State<ArrayRepr> {
     pub fn new() -> Self {

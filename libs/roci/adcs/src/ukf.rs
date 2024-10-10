@@ -1,8 +1,8 @@
 #![allow(clippy::type_complexity)]
 
 use nox::{
-    BaseBroadcastDim, BroadcastDim, Const, Dim, Error, Matrix, NonScalarDim, NonTupleDim, Repr,
-    Scalar, ShapeConstraint, SquareDim, Tensor, Vector,
+    BaseBroadcastDim, BroadcastDim, Const, Dim, Error, Matrix, NonScalarDim, NonTupleDim,
+    OwnedRepr, Scalar, ShapeConstraint, SquareDim, Tensor, Vector,
 };
 
 pub fn unscented_transform<N, S, R>(
@@ -17,7 +17,7 @@ where
     N: Dim + NonScalarDim + NonTupleDim,
     S: Dim + NonScalarDim + NonTupleDim,
     (S, S): SquareDim<SideDim = S>,
-    R: Repr,
+    R: OwnedRepr,
 {
     let points_t = points.transpose();
     let x_hat = points_t.dot(mean_weights);
@@ -44,7 +44,7 @@ where
     (S, N): Dim,
     (S, Z): Dim,
     (Z, N): Dim,
-    R: Repr,
+    R: OwnedRepr,
 {
     let delta_x = points_x - x_hat;
     let delta_z = points_z - z_hat;
@@ -75,7 +75,7 @@ where
     (N, N): Dim + SquareDim<SideDim = N>,
     (S, S): Dim + SquareDim<SideDim = S>,
     (N, S): Dim,
-    R: Repr,
+    R: OwnedRepr,
 {
     let points = Tensor::stack(sigma_points.rows_iter().map(prop_fn), 0);
     let (x_hat, covar) = unscented_transform::<N, S, R>(&points, mean_weights, covar_weights);
@@ -99,7 +99,7 @@ where
     S: Dim + NonTupleDim + NonScalarDim,
     N: Dim + NonTupleDim + NonScalarDim,
     Z: Dim + NonTupleDim + NonScalarDim,
-    R: Repr,
+    R: OwnedRepr,
     ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
     ShapeConstraint: BaseBroadcastDim<Z, Z, Output = Z>,
     (S, N): Dim,
@@ -157,7 +157,7 @@ impl UncheckedMerweConfig {
         (N, N): Dim + SquareDim<SideDim = N>,
         ShapeConstraint: BaseBroadcastDim<N, N, Output = N>,
         ShapeConstraint: BroadcastDim<N, N, Output = N>,
-        R: Repr + 'static,
+        R: OwnedRepr + 'static,
         N: Dim + NonScalarDim + 'static,
         (S, N): Dim,
     {
@@ -176,7 +176,7 @@ impl UncheckedMerweConfig {
         ))
     }
 
-    pub fn mean_weights<S: Dim, R: Repr>(&self) -> Tensor<f64, S, R> {
+    pub fn mean_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R> {
         let s = 2 * self.n + 1;
         let n = self.n as f64;
         let lambda = self.lambda;
@@ -188,7 +188,7 @@ impl UncheckedMerweConfig {
         )
     }
 
-    pub fn covariance_weights<S: Dim, R: Repr>(&self) -> Tensor<f64, S, R> {
+    pub fn covariance_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R> {
         let Self {
             lambda,
             alpha,
@@ -207,7 +207,7 @@ impl UncheckedMerweConfig {
     }
 
     /// Calculated the shared weight used by both the covariance and mean weights
-    pub fn shared_weight<R: Repr>(&self) -> Scalar<f64, R> {
+    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R> {
         let lambda = self.lambda;
         let n = self.n as f64;
         let w = 1.0 / (2.0 * (n + lambda));
@@ -222,7 +222,7 @@ impl<const N: usize> MerweConfig<N> {
         }
     }
 
-    pub fn sigma_points<const S: usize, R: Repr + 'static>(
+    pub fn sigma_points<const S: usize, R: OwnedRepr + 'static>(
         &self,
         x: Vector<f64, N, R>,
         sigma: Matrix<f64, N, N, R>,
@@ -231,22 +231,22 @@ impl<const N: usize> MerweConfig<N> {
         self.unchecked_config.sigma_points(x, sigma)
     }
 
-    pub fn mean_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
+    pub fn mean_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R> {
         self.unchecked_config.mean_weights()
     }
 
-    pub fn covariance_weights<const S: usize, R: Repr>(&self) -> Vector<f64, S, R> {
+    pub fn covariance_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R> {
         self.unchecked_config.covariance_weights()
     }
 
     /// Calculated the shared weight used by both the covariance and mean weights
-    pub fn shared_weight<R: Repr>(&self) -> Scalar<f64, R> {
+    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R> {
         self.unchecked_config.shared_weight()
     }
 }
 
 #[doc(hidden)]
-pub struct UncheckedState<N: Dim, Z: Dim, R: Repr>
+pub struct UncheckedState<N: Dim, Z: Dim, R: OwnedRepr>
 where
     (N, N): Dim,
     (Z, Z): Dim,
@@ -257,7 +257,7 @@ where
     pub noise_covar: Tensor<f64, (Z, Z), R>,
 }
 
-impl<N: Dim, Z: Dim, R: Repr + 'static> UncheckedState<N, Z, R>
+impl<N: Dim, Z: Dim, R: OwnedRepr + 'static> UncheckedState<N, Z, R>
 where
     N: NonScalarDim + NonTupleDim + 'static,
     Z: NonScalarDim + NonTupleDim,
@@ -315,7 +315,7 @@ where
     }
 }
 
-pub struct State<const N: usize, const Z: usize, const S: usize, R: Repr> {
+pub struct State<const N: usize, const Z: usize, const S: usize, R: OwnedRepr> {
     pub x_hat: Vector<f64, N, R>,
     pub covar: Matrix<f64, N, N, R>,
     pub prop_covar: Matrix<f64, N, N, R>,
@@ -323,7 +323,7 @@ pub struct State<const N: usize, const Z: usize, const S: usize, R: Repr> {
     pub config: MerweConfig<N>,
 }
 
-impl<const N: usize, const Z: usize, const S: usize, R: Repr + 'static> State<N, Z, S, R> {
+impl<const N: usize, const Z: usize, const S: usize, R: OwnedRepr + 'static> State<N, Z, S, R> {
     pub fn update(
         self,
         z: Vector<f64, Z, R>,

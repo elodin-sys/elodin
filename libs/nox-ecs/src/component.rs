@@ -1,4 +1,4 @@
-use nox::{Op, Repr, ReprMonad, Scalar};
+use nox::{Op, OwnedRepr, ReprMonad, Scalar};
 use nox_ecs_macros::{Component, ReprMonad};
 
 pub trait Component:
@@ -7,13 +7,13 @@ pub trait Component:
 }
 
 #[derive(Component, ReprMonad)]
-pub struct WorldPos<R: Repr = Op>(pub nox::SpatialTransform<f64, R>);
+pub struct WorldPos<R: OwnedRepr = Op>(pub nox::SpatialTransform<f64, R>);
 
 #[derive(Component, ReprMonad)]
-pub struct Seed<R: Repr = Op>(pub Scalar<u64, R>);
+pub struct Seed<R: OwnedRepr = Op>(pub Scalar<u64, R>);
 
 #[derive(Component, ReprMonad)]
-pub struct Time<R: Repr = Op>(pub Scalar<f64, R>);
+pub struct Time<R: OwnedRepr = Op>(pub Scalar<f64, R>);
 
 impl Seed {
     pub fn zero() -> Self {

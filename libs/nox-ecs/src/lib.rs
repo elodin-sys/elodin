@@ -658,8 +658,8 @@ mod tests {
     };
     use impeller::well_known::Glb;
     use nox::{
-        tensor, Op, Repr, Scalar, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform,
-        Vector,
+        tensor, Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion,
+        SpatialTransform, Vector,
     };
     use nox_ecs_macros::ReprMonad;
     use polars::{
@@ -670,13 +670,13 @@ mod tests {
     #[test]
     fn test_simple() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Component, ReprMonad)]
-        struct B<R: Repr = Op>(Scalar<f64, R>);
+        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Component, ReprMonad)]
-        struct C<R: Repr = Op>(Scalar<f64, R>);
+        struct C<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -709,10 +709,10 @@ mod tests {
     #[test]
     fn test_get_scalar() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Component, ReprMonad)]
-        struct B<R: Repr = Op>(Scalar<f64, R>);
+        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
             v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
@@ -730,10 +730,10 @@ mod tests {
     #[test]
     fn test_get_tensor() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Vector<f64, 3, R>);
+        struct A<R: OwnedRepr = Op>(Vector<f64, 3, R>);
 
         #[derive(Component, ReprMonad)]
-        struct B<R: Repr = Op>(Vector<f64, 3, R>);
+        struct B<R: OwnedRepr = Op>(Vector<f64, 3, R>);
 
         fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
             v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn test_assets() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         #[derive(Archetype)]
         struct Body {
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn test_startup() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
             a.map(|a: A| A(a.0 * 3.0)).unwrap()
@@ -796,7 +796,7 @@ mod tests {
     #[test]
     fn test_write_read() {
         #[derive(Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
             a.map(|a: A| A(a.0 * 3.0)).unwrap()

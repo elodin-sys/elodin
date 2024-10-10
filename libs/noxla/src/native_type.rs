@@ -1,6 +1,6 @@
 use crate::{Literal, XlaBuilder, XlaOp, XlaOpRaw};
-use bytemuck::Pod;
 use cpp::cpp;
+use zerocopy::{FromBytes, Immutable};
 
 cpp! {{
     #include "xla/client/xla_builder.h"
@@ -16,7 +16,7 @@ cpp! {{
 
 /// A type implementing the `NativeType` trait can be directly converted to constant ops or
 /// literals.
-pub trait NativeType: Copy + Pod {
+pub trait NativeType: Copy + FromBytes + Immutable {
     fn constant_r0(builder: &XlaBuilder, value: Self) -> XlaOp;
     fn constant_r1(builder: &XlaBuilder, value: &[Self]) -> XlaOp;
     fn literal(self) -> Literal;

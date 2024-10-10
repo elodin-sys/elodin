@@ -102,8 +102,9 @@ pub enum Error {
         rhs_dims: Vec<i64>,
         msg: &'static str,
     },
-    #[error("podcast error {0}")]
-    PodCastError(bytemuck::PodCastError),
+
+    #[error("cast error")]
+    CastError,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -65,13 +65,13 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::{tensor, Op, Repr, Scalar, SpatialMotion, SpatialTransform};
+    use nox::{tensor, Op, OwnedRepr, Scalar, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::ReprMonad;
 
     #[test]
     fn test_simple_semi_implicit_vertlet() {
         #[derive(Clone, Component, ReprMonad)]
-        struct X<R: Repr = Op>(Scalar<f64, R>);
+        struct X<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         impl Add<V> for X {
             type Output = X;
@@ -82,7 +82,7 @@ mod tests {
         }
 
         #[derive(Clone, Component, ReprMonad)]
-        struct V<R: Repr = Op>(Scalar<f64, R>);
+        struct V<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         impl Add<A> for V {
             type Output = V;
@@ -101,7 +101,7 @@ mod tests {
         }
 
         #[derive(Clone, Component, ReprMonad)]
-        struct A<R: Repr = Op>(Scalar<f64, R>);
+        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
 
         impl Mul<A> for Scalar<f64> {
             type Output = A;
@@ -135,11 +135,11 @@ mod tests {
     #[test]
     fn test_six_dof() {
         #[derive(Clone, Component, ReprMonad)]
-        struct X<R: Repr = Op>(SpatialTransform<f64, R>);
+        struct X<R: OwnedRepr = Op>(SpatialTransform<f64, R>);
         #[derive(Clone, Component, ReprMonad)]
-        struct V<R: Repr = Op>(SpatialMotion<f64, R>);
+        struct V<R: OwnedRepr = Op>(SpatialMotion<f64, R>);
         #[derive(Clone, Component, ReprMonad)]
-        struct A<R: Repr = Op>(SpatialMotion<f64, R>);
+        struct A<R: OwnedRepr = Op>(SpatialMotion<f64, R>);
 
         impl Add<V> for X {
             type Output = X;

@@ -9,7 +9,7 @@ use smallvec::{smallvec, SmallVec};
 use crate::ArrayTy;
 use crate::{
     array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    Dim, DimGet, DimRow, DotDim, Field, MappableDim, Noxpr, ReplaceDim, Repr, RowDim,
+    Dim, DimGet, DimRow, DotDim, Field, MappableDim, Noxpr, OwnedRepr, ReplaceDim, Repr, RowDim,
 };
 
 /// Represents a compute operation.
@@ -57,6 +57,16 @@ impl Op {
 impl Repr for Op {
     type Inner<T: Elem, D: Dim> = Noxpr;
 
+    type Shape<D: Dim> = SmallVec<[usize; 4]>;
+    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
+        arg.shape()
+            .unwrap()
+            .into_iter()
+            .map(|x| x as usize)
+            .collect()
+    }
+}
+impl OwnedRepr for Op {
     fn add<T, D1, D2>(
         left: &Self::Inner<T, D1>,
         right: &Self::Inner<T, D2>,
@@ -410,7 +420,7 @@ impl Repr for Op {
         D1::MappedDim<D2>: Dim,
         T1: Field,
         D1: Dim + MappableDim,
-        T2: Copy + Default,
+        T2: Elem,
         D2: Dim,
     {
         let arg_shape = arg.shape().unwrap();
@@ -462,14 +472,5 @@ impl Repr for Op {
                 .slice(start, stop, strides.clone())
                 .reshape(row_shape.clone())
         })
-    }
-
-    type Shape<D: Dim> = SmallVec<[usize; 4]>;
-    fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {
-        arg.shape()
-            .unwrap()
-            .into_iter()
-            .map(|x| x as usize)
-            .collect()
     }
 }

@@ -2,14 +2,14 @@
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::{
-    ArrayRepr, Const, DefaultRepr, Field, Quaternion, RealField, Repr, ReprMonad, Scalar, Tensor,
-    TensorItem, Vector, MRP,
+    ArrayRepr, Const, DefaultRepr, Field, OwnedRepr, Quaternion, RealField, ReprMonad, Scalar,
+    Tensor, TensorItem, Vector, MRP,
 };
 use std::ops::Div;
 use std::ops::{Add, Mul};
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
-pub struct SpatialTransform<T: TensorItem, R: Repr = DefaultRepr> {
+pub struct SpatialTransform<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
 
@@ -24,7 +24,7 @@ where
     }
 }
 
-impl<T: Field, R: Repr> Clone for SpatialTransform<T, R>
+impl<T: Field, R: OwnedRepr> Clone for SpatialTransform<T, R>
 where
     Vector<T, 7, R>: Clone,
 {
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<T: Field, R: Repr> std::fmt::Debug for SpatialTransform<T, R>
+impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialTransform<T, R>
 where
     R::Inner<T, Const<7>>: std::fmt::Debug,
 {
@@ -46,12 +46,12 @@ where
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialTransform<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> ReprMonad<R> for SpatialTransform<T, R> {
     type Elem = T;
     type Dim = Const<7>;
-    type Map<N: Repr> = SpatialTransform<T, N>;
+    type Map<N: OwnedRepr> = SpatialTransform<T, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {
@@ -75,7 +75,7 @@ impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialTransform<T, R>
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> SpatialTransform<T, R> {
     /// Constructs a new spatial transform from an angular component (Quaternion) and a linear component (Vector).
     pub fn new(angular: impl Into<Quaternion<T, R>>, linear: impl Into<Vector<T, 3, R>>) -> Self {
         let angular = angular.into();
@@ -123,7 +123,7 @@ impl<T: TensorItem + RealField, R: Repr> SpatialTransform<T, R> {
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> Mul for SpatialTransform<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> Mul for SpatialTransform<T, R> {
     type Output = SpatialTransform<T, R>;
 
     fn mul(self, rhs: SpatialTransform<T, R>) -> Self::Output {
@@ -134,11 +134,11 @@ impl<T: TensorItem + RealField, R: Repr> Mul for SpatialTransform<T, R> {
 }
 
 /// A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
-pub struct SpatialForce<T: TensorItem, R: Repr = DefaultRepr> {
+pub struct SpatialForce<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }
 
-impl<T: Field, R: Repr> Clone for SpatialForce<T, R>
+impl<T: Field, R: OwnedRepr> Clone for SpatialForce<T, R>
 where
     Vector<T, 6, R>: Clone,
 {
@@ -160,7 +160,7 @@ where
     }
 }
 
-impl<T: Field, R: Repr> std::fmt::Debug for SpatialForce<T, R>
+impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialForce<T, R>
 where
     R::Inner<T, Const<6>>: std::fmt::Debug,
 {
@@ -169,12 +169,12 @@ where
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialForce<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> ReprMonad<R> for SpatialForce<T, R> {
     type Elem = T;
     type Dim = Const<6>;
-    type Map<N: Repr> = SpatialForce<T, N>;
+    type Map<N: OwnedRepr> = SpatialForce<T, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {
@@ -198,7 +198,7 @@ impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialForce<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> SpatialForce<T, R> {
+impl<T: RealField, R: OwnedRepr> SpatialForce<T, R> {
     /// Constructs a new spatial force from a torque component (Vector) and a force component (Vector).
     pub fn new(torque: impl Into<Vector<T, 3, R>>, force: impl Into<Vector<T, 3, R>>) -> Self {
         let torque = torque.into();
@@ -241,7 +241,7 @@ impl<T: RealField, R: Repr> SpatialForce<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Add for SpatialForce<T, R> {
+impl<T: RealField, R: OwnedRepr> Add for SpatialForce<T, R> {
     type Output = SpatialForce<T, R>;
 
     fn add(self, rhs: SpatialForce<T, R>) -> Self::Output {
@@ -253,16 +253,16 @@ impl<T: RealField, R: Repr> Add for SpatialForce<T, R> {
 
 /// A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space.
 /// The inertia matrix is assumed to be symmetric and represented in its diagonalized form.
-pub struct SpatialInertia<T: TensorItem, R: Repr = DefaultRepr> {
+pub struct SpatialInertia<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
 
-impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialInertia<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> ReprMonad<R> for SpatialInertia<T, R> {
     type Elem = T;
     type Dim = Const<7>;
-    type Map<N: Repr> = SpatialInertia<T, N>;
+    type Map<N: OwnedRepr> = SpatialInertia<T, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {
@@ -286,7 +286,7 @@ impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialInertia<T, R> {
     }
 }
 
-impl<T: Field, R: Repr> Clone for SpatialInertia<T, R>
+impl<T: Field, R: OwnedRepr> Clone for SpatialInertia<T, R>
 where
     Vector<T, 7, R>: Clone,
 {
@@ -297,7 +297,7 @@ where
     }
 }
 
-impl<T: Field, R: Repr> std::fmt::Debug for SpatialInertia<T, R>
+impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialInertia<T, R>
 where
     R::Inner<T, Const<7>>: std::fmt::Debug,
 {
@@ -306,7 +306,7 @@ where
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> SpatialInertia<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> SpatialInertia<T, R> {
     /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
     pub fn new(
         inertia: impl Into<Vector<T, 3, R>>,
@@ -346,7 +346,7 @@ impl<T: TensorItem + RealField, R: Repr> SpatialInertia<T, R> {
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> Div<SpatialInertia<T, R>> for SpatialForce<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> Div<SpatialInertia<T, R>> for SpatialForce<T, R> {
     type Output = SpatialMotion<T, R>;
 
     fn div(self, rhs: SpatialInertia<T, R>) -> Self::Output {
@@ -356,7 +356,7 @@ impl<T: TensorItem + RealField, R: Repr> Div<SpatialInertia<T, R>> for SpatialFo
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> Mul<SpatialMotion<T, R>> for SpatialInertia<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> Mul<SpatialMotion<T, R>> for SpatialInertia<T, R> {
     type Output = SpatialForce<T, R>;
 
     fn mul(self, rhs: SpatialMotion<T, R>) -> Self::Output {
@@ -379,11 +379,11 @@ where
 }
 
 /// A spatial motion is a 6D vector that represents the velocity of a rigid body in 3D space.
-pub struct SpatialMotion<T: TensorItem, R: Repr = DefaultRepr> {
+pub struct SpatialMotion<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }
 
-impl<T: Field, R: Repr> Clone for SpatialMotion<T, R>
+impl<T: Field, R: OwnedRepr> Clone for SpatialMotion<T, R>
 where
     R::Inner<T::Elem, Const<6>>: Clone,
 {
@@ -394,12 +394,12 @@ where
     }
 }
 
-impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialMotion<T, R> {
+impl<T: TensorItem + RealField, R: OwnedRepr> ReprMonad<R> for SpatialMotion<T, R> {
     type Elem = T;
     type Dim = Const<6>;
-    type Map<N: Repr> = SpatialMotion<T, N>;
+    type Map<N: OwnedRepr> = SpatialMotion<T, N>;
 
-    fn map<N: Repr>(
+    fn map<N: OwnedRepr>(
         self,
         func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
     ) -> Self::Map<N> {
@@ -423,7 +423,7 @@ impl<T: TensorItem + RealField, R: Repr> ReprMonad<R> for SpatialMotion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> SpatialMotion<T, R> {
+impl<T: RealField, R: OwnedRepr> SpatialMotion<T, R> {
     /// Constructs a new spatial motion from angular and linear components.
     pub fn new(angular: impl Into<Vector<T, 3, R>>, linear: impl Into<Vector<T, 3, R>>) -> Self {
         let angular = angular.into();
@@ -487,7 +487,7 @@ impl<T: RealField, R: Repr> SpatialMotion<T, R> {
     }
 }
 
-impl<R: Repr> Mul<SpatialMotion<f64, R>> for f64 {
+impl<R: OwnedRepr> Mul<SpatialMotion<f64, R>> for f64 {
     type Output = SpatialMotion<f64, R>;
     fn mul(self, rhs: SpatialMotion<f64, R>) -> Self::Output {
         SpatialMotion {
@@ -496,7 +496,7 @@ impl<R: Repr> Mul<SpatialMotion<f64, R>> for f64 {
     }
 }
 
-impl<R: Repr> Mul<SpatialMotion<f32, R>> for f32 {
+impl<R: OwnedRepr> Mul<SpatialMotion<f32, R>> for f32 {
     type Output = SpatialMotion<f32, R>;
     fn mul(self, rhs: SpatialMotion<f32, R>) -> Self::Output {
         SpatialMotion {
@@ -525,7 +525,7 @@ impl<T: RealField> Mul<SpatialMotion<T>> for &Scalar<T> {
 
 impl<T, R> Add<SpatialMotion<T, R>> for SpatialTransform<T, R>
 where
-    R: Repr,
+    R: OwnedRepr,
     T: RealField,
     Quaternion<T, R>: Add<Quaternion<T, R>, Output = Quaternion<T, R>>,
     Vector<T, 3, R>: Add<Vector<T, 3, R>, Output = Vector<T, 3, R>>,
@@ -544,7 +544,7 @@ where
     }
 }
 
-impl<T: RealField, R: Repr> Add<SpatialMotion<T, R>> for SpatialMotion<T, R> {
+impl<T: RealField, R: OwnedRepr> Add<SpatialMotion<T, R>> for SpatialMotion<T, R> {
     type Output = SpatialMotion<T, R>;
 
     fn add(self, rhs: SpatialMotion<T, R>) -> Self::Output {
@@ -554,7 +554,7 @@ impl<T: RealField, R: Repr> Add<SpatialMotion<T, R>> for SpatialMotion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Add<SpatialTransform<T, R>> for SpatialTransform<T, R> {
+impl<T: RealField, R: OwnedRepr> Add<SpatialTransform<T, R>> for SpatialTransform<T, R> {
     type Output = SpatialTransform<T, R>;
 
     fn add(self, rhs: SpatialTransform<T, R>) -> Self::Output {
@@ -564,7 +564,7 @@ impl<T: RealField, R: Repr> Add<SpatialTransform<T, R>> for SpatialTransform<T, 
     }
 }
 
-impl<T: RealField, R: Repr> Mul<SpatialMotion<T, R>> for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<SpatialMotion<T, R>> for Quaternion<T, R> {
     type Output = SpatialMotion<T, R>;
 
     fn mul(self, rhs: SpatialMotion<T, R>) -> Self::Output {
@@ -572,7 +572,7 @@ impl<T: RealField, R: Repr> Mul<SpatialMotion<T, R>> for Quaternion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Mul<SpatialTransform<T, R>> for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<SpatialTransform<T, R>> for Quaternion<T, R> {
     type Output = SpatialTransform<T, R>;
 
     fn mul(self, rhs: SpatialTransform<T, R>) -> Self::Output {
@@ -580,7 +580,7 @@ impl<T: RealField, R: Repr> Mul<SpatialTransform<T, R>> for Quaternion<T, R> {
     }
 }
 
-impl<T: RealField, R: Repr> Mul<SpatialForce<T, R>> for Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<SpatialForce<T, R>> for Quaternion<T, R> {
     type Output = SpatialForce<T, R>;
 
     fn mul(self, rhs: SpatialForce<T, R>) -> Self::Output {
