@@ -1,5 +1,6 @@
-use core::borrow::{Borrow, BorrowMut};
+use core::{borrow::Borrow, cell::UnsafeCell, ops::Deref};
 
+use critical_section::Mutex;
 use hal::{clocks::Clocks, dma, pac, timer};
 
 use crate::dma::DmaBuf;
@@ -16,15 +17,30 @@ pub trait HalTimerRegExt: Sized {
     ) -> timer::Timer<Self>;
 }
 
-pub trait HalDmaRegExt: Sized {
-    const DMA: u8;
-    fn dma(self) -> dma::Dma<Self>;
-    fn dma_periph() -> dma::DmaPeriph {
-        match Self::DMA {
-            1 => dma::DmaPeriph::Dma1,
-            2 => dma::DmaPeriph::Dma2,
-            _ => unreachable!(),
-        }
+pub trait HalDmaRegExt: Sized + Deref<Target = pac::dma1::RegisterBlock> + 'static {
+    const DMA: dma::DmaPeriph;
+    fn dma(self) -> dma::Dma<Self> {
+        dma::Dma::new(self)
+    }
+
+    fn split(self) -> [DmaChannel<Self>; 8] {
+        let mut dma = self.dma();
+        let dma_channels = [
+            dma::DmaChannel::C0,
+            dma::DmaChannel::C1,
+            dma::DmaChannel::C2,
+            dma::DmaChannel::C3,
+            dma::DmaChannel::C4,
+            dma::DmaChannel::C5,
+            dma::DmaChannel::C6,
+            dma::DmaChannel::C7,
+        ];
+        dma_channels.map(|channel| DmaChannel {
+            dma: Mutex::new(unsafe {
+                &mut *(&mut dma as *mut dma::Dma<Self> as *mut UnsafeCell<dma::Dma<Self>>)
+            }),
+            channel,
+        })
     }
 }
 
@@ -49,13 +65,7 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         dma_periph: dma::DmaPeriph,
     );
 
-    fn write<const N: usize, const CHANNEL: u8, H: HalDmaRegExt>(
-        &mut self,
-        dma_buf: &mut DmaBuf<N, CHANNEL, H>,
-    ) -> bool
-    where
-        dma::Dma<H>: HalDmaExt,
-    {
+    fn write<const N: usize, H: HalDmaRegExt>(&mut self, dma_buf: &mut DmaBuf<N, H>) -> bool {
         if dma_buf.transfer_in_progress && !dma_buf.dma_ch.transfer_complete() {
             defmt::warn!("DMA transfer is not complete");
             return false;
@@ -67,23 +77,21 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         let base_addr = TIMX_CCR1_OFFSET / 4;
         let burst_len = 4u8;
         assert_eq!(dma_buf.staging_buf.len() % burst_len as usize, 0);
-        let dma_channel = DmaCh::<CHANNEL, H>::dma_channel();
         let channel_cfg = dma::ChannelCfg::default();
-        let dma_periph = H::dma_periph();
 
         dma_buf.shared_buf.copy_from_slice(dma_buf.staging_buf);
         dma_buf.transfer_in_progress = true;
-        // SAFETY: `dma_buf.buf` is leaked memory, and will remain valid for the lifetime of the program
-        // `dma_buf.buf` can only be written to when the DMA transfer is not in progress to prevent data corruption
+        // SAFETY: `dma_buf.shared_buf` is leaked memory, and will remain valid for the lifetime of the program
+        // `dma_buf.shared_buf` can only be written to when the DMA transfer is not in progress to prevent data corruption
         unsafe {
             self.hal_write_dma_burst(
                 dma_buf.shared_buf,
                 base_addr,
                 burst_len,
-                dma_channel,
+                dma_buf.dma_ch.channel,
                 channel_cfg,
                 false,
-                dma_periph,
+                H::DMA,
             );
         }
         true
@@ -103,19 +111,6 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         self.ch()
     }
     fn ch4(&self) -> TimCh<4, Self::HalTimerReg> {
-        self.ch()
-    }
-}
-
-pub trait HalDmaExt: Sized + BorrowMut<dma::Dma<Self::HalDmaReg>> {
-    type HalDmaReg: HalDmaRegExt;
-    fn hal_transfer_is_complete(&mut self, channel: dma::DmaChannel) -> bool;
-    fn ch<const CHANNEL: u8>(&mut self) -> DmaCh<CHANNEL, Self::HalDmaReg> {
-        DmaCh {
-            dma: self.borrow_mut(),
-        }
-    }
-    fn ch1(&mut self) -> DmaCh<1, Self::HalDmaReg> {
         self.ch()
     }
 }
@@ -147,8 +142,9 @@ pub type Tim3Ch2<'a> = Tim3<'a, 2>;
 pub type Tim3Ch3<'a> = Tim3<'a, 3>;
 pub type Tim3Ch4<'a> = Tim3<'a, 4>;
 
-pub struct DmaCh<'a, const CHANNEL: u8, H: HalDmaRegExt> {
-    dma: &'a mut dma::Dma<H>,
+pub struct DmaChannel<H: HalDmaRegExt> {
+    dma: Mutex<&'static mut UnsafeCell<dma::Dma<H>>>,
+    channel: dma::DmaChannel,
 }
 
 macro_rules! impl_hal_timer {
@@ -198,23 +194,6 @@ impl_hal_timer!(1);
 impl_hal_timer!(2);
 impl_hal_timer!(3);
 
-macro_rules! impl_hal_dma {
-    ($dma:literal) => {
-        paste::paste! {
-        impl HalDmaExt for dma::Dma<pac::[<DMA $dma>]>
-        {
-            type HalDmaReg = pac::[<DMA $dma>];
-            fn hal_transfer_is_complete(&mut self, channel: dma::DmaChannel) -> bool {
-                self.transfer_is_complete(channel)
-            }
-        }
-        }
-    };
-}
-
-impl_hal_dma!(1);
-impl_hal_dma!(2);
-
 macro_rules! impl_hal_timer_reg {
     ($tim_num:literal) => {
         paste::paste! {
@@ -243,17 +222,11 @@ impl_hal_timer_reg!(2);
 impl_hal_timer_reg!(3);
 
 impl HalDmaRegExt for pac::DMA1 {
-    const DMA: u8 = 1;
-    fn dma(self) -> dma::Dma<Self> {
-        dma::Dma::new(self)
-    }
+    const DMA: dma::DmaPeriph = dma::DmaPeriph::Dma1;
 }
 
 impl HalDmaRegExt for pac::DMA2 {
-    const DMA: u8 = 2;
-    fn dma(self) -> dma::Dma<Self> {
-        dma::Dma::new(self)
-    }
+    const DMA: dma::DmaPeriph = dma::DmaPeriph::Dma2;
 }
 
 macro_rules! impl_timer_dma_mux {
@@ -270,37 +243,22 @@ impl_timer_dma_mux!(1);
 impl_timer_dma_mux!(2);
 impl_timer_dma_mux!(3);
 
-impl<'a, const CHANNEL: u8, H: HalDmaRegExt> DmaCh<'a, CHANNEL, H>
-where
-    dma::Dma<H>: HalDmaExt,
-{
-    const fn dma_channel() -> dma::DmaChannel {
-        match CHANNEL {
-            0 => dma::DmaChannel::C0,
-            1 => dma::DmaChannel::C1,
-            2 => dma::DmaChannel::C2,
-            3 => dma::DmaChannel::C3,
-            4 => dma::DmaChannel::C4,
-            5 => dma::DmaChannel::C5,
-            6 => dma::DmaChannel::C6,
-            7 => dma::DmaChannel::C7,
-            _ => unreachable!(),
-        }
-    }
-
+impl<H: HalDmaRegExt> DmaChannel<H> {
     pub fn mux<M: DmaMuxInput>(&self, _: &mut M) {
-        dma::mux(H::dma_periph(), Self::dma_channel(), M::DMA_INPUT);
+        dma::mux(H::DMA, self.channel, M::DMA_INPUT);
     }
 
-    pub fn clear_interrupt(&self) {
-        dma::clear_interrupt(
-            H::dma_periph(),
-            Self::dma_channel(),
-            dma::DmaInterrupt::TransferComplete,
-        );
+    pub fn clear_interrupt(&mut self) {
+        self.dma
+            .get_mut()
+            .get_mut()
+            .clear_interrupt(self.channel, dma::DmaInterrupt::TransferComplete);
     }
 
     pub fn transfer_complete(&mut self) -> bool {
-        self.dma.hal_transfer_is_complete(Self::dma_channel())
+        self.dma
+            .get_mut()
+            .get_mut()
+            .transfer_is_complete(self.channel)
     }
 }
