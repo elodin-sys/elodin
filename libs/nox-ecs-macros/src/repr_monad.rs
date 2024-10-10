@@ -98,9 +98,9 @@ pub fn repr_monad(input: TokenStream) -> TokenStream {
         impl #impl_generics #crate_name::ReprMonad<#repr_generic_ident> for #ident #ty_generics #where_clause {
             type Elem = <#inner_type as #crate_name::ReprMonad<#repr_generic_ident>>::Elem;
             type Dim = <#inner_type as #crate_name::ReprMonad<#repr_generic_ident>>::Dim;
-            type Map<NewRepr: Repr> = #ident<#(#replaced_generic_idents)*>;
+            type Map<NewRepr: #crate_name::OwnedRepr> = #ident<#(#replaced_generic_idents)*>;
 
-            fn map<N: Repr>(
+            fn map<N: #crate_name::OwnedRepr>(
                 self,
                 func: impl Fn(R::Inner<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
             ) -> Self::Map<N> {

@@ -12,7 +12,7 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["noxpr", "xla"]
 jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
 cuda = ["shared"]
-noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
+noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write", "zerocopy"]
 xla = ["dep:xla", "lapack-src"]
 shared = []
 serde = ["dep:serde"]
@@ -24,7 +24,6 @@ thiserror = "1.0"
 seq-macro = "0.3.5"
 fn-traits = "0.2"
 faer = "0.19.1"
-bytemuck.version = "1.14"
 dyn-stack = "0.10.0"
 inplace_it = "0.3.5"
 smallvec.version = "1.11.2"
@@ -39,6 +38,8 @@ itertools.version = "0.12.0"
 itertools.optional = true
 indent_write.version = "2.2.0"
 indent_write.optional = true
+zerocopy.version = "0.8.2"
+zerocopy.optional = true
 
 # noxla - a wrapper around raw xla
 xla = { optional = true, workspace = true }
