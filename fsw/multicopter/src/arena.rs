@@ -1,8 +1,9 @@
 use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[link_section = ".axisram.buffers"]
 static mut DMA_BUF: MaybeUninit<[u8; 4096]> = MaybeUninit::uninit();
-static mut TAKEN: bool = false;
+static TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// A simple bump allocator for DMA buffers backed by memory that's been reserved in a DMA-accessible region.
 /// This allocator does not support deallocation. So, it just leaks memory which is actually fine for DMA buffers.
@@ -13,18 +14,12 @@ pub struct DmaAlloc<B> {
 
 impl DmaAlloc<&'static mut [u8; 4096]> {
     pub fn take() -> Self {
-        // SAFETY: A mutable reference to the static is safe to create because it cannot be aliased.
-        let buf = critical_section::with(|_| unsafe {
-            if TAKEN {
+        let buf = critical_section::with(|_| {
+            if TAKEN.swap(true, Ordering::AcqRel) {
                 defmt::panic!("DMA alloc already taken");
             }
-            TAKEN = true;
-            let buf = &mut *(core::ptr::addr_of_mut!(DMA_BUF) as *mut [MaybeUninit<u8>; 4096]);
-            // zero out the buffer
-            for value in buf.iter_mut() {
-                value.as_mut_ptr().write(0);
-            }
-            DMA_BUF.assume_init_mut()
+            // SAFETY: A mutable reference to the static is safe to create because it cannot be aliased.
+            unsafe { DMA_BUF.write([0u8; 4096]) }
         });
         Self::new(buf)
     }

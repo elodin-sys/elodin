@@ -1,6 +1,6 @@
 use dshot_frame::{Command, Frame};
 use embedded_hal::delay::DelayNs;
-use hal::{dma, timer};
+use hal::timer;
 
 use crate::{arena::DmaAlloc, dma::DmaBuf, peripheral::*};
 
@@ -17,25 +17,24 @@ impl From<f32> for Throttle {
     }
 }
 
-pub struct Driver<'a, const CHANNEL: u8, T, D>
+pub struct Driver<T, D>
 where
     D: HalDmaRegExt,
 {
     pub pwm_timer: timer::Timer<T>,
-    pub dma_buf: DmaBuf<'a, DMA_BUF_SIZE, CHANNEL, D>,
+    pub dma_buf: DmaBuf<DMA_BUF_SIZE, D>,
     max_duty_cycle: u16,
 }
 
-impl<'a, const CHANNEL: u8, T, D> Driver<'a, CHANNEL, T, D>
+impl<T, D> Driver<T, D>
 where
     T: HalTimerRegExt,
     D: HalDmaRegExt,
-    dma::Dma<D>: HalDmaExt<HalDmaReg = D>,
     timer::Timer<T>: HalTimerExt<HalTimerReg = T> + DmaMuxInput,
 {
     pub fn new<B: AsMut<[u8]> + 'static>(
         mut pwm_timer: timer::Timer<T>,
-        dma: DmaCh<'a, CHANNEL, D>,
+        dma: DmaChannel<D>,
         alloc: &mut DmaAlloc<B>,
     ) -> Self {
         pwm_timer.enable_pwm();

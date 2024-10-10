@@ -36,8 +36,7 @@ fn main() -> ! {
     PC9::set(&pwm_timer.ch4());
     defmt::info!("Configured PWM timer");
 
-    let mut dma1 = dp.DMA1.dma();
-    let dma1_ch1 = dma1.ch1();
+    let [_, dma1_ch1, ..] = dp.DMA1.split();
     let mut alloc = DmaAlloc::take();
 
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dma1_ch1, &mut alloc);
