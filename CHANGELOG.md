@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+
+## v0.8.0
 - **(breaking)** Remove deprecated `from_linear`, `from_angular`, and `zero` static methods from spatial types. Use the constructor instead with optional arguments.
 
 ## v0.7.4

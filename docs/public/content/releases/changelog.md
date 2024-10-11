@@ -14,6 +14,9 @@ order = 1
 +++
 
 
+## v0.8.0
+- **(breaking)** Remove deprecated `from_linear`, `from_angular`, and `zero` static methods from spatial types. Use the constructor instead with optional arguments.
+
 ## v0.7.4
 - **(fix)** Fix bug where `editor run` would fail if the simulation file was in the current directory because it would attempt to get the parent directory without canonicalizing the path.
 - **(fix)** Fix `elodin login` in WSL. Previously, it would fail when attempting to open the browser. Now, it will print the URL to the console and you can copy and paste it into your browser.
