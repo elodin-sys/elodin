@@ -14,7 +14,7 @@ use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller::{
-    bevy::{EntityMap, Tick, TimeStep},
+    bevy::{ComponentValueMap, EntityMap, Tick, TimeStep},
     query::MetadataStore,
     well_known::{EntityMetadata, Graph, Panel, Viewport},
     ComponentId, ControlMsg, EntityId,
@@ -106,6 +106,18 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddViewport(None, None));
     }
 
+    pub fn create_component_monitor_tile(
+        &mut self,
+        entity_id: EntityId,
+        component_id: ComponentId,
+    ) {
+        self.tree_actions.push(TreeAction::AddComponentMonitor(
+            None,
+            entity_id,
+            component_id,
+        ));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
@@ -114,6 +126,7 @@ impl TileState {
 enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
+    ComponentMonitor(ComponentMonitorPane),
 }
 
 impl Pane {
@@ -121,6 +134,7 @@ impl Pane {
         match self {
             Pane::Graph(pane) => &pane.label,
             Pane::Viewport(viewport) => &viewport.label,
+            Pane::ComponentMonitor(component_monitor) => &component_monitor.label,
         }
     }
 
@@ -141,6 +155,7 @@ impl Pane {
         entity_metadata: &Query<&EntityMetadata>,
         metadata_store: &MetadataStore,
         control_msg: &mut EventWriter<ControlMsg>,
+        component_value_query: &Query<&ComponentValueMap>,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -192,6 +207,39 @@ impl Pane {
                 pane.rect = Some(content_rect.shrink(1.0));
                 egui_tiles::UiResponse::None
             }
+            Pane::ComponentMonitor(pane) => {
+                let Some(entity) = entity_map.get(&pane.entity_id) else {
+                    return egui_tiles::UiResponse::None;
+                };
+                let Ok(component_value_map) = component_value_query.get(*entity) else {
+                    return egui_tiles::UiResponse::None;
+                };
+                let Some(metadata) = metadata_store.get_metadata(&pane.component_id) else {
+                    return egui_tiles::UiResponse::None;
+                };
+
+                pane.label = format!("Component Monitor: {:?}", metadata.component_name());
+                for value in component_value_map.0.iter() {
+                    ui.label(format!("{:?}: {:?}", metadata.component_name(), value));
+                }
+                egui_tiles::UiResponse::None
+            }
+        }
+    }
+}
+
+struct ComponentMonitorPane {
+    pub label: String,
+    pub entity_id: EntityId,
+    pub component_id: ComponentId,
+}
+
+impl ComponentMonitorPane {
+    fn new(label: String, entity_id: EntityId, component_id: ComponentId) -> Self {
+        Self {
+            label,
+            entity_id,
+            component_id,
         }
     }
 }
@@ -276,11 +324,13 @@ struct TreeBehavior<'a, 'w, 's> {
     metadata_store: &'a MetadataStore,
     control_msg: &'a mut EventWriter<'w, ControlMsg>,
     new_tile_state: ResMut<'w, NewTileState>,
+    component_value_query: &'a Query<'w, 's, &'static ComponentValueMap>,
 }
 
 pub enum TreeAction {
     AddViewport(Option<TileId>, Option<EntityId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
+    AddComponentMonitor(Option<TileId>, EntityId, ComponentId),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -326,6 +376,7 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
             self.entity_metadata,
             self.metadata_store,
             self.control_msg,
+            self.component_value_query,
         )
     }
 
@@ -530,6 +581,15 @@ impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
                 };
                 ui.close_menu();
             }
+            ui.separator();
+            if ui.button("COMPONENT MONITOR").clicked() {
+                *self.new_tile_state = NewTileState::ComponentMonitor {
+                    entity_id: None,
+                    component_id: None,
+                    parent_id: None,
+                };
+                ui.close_menu();
+            }
         });
     }
 }
@@ -609,6 +669,11 @@ pub enum NewTileState {
         range_id: Option<TimelineRangeId>,
         parent_id: Option<TileId>,
     },
+    ComponentMonitor {
+        entity_id: Option<EntityId>,
+        component_id: Option<ComponentId>,
+        parent_id: Option<TileId>,
+    },
 }
 
 #[derive(SystemParam)]
@@ -636,7 +701,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
         let button_width = 240.0;
         let button_spacing = 20.0;
 
-        let desired_size = egui::vec2(button_width * 2.0 + button_spacing, button_height);
+        let desired_size = egui::vec2(button_width * 3.0 + button_spacing, button_height);
 
         ui.allocate_ui_at_rect(
             egui::Rect::from_center_size(ui.max_rect().center(), desired_size),
@@ -670,6 +735,21 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                             parent_id: None,
                         };
                     }
+
+                    let create_component_monitor_btn = ui.add(
+                        ETileButton::new("Component Monitor", icons.add)
+                            .description("Component Monitor")
+                            .width(button_width)
+                            .height(160.0),
+                    );
+
+                    if create_component_monitor_btn.clicked() {
+                        *new_tile_state = NewTileState::ComponentMonitor {
+                            entity_id: None,
+                            component_id: None,
+                            parent_id: None,
+                        };
+                    }
                 });
             },
         );
@@ -699,6 +779,7 @@ pub struct TileLayout<'w, 's> {
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam_query: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
+    component_value_query: Query<'w, 's, &'static ComponentValueMap>,
     new_tile_state: ResMut<'w, NewTileState>,
 }
 
@@ -737,6 +818,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             mut editor_cam_query,
             grid_cell,
             new_tile_state,
+            component_value_query,
         } = state_mut;
 
         let icons = args;
@@ -768,6 +850,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             entity_metadata: &entity_metadata,
             metadata_store: &metadata_store,
             control_msg: &mut control_msg,
+            component_value_query: &component_value_query,
             new_tile_state,
         };
         ui_state.tree.ui(&mut behavior, ui);
@@ -867,6 +950,21 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         ui_state.graphs.insert(tile_id, graph_id);
                     }
                 }
+                TreeAction::AddComponentMonitor(parent_tile_id, entity_id, component_id) => {
+                    let component_monitor = ComponentMonitorPane::new(
+                        "Component monitor".to_string(),
+                        entity_id,
+                        component_id,
+                    );
+
+                    let pane = Pane::ComponentMonitor(component_monitor);
+                    if let Some(tile_id) =
+                        ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                    {
+                        ui_state.tree.make_active(|id, _| id == tile_id);
+                    }
+                }
+
                 TreeAction::SelectTile(tile_id) => {
                     ui_state.tree.make_active(|id, _| id == tile_id);
                 }
@@ -898,6 +996,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         cam.insert(ViewportRect(None));
                     }
                 }
+                Pane::ComponentMonitor(_componentmonitorpane) => {}
             }
         }
     }

@@ -319,6 +319,13 @@ impl WidgetSystem for ModalNewTile<'_> {
                             icons,
                         );
                     }
+                    tiles::NewTileState::ComponentMonitor { .. } => {
+                        ui.add_widget_with::<ModalNewComponentMonitorTile>(
+                            world,
+                            "modal_new_component_monitor_tile",
+                            icons,
+                        );
+                    }
                     tiles::NewTileState::None => {
                         panic!("NewTileState is None after validating otherwise")
                     }
@@ -732,6 +739,198 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
             }
         });
 
+        if close_modal {
+            *new_tile_state = tiles::NewTileState::None;
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub struct ModalNewComponentMonitorTile<'w, 's> {
+    entities_meta: Query<'w, 's, EntityData<'static>>,
+    metadata_store: Res<'w, MetadataStore>,
+    new_tile_state: ResMut<'w, tiles::NewTileState>,
+    tile_state: ResMut<'w, tiles::TileState>,
+}
+
+impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
+    type Args = tiles::TileIcons;
+    type Output = ();
+
+    fn ui_system(
+        world: &mut World,
+        state: &mut SystemState<Self>,
+        ui: &mut egui::Ui,
+        args: Self::Args,
+    ) {
+        let state_mut = state.get_mut(world);
+        let icons = args;
+
+        let mut new_tile_state = state_mut.new_tile_state;
+        let entities_meta = state_mut.entities_meta;
+        let metadata_store = state_mut.metadata_store;
+        let mut tile_state = state_mut.tile_state;
+
+        let tiles::NewTileState::ComponentMonitor {
+            entity_id: m_entity_id,
+            component_id: m_component_id,
+            parent_id: _m_parent_id,
+        } = new_tile_state.as_mut()
+        else {
+            *new_tile_state = tiles::NewTileState::None;
+            return;
+        };
+
+        let mut close_modal = false;
+        let can_create = m_entity_id.is_some() && m_component_id.is_some();
+
+        // Header
+        ui.add(
+            EImageLabel::new(icons.tile_graph) // Todo: create and add tile icon for data monitor
+                .image_tint(colors::PEACH_DEFAULT)
+                .bg_color(with_opacity(colors::PEACH_DEFAULT, 0.01))
+                .margin(egui::Margin::same(1.0)),
+        );
+
+        ui.add(
+            ELabel::new("Create new component monitor")
+                .text_color(colors::PRIMARY_CREAME)
+                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+        );
+
+        // Entity selection
+        ui.add(
+            ELabel::new("ENTITY")
+                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
+                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+        );
+
+        let selected_entity = entities_meta
+            .iter()
+            .find(|(entity_id, _, _, _)| m_entity_id.is_some_and(|eid| eid == **entity_id));
+
+        let selected_entity_label =
+            selected_entity.map_or("None", |(_, _, _, metadata)| &metadata.name);
+
+        let width = ui.available_width();
+
+        ui.scope(|ui| {
+            theme::configure_combo_box(ui.style_mut());
+            egui::ComboBox::from_id_source("ENTITY")
+                .width(width)
+                .selected_text(selected_entity_label)
+                .show_ui(ui, |ui| {
+                    theme::configure_combo_item(ui.style_mut());
+
+                    ui.selectable_value(m_entity_id, None, "None");
+                    let mut entities = entities_meta
+                        .iter()
+                        .filter(|(_, _, values, _)| values.0.contains_key(&WorldPos::COMPONENT_ID))
+                        .collect::<Vec<_>>();
+                    entities.sort_by(|a, b| a.0.cmp(b.0));
+
+                    for (entity_id, _, values, metadata) in entities {
+                        if values.0.contains_key(&WorldPos::COMPONENT_ID) {
+                            ui.selectable_value(
+                                m_entity_id,
+                                Some(*entity_id),
+                                metadata.name.to_string(),
+                            );
+                        }
+                    }
+                });
+        });
+
+        // Component Selection
+        ui.add(
+            ELabel::new("COMPONENT")
+                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
+                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+        );
+
+        let components = if let Some((_, _, components, _)) = selected_entity {
+            components.0.clone()
+        } else {
+            BTreeMap::new()
+        };
+
+        let selected_component = components
+            .iter()
+            .find(|(component_id, _)| m_component_id.is_some_and(|cid| cid == **component_id));
+
+        let selected_component_label = selected_component
+            .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
+            .map(|m| m.component_name())
+            .unwrap_or_else(|| "None");
+
+        ui.scope(|ui| {
+            if components.is_empty() {
+                ui.disable();
+            }
+
+            theme::configure_combo_box(ui.style_mut());
+            egui::ComboBox::from_id_source("COMPONENT")
+                .width(width)
+                .selected_text(selected_component_label)
+                .show_ui(ui, |ui| {
+                    theme::configure_combo_item(ui.style_mut());
+
+                    ui.selectable_value(m_component_id, None, "None");
+
+                    for (component_id, _) in components.iter() {
+                        let Some(metadata) = metadata_store.get_metadata(component_id) else {
+                            continue;
+                        };
+                        ui.selectable_value(
+                            m_component_id,
+                            Some(*component_id),
+                            metadata.component_name(),
+                        );
+                    }
+                });
+        });
+
+        // Buttons
+
+        ui.add_space(16.0);
+
+        ui.horizontal(|ui| {
+            let item_spacing = 10.0;
+            ui.spacing_mut().item_spacing.x = item_spacing;
+            let button_width = (ui.available_width() - item_spacing) / 2.0;
+
+            let cancel_btn = ui.add(
+                EButton::new("CANCEL")
+                    .width(button_width)
+                    .color(colors::PRIMARY_CREAME)
+                    .bg_color(colors::PRIMARY_ONYX)
+                    .stroke(egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9)),
+            );
+            close_modal = cancel_btn.clicked();
+
+            let create_btn = ui.add(
+                EButton::new("CREATE")
+                    .width(button_width)
+                    .color(colors::MINT_DEFAULT)
+                    .disabled(!can_create)
+                    .bg_color(with_opacity(colors::MINT_DEFAULT, 0.05))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        with_opacity(colors::MINT_DEFAULT, 0.4),
+                    )),
+            );
+
+            if create_btn.clicked() {
+                let Some(component_id) = m_component_id.to_owned() else {
+                    return;
+                };
+                let Some((entity_id, _, _, _)) = selected_entity else {
+                    return;
+                };
+                tile_state.create_component_monitor_tile(*entity_id, component_id);
+                close_modal = true;
+            }
+        });
         if close_modal {
             *new_tile_state = tiles::NewTileState::None;
         }
