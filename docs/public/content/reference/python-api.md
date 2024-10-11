@@ -189,7 +189,7 @@ sim = w.run(sys, 1.0 / 120.0)
 ```
 
 <br></br>
-## `6 Degrees of Freedom`
+## 6 Degrees of Freedom Model
 
 Elodin has a built-in [6 Degrees of Freedom](https://en.wikipedia.org/wiki/Six_degrees_of_freedom) (6DoF) system
 implementation for simulating [rigid bodies](https://en.m.wikipedia.org/wiki/Rigid_body), such as flight vehicles.

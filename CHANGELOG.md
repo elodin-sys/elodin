@@ -2,20 +2,24 @@
 
 ## unreleased
 
-## v0.8.0
+## v0.8
+
+### v0.8.0
 - **(breaking)** Remove deprecated `from_linear`, `from_angular`, and `zero` static methods from spatial types. Use the constructor instead with optional arguments.
 
-## v0.7.4
+## v0.7
+
+### v0.7.4
 - **(fix)** Fix bug where `editor run` would fail if the simulation file was in the current directory because it would attempt to get the parent directory without canonicalizing the path.
 - **(fix)** Fix `elodin login` in WSL. Previously, it would fail when attempting to open the browser. Now, it will print the URL to the console and you can copy and paste it into your browser.
 
-## v0.7.2
+### v0.7.2
 - Use logical scan codes for the editor's key bindings. This means that keyboard shortcuts will respect your keyboard layout. For example, if you remap your Caps Lock key to Ctrl, the editor will treat Caps Lock as Ctrl as well.
 
-## v0.7.1
+### v0.7.1
 - On Windows, use Ctrl instead of Super for launching the command palette (Ctrl + P).
 
-## v0.7.0
+### v0.7.0
 - **(breaking)** Replace `--watch` option with `elodin run`.
 As part of adding process supervision to Elodin, we refactored how watching a simulation works. Now instead of running `python3 sim.py run --watch`, you run `elodin run sim.py`.
 - Add locking axis when panning and zooming plots.
@@ -28,18 +32,24 @@ As part of adding process supervision to Elodin, we refactored how watching a si
   world.recipe(el.s10.Recipe.Cargo(name = "test", path = "./test-crate", args = [], cwd = None, env = {}, restart_policy = el.s10.RestartPolicy.Never, package = None, bin = None)) # to build and run a crate
   ```
 
-## v0.6.2
+## v0.6
+
+### v0.6.2
 - **(fix)** Various WASM editor bug fixes.
 
-## v0.5.0
+## v0.5
+
+### v0.5.0
 - **(fix)** Fix inconsistent axes colors in the editor. Now, +X is red, +Y is green, and +Z is blue across both the navigation widget and the grid lines.
 - Respect `.gitignore` when uploading simulation artifacts for monte carlo runs. Also, ignore hidden files and directories.
 
-## v0.4.1
+## v0.4
+
+### v0.4.1
 - Add local cache for remote GLB assets to improve model load times and reduce network usage.
 - Add more built-in templates for creating new simulations (`ball` and `drone`).
 
-## v0.4.0
+### v0.4.0
 - **(fix)** Fix cutoff titlebar in editor on browser and windows.
 - **(fix)** Fix bug in the drone example's rate controller where the derivative term wasn't filtered correctly (https://github.com/elodin-sys/elodin/issues/18). It effectively caused the integral gain to amplified and the derivative gain to be suppressed.
 - **(breaking)** Replace `el.Time` and `el.advance_time` with `el.SimulationTick` and `el.SimulationTimeStep`.
@@ -53,24 +63,26 @@ As part of adding process supervision to Elodin, we refactored how watching a si
 - Enable vsync on Windows and Linux.
 - Don't throttle FPS when cursor is not moving on Windows and Linux.
 
-## v0.3.30
+## v0.3
+
+### v0.3.30
 - **(fix)** Fix issue where `edge_fold` would not filter out edges where the "right" entity doesn't match the "right" query.
 
-## v0.3.29
+### v0.3.29
 - Support adding `el.SpatialMotion` to `el.SpatialTransform`.
 - Add body-frame quaternion integration to `el.Quaternion` via `integrate_body`.
 
-## v0.3.28
+### v0.3.28
 - Various bug fixes.
 
-## v0.3.27
+### v0.3.27
 - **(fix)** Set the correct type information for the return value of `el.Quaternion` `__matmul__`. Previously, it would always return a `jax.BatchTracer` even if a spatial type was being multiplied.
 - **(fix)** Fix issue where CLI is unable to verify the license key.
 
-## v0.3.26
+### v0.3.26
 - Improve simulation startup times.
 
-## v0.3.25
+### v0.3.25
 - **(breaking)** Use variable positional arguments for `el.Panel.vsplit`, `el.Panel.hsplit`, `el.Panel.graph`, and `el.GraphEntity` instead of lists. This results in much less verbose panel configuration code. To update your code, either replace the list of arguments with individual arguments separated by commas or unpack the list with `*`.
   ```python
   # before:
@@ -139,7 +151,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
     w.spawn(el.Line3d(rocket, perspective=False))
     ```
 
-## v0.3.24
+### v0.3.24
 - Decouple simulation and playback running. You can now pause and rewind the editor without pausing the simulation. You can also change the playback speed by using `output_time_step` on `WorldBuilder.run`. We are deprecating the `time_step` parameter and replacing it with `sim_time_step`. This is to disambiguate it with `run_time_step`, which allows you to control the amount of time elodin waits between ticks of the simulation. Setting `run_time_step` to `0.0` effectively lets you simulate maximum speed.
 - Add `max_ticks` parameter to `WorldBuilder.run`. The simulation will run until the specified number of ticks is reached.
 - Add body frame visualization option.
@@ -194,18 +206,18 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
   )
   ```
 
-## v0.3.23
+### v0.3.23
 - **(breaking)** Render the Z-axis as up in the editor (instead of the Y-axis). This is a purely visual change and does not affect simulation results, but it's recommended to update simulations to match the new visual orientation. Typically, this requires swapping the Y and Z axes when operating on spatial positions, velocities, and forces.
 - **(fix)** When a simulation file was changed, the associated pycache files would also be updated, causing the simulation to be re-built multiple times in some cases. This is now fixed.
 - Add Status Bar to the editor (currently shows FPS/TPS and basic version of the connection status).
 - `elodin editor <path/to/sim>` now watches the parent directory of the simulation file for changes in addition to the file itself. This is useful for multi-file projects. This is also the case when using the `--watch` flag directly. E.g. `python <path/to/sim> run --watch`.
 - Export simulation data to a directory using `exec.write_to_dir(path)`.
 
-## v0.3.22
+### v0.3.22
 - **(fix)** Fix errors when using `vmap` with `scan`, and non-scalar values
     - When the arguments to a scan operation were non-scalar values (i.e their rank was above 0), scan would error in various ways when combined with vmap. The core issue is that some of our logic accidentally assumed an empty shape array, and when that array was non-empty, dimensions would be inserted into the wrong place.
 
-## v0.3.21
+### v0.3.21
 - **(fix)** Fix missing 1/2 factor in angular velocity integration and `Quaternion::from_axis_angle` .
     - In `nox`, the constant `Field::two` returned a `1` constant. This constant was only used in the implementation of `Add` between `SpatialMotion` and `SpatialTransform` and in `Quaternion::from_axis_angle`. Unfortunately, this caused angular velocity integration to return incorrect results. This bug caused the applied angular velocity to be multiplied by a factor of 2.
     - The most significant impact of this bug is on the stability of any attitude control system. This bug has led to an increase in small oscillations, potentially affecting the performance of PID controllers tuned to work with previous versions of Elodin. PID controllers tuned to work with earlier versions of Elodin will likely need to be re-tuned
@@ -256,7 +268,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Fix issue where stepping backwards or forwards in the editor would sometimes not work.
 - Add Command Palette to the editor
 
-## v0.3.20
+### v0.3.20
 
 - **(breaking)** Replace entity builder pattern with a more flexible `spawn` API.
   - To migrate to the new API, replace `name()` with the keyword argument:
@@ -285,7 +297,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Add multi-file support for Monte Carlo runs.
 - Add ability to use ranges in viewports for replay.
 
-## v0.3.19
+### v0.3.19
 
 - **(breaking)** Allow querying different components from the left and right entities via the new `edge_fold` API.
   - To migrate to the new API, move the graph query's input components to a separate query parameter:
@@ -329,7 +341,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Switch to GPU based plotting.
 - Add configurable line width for graphs.
 
-## v0.3.18
+### v0.3.18
 
 - **(breaking)** Make RK4 the default integrator (can still override to use semi-implicit euler).
 - Add element names to graphs.
@@ -344,7 +356,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
 - Add `interia_diag()` helper to el.SpatialInertia.
 - Fix graph data interpolation issues.
 
-## v0.3.17
+### v0.3.17
 
 - Reduce memory usage of plots.
 - Add rocket example with thrust curve interpolation.
