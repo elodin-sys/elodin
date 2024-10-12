@@ -1,30 +1,49 @@
 { config, self', pkgs, lib, flakeInputs, ... }:
 let
-  app = pkgs.stdenv.mkDerivation {
-    name = "app";
+  content = pkgs.stdenv.mkDerivation {
+    name = "docs-content";
     src = ../docs/public;
 
     buildInputs = [ pkgs.zola ];
     buildPhase = "zola build";
 
     installPhase = ''
-      mkdir -p $out/app
-      cp -r ./public $out/app/public
+      mkdir -p $out
+      cp -r ./public $out/public
     '';
   };
 
-  docker_attrs = {
+  etag = pkgs.runCommand "content-etag" {} ''
+    echo -n "${content}" | ${pkgs.b3sum}/bin/b3sum - | cut -d' ' -f1 | xargs printf "%s" > $out
+  '';
+
+  sws-config = pkgs.writeText "config.toml" ''
+    [general]
+    cache-control-headers = false
+    port = 1111
+    log-level = "info"
+
+    [advanced]
+    [[advanced.headers]]
+    source = "**/*"
+    [advanced.headers.headers]
+    Cache-Control = "public, max-age=60"
+    ETag = "${builtins.readFile etag}"
+  '';
+
+
+  image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-docs";
     tag = "latest";
-    contents = [ pkgs.static-web-server app pkgs.cacert pkgs.busybox ];
     config = {
-      Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
-      Cmd = [ "sh" "-c" "static-web-server -p 1111"];
-      ExposedPorts = { "1111/tcp" = {}; };
-      WorkingDir = "/app";
+      Env = [ "SERVER_CONFIG_FILE=${sws-config}" ];
+      Cmd = [ "${pkgs.static-web-server}/bin/static-web-server" ];
+      WorkingDir = content;
     };
   };
 in
 {
-  packages.docs-image = pkgs.dockerTools.buildLayeredImage docker_attrs;
+  packages.docs-sws-config = sws-config;
+  packages.docs-content = content;
+  packages.docs-image = image;
 }
