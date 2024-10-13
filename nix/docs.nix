@@ -13,9 +13,13 @@ let
     '';
   };
 
-  etag = pkgs.runCommand "content-etag" {} ''
-    echo -n "${content}" | ${pkgs.b3sum}/bin/b3sum - | cut -d' ' -f1 | xargs printf "%s" > $out
-  '';
+  contentHash = lib.removeSuffix "\n" (
+    builtins.readFile (
+      pkgs.runCommand "content-hash" {} ''
+        ${pkgs.nix}/bin/nix-hash --type sha256 --base32 ${content} > $out
+      ''
+    )
+  );
 
   sws-config = pkgs.writeText "config.toml" ''
     [general]
@@ -27,8 +31,9 @@ let
     [[advanced.headers]]
     source = "**/*"
     [advanced.headers.headers]
-    Cache-Control = "public, max-age=60"
-    ETag = "${builtins.readFile etag}"
+    Cache-Control = "public, max-age=60, must-revalidate"
+    ETag = "${contentHash}"
+    Last-Modified = ""
   '';
 
 
