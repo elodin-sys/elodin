@@ -202,14 +202,6 @@ body.dark .navbar-light .navbar-nav .nav-link:hover {
     color: #fffbf0;
 }
 
-.navbar-light .navbar-brand {
-    color: #0d0d0d !important;
-}
-
-body.dark .navbar-light .navbar-brand {
-    color: #fffbf0 !important;
-}
-
 .navbar-light .navbar-nav .get-started > .nav-link {
     border-radius: 5px;
     color: #20813a !important;
@@ -244,14 +236,12 @@ body.dark .navbar-light .navbar-nav .releases > .nav-link {
 }
 
 .main-nav .nav-link {
-    padding-left: 11px !important;
-    padding-top: 4px !important;
-    padding-bottom: 4px !important;
-    margin-top: 4px !important;
-}
-
-.main-nav .nav-item:last-child .nav-link {
-    padding-right: 10px;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    margin-left: 0.25rem;
+    margin-right: 0.25rem;
 }
 
 .page-links a {
@@ -276,7 +266,7 @@ body.dark .page-links a:hover {
     color: #fffbf0;
 }
 
-ul ul {
+.docs-content ul ul {
     padding-bottom: 25px;
 }
 
@@ -289,10 +279,10 @@ ul ul {
 }
 
 .navbar {
-    padding-top: 8px;
     border-bottom: 1px solid #b6ae9c;
     background-color: #e4d9c3;
-    color: #0d0d0d !important;
+    color: #0d0d0d;
+    padding: 0px;
 }
 
 body.dark .navbar {
@@ -301,9 +291,21 @@ body.dark .navbar {
     color: #fffbf0 !important;
 }
 
+body.dark .navbar-light .nav-link-icon {
+    color: #fffbf0;
+}
+
+.navbar-light .nav-link-icon {
+    color: #0d0d0d;
+}
+
 .nav-link-icon {
-    font-size: 24px !important;
+    font-size: 26px !important;
     padding-right: 0px !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
 }
 
 .nav-link-icon:hover {
@@ -410,6 +412,7 @@ body.dark a.docs-link:hover {
     font-weight: 500;
     padding-left: 30px;
     line-height: 24px;
+    height: 32px;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='13' viewBox='0 0 12 13' fill='none'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M4.73889 2.64479C3.09101 2.64479 1.75514 3.99778 1.75514 5.66677C1.75514 7.33577 3.09101 8.68875 4.73889 8.68875C6.38677 8.68875 7.72263 7.33577 7.72263 5.66677C7.72263 3.99778 6.38677 2.64479 4.73889 2.64479ZM0 5.66677C0 3.01602 2.12167 0.867157 4.73889 0.867157C7.3561 0.867157 9.47778 3.01602 9.47778 5.66677C9.47778 6.64508 9.18878 7.55503 8.69253 8.31382C8.68536 8.32479 8.70108 8.33765 8.71029 8.32832C8.71449 8.32407 8.72135 8.32407 8.72555 8.32832L11.6156 11.2554C11.9552 11.5993 11.9552 12.1524 11.6156 12.4964C11.2698 12.8466 10.7045 12.8466 10.3587 12.4964L7.48097 9.58175C6.707 10.1388 5.76071 10.4664 4.73889 10.4664C2.12167 10.4664 0 8.31753 0 5.66677Z' fill='%23171615'/%3E%3C/svg%3E") !important;
     background-position: 10px 10px !important;
     background-repeat: no-repeat !important;
@@ -424,15 +427,7 @@ body.dark .form-control.is-search {
 }
 
 .form-control.is-search:focus {
-    border-color: #b6ae9c !important;
-    box-shadow: 0 0 0 0.2rem #b6ae9c !important;
-    background-color: rgba(13, 13, 13, 0.05) !important;
-}
-
-body.dark .form-control.is-search:focus {
-    border-color: #454544 !important;
-    box-shadow: 0 0 0 0.2rem #454544 !important;
-    background-color: rgba(255, 251, 240, 0.05) !important;
+    box-shadow: 0 0 0 0 !important;
 }
 
 // supports the inline alert styles on the previous docs site
@@ -682,7 +677,7 @@ body.dark img.dark-only {
     font-weight: 500;
     line-height: 24px;
     width: 90px;
-    height: 30px;
+    height: 32px;
     padding-left: 10px;
     justify-content: center;
     align-items: center;

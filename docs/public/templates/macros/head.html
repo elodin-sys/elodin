@@ -12,6 +12,10 @@
   <link rel="preload" as="font" href="{{ get_url(path="fonts/ibm-plex-mono-700.woff2") | safe }}" type="font/woff2" crossorigin>
 {% endmacro %}
 
+{% macro async_css(href) %}
+<link rel="stylesheet" href="{{ href }}" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="{{ href }}"></noscript>
+{% endmacro %}
 
 {% macro stylesheet() %}
 <link rel="stylesheet" href="{{ get_url(path="main.css") | safe }}">

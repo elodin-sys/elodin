@@ -23,7 +23,7 @@
             {% for page in subsection.pages %}
             <li>
                 <a
-                    class="{% if page.extra.icon %}bi-{{ page.extra.icon }}{% endif %} docs-link{% if current_url == page.permalink %} active{% endif %}"
+                    class="{% if page.extra.icon %}bx bx-{{ page.extra.icon }}{% endif %} docs-link{% if current_url == page.permalink %} active{% endif %}"
                     href="{{ page.permalink | safe }}"
                     >{% if page.extra.icon %}&nbsp;&nbsp;&nbsp;{% endif%}{{
                     page.title }}</a
