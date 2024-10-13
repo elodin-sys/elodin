@@ -27,7 +27,6 @@ h6,
 @include media-breakpoint-up(md) {
     body {
         font-size: $font-size-md;
-        padding-top: 4rem !important;
     }
 
     h1,
@@ -94,7 +93,7 @@ body {
         .docs-sidebar {
             position: -webkit-sticky;
             position: sticky;
-            top: 4.3rem;
+            top: 62px;
             z-index: 1000;
             height: calc(100vh - 4rem);
             padding-left: 0px;
@@ -140,12 +139,11 @@ body {
     .docs-toc {
         position: -webkit-sticky;
         position: sticky;
-        top: 4rem;
+        top: 62px;
         height: calc(100vh - 4rem);
         overflow-y: auto;
         padding-left: 10px;
         padding-right: 0px;
-        padding-top: 15px;
     }
 }
 

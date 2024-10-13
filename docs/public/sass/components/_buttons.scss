@@ -3,10 +3,6 @@
   padding: 0.4375rem 0;
 }
 
-#mode {
-  margin-right: 1.25rem;
-}
-
 .btn-link:focus {
   outline: 0;
   box-shadow: none;
@@ -14,16 +10,6 @@
 
 #navigation {
   margin-left: 1.25rem;
-}
-
-@include media-breakpoint-up(md) {
-  #mode {
-    margin-right: 0.5rem;
-  }
-
-  .navbar .btn-link {
-    padding: 0.5625em 0.25rem 0.5rem 0.125rem;
-  }
 }
 
 .navbar .btn-link:hover {
@@ -35,7 +21,7 @@
 }
 
 body .toggle-dark {
-  display: block;
+  display: flex;
 }
 
 body .toggle-light {
@@ -43,7 +29,7 @@ body .toggle-light {
 }
 
 body.dark .toggle-light {
-  display: block;
+  display: flex;
 }
 
 body.dark .toggle-dark {
