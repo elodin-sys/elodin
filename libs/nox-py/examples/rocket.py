@@ -8,8 +8,8 @@ import jax.numpy.linalg as la
 import polars as pl
 from jax.scipy.ndimage import map_coordinates
 
-TIME_STEP = 1.0 / 120.0
-lp_sample_freq = round(1.0 / TIME_STEP)
+SIM_TIME_STEP = 1.0 / 120.0
+lp_sample_freq = round(1.0 / SIM_TIME_STEP)
 lp_buffer_size = lp_sample_freq * 4
 lp_cutoff_freq = 1
 
@@ -411,7 +411,7 @@ def v_rel_accel_filtered(s: VRelAccelBuffer) -> VRelAccelFiltered:
 
 @el.map
 def accel_setpoint_smooth(a: AccelSetpoint, a_s: AccelSetpointSmooth) -> AccelSetpointSmooth:
-    dt = TIME_STEP
+    dt = SIM_TIME_STEP
     exp_decay_constant = 0.5
     return a_s + (a - a_s) * jnp.exp(-exp_decay_constant * dt)
 
@@ -423,7 +423,7 @@ def pitch_pid_state(
     s: PitchPIDState,
 ) -> PitchPIDState:
     e = a_rel[2] - a_setpoint[0]
-    i = jnp.clip(s[1] + e * TIME_STEP * 2, -2.0, 2.0)
+    i = jnp.clip(s[1] + e * SIM_TIME_STEP * 2, -2.0, 2.0)
     d = e - s[0]
     pid_state = jnp.array([e, i, d])
     return pid_state
@@ -434,7 +434,7 @@ def pitch_pid_control(pid: PitchPID, s: PitchPIDState) -> FinControl:
     Kp, Ki, Kd = pid
     e, i, d = s
     mv = Kp * e + Ki * i + Kd * d
-    fin_control = mv * TIME_STEP
+    fin_control = mv * SIM_TIME_STEP
     return fin_control
 
 
@@ -507,4 +507,4 @@ non_effectors = (
 )
 effectors = gravity | apply_thrust | apply_aero_forces
 sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
-w.run(sys, time_step=TIME_STEP)
+w.run(sys, sim_time_step=SIM_TIME_STEP)

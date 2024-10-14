@@ -35,7 +35,7 @@ EDU_450_CONFIG = Config(
         ]
     ),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    time_step=(1.0 / 300.0),
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -103,7 +103,7 @@ TALON_QUAD_CONFIG = Config(
     ).T,
     motor_thrust_directions=np.array(motor_thrust_directions),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    time_step=(1.0 / 300.0),
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -114,8 +114,8 @@ TALON_QUAD_CONFIG.set_as_global()
 
 world().run(
     system(),
-    run_time_step=0.0,
     sim_time_step=Config.GLOBAL.dt,
+    run_time_step=0.0,
     output_time_step=Config.GLOBAL.dt,
     max_ticks=int(Config.GLOBAL.total_sim_ticks),
 )

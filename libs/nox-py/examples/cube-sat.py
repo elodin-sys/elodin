@@ -17,7 +17,7 @@ earth_radius = 6378.1 * 1000
 altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
-TIME_STEP = 1.0 / 20.0
+SIM_TIME_STEP = 1.0 / 20.0
 
 # sensors
 GyroOmega = Annotated[
@@ -171,7 +171,7 @@ def calculate_covariance(sigma_g: jax.Array, sigma_b: jax.Array, dt: float) -> j
     return np.block([[Q_00, Q_01], [Q_10, Q_11]])
 
 
-Q = calculate_covariance(np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), TIME_STEP)
+Q = calculate_covariance(np.array([0.01, 0.01, 0.01]), np.array([0.01, 0.01, 0.01]), SIM_TIME_STEP)
 Y = np.diag(np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]))
 YQY = Y @ Q @ Y.T
 P = Annotated[jax.Array, el.Component("P", el.ComponentType(el.PrimitiveType.F64, (6, 6)))]
@@ -222,7 +222,7 @@ def propogate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) ->
     phi_01 = jax.lax.select(
         omega_norm > 1e-5,
         omega_cross * q - np.eye(3) * dt - omega_cross_square * r,
-        np.eye(3) * -TIME_STEP,
+        np.eye(3) * -SIM_TIME_STEP,
     )
     phi_10 = np.zeros((3, 3))
     phi_11 = np.eye(3)
@@ -279,7 +279,7 @@ def kalman_filter(
         p,
         np.array([mag_body, sun_body]),
         np.array([mag_ref, sun_ref]),
-        TIME_STEP,
+        SIM_TIME_STEP,
     )
     return (q_hat, omega_hat, b_hat, big_p)
 
@@ -440,10 +440,10 @@ def rw_drag(speed: RWSpeed, force: RWForce, axis: RWAxis) -> tuple[RWForce, RWFr
 
 @el.map
 def saturate_force(force: RWForce, ang_momentum: RWAngMomentum) -> tuple[RWForce, RWAngMomentum]:
-    new_ang_momentum = ang_momentum + force.torque() * TIME_STEP
+    new_ang_momentum = ang_momentum + force.torque() * SIM_TIME_STEP
     torque = jax.lax.select(np.abs(new_ang_momentum) < 0.04, force.torque(), np.zeros(3))
     torque = np.clip(torque, -rw_force_clamp, rw_force_clamp)
-    return (el.SpatialForce(torque=torque), ang_momentum + torque * TIME_STEP)
+    return (el.SpatialForce(torque=torque), ang_momentum + torque * SIM_TIME_STEP)
 
 
 @dataclass
@@ -693,7 +693,7 @@ exec = w.run(
         | earth_point,
         integrator=el.Integrator.SemiImplicit,
     ),
-    sim_time_step=TIME_STEP,
+    sim_time_step=SIM_TIME_STEP,
     run_time_step=0.0 / 10.0,
     output_time_step=1 / 512.0,
     max_ticks=60 * 20 * 128,
