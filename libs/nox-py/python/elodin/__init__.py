@@ -457,8 +457,7 @@ class World(WorldBuilder):
     def run(
         self,
         system: System,
-        time_step: Optional[float] = None,
-        sim_time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         max_ticks: Optional[int] = None,
@@ -471,7 +470,7 @@ class World(WorldBuilder):
         if frame is None:
             raise Exception("No previous frame")
         if sim_time_step is None:
-            sim_time_step = time_step
+            sim_time_step = 1 / 120.0
         addr = super().run(
             system, sim_time_step, run_time_step, output_time_step, max_ticks, client
         )
@@ -487,15 +486,14 @@ class World(WorldBuilder):
         self,
         system: System,
         addr: Optional[str] = None,
-        time_step: Optional[float] = None,
-        sim_time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         max_ticks: Optional[int] = None,
         client: Optional[Client] = None,
     ):
         if sim_time_step is None:
-            sim_time_step = time_step
+            sim_time_step = 1 / 120.0
         super().serve(
             system,
             False,
@@ -510,8 +508,7 @@ class World(WorldBuilder):
     def view(
         self,
         system: System,
-        time_step: Optional[float] = None,
-        sim_time_step: Optional[float] = None,
+        sim_time_step: Optional[float] = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         client: Optional[Client] = None,
@@ -519,7 +516,7 @@ class World(WorldBuilder):
         from IPython.display import IFrame
 
         if sim_time_step is None:
-            sim_time_step = time_step
+            sim_time_step = 1 / 120.0
         addr = super().serve(
             system,
             True,
