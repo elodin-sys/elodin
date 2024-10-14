@@ -125,6 +125,7 @@ test_steps = [
             ),
         ],
     ),
+    nix_step(label="alejandra", flake=".#nix-tools", command="alejandra -c ."),
 ]
 
 cluster_app_deploy_steps = [

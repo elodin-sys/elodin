@@ -1,16 +1,24 @@
-{ config, self', pkgs, lib, flakeInputs, rustToolchain, system, ... }:
-let
+{
+  config,
+  self',
+  pkgs,
+  lib,
+  flakeInputs,
+  rustToolchain,
+  system,
+  ...
+}: let
   xla_sha256_map = {
     "aarch64-darwin" = "sha256:0ykfnp6d78vp2yrhmr8wa3rlv6cri6mdl0fg034za839j7i7xqkz";
     "aarch64-linux" = "sha256:0sy53r6qhw0n3n342s013nq5rnzlg1qdbmgpvawh3p35a21qy8xr";
-    "x86_64-linux"   = "sha256:103mybbnz6fm2i3r0fy0nf23ffdjxb37wd4pzvmwn0dpczr6dkw1";
+    "x86_64-linux" = "sha256:103mybbnz6fm2i3r0fy0nf23ffdjxb37wd4pzvmwn0dpczr6dkw1";
   };
   xla_ext = fetchTarball {
     url = "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-${system}-gnu-cpu.tar.gz";
     sha256 = builtins.getAttr system xla_sha256_map;
   };
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml { cargoToml = ../services/sim-agent/Cargo.toml; };
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../services/sim-agent/Cargo.toml;};
 
   pyFilter = path: _type: builtins.match ".*py$" path != null;
   mdFilter = path: _type: builtins.match ".*nox-py.*md$" path != null;
@@ -28,7 +36,7 @@ let
     inherit (crateName) pname version;
     inherit src;
     doCheck = false;
-    nativeBuildInputs = with pkgs; [ maturin ];
+    nativeBuildInputs = with pkgs; [maturin];
     buildInputs = with pkgs;
       [
         systemdMinimal
@@ -41,35 +49,38 @@ let
         gfortran.cc.lib
         cmake
       ]
-      ++ lib.optionals stdenv.isDarwin [ pkgs.libiconv ];
+      ++ lib.optionals stdenv.isDarwin [pkgs.libiconv];
     XLA_EXTENSION_DIR = "${xla_ext}";
     cargoExtraArgs = "--package=sim-agent --package=nox-py";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  bin = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-  });
+  bin = craneLib.buildPackage (commonArgs
+    // {
+      inherit cargoArtifacts;
+    });
 
   wheelName = "elodin";
-  wheelVersion = (craneLib.crateNameFromCargoToml { cargoToml = ../Cargo.toml; }).version;
+  wheelVersion = (craneLib.crateNameFromCargoToml {cargoToml = ../Cargo.toml;}).version;
   wheelSuffix = "cp310-abi3-linux_${arch}";
-  wheel = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-    pname = "elodin";
-    buildPhase = "maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release";
-    installPhase = "install -D target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl -t $out/";
-  });
-  elodin = ps: ps.buildPythonPackage rec {
-    pname = wheelName;
-    format = "wheel";
-    version = wheelVersion;
-    src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
-    doCheck = false;
-    propagatedBuildInputs = with ps; [ jax jaxlib typing-extensions numpy polars pytest ];
-    pythonImportsCheck = [ wheelName ];
-  };
+  wheel = craneLib.buildPackage (commonArgs
+    // {
+      inherit cargoArtifacts;
+      pname = "elodin";
+      buildPhase = "maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release";
+      installPhase = "install -D target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl -t $out/";
+    });
+  elodin = ps:
+    ps.buildPythonPackage rec {
+      pname = wheelName;
+      format = "wheel";
+      version = wheelVersion;
+      src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
+      doCheck = false;
+      propagatedBuildInputs = with ps; [jax jaxlib typing-extensions numpy polars pytest];
+      pythonImportsCheck = [wheelName];
+    };
 
-  kernel = (pkgs.linux_6_6.override {
+  kernel = pkgs.linux_6_6.override {
     defconfig = "defconfig kvm_guest.config";
     autoModules = false;
     ignoreConfigErrors = true;
@@ -81,8 +92,9 @@ let
       VIRTIO_VSOCKETS_COMMON = yes;
       VHOST_VSOCK = yes;
     };
-  });
-  rootfs = pkgs.runCommand "rootfs"
+  };
+  rootfs =
+    pkgs.runCommand "rootfs"
     rec {
       contents = with pkgs; [
         busybox
@@ -90,8 +102,8 @@ let
         (python3.withPackages (ps: with ps; [(elodin ps) pytest pytest-json-report]))
         openblasCompat
       ];
-      closureInfo = pkgs.closureInfo { rootPaths = contents; };
-      nativeBuildInputs = with pkgs; [ rsync zstd squashfsTools ];
+      closureInfo = pkgs.closureInfo {rootPaths = contents;};
+      nativeBuildInputs = with pkgs; [rsync zstd squashfsTools];
     }
     ''
       mkdir rootfs
@@ -121,8 +133,8 @@ let
   };
   mkfs = pkgs.buildEnv {
     name = "mkfs";
-    paths = with pkgs; [ e2fsprogs ];
-    pathsToLink = [ "/bin" ];
+    paths = with pkgs; [e2fsprogs];
+    pathsToLink = ["/bin"];
   };
 
   image = pkgs.dockerTools.buildLayeredImage {
@@ -140,9 +152,8 @@ let
       Cmd = ["${bin}/bin/${crateName.pname}"];
     };
   };
-in
-{
+in {
   packages.sim-agent-image = image;
   packages.sandbox-vm = vm;
-  packages.elodin-py = (elodin pkgs.python3Packages);
+  packages.elodin-py = elodin pkgs.python3Packages;
 }

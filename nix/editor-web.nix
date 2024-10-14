@@ -1,7 +1,14 @@
-{ config, self', pkgs, lib, flakeInputs, rustToolchain, ... }:
-let
+{
+  config,
+  self',
+  pkgs,
+  lib,
+  flakeInputs,
+  rustToolchain,
+  ...
+}: let
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml { cargoToml = ../apps/editor-web/Cargo.toml; };
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../apps/editor-web/Cargo.toml;};
   src = pkgs.nix-gitignore.gitignoreSource [] ../.;
   commonArgs = {
     inherit (crateName) pname version;
@@ -16,14 +23,14 @@ let
     RUSTFLAGS = "--cfg=web_sys_unstable_apis";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  wasm = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-  });
+  wasm = craneLib.buildPackage (commonArgs
+    // {
+      inherit cargoArtifacts;
+    });
   wasm-bindgen-cli = config.packages.wasm-bindgen-cli;
   bundle = pkgs.runCommand "editor-web-bundle" {} ''
     ${wasm-bindgen-cli}/bin/wasm-bindgen --out-dir $out --target web ${wasm}/bin/editor-web.wasm
   '';
-in
-{
+in {
   packages.editor-web = bundle;
 }

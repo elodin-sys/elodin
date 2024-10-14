@@ -1,12 +1,16 @@
-{ config, self', pkgs, lib, ... }:
-let
-  cfg = config.wasm-bindgen-cli;
-in
 {
+  config,
+  self',
+  pkgs,
+  lib,
+  ...
+}: let
+  cfg = config.wasm-bindgen-cli;
+in {
   options.wasm-bindgen-cli = {
-    version = lib.mkOption { type = lib.types.str; };
-    hash = lib.mkOption { type = lib.types.str; };
-    cargoHash = lib.mkOption { type = lib.types.str; };
+    version = lib.mkOption {type = lib.types.str;};
+    hash = lib.mkOption {type = lib.types.str;};
+    cargoHash = lib.mkOption {type = lib.types.str;};
   };
   config = {
     packages.wasm-bindgen-cli = pkgs.rustPlatform.buildRustPackage rec {
