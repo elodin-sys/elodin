@@ -93,7 +93,7 @@ macro_rules! impl_basilisk_channel {
                     return;
                 }
                 let Some(data) = data.as_ref() else {
-                    tracing::warn!("watcha doin passing null ptrs to write, you know better than that");
+                    tracing::warn!("watcha doing passing null ptrs to write, you know better than that");
                     return;
                 };
                 let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;

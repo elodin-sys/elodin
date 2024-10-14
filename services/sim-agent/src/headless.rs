@@ -204,7 +204,7 @@ impl Runner {
             .into_inner()
             .report;
         let report = pytest::Report::from_json(&report)?;
-        tracing::debug!(elasped = ?test_start.elapsed(), ?report.summary, "received test results");
+        tracing::debug!(elapsed = ?test_start.elapsed(), ?report.summary, "received test results");
         let failed = report.failed(samples, batch_no * samples);
         Ok(failed)
     }

@@ -64,7 +64,7 @@ title_addition = "Modern Documentation Theme"
 timeformat = "%Y-%m-%d %H:%M:%S" # e.g. 2021-05-01 09:19:42
 timezone = "UTC"
 
-# Edit page on reposity or not
+# Edit page on repository or not
 edit_page = false
 docs_repo = "https://github.com/elodin-sys/elodin"
 repo_branch = "main"

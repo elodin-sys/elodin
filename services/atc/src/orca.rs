@@ -80,7 +80,7 @@ impl Orca {
                     }
                 }
                 OrcaMsg::K8sEvent(Event::InitApply(_) | Event::Init | Event::InitDone) => {
-                    // ingore init events for now
+                    // ignore init events for now
                 }
                 OrcaMsg::DbEvent(DbEvent::Insert(vm)) => {
                     tracing::trace!(?vm, "vm insert event");

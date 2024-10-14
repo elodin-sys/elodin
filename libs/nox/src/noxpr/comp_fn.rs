@@ -133,7 +133,7 @@ where
 //         // We also do not take a new reference of this type, until the `CompFn` has been called
 //         let tensor = unsafe { &mut *builder.mut_params[tensor_index].get() };
 //         // Safety: since we created the inner op above with the correct type and dimension, we can
-//         // guarentee that this is correct
+//         // guarantee that this is correct
 //         unsafe { tensor.unsafe_mut_cast() }
 //     }
 

@@ -16,14 +16,14 @@ pub struct SunlineEKF {
 #[derive(Clone, Copy)]
 pub struct CSSConfig {
     pub normal_b: [f64; 3],
-    pub coefficent: f64,
+    pub coefficient: f64,
 }
 
 impl From<CSSConfig> for CSSUnitConfigMsgPayload {
     fn from(val: CSSConfig) -> Self {
         CSSUnitConfigMsgPayload {
             nHat_B: val.normal_b,
-            CBias: val.coefficent,
+            CBias: val.coefficient,
         }
     }
 }

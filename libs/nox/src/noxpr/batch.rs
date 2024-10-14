@@ -590,7 +590,7 @@ impl BatchTracer {
                     .visit(&s.on_false)?
                     .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?;
-                // TODO: handle confliting batch axises
+                // TODO: handle conflating batch axes
                 BatchedExpr {
                     inner: Noxpr::select(&cond.inner, on_true.inner, on_false.inner),
                     batch_axis: cond.batch_axis,

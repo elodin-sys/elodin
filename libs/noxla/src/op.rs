@@ -928,16 +928,16 @@ impl XlaOp {
         self.wrap(raw)
     }
 
-    pub fn dynamic_slice(&self, start_indices: &[XlaOpRef<'_>], size_indicies: &[i64]) -> Self {
+    pub fn dynamic_slice(&self, start_indices: &[XlaOpRef<'_>], size_indices: &[i64]) -> Self {
         let op = &self.raw;
         let start_indices_ptr = start_indices.as_ptr();
         let start_indices_len = start_indices.len();
-        let size_indicies_ptr = size_indicies.as_ptr();
-        let size_indicies_len = size_indicies.len();
+        let size_indices_ptr = size_indices.as_ptr();
+        let size_indices_len = size_indices.len();
         let raw = unsafe {
-            cpp!([op as "const XlaOp*", start_indices_ptr as "const XlaOp*", start_indices_len as "size_t", size_indicies_ptr as "const int64_t*", size_indicies_len as "size_t"] -> XlaOpRaw as "XlaOp" {
+            cpp!([op as "const XlaOp*", start_indices_ptr as "const XlaOp*", start_indices_len as "size_t", size_indices_ptr as "const int64_t*", size_indices_len as "size_t"] -> XlaOpRaw as "XlaOp" {
                 try {
-                    return XlaOp(DynamicSlice(*op, absl::Span(start_indices_ptr, start_indices_len), absl::Span(size_indicies_ptr, size_indicies_len)));
+                    return XlaOp(DynamicSlice(*op, absl::Span(start_indices_ptr, start_indices_len), absl::Span(size_indices_ptr, size_indices_len)));
                 }catch(std::exception& e) {
                     return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
                 }
@@ -946,10 +946,10 @@ impl XlaOp {
         self.wrap(raw)
     }
 
-    pub fn dynamic_update_slice(&self, update: &XlaOp, start_indicies: &[XlaOpRef<'_>]) -> Self {
+    pub fn dynamic_update_slice(&self, update: &XlaOp, start_indices: &[XlaOpRef<'_>]) -> Self {
         let op = &self.raw;
-        let start_indices_ptr = start_indicies.as_ptr();
-        let start_indices_len = start_indicies.len();
+        let start_indices_ptr = start_indices.as_ptr();
+        let start_indices_len = start_indices.len();
         let raw = unsafe {
             cpp!([op as "const XlaOp*", update as "const XlaOp*", start_indices_ptr as "const XlaOp*", start_indices_len as "size_t"] -> XlaOpRaw as "XlaOp" {
                 try {
@@ -978,7 +978,7 @@ impl XlaOp {
 
     pub fn gather(
         &self,
-        indicies: &Self,
+        indices: &Self,
         offset_dims: &[i64],
         collapsed_slice_dims: &[i64],
         start_index_map: &[i64],
@@ -997,7 +997,7 @@ impl XlaOp {
         let raw = unsafe {
             cpp!([
                 op as "const XlaOp*",
-                indicies as "const XlaOp*",
+                indices as "const XlaOp*",
                 offset_dims_ptr as "const int64_t*",
                 offset_dims_len as "size_t",
                 slice_dims_ptr as "const int64_t*",
@@ -1020,7 +1020,7 @@ impl XlaOp {
                     }
                     dn.set_index_vector_dim(index_vector_dim);
                     auto ss = absl::Span<const int64_t>(slice_sizes_ptr, slice_sizes_len);
-                    return XlaOp(Gather(*op, *indicies, dn, ss));
+                    return XlaOp(Gather(*op, *indices, dn, ss));
             })
         };
         self.wrap(raw)

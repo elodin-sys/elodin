@@ -85,7 +85,7 @@ The 3rd reason is that we want this software to easily integrate with your exist
 and using a "systems" language like Rust makes that easier. Eventually, we would love to build out a suite of flight software in Rust that can easily
 integrate with the simulation but is still flight-ready.
 
-A fun side-effect of this architecture is Nox allows you to write code for both simulations and flight software generically, allowing for seemless
+A fun side-effect of this architecture is Nox allows you to write code for both simulations and flight software generically, allowing for seamless
 "software in the loop" and "hardware in the loop" testing of your flight software.
 
 ## And The "Sharp Bits"

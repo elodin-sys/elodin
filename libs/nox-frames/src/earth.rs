@@ -116,10 +116,10 @@ pub fn sun_vec(epoch: Epoch) -> Vector<f64, 3, ArrayRepr> {
     // source: vallado + https://astronomy.stackexchange.com/a/37199
     let centuries = epoch.to_tdb_centuries_since_j2000();
     let mean_long = 280.4606184 + 36000.77005361 * centuries;
-    let mean_anomoly = 357.5277233 + 35999.05034 * centuries;
+    let mean_anomaly = 357.5277233 + 35999.05034 * centuries;
     let eclipitic_long = mean_long
-        + 1.914666471 * f64::sin(mean_anomoly.to_radians())
-        + 0.918994643 * f64::sin(2.0 * mean_anomoly.to_radians());
+        + 1.914666471 * f64::sin(mean_anomaly.to_radians())
+        + 0.918994643 * f64::sin(2.0 * mean_anomaly.to_radians());
     let obliquity = 23.43929 - (46.8093 / 3600.0) * centuries;
     let (sin_eclipitic_long, cos_eclipitic_long) = eclipitic_long.to_radians().sin_cos();
     let (sin_obliquity, cos_obliquity) = obliquity.to_radians().sin_cos();

@@ -13,27 +13,27 @@ ekf_switch = 5.0
 
 [[determination.sunline.css]]
 normal_b = [1.0, 0.0, 0.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [[determination.sunline.css]]
 normal_b = [-1.0, 0.0, 0.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [[determination.sunline.css]]
 normal_b = [0.0, 1.0, 0.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [[determination.sunline.css]]
 normal_b = [0.0, -1.0, 0.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [[determination.sunline.css]]
 normal_b = [0.0, 0.0, 1.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [[determination.sunline.css]]
 normal_b = [0.0, 0.0, -1.0]
-coefficent = 1.0
+coefficient = 1.0
 
 [determination.mekf]
 dt = 0.1

@@ -347,10 +347,10 @@ impl<const HZ: usize, H: System> McuDriver<HZ, H> {
                     }
                 };
                 trace!(
-                    lat = ?gps_data.latitute, long = ?gps_data.longitude, gps_data.altitude,
+                    lat = ?gps_data.latitude, long = ?gps_data.longitude, gps_data.altitude,
                     "received gps"
                 );
-                world.gps_inputs.lat = gps_data.latitute;
+                world.gps_inputs.lat = gps_data.latitude;
                 world.gps_inputs.long = gps_data.longitude;
                 world.gps_inputs.alt = gps_data.altitude;
             }
@@ -448,7 +448,7 @@ pub struct SensorData {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct GpsData {
-    pub latitute: f64,
+    pub latitude: f64,
     pub longitude: f64,
     pub altitude: f64,
     pub unix_time: u64,
@@ -566,7 +566,7 @@ impl FromStr for GpsData {
         let (_tags, s) = s.split_at(last_tag);
 
         let mut s = s.split(',');
-        let latitute = s
+        let latitude = s
             .next()
             .ok_or(SensorParseError::InsufficientParts)?
             .parse()?;
@@ -584,7 +584,7 @@ impl FromStr for GpsData {
             .parse()?;
 
         Ok(GpsData {
-            latitute,
+            latitude,
             longitude,
             altitude,
             unix_time,
@@ -701,7 +701,7 @@ mod tests {
 
         let gps_data = "40.1,-111.8,800.0,1719068896".parse::<GpsData>().unwrap();
         let expected_gps_data = GpsData {
-            latitute: 40.1,
+            latitude: 40.1,
             longitude: -111.8,
             altitude: 800.0,
             unix_time: 1719068896,

@@ -25,7 +25,7 @@ Often you want to build Linux binaries with Nix on your mac. This guide shows ho
 5. Once in NixOS, open `sudo nano /etc/nixos/configuration.nix`, and find the line referencing `openssh` and enable it.
 6. Run `sudo nixos-rebuild switch`
 8. Run `mkdir ~/.ssh`
-7. Now you can ssh into your machine with its IP address. You can find this using `ip addr show` it will be under the interface named withing like `enp0s1`
+7. Now you can ssh into your machine with its IP address. You can find this using `ip addr show` it will be under the interface named within like `enp0s1`
 9. Now copy your ssh public key to the vm's authorized keys file. The following command should work to do it.
 ```sh
 scp YOUR_SSH_PUBLIC_KEY USERNAME@VM_IP:~/.ssh/authorized_keys
@@ -42,6 +42,6 @@ replace `USERNAME` with your username
 ssh://USERNAME@IP x86_64-linux,aarch64-linux PRIVATE_KEY_PATH 20 20 nixos-test,benchmark,big-parallel,kvm - -
 ```
 Replace `USERNAME` with your username, `IP` with your ip address, and `PUBLIC_KEY_PATH` with the path to your public key.
-13. Last but not least, you need to ssh into your VM as the root user. You can do this with `sudo ssh USERNAME@IP`. This is just to enusre that
+13. Last but not least, you need to ssh into your VM as the root user. You can do this with `sudo ssh USERNAME@IP`. This is just to ensure that
 it is a known-host
 14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'` in macOS

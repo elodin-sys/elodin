@@ -18,7 +18,7 @@ pub fn calculate_covariance(
     Matrix::concat_in_dim([q_0, q_1], 0)
 }
 
-fn propogate_quaternion(
+fn propagate_quaternion(
     q: Quaternion<f64, ArrayRepr>,
     omega: Vector<f64, 3, ArrayRepr>,
     dt: f64,
@@ -36,7 +36,7 @@ fn propogate_quaternion(
     }
 }
 
-fn propogate_state_covariance(
+fn propagate_state_covariance(
     big_p: Matrix6<f64, ArrayRepr>,
     omega: Vector<f64, 3, ArrayRepr>,
     yqy: Matrix6<f64, ArrayRepr>,
@@ -118,8 +118,8 @@ impl State {
             dt,
         } = self;
         let omega = omega - b_hat;
-        let q_hat = propogate_quaternion(q_hat, omega, dt);
-        let mut p = propogate_state_covariance(p, omega, yqy, dt);
+        let q_hat = propagate_quaternion(q_hat, omega, dt);
+        let mut p = propagate_state_covariance(p, omega, yqy, dt);
         let mut delta_x_hat: Vector<f64, 6, ArrayRepr> = Vector::zeros();
         for ((reference, measured_body), sigma) in references
             .into_iter()
@@ -157,7 +157,7 @@ impl State {
 }
 
 impl State {
-    /// Checks if the estimation paremters are all finite (i.e not NaN or infinite)
+    /// Checks if the estimation parameters are all finite (i.e not NaN or infinite)
     pub fn is_non_finite(&self) -> bool {
         self.q_hat.0.into_buf().iter().any(|x| !x.is_finite())
             || self.b_hat.into_buf().iter().any(|x| !x.is_finite())
@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_propogate_state_covariance() {
+    fn test_propagate_state_covariance() {
         // from: cube-sat.py
         // TODO(sphw): bring this function into rust
         let yqy = tensor![
@@ -225,7 +225,7 @@ mod tests {
             [0.0, 0.0, -3.4722e-09, 0.0, 0.0, 8.3333e-07]
         ];
         let out =
-            propogate_state_covariance(Matrix::eye(), tensor![1.0, 0.0, 0.0], yqy, 1.0 / 120.0);
+            propagate_state_covariance(Matrix::eye(), tensor![1.0, 0.0, 0.0], yqy, 1.0 / 120.0);
         #[rustfmt::skip]
         let expected = tensor![[ 1.00007028e+00,  0.00000000e+00,  0.00000000e+00,
             -8.33333681e-03,  0.00000000e+00,  0.00000000e+00],
@@ -243,8 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn test_propogate_quaternion() {
-        let q = propogate_quaternion(Quaternion::identity(), tensor![1.0, 0.0, 0.0], 1.0 / 60.0);
+    fn test_propagate_quaternion() {
+        let q = propagate_quaternion(Quaternion::identity(), tensor![1.0, 0.0, 0.0], 1.0 / 60.0);
         assert_relative_eq!(
             q.0.inner(),
             &array![0.00833324, 0., 0., 0.99996528],

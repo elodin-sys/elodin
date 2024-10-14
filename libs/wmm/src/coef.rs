@@ -1,6 +1,6 @@
 use crate::sys::MAGtype_MagneticModel;
 
-// source: WMM 2020 coefficents, converted using coef2rs.jl
+// source: WMM 2020 coefficients, converted using coef2rs.jl
 pub const WMM: &[(usize, usize, f64, f64, f64, f64)] = &[
     (1, 0, -29404.5, 0.0, 6.7, 0.0),
     (1, 1, -1450.7, 4652.9, 7.7, -25.1),
