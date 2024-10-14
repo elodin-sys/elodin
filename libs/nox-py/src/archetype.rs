@@ -5,14 +5,14 @@ use impeller::ArchetypeName;
 use numpy::PyUntypedArray;
 
 pub struct Archetype<'py> {
-    pub component_datas: Vec<Metadata>,
+    pub component_data: Vec<Metadata>,
     pub arrays: Vec<&'py PyUntypedArray>,
     pub archetype_name: ArchetypeName,
 }
 
 impl Archetype<'_> {
     pub fn component_names(&self) -> Vec<String> {
-        self.component_datas
+        self.component_data
             .iter()
             .map(|data| data.name.to_string())
             .collect::<Vec<_>>()
@@ -25,13 +25,13 @@ impl<'s> FromPyObject<'s> for Archetype<'s> {
             .call_method0("archetype_name")?
             .extract::<String>()?;
         let archetype_name = ArchetypeName::from(archetype_name.as_str());
-        let component_datas = archetype
+        let component_data = archetype
             .call_method0("component_data")?
             .extract::<Vec<Metadata>>()?;
         let arrays = archetype.call_method0("arrays")?;
         let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
         Ok(Self {
-            component_datas,
+            component_data,
             arrays,
             archetype_name,
         })

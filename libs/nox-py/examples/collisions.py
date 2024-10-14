@@ -20,7 +20,7 @@ elasticity = 0.85
 def bounce(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
     return v + jax.lax.cond(
         p.linear()[2] <= 0.4,
-        lambda: collison_impulse_static(
+        lambda: collision_impulse_static(
             np.array([0.0, 0.0, 1.0]),
             np.array([0.0, 0.0, 0.4]),
             v,
@@ -50,7 +50,7 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
         if wall.leq:
             v += jax.lax.cond(
                 p.linear()[wall.pos_dim] <= wall.pos[wall.pos_dim],
-                lambda: collison_impulse_static(
+                lambda: collision_impulse_static(
                     wall.normal,
                     wall.normal * 0.4,
                     v,
@@ -61,7 +61,7 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
         else:
             v += jax.lax.cond(
                 p.linear()[wall.pos_dim] >= wall.pos[wall.pos_dim],
-                lambda: collison_impulse_static(
+                lambda: collision_impulse_static(
                     wall.normal,
                     wall.normal * 0.4,
                     v,
@@ -72,7 +72,7 @@ def walls(p: el.WorldPos, v: el.WorldVel, inertia: el.Inertia) -> el.WorldVel:
     return v
 
 
-def collison_impulse_static(
+def collision_impulse_static(
     norm: jax.Array,
     r_a: jax.Array,
     vel_a: el.WorldVel,
@@ -89,7 +89,7 @@ def collison_impulse_static(
     return el.SpatialMotion(linear=impulse)
 
 
-def collison_impulse(
+def collision_impulse(
     norm: jax.Array,
     r_a: jax.Array,
     r_b: jax.Array,
@@ -134,7 +134,7 @@ def collide(
         r_b = norm * 0.4
         impulse = jax.lax.cond(
             dist <= 0.8,
-            lambda: collison_impulse(norm, r_a, r_b, vel_a, inertia_a, vel_b, inertia_b),
+            lambda: collision_impulse(norm, r_a, r_b, vel_a, inertia_a, vel_b, inertia_b),
             lambda: el.SpatialMotion(),
         )
         return acc + impulse

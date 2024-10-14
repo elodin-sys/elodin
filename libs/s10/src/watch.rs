@@ -48,7 +48,7 @@ where
                     break;
                 };
                 if let Err(errors) = event {
-                    eprintln!("errors occured while watching dir {:?}", errors);
+                    eprintln!("errors occurred while watching dir {:?}", errors);
                 }
                 proc_cancel_token.cancel();
                 set.join_next().await;

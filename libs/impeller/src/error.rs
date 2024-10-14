@@ -15,8 +15,8 @@ pub enum Error {
     ParsingError,
     #[error("send error")]
     SendError,
-    #[error("component values need contigous memory to be encoded")]
-    NonContigousMemory,
+    #[error("component values need contiguous memory to be encoded")]
+    NonContiguousMemory,
     #[error("shape must have less than 255 dims")]
     TooManyDims,
     #[error("eof")]

@@ -215,7 +215,7 @@ impl JaxTracer {
                 let expr = self.visit(&u.expr)?;
                 let update = self.visit(&u.update)?;
                 let start_indices = u
-                    .start_indicies
+                    .start_indices
                     .iter()
                     .map(|e| self.visit(e))
                     .collect::<Result<Vec<_>, Error>>()?;
