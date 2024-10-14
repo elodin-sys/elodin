@@ -38,7 +38,7 @@ struct TokenResponse {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct AcessTokenPayload {
+struct AccessTokenPayload {
     iss: String,
     sub: String,
     aud: Vec<String>,
@@ -109,7 +109,7 @@ impl Cli {
             .nth(1)
             .ok_or(AuthError::InvalidAccessToken)?;
         let payload = URL_SAFE_NO_PAD.decode(payload)?;
-        let payload = serde_json::from_slice::<AcessTokenPayload>(&payload)?;
+        let payload = serde_json::from_slice::<AccessTokenPayload>(&payload)?;
         if Utc::now() > payload.exp {
             return Err(AuthError::AccessTokenExpired);
         }

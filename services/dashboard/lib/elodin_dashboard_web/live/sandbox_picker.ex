@@ -186,7 +186,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
       </:navbar_right>
       <div class="flex flex-col min-h-full w-full items-start p-elo-lg py-elo-xl bg-black-primary">
         <div class="flex flex-col flex-wrap items-start w-full rounded-elo-xs bg-black-secondary border border-white border-opacity-10 border-solid">
-          <div class="p-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
+          <div class="p-elo-xl w-fit font-bold text-primitive-colors-white-opacity-900 text-[14px] w-full">
             ELODIN TEMPLATES
           </div>
           <div class="inline-flex items-start px-elo-xl pb-elo-xl gap-elo-lg">
@@ -218,7 +218,7 @@ defmodule ElodinDashboardWeb.SandboxPickerLive do
           </div>
         </div>
         <div class="px-elo-xl flex flex-wrap flex-col items-start self-stretch w-full flex-[0_0_auto] rounded-elo-xs ">
-          <div class="py-elo-xl w-fit font-bold text-primative-colors-white-opacity-900 text-[14px] w-full">
+          <div class="py-elo-xl w-fit font-bold text-primitive-colors-white-opacity-900 text-[14px] w-full">
             YOUR SANDBOXES
           </div>
           <div class="inline-flex items-start flex-wrap gap-elo-lg">

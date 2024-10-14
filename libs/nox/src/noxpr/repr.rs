@@ -385,7 +385,7 @@ impl OwnedRepr for Op {
         arg: &Self::Inner<T1, D1>,
     ) -> Result<Self::Inner<T1, D1>, Error> {
         Ok(Noxpr::cholesky(arg, false))
-        // TODO(sphw): We will need to maks out the unused triangle to ensure that it is zero,
+        // TODO(sphw): We will need to masks out the unused triangle to ensure that it is zero,
         // since it may be uninitialized memory or the existing values
     }
 

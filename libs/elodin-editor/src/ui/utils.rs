@@ -116,7 +116,7 @@ pub fn format_num(mut num: f64) -> String {
     let precision = digit_width.saturating_sub(digits).clamp(1, 3);
     // round to the nearest multiple of 10^(-precision)
     num = (num * 10.0_f64.powi(precision as i32)).round() / 10.0_f64.powi(precision as i32);
-    // -0.0 is wierd, just make it 0.0
+    // -0.0 is weird, just make it 0.0
     if num == -0.0 {
         num = 0.0;
     }

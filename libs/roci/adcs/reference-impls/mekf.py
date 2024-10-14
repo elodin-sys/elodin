@@ -27,7 +27,7 @@ YQY = Y @ Q @ Y.T
 print(repr(YQY))
 
 
-def propogate_quaternion(q: Quaternion, omega: jax.Array, dt: float) -> Quaternion:
+def propagate_quaternion(q: Quaternion, omega: jax.Array, dt: float) -> Quaternion:
     omega_norm = la.norm(omega)
     c = np.cos(0.5 * omega_norm * dt)
     s = np.sin(0.5 * omega_norm * dt) / omega_norm
@@ -46,7 +46,7 @@ def update_quaternion(q: Quaternion, delta_alpha: jax.Array) -> Quaternion:
     return q_hat.normalize()
 
 
-def propogate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) -> jax.Array:
+def propagate_state_covariance(big_p: jax.Array, omega: jax.Array, dt: float) -> jax.Array:
     omega_norm = la.norm(omega)
     s = np.sin(omega_norm * dt)
     c = np.cos(omega_norm * dt)
@@ -81,8 +81,8 @@ def estimate_attitude(
     dt: float,
 ) -> tuple[Quaternion, jax.Array, jax.Array, jax.Array]:
     omega = omega - b_hat
-    q_hat = propogate_quaternion(q_hat, omega, dt)
-    p = propogate_state_covariance(p, omega, dt)
+    q_hat = propagate_quaternion(q_hat, omega, dt)
+    p = propagate_state_covariance(p, omega, dt)
     delta_x_hat = np.zeros(6)
     var_r = np.eye(3) * 0.001
     for i in range(0, 2):

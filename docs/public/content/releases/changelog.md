@@ -237,7 +237,7 @@ name\>" for viewports and "\<entity name\>: \<component name\>" for graphs.
         1. We created a set of unit tests for the 6 DOF implementation that compare Elodin's results with Simulink. They have confirmed that our implementation now matched Simulink's [6DOF Quaternion block](https://www.mathworks.com/help/aeroblks/6dofquaternion.html).
         2. We will expand our set of unit tests to have 100% coverage of our math modules. We will test each module against Simulink and other trusted implementations.
         3. We will publish documentation on our testing methodology and reports for each module.
-- **(fix)** Fix incorrent angular acceleration due to mismatched coordinate frames.
+- **(fix)** Fix incorrect angular acceleration due to mismatched coordinate frames.
     - Spatial force and motion are defined in the world frame. The inertia tensor, however, is defined in the body frame. To correctly calculate angular acceleration, torque and inertia tensor must be in the same frame. To fix this, we now transform torque from the world frame to the body frame before calculating angular acceleration. Then, we transform the angular acceleration back to the world frame.
 - **(breaking)** Split `el.Pbr` into `el.Mesh`, `el.Material`, `el.Shape`, and `el.Glb`.
   - Use the `el.shape` and `el.glb` helpers instead

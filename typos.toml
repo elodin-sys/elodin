@@ -1,0 +1,27 @@
+[default.extend-words]
+"UE" = "UE"
+"SITL" = "SITL"
+"NED" = "NED"
+"ECI" = "ECI"
+"ECEF" = "ECEF"
+"thst" = "thst"
+"hsi" = "hsi"
+"thr" = "thr"
+"som" = "som"
+"lits" = "lits"
+
+[files]
+extend-exclude = [
+ "**/target/*",
+ "docs/public/static/js/*",
+ "**/vendor/*",
+ "pcbs/*",
+ "/apps/unreal-demo/Plugins/RustPlugin",
+ "*.dts",
+ "images/orin-nano/flake.nix",
+ "services/dashboard/priv/static/fonts/**/*",
+ "**/simulink/**/*.xml",
+ "libs/basilisk-rs/basilisk/**/*"
+]
+ignore-vcs = true
+

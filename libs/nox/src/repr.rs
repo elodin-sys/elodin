@@ -104,7 +104,7 @@ pub trait OwnedRepr: Repr {
     where
         I::IntoIter: ExactSizeIterator;
 
-    /// Stacks multiple tensors along specified dimension, creating a new dimension if neccesary
+    /// Stacks multiple tensors along specified dimension, creating a new dimension if necessary
     fn stack<T1: Field, D1: Dim, D2: Dim, I: IntoIterator<Item = Self::Inner<T1, D1>>>(
         args: I,
         dim: usize,

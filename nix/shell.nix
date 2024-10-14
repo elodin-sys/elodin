@@ -86,5 +86,9 @@
           config.packages.elodin-py
         ];
     };
+    writing = pkgs.mkShell {
+      name = "elo-writing-shell";
+      buildInputs = with pkgs; [typos];
+    };
   };
 }

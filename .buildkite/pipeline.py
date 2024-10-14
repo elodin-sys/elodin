@@ -84,6 +84,16 @@ test_steps = [
         ],
     ),
     group(
+        name=":black_nib: writing",
+        steps=[
+            nix_step(
+                label="typos",
+                flake=".#writing",
+                command="typos -c typos.toml",
+            ),
+        ],
+    ),
+    group(
         name=":python: python",
         steps=[
             nix_step(

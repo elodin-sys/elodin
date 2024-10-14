@@ -103,7 +103,7 @@ Source:
 
     var value = this.value;
     var results = index.search(value, 5);
-    var entry, childs = suggestions.childNodes;
+    var entry, children = suggestions.childNodes;
     var i = 0, len = results.length;
 
     suggestions.classList.remove('d-none');
@@ -126,9 +126,9 @@ Source:
 
     });
 
-    while(childs.length > len){
+    while(children.length > len){
 
-        suggestions.removeChild(childs[i])
+        suggestions.removeChild(children[i])
     }
 
   }

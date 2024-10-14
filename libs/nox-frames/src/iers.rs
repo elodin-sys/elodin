@@ -172,7 +172,7 @@ impl FromStr for IERSEntry {
 #[derive(Debug)]
 pub enum ParseError {
     BufferUnderflow,
-    InvalidPredicitionFlag,
+    InvalidPredictionFlag,
     Float(std::num::ParseFloatError),
 }
 
@@ -205,7 +205,7 @@ impl FromStr for PredictionFlag {
         match s {
             "I" => Ok(PredictionFlag::IERS),
             "P" => Ok(PredictionFlag::Predication),
-            _ => Err(ParseError::InvalidPredicitionFlag),
+            _ => Err(ParseError::InvalidPredictionFlag),
         }
     }
 }

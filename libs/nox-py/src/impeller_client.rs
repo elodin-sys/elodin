@@ -35,14 +35,14 @@ impl Impeller {
     ) -> Result<(), Error> {
         let time = time.unwrap_or_default();
         let Archetype {
-            component_datas,
+            component_data,
             arrays,
             ..
         } = archetype;
         let inner = self.inner.clone();
         let arrays = arrays
             .iter()
-            .zip(component_datas.iter())
+            .zip(component_data.iter())
             .map(|(arr, data)| {
                 let ty: impeller::ComponentType = data.component_type.clone();
                 let elem_size = ty.primitive_ty.element_type().element_size_in_bytes();
@@ -51,7 +51,7 @@ impl Impeller {
             .collect();
         self.rt.block_on(async move {
             let mut inner = inner.lock().await;
-            inner.send(entity_id, component_datas, arrays, time).await
+            inner.send(entity_id, component_data, arrays, time).await
         })
     }
 }
@@ -74,13 +74,13 @@ impl ImpellerInner {
     async fn send(
         &mut self,
         entity_id: EntityId,
-        component_datas: Vec<Metadata>,
+        component_data: Vec<Metadata>,
         arrays: Vec<Bytes>,
         time: u64,
     ) -> Result<(), Error> {
         let client = self.client().await?;
         for _ in 0..2 {
-            match send_inner(client, entity_id, &component_datas, &arrays, time).await {
+            match send_inner(client, entity_id, &component_data, &arrays, time).await {
                 Ok(_) => break,
                 Err(impeller::Error::Io(_)) => {
                     continue;
@@ -95,12 +95,12 @@ impl ImpellerInner {
 async fn send_inner(
     client: &mut impeller::client::TcpClient,
     entity_id: EntityId,
-    component_datas: &[Metadata],
+    component_data: &[Metadata],
     arrays: &[Bytes],
     time: u64,
 ) -> Result<(), impeller::Error> {
     let stream_id = StreamId::rand();
-    for (data, value_buf) in component_datas.iter().zip(arrays.iter()) {
+    for (data, value_buf) in component_data.iter().zip(arrays.iter()) {
         let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.inner.clone());
         client.send(packet).await?;
 

@@ -41,7 +41,7 @@ pub struct WorldBuilder {
 impl WorldBuilder {
     fn insert_entity_id(&mut self, archetype: &Archetype, entity_id: EntityId) {
         let archetype_name = archetype.archetype_name;
-        let columns = archetype.component_datas.iter().cloned();
+        let columns = archetype.component_data.iter().cloned();
         for metadata in columns {
             let id = metadata.component_id();
             self.world
@@ -100,7 +100,7 @@ impl WorldBuilder {
             Spawnable::Archetypes(archetypes) => {
                 for archetype in archetypes {
                     self.insert_entity_id(&archetype, entity_id);
-                    for (arr, component) in archetype.arrays.iter().zip(archetype.component_datas) {
+                    for (arr, component) in archetype.arrays.iter().zip(archetype.component_data) {
                         let mut col = self
                             .world
                             .column_by_id_mut(ComponentId::new(&component.name))
@@ -119,7 +119,7 @@ impl WorldBuilder {
                 let archetype_name = metadata.component_name().into();
                 let inner = self.world.assets.insert_bytes(bytes.bytes);
                 let archetype = Archetype {
-                    component_datas: vec![Metadata { inner: metadata }],
+                    component_data: vec![Metadata { inner: metadata }],
                     arrays: vec![],
                     archetype_name,
                 };

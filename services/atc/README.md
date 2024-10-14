@@ -17,7 +17,7 @@ ATC manages everything to do with running distributed simulations. It is respons
 1. Start and set up the `PostgreSQL`, create the `atc_dev` database (`psql -c 'create database atc_dev;'`)
 2. Start the `Redis`.
 3. Create a local Kubernetes cluster: [`kind`](https://kind.sigs.k8s.io/)(windows) / [`orbstack`](https://orbstack.dev/)(mac)
-4. Ceate the `vms` namespace in your new cluster
+4. Create the `vms` namespace in your new cluster
 5. Set up the [`config file`](config.toml). Make sure that you've properly specified the database_url, redis_url and pod_name fields.
 6. Make sure you have set up the [`GOOGLE_APPLICATION_CREDENTIALS env`](https://cloud.google.com/docs/authentication/provide-credentials-adc).
 7. Run `cargo run` in this directory.
