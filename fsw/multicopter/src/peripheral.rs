@@ -46,6 +46,7 @@ pub trait HalDmaRegExt: Sized + Deref<Target = pac::dma1::RegisterBlock> + 'stat
 
 pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
     type HalTimerReg: HalTimerRegExt;
+    const ADVANCED_CONTROL: bool;
 
     fn enable_pwm(&mut self);
     fn enable_dma_interrupt(&mut self);
@@ -147,13 +148,24 @@ pub struct DmaChannel<H: HalDmaRegExt> {
     channel: dma::DmaChannel,
 }
 
+macro_rules! cond {
+    (true, $val:expr) => {
+        $val
+    };
+    (false, $val:expr) => {};
+}
+
 macro_rules! impl_hal_timer {
-    ($tim:literal) => {
+    ($tim:literal, $advanced:literal) => {
         paste::paste! {
         impl HalTimerExt for timer::Timer<pac::[<TIM $tim>]>
         {
             type HalTimerReg = pac::[<TIM $tim>];
+            const ADVANCED_CONTROL: bool = $advanced;
+
             fn enable_pwm(&mut self) {
+                // if advanced, set MOE bit to enable outputs
+                cond!($advanced, self.regs.bdtr.modify(|_, w| w.moe().set_bit()));
                 self.enable_pwm_output(timer::TimChannel::C1, timer::OutputCompare::Pwm1, 0.);
                 self.enable_pwm_output(timer::TimChannel::C2, timer::OutputCompare::Pwm1, 0.);
                 self.enable_pwm_output(timer::TimChannel::C3, timer::OutputCompare::Pwm1, 0.);
@@ -190,9 +202,15 @@ macro_rules! impl_hal_timer {
     };
 }
 
-impl_hal_timer!(1);
-impl_hal_timer!(2);
-impl_hal_timer!(3);
+// Advanced timers
+impl_hal_timer!(1, true);
+impl_hal_timer!(8, true);
+
+// General purpose timers
+impl_hal_timer!(2, false);
+impl_hal_timer!(3, false);
+impl_hal_timer!(4, false);
+impl_hal_timer!(5, false);
 
 macro_rules! impl_hal_timer_reg {
     ($tim_num:literal) => {
@@ -220,6 +238,9 @@ macro_rules! impl_hal_timer_reg {
 impl_hal_timer_reg!(1);
 impl_hal_timer_reg!(2);
 impl_hal_timer_reg!(3);
+impl_hal_timer_reg!(4);
+impl_hal_timer_reg!(5);
+impl_hal_timer_reg!(8);
 
 impl HalDmaRegExt for pac::DMA1 {
     const DMA: dma::DmaPeriph = dma::DmaPeriph::Dma1;
