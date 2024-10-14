@@ -4,7 +4,7 @@ from typing import Annotated
 import elodin as el
 import jax
 
-TIME_STEP = 1.0 / 30.0
+SIM_TIME_STEP = 1.0 / 30.0
 
 
 MagRef = Annotated[jax.Array, el.Component("mag_ref", el.ComponentType(el.PrimitiveType.F64, (3,)))]
@@ -30,4 +30,4 @@ def nop(ref: MagRef, mag_reading: MagReading) -> MagRef:
     return ref
 
 
-sim = w.run(nop, TIME_STEP)
+sim = w.run(nop, SIM_TIME_STEP)

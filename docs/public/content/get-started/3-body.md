@@ -24,13 +24,13 @@ R. A. Broucke's technical report ["Period Orbits in the Restricted Three-Body Pr
 #### Import Elodin and JAX
 Our first step is to import Elodin and Jax into our environment:
 ```python
+import elodin as el
 from jax import numpy as np
 from jax.numpy import linalg as la
-import elodin as el
 
-TIME_STEP = 1.0 / 120.0
+SIM_TIME_STEP = 1.0 / 120.0
 ```
-`TIME_STEP` value is the duration of each tick in the simulation.
+`SIM_TIME_STEP` value is the duration of each tick in the simulation.
 
 #### Setup Gravity Constraints
 With all dependencies prepared, we can set Gravity Constraints:
@@ -66,12 +66,13 @@ def gravity(
 Before we can do anything we'll need an instance of a WorldBuilder, and with that we can spawn our first entities:
 ```python
 w = el.World()
+mesh = w.insert_asset(el.Mesh.sphere(0.2))
 a = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform(linear=np.array([0.8822391241, 0, 0])),
-            world_vel=el.SpatialMotion(linear=np.array([0, 1.0042424155, 0])),
-            inertia=el.SpatialInertia(1.0 / G),
+            world_pos=el.WorldPos(linear=np.array([0.8822391241, 0, 0])),
+            world_vel=el.WorldVel(linear=np.array([0, 1.0042424155, 0])),
+            inertia=el.Inertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(25.3, 18.4, 1.0))),
     ],
@@ -80,9 +81,9 @@ a = w.spawn(
 b = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform(linear=np.array([-0.6432718586, 0, 0])),
-            world_vel=el.SpatialMotion(linear=np.array([0, -1.6491842814, 0])),
-            inertia=el.SpatialInertia(1.0 / G),
+            world_pos=el.WorldPos(linear=np.array([-0.6432718586, 0, 0])),
+            world_vel=el.WorldVel(linear=np.array([0, -1.6491842814, 0])),
+            inertia=el.Inertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(10.0, 0.0, 10.0))),
     ],
@@ -101,9 +102,7 @@ But first, let's add a view port so we can observe the world:
 ```python
 w.spawn(
     el.Panel.viewport(
-        track_rotation=False,
-        active=True,
-        pos=[0.0, 0.0, 5.0],
+        pos=[0.0, -3.0, 3.0],
         looking_at=[0.0, 0.0, 0.0],
         hdr=True,
     ),
@@ -113,8 +112,8 @@ w.spawn(
 
 Now, we're ready to start simulating:
 ```python
-sys = six_dof(gravity)
-sim = w.run(sys, TIME_STEP)
+sys = el.six_dof(sys=gravity)
+sim = w.run(sys, SIM_TIME_STEP)
 ```
 At this moment, bodies will be flying off into space, so feel free to remove these last 2 lines for now.
 
@@ -124,9 +123,9 @@ And last but not least, we will add the third body which will make this a stable
 c = w.spawn(
     [
         el.Body(
-            world_pos=el.SpatialTransform(linear=np.array([-0.2389672654, 0, 0])),
-            world_vel=el.SpatialMotion(linear=np.array([0, 0.6449418659, 0.0])),
-            inertia=el.SpatialInertia(1.0 / G),
+            world_pos=el.WorldPos(linear=np.array([-0.2389672654, 0, 0])),
+            world_vel=el.WorldVel(linear=np.array([0, 0.6449418659, 0.0])),
+            inertia=el.Inertia(1.0 / G),
         ),
         el.Shape(mesh, w.insert_asset(el.Material.color(00.0, 1.0, 10.0))),
     ],
@@ -144,5 +143,21 @@ w.spawn(GravityConstraint(c, b), name="C -> B")
 You can now update the simulation by pressing `Update Sim` or hitting `Cmd-Enter`.
 ```python
 sys = six_dof(gravity)
-sim = w.run(sys, TIME_STEP)
+sim = w.run(sys, SIM_TIME_STEP)
+```
+
+#### Add some gizmos
+Sometimes it can be helpful to visualize the forces acting on the bodies and their movements in 3D space. Add these two
+lines to see a few options in action:
+```python
+w.spawn(el.VectorArrow(a, "world_vel", offset=3, body_frame=False, scale=1.0))
+
+w.spawn(el.Line3d(b, "world_pos", index=[4, 5, 6], line_width=10.0))
+```
+
+#### Checking your work
+And that's it! You can now run the simulation and see the three bodies orbiting around each other in a stable configuration.
+If you'd like to check your work, you can use the following command to generate the matching template code:
+```bash
+elodin create --template three-body
 ```

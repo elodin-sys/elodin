@@ -5,7 +5,7 @@ import jax
 from jax import numpy as np
 from jax.numpy import linalg as la
 
-TIME_STEP = 1.0 / 240.0
+SIM_TIME_STEP = 1.0 / 240.0
 
 
 @el.map
@@ -182,4 +182,4 @@ world.spawn(
 
 
 sys = bounce.pipe(collide).pipe(walls).pipe(el.six_dof(sys=gravity))
-world.run(sys, TIME_STEP)
+world.run(sys, SIM_TIME_STEP)

@@ -6,7 +6,7 @@ import elodin as el
 import jax
 import jax.numpy as np
 
-TIME_STEP = 1.0 / 60.0
+SIM_TIME_STEP = 1.0 / 60.0
 
 j = np.array([15204079.70002, 14621352.61765, 6237758.3131]) * 1e-9
 
@@ -243,5 +243,5 @@ def noop(
 
 exec = world.run(
     system=noop,
-    time_step=TIME_STEP,
+    sim_time_step=SIM_TIME_STEP,
 )
