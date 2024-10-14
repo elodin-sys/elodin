@@ -37,7 +37,7 @@ pub struct Server {
     demux: Demux,
     addr: SocketAddr,
     subscriptions: Subscriptions,
-    write_halfs: HashMap<ConnectionId, TcpWriter>,
+    write_halves: HashMap<ConnectionId, TcpWriter>,
     stream_map:
         tokio_stream::StreamMap<ConnectionId, FramedRead<OwnedReadHalf, LengthDelimitedCodec>>,
     outgoing_tx: TxChannel,
@@ -104,7 +104,7 @@ impl Server {
                 incoming_rx,
                 demux: Demux::default(),
                 subscriptions: Default::default(),
-                write_halfs: Default::default(),
+                write_halves: Default::default(),
                 stream_map: Default::default(),
                 outgoing_filter,
                 metadata,
@@ -127,7 +127,7 @@ impl Server {
                     let id = ConnectionId(fastrand::u64(..));
                     let (rx, tx) = stream.into_split();
                     self.subscriptions.insert(id, vec![]);
-                    self.write_halfs.insert(
+                    self.write_halves.insert(
                         id,
                         AsyncClient::new(FramedWrite::new(tx, LengthDelimitedCodec::new())),
                     );
@@ -148,7 +148,7 @@ impl Server {
                         for (connection_id, subs) in &self.subscriptions {
                             for sub in subs {
                                 if sub.query.matches(*component_id, *entity_id) {
-                                    if let Some(stream) = self.write_halfs.get_mut(connection_id) {
+                                    if let Some(stream) = self.write_halves.get_mut(connection_id) {
                                         let packet: Packet<Payload<Bytes>> = Packet::column(
                                             sub.stream_id,
                                             ColumnPayload::try_from_value_iter(
@@ -179,7 +179,7 @@ impl Server {
         let msg = self.demux.handle(packet)?;
         match msg {
             Msg::Control(ControlMsg::Subscribe { query }) => {
-                let Some(tx) = self.write_halfs.get_mut(&id) else {
+                let Some(tx) = self.write_halves.get_mut(&id) else {
                     return Ok(());
                 };
                 let stream_id = StreamId::rand();
