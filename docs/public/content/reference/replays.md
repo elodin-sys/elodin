@@ -37,7 +37,7 @@ This file contains all of the metadata that is needed to replay the simulation. 
 
 ```json
 {
-  "time_step": 0.008333333,
+  "sim_time_step": 0.008333333,
   "archetypes": {
     "archetype_a": [
       {

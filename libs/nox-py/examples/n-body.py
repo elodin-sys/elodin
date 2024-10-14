@@ -56,4 +56,4 @@ w.spawn(
 )
 
 sys = el.six_dof(sys=gravity)
-sim = w.run(sys, 1 / 240.0)
+sim = w.run(sys, sim_time_step=1 / 240.0)

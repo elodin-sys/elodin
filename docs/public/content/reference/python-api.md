@@ -53,12 +53,11 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `run(system, time_step, sim_time_step, run_time_step, output_time_step, max_ticks, client)` -> None
+- `run(system, sim_time_step, run_time_step, output_time_step, max_ticks, client)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
-    - `time_step` : `float`, optional, the amount of simulated time between each tick.
-    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick.
+    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to 1 / 120.0.
     - `run_time_step` : `float`, optional, the amount of real time between each tick, defaults to real-time playback by matching the `sim_time_step`.
     - `output_time_step` : `float`, optional, the amount of real time between each output frame sent from the server to clients, defaults to `sim_time_step` value.
     - `max_ticks` : `integer`, optional, the maximum number of ticks to run the simulation for before stopping.
@@ -185,7 +184,7 @@ graph = el.Panel.graph(
 w.spawn(el.Panel.vsplit(camera, graph), name="main_view")
 
 sys = el.six_dof(sys=spin)
-sim = w.run(sys, 1.0 / 120.0)
+sim = w.run(sys, sim_time_step=1.0 / 120.0)
 ```
 
 <br></br>
@@ -265,7 +264,7 @@ A simple example of a 6DoF system that models gravity acting on a rigid body in 
 import elodin as el
 import jax.numpy as jnp
 
-WORLD_SIM_TIME_STEP = 1.0 / 120.0
+SIM_TIME_STEP = 1.0 / 120.0
 
 @el.map
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
@@ -274,7 +273,7 @@ def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
 w = el.World()
 w.spawn(el.Body(), name="example")
 sys = el.six_dof(sys=gravity, integrator=el.Integrator.Rk4)
-sim = w.run(sys, WORLD_SIM_TIME_STEP)
+sim = w.run(sys, SIM_TIME_STEP)
 ```
 
 {% alert(kind="warning") %}
@@ -284,7 +283,7 @@ You should never need to use the six_dof time_step parameter unless you need to 
 # lower frequency time step
 SIX_DOF_TIME_STEP = 1.0 / 60.0
 sys = el.six_dof(time_step=SIX_DOF_TIME_STEP, sys=gravity)
-sim = w.run(sys, WORLD_SIM_TIME_STEP)
+sim = w.run(sys, SIM_TIME_STEP)
 ```
 
 <br></br>
