@@ -478,5 +478,5 @@ exec = w.run(
         | earth_point,
         integrator=el.Integrator.SemiImplicit,
     ),
-    time_step=1.0 / 240.0,
+    sim_time_step=1.0 / 240.0,
 )

@@ -7,7 +7,7 @@ from jax import numpy as jnp
 from jax import random
 from jax.numpy import linalg as la
 
-TIME_STEP = 1.0 / 120.0
+SIM_TIME_STEP = 1.0 / 120.0
 
 Wind = typing.Annotated[
     jax.Array,
