@@ -665,7 +665,7 @@ mod tests {
                 0.0,
                 0.0,
                 0.0
-            ], // roation of 0.25 around axis angle
+            ], // rotation of 0.25 around axis angle
             epsilon = 1e-5
         )
     }

@@ -435,7 +435,7 @@ pub struct Gather {
 #[derive(Debug)]
 pub struct DynamicUpdateSlice {
     pub expr: Noxpr,
-    pub start_indicies: Vec<Noxpr>,
+    pub start_indices: Vec<Noxpr>,
     pub update: Noxpr,
 }
 
@@ -651,10 +651,10 @@ impl Noxpr {
     }
 
     /// Creates a transposed `Noxpr`.
-    pub fn transpose(self, permuation: SmallVec<[i64; 4]>) -> Self {
+    pub fn transpose(self, permutation: SmallVec<[i64; 4]>) -> Self {
         Self::new(NoxprNode::Transpose(Transpose {
             expr: self,
-            permutation: permuation,
+            permutation,
         }))
     }
 
@@ -1217,10 +1217,10 @@ impl Noxpr {
     }
 
     /// Constructs a `Noxpr` for dynamically updating a slice of the original data.
-    pub fn dynamic_update_slice(&self, start_indicies: Vec<Noxpr>, update: Noxpr) -> Noxpr {
+    pub fn dynamic_update_slice(&self, start_indices: Vec<Noxpr>, update: Noxpr) -> Noxpr {
         Noxpr::new(NoxprNode::DynamicUpdateSlice(DynamicUpdateSlice {
             expr: self.clone(),
-            start_indicies,
+            start_indices,
             update,
         }))
     }
@@ -1582,7 +1582,7 @@ impl XlaTracer {
                 let inner = self.visit(&d.expr)?;
                 let update = self.visit(&d.update)?;
                 let start = d
-                    .start_indicies
+                    .start_indices
                     .iter()
                     .map(|expr| self.visit(expr))
                     .collect::<Result<Vec<_>, Error>>()?;
@@ -1920,7 +1920,7 @@ impl ReplacementTracer {
             NoxprNode::DynamicUpdateSlice(d) => {
                 Noxpr::new(NoxprNode::DynamicUpdateSlice(DynamicUpdateSlice {
                     expr: self.visit(&d.expr),
-                    start_indicies: d.start_indicies.iter().map(|e| self.visit(e)).collect(),
+                    start_indices: d.start_indices.iter().map(|e| self.visit(e)).collect(),
                     update: self.visit(&d.update),
                 }))
             }
@@ -2217,7 +2217,7 @@ impl PrettyPrintTracer {
                 let expr = self.visit(&d.expr, writer)?;
                 let update = self.visit(&d.update, writer)?;
                 let start_indices: Vec<_> = d
-                    .start_indicies
+                    .start_indices
                     .iter()
                     .map(|e| self.visit(e, writer))
                     .collect::<Result<_, _>>()?;

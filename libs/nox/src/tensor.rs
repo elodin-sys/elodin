@@ -63,7 +63,7 @@ pub trait TensorItem {
     where
         D: Dim;
 
-    /// The dimension of the underyling item. For example `f64` will be `ScalarDim`
+    /// The dimension of the underlying item. For example `f64` will be `ScalarDim`
     type Dim: Dim;
 
     /// The primitive element that will be stored in actual memory
