@@ -1,19 +1,27 @@
-{ config, self', pkgs, lib, flakeInputs, rustToolchain, ... }:
-let
+{
+  config,
+  self',
+  pkgs,
+  lib,
+  flakeInputs,
+  rustToolchain,
+  ...
+}: let
   craneLib = (flakeInputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml { cargoToml = ../services/atc/Cargo.toml; };
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../services/atc/Cargo.toml;};
   src = pkgs.nix-gitignore.gitignoreSource [] ../.;
   commonArgs = {
     inherit (crateName) pname version;
     inherit src;
     doCheck = false;
     cargoExtraArgs = "--package=${crateName.pname}";
-    buildInputs = with pkgs; [ protobuf ];
+    buildInputs = with pkgs; [protobuf];
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-  bin = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-  });
+  bin = craneLib.buildPackage (commonArgs
+    // {
+      inherit cargoArtifacts;
+    });
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-atc";
@@ -24,7 +32,6 @@ let
       Cmd = ["${bin}/bin/${crateName.pname}"];
     };
   };
-in
-{
+in {
   packages.atc-image = image;
 }

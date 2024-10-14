@@ -1,5 +1,10 @@
-{ config, self', pkgs, lib, ... }:
-let
+{
+  config,
+  self',
+  pkgs,
+  lib,
+  ...
+}: let
   beam = pkgs.beam;
   # Note the below code disables wx widgets and systemd, which drastically reduces image size.
   # It causes erlang to be fully rebuilt, so it is commented out for now.
@@ -51,8 +56,7 @@ let
       Cmd = ["${bin}/bin/server"];
     };
   };
-in
-{
+in {
   packages.dashboard = bin;
   packages.dashboard-image = image;
 }

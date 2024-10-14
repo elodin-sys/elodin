@@ -1,10 +1,16 @@
-{ config, self', pkgs, lib, flakeInputs, ... }:
-let
+{
+  config,
+  self',
+  pkgs,
+  lib,
+  flakeInputs,
+  ...
+}: let
   content = pkgs.stdenv.mkDerivation {
     name = "docs-content";
     src = ../docs/public;
 
-    buildInputs = [ pkgs.zola ];
+    buildInputs = [pkgs.zola];
     buildPhase = "zola build";
 
     installPhase = ''
@@ -36,18 +42,16 @@ let
     Last-Modified = ""
   '';
 
-
   image = pkgs.dockerTools.buildLayeredImage {
     name = "elo-docs";
     tag = "latest";
     config = {
-      Env = [ "SERVER_CONFIG_FILE=${sws-config}" ];
-      Cmd = [ "${pkgs.static-web-server}/bin/static-web-server" ];
+      Env = ["SERVER_CONFIG_FILE=${sws-config}"];
+      Cmd = ["${pkgs.static-web-server}/bin/static-web-server"];
       WorkingDir = content;
     };
   };
-in
-{
+in {
   packages.docs-sws-config = sws-config;
   packages.docs-content = content;
   packages.docs-image = image;
