@@ -1,7 +1,7 @@
 //! Provides functionality for executing operations and transferring data between host and client device.
 use crate::{ArrayRepr, AsTypedBuffer, Client, FromTypedBuffers, Op, ReprMonad};
+use core::marker::PhantomData;
 use paste::paste;
-use std::marker::PhantomData;
 
 /// Represents an executable compiled from an XLA computation.
 pub struct Exec<T, R> {

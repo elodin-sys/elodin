@@ -1,4 +1,4 @@
-use std::ops::Add;
+use core::ops::Add;
 
 use crate::{Field, Matrix, OwnedRepr, Quaternion, RealField, Scalar, Vector};
 

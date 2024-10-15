@@ -3,7 +3,7 @@ pub mod earth;
 #[cfg(feature = "earth")]
 pub mod iers;
 
-use std::ops::Mul;
+use core::ops::Mul;
 
 use nox::{
     ArrayDim, Const, DefaultRepr, Dim, DotDim, Elem, Field, Matrix, OwnedRepr, RealField,

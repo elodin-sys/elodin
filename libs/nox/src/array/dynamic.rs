@@ -1,4 +1,5 @@
-use std::marker::PhantomData;
+use alloc::{vec, vec::Vec};
+use core::marker::PhantomData;
 
 use smallvec::SmallVec;
 
