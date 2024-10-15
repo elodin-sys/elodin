@@ -1,5 +1,5 @@
 //! Traits and implementations for data transfer between host and XLA devices, buffer management, and XLA client operations.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use smallvec::SmallVec;
 use xla::{ArrayElement, NativeType, PjRtBuffer, Shape};

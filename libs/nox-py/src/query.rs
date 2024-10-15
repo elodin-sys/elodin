@@ -1,6 +1,6 @@
 use crate::*;
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use impeller::ComponentId;
 use nox_ecs::{join_many, nox::Noxpr};

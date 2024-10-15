@@ -5,7 +5,7 @@ use crate::{
 };
 use crate::{Const, DimMul, ToTypenum};
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 /// Type alias for a tensor that specifically represents a vector.
 pub type Vector<T, const N: usize, P = DefaultRepr> = Tensor<T, Const<N>, P>;
@@ -125,7 +125,7 @@ impl<T: Field + RealField, const N: usize, R: OwnedRepr> Vector<T, N, R> {
 #[cfg(test)]
 mod tests {
 
-    use std::f64::consts::FRAC_PI_4;
+    use core::f64::consts::FRAC_PI_4;
 
     use super::*;
     use crate::*;

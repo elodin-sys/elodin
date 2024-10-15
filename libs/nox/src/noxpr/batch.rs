@@ -3,12 +3,12 @@ use crate::{
     DotDimensionNums, Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad,
     Tensor, TensorItem,
 };
-use smallvec::{smallvec, SmallVec};
-use std::{
-    collections::HashMap,
+use core::{
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
 };
+use smallvec::{smallvec, SmallVec};
+use std::collections::HashMap;
 
 use super::Op;
 

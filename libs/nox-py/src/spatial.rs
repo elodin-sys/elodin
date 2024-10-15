@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul};
+use core::ops::{Add, Mul};
 
 use impeller::ComponentExt;
 use nox_ecs::nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};

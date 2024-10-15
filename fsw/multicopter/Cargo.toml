@@ -28,5 +28,15 @@ fugit = { version = "0.3.7", features = ["defmt"] }
 paste = "1.0"
 dshot-frame = "0.1.3"
 
+nox = { path = "../../libs/nox", default-features = false }
+
 [dev-dependencies]
 defmt-test = "0.3"
+
+[patch.crates-io]
+# Remove after https://github.com/dtolnay/thiserror/pull/304 is merged
+thiserror = { git = "https://github.com/quartiq/thiserror.git", rev = "e779e1b" }
+# Remove after https://github.com/NotIntMan/inplace_it/pull/16 is merged
+inplace_it = { git = "https://github.com/akhilles/inplace_it.git", rev = "61077d3" }
+# Remove after there's a new release on https://crates.io/crates/faer > 0.19.4
+faer = { git = "https://github.com/sarah-quinones/faer-rs.git", rev = "4f3eb7e" }

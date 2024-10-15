@@ -5,8 +5,14 @@ use crate::{
     TensorDim,
 };
 use crate::{Const, Dyn, ShapeConstraint};
+use alloc::{vec, vec::Vec};
 use approx::{AbsDiffEq, RelativeEq};
-use dyn_stack::ReborrowMut;
+use core::default::Default;
+use core::{cmp, fmt, iter};
+use core::{
+    marker::PhantomData,
+    ops::{Add, Div, Mul, Neg, Sub},
+};
 use faer::{
     linalg::{
         cholesky::llt::compute::{cholesky_in_place, cholesky_in_place_req},
@@ -14,14 +20,10 @@ use faer::{
             full_pivoting::compute::lu_in_place_req, partial_pivoting::inverse::invert_in_place_req,
         },
     },
+    reborrow::ReborrowMut,
     Parallelism,
 };
 use smallvec::SmallVec;
-use std::default::Default;
-use std::{
-    marker::PhantomData,
-    ops::{Add, Div, Mul, Neg, Sub},
-};
 
 mod dynamic;
 mod repr;
@@ -86,11 +88,11 @@ where
     }
 }
 
-impl<T: Elem, D: ArrayDim> std::fmt::Debug for Array<T, D>
+impl<T: Elem, D: ArrayDim> fmt::Debug for Array<T, D>
 where
-    D::Buf<T>: std::fmt::Debug,
+    D::Buf<T>: fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.buf.fmt(f)
     }
 }
@@ -330,7 +332,7 @@ macro_rules! impl_op {
                 let d2 = D2::array_shape(&b.buf);
 
                 match d1.as_ref().len().cmp(&d2.as_ref().len()) {
-                    std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                    cmp::Ordering::Less | cmp::Ordering::Equal => {
                         let mut out: Array<T1, BroadcastedDim<D1, D2>> =
                             Array::zeroed(d2.as_ref());
                         let mut broadcast_dims = d2.clone();
@@ -347,7 +349,7 @@ macro_rules! impl_op {
                         }
                         out
                     }
-                    std::cmp::Ordering::Greater => {
+                    cmp::Ordering::Greater => {
                         let mut out: Array<T1, BroadcastedDim<D1, D2>> =
                             Array::zeroed(d2.as_ref());
                         let mut broadcast_dims = d1.clone();
@@ -537,7 +539,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         for (offset, index) in offsets
             .iter()
             .copied()
-            .chain(std::iter::repeat(0))
+            .chain(iter::repeat(0))
             .zip(indexes.as_mut().iter_mut())
         {
             *index = offset;
@@ -570,7 +572,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
         for (offset, index) in offsets
             .iter()
             .copied()
-            .chain(std::iter::repeat(0))
+            .chain(iter::repeat(0))
             .zip(indexes.as_mut().iter_mut())
         {
             *index = offset;
@@ -603,7 +605,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             .as_ref()
             .iter()
             .rev()
-            .chain(std::iter::repeat(&1))
+            .chain(iter::repeat(&1))
             .zip(existing_strides.as_ref().iter().rev())
             .zip(new_dims.as_ref().iter().enumerate().rev())
         {
@@ -840,7 +842,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             req.unaligned_bytes_required(),
             |work: inplace_it::UninitializedSliceMemoryGuard<u8>| {
                 let mut work = work.init(|_| 0);
-                let mut stack = dyn_stack::PodStack::new(&mut work);
+                let mut stack = faer::dyn_stack::PodStack::new(&mut work);
                 let mut perm = D1::ipiv(&self.buf);
                 let mut perm_inv = D1::ipiv(&self.buf);
                 let mut mat = faer::mat::from_row_major_slice_mut(self.buf.as_mut_buf(), n, n);
@@ -884,7 +886,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             .zip(
                 iter.into_iter()
                     .map(|a| a.buf)
-                    .chain(std::iter::repeat(T1::zero_prim())),
+                    .chain(iter::repeat(T1::zero_prim())),
             )
             .for_each(|(a, b)| {
                 *a = b;
@@ -966,7 +968,7 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             req.unaligned_bytes_required(),
             |work: inplace_it::UninitializedSliceMemoryGuard<u8>| {
                 let mut work = work.init(|_| 0);
-                let stack = dyn_stack::PodStack::new(&mut work);
+                let stack = faer::dyn_stack::PodStack::new(&mut work);
                 cholesky_in_place(
                     mat,
                     Default::default(),
@@ -1185,7 +1187,7 @@ impl<D: Dim + crate::NonTupleDim + crate::NonScalarDim> DimGet for D {
     }
 
     fn index_as_slice(index: &Self::Index) -> &[usize] {
-        std::slice::from_ref(index)
+        core::slice::from_ref(index)
     }
 }
 
@@ -1431,7 +1433,7 @@ impl<
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|x| {
             (
-                unsafe { std::mem::transmute::<&I, &'a I>(&self.0.indexes) },
+                unsafe { core::mem::transmute::<&I, &'a I>(&self.0.indexes) },
                 x,
             )
         })
@@ -1554,7 +1556,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::f64::consts::FRAC_PI_4;
+    use core::f64::consts::FRAC_PI_4;
 
     use approx::assert_relative_eq;
 

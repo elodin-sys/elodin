@@ -5,7 +5,7 @@ use crate::DefaultRepr;
 use crate::Elem;
 use crate::Matrix3;
 use crate::ReprMonad;
-use std::ops::{Add, Mul};
+use core::ops::{Add, Mul};
 
 use crate::{Field, OwnedRepr, RealField, Scalar, TensorItem, Vector, MRP};
 
@@ -71,11 +71,11 @@ impl<T: Elem + PartialEq> PartialEq for Quaternion<T, ArrayRepr> {
     }
 }
 
-impl<T: Field, R: OwnedRepr> std::fmt::Debug for Quaternion<T, R>
+impl<T: Field, R: OwnedRepr> core::fmt::Debug for Quaternion<T, R>
 where
-    R::Inner<T, Const<4>>: std::fmt::Debug,
+    R::Inner<T, Const<4>>: core::fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Quaternion").field(&self.0).finish()
     }
 }

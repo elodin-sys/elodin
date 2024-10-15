@@ -1,5 +1,5 @@
 //! Provides functionality for managing a client that interfaces with the XLA (Accelerated Linear Algebra) library.
-use std::ops::Deref;
+use core::ops::Deref;
 
 use crate::Error;
 

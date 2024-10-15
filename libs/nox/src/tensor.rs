@@ -5,11 +5,9 @@ use crate::{
     Scalar, ShapeConstraint,
 };
 use approx::{AbsDiffEq, RelativeEq};
-use std::iter::Sum;
-use std::{
-    marker::PhantomData,
-    ops::{Add, Div, Mul, Neg, Sub},
-};
+use core::iter::Sum;
+use core::marker::PhantomData;
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
@@ -28,11 +26,11 @@ pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
 
 impl<T: Field, D: Dim, R: OwnedRepr> Copy for Tensor<T, D, R> where R::Inner<T::Elem, D>: Copy {}
 
-impl<T: TensorItem, D: Dim, P: OwnedRepr> std::fmt::Debug for Tensor<T, D, P>
+impl<T: TensorItem, D: Dim, P: OwnedRepr> core::fmt::Debug for Tensor<T, D, P>
 where
-    P::Inner<T::Elem, D>: std::fmt::Debug,
+    P::Inner<T::Elem, D>: core::fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Tensor").field(&self.inner).finish()
     }
 }
