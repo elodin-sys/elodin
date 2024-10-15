@@ -233,9 +233,9 @@ impl OwnedRepr for ArrayRepr {
     fn row<T1: Field, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
         index: usize,
-    ) -> Self::Inner<T1, crate::RowDim<D1>>
+    ) -> Self::Inner<T1, RowDim<D1>>
     where
-        ShapeConstraint: crate::DimRow<D1>,
+        ShapeConstraint: DimRow<D1>,
     {
         arg.row(index)
     }

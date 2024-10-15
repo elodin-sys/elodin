@@ -29,6 +29,24 @@ mod view;
 pub use repr::*;
 pub use view::*;
 
+pub type Vector<T, const N: usize> = crate::vector::Vector<T, N, ArrayRepr>;
+pub type Vector3<T> = Vector<T, 3>;
+pub type Vec3<T> = Vector3<T>;
+
+pub type Matrix<T, const R: usize, const C: usize> = crate::matrix::Matrix<T, R, C, ArrayRepr>;
+pub type Matrix3<T> = Matrix<T, 3, 3>;
+pub type Mat3<T> = Matrix3<T>;
+
+pub mod dims {
+    pub use super::{
+        ArrayDim, ConcatDim, DimGet, DimRow, MappableDim, RowDim, SquareDim, TransposeDim,
+        TransposedDim,
+    };
+}
+pub mod prelude {
+    pub use super::{dims::*, Array, ArrayBuf, ArrayDim, ArrayRepr, Mat3, Vec3};
+}
+
 /// A struct representing an array with type-safe dimensions and element type.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Array<T: Elem, D: ArrayDim> {
