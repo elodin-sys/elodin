@@ -1,13 +1,10 @@
 //! Provides definitions and traits for handling operations on tensor dimensions and data types.
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+use crate::array::prelude::*;
 use crate::{
-    array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    Dim, DimGet, DotDim, Field, ReplaceDim,
-};
-use crate::{
-    ConstDim, DimRow, Elem, Error, MappableDim, RealField, RowDim, ShapeConstraint, SquareDim,
-    TransposeDim, TransposedDim,
+    AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DotDim,
+    Elem, Error, Field, RealField, ReplaceDim, ShapeConstraint,
 };
 
 pub trait Repr {
