@@ -4,7 +4,7 @@
 #[cfg(feature = "xla")]
 extern crate lapack_src as _;
 
-mod array;
+pub mod array;
 mod dim;
 mod error;
 mod fields;
@@ -19,7 +19,7 @@ mod vector;
 
 pub mod utils;
 
-pub use array::*;
+pub use array::prelude::*;
 pub use dim::*;
 pub use error::*;
 pub use fields::*;
@@ -47,4 +47,4 @@ pub use xla;
 pub use crate::noxpr::Op as DefaultRepr;
 
 #[cfg(not(feature = "noxpr"))]
-pub use crate::ArrayRepr as DefaultRepr;
+pub use crate::array::ArrayRepr as DefaultRepr;

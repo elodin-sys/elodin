@@ -1,16 +1,13 @@
 use std::ops::{Add, Div, Mul, Sub};
 
+use crate::array::dims::*;
 use crate::{
-    ConstDim, Elem, Error, NoxprFn, NoxprTy, RealField, ShapeConstraint, SquareDim, TransposeDim,
-    TransposedDim,
+    AddDim, ArrayTy, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim,
+    DotDim, Elem, Error, Field, Noxpr, NoxprFn, NoxprTy, OwnedRepr, RealField, ReplaceDim, Repr,
+    ShapeConstraint,
 };
-use smallvec::{smallvec, SmallVec};
 
-use crate::ArrayTy;
-use crate::{
-    array::ArrayDim, AddDim, BroadcastDim, BroadcastedDim, ConcatDim, DefaultMap, DefaultMappedDim,
-    Dim, DimGet, DimRow, DotDim, Field, MappableDim, Noxpr, OwnedRepr, ReplaceDim, Repr, RowDim,
-};
+use smallvec::{smallvec, SmallVec};
 
 /// Represents a compute operation.
 pub struct Op;
@@ -23,7 +20,7 @@ impl Op {
         let broadcast_dims = match d1.as_ref().len().cmp(&d2.as_ref().len()) {
             std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
                 let mut broadcast_dims = d2.clone();
-                if !crate::cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
+                if !crate::array::cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
                     panic!(
                         "unbroadcastable dims {:?} {:?}",
                         broadcast_dims.as_mut(),
@@ -34,7 +31,7 @@ impl Op {
             }
             std::cmp::Ordering::Greater => {
                 let mut broadcast_dims = d1.clone();
-                if !crate::cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
+                if !crate::array::cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
                     panic!(
                         "unbroadcastable dims {:?} {:?}",
                         broadcast_dims.as_mut(),
@@ -392,9 +389,9 @@ impl OwnedRepr for Op {
     fn row<T1: Field, D1: Dim>(
         arg: &Self::Inner<T1, D1>,
         index: usize,
-    ) -> Self::Inner<T1, crate::RowDim<D1>>
+    ) -> Self::Inner<T1, RowDim<D1>>
     where
-        ShapeConstraint: crate::DimRow<D1>,
+        ShapeConstraint: DimRow<D1>,
     {
         let shape = arg.shape().unwrap();
         let strides = shape

@@ -1,11 +1,9 @@
 //! Provides the core functionality for manipulating tensors.
-use crate::array::ArrayDim;
+use crate::array::prelude::*;
 use crate::{
-    Array, ArrayRepr, ConcatDim, Dim, DimGet, DimRow, Error, Field, OwnedRepr, Repr, ReprMonad,
-    RowDim, Scalar, SquareDim, TransposeDim, TransposedDim,
+    Const, DefaultRepr, Dim, Dyn, Elem, Error, Field, OwnedRepr, RealField, Repr, ReprMonad,
+    Scalar, ShapeConstraint,
 };
-use crate::{Const, Dyn, ShapeConstraint};
-use crate::{DefaultRepr, Elem, RealField};
 use approx::{AbsDiffEq, RelativeEq};
 use std::iter::Sum;
 use std::{
@@ -966,7 +964,7 @@ impl<T: Field, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
     where
         D1::MappedDim<D2>: Dim,
         T: Field,
-        D1: Dim + crate::MappableDim,
+        D1: Dim + MappableDim,
     {
         let inner = R::map::<T, D1, T2, D2>(&self.inner, |arg_inner| {
             func(Tensor {
@@ -1084,17 +1082,17 @@ impl<T: Field, const D1: usize, const D2: usize, const D3: usize> From<[[[T; D3]
 #[macro_export]
 macro_rules! tensor {
     ($([$([$($x:expr),* $(,)*]),+ $(,)*]),+ $(,)*) => {{
-        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$([$([$($x,)*],)*],)*])
+        $crate::Tensor::<_, _, $crate::array::ArrayRepr>::from([$([$([$($x,)*],)*],)*])
     }};
     ($([$($x:expr),* $(,)*]),+ $(,)*) => {{
-        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$([$($x,)*],)*])
+        $crate::Tensor::<_, _, $crate::array::ArrayRepr>::from([$([$($x,)*],)*])
     }};
     ($($x:expr),* $(,)*) => {{
-        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$($x,)*])
+        $crate::Tensor::<_, _, $crate::array::ArrayRepr>::from([$($x,)*])
     }};
 
     ($elem:expr; $n:expr) => {{
-        $crate::Tensor::<_, _, $crate::ArrayRepr>::from([$elem; $n])
+        $crate::Tensor::<_, _, $crate::array::ArrayRepr>::from([$elem; $n])
     }};
 }
 
