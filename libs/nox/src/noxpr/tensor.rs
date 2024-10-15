@@ -1,7 +1,8 @@
+use crate::array::prelude::*;
 use crate::{
-    AddDim, Array, ArrayBuf, ArrayRepr, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim,
-    DimConcat, Field, MappedDim, NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad,
-    Scalar, Tensor, TensorItem, Vector,
+    AddDim, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim, DimConcat, Field, MappedDim,
+    NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad, Scalar, Tensor, TensorItem,
+    Vector,
 };
 use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
