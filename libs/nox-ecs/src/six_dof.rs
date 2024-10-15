@@ -1,8 +1,8 @@
+use core::ops::{Add, Mul};
 use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
 use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
-use std::ops::{Add, Mul};
 use std::sync::Arc;
 
 use crate::{

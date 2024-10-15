@@ -1,5 +1,5 @@
 //! Provides the `Comp` struct which encapsulates an XLA computation with type information.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::{Client, Exec};
 

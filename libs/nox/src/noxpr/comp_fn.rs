@@ -1,7 +1,7 @@
 //! Defines traits and structures for constructing functions and transforming them into computational graphs.
 use crate::{ArrayTy, Builder, Comp, ConstDim, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
+use core::{any, marker::PhantomData};
 use smallvec::SmallVec;
-use std::{any, marker::PhantomData};
 use xla::ArrayElement;
 
 /// Represents a computational function that can be converted into an XLA computation.

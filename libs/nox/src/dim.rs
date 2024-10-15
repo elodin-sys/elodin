@@ -1,5 +1,5 @@
 use crate::{ArrayDim, TensorDim};
-use std::ops::{Add, Div, Mul, Sub};
+use core::ops::{Add, Div, Mul, Sub};
 use typenum::{self, Diff, Max, Maximum, Min, Minimum, Prod, Quot, Sum};
 
 /// Defines a trait for dimensions supporting tensor operations, XLA compatibility, and array storage.

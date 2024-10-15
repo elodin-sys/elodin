@@ -1,6 +1,6 @@
 //! Defines the `Field` trait for scalar operations and constants, supporting basic arithmetic, matrix multiplication, and associated utilities for numerical types.
-use std::marker::PhantomData;
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use core::marker::PhantomData;
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 #[cfg(feature = "xla")]
 use xla::Literal;
@@ -72,6 +72,7 @@ pub trait RealField:
     fn neg_one() -> Self;
 }
 
+#[cfg(feature = "std")]
 macro_rules! impl_real_field {
     ($t:ty) => {
         impl RealField for $t {
@@ -101,6 +102,45 @@ macro_rules! impl_real_field {
 
             fn copysign(self, sign: Self) -> Self {
                 self.copysign(sign)
+            }
+
+            fn neg_one() -> Self {
+                -1.0
+            }
+        }
+    };
+}
+
+#[cfg(not(feature = "std"))]
+macro_rules! impl_real_field {
+    ($t:ty) => {
+        impl RealField for $t {
+            fn sqrt(self) -> Self {
+                libm::Libm::<$t>::sqrt(self)
+            }
+
+            fn cos(self) -> Self {
+                libm::Libm::<$t>::cos(self)
+            }
+
+            fn sin(self) -> Self {
+                libm::Libm::<$t>::sin(self)
+            }
+
+            fn abs(self) -> Self {
+                libm::Libm::<$t>::fabs(self)
+            }
+
+            fn atan2(self, other: Self) -> Self {
+                libm::Libm::<$t>::atan2(self, other)
+            }
+
+            fn max(self, other: Self) -> Self {
+                libm::Libm::<$t>::fmax(self, other)
+            }
+
+            fn copysign(self, sign: Self) -> Self {
+                libm::Libm::<$t>::copysign(self, sign)
             }
 
             fn neg_one() -> Self {
