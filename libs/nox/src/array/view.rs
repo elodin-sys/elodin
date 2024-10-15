@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::{utils::calculate_strides, DimGet, Dyn, Elem, Repr};
 
