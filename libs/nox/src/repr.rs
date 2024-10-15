@@ -1,5 +1,5 @@
 //! Provides definitions and traits for handling operations on tensor dimensions and data types.
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::array::prelude::*;
 use crate::{

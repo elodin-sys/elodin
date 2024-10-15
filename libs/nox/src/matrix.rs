@@ -1,5 +1,5 @@
 //! Provides a Matrix type alias with convenience functions for converting to various representations.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use crate::Const;
 use crate::{

@@ -1,5 +1,8 @@
 #![recursion_limit = "1024"]
 #![allow(clippy::arc_with_non_send_sync)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 #[cfg(feature = "xla")]
 extern crate lapack_src as _;

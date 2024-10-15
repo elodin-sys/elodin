@@ -1,9 +1,9 @@
 use crate::globals::SimulationTimeStep;
 use crate::{ComponentArray, ComponentGroup, ErasedSystem, IntoSystem, Query};
 use crate::{System, SystemParam};
+use core::ops::Add;
+use core::ops::Mul;
 use nox::Scalar;
-use std::ops::Add;
-use std::ops::Mul;
 
 /// Semi-implicit Euler integrator, typically used when you need a sympletic integrator
 ///

@@ -9,22 +9,23 @@ repository = "https://github.com/elodin-sys/elodin"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["noxpr", "xla"]
+default = []
+std = ["thiserror/std", "faer/std", "num-traits/std"]
 jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
-cuda = ["shared"]
+cuda = ["shared", "xla"]
 noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write", "zerocopy"]
-xla = ["dep:xla", "lapack-src"]
+xla = ["dep:xla", "lapack-src", "std"]
 shared = []
 serde = ["dep:serde"]
 
 [dependencies]
 typenum = "1.17.0"
-num-traits = "0.2.15"
-thiserror = "1.0"
+num-traits = { version = "0.2.15", default-features = false }
+thiserror = { version = "1.0", default-features = false }
 seq-macro = "0.3.5"
 fn-traits = "0.2"
-faer = "0.19.1"
-dyn-stack = "0.10.0"
+faer = { version = "0.19.1", default-features = false, features = ["cholesky", "lu"] }
+libm = "0.2.8"
 inplace_it = "0.3.5"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]

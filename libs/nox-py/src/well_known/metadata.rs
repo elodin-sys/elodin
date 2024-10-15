@@ -50,7 +50,7 @@ impl From<Metadata> for Component {
     }
 }
 
-impl std::ops::Deref for Metadata {
+impl core::ops::Deref for Metadata {
     type Target = impeller::Metadata;
 
     fn deref(&self) -> &Self::Target {

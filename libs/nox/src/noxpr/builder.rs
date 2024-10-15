@@ -1,6 +1,6 @@
 //! Provides tools for constructing tensor operations and managing parameters.
 use crate::{Noxpr, Op, ScalarDim, Tensor};
-use std::cell::{RefCell, UnsafeCell};
+use core::cell::{RefCell, UnsafeCell};
 
 /// A builder for constructing tensor computations and managing tensor parameters.
 pub struct Builder {

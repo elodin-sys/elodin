@@ -5,8 +5,8 @@ use crate::{
     ArrayRepr, Const, DefaultRepr, Field, OwnedRepr, Quaternion, RealField, ReprMonad, Scalar,
     Tensor, TensorItem, Vector, MRP,
 };
-use std::ops::Div;
-use std::ops::{Add, Mul};
+use core::ops::Div;
+use core::ops::{Add, Mul};
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
 pub struct SpatialTransform<T: TensorItem, R: OwnedRepr = DefaultRepr> {
@@ -35,11 +35,11 @@ where
     }
 }
 
-impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialTransform<T, R>
+impl<T: Field, R: OwnedRepr> core::fmt::Debug for SpatialTransform<T, R>
 where
-    R::Inner<T, Const<7>>: std::fmt::Debug,
+    R::Inner<T, Const<7>>: core::fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("SpatialTransform")
             .field(&self.inner)
             .finish()
@@ -160,11 +160,11 @@ where
     }
 }
 
-impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialForce<T, R>
+impl<T: Field, R: OwnedRepr> core::fmt::Debug for SpatialForce<T, R>
 where
-    R::Inner<T, Const<6>>: std::fmt::Debug,
+    R::Inner<T, Const<6>>: core::fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("SpatialForce").field(&self.inner).finish()
     }
 }
@@ -297,11 +297,11 @@ where
     }
 }
 
-impl<T: Field, R: OwnedRepr> std::fmt::Debug for SpatialInertia<T, R>
+impl<T: Field, R: OwnedRepr> core::fmt::Debug for SpatialInertia<T, R>
 where
-    R::Inner<T, Const<7>>: std::fmt::Debug,
+    R::Inner<T, Const<7>>: core::fmt::Debug,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("SpatialInertia").field(&self.inner).finish()
     }
 }

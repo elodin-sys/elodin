@@ -4,8 +4,8 @@ use crate::{
     NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad, Scalar, Tensor, TensorItem,
     Vector,
 };
+use core::marker::PhantomData;
 use smallvec::{smallvec, SmallVec};
-use std::marker::PhantomData;
 use xla::{ArrayElement, NativeType};
 
 impl<T: Field + ArrayElement + NativeType, D: Dim> From<Array<T, D>> for Tensor<T, D, Op> {

@@ -4,9 +4,9 @@ use super::ArrayShape;
 use crate::Result;
 use crate::{PrimitiveType, Status};
 use crate::{XlaBuilder, XlaComputation};
-use std::marker::PhantomData;
+use core::marker::PhantomData;
+use core::ops::{Add, Div, Mul, Sub};
 use std::mem::ManuallyDrop;
-use std::ops::{Add, Div, Mul, Sub};
 use std::pin::Pin;
 
 cpp! {{
