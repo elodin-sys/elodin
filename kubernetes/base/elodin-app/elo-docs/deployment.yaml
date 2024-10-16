@@ -14,7 +14,7 @@ spec:
         imagePullPolicy: Always
         image: elodin-infra/elo-docs:latest
         ports:
-        - containerPort: 1111
+        - containerPort: 8080
           name: http
         resources:
           requests:
@@ -23,8 +23,8 @@ spec:
         readinessProbe:
           httpGet:
             path: /get-started/quickstart
-            port: 1111
+            port: 8080
         livenessProbe:
           httpGet:
             path: /get-started/quickstart
-            port: 1111
+            port: 8080

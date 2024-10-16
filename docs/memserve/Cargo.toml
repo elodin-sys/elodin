@@ -1,0 +1,16 @@
+[package]
+name = "memserve"
+version = "0.1.0"
+edition = "2021"
+description = "Web server that serves static web content from memory."
+readme = "README.md"
+publish = false
+
+[[bin]]
+name = "memserve"
+path = "memserve.rs"
+
+[dependencies]
+mio = { version = "1.0.2", default-features = false, features = ["net", "os-poll"] }
+flate2 = { version = "1.0.34", default-features = false, features = ["rust_backend"] } # for gzip support
+xxhash-rust = { version = "0.8.12", default-features = false, features = ["xxh3"]} # for etags
