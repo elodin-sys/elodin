@@ -1,4 +1,3 @@
-#![no_main]
 #![no_std]
 
 use cortex_m_semihosting::debug;
@@ -8,6 +7,7 @@ use hal as _;
 use panic_probe as _;
 
 pub mod arena;
+pub mod bmm350;
 pub mod bsp;
 pub mod dma;
 pub mod dshot;

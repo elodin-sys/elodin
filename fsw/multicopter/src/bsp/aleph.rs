@@ -26,6 +26,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         hclk_prescaler: clocks::HclkPrescaler::Div2, // 240 MHz (hclk, M4 core)
         d2_prescaler1: clocks::ApbPrescaler::Div2, // 120 MHz
         d2_prescaler2: clocks::ApbPrescaler::Div2, // 120 MHz
+        d3_prescaler: clocks::ApbPrescaler::Div2, // 120 MHz
         vos_range: clocks::VosRange::VOS0,
         ..Default::default()
     };
