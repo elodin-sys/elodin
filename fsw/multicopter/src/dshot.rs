@@ -56,7 +56,7 @@ where
     }
 
     pub fn arm_motors<Delay: DelayNs>(&mut self, delay: &mut Delay) {
-        defmt::info!("Arming motors");
+        defmt::debug!("Arming motors");
         // Just send 0 throttle for a while, which seems to work with both AM32 and BLHeli_32 ESCs.
         // Unfortunately, the DSHOT protocol doesn't provide a way to detect when the ESC is ready.
         // TODO(Akhil): Replace this with a state machine, but that requires time-keeping which I'll add later.
@@ -64,7 +64,7 @@ where
             self.write_throttle([Throttle(0); 4]);
             delay.delay_ms(1);
         }
-        defmt::info!("Motors armed");
+        defmt::debug!("Motors armed");
     }
 
     pub fn write_throttle(&mut self, throttle: [Throttle; 4]) {
@@ -76,11 +76,11 @@ where
     }
 
     pub fn beep<Delay: DelayNs>(&mut self, delay: &mut Delay) {
-        defmt::info!("Beeping motors");
+        defmt::debug!("Beeping motors");
         let frame = Frame::command(Command::Beep1, false);
         (0..4).for_each(|motor_index| self.write_frame(motor_index, frame));
         self.pwm_timer.write(&mut self.dma_buf);
         delay.delay_ms(260);
-        defmt::info!("Motors beeped");
+        defmt::debug!("Motors beeped");
     }
 }
