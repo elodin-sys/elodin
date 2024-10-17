@@ -1,0 +1,33 @@
+[package]
+name = "impeller2"
+edition = "2021"
+version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["alloc"]
+std = ["miette", "alloc"]
+alloc = []
+
+
+[dependencies]
+# ser-des
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
+serde.version = "1.0"
+serde.features = ["derive"]
+
+# types
+heapless.version = "0.8"
+heapless.features = ["serde"]
+nox.path = "../nox"
+nox.default-features = false
+
+# errors
+thiserror.git = "https://github.com/quartiq/thiserror.git"
+thiserror.rev = "e779e1b70023cee5807f378e147f66387d1ccd4f"
+miette.version = "7.2"
+miette.optional = true
+
+# hash
+const-fnv1a-hash = "1.1.0"
