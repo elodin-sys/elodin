@@ -494,15 +494,15 @@ A `GraphQuery` requires exactly one type argument, which must be an annotated [e
 GravityEdge = typing.Annotated[elodin.Edge, elodin.Component("gravity_edge")]
 ```
 
-- `edge_fold(left_query, right_query, ret_type, init_val, fold_fn)` -> [elodin.Query]
+- `edge_fold(left_query, right_query, return_type, init_value, fold_fn)` -> [elodin.Query]
 
-    For each edge, query the left and right entity components using `left_query` and `right_query`, respectively. Then, apply the `fold_fn` function to those input components to compute the `ret_type` output component(s).
+    For each edge, query the left and right entity components using `left_query` and `right_query`, respectively. Then, apply the `fold_fn` function to those input components to compute the `return_type` output component(s).
 
     {% alert(kind="notice") %}
-    The `ret_type` component(s) must belong to the **left** entity of the edge.
+    The `return_type` component(s) must belong to the **left** entity of the edge.
     {% end %}
 
-    A single left entity may have edges to multiple right entities, but it can only hold a single value for each `ret_type` component. So, the `fold_fn` computations for each entity's edges must be accumulated into a single final value. To carry the intermediate results, `fold_fn` takes an "accumulator" value as the first argument. Its output is set as the accumulator value for the next iteration. `init_val` is the initial value of the accumulator.
+    A single left entity may have edges to multiple right entities, but it can only hold a single value for each `return_type` component. So, the `fold_fn` computations for each entity's edges must be accumulated into a single final value. To carry the intermediate results, `fold_fn` takes an "accumulator" value as the first argument. Its output is set as the accumulator value for the next iteration. `init_value` is the initial value of the accumulator.
 
     {% alert(kind="notice") %}
     `edge_fold` makes no guarantees about the order in which edges are processed. For associative operators like `+`, the order the elements are combined in is not important, but for non-associative operators like `-`, the order will affect the final result.
