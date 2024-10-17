@@ -338,6 +338,14 @@ body.dark .docs-sidebar {
     scrollbar-width: none;
 }
 
+.docs-toc {
+    scrollbar-width: none;
+}
+
+.docs-toc::-webkit-scrollbar {
+    display: none;
+}
+
 .docs-links ul {
     margin-bottom: -0.29rem;
 }

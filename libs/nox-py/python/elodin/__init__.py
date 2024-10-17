@@ -264,14 +264,14 @@ class GraphQuery(Generic[E]):
 
     def edge_fold(
         self,
-        from_query: Query[Unpack[A]],
-        to_query: Query[Unpack[B]],
-        out_tp: Annotated[Any, Component],
+        left_query: Query[Unpack[A]],
+        right_query: Query[Unpack[B]],
+        return_type: Annotated[Any, Component],
         init_value: T,
-        fn: Callable[..., T],
+        fold_fn: Callable[..., T],
     ) -> "Query[T]":
         out_bufs: list[jax.typing.ArrayLike] = []
-        bufs = self.inner.arrays(from_query.inner, to_query.inner)
+        bufs = self.inner.arrays(left_query.inner, right_query.inner)
         init_value_flat, init_value_tree = tree_flatten(init_value)
         for _, (f, to) in bufs.items():
 
@@ -281,9 +281,11 @@ class GraphQuery(Generic[E]):
                 def scan_inner(xs, to):
                     xs = tree_unflatten(init_value_tree, xs)
                     args = [
-                        from_array(data, x) for (x, data) in zip(f, from_query.component_classes)
-                    ] + [from_array(data, x) for (x, data) in zip(to, to_query.component_classes)]
-                    o = fn(xs, *args)
+                        from_array(data, x) for (x, data) in zip(f, left_query.component_classes)
+                    ] + [
+                        from_array(data, x) for (x, data) in zip(to, right_query.component_classes)
+                    ]
+                    o = fold_fn(xs, *args)
                     o_flat, _ = tree_flatten(o)
                     return (o_flat, 0)
 
@@ -296,16 +298,16 @@ class GraphQuery(Generic[E]):
                 out_bufs = new_bufs
             else:
                 out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
-        component_data = Metadata.of(out_tp)
+        component_data = Metadata.of(return_type)
         return Query(
             self.inner.map(
-                from_query.inner,
-                to_query.inner,
+                left_query.inner,
+                right_query.inner,
                 out_bufs[0],
                 component_data,
             ),
             [component_data],
-            [out_tp],
+            [return_type],
         )
 
 

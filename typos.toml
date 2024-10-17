@@ -9,6 +9,7 @@
 "thr" = "thr"
 "som" = "som"
 "lits" = "lits"
+"ba" = "ba"
 
 [files]
 extend-exclude = [
