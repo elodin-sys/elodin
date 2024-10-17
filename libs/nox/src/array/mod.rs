@@ -1086,10 +1086,10 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
     }
 
     pub fn view(&self) -> ArrayView<'_, T1> {
-        let dim = D1::shape_slice(&self.buf);
+        let shape = D1::shape_slice(&self.buf);
         ArrayView {
             buf: self.buf.as_buf(),
-            dim,
+            shape,
         }
     }
 }
