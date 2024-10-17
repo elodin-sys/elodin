@@ -5,10 +5,10 @@ use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use fugit::RateExtU32 as _;
-use hal::pac;
+use hal::{gpio, i2c, pac};
 
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{arena::DmaAlloc, dshot, peripheral::*, pin::*};
+use roci_multicopter::{arena::DmaAlloc, bmm350, dshot, peripheral::*, pin::*};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -23,17 +23,25 @@ fn main() -> ! {
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
     defmt::info!("Configured clocks");
 
-    for tick in 0..100 {
-        delay.delay_ms(10);
-        defmt::info!("Tick {}", tick);
-    }
+    PB6::set(&dp.I2C4).output_type(gpio::OutputType::OpenDrain);
+    PB7::set(&dp.I2C4).output_type(gpio::OutputType::OpenDrain);
+    let i2c = i2c::I2c::new(
+        dp.I2C4,
+        i2c::I2cConfig {
+            speed: i2c::I2cSpeed::FastPlus1M,
+            ..Default::default()
+        },
+        &clock_cfg,
+    );
+    let mut bmm350 = bmm350::Bmm350::new(i2c, bmm350::Address::Low, &mut delay).unwrap();
+    defmt::info!("Configured BMM350");
 
     // Generate a 600kHz PWM signal on TIM3
+    PC6::set(&dp.TIM3);
+    PC7::set(&dp.TIM3);
+    PC8::set(&dp.TIM3);
+    PC9::set(&dp.TIM3);
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
-    PC6::set(&pwm_timer.ch1());
-    PC7::set(&pwm_timer.ch2());
-    PC8::set(&pwm_timer.ch3());
-    PC9::set(&pwm_timer.ch4());
     defmt::info!("Configured PWM timer");
 
     let [_, dma1_ch1, ..] = dp.DMA1.split();
@@ -43,7 +51,13 @@ fn main() -> ! {
 
     let throttle = 0.3;
     dshot_driver.arm_motors(&mut delay);
+    let mut tick = 0;
     loop {
+        tick += 1;
+        if tick % 100 == 0 {
+            let mag_data = bmm350.read_data().unwrap();
+            defmt::info!("BMM350: {}", mag_data);
+        }
         dshot_driver.write_throttle([throttle.into(); 4]);
         delay.delay_us(100);
     }
