@@ -28,6 +28,7 @@ members = [
     "clients/care-weather/helmholtz-chamber",
     "clients/care-weather/mcu-client",
     "libs/s10",
+    "libs/impeller2"
 ]
 exclude = [
     "fsw/multicopter",
