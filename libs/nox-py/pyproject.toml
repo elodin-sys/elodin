@@ -15,7 +15,7 @@ dependencies = [
     "numpy",
     "typing-extensions",
     "polars",
-    "pytest"
+    "pytest",
 ]
 
 [project.optional-dependencies]
