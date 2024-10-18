@@ -596,7 +596,7 @@ checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
 name = "nox"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "approx",
  "faer",
