@@ -1,6 +1,10 @@
 # Changelog
 
 ## unreleased
+
+## v0.9
+
+### v0.9.0
 - **(breaking)** Remove deprecated `time_step` argument from `World.run`. Use `sim_time_step` instead.
 
 ## v0.8

@@ -13,7 +13,7 @@ order = 2
 icon = ""
 +++
 
-<img src="../three-body-screenshot.png" alt="three-body-screenshot"/>
+<img src="../three-body-screenshot.jpg" alt="three-body-screenshot"/>
 
 The [three-body problem](https://en.wikipedia.org/wiki/Three-body_problem) is a classic orbital dynamics situation.
 You have three bodies, each with significant mass, all interacting gravitationally.
@@ -168,7 +168,8 @@ You'll want to make sure to always keep the `six_dof()` and `w.run()` calls at t
 {% end %}
 
 <video autoplay loop muted playsinline style="width: 100%; height: auto;">
-  <source src="../2-body-H264.mp4" type="video/mp4">
+  <source src="../2-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="../2-body.h264.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -347,7 +348,8 @@ c = w.spawn(
 And voila, you have a randomly selected stable three-body system!
 
 <video autoplay loop muted playsinline style="width: 100%; height: auto;">
-  <source src="../3-body-H264.mp4" type="video/mp4">
+  <source src="../3-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="../3-body.h264.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
