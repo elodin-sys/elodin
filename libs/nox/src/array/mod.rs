@@ -46,7 +46,7 @@ pub mod dims {
     };
 }
 pub mod prelude {
-    pub use super::{dims::*, Array, ArrayBuf, ArrayDim, ArrayRepr, Mat3, Vec3};
+    pub use super::{dims::*, Array, ArrayBuf, ArrayDim, ArrayRepr, ArrayView, Mat3, Vec3};
 }
 
 /// A struct representing an array with type-safe dimensions and element type.
