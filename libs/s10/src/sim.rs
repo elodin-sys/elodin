@@ -11,7 +11,7 @@ use std::{
 };
 use tokio::{process::Command, sync::Mutex};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use which::which;
 
 use crate::{error::Error, recipe::DEFAULT_WATCH_TIMEOUT, watch::watch};
@@ -23,6 +23,8 @@ pub struct SimRecipe {
     pub path: PathBuf,
     #[serde(default = "default_addr")]
     pub addr: SocketAddr,
+    #[serde(default)]
+    pub optimize: bool,
 }
 
 fn default_addr() -> SocketAddr {
@@ -30,10 +32,18 @@ fn default_addr() -> SocketAddr {
 }
 
 impl SimRecipe {
+    fn client(&self) -> Result<nox::Client, nox_ecs::Error> {
+        let mut client = nox_ecs::nox::Client::cpu().map_err(nox_ecs::Error::from)?;
+        if !self.optimize {
+            debug!("disabling optimizations");
+            client.disable_optimizations();
+        }
+        Ok(client)
+    }
     async fn build_with_client(&self, client: nox::Client) -> Result<WorldExec<Compiled>, Error> {
         let tmpdir = tempfile::tempdir()?;
         let mut start = Instant::now();
-        info!("building sim");
+        debug!("building sim");
 
         let status = python_tokio_command()?
             .arg(&self.path)
@@ -54,13 +64,10 @@ impl SimRecipe {
         info!(elapsed = ?start.elapsed(), "compiled sim");
         Ok(exec)
     }
-    async fn build(&self) -> Result<WorldExec<Compiled>, Error> {
-        let client = nox_ecs::nox::Client::cpu().map_err(nox_ecs::Error::from)?;
-        self.build_with_client(client).await
-    }
 
     pub async fn run(self, cancel_token: CancellationToken) -> Result<(), Error> {
-        let exec = self.build().await?;
+        let client = self.client()?;
+        let exec = self.build_with_client(client).await?;
         let (tx, rx) = flume::unbounded();
         let server = impeller::server::TcpServer::bind(tx, self.addr)
             .await
@@ -88,7 +95,7 @@ impl SimRecipe {
             .await
             .map_err(nox_ecs::Error::from)?;
         let connections = Arc::new(Mutex::new(vec![]));
-        let client = nox::Client::cpu().map_err(nox_ecs::Error::from)?;
+        let client = self.client()?;
         let watch = watch(
             DEFAULT_WATCH_TIMEOUT,
             |token| {

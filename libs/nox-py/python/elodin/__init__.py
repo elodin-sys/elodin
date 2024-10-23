@@ -463,7 +463,7 @@ class World(WorldBuilder):
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         max_ticks: Optional[int] = None,
-        client: Optional[Client] = None,
+        optimize: bool = False,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -472,7 +472,12 @@ class World(WorldBuilder):
         if frame is None:
             raise Exception("No previous frame")
         addr = super().run(
-            system, sim_time_step, run_time_step, output_time_step, max_ticks, client
+            system,
+            sim_time_step,
+            run_time_step,
+            output_time_step,
+            max_ticks,
+            optimize,
         )
         locals = frame.f_locals
         if addr is not None:
@@ -482,34 +487,12 @@ class World(WorldBuilder):
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
 
-    def serve(
-        self,
-        system: System,
-        addr: Optional[str] = None,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
-        max_ticks: Optional[int] = None,
-        client: Optional[Client] = None,
-    ):
-        super().serve(
-            system,
-            False,
-            sim_time_step,
-            run_time_step,
-            output_time_step,
-            max_ticks,
-            client,
-            addr,
-        )
-
     def view(
         self,
         system: System,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
-        client: Optional[Client] = None,
     ) -> Any:
         from IPython.display import IFrame
 
@@ -519,9 +502,6 @@ class World(WorldBuilder):
             sim_time_step,
             run_time_step,
             output_time_step,
-            None,
-            client,
-            None,
         )
         return IFrame(f"http://{addr}", width=960, height=540)
 

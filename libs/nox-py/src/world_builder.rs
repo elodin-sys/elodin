@@ -6,7 +6,7 @@ use nox_ecs::{
     impeller, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
     WorldExt,
 };
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -56,8 +56,12 @@ impl WorldBuilder {
             .extend_from_slice(&entity_id.inner.0.to_le_bytes());
     }
 
-    fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr) -> ::s10::Recipe {
-        let sim = SimRecipe { path, addr };
+    fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
+        let sim = SimRecipe {
+            path,
+            addr,
+            optimize,
+        };
         let group = GroupRecipe {
             refs: vec![],
             recipes: self
@@ -147,22 +151,27 @@ impl WorldBuilder {
     }
 
     #[cfg(feature = "server")]
+    #[pyo3(signature = (
+        sys,
+        daemon = False,
+        sim_time_step = 1.0 / 120.0,
+        output_time_step = None,
+        max_ticks = None,
+        addr = "127.0.0.1:0",
+    ))]
     pub fn serve(
         &mut self,
         py: Python<'_>,
         sys: PyObject,
-        daemon: Option<bool>,
-        time_step: Option<f64>,
+        daemon: bool,
+        sim_time_step: f64,
         output_time_step: Option<f64>,
         max_ticks: Option<u64>,
-        client: Option<&Client>,
-        addr: Option<&str>,
+        addr: String,
     ) -> Result<String, Error> {
         use self::web_socket::spawn_ws_server;
         use tokio_util::sync::CancellationToken;
 
-        let addr = addr.unwrap_or("127.0.0.1:0").to_string();
-        let daemon = daemon.unwrap_or(false);
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
                 EnvFilter::builder()
@@ -171,12 +180,9 @@ impl WorldBuilder {
             )
             .try_init();
 
-        let exec = self.build_uncompiled(py, sys, time_step, output_time_step, max_ticks)?;
+        let exec = self.build_uncompiled(py, sys, sim_time_step, output_time_step, max_ticks)?;
 
-        let client = match client {
-            Some(c) => c.client.clone(),
-            None => nox::Client::cpu()?,
-        };
+        let client = nox::Client::cpu()?;
 
         let (tx, rx) = flume::unbounded();
         if daemon {
@@ -206,15 +212,23 @@ impl WorldBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        sys,
+        sim_time_step = 1.0 / 120.0,
+        run_time_step = None,
+        output_time_step = None,
+        max_ticks = None,
+        optimize = false,
+    ))]
     pub fn run(
         &mut self,
         py: Python<'_>,
         sys: System,
-        sim_time_step: Option<f64>,
+        sim_time_step: f64,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
         max_ticks: Option<u64>,
-        client: Option<&Client>,
+        optimize: bool,
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
@@ -264,10 +278,10 @@ impl WorldBuilder {
                     output_time_step,
                     max_ticks,
                 )?;
-                let client = match client {
-                    Some(c) => c.client.clone(),
-                    None => nox::Client::cpu()?,
-                };
+                let mut client = nox::Client::cpu()?;
+                if !optimize {
+                    client.disable_optimizations();
+                }
                 let recipes = self.recipes.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
@@ -285,7 +299,7 @@ impl WorldBuilder {
                 Ok(None)
             }
             Args::Plan { addr, out_dir } => {
-                let recipe = self.sim_recipe(path, addr);
+                let recipe = self.sim_recipe(path, addr, optimize);
                 let toml = toml::to_string_pretty(&recipe)
                     .map_err(|err| PyValueError::new_err(err.to_string()))?;
                 let plan_path = out_dir.join("s10.toml");
@@ -300,7 +314,7 @@ impl WorldBuilder {
                     run_time_step,
                     output_time_step,
                     max_ticks,
-                    client,
+                    optimize,
                 )?;
                 exec.run(py, ticks, true)?;
                 let tempdir = tempfile::tempdir()?;
@@ -311,6 +325,7 @@ impl WorldBuilder {
                 println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                 println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                 println!("= tick time:          {:.3} ms", profile["tick"]);
+                println!("build time:           {:.3} ms", profile["build"]);
                 println!("compile time:         {:.3} ms", profile["compile"]);
                 println!("write_to_dir time:    {:.3} ms", profile["write_to_dir"]);
                 println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
@@ -320,15 +335,23 @@ impl WorldBuilder {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        system,
+        sim_time_step = 1.0 / 120.0,
+        run_time_step = None,
+        output_time_step = None,
+        max_ticks = None,
+        optimize = false,
+    ))]
     pub fn build(
         &mut self,
         py: Python<'_>,
         system: System,
-        sim_time_step: Option<f64>,
+        sim_time_step: f64,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
         max_ticks: Option<u64>,
-        client: Option<&Client>,
+        optimize: bool,
     ) -> Result<Exec, Error> {
         let exec = self.build_uncompiled(
             py,
@@ -338,10 +361,10 @@ impl WorldBuilder {
             output_time_step,
             max_ticks,
         )?;
-        let client = match client {
-            Some(c) => c.client.clone(),
-            None => nox::Client::cpu()?,
-        };
+        let mut client = nox::Client::cpu()?;
+        if !optimize {
+            client.disable_optimizations();
+        }
         let exec = exec.compile(client.clone())?;
         Ok(Exec { exec })
     }
@@ -352,27 +375,22 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: System,
-        sim_time_step: Option<f64>,
+        sim_time_step: f64,
         run_time_step: Option<f64>,
         output_time_step: Option<f64>,
         max_ticks: Option<u64>,
     ) -> Result<nox_ecs::WorldExec, Error> {
-        if let Some(ts) = sim_time_step {
-            let ts = Duration::from_secs_f64(ts);
-            // 1ms (~1000 ticks/sec) is the minimum time step
-            // if ts <= Duration::from_millis(1) {
-            //     return Err(Error::InvalidTimeStep(ts));
-            // }
-            self.world.sim_time_step = TimeStep(ts);
-            self.world.run_time_step = TimeStep(ts);
-        }
+        let mut start = time::Instant::now();
+        let ts = time::Duration::from_secs_f64(sim_time_step);
+        self.world.sim_time_step = TimeStep(ts);
+        self.world.run_time_step = TimeStep(ts);
         if let Some(ts) = run_time_step {
-            let ts = Duration::from_secs_f64(ts);
+            let ts = time::Duration::from_secs_f64(ts);
             self.world.run_time_step = TimeStep(ts);
         }
 
         if let Some(ts) = output_time_step {
-            let time_step = Duration::from_secs_f64(ts);
+            let time_step = time::Duration::from_secs_f64(ts);
             self.world.output_time_step = Some(impeller::OutputTimeStep {
                 time_step,
                 last_tick: std::time::Instant::now(),
@@ -388,7 +406,8 @@ impl WorldBuilder {
         let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
         let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
-        let exec = nox_ecs::WorldExec::new(world, tick_exec, None);
+        let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
+        exec.profiler.build.observe(&mut start);
         Ok(exec)
     }
 }
