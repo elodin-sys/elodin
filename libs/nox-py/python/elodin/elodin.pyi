@@ -56,39 +56,34 @@ class WorldBuilder:
     def insert_asset(self, asset: Asset) -> Handle: ...
     def run(
         self,
-        system: Any,
-        sim_time_step: Optional[float] = None,
+        system: System,
+        sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         max_ticks: Optional[int] = None,
-        client: Optional[Client] = None,
+        optimize: bool = False,
     ): ...
     def serve(
         self,
-        system: Any,
+        system: System,
         daemon: bool = False,
-        sim_time_step: Optional[float] = None,
+        sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
         max_ticks: Optional[int] = None,
-        client: Optional[Client] = None,
-        addr: Optional[str] = None,
+        addr: str = "127.0.0.1:0",
     ): ...
     def build(
         self,
-        system: Any,
-        sim_time_step: Optional[float] = None,
+        system: System,
+        sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
         output_time_step: Optional[float] = None,
-        client: Optional[Client] = None,
+        optimize: bool = False,
     ) -> Exec: ...
 
 class EntityId:
     def __init__(self, id: int): ...
-
-class Client:
-    @staticmethod
-    def cpu() -> Client: ...
 
 class SpatialTransform:
     __metadata__: ClassVar[Tuple[Component,]]

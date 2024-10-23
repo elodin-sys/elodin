@@ -66,21 +66,6 @@ impl PyUntypedArrayExt for PyUntypedArray {
 }
 
 #[pyclass]
-pub struct Client {
-    client: nox::Client,
-}
-
-#[pymethods]
-impl Client {
-    #[staticmethod]
-    pub fn cpu() -> Result<Self, Error> {
-        Ok(Self {
-            client: nox::Client::cpu()?,
-        })
-    }
-}
-
-#[pyclass]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Integrator {
     Rk4,
@@ -155,7 +140,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<WorldBuilder>()?;
     m.add_class::<Exec>()?;
     m.add_class::<EntityId>()?;
-    m.add_class::<Client>()?;
     m.add_class::<SpatialTransform>()?;
     m.add_class::<SpatialForce>()?;
     m.add_class::<SpatialMotion>()?;
