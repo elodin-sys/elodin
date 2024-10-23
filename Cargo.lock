@@ -3402,7 +3402,7 @@ dependencies = [
 
 [[package]]
 name = "dev-tools"
-version = "0.7.3"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "clap 4.5.19",
@@ -10440,7 +10440,7 @@ dependencies = [
  "sqlformat",
  "sqlx-rt",
  "stringprep",
- "thiserror",
+ "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
  "tokio-stream",
  "url",
  "uuid 1.10.0",
