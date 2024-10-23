@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** Add "optimize" as an optional argument to `World.run` (defaults to `False`). This will enable additional optimization passes on the simulation code, which results in faster simulation run times at the cost of slower simulation startup times. This is useful for rapidly iterating on simulation code.
+- Expose more default arguments via type hints.
 
 ## v0.9
 
