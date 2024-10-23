@@ -559,7 +559,7 @@ impl WorldExec<Compiled> {
     }
 
     pub fn profile(&self) -> HashMap<&'static str, f64> {
-        self.profiler.profile(self.world.run_time_step.0)
+        self.profiler.profile(self.world.sim_time_step.0)
     }
 }
 

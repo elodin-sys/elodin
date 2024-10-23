@@ -6,6 +6,7 @@ use std::{
 
 #[derive(Default, Clone, Debug)]
 pub struct Profiler {
+    pub build: RollingMean,
     pub compile: RollingMean,
     pub write_to_dir: RollingMean,
     pub copy_to_client: RollingMean,
@@ -26,6 +27,7 @@ impl Profiler {
         let tick_mean = self.tick_mean();
         let time_step = time_step.as_secs_f64() * 1000.0;
         let profile = [
+            ("build", self.build.mean()),
             ("compile", self.compile.mean()),
             ("write_to_dir", self.write_to_dir.mean()),
             ("copy_to_client", self.copy_to_client.mean()),

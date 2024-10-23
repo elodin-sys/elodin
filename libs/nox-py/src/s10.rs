@@ -37,6 +37,7 @@ pub enum Recipe {
         name: String,
         path: PathBuf,
         addr: String,
+        optimize: bool,
     },
 }
 
@@ -113,9 +114,15 @@ impl Recipe {
                     .map(|recipe| Ok((recipe.name(), recipe.to_rust()?)))
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })),
-            Recipe::Sim { path, addr, .. } => Ok(RustRecipe::Sim(SimRecipe {
+            Recipe::Sim {
+                path,
+                addr,
+                optimize,
+                ..
+            } => Ok(RustRecipe::Sim(SimRecipe {
                 path: path.clone(),
                 addr: addr.parse()?,
+                optimize: *optimize,
             })),
         }
     }
