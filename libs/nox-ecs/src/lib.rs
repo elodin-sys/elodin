@@ -1,9 +1,7 @@
 extern crate self as nox_ecs;
 
 use impeller::well_known::{Color, EntityMetadata, Material, Mesh};
-use impeller::{
-    Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle, OutputTimeStep,
-};
+use impeller::{Archetype, ComponentExt, ComponentId, ComponentType, EntityId, Handle};
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr};
 use profile::Profiler;
@@ -246,15 +244,6 @@ where
 
     pub fn run_time_step(mut self, time_step: Duration) -> Self {
         self.world.run_time_step = TimeStep(time_step);
-        self
-    }
-
-    pub fn output_time_step(mut self, time_step: Duration) -> Self {
-        self.world.output_time_step = OutputTimeStep {
-            time_step,
-            last_tick: std::time::Instant::now(),
-        }
-        .into();
         self
     }
 
