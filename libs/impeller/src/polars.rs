@@ -12,8 +12,7 @@ use std::time::Duration;
 use std::{fs::File, path::Path};
 
 use crate::world::{Buffers, ColumnRef, TimeStep, World};
-use crate::{ArchetypeName, ComponentId, ComponentType, EntityId, Metadata, PrimitiveTy};
-use crate::{Error, OutputTimeStep};
+use crate::{ArchetypeName, ComponentId, ComponentType, EntityId, Error, Metadata, PrimitiveTy};
 
 impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn series(&self) -> Result<Series, Error> {
@@ -31,7 +30,7 @@ impl World {
             &self.entity_ids,
             &self.history,
             host,
-            self.output_time_step.clone().map(|d| d.time_step),
+            self.default_playback_speed,
             self.max_tick,
         )
     }
@@ -53,13 +52,7 @@ impl World {
         let component_map = polars_world.component_map();
         let run_time_step = TimeStep(polars_world.metadata.run_time_step);
         let sim_time_step = TimeStep(polars_world.metadata.sim_time_step);
-        let output_time_step = polars_world
-            .metadata
-            .output_time_step
-            .map(|d| OutputTimeStep {
-                time_step: d,
-                last_tick: std::time::Instant::now(),
-            });
+        let default_playback_speed = polars_world.metadata.default_playback_speed;
         let world = World::new(
             history,
             entity_ids,
@@ -67,7 +60,7 @@ impl World {
             assets,
             sim_time_step,
             run_time_step,
-            output_time_step,
+            default_playback_speed,
             polars_world.metadata.max_ticks,
         );
         Ok(world)
@@ -88,7 +81,7 @@ pub struct WorldMetadata {
     sim_time_step: std::time::Duration,
     #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
     run_time_step: std::time::Duration,
-    output_time_step: Option<Duration>,
+    default_playback_speed: f64,
     max_ticks: u64,
 }
 
@@ -101,7 +94,7 @@ impl PolarsWorld {
         entity_ids: &ustr::UstrMap<Vec<u8>>,
         history: &[Buffers],
         host: Option<&Buffers>,
-        output_time_step: Option<Duration>,
+        default_playback_speed: f64,
         max_ticks: u64,
     ) -> Result<Self, Error> {
         let archetype_metadata = component_map.iter().fold(
@@ -147,7 +140,7 @@ impl PolarsWorld {
             archetypes: archetype_metadata,
             run_time_step,
             sim_time_step,
-            output_time_step,
+            default_playback_speed,
             max_ticks,
         };
         Ok(Self {
