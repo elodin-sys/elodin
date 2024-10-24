@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::atomic::Ordering};
+use std::{path::PathBuf, sync::atomic::Ordering, time};
 
 use crate::{Compiled, Error, WorldExec};
 use impeller::{
@@ -12,6 +12,7 @@ pub struct ImpellerExec {
     connections: Vec<Connection>,
     rx: flume::Receiver<MsgPair>,
     exec: WorldExec<Compiled>,
+    last_tick: time::Instant,
     simulating: bool,
     replay_dir: PathBuf,
 }
@@ -24,14 +25,22 @@ impl ImpellerExec {
         }
         let dirs = directories::ProjectDirs::from("systems", "elodin", "cli").unwrap();
         let replay_dir = dirs.data_dir().join("replays");
-        Self {
+        let mut exec = Self {
             sub_manager: SubscriptionManager::new(metadata_store),
             connections: Vec::new(),
             rx,
             exec,
+            last_tick: time::Instant::now(),
             replay_dir,
             simulating: true,
-        }
+        };
+        exec.last_tick -= exec.output_time_step();
+        exec
+    }
+
+    pub fn output_time_step(&self) -> std::time::Duration {
+        self.sim_time_step()
+            .div_f64(self.exec.world.default_playback_speed)
     }
 
     pub fn sim_time_step(&self) -> std::time::Duration {
@@ -46,14 +55,9 @@ impl ImpellerExec {
         if self.simulating && self.exec.world.tick < self.exec.world.max_tick {
             self.exec.run()?;
         }
-        if let Some(output_time_step) = &mut self.exec.world.output_time_step {
-            let elapsed = output_time_step.last_tick.elapsed();
-            if elapsed >= output_time_step.time_step {
-                output_time_step.last_tick += elapsed;
-                self.send();
-                self.recv();
-            }
-        } else {
+        let output_time_step = self.output_time_step();
+        if self.last_tick.elapsed() >= output_time_step {
+            self.last_tick += output_time_step;
             self.send();
             self.recv();
         }
