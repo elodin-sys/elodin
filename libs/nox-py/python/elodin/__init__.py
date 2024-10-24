@@ -461,7 +461,7 @@ class World(WorldBuilder):
         system: System,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
     ):
@@ -475,7 +475,7 @@ class World(WorldBuilder):
             system,
             sim_time_step,
             run_time_step,
-            output_time_step,
+            default_playback_speed,
             max_ticks,
             optimize,
         )
@@ -492,7 +492,7 @@ class World(WorldBuilder):
         system: System,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
     ) -> Any:
         from IPython.display import IFrame
 
@@ -501,7 +501,7 @@ class World(WorldBuilder):
             True,
             sim_time_step,
             run_time_step,
-            output_time_step,
+            default_playback_speed,
         )
         return IFrame(f"http://{addr}", width=960, height=540)
 

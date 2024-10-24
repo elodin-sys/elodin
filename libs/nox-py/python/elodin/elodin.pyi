@@ -59,7 +59,7 @@ class WorldBuilder:
         system: System,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
     ): ...
@@ -69,7 +69,7 @@ class WorldBuilder:
         daemon: bool = False,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         addr: str = "127.0.0.1:0",
     ): ...
@@ -78,7 +78,7 @@ class WorldBuilder:
         system: System,
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
-        output_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
         optimize: bool = False,
     ) -> Exec: ...
 

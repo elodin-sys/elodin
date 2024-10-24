@@ -116,6 +116,5 @@ world().run(
     system(),
     sim_time_step=Config.GLOBAL.dt,
     run_time_step=0.0,
-    output_time_step=Config.GLOBAL.dt,
     max_ticks=int(Config.GLOBAL.total_sim_ticks),
 )

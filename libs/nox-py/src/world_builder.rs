@@ -155,7 +155,7 @@ impl WorldBuilder {
         sys,
         daemon = False,
         sim_time_step = 1.0 / 120.0,
-        output_time_step = None,
+        default_playback_speed = 1.0,
         max_ticks = None,
         addr = "127.0.0.1:0",
     ))]
@@ -165,7 +165,7 @@ impl WorldBuilder {
         sys: PyObject,
         daemon: bool,
         sim_time_step: f64,
-        output_time_step: Option<f64>,
+        default_playback_speed: f64,
         max_ticks: Option<u64>,
         addr: String,
     ) -> Result<String, Error> {
@@ -180,7 +180,8 @@ impl WorldBuilder {
             )
             .try_init();
 
-        let exec = self.build_uncompiled(py, sys, sim_time_step, output_time_step, max_ticks)?;
+        let exec =
+            self.build_uncompiled(py, sys, sim_time_step, default_playback_speed, max_ticks)?;
 
         let client = nox::Client::cpu()?;
 
@@ -216,7 +217,7 @@ impl WorldBuilder {
         sys,
         sim_time_step = 1.0 / 120.0,
         run_time_step = None,
-        output_time_step = None,
+        default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
     ))]
@@ -226,7 +227,7 @@ impl WorldBuilder {
         sys: System,
         sim_time_step: f64,
         run_time_step: Option<f64>,
-        output_time_step: Option<f64>,
+        default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
     ) -> Result<Option<String>, Error> {
@@ -263,7 +264,7 @@ impl WorldBuilder {
                     sys,
                     sim_time_step,
                     run_time_step,
-                    output_time_step,
+                    default_playback_speed,
                     max_ticks,
                 )?;
                 exec.write_to_dir(dir)?;
@@ -275,7 +276,7 @@ impl WorldBuilder {
                     sys,
                     sim_time_step,
                     run_time_step,
-                    output_time_step,
+                    default_playback_speed,
                     max_ticks,
                 )?;
                 let mut client = nox::Client::cpu()?;
@@ -312,7 +313,7 @@ impl WorldBuilder {
                     sys,
                     sim_time_step,
                     run_time_step,
-                    output_time_step,
+                    default_playback_speed,
                     max_ticks,
                     optimize,
                 )?;
@@ -339,7 +340,7 @@ impl WorldBuilder {
         system,
         sim_time_step = 1.0 / 120.0,
         run_time_step = None,
-        output_time_step = None,
+        default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
     ))]
@@ -349,7 +350,7 @@ impl WorldBuilder {
         system: System,
         sim_time_step: f64,
         run_time_step: Option<f64>,
-        output_time_step: Option<f64>,
+        default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
     ) -> Result<Exec, Error> {
@@ -358,7 +359,7 @@ impl WorldBuilder {
             system,
             sim_time_step,
             run_time_step,
-            output_time_step,
+            default_playback_speed,
             max_ticks,
         )?;
         let mut client = nox::Client::cpu()?;
@@ -377,24 +378,17 @@ impl WorldBuilder {
         sys: System,
         sim_time_step: f64,
         run_time_step: Option<f64>,
-        output_time_step: Option<f64>,
+        default_playback_speed: f64,
         max_ticks: Option<u64>,
     ) -> Result<nox_ecs::WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.sim_time_step = TimeStep(ts);
         self.world.run_time_step = TimeStep(ts);
+        self.world.default_playback_speed = default_playback_speed;
         if let Some(ts) = run_time_step {
             let ts = time::Duration::from_secs_f64(ts);
             self.world.run_time_step = TimeStep(ts);
-        }
-
-        if let Some(ts) = output_time_step {
-            let time_step = time::Duration::from_secs_f64(ts);
-            self.world.output_time_step = Some(impeller::OutputTimeStep {
-                time_step,
-                last_tick: std::time::Instant::now(),
-            })
         }
         if let Some(max_ticks) = max_ticks {
             self.world.max_tick = max_ticks;
