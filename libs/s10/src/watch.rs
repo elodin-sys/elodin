@@ -23,7 +23,9 @@ where
     let flat_map = dirs.flat_map(ignore::Walk::new);
     let files = flat_map;
     for res in files {
-        let watch_dir = res?;
+        let Ok(watch_dir) = res else {
+            continue;
+        };
         debouncer
             .watcher()
             .watch(watch_dir.path(), RecursiveMode::NonRecursive)
