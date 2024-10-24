@@ -287,6 +287,10 @@ fn spawn_main_camera(
                 order: 1,
                 ..Default::default()
             },
+            projection: Projection::Perspective(PerspectiveProjection {
+                fov: viewport.fov,
+                ..Default::default()
+            }),
             tonemapping: Tonemapping::TonyMcMapface,
             exposure: Exposure::from_physical_camera(PhysicalCameraParameters {
                 aperture_f_stops: 2.8,
