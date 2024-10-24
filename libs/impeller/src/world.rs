@@ -19,13 +19,7 @@ impl Default for TimeStep {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct OutputTimeStep {
-    pub time_step: std::time::Duration,
-    pub last_tick: std::time::Instant,
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct World {
     pub host: Buffers,
     pub history: Vec<Buffers>,
@@ -37,7 +31,7 @@ pub struct World {
     pub entity_len: u64,
     pub sim_time_step: TimeStep,
     pub run_time_step: TimeStep,
-    pub output_time_step: Option<OutputTimeStep>,
+    pub default_playback_speed: f64,
     pub max_tick: u64,
 }
 
@@ -54,7 +48,7 @@ impl Default for World {
             entity_len: Default::default(),
             run_time_step: Default::default(),
             sim_time_step: Default::default(),
-            output_time_step: Default::default(),
+            default_playback_speed: 1.0,
             max_tick: u64::MAX,
         }
     }
@@ -104,7 +98,7 @@ impl World {
         asset_store: AssetStore,
         sim_time_step: TimeStep,
         run_time_step: TimeStep,
-        output_time_step: Option<OutputTimeStep>,
+        default_playback_speed: f64,
         max_tick: u64,
     ) -> Self {
         let host = history.pop().unwrap_or_default();
@@ -128,7 +122,7 @@ impl World {
             entity_len,
             run_time_step,
             sim_time_step,
-            output_time_step,
+            default_playback_speed,
             max_tick,
         }
     }
@@ -260,7 +254,7 @@ impl Clone for World {
             entity_len: self.entity_len,
             run_time_step: self.run_time_step,
             sim_time_step: self.sim_time_step,
-            output_time_step: self.output_time_step.clone(),
+            default_playback_speed: self.default_playback_speed,
             max_tick: self.max_tick,
         }
     }
