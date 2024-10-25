@@ -1,9 +1,20 @@
 <!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
 
 <a class="el-cardlink" href="{{ href }}">
-    <div style="padding: 20px;">
-        <i class="bx bxs-{{ icon }}" style="font-size: 2rem; color: #1D41DC;"></i>
-        <h4 style="margin: 0px;" >{{ title }}</h2>
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-{{ icon }}"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            {{ title }}
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
         <p>{{ body | markdown | safe }}</p>
     </div>
 </a>

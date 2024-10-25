@@ -19,7 +19,7 @@ axes as (red, green, blue) respectively. Also, all coordinate systems are right-
 
 ### Local Geodetic World Frame
 
-{% image(href="/reference/coordinates") %}Elodin Default Coordinate System{% end %}
+{% image(href="/assets/coordinates") %}Elodin Default Coordinate System{% end %}
 
 A local geodetic world frame is commonly used for terrestrial vehicles and is represented using
 the [East, North, Up (ENU)](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates)

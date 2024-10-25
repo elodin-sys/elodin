@@ -13,7 +13,7 @@ order = 2
 icon = ""
 +++
 
-<img src="../three-body-screenshot.jpg" alt="three-body-screenshot"/>
+<img src="/assets/three-body-screenshot.jpg" alt="three-body-screenshot"/>
 
 The [three-body problem](https://en.wikipedia.org/wiki/Three-body_problem) is a classic orbital dynamics situation.
 You have three bodies, each with significant mass, all interacting gravitationally.
@@ -108,7 +108,7 @@ because we're working in a 3D space. Sometimes you may have to convert between t
 Let's model this as a system that iterates over all gravity edges in a graph of connected bodies and calculates the forces between them.
 Modeling with graphs and edges is a more advanced Elodin API, review the documentation for it [here](/reference/python-api/#class-elodin-graphquery).
 
-{% image(href="/get-started/gravity-edge") %}Gravity Constraints{% end %}
+{% image(href="/assets/gravity-edge") %}Gravity Constraints{% end %}
 
 ```python
 # Set the gravitational constant for Newton's law of universal gravitation
@@ -168,8 +168,8 @@ You'll want to make sure to always keep the `six_dof()` and `w.run()` calls at t
 {% end %}
 
 <video autoplay loop muted playsinline style="width: 100%; height: auto;">
-  <source src="../2-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
-  <source src="../2-body.h264.mp4" type="video/mp4">
+  <source src="/assets/2-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="/assets/2-body.h264.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -177,7 +177,7 @@ You'll want to make sure to always keep the `six_dof()` and `w.run()` calls at t
 
 What's a gravitational system without a third body? Let's add a third body to the system.
 
-{% image(href="/get-started/3-body") %}3-Body{% end %}
+{% image(href="/assets/3-body") %}3-Body{% end %}
 
 ```python
 c = w.spawn(
@@ -275,7 +275,7 @@ import random
 import json
 
 # URL of Bourke's stable orbits JSON data
-url = "https://storage.googleapis.com/elodin-assets/brouke-stable-orbits.json"
+url = "https://docs.elodin.systems/assets/brouke-stable-orbits.json"
 
 # Fetch data and select a random orbit
 orbit = random.choice(json.loads(requests.get(url).text))
@@ -348,8 +348,8 @@ c = w.spawn(
 And voila, you have a randomly selected stable three-body system!
 
 <video autoplay loop muted playsinline style="width: 100%; height: auto;">
-  <source src="../3-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
-  <source src="../3-body.h264.mp4" type="video/mp4">
+  <source src="/assets/3-body.av1.mp4" type="video/mp4; codecs=av01.0.05M.08">
+  <source src="/assets/3-body.h264.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
