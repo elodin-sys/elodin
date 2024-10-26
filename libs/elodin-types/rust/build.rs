@@ -23,6 +23,6 @@ fn main() {
         // only needed for libprotoc versions <= 3.14, optional keyword is supported by default in >= 3.15
         .protoc_arg("--experimental_allow_proto3_optional")
         .file_descriptor_set_path(out_dir.join("elodin_types.bin"))
-        .compile(&protos, &[protobuf_dir()])
+        .compile_protos(&protos, &[protobuf_dir()])
         .unwrap_or_else(|e| panic!("Failed to compile protos {:?}", e));
 }

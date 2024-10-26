@@ -1,0 +1,48 @@
+[package]
+name = "stellarator"
+edition = "2021"
+version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+# async
+maitake.git = "https://github.com/hawkw/mycelium.git"
+maitake.rev = "ba56bb4d02f46fb59754b7b88bddc2e8ca99c1f5"
+pin-project = "1.1.6"
+
+# dsts
+slab = "0.4"
+stack_dst = "0.8"
+
+# syscalls
+libc = "0.2"
+socket2 = "0.5"
+
+# errors
+thiserror = "1.0.58"
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.7.1"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+polling = "3.7"
+blocking = "1.3"
+waker-fn = "1.2.0"
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union"]
+
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+rustix = { version = "0.38", features = ["net", "fs", "termios"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+rustix = { version = "0.38", features = ["net"] }
+windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3.13.0"
