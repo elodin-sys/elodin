@@ -288,7 +288,7 @@ fn spawn_main_camera(
                 ..Default::default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov,
+                fov: viewport.fov.to_radians(),
                 ..Default::default()
             }),
             tonemapping: Tonemapping::TonyMcMapface,
