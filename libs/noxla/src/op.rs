@@ -13,6 +13,7 @@ cpp! {{
     #include "xla/client/xla_builder.h"
     #include "xla/client/lib/constants.h"
     #include "xla/client/lib/matrix.h"
+    #include "xla/client/lib/math.h"
     #include "xla/statusor.h"
     #include "xla/literal_util.h"
     using namespace xla;
@@ -565,6 +566,34 @@ impl XlaOp {
             cpp!([op as "const XlaOp*"] -> XlaOpRaw as "XlaOp" {
                 try {
                     return XlaOp(Sin(*op));
+                }catch(std::exception& e) {
+                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                }
+            })
+        };
+        self.wrap(raw)
+    }
+
+    pub fn asin(&self) -> Self {
+        let op = &self.raw;
+        let raw = unsafe {
+            cpp!([op as "const XlaOp*"] -> XlaOpRaw as "XlaOp" {
+                try {
+                    return XlaOp(Asin(*op));
+                }catch(std::exception& e) {
+                    return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
+                }
+            })
+        };
+        self.wrap(raw)
+    }
+
+    pub fn acos(&self) -> Self {
+        let op = &self.raw;
+        let raw = unsafe {
+            cpp!([op as "const XlaOp*"] -> XlaOpRaw as "XlaOp" {
+                try {
+                    return XlaOp(Acos(*op));
                 }catch(std::exception& e) {
                     return XlaOp(op->builder()->ReportError(tsl::errors::Internal(e.what())));
                 }

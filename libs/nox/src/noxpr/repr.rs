@@ -295,6 +295,14 @@ impl OwnedRepr for Op {
             .reshape(dim.as_ref().iter().map(|&x| x as i64).collect())
     }
 
+    fn acos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.clone().acos()
+    }
+
+    fn asin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.clone().asin()
+    }
+
     fn try_lu_inverse<T1: RealField, D1: Dim + SquareDim>(
         arg: &Self::Inner<T1, D1>,
     ) -> Result<Self::Inner<T1, D1>, Error> {
