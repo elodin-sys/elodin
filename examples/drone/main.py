@@ -1,6 +1,11 @@
+#!/usr/bin/env uv run
+
+import sys
+
 import elodin as el
 import jax.numpy as jnp
 import numpy as np
+import polars as pl
 import util
 from config import Config, Control, Frame
 from sim import system, world
@@ -112,9 +117,26 @@ TALON_QUAD_CONFIG = Config(
 TALON_QUAD_CONFIG.set_as_global()
 # EDU_450_CONFIG.set_as_global()
 
-world().run(
-    system(),
-    sim_time_step=Config.GLOBAL.dt,
-    run_time_step=0.0,
-    max_ticks=int(Config.GLOBAL.total_sim_ticks),
-)
+args = sys.argv[1:]
+if "--telemetry" in args:
+    exec = world().build(system(only_rate_control=True))
+    exec.run(Config.GLOBAL.total_sim_ticks)
+    df = exec.history()
+    df = df.select("tick", "body_ang_vel", "motor_ang_vel").sort("tick").drop_nulls()
+    df = df.select(
+        pl.col("body_ang_vel").arr.get(0).alias("body_ang_vel_x"),
+        pl.col("body_ang_vel").arr.get(1).alias("body_ang_vel_y"),
+        pl.col("body_ang_vel").arr.get(2).alias("body_ang_vel_z"),
+        pl.col("motor_ang_vel").arr.get(0).alias("motor_ang_vel_1"),
+        pl.col("motor_ang_vel").arr.get(1).alias("motor_ang_vel_2"),
+        pl.col("motor_ang_vel").arr.get(2).alias("motor_ang_vel_3"),
+        pl.col("motor_ang_vel").arr.get(3).alias("motor_ang_vel_4"),
+    )
+    df.write_csv("telemetry.csv")
+else:
+    world().run(
+        system(),
+        sim_time_step=Config.GLOBAL.dt,
+        run_time_step=0.0,
+        max_ticks=int(Config.GLOBAL.total_sim_ticks),
+    )
