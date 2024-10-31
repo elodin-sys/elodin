@@ -26,6 +26,7 @@ def build_image_step(
         pre_command=pre_command,
         command=command,
         plugins=[gcp_identity_plugin()],
+        agents={"queue": "gcp"},
     )
 
 
@@ -39,6 +40,7 @@ def nix_step(
     depends_on=None,
     env={},
     plugins=[],
+    agents={},
 ):
     return step(
         label=f"{emoji} {label}",
@@ -50,6 +52,7 @@ def nix_step(
         depends_on=depends_on,
         env=env,
         plugins=plugins,
+        agents=agents,
     )
 
 
