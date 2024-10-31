@@ -4,7 +4,9 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "elodin"
+  "elodin",
+  "matplotlib>=3.9.2",
+  "polars>=1.10.0",
 ]
 
 [tool.ruff]

@@ -7,8 +7,10 @@ import jax
 import jax.numpy as jnp
 import mekf
 import motors
+import numpy as np
 import params
 import sensors
+import telemetry
 from config import Config
 
 BodyThrust = ty.Annotated[
@@ -63,15 +65,15 @@ def motor_thrust_response(
     dt = Config.GLOBAL.fast_loop_time_step
     pwm_ref, thrust_ref, torque_ref, rpm_ref = Config.GLOBAL.thrust_curve()
     _, _, yaw_factor, _ = Config.GLOBAL.frame.motor_matrix
-
-    thrust = jnp.interp(pwm, pwm_ref, thrust_ref)
-    torque = jnp.interp(pwm, pwm_ref, torque_ref) * yaw_factor
-    rpm = jnp.interp(pwm, pwm_ref, rpm_ref)
+    thrust_constant = np.linalg.lstsq(rpm_ref[:, np.newaxis] ** 2, thrust_ref, rcond=None)[0][0]
+    torque_constant = np.linalg.lstsq(rpm_ref[:, np.newaxis] ** 2, torque_ref, rcond=None)[0][0]
 
     alpha = dt / (dt + params.MOT_TIME_CONST)
-    thrust = prev_thrust + alpha * (thrust - prev_thrust)
-    torque = prev_torque + alpha * (torque - prev_torque)
+    rpm = jnp.interp(pwm, pwm_ref, rpm_ref)
     rpm = prev_rpm + alpha * (rpm - prev_rpm)
+
+    thrust = rpm**2 * thrust_constant
+    torque = rpm**2 * torque_constant * yaw_factor
     return thrust, torque, rpm
 
 
@@ -120,6 +122,7 @@ def world() -> el.World:
             sensors.IMU(),
             control.AttitudeController(),
             mekf.MEKF(),
+            telemetry.Telemetry(),
         ],
         name="Drone",
     )
@@ -191,7 +194,7 @@ def inner_loop(run_count: int, system: el.System) -> el.System:
     return out_sys
 
 
-def system() -> el.System:
+def system(only_rate_control: bool = False) -> el.System:
     non_effectors = (
         control.attitude_flight_plan
         | control.update_target_attitude
@@ -200,6 +203,10 @@ def system() -> el.System:
         | control.rate_control
         | motors.output
     )
+    if only_rate_control:
+        non_effectors = (
+            control.rate_flight_plan | control.rate_pid_state | control.rate_control | motors.output
+        )
     effectors = gravity | drag | motor_thrust_response | body_thrust | apply_body_forces
 
     INNER_RUN_COUNT = round(Config.GLOBAL.dt / Config.GLOBAL.fast_loop_time_step)
@@ -212,6 +219,7 @@ def system() -> el.System:
             effectors,
             integrator=el.Integrator.SemiImplicit,
         )
-        | sensors.imu,
+        | sensors.imu
+        | telemetry.telemetry,
     )
     return non_effectors | inner
