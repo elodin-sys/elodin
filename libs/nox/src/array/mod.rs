@@ -470,6 +470,9 @@ impl_unary_op!(RealField, sin);
 impl_unary_op!(RealField, cos);
 impl_unary_op!(RealField, abs);
 
+impl_unary_op!(RealField, acos);
+impl_unary_op!(RealField, asin);
+
 impl<T1: Elem, D1: Dim> Array<T1, D1> {
     pub fn neg(&self) -> Array<T1, D1>
     where

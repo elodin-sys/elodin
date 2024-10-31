@@ -13,6 +13,7 @@ impl<T> Elem for T where T: Copy + Default + 'static {}
 
 /// Represents a mathematical field, supporting basic arithmetic operations,
 /// matrix multiplication, and the generation of standard constants.
+
 pub trait Field:
     TensorItem<Elem = Self>
     + Copy
@@ -70,6 +71,8 @@ pub trait RealField:
     fn max(self, other: Self) -> Self;
     fn copysign(self, sign: Self) -> Self;
     fn neg_one() -> Self;
+    fn acos(self) -> Self;
+    fn asin(self) -> Self;
 }
 
 #[cfg(feature = "std")]
@@ -106,6 +109,14 @@ macro_rules! impl_real_field {
 
             fn neg_one() -> Self {
                 -1.0
+            }
+
+            fn acos(self) -> Self {
+                self.acos()
+            }
+
+            fn asin(self) -> Self {
+                self.asin()
             }
         }
     };
@@ -145,6 +156,14 @@ macro_rules! impl_real_field {
 
             fn neg_one() -> Self {
                 -1.0
+            }
+
+            fn acos(self) -> Self {
+                libm::Libm::<$t>::acos(self)
+            }
+
+            fn asin(self) -> Self {
+                libm::Libm::<$t>::asin(self)
             }
         }
     };
