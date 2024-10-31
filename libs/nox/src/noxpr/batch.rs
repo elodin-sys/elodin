@@ -141,6 +141,8 @@ impl BatchTracer {
             NoxprNode::Sin(e) => self.visit_unary_op(e, Noxpr::sin)?,
             NoxprNode::Cos(e) => self.visit_unary_op(e, Noxpr::cos)?,
             NoxprNode::Abs(e) => self.visit_unary_op(e, Noxpr::abs)?,
+            NoxprNode::Acos(e) => self.visit_unary_op(e, Noxpr::acos)?,
+            NoxprNode::Asin(e) => self.visit_unary_op(e, Noxpr::asin)?,
             NoxprNode::Concat(c) => {
                 let nodes = c
                     .nodes

@@ -220,6 +220,14 @@ impl OwnedRepr for ArrayRepr {
         Array::from_diag(diag)
     }
 
+    fn acos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.acos()
+    }
+
+    fn asin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
+        arg.asin()
+    }
+
     fn noop<T1: Field, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1> {
         arg.clone()
     }

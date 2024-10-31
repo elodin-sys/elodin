@@ -96,6 +96,14 @@ impl<T: RealField, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
         Self::from_inner(R::cos(&self.inner))
     }
 
+    pub fn asin(&self) -> Self {
+        Self::from_inner(R::asin(&self.inner))
+    }
+
+    pub fn acos(&self) -> Self {
+        Self::from_inner(R::acos(&self.inner))
+    }
+
     pub fn abs(&self) -> Self {
         Self::from_inner(R::abs(&self.inner))
     }
