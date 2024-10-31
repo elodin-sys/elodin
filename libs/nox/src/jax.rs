@@ -124,6 +124,9 @@ impl JaxTracer {
             NoxprNode::Log(op) => self.visit_unary_lax(op, "log")?,
             NoxprNode::Sin(op) => self.visit_unary_lax(op, "sin")?,
             NoxprNode::Cos(op) => self.visit_unary_lax(op, "cos")?,
+            NoxprNode::Asin(op) => self.visit_unary_lax(op, "asin")?,
+            NoxprNode::Acos(op) => self.visit_unary_lax(op, "acos")?,
+
             NoxprNode::Abs(op) => self.visit_unary_lax(op, "abs")?,
             NoxprNode::Concat(c) => {
                 let nodes = c

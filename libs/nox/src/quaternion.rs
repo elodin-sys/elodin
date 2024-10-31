@@ -1,4 +1,5 @@
 //! Provides functionality to handle quaternions, which are constructs used to represent and manipulate spatial orientations and rotations in 3D space.
+
 use crate::ArrayRepr;
 use crate::Const;
 use crate::DefaultRepr;
@@ -175,6 +176,15 @@ impl<T: RealField, R: OwnedRepr> Quaternion<T, R> {
         let q = self + self * half_omega;
         q.normalize()
     }
+
+    /// Computes the angular distance (angle) between two quaternions in radians.
+    ///
+    /// The angular distance represents the magnitude of the rotation that transforms
+    /// one quaternion into another.
+    /// It is calculated through `2 acos(|<q1, q2>|)`
+    pub fn angular_distance(&self, other: &Self) -> Scalar<T, R> {
+        T::two() * self.0.dot(&other.0).abs().acos()
+    }
 }
 
 impl<T: RealField> Quaternion<T, ArrayRepr> {
@@ -321,6 +331,18 @@ mod tests {
     use crate::{tensor, ArrayRepr, Vector3};
 
     use super::*;
+
+    #[test]
+    fn test_angular_distance() {
+        let q1 = Quaternion::from_axis_angle(Vector3::z_axis(), 0.0);
+        let q2 = Quaternion::from_axis_angle(Vector3::z_axis(), std::f64::consts::PI / 2.0);
+        let distance = q1.angular_distance(&q2);
+        assert_relative_eq!(
+            distance.into_buf(),
+            std::f64::consts::PI / 2.0,
+            epsilon = 1e-6
+        );
+    }
 
     #[test]
     fn test_quat_mult() {

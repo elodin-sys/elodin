@@ -50,6 +50,9 @@ pub enum NoxprNode {
     Cos(Noxpr),
     Abs(Noxpr),
 
+    Acos(Noxpr),
+    Asin(Noxpr),
+
     // Nary ops
     Concat(Concat),
 
@@ -570,6 +573,7 @@ impl Noxpr {
     }
 
     /// Creates a square root transformation of the `Noxpr`.
+
     pub fn sqrt(self) -> Self {
         Self::new(NoxprNode::Sqrt(self))
     }
@@ -587,6 +591,14 @@ impl Noxpr {
     /// Creates an absolute value transformation of the `Noxpr`.
     pub fn abs(self) -> Self {
         Self::new(NoxprNode::Abs(self))
+    }
+
+    pub fn acos(self) -> Self {
+        Self::new(NoxprNode::Acos(self))
+    }
+
+    pub fn asin(self) -> Self {
+        Self::new(NoxprNode::Asin(self))
     }
 
     /// Creates a constant `Noxpr` from a given literal and type.
@@ -790,7 +802,9 @@ impl Noxpr {
             | NoxprNode::Neg(expr)
             | NoxprNode::Sin(expr)
             | NoxprNode::Cos(expr)
-            | NoxprNode::Abs(expr) => expr.ty(),
+            | NoxprNode::Abs(expr)
+            | NoxprNode::Acos(expr)
+            | NoxprNode::Asin(expr) => expr.ty(),
 
             NoxprNode::Concat(concat) => {
                 let tys = concat
@@ -1008,6 +1022,8 @@ impl Noxpr {
             | NoxprNode::Sin(expr)
             | NoxprNode::Cos(expr)
             | NoxprNode::Abs(expr) => expr.element_type(),
+            NoxprNode::Acos(expr) => expr.element_type(),
+            NoxprNode::Asin(expr) => expr.element_type(),
             NoxprNode::Concat(concat) => concat.nodes.first()?.element_type(),
             NoxprNode::Slice(slice) => slice.expr.element_type(),
             NoxprNode::DynamicSlice(dynamic_slice) => dynamic_slice.expr.element_type(),
@@ -1085,7 +1101,9 @@ impl Noxpr {
             | NoxprNode::Neg(expr)
             | NoxprNode::Sin(expr)
             | NoxprNode::Cos(expr)
-            | NoxprNode::Abs(expr) => expr.shape(),
+            | NoxprNode::Abs(expr)
+            | NoxprNode::Acos(expr)
+            | NoxprNode::Asin(expr) => expr.shape(),
 
             NoxprNode::Concat(concat) => {
                 let shapes = concat
@@ -1278,6 +1296,8 @@ impl Noxpr {
             NoxprNode::Jax(_) => "Jax",
             NoxprNode::Sin(_) => "Sin",
             NoxprNode::Cos(_) => "Cos",
+            NoxprNode::Asin(_) => "ASin",
+            NoxprNode::Acos(_) => "ACos",
             NoxprNode::Abs(_) => "Abs",
             NoxprNode::Convert(_) => "Convert",
             NoxprNode::Select(_) => "Select",
@@ -1511,6 +1531,16 @@ impl XlaTracer {
                 let expr = self.visit(expr)?;
                 expr.abs()
             }
+
+            NoxprNode::Acos(c) => {
+                let arg = self.visit(c)?;
+                arg.acos()
+            }
+            NoxprNode::Asin(c) => {
+                let arg = self.visit(c)?;
+                arg.asin()
+            }
+
             NoxprNode::Concat(concat) => {
                 let ops = concat
                     .nodes
@@ -1876,6 +1906,10 @@ impl ReplacementTracer {
             NoxprNode::Sin(s) => Noxpr::new(NoxprNode::Sin(self.visit(s))),
             NoxprNode::Cos(c) => Noxpr::new(NoxprNode::Cos(self.visit(c))),
             NoxprNode::Abs(a) => Noxpr::new(NoxprNode::Abs(self.visit(a))),
+
+            NoxprNode::Acos(c) => Noxpr::new(NoxprNode::Acos(self.visit(c))),
+            NoxprNode::Asin(c) => Noxpr::new(NoxprNode::Asin(self.visit(c))),
+
             NoxprNode::Concat(c) => Noxpr::new(NoxprNode::Concat(Concat {
                 nodes: c.nodes.iter().map(|n| self.visit(n)).collect(),
                 dimension: c.dimension,
@@ -2068,6 +2102,20 @@ impl PrettyPrintTracer {
             }
             NoxprNode::Add(a) => self.visit_binary_op(id, a, "+", writer),
             NoxprNode::Sub(s) => self.visit_binary_op(id, s, "-", writer),
+
+            NoxprNode::Acos(c) => {
+                let arg = self.visit(c, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "acos(var_{})", arg)?;
+                Ok(num)
+            }
+            NoxprNode::Asin(c) => {
+                let arg = self.visit(c, writer)?;
+                let num = self.print_var(id, writer)?;
+                write!(writer, "asin(var_{})", arg)?;
+                Ok(num)
+            }
+
             NoxprNode::Mul(m) => self.visit_binary_op(id, m, "*", writer),
             NoxprNode::Div(d) => self.visit_binary_op(id, d, "/", writer),
             NoxprNode::And(a) => self.visit_binary_op(id, a, "&&", writer),

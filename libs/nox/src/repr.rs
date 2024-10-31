@@ -140,6 +140,9 @@ pub trait OwnedRepr: Repr {
 
     fn cos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
+    fn asin<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
+    fn acos<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
+
     fn abs<T1: Field + RealField, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>;
 
     fn copy_fixed_slice<T1: Field, D1: Dim, D2: Dim + ConstDim>(
