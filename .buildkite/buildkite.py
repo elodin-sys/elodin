@@ -1,7 +1,7 @@
 import json
 
 
-def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False):
+def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False, agents={}):
     return {
         "label": label,
         "command": command,
@@ -10,6 +10,7 @@ def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=Fal
         "env": env,
         "plugins": plugins,
         "skip": skip,
+        "agents": agents,
     }
 
 

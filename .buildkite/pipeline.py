@@ -50,6 +50,7 @@ def deploy_k8s_step(branch_name):
         command=command,
         env={"ELO_DECRYPT_SECRETS": "1"},
         plugins=[gcp_identity_plugin()],
+        agents={"queue": "gcp"},
     )
 
 
@@ -194,8 +195,6 @@ else:
 pipeline(
     steps=pipeline_steps,
     env={
-        "SCCACHE_DIR": "/buildkite/builds/sscache",
-        "RUSTC_WRAPPER": "sccache",
-        "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/buildkite/cache",
+        "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
     },
 )
