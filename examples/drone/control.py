@@ -381,41 +381,60 @@ def rate_flight_plan(
     pitch_test_points = jnp.array(
         [
             [0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
             [0.0, 0.3, 0.0],
             [0.0, -0.2, 0.0],
-            [0.0, -0.2, 0.0],
             [0.0, 0.0, 0.0],
-            [0.0, 0.4, 0.0],
             [0.0, 0.4, 0.0],
             [0.0, -0.7, 0.0],
-            [0.0, 0.0, 0.0],
         ]
     )
     roll_test_points = jnp.array(
         [
-            [0.0, 0.0, 0.0],
             [-0.2, 0.0, 0.0],
             [0.4, 0.0, 0.0],
             [-0.2, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
+            [-0.7, 0.0, 0.0],
+            [-0.1, 0.0, 0.0],
+            [0.6, 0.0, 0.0],
         ]
     )
     yaw_test_points = jnp.array(
         [
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.1],
-            [0.0, 0.0, 0.1],
-            [0.0, 0.0, 0.2],
             [0.0, 0.0, 0.2],
             [0.0, 0.0, -0.1],
-            [0.0, 0.0, -0.1],
             [0.0, 0.0, -0.3],
-            [0.0, 0.0, -0.3],
+        ]
+    )
+    combined_test_points = jnp.array(
+        [
+            [0.2, 0.4, 0.0],
+            [-0.3, 0.4, 0.0],
+            [0.1, 0.1, 0.0],
+            [0.3, -0.4, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.6, 0.0],
+            [0.0, -0.4, 0.0],
+            [0.0, -0.4, 1.0],
+            [0.3, -0.4, 1.0],
+            [0.3, -0.4, 0.0],
+            [-0.3, -0.4, 1.0],
+            [-0.3, 0.2, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.1, 0.5, 0.0],
             [0.0, 0.0, 0.0],
         ]
     )
-    points = jnp.concatenate([pitch_test_points, roll_test_points, yaw_test_points])
+
+    points = jnp.concatenate(
+        [
+            pitch_test_points,
+            roll_test_points,
+            yaw_test_points,
+            combined_test_points,
+        ]
+    )
     time = tick[0] * dt[0]
     point = points[time.astype(jnp.int32)]
     return target.map(AngVelSetpoint, lambda _: point)
