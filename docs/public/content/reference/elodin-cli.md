@@ -4,7 +4,6 @@ description = "Elodin CLI"
 draft = false
 weight = 104
 sort_by = "weight"
-template = "reference/page.html"
 
 [extra]
 toc = true

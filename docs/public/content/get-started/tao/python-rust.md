@@ -4,7 +4,6 @@ description = "Python & Rust"
 draft = true
 weight = 109
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

@@ -4,7 +4,6 @@ description = "JAX & NOX"
 draft = false
 weight = 107
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

@@ -4,7 +4,6 @@ description = "ECS Data Flow"
 draft = false
 weight = 105
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

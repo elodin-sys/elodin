@@ -4,7 +4,6 @@ description = "Replays"
 draft = false
 weight = 105
 sort_by = "weight"
-template = "reference/page.html"
 
 [extra]
 toc = true

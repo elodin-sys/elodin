@@ -4,7 +4,6 @@ description = "Install Elodin and start simulating."
 draft = false
 weight = 101
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 lead = "Install Elodin and start simulating."
@@ -123,6 +122,6 @@ Run Monte Carlo simulations to explore the state space.
 
 Try out the following tutorials to learn how to build simulations using Elodin:
 
-{% cardlink(title="Three-Body Orbit Tutorial", icon="planet", href="/get-started/3-body/") %}
+{% cardlink(title="Three-Body Orbit Tutorial", icon="planet", href="/get-started/3-body") %}
 Learn how to model a basic stable three-body problem
 {% end %}

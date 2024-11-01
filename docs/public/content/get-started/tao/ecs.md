@@ -4,7 +4,6 @@ description = "Why ECS for Physics?"
 draft = false
 weight = 104
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true
