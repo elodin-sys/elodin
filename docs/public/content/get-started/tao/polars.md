@@ -4,7 +4,6 @@ description = "Polars for DataFrames"
 draft = true
 weight = 114
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

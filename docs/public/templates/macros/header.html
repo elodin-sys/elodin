@@ -58,7 +58,7 @@
                 >
                     <a
                         class="nav-link"
-                        href="{{ get_url(path=val.url, trailing_slash=true) | safe }}"
+                        href="{{ get_url(path=val.url, trailing_slash=false) | safe }}"
                         >{{ val.name }}</a
                     >
                 </li>

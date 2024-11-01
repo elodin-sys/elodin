@@ -4,7 +4,6 @@ description = "Changelog"
 draft = false
 weight = 100
 sort_by = "weight"
-template = "releases/page.html"
 
 [extra]
 toc = true

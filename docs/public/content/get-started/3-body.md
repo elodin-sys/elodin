@@ -4,7 +4,6 @@ description = "Example using a classic physics problem."
 draft = false
 weight = 102
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

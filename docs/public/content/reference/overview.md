@@ -4,7 +4,6 @@ description = "Overview"
 draft = false
 weight = 101
 sort_by = "weight"
-template = "reference/page.html"
 
 [extra]
 toc = true

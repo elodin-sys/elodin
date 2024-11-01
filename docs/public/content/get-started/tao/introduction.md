@@ -4,7 +4,6 @@ description = "What is Elodin"
 draft = false
 weight = 103
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

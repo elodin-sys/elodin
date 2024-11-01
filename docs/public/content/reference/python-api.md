@@ -4,7 +4,6 @@ description = "Python API"
 draft = false
 weight = 103
 sort_by = "weight"
-template = "reference/page.html"
 
 [extra]
 toc = true

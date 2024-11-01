@@ -1,6 +1,12 @@
 {# Default page.html template #}
 {% extends "base.html" %}
 
+{% import 'macros/header.html' as macros_header -%}
+{% import 'macros/javascript.html' as macros_js -%}
+{% import 'macros/docs-sidebar.html' as macros_sidebar -%}
+{% import 'macros/docs-navigation.html' as macros_navigation -%}
+{% import 'macros/docs-toc.html' as macros_toc -%}
+
 {% block seo %}
   {{ super() }}
   {% set title_addition = "" %}
@@ -12,7 +18,7 @@
   {% else %}
     {% set title = config.title %}
   {% endif %}
-  
+
   {% if page.description %}
     {% set description = page.description %}
   {% else %}
@@ -25,36 +31,35 @@
   {% else %}
     {% set page_section = "" %}
   {% endif %}
-  
+
   {{ macros_head::seo(title=title, title_addition=title_addition, description=description, type="article", is_page=true, created_time=created_time, updated_time=updated_time, page_section=page_section) }}
 {% endblock seo %}
-  
+
 {% block body %}
-  {% if section.extra.class %}
-    {% set page_class = page.extra.class %}
-  {% else %}
-    {% set page_class = "page single" %}
+<body class="docs single">
+  {% if page.ancestors | last %}
+    {% set ancestor = get_section(path=page.ancestors | last, metadata_only=true) %}
+    {% set current_section = ancestor.extra.nav_section %}
+    {% set current_section_color = ancestor.extra.color %}
   {% endif %}
-{% endblock body %}
-
-{% block content %}
-<div class="wrap container" role="document">
-  <div class="content">
-    <div class="row justify-content-center">
-      <div class="col-md-12 col-lg-10 col-xxl-8">
-        <article>
-          <div class="page-header">
-            <h1>{{ page.title }}</h1>
+  {% block header %}
+    {{ macros_header::header(current_section=current_section) }}
+  {% endblock header %}
+  <div class="wrap container tom-{{current_section_color}}" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              {{ macros_sidebar::docs_sidebar(current_section=current_section) }}
+              {{ macros_toc::docs_toc(page=page) }}
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>{{ page.title }}</h1>
+                  {% if page.extra.lead %}
+                  <p class="lead">{{ page.extra.lead | safe }}</p>
+                  {% endif %} {{ page.content | safe }}
+                  {{ macros_navigation::docs_navigation(page=page, current_section=current_section) }}
+              </main>
           </div>
-          {% if page.extra.lead %}<p class="lead">{{ page.extra.lead }}</p>{% endif %}
-          {{ page.content | safe }}
-        </article>
       </div>
-    </div>
   </div>
-  {% block footer %}
-    {{ macros_footer::footer() }}
-  {% endblock footer %}
-</div>
-
-{% endblock content %}
+  {{ macros_js::javascript() }}
+</body>
+{% endblock body %}

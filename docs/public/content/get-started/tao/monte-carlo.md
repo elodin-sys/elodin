@@ -4,7 +4,6 @@ description = "Monte Carlo"
 draft = false
 weight = 106
 sort_by = "weight"
-template = "get-started/page.html"
 
 [extra]
 toc = true

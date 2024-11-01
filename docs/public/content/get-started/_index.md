@@ -3,5 +3,9 @@ title = "Get Started"
 description = "Elodin Overview."
 sort_by = "weight"
 weight = 1
-template = "get-started/section.html"
+redirect_to = "/get-started/quickstart"
+
+[extra]
+nav_section = "get-started"
+color = "green"
 +++

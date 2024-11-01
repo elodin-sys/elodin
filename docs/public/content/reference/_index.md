@@ -3,5 +3,9 @@ title = "Reference"
 description = "Reference."
 sort_by = "weight"
 weight = 100
-template = "reference/section.html"
+redirect_to = "/reference/overview"
+
+[extra]
+nav_section = "reference"
+color = "blue"
 +++

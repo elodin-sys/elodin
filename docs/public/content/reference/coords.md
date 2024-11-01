@@ -4,7 +4,6 @@ description = "Coordinate Systems in Elodin"
 draft = false
 weight = 102
 sort_by = "weight"
-template = "reference/page.html"
 
 [extra]
 toc = true
