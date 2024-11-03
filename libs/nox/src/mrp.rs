@@ -1,6 +1,6 @@
 use core::ops::Add;
 
-use crate::{Field, Matrix, OwnedRepr, Quaternion, RealField, Scalar, Vector};
+use crate::{Const, Field, Matrix, OwnedRepr, Quaternion, RealField, Scalar, Vector};
 
 /// Modified Rodrigues Parameters
 pub struct MRP<T: Field, R: OwnedRepr>(pub Vector<T, 3, R>);
@@ -23,6 +23,16 @@ impl<'a, T: Field, R: OwnedRepr> From<&'a Quaternion<T, R>> for MRP<T, R> {
 impl<T: Field, R: OwnedRepr> From<Quaternion<T, R>> for MRP<T, R> {
     fn from(quat: Quaternion<T, R>) -> Self {
         MRP::from(&quat)
+    }
+}
+
+impl<T: RealField, R: OwnedRepr> From<MRP<T, R>> for Quaternion<T, R> {
+    fn from(mrp: MRP<T, R>) -> Self {
+        let mag_squared = mrp.0.norm_squared();
+        let w = T::one::<R>() - &mag_squared;
+        let p = T::two::<R>() * mrp.0;
+        let q = p.concat(w.broadcast::<Const<1>>()) / (mag_squared + T::one::<R>());
+        Quaternion(q)
     }
 }
 
@@ -88,7 +98,7 @@ impl<'a, T: RealField, R: OwnedRepr> Add<&'a MRP<T, R>> for MRP<T, R> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{array, tensor, ArrayRepr};
+    use crate::{array, tensor, ArrayRepr, Vector3};
 
     use super::*;
 
@@ -111,5 +121,14 @@ mod tests {
         let mrp: MRP<f64, ArrayRepr> = MRP::from_rot_matrix(rot);
         assert_relative_eq!(mrp.0.inner(), &array![-0.6666, 0.0, 0.0], epsilon = 1e-4);
         // value from rot2mrp
+    }
+
+    #[test]
+    fn mrp_from_quat() {
+        let q: Quaternion<f64, ArrayRepr> =
+            Quaternion::from_axis_angle(Vector3::x_axis(), 90.0f64.to_radians());
+        let mrp = q.mrp();
+        let back_again = Quaternion::from(mrp);
+        assert_relative_eq!(q.0, back_again.0)
     }
 }
