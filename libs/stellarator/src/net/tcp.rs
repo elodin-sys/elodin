@@ -91,8 +91,8 @@ mod tests {
             stream.write(b"foo").await.unwrap();
             let buf = vec![0; 128];
             let (n, buf) = stream.read(buf).await.unwrap();
-            assert_eq!(&buf[..n], b"foo");
             handle.await.unwrap();
+            assert_eq!(&buf[..n], b"foo");
         })
     }
 }
