@@ -355,7 +355,7 @@ mod tests {
                 .await
                 .unwrap();
             let delta = start.elapsed().as_millis().abs_diff(250);
-            assert!(delta <= 10, "Δt > 10ms")
+            assert!(delta <= 10, "Δt ({}) > 10ms", delta)
         })
     }
 }
