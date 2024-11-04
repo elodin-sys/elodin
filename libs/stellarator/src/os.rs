@@ -127,7 +127,6 @@ pub fn pread<T: AsRawHandle>(
     buf: &mut [u8],
     offset: Option<u64>,
 ) -> Result<usize, std::io::Error> {
-    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::Storage::FileSystem::ReadFile;
     use windows_sys::Win32::System::IO::OVERLAPPED;
@@ -171,7 +170,6 @@ pub fn pwrite<T: AsRawHandle>(
     buf: &[u8],
     offset: Option<u64>,
 ) -> Result<usize, std::io::Error> {
-    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::Storage::FileSystem::WriteFile;
     use windows_sys::Win32::System::IO::OVERLAPPED;
