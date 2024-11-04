@@ -26,7 +26,10 @@ pub struct SockAddrRaw {
 
 impl SockAddrRaw {
     pub(crate) fn zeroed() -> Self {
-        unsafe { std::mem::zeroed() }
+        SockAddrRaw {
+            storage: unsafe { std::mem::zeroed() },
+            len: std::mem::size_of::<SockAddrStorage>() as _,
+        }
     }
 }
 

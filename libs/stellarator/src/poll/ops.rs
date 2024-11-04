@@ -24,7 +24,7 @@ use std::{
 use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 
 #[cfg(target_os = "windows")]
-use std::os::windows::io::{AsHandle, AsRawHandle, AsRawSocket, AsSocket, FromRawSocket};
+use std::os::windows::io::{AsRawHandle, AsSocket, FromRawSocket};
 
 #[pin_project]
 pub struct Read<'fd, T> {
@@ -298,15 +298,14 @@ impl OpCode for Open {
 
 impl Open {
     pub fn new(path: PathBuf, options: &crate::fs::OpenOptions) -> Result<Self, Error> {
-        let flags = libc::O_CLOEXEC
-            | options.access_mode()?
-            | options.creation_mode()?
-            | options.custom_flags;
+        let flags = options.access_mode()? | options.creation_mode()? | options.custom_flags;
         let mode = options.mode as libc::c_uint;
         Ok(Open(unblock(move || {
             let path = path.to_str().ok_or(Error::InvalidPath)?;
             let path = CString::new(path).map_err(io::Error::from)?;
             let fd = unsafe { libc::open(path.as_ptr(), flags, mode) }.as_result()?;
+            #[cfg(target_os = "windows")]
+            let fd = unsafe { libc::get_osfhandle(fd as _) };
             let handle = unsafe { OwnedHandle::from_raw_fd(fd as _) };
             Ok(handle)
         })))
@@ -329,7 +328,9 @@ impl<'fd> Connect<'fd> {
         } == -1
         {
             let err = io::Error::last_os_error();
-            if err.raw_os_error() != Some(libc::EINPROGRESS) {
+            if err.raw_os_error() != Some(libc::EINPROGRESS)
+                && err.kind() != io::ErrorKind::WouldBlock
+            {
                 return Err(Error::Io(err));
             }
         }
