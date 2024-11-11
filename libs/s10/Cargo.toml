@@ -3,6 +3,13 @@ name = "s10"
 edition = "2021"
 version.workspace = true
 repository.workspace = true
+authors = ["sascha@elodin.systems"]
+
+[package.metadata.wix]
+upgrade-guid = "1F06B3EA-E5D3-4C5C-8AD6-78ADFE45F544"
+path-guid = "8803618A-EB61-4F3E-BD59-8447E4E7F3B2"
+license = false
+eula = false
 
 [dependencies]
 # types
