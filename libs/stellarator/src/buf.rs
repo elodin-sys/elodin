@@ -1,4 +1,8 @@
-use std::{mem::MaybeUninit, ptr::NonNull};
+use std::{
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut, Range},
+    ptr::NonNull,
+};
 
 /// A buffer that is safe to pass to io_uring
 ///
@@ -32,7 +36,7 @@ pub unsafe trait IoBuf: Unpin + 'static + Send {
 /// io_uring will ruin your day if you free the memory in the buffer before the operation is complete
 pub unsafe trait IoBufMut: IoBuf {
     /// A stable pointer to the buffer's contents, contains potentially uninitialized memory
-    fn stable_mut_ptr(&self) -> NonNull<MaybeUninit<u8>>;
+    fn stable_mut_ptr(&mut self) -> NonNull<MaybeUninit<u8>>;
     /// Set the initialized length of memory
     ///
     /// # Safety
@@ -71,7 +75,7 @@ unsafe impl IoBuf for Vec<u8> {
 }
 
 unsafe impl IoBufMut for Vec<u8> {
-    fn stable_mut_ptr(&self) -> NonNull<MaybeUninit<u8>> {
+    fn stable_mut_ptr(&mut self) -> NonNull<MaybeUninit<u8>> {
         NonNull::new(self.as_ptr() as *mut MaybeUninit<u8>).unwrap()
     }
 
@@ -105,5 +109,89 @@ unsafe impl<const N: usize> IoBuf for &'static [u8; N] {
 
     fn total_len(&self) -> usize {
         self.len()
+    }
+}
+
+/// A slice of an [`IoBuf`]
+///
+/// IoBuf requires ownership of buffers, so `Slice` allows a user
+/// to slice an `IoBuf` without loosing
+pub struct Slice<T: IoBuf> {
+    inner: T,
+    range: Range<usize>,
+}
+
+impl<T: IoBuf> Slice<T> {
+    /// The range of the data in the slice
+    pub fn range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+
+    /// Consumes `Slice` returning the inner buffer
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+
+    /// Sets the [`Slice`] to the entire length of the inner [`IoBuf`]
+    pub fn reset(&mut self) {
+        self.range = 0..self.inner.init_len()
+    }
+
+    /// Attempts to set the range of the [`Slice`]
+    ///
+    /// Returns `false` if the range exceeds the bounds of the inner buf
+    pub fn try_set_range(&mut self, range: Range<usize>) -> bool {
+        if range.start <= self.inner.init_len() || range.end <= self.inner.init_len() {
+            return false;
+        }
+        self.range = range;
+        true
+    }
+    /// Sets the range of the [`Slice`]
+    ///
+    /// Panics if the range exceeds the bounds of the inner buf
+    pub fn set_range(&mut self, range: Range<usize>) {
+        assert!(self.try_set_range(range), "range out of bounds")
+    }
+}
+
+unsafe impl<T: IoBuf> IoBuf for Slice<T> {
+    fn stable_init_ptr(&self) -> *const u8 {
+        self.deref()[self.range.clone()].as_ptr()
+    }
+
+    fn init_len(&self) -> usize {
+        self.range.len()
+    }
+
+    fn total_len(&self) -> usize {
+        self.range.len()
+    }
+}
+
+unsafe impl<T: IoBufMut> IoBufMut for Slice<T> {
+    fn stable_mut_ptr(&mut self) -> NonNull<MaybeUninit<u8>> {
+        let range = self.range.clone();
+        unsafe { NonNull::new_unchecked(self.deref_mut()[range].as_ptr() as *mut MaybeUninit<u8>) }
+    }
+
+    unsafe fn set_init(&mut self, len: usize) {
+        self.inner.set_init(self.range.start + len)
+    }
+}
+
+impl<T: IoBuf> Deref for Slice<T> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        let slice = deref(&self.inner);
+        &slice[self.range.clone()]
+    }
+}
+
+impl<T: IoBufMut> DerefMut for Slice<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let slice = deref_mut(&mut self.inner);
+        &mut slice[self.range.clone()]
     }
 }

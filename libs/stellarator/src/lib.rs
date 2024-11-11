@@ -1,7 +1,6 @@
 use std::{
     cell::RefCell,
     future::Future,
-    io,
     pin::pin,
     task::{Context, Poll, Waker},
 };
@@ -18,6 +17,7 @@ type DefaultReactor = uring::UringReactor;
 
 pub mod buf;
 pub mod fs;
+pub mod io;
 pub mod net;
 pub mod os;
 
@@ -55,9 +55,11 @@ impl From<std::io::Error> for Error {
 
 impl From<rustix::io::Errno> for Error {
     fn from(err: rustix::io::Errno) -> Self {
-        Error::Io(io::Error::from_raw_os_error(err.raw_os_error()))
+        Error::Io(std::io::Error::from_raw_os_error(err.raw_os_error()))
     }
 }
+
+pub type BufResult<T, B> = (Result<T, Error>, B);
 
 pub struct Executor<R: Reactor = DefaultReactor> {
     reactor: RefCell<R>,
@@ -134,5 +136,21 @@ macro_rules! test {
         std::thread::spawn(|| $crate::run(|| $fut))
             .join()
             .expect("join failed")
+    };
+}
+
+#[macro_export]
+macro_rules! rent {
+    ($call:expr, $buf:ident) => {{
+        let (res, o) = $call;
+        $buf = o;
+        res
+    }};
+}
+
+#[macro_export]
+macro_rules! rent_read {
+    ($call:expr, $buf:ident) => {
+        $crate::rent!($call, $buf).map(|len| &$buf[..len])
     };
 }

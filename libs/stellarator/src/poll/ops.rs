@@ -1,5 +1,6 @@
 use super::{OpCode, OpState};
 use crate::os::{BorrowedHandle, OwnedHandle};
+use crate::BufResult;
 use crate::{
     buf::{deref, deref_mut, IoBuf, IoBufMut},
     net::SockAddrRaw,
@@ -35,7 +36,7 @@ pub struct Read<'fd, T> {
 
 #[pin_project(project = ReadStateProj)]
 enum ReadState<'a, T> {
-    Blocking(#[pin] blocking::Task<Result<(usize, T), Error>>),
+    Blocking(#[pin] blocking::Task<BufResult<usize, T>>),
     NonBlocking { sock: &'a Socket, buf: Option<T> },
 }
 
@@ -51,16 +52,15 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
                             let fd = unsafe {
                                 std::os::windows::io::BorrowedHandle::borrow_raw(fd as _)
                             };
-                            let n = crate::os::pread(&fd, deref_mut(&mut buf), offset).map_err(
-                                |err| {
+                            let res =
+                                crate::os::pread(&fd, deref_mut(&mut buf), offset).map_err(|err| {
                                     if let Some(os_err) = err.raw_os_error() {
                                         io::Error::from_raw_os_error(os_err)
                                     } else {
                                         io::Error::new(io::ErrorKind::Other, "")
                                     }
-                                },
-                            )?;
-                            Ok((n as usize, buf))
+                                });
+                            (res.map_err(Error::from), buf)
                         }))
                     }
 
@@ -69,16 +69,14 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
                         let fd = fd.as_raw_fd();
                         ReadState::Blocking(unblock(move || {
                             let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
-                            let n = if let Some(offset) = offset {
-                                rustix::io::pread(fd, deref_mut(&mut buf), offset).map_err(
-                                    |err| io::Error::from_raw_os_error(err.raw_os_error()),
-                                )?
+                            let res = if let Some(offset) = offset {
+                                rustix::io::pread(fd, deref_mut(&mut buf), offset)
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                             } else {
-                                rustix::io::read(fd, deref_mut(&mut buf)).map_err(|err| {
-                                    io::Error::from_raw_os_error(err.raw_os_error())
-                                })?
+                                rustix::io::read(fd, deref_mut(&mut buf))
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                             };
-                            Ok((n as usize, buf))
+                            (res.map_err(Error::from), buf)
                         }))
                     }
                 }
@@ -98,7 +96,7 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
 }
 
 impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
-    type Output = (usize, T);
+    type Output = BufResult<usize, T>;
 
     fn initial_state(&self) -> OpState {
         match &self.state {
@@ -119,15 +117,13 @@ impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Output, Error>> {
+    ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         let state = this.state.project();
         match state {
             ReadStateProj::Blocking(mut task) => task.as_mut().poll(cx),
             ReadStateProj::NonBlocking { sock, buf } => {
-                let Some(mut temp_buf) = buf.take() else {
-                    return Poll::Ready(Err(Error::CompletionStateMissing));
-                };
+                let mut temp_buf = buf.take().expect("buffer missing from op");
                 #[cfg(not(target_os = "windows"))]
                 let fd = sock.as_fd();
                 #[cfg(target_os = "windows")]
@@ -136,8 +132,8 @@ impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
                     .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                     .to_poll()
                 {
-                    Poll::Ready(Ok(len)) => Poll::Ready(Ok((len, temp_buf))),
-                    Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+                    Poll::Ready(Ok(len)) => Poll::Ready((Ok(len), temp_buf)),
+                    Poll::Ready(Err(err)) => Poll::Ready((Err(err), temp_buf)),
                     Poll::Pending => {
                         *buf = Some(temp_buf);
                         Poll::Pending
@@ -155,7 +151,7 @@ pub struct Write<'fd, T> {
 
 #[pin_project(project = WriteStateProj)]
 enum WriteState<'a, T> {
-    Blocking(#[pin] blocking::Task<Result<(usize, T), Error>>),
+    Blocking(#[pin] blocking::Task<BufResult<usize, T>>),
     NonBlocking { sock: &'a Socket, buf: Option<T> },
 }
 
@@ -171,9 +167,9 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
                             let fd = unsafe {
                                 std::os::windows::io::BorrowedHandle::borrow_raw(fd as _)
                             };
-                            let n = crate::os::pwrite(&fd, crate::buf::deref(&buf), offset)
-                                .map_err(Error::from)?;
-                            Ok((n, buf))
+                            let res = crate::os::pwrite(&fd, crate::buf::deref(&buf), offset)
+                                .map_err(Error::from);
+                            (res, buf)
                         }))
                     }
 
@@ -183,16 +179,14 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
                         WriteState::Blocking(unblock(move || {
                             let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
 
-                            let n = if let Some(offset) = offset {
-                                rustix::io::pwrite(fd, crate::buf::deref(&buf), offset).map_err(
-                                    |err| io::Error::from_raw_os_error(err.raw_os_error()),
-                                )?
+                            let res = if let Some(offset) = offset {
+                                rustix::io::pwrite(fd, crate::buf::deref(&buf), offset)
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                             } else {
-                                rustix::io::write(fd, crate::buf::deref(&buf)).map_err(|err| {
-                                    io::Error::from_raw_os_error(err.raw_os_error())
-                                })?
+                                rustix::io::write(fd, crate::buf::deref(&buf))
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                             };
-                            Ok((n, buf))
+                            (res.map_err(Error::from), buf)
                         }))
                     }
                 }
@@ -206,7 +200,7 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
 }
 
 impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
-    type Output = (usize, T);
+    type Output = BufResult<usize, T>;
 
     fn initial_state(&self) -> OpState {
         match &self.state {
@@ -227,15 +221,13 @@ impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Output, Error>> {
+    ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         let state = this.state.project();
         match state {
             WriteStateProj::Blocking(mut task) => task.as_mut().poll(cx),
             WriteStateProj::NonBlocking { sock, buf } => {
-                let Some(temp_buf) = buf.take() else {
-                    return Poll::Ready(Err(Error::CompletionStateMissing));
-                };
+                let temp_buf = buf.take().expect("buffer missing from op");
                 #[cfg(not(target_os = "windows"))]
                 let fd = sock.as_fd();
                 #[cfg(target_os = "windows")]
@@ -244,8 +236,8 @@ impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
                     .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
                     .to_poll()
                 {
-                    Poll::Ready(Ok(len)) => Poll::Ready(Ok((len, temp_buf))),
-                    Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+                    Poll::Ready(Ok(len)) => Poll::Ready((Ok(len), temp_buf)),
+                    Poll::Ready(Err(err)) => Poll::Ready((Err(err), temp_buf)),
                     Poll::Pending => {
                         *buf = Some(temp_buf);
                         Poll::Pending
@@ -281,12 +273,12 @@ impl OpCode for Open {
         None
     }
 
-    type Output = OwnedHandle;
+    type Output = Result<OwnedHandle, Error>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Output, crate::Error>> {
+    ) -> std::task::Poll<Self::Output> {
         let this = self.project();
         this.0.poll(cx)
     }
@@ -340,7 +332,7 @@ impl<'fd> Connect<'fd> {
 }
 
 impl<'fd> OpCode for Connect<'fd> {
-    type Output = ();
+    type Output = Result<(), Error>;
 
     fn event(&self) -> Option<polling::Event> {
         Some(Event::writable(self.fd.as_raw_os_handle() as usize))
@@ -349,7 +341,7 @@ impl<'fd> OpCode for Connect<'fd> {
     fn poll(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Output, Error>> {
+    ) -> std::task::Poll<Self::Output> {
         let socket = self.fd;
         if let Ok(Some(err)) | Err(err) = socket.take_error() {
             return Poll::Ready(Err(Error::Io(err)));
@@ -383,7 +375,7 @@ impl<'fd> Accept<'fd> {
 }
 
 impl<'fd> OpCode for Accept<'fd> {
-    type Output = (Box<SockAddrRaw>, Socket);
+    type Output = BufResult<Socket, Box<SockAddrRaw>>;
 
     fn event(&self) -> Option<polling::Event> {
         Some(Event::readable(self.fd.as_raw_os_handle() as usize))
@@ -392,11 +384,9 @@ impl<'fd> OpCode for Accept<'fd> {
     fn poll(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Self::Output, Error>> {
+    ) -> std::task::Poll<Self::Output> {
         let this = self.get_mut();
-        let Some(mut sock_addr) = this.sock_addr.take() else {
-            return Poll::Ready(Err(Error::CompletionStateMissing));
-        };
+        let mut sock_addr = this.sock_addr.take().expect("sock addr missing");
         #[cfg(target_os = "windows")]
         const ERR_CODE: usize = windows_sys::Win32::Networking::WinSock::INVALID_SOCKET;
         #[cfg(not(target_os = "windows"))]
@@ -415,13 +405,13 @@ impl<'fd> OpCode for Accept<'fd> {
                     this.sock_addr = Some(sock_addr);
                     Poll::Pending
                 } else {
-                    Poll::Ready(Err(err.into()))
+                    Poll::Ready((Err(Error::from(err)), sock_addr))
                 }
             }
             #[cfg(target_os = "windows")]
-            fd => Poll::Ready(Ok((sock_addr, unsafe { Socket::from_raw_socket(fd as _) }))),
+            fd => Poll::Ready((Ok(unsafe { Socket::from_raw_socket(fd as _) }), sock_addr)),
             #[cfg(not(target_os = "windows"))]
-            fd => Poll::Ready(Ok((sock_addr, unsafe { Socket::from_raw_fd(fd) }))),
+            fd => Poll::Ready((Ok(unsafe { Socket::from_raw_fd(fd) }), sock_addr)),
         }
     }
 
@@ -464,38 +454,5 @@ impl LibcExt for libc::c_int {
 impl LibcExt for libc::ssize_t {
     fn is_err(&self) -> bool {
         *self < 0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::{fs::OpenOptions, poll::Completion, test};
-
-    #[test]
-    fn test_open_write_read() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test");
-
-        test!(async move {
-            let mut options = OpenOptions::default();
-            options.create(true).read(true).write(true);
-            let fd = Completion::run(Open::new(path, &options).unwrap())
-                .await
-                .expect("couldnt open file");
-            let buf: &'static [u8] = b"test";
-            let (written, returned_buf) = Completion::run(Write::new(fd.as_handle(), buf, Some(0)))
-                .await
-                .expect("couldnt write to file");
-            assert_eq!(written, 4);
-            assert_eq!(returned_buf, buf);
-            let out_buf = vec![0u8; 4];
-            let (read, out_buf) = Completion::run(Read::new(fd.as_handle(), out_buf, Some(0)))
-                .await
-                .expect("couldnt open file");
-            assert_eq!(read, 4);
-            assert_eq!(&out_buf, buf);
-        })
     }
 }

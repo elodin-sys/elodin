@@ -1,7 +1,8 @@
 use crate::buf::{IoBuf, IoBufMut};
+use crate::io::{AsyncRead, AsyncWrite};
 use crate::os::BorrowedHandle;
 use crate::reactor::{ops, Completion};
-use crate::Error;
+use crate::{BufResult, Error};
 use socket2::{SockAddr, Socket};
 use std::io;
 use std::net::SocketAddr;
@@ -25,11 +26,11 @@ impl UdpSocket {
         Ok(UdpSocket { socket })
     }
 
-    pub async fn recv<B: IoBufMut>(&self, buf: B) -> Result<(usize, B), Error> {
+    pub async fn recv<B: IoBufMut>(&self, buf: B) -> BufResult<usize, B> {
         Completion::run(ops::Read::new(self.as_handle(), buf, None)).await
     }
 
-    pub async fn send<B: IoBuf>(&self, buf: B) -> Result<(usize, B), Error> {
+    pub async fn send<B: IoBuf>(&self, buf: B) -> BufResult<usize, B> {
         Completion::run(ops::Write::new(self.as_handle(), buf, None)).await
     }
 
@@ -73,9 +74,22 @@ impl UdpSocket {
     }
 }
 
+impl AsyncRead for UdpSocket {
+    fn read<B: IoBufMut>(&self, buf: B) -> impl std::future::Future<Output = BufResult<usize, B>> {
+        self.recv(buf)
+    }
+}
+
+impl AsyncWrite for UdpSocket {
+    fn write<B: IoBuf>(&self, buf: B) -> impl std::future::Future<Output = BufResult<usize, B>> {
+        self.send(buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rent;
 
     #[test]
     fn test_p2p_send() {
@@ -85,14 +99,14 @@ mod tests {
             let a_addr = a.local_addr().unwrap();
             let b_addr = b.local_addr().unwrap();
             a.connect(b_addr).await.unwrap();
-            a.send(b"foo").await.unwrap();
+            a.send(b"foo").await.0.unwrap();
             b.connect(a_addr).await.unwrap();
-            b.send(b"bar").await.unwrap();
-            let out_buf = vec![0u8; 64];
-            let (n, out_buf) = a.recv(out_buf).await.unwrap();
+            b.send(b"bar").await.0.unwrap();
+            let mut out_buf = vec![0u8; 64];
+            let n = rent!(a.recv(out_buf).await, out_buf).unwrap();
             assert_eq!(&out_buf[..n], b"bar");
-            let out_buf = vec![0u8; 64];
-            let (n, out_buf) = b.recv(out_buf).await.unwrap();
+            let mut out_buf = vec![0u8; 64];
+            let n = rent!(b.recv(out_buf).await, out_buf).unwrap();
             assert_eq!(&out_buf[..n], b"foo");
         })
     }
