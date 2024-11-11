@@ -62,8 +62,7 @@ tracing.optional = true
 const-fnv1a-hash = "1.1.0"
 
 # error
-thiserror-no-std = "2.0.2"
-thiserror = "1"
+thiserror = { version = "2.0", default-features = false }
 
 # nox
 nox.workspace = true
