@@ -7,7 +7,7 @@ license = "BSL"
 authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 miette.version = "7.2"
 miette.features = ["fancy"]
 base64 = "0.22.1"

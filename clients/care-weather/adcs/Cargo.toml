@@ -32,7 +32,7 @@ serialport.version = "4.3.0"
 serialport.default-features = false
 
 # errors
-thiserror = "1.0.61"
+thiserror = "2.0"
 anyhow = "1"
 
 # time

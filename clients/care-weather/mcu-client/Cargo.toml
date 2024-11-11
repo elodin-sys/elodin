@@ -10,7 +10,7 @@ version.workspace = true
 serialport = "4.3.0"
 roci.workspace = true
 roci.features = ["tokio", "std"]
-thiserror = "1.0.61"
+thiserror = "2.0"
 arrayvec = "0.7.4"
 enumflags2 = { version = "0.7.10", features = ["serde"] }
 nox.workspace = true

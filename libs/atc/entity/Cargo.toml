@@ -24,7 +24,7 @@ sea-orm = { version = "1.0", features = ["with-uuid", "with-chrono"] }
 # chrono
 chrono = "0.4"
 
-thiserror = "1.0.57"
+thiserror = { version = "2.0", default-features = false }
 fred = { version = "9", features = ["i-pubsub", "subscriber-client", "serde-json"] }
 futures-util = "0.3.30"
 tokio = { version = "1.36.0", features = ["sync"] }
