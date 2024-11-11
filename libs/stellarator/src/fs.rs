@@ -1,5 +1,6 @@
+use crate::io::{AsyncRead, AsyncWrite};
 use crate::reactor::Completion;
-use crate::Error;
+use crate::{BufResult, Error};
 use std::io;
 use std::path::Path;
 
@@ -29,7 +30,7 @@ impl File {
         Self::open_with(path, &options).await
     }
 
-    pub async fn read<B: crate::buf::IoBufMut>(&self, buf: B) -> Result<(usize, B), Error> {
+    pub async fn read<B: crate::buf::IoBufMut>(&self, buf: B) -> BufResult<usize, B> {
         Completion::run(crate::reactor::ops::Read::new(
             self.handle.as_handle(),
             buf,
@@ -38,7 +39,7 @@ impl File {
         .await
     }
 
-    pub async fn write<B: crate::buf::IoBuf>(&self, buf: B) -> Result<(usize, B), Error> {
+    pub async fn write<B: crate::buf::IoBuf>(&self, buf: B) -> BufResult<usize, B> {
         Completion::run(crate::reactor::ops::Write::new(
             self.handle.as_handle(),
             buf,
@@ -51,7 +52,7 @@ impl File {
         &self,
         buf: B,
         offset: u64,
-    ) -> Result<(usize, B), Error> {
+    ) -> BufResult<usize, B> {
         Completion::run(crate::reactor::ops::Read::new(
             self.handle.as_handle(),
             buf,
@@ -60,11 +61,7 @@ impl File {
         .await
     }
 
-    pub async fn write_at<B: crate::buf::IoBuf>(
-        &self,
-        buf: B,
-        offset: u64,
-    ) -> Result<(usize, B), Error> {
+    pub async fn write_at<B: crate::buf::IoBuf>(&self, buf: B, offset: u64) -> BufResult<usize, B> {
         Completion::run(crate::reactor::ops::Write::new(
             self.handle.as_handle(),
             buf,
@@ -206,10 +203,28 @@ impl OpenOptions {
     }
 }
 
+impl AsyncRead for File {
+    fn read<B: crate::buf::IoBufMut>(
+        &self,
+        buf: B,
+    ) -> impl std::future::Future<Output = BufResult<usize, B>> {
+        self.read(buf)
+    }
+}
+
+impl AsyncWrite for File {
+    fn write<B: crate::buf::IoBuf>(
+        &self,
+        buf: B,
+    ) -> impl std::future::Future<Output = BufResult<usize, B>> {
+        self.write(buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test;
+    use crate::{rent, test};
 
     #[test]
     fn test_open_write_read() {
@@ -220,11 +235,11 @@ mod tests {
             let mut options = OpenOptions::default();
             options.create(true).read(true).write(true);
             let file = File::open_with(path, &options).await.unwrap();
-            let buf: &'static [u8] = b"test";
-            let (written, _) = file.write(buf).await.unwrap();
+            let mut buf: &'static [u8] = b"test";
+            let written = rent!(file.write(buf).await, buf).unwrap();
             assert_eq!(written, 4);
-            let out_buf = vec![0u8; 4];
-            let (n, out_buf) = file.read_at(out_buf, 0).await.unwrap();
+            let mut out_buf = vec![0u8; 4];
+            let n = rent!(file.read_at(out_buf, 0).await, out_buf).unwrap();
             assert_eq!(n, 4);
             assert_eq!(&out_buf, buf);
         })

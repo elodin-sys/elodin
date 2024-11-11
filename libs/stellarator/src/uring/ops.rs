@@ -3,6 +3,7 @@ use crate::buf::IoBuf;
 use crate::buf::IoBufMut;
 use crate::net::SockAddrRaw;
 use crate::os::{BorrowedHandle, OwnedHandle};
+use crate::BufResult;
 use crate::Error;
 use io_uring::types::{TimeoutFlags, Timespec};
 use io_uring::{cqueue, opcode, squeue, types};
@@ -20,10 +21,14 @@ use std::{
 pub struct Nop;
 
 impl OpCode for Nop {
-    type Output = ();
+    type Output = Result<(), Error>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, Error> {
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
         entry.as_result().map(|_| ())
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        Err(err)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -57,10 +62,14 @@ pub struct Read<'fd, T> {
 }
 
 impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
-    type Output = (usize, T);
+    type Output = BufResult<usize, T>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, crate::Error> {
-        entry.as_result().map(|res| (res as usize, self.buf))
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
+        (entry.as_result().map(|res| res as usize), self.buf)
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        (Err(err), self.buf)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -94,10 +103,14 @@ pub struct Write<'fd, T> {
 }
 
 impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
-    type Output = (usize, T);
+    type Output = BufResult<usize, T>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, crate::Error> {
-        entry.as_result().map(|res| (res as usize, self.buf))
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
+        (entry.as_result().map(|res| res as usize), self.buf)
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        (Err(err), self.buf)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -131,13 +144,17 @@ pub struct Open {
 }
 
 impl OpCode for Open {
-    type Output = OwnedHandle;
+    type Output = Result<OwnedHandle, Error>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, crate::Error> {
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
         let fd = entry.as_result()? as RawFd;
         // safety: io_uring has just given a file-descriptor and we are the sole owner
         let fd = unsafe { OwnedHandle::Fd(OwnedFd::from_raw_fd(fd)) };
         Ok(fd)
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        Err(err)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -171,10 +188,14 @@ pub struct Close {
 }
 
 impl OpCode for Close {
-    type Output = ();
+    type Output = Result<(), Error>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, crate::Error> {
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
         entry.as_result().map(|_| ())
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        Err(err)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -200,13 +221,20 @@ pub struct Accept<'fd> {
 }
 
 impl<'fd> OpCode for Accept<'fd> {
-    type Output = (Box<SockAddrRaw>, Socket);
+    type Output = BufResult<Socket, Box<SockAddrRaw>>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, Error> {
-        let fd = entry.as_result()? as RawFd;
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
+        let fd = match entry.as_result() {
+            Ok(fd) => fd as RawFd,
+            Err(err) => return (Err(err), self.sock_addr),
+        };
         // safety: io_uring has just given a file-descriptor and we are the sole owner
         let fd = unsafe { Socket::from_raw_fd(fd) };
-        Ok((self.sock_addr, fd))
+        (Ok(fd), self.sock_addr)
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        (Err(err), self.sock_addr)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -247,10 +275,14 @@ pub struct Connect<'fd> {
 }
 
 impl<'fd> OpCode for Connect<'fd> {
-    type Output = ();
+    type Output = Result<(), Error>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, Error> {
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
         entry.as_result().map(|_| ())
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        Err(err)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
@@ -282,14 +314,18 @@ pub struct Timeout {
 }
 
 impl OpCode for Timeout {
-    type Output = ();
+    type Output = Result<(), Error>;
 
-    fn output(self, entry: cqueue::Entry) -> Result<Self::Output, Error> {
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
         match entry.as_result() {
             Ok(_) => Ok(()), // TODO: not sure when this happens what we should do
             Err(Error::Io(err)) if err.raw_os_error() == Some(62) => Ok(()),
             Err(err) => Err(err),
         }
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        Err(err)
     }
 
     unsafe fn sqe(&mut self) -> squeue::Entry {
