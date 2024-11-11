@@ -69,7 +69,7 @@ atc-entity = { path = "../../libs/atc/entity" }
 tower = { version = "0.5.0", features = ["util"] }
 crc = "3.0.1"
 gethostname = "0.4.3"
-thiserror = "1.0.58"
+thiserror = "2.0"
 tokio-stream = "0.1.14"
 
 sea-orm.version = "1.0"

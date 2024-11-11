@@ -35,7 +35,7 @@ nu-ansi-term = "0.49"
 # errors
 miette.version = "7.2"
 miette.features = ["fancy"]
-thiserror = "1.0"
+thiserror = { version = "2.0", default-features = false }
 
 # posix - build
 cargo_metadata.version = "0.18.1"

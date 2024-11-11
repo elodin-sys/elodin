@@ -107,7 +107,7 @@ dependencies = [
  "serde",
  "serialport",
  "thingbuf",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "toml",
  "tracing 0.1.40",
  "tracing-subscriber",
@@ -242,7 +242,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys 0.6.0+11769913",
  "num_enum",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -743,7 +743,7 @@ checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -766,7 +766,7 @@ dependencies = [
  "sha2",
  "smart-default",
  "smol_str 0.1.24",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
  "uuid 0.8.2",
 ]
@@ -785,7 +785,7 @@ checksum = "721cae7de5c34fbb2acd27e21e6d2cf7b886dce0c27388d46c4e6c47ea4318dd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -797,7 +797,7 @@ dependencies = [
  "async-trait",
  "notify 5.2.0",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
  "tracing 0.1.40",
 ]
@@ -833,7 +833,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -860,7 +860,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "uuid 1.11.0",
 ]
@@ -1116,7 +1116,7 @@ dependencies = [
  "petgraph",
  "ron",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "thread_local",
  "uuid 1.11.0",
 ]
@@ -1134,7 +1134,7 @@ dependencies = [
  "bevy_utils",
  "console_error_panic_hook",
  "downcast-rs",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -1164,7 +1164,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "ron",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "uuid 1.11.0",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1180,7 +1180,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1213,7 +1213,7 @@ dependencies = [
  "bytemuck",
  "encase",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "wgpu-types",
 ]
 
@@ -1253,7 +1253,7 @@ dependencies = [
  "radsort",
  "serde",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1264,7 +1264,7 @@ checksum = "3fbfc33a4c6b80760bb8bf850a2cc65a1e031da62fd3ca8b552189104dc98514"
 dependencies = [
  "bevy_macro_utils",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1301,7 +1301,7 @@ dependencies = [
  "nonmax",
  "petgraph",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1313,7 +1313,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1395,7 +1395,7 @@ checksum = "3fc779559aa23b81da2b14fba90586755d225983c5b6d3154658e42fc088de7f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1429,7 +1429,7 @@ dependencies = [
  "bevy_time",
  "bevy_utils",
  "gilrs",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1464,7 +1464,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1495,7 +1495,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1533,7 +1533,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "smol_str 0.2.2",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1600,7 +1600,7 @@ checksum = "bfc65e570012e64a21f3546df68591aaede8349e6174fb500071677f54f06630"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "toml_edit",
 ]
 
@@ -1615,7 +1615,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1771,7 +1771,7 @@ dependencies = [
  "serde",
  "smallvec",
  "smol_str 0.2.2",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "uuid 1.11.0",
 ]
 
@@ -1784,7 +1784,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "uuid 1.11.0",
 ]
 
@@ -1830,7 +1830,7 @@ dependencies = [
  "send_wrapper",
  "serde",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "wasm-bindgen",
  "web-sys",
  "wgpu",
@@ -1845,7 +1845,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1864,7 +1864,7 @@ dependencies = [
  "bevy_transform",
  "bevy_utils",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "uuid 1.11.0",
 ]
 
@@ -1891,7 +1891,7 @@ dependencies = [
  "guillotiere",
  "radsort",
  "rectangle-pack",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1917,7 +1917,7 @@ dependencies = [
  "bevy_macro_utils",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1953,7 +1953,7 @@ dependencies = [
  "bevy_window",
  "glyph_brush_layout",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1967,7 +1967,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "crossbeam-channel",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1981,7 +1981,7 @@ dependencies = [
  "bevy_hierarchy",
  "bevy_math",
  "bevy_reflect",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2011,7 +2011,7 @@ dependencies = [
  "nonmax",
  "smallvec",
  "taffy",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2037,7 +2037,7 @@ checksum = "38f1ab8f2f6f58439d260081d89a42b02690e5fdd64f814edc9417d33fcf2857"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -2146,7 +2146,7 @@ dependencies = [
  "regex",
  "rustc-hash 1.1.0",
  "shlex",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -2267,7 +2267,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "syn_derive",
 ]
 
@@ -2354,7 +2354,7 @@ checksum = "bcfcc3cd946cb52f0bbfdbbcfa2f4e24f75ebb6c0e1002f7c25904fada18b9ec"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -2420,7 +2420,7 @@ dependencies = [
  "polling",
  "rustix",
  "slab",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2464,7 +2464,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2624,7 +2624,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3052,7 +3052,7 @@ dependencies = [
  "lazy_static",
  "proc-macro2",
  "regex",
- "syn 2.0.85",
+ "syn 2.0.87",
  "unicode-xid",
 ]
 
@@ -3064,7 +3064,7 @@ checksum = "3e1a2532e4ed4ea13031c13bc7bc0dbca4aae32df48e9d77f0d1e743179f2ea1"
 dependencies = [
  "lazy_static",
  "proc-macro2",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3079,7 +3079,7 @@ dependencies = [
  "lazy_static",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3284,7 +3284,7 @@ checksum = "a1719100f31492cd6adeeab9a0f46cdbc846e615fdb66d7b398aa46ec7fdd06f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3319,7 +3319,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim 0.11.1",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3330,7 +3330,7 @@ checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
 dependencies = [
  "darling_core",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3408,7 +3408,7 @@ checksum = "67e77553c4162a157adbf834ebae5b415acbecbeafc7a74b0e886657506a7611"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3494,7 +3494,7 @@ checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3661,7 +3661,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-util",
  "toml",
@@ -3763,7 +3763,7 @@ dependencies = [
  "const_panic",
  "encase_derive",
  "glam",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3783,7 +3783,7 @@ checksum = "fd31dbbd9743684d339f907a87fe212cb7b51d75b9e8e74181fe363199ee9b47"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3810,7 +3810,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3822,7 +3822,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3843,7 +3843,7 @@ checksum = "de0d48a183585823424a4ce1aa132d174a6a81bd540895822eb4c8373a8e49e8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3854,7 +3854,7 @@ checksum = "2f9ed6b3789237c8a0c1c505af1c7eb2c560df6186f01b098c3a1064ea532f38"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3913,7 +3913,7 @@ checksum = "3bf679796c0322556351f287a51b49e48f7c4986e727b5dd78c972d30e2e16cc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -3924,7 +3924,7 @@ checksum = "5322a90066ddae2b705096eb9e10c465c0498ae93bf9bdd6437415327c88e3bb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4207,7 +4207,7 @@ checksum = "1a5c6c585bc94aaf2c7b51dd4c2ba22680844aba4c687be581871a6f518c5742"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4275,7 +4275,7 @@ checksum = "1458c6e22d36d61507034d5afecc64f105c1d39712b7ac6ec3b352c423f715cc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4399,7 +4399,7 @@ checksum = "162ee34ebcb7c64a8abebc059ce0fee27c2262618d7b60ed8faf72fef13c3650"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4734,7 +4734,7 @@ dependencies = [
  "inflections",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -4784,7 +4784,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tokio",
  "tracing 0.1.40",
@@ -4798,7 +4798,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04f945a208886a13d07636f38fb978da371d0abc3e34bad338124b9f8c135a8f"
 dependencies = [
  "reqwest",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -4828,7 +4828,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tokio",
  "tracing 0.1.40",
@@ -4871,7 +4871,7 @@ checksum = "6f56f6318968d03c18e1bcf4857ff88c61157e9da8e47c5f29055d60e1228884"
 dependencies = [
  "log",
  "presser",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "winapi",
  "windows 0.52.0",
 ]
@@ -5035,7 +5035,7 @@ dependencies = [
  "com",
  "libc",
  "libloading 0.8.5",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "widestring",
  "winapi",
 ]
@@ -5554,8 +5554,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
- "thiserror-no-std",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-util",
  "tracing 0.1.40",
@@ -5572,7 +5571,7 @@ dependencies = [
  "miette",
  "nox",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b70023cee5807f378e147f66387d1ccd4f)",
+ "thiserror 2.0.3",
  "zerocopy 0.8.7",
 ]
 
@@ -5662,7 +5661,7 @@ checksum = "0122b7114117e64a63ac49f752a5ca4624d534c7b1c7de796ac196381cd2d947"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -5707,8 +5706,9 @@ dependencies = [
 
 [[package]]
 name = "inplace_it"
-version = "0.3.5"
-source = "git+https://github.com/akhilles/inplace_it.git?rev=61077d3#61077d3f2570fc7cf7df9e2bce09349d1972d753"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d57a1694cff80cdd6c8a4cae63984578e2617528d3c266e53f56dfd3e279e9f7"
 
 [[package]]
 name = "instant"
@@ -5805,7 +5805,7 @@ dependencies = [
  "combine",
  "jni-sys",
  "log",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "walkdir",
  "windows-sys 0.45.0",
 ]
@@ -5849,7 +5849,7 @@ dependencies = [
  "jsonptr",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5875,7 +5875,7 @@ dependencies = [
  "pest_derive",
  "regex",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6006,7 +6006,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tower 0.4.13",
@@ -6028,7 +6028,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6041,7 +6041,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_json",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -6066,7 +6066,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tracing 0.1.40",
@@ -6498,7 +6498,7 @@ dependencies = [
  "nox",
  "roci",
  "serialport",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
@@ -6575,7 +6575,7 @@ dependencies = [
  "supports-unicode",
  "terminal_size",
  "textwrap",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "unicode-width",
 ]
 
@@ -6587,7 +6587,7 @@ checksum = "dcf09caffaac8068c346b6df2a7fc27a177fd20b39421a39ce0a211bde679a6c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -6715,7 +6715,7 @@ dependencies = [
  "rustc-hash 1.1.0",
  "spirv",
  "termcolor",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "unicode-xid",
 ]
 
@@ -6734,7 +6734,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.5",
  "rustc-hash 1.1.0",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tracing 0.1.40",
  "unicode-ident",
 ]
@@ -6875,7 +6875,7 @@ dependencies = [
  "log",
  "ndk-sys 0.5.0+25.2.9519653",
  "num_enum",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6891,7 +6891,7 @@ dependencies = [
  "num_enum",
  "raw-window-handle 0.5.2",
  "raw-window-handle 0.6.2",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -7061,7 +7061,7 @@ dependencies = [
  "seq-macro",
  "serde",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "typenum",
  "which 6.0.3",
  "zerocopy 0.8.7",
@@ -7091,7 +7091,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tracing 0.1.40",
  "tracing-subscriber",
@@ -7107,7 +7107,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -7147,7 +7147,7 @@ dependencies = [
  "s10",
  "serde_json",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-util",
  "toml",
@@ -7174,7 +7174,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "tar",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "ureq",
  "zerocopy 0.8.7",
  "zip",
@@ -7273,7 +7273,7 @@ checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -7335,7 +7335,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -7653,7 +7653,7 @@ checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -7745,7 +7745,7 @@ dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -7902,7 +7902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879952a81a83930934cbf1786752d6dedc3b1f29e8f8fb2ad1d0a36f377cf442"
 dependencies = [
  "memchr",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "ucd-trie",
 ]
 
@@ -7926,7 +7926,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8007,7 +8007,7 @@ checksum = "3c0f5fad0874fc7abcd4d750e76917eaebbecaa2c20bde22e1dbeeba8beb758c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8195,7 +8195,7 @@ dependencies = [
  "rayon",
  "regex",
  "smartstring",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "version_check",
  "xxhash-rust",
 ]
@@ -8209,7 +8209,7 @@ dependencies = [
  "polars-arrow-format",
  "regex",
  "simdutf8",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -8576,7 +8576,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64d1ec885c64d0457d564db4ec299b2dae3f9c02808b8ad9c3a089c591b18033"
 dependencies = [
  "proc-macro2",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8630,7 +8630,7 @@ dependencies = [
  "proc-macro-error-attr2",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8650,7 +8650,7 @@ checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "version_check",
  "yansi",
 ]
@@ -8688,7 +8688,7 @@ dependencies = [
  "prost",
  "prost-types",
  "regex",
- "syn 2.0.85",
+ "syn 2.0.87",
  "tempfile",
 ]
 
@@ -8702,7 +8702,7 @@ dependencies = [
  "itertools 0.13.0",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8802,7 +8802,7 @@ dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8815,7 +8815,7 @@ dependencies = [
  "proc-macro2",
  "pyo3-build-config",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -8827,7 +8827,7 @@ dependencies = [
  "polars",
  "polars-core",
  "pyo3",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -8852,7 +8852,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.15",
  "socket2",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio",
  "tracing 0.1.40",
 ]
@@ -8869,7 +8869,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.15",
  "slab",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tinyvec",
  "tracing 0.1.40",
 ]
@@ -9080,7 +9080,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76009fbe0614077fc1a2ce255e3a1881a2e3a3527097d5dc6d8212c585e7e38b"
 dependencies = [
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -9152,7 +9152,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom 0.2.15",
  "libredox",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -9277,7 +9277,7 @@ dependencies = [
  "http 1.1.0",
  "reqwest",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tower-service",
 ]
 
@@ -9391,7 +9391,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -9402,7 +9402,7 @@ checksum = "d1fceb9d127d515af1586d8d0cc601e1245bdb0af38e75c865a156290184f5b3"
 dependencies = [
  "cpal",
  "lewton",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -9674,7 +9674,7 @@ dependencies = [
  "serde",
  "smallvec",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-util",
  "toml",
@@ -9723,7 +9723,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -9771,7 +9771,7 @@ dependencies = [
  "proc-macro-error2",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -9795,7 +9795,7 @@ dependencies = [
  "serde_json",
  "sqlx 0.8.2",
  "strum",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tracing 0.1.40",
  "url",
@@ -9829,7 +9829,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "sea-bae",
- "syn 2.0.85",
+ "syn 2.0.87",
  "unicode-ident",
 ]
 
@@ -9893,8 +9893,8 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "syn 2.0.87",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -9917,7 +9917,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10007,7 +10007,7 @@ checksum = "7e85ad2009c50b58e87caa8cd6dac16bdf511bbfb7af6c33df902396aa480fa5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10018,7 +10018,7 @@ checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10051,7 +10051,7 @@ checksum = "c7715380eec75f029a4ef7de39a9200e0a63823176b759d055b613f5a87df6a6"
 dependencies = [
  "percent-encoding",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -10062,7 +10062,7 @@ checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
 dependencies = [
  "percent-encoding",
  "serde",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -10113,7 +10113,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10231,7 +10231,7 @@ dependencies = [
  "serde_with",
  "tar",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -10288,7 +10288,7 @@ checksum = "adc4e5204eb1910f40f9cfa375f6f05b68c3abac4b6fd879c8ff5e7ae8a0a085"
 dependencies = [
  "num-bigint",
  "num-traits",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
 ]
 
@@ -10367,7 +10367,7 @@ dependencies = [
  "log",
  "memmap2 0.9.5",
  "rustix",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "wayland-backend",
  "wayland-client",
  "wayland-csd-frame",
@@ -10543,7 +10543,7 @@ dependencies = [
  "sqlformat",
  "sqlx-rt",
  "stringprep",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "tokio-stream",
  "url",
  "uuid 1.11.0",
@@ -10588,7 +10588,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "sqlformat",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tokio",
  "tokio-stream",
@@ -10627,7 +10627,7 @@ dependencies = [
  "quote",
  "sqlx-core 0.8.2",
  "sqlx-macros-core",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10650,7 +10650,7 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
- "syn 2.0.85",
+ "syn 2.0.87",
  "tempfile",
  "tokio",
  "url",
@@ -10696,7 +10696,7 @@ dependencies = [
  "smallvec",
  "sqlx-core 0.8.2",
  "stringprep",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tracing 0.1.40",
  "uuid 1.11.0",
@@ -10740,7 +10740,7 @@ dependencies = [
  "smallvec",
  "sqlx-core 0.8.2",
  "stringprep",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "tracing 0.1.40",
  "uuid 1.11.0",
@@ -10834,7 +10834,7 @@ dependencies = [
  "socket2",
  "stack_dst",
  "tempfile",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 2.0.3",
  "waker-fn",
  "windows-sys 0.52.0",
 ]
@@ -10905,7 +10905,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -10954,9 +10954,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.85"
+version = "2.0.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5023162dfcd14ef8f32034d8bcd4cc5ddc61ef7a247c024a33e24e1f24d21b56"
+checksum = "25aa4ce346d03a6dcd68dd8b4010bcb74e54e62c90c573f394c46eae99aba32d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10972,7 +10972,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11000,7 +11000,7 @@ dependencies = [
  "byteorder",
  "enum-as-inner",
  "libc",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "walkdir",
 ]
 
@@ -11136,58 +11136,42 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.64"
-source = "git+https://github.com/quartiq/thiserror.git?rev=e779e1b#e779e1b70023cee5807f378e147f66387d1ccd4f"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror-impl 1.0.69",
 ]
 
 [[package]]
 name = "thiserror"
-version = "1.0.64"
-source = "git+https://github.com/quartiq/thiserror.git?rev=e779e1b70023cee5807f378e147f66387d1ccd4f#e779e1b70023cee5807f378e147f66387d1ccd4f"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
 dependencies = [
- "thiserror-impl 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b70023cee5807f378e147f66387d1ccd4f)",
+ "thiserror-impl 2.0.3",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.64"
-source = "git+https://github.com/quartiq/thiserror.git?rev=e779e1b#e779e1b70023cee5807f378e147f66387d1ccd4f"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.64"
-source = "git+https://github.com/quartiq/thiserror.git?rev=e779e1b70023cee5807f378e147f66387d1ccd4f#e779e1b70023cee5807f378e147f66387d1ccd4f"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
-]
-
-[[package]]
-name = "thiserror-impl-no-std"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58e6318948b519ba6dc2b442a6d0b904ebfb8d411a3ad3e07843615a72249758"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "thiserror-no-std"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3ad459d94dd517257cc96add8a43190ee620011bb6e6cdc82dafd97dfafafea"
-dependencies = [
- "thiserror-impl-no-std",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11317,7 +11301,7 @@ checksum = "693d596312e88961bc67d7f1f97af8a70227d9f90c31bba5806eec004978d752"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11494,7 +11478,7 @@ dependencies = [
  "prost-build",
  "prost-types",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11620,7 +11604,7 @@ checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11630,7 +11614,7 @@ source = "git+https://github.com/tokio-rs/tracing#bdbaf8007364ed2a766cca851d63de
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -11748,7 +11732,7 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "sha1",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "utf-8",
 ]
 
@@ -11786,7 +11770,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c878a167baa8afd137494101a688ef8c67125089ff2249284bd2b5f9bfedb815"
 dependencies = [
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -12063,7 +12047,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "wasm-bindgen-shared",
 ]
 
@@ -12097,7 +12081,7 @@ checksum = "afc340c74d9005395cf9dd098506f7f44e38f2b4a21c6aaacf9a105ea5e1e836"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -12349,7 +12333,7 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "rustc-hash 1.1.0",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "web-sys",
  "wgpu-hal",
  "wgpu-types",
@@ -12393,7 +12377,7 @@ dependencies = [
  "renderdoc-sys",
  "rustc-hash 1.1.0",
  "smallvec",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "wasm-bindgen",
  "web-sys",
  "wgpu-types",
@@ -12555,7 +12539,7 @@ checksum = "942ac266be9249c84ca862f0a164a39533dc2f6f33dc98ec89c8da99b82ea0bd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -12566,7 +12550,7 @@ checksum = "2bbd5b46c938e506ecbce286b6628a02171d56153ba733b6c741fc627ec9579b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -12577,7 +12561,7 @@ checksum = "da33557140a288fae4e1d5f8873aaf9eb6613a9cf82c3e070223ff177f598b60"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -12588,7 +12572,7 @@ checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -13071,7 +13055,7 @@ checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -13082,7 +13066,7 @@ checksum = "2e5f54f3cc93cd80745404626681b4b9fca9a867bad5a8424b618eb0db1ae6ea"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -13102,7 +13086,7 @@ checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.85",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -13127,7 +13111,7 @@ dependencies = [
  "pbkdf2",
  "rand 0.8.5",
  "sha1",
- "thiserror 1.0.64 (git+https://github.com/quartiq/thiserror.git?rev=e779e1b)",
+ "thiserror 1.0.69",
  "time",
  "zeroize",
  "zopfli",
