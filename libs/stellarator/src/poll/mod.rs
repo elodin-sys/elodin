@@ -105,11 +105,12 @@ impl PollingReactor {
         &mut self,
         cx: &mut std::task::Context<'_>,
         completion: Pin<&mut Completion<O>>,
-    ) -> Poll<Result<O::Output, Error>> {
+    ) -> Poll<O::Output> {
         let mut completion = completion.project();
-        let Some(state) = self.states.get_mut(completion.id.0) else {
-            return Poll::Ready(Err(Error::CompletionStateMissing));
-        };
+        let state = self
+            .states
+            .get_mut(completion.id.0)
+            .expect("state not found for completion");
 
         match state {
             OpState::Waiting(Some(waker)) if waker.will_wake(cx.waker()) => {
@@ -125,11 +126,9 @@ impl PollingReactor {
             Poll::Pending => {
                 let op_code = completion.op_code.as_ref();
                 *state = OpState::Waiting(Some(cx.waker().clone()));
-                if let Err(err) = self.submit_op_reactor(op_code.get_ref(), *completion.id) {
-                    Poll::Ready(Err(err))
-                } else {
-                    Poll::Pending
-                }
+                self.submit_op_reactor(op_code.get_ref(), *completion.id)
+                    .expect("failed to submit op to reactor");
+                Poll::Pending
             }
             poll => poll,
         }
@@ -146,15 +145,12 @@ pub trait OpCode {
     }
 
     type Output;
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Self::Output, Error>>;
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output>;
 }
 #[derive(Clone, Copy)]
 pub struct CompletionId(pub usize);
 
-#[pin_project(PinnedDrop)]
+#[pin_project(PinnedDrop, project = CompletionProj)]
 pub struct Completion<O: OpCode> {
     id: CompletionId,
     #[pin]
@@ -166,13 +162,13 @@ impl<O: OpCode> Completion<O> {
         Executor::with_reactor(|reactor| reactor.submit_op(op_code))
     }
 
-    pub async fn run(op_code: O) -> Result<O::Output, Error> {
-        Self::submit(op_code)?.await
+    pub async fn run(op_code: O) -> O::Output {
+        Self::submit(op_code).expect("failed to submit op").await
     }
 }
 
 impl<O: OpCode> Future for Completion<O> {
-    type Output = Result<O::Output, Error>;
+    type Output = O::Output;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,

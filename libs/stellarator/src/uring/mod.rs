@@ -19,11 +19,13 @@ pub struct UringReactor {
 }
 
 impl UringReactor {
-    pub fn submit_op<O: OpCode>(&mut self, mut op_code: O) -> Result<Completion<O>, Error> {
+    pub fn submit_op<O: OpCode>(&mut self, mut op_code: O) -> Result<Completion<O>, (O, Error)> {
         let entry = self.states.vacant_entry();
         unsafe {
             let sqe = op_code.sqe().user_data(entry.key() as u64);
-            self.uring.submission().push(&sqe)?;
+            if let Err(err) = self.uring.submission().push(&sqe) {
+                return Err((op_code, Error::from(err)));
+            }
         }
         let id = CompletionId(entry.key());
         entry.insert(OpState::Waiting(None));
@@ -38,10 +40,11 @@ impl UringReactor {
         &mut self,
         cx: &mut std::task::Context<'_>,
         completion: Pin<&mut Completion<O>>,
-    ) -> Poll<Result<O::Output, Error>> {
+    ) -> Poll<O::Output> {
         let completion = completion.project();
         let Some(state) = self.states.get_mut(completion.id.0) else {
-            return Poll::Ready(Err(Error::CompletionStateMissing));
+            let op_code = take_completion_op_code(completion);
+            return Poll::Ready(op_code.output_from_error(Error::CompletionStateMissing));
         };
         match state {
             OpState::Waiting(Some(waker)) if waker.will_wake(cx.waker()) => {
@@ -55,17 +58,12 @@ impl UringReactor {
                 let OpState::Completed(cqe) = self.states.remove(completion.id.0) else {
                     unreachable!()
                 };
-                // SAFETY: This is safe because we are using `Pin` to guarantee the location,
-                // of the underlying buffer io_uring will be writing into. Since we have completed the operation,
-                // we can now move that buffer safely.
-                let op_code = unsafe { completion.op_code.get_unchecked_mut().take() };
-                let Some(op_code) = op_code else {
-                    return Poll::Ready(Err(Error::CompletionOpCodeMissing));
-                };
+                let op_code = take_completion_op_code(completion);
                 return Poll::Ready(op_code.output(cqe));
             }
             OpState::Ignored(_) => {
-                return Poll::Ready(Err(Error::PolledIgnoredCompletion));
+                let op_code = take_completion_op_code(completion);
+                return Poll::Ready(op_code.output_from_error(Error::PolledIgnoredCompletion));
             }
         }
         Poll::Pending
@@ -89,6 +87,17 @@ impl UringReactor {
 
         *state = OpState::Ignored(value)
     }
+}
+
+fn take_completion_op_code<O: OpCode>(completion: CompletionProj<'_, O>) -> O {
+    // SAFETY: This is safe because we are using `Pin` to guarantee the location,
+    // of the underlying buffer io_uring will be writing into. Since we have completed the operation,
+    // we can now move that buffer safely.
+    let op_code = unsafe { completion.op_code.get_unchecked_mut().take() };
+    let Some(op_code) = op_code else {
+        unreachable!("op code already taken - this should never happen as we only take the op_code when we are returning `Poll::Ready`")
+    };
+    op_code
 }
 
 impl Reactor for UringReactor {
@@ -130,7 +139,9 @@ impl Reactor for UringReactor {
 pub trait OpCode {
     type Output;
 
-    fn output(self, cqe: cqueue::Entry) -> Result<Self::Output, Error>;
+    fn output(self, cqe: cqueue::Entry) -> Self::Output;
+
+    fn output_from_error(self, err: Error) -> Self::Output;
 
     /// # Safety
     /// Implementors of `sqe` must ensure that the buffers passed to io_uring
@@ -149,7 +160,7 @@ pub enum OpState {
 
 pub struct CompletionId(pub usize);
 
-#[pin_project(PinnedDrop)]
+#[pin_project(PinnedDrop, project = CompletionProj)]
 pub struct Completion<O: OpCode> {
     id: CompletionId,
     #[pin]
@@ -157,17 +168,20 @@ pub struct Completion<O: OpCode> {
 }
 
 impl<O: OpCode> Completion<O> {
-    pub fn submit(op_code: O) -> Result<Self, Error> {
+    pub fn submit(op_code: O) -> Result<Self, (O, Error)> {
         Executor::with_reactor(|reactor| reactor.submit_op(op_code))
     }
 
-    pub async fn run(op_code: O) -> Result<O::Output, Error> {
-        Self::submit(op_code)?.await
+    pub async fn run(op_code: O) -> O::Output {
+        match Self::submit(op_code) {
+            Ok(comp) => comp.await,
+            Err((op_code, err)) => op_code.output_from_error(err),
+        }
     }
 }
 
 impl<O: OpCode> Future for Completion<O> {
-    type Output = Result<O::Output, Error>;
+    type Output = O::Output;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
