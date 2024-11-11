@@ -23,7 +23,7 @@ libc = "0.2"
 socket2 = "0.5"
 
 # errors
-thiserror = "1.0.58"
+thiserror = { version = "2.0", default-features = false }
 
 
 [target.'cfg(target_os = "linux")'.dependencies]

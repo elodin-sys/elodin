@@ -24,8 +24,7 @@ nox.path = "../nox"
 nox.default-features = false
 
 # errors
-thiserror.git = "https://github.com/quartiq/thiserror.git"
-thiserror.rev = "e779e1b70023cee5807f378e147f66387d1ccd4f"
+thiserror = { version = "2.0", default-features = false }
 miette.version = "7.2"
 miette.optional = true
 
