@@ -61,7 +61,7 @@ jobs:
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.20.0/cargo-dist-installer.sh | sh"
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.24.0/cargo-dist-installer.sh | sh"
       - name: Cache cargo-dist
         uses: actions/upload-artifact@v4
         with:
@@ -247,6 +247,77 @@ jobs:
           name: artifacts-linux-wheel
           path: dist
 
+  cargo-deb:
+    runs-on: "ubuntu-22.04"
+    needs:
+      - plan
+    if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl libssl-dev \
+            protobuf-compiler \
+            g++ pkg-config libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0 \
+            libwayland-dev libxkbcommon-dev libopenblas-dev gfortran gfortran-12 libgfortran-12-dev liblzma-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: cargo build
+        run:  cargo build --release --package elodin
+      - name: cargo-deb
+        run: cargo deb --package elodin --no-build
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-deb
+          path: target/debian
+
+  macos-app:
+    runs-on: "macos-latest"
+    needs:
+      - plan
+    if: ${{ needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install deps
+        run: brew install protobuf
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-deb
+        run: cargo install cargo-bundle
+      - name: cargo build
+        run:  cargo build --release --package elodin
+      - name: cargo bundle
+        env:
+          CARGO_BUNDLE_SKIP_BUILD: true
+        run:  cargo bundle --release
+      - uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_DATA}}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          apple-team-id: PN2WFW7ZXW
+      - run: 'echo "${{ secrets.APPLE_API_KEY }}" | base64 -d > /tmp/key.p8'
+      - name: codesign & zip app
+        run: 'mkdir /tmp/elodin && cp -r target/release/bundle/osx/Elodin.app /tmp/Elodin.app && cd /tmp && codesign --deep --force --options=runtime --sign "Developer ID Application: Elodin Systems, Inc. (PN2WFW7ZXW)" --timestamp Elodin.app && /usr/bin/ditto -c -k --keepParent /tmp/Elodin.app /tmp/Elodin.app.zip && xcrun notarytool submit --key /tmp/key.p8 --key-id J78FX7L9QH --issuer 3456f921-2738-4ad5-91cc-c5b99501ef69 /tmp/Elodin.app.zip'
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-mac-app
+          path: /tmp/Elodin.app.zip
   macos-wheel:
     runs-on: "macos-latest"
     needs:

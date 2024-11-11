@@ -3,6 +3,13 @@ name = "dev-tools"
 edition = "2021"
 version.workspace = true
 repository.workspace = true
+authors = ["info@elodin.systems"]
+
+[package.metadata.wix]
+upgrade-guid = "B8E18A2F-15D2-4960-8916-4FDD1606097F"
+path-guid = "17642022-7D39-4164-A22D-044120E8B9A4"
+license = false
+eula = false
 
 [dependencies]
 config = "0.14.0"
