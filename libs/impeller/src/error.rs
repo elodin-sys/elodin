@@ -1,10 +1,5 @@
-#[cfg(feature = "std")]
-use thiserror::Error;
-#[cfg(not(feature = "std"))]
-use thiserror_no_std::Error;
-
 use crate::StreamId;
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[cfg(feature = "std")]
     #[error("io {0}")]
