@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "dev-tools"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
@@ -3636,7 +3636,7 @@ dependencies = [
 
 [[package]]
 name = "elodin"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5106,7 +5106,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helmholtz-chamber"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "roci",
  "serialport",
@@ -5530,7 +5530,7 @@ dependencies = [
 
 [[package]]
 name = "impeller"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "arrow",
  "bevy",
@@ -5564,7 +5564,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "const-fnv1a-hash",
  "heapless 0.8.0",
@@ -6489,7 +6489,7 @@ dependencies = [
 
 [[package]]
 name = "mcu-client"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "arrayvec",
  "ctrlc",
@@ -7040,7 +7040,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "approx",
  "boxcar",
@@ -7122,7 +7122,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "axum",
  "bytes",
@@ -7158,7 +7158,7 @@ dependencies = [
 
 [[package]]
 name = "noxla"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -9352,7 +9352,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "bbqueue",
  "bytes",
@@ -9384,7 +9384,7 @@ dependencies = [
 
 [[package]]
 name = "roci-macros"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "convert_case",
  "darling",
@@ -9659,7 +9659,7 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "s10"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -10820,7 +10820,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellarator"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "blocking",
  "io-uring",
@@ -12908,7 +12908,7 @@ checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wmm"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "approx",
  "bindgen 0.70.1",

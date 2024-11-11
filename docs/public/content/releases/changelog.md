@@ -13,6 +13,13 @@ order = 1
 +++
 
 
+## v0.10
+
+### v0.10.0
+- **(breaking)** Add "optimize" as an optional argument to `World.run` (defaults to `False`). This will enable additional optimization passes on the simulation code, which results in faster simulation run times at the cost of slower simulation startup times. This is useful for rapidly iterating on simulation code.
+- **(breaking)** Replace "output_time_step" with "default_playback_speed" in `World.run`. This argument sets the default playback speed of the simulation in the editor. A value of 1.0 means that the simulation will run in real-time. A value of 0.5 means that the simulation will run at half speed, and so on.
+- Expose more default arguments via type hints.
+
 ## v0.9
 
 ### v0.9.0
