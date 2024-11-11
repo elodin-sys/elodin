@@ -3,6 +3,8 @@ name = "elodin"
 version.workspace = true
 repository.workspace = true
 edition = "2021"
+license = "BSL"
+authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
 
 [dependencies]
 thiserror = "1.0"
@@ -54,3 +56,26 @@ anyhow = "1.0.79"
 ignore = "0.4"
 tar = "0.4.40"
 zstd = "0.13.0"
+
+[package.metadata.deb]
+maintainer = "info@elodin.systems"
+
+[package.metadata.bundle]
+name = "Elodin"
+identifier = "systems.elodin.app"
+icon = ["apps/elodin/assets/512x512@2x.png"]
+version = "1.0.0"
+resources = []
+copyright = "Copyright (c) Elodin Systems, Inc. All rights reserved."
+category = "Developer Tool"
+short_description = "Elodin"
+long_description = """ """
+deb_depends = []
+osx_frameworks = []
+osx_url_schemes = []
+
+[package.metadata.wix]
+upgrade-guid = "C55D292D-9DEC-4BAA-A279-D20321A8EC55"
+path-guid = "10286407-AC70-4A23-84E5-6F5BD9238C87"
+license = false
+eula = false

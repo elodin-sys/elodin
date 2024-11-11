@@ -41,52 +41,15 @@ exclude = [
 version = "0.9.0"
 repository = "https://github.com/elodin-sys/paracosm"
 
-# Config for 'cargo dist'
-[workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.20.0"
-# CI backends to support
-ci = "github"
-# The installers to generate for each app
-installers = []
-# Target platforms to build apps for (Rust target-triple syntax)
-targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
-# Publish jobs to run in CI
-pr-run-mode = "plan"
-# Skip checking whether the specified configuration files are up to date
-allow-dirty = ["ci"]
-# Build only the required packages, and individually
-precise-builds = true
-# The archive format to use for non-windows builds (defaults .tar.xz)
-unix-archive = ".tar.gz"
-# Whether to auto-include files like READMEs, LICENSEs, and CHANGELOGs (default true)
-auto-includes = false
-
-[workspace.metadata.dist.github-custom-runners]
-x86_64-unknown-linux-gnu = "ubuntu-22.04"
-aarch64-apple-darwin = "macos-14"
-
-[workspace.metadata.dist.dependencies.apt]
-"g++" = '*'
-pkg-config = '*'
-libx11-dev = '*'
-libasound2-dev = '*'
-libudev-dev = '*'
-libxkbcommon-x11-0 = '*'
-libwayland-dev = '*'
-libxkbcommon-dev = '*'
-protobuf-compiler = '*'
-gfortran = '*'
-gfortran-12 = '*'
-libgfortran-12-dev = '*'
-
-[workspace.metadata.dist.dependencies.chocolatey]
-cmake = '*'
-protoc = '*'
-
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.macos-release]
+inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "debuginfo"

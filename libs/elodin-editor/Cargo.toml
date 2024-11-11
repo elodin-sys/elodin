@@ -5,12 +5,6 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-[package.metadata.bundle]
-name = "Elodin Editor"
-identifier = "systems.elodin.elodin"
-icon = ["assets/512x512@2x.png"]
-osx_minimum_system_version = "10.11"
-
 [dependencies]
 # math
 nox.path = "../nox"
