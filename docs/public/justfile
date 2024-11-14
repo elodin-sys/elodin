@@ -1,2 +1,19 @@
+#! /usr/bin/env nix
+#! nix develop .#docs --command just --justfile
+
 default:
-    nix run nixpkgs#zola serve
+    zola serve
+
+encode file_path:
+    #!/usr/bin/env sh
+    base=$(basename {{file_path}})
+    filename="${base%.*}"
+    docs_dir="{{justfile_directory()}}"
+    h264_path="$docs_dir/static/assets/$filename.h264.mp4"
+    av1_path="$docs_dir/static/assets/$filename.av1.mp4"
+    echo "Encoding {{file_path}} to $h264_path"
+    rm -f $h264_path
+    ffmpeg -i {{file_path}} -loglevel error -c:v h264_videotoolbox -q:v 70 -vf scale="iw/2:ih/2" -an $h264_path
+    echo "Encoding {{file_path}} to $av1_path"
+    rm -f $av1_path
+    ffmpeg -i {{file_path}} -loglevel error -an -f yuv4mpegpipe - | rav1e - -o - | ffmpeg -loglevel error -f ivf -i - -c:v copy -strict experimental $av1_path

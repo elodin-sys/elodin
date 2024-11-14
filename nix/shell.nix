@@ -99,5 +99,14 @@
       name = "elo-writing-shell";
       buildInputs = with pkgs; [typos];
     };
+    docs = pkgs.mkShell {
+      name = "elo-docs-shell";
+      buildInputs = with pkgs; [
+        typos
+        zola
+        ffmpeg
+        rav1e
+      ];
+    };
   };
 }

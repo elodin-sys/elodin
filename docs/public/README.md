@@ -21,3 +21,9 @@ brew install zola
 cd docs/public
 zola serve
 ```
+
+### Video Encoding
+
+```sh
+./justfile <path/to/video>
+```
