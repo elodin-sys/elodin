@@ -13,6 +13,7 @@ icon = ""
 +++
 
 <img src="/assets/three-body-screenshot.jpg" alt="three-body-screenshot"/>
+<br></br>
 
 The [three-body problem](https://en.wikipedia.org/wiki/Three-body_problem) is a classic orbital dynamics situation.
 You have three bodies, each with significant mass, all interacting gravitationally.
@@ -359,4 +360,10 @@ what you've learned here to find and apply the starting configurations for stabl
 
 Post what you discover in the [Elodin Discord](https://discord.gg/7vzr8j6)!
 
-#### Exploring more bodies
+## Next Steps
+
+In the next tutorial we'll explore adding multiple systems, breaking up your code into project files, and running Monte Carlo simulations:
+
+{% cardlink(title="Bouncing Ball Tutorial", icon="ball", href="/get-started/bouncing-ball/") %}
+Learn how to model a bouncing ball in windy conditions.
+{% end %}
