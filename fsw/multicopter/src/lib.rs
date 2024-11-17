@@ -1,3 +1,4 @@
+#![no_main]
 #![no_std]
 
 use cortex_m_semihosting::debug;
