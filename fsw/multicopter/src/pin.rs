@@ -26,6 +26,9 @@ pub struct PC7 {}
 pub struct PC8 {}
 pub struct PC9 {}
 
+pub struct PD8 {}
+pub struct PD9 {}
+
 pub struct PE11 {}
 pub struct PE13 {}
 pub struct PE14 {}
@@ -53,6 +56,9 @@ impl_pin!(C, 6);
 impl_pin!(C, 7);
 impl_pin!(C, 8);
 impl_pin!(C, 9);
+
+impl_pin!(D, 8);
+impl_pin!(D, 9);
 
 impl_pin!(E, 11);
 impl_pin!(E, 13);
@@ -82,3 +88,9 @@ impl_af!(pac::TIM3, PC9, 2);
 
 impl_af!(pac::I2C4, PB6, 6);
 impl_af!(pac::I2C4, PB7, 6);
+
+impl_af!(pac::USART1, PA9, 7);
+impl_af!(pac::USART1, PA10, 7);
+
+impl_af!(pac::USART3, PD8, 7);
+impl_af!(pac::USART3, PD9, 7);
