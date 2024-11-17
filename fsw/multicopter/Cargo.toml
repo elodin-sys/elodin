@@ -4,6 +4,16 @@ edition = "2021"
 version = "0.1.0"
 publish = false
 
+[[bin]]
+name = "fw"
+test = false
+bench = false
+
+[[bin]]
+name = "magcal"
+test = false
+bench = false
+
 [lib]
 harness = false
 
