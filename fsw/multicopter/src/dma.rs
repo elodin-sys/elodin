@@ -9,7 +9,7 @@ pub struct DmaBuf<const N: usize, H: HalDmaRegExt> {
 }
 
 impl<const N: usize, H: HalDmaRegExt> DmaBuf<N, H> {
-    pub fn new<B: AsMut<[u8]> + 'static>(dma_ch: DmaChannel<H>, alloc: &mut DmaAlloc<B>) -> Self {
+    pub fn new<B: AsMut<[u8]> + 'static>(dma_ch: DmaChannel<H>, alloc: &mut ArenaAlloc<B>) -> Self {
         let shared_buf = alloc.leak([0; N]);
         let staging_buf = alloc.leak([0; N]);
         Self {

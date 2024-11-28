@@ -8,7 +8,7 @@ use fugit::RateExtU32 as _;
 use hal::{i2c, pac};
 
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{arena::DmaAlloc, bmm350, dshot, peripheral::*};
+use roci_multicopter::{arena::ArenaAlloc, bmm350, dshot, peripheral::*};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -40,7 +40,7 @@ fn main() -> ! {
     defmt::info!("Configured PWM timer");
 
     let [_, dma1_ch1, ..] = dp.DMA1.split();
-    let mut alloc = DmaAlloc::take();
+    let mut alloc = ArenaAlloc::take();
 
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dma1_ch1, &mut alloc);
 
