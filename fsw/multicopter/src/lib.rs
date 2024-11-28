@@ -12,6 +12,7 @@ pub mod bmm350;
 pub mod bsp;
 pub mod dma;
 pub mod dshot;
+pub mod healing_usart;
 pub mod peripheral;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
