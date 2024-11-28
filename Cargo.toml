@@ -30,6 +30,7 @@ members = [
     "libs/s10",
     "apps/dev-tools",
     "libs/impeller2",
+    "libs/impeller2/stella",
     "libs/stellarator",
 ]
 exclude = [

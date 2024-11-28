@@ -5576,6 +5576,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "impeller2-stella"
+version = "0.1.0"
+dependencies = [
+ "impeller2",
+ "postcard",
+ "serde",
+ "stellarator",
+ "thiserror 2.0.3",
+ "zerocopy 0.8.7",
+]
+
+[[package]]
 name = "include_dir"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8536,7 +8548,19 @@ dependencies = [
  "embedded-io 0.4.0",
  "embedded-io 0.6.1",
  "heapless 0.7.17",
+ "postcard-derive",
  "serde",
+]
+
+[[package]]
+name = "postcard-derive"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0239fa9c1d225d4b7eb69925c25c5e082307a141e470573fbbe3a817ce6a7a37"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

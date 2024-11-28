@@ -33,18 +33,33 @@ thread_local! {
     static EXEC: Executor = Executor::default();
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("submission queue full")]
     SubmissionQueueFull,
+    #[error("executor already installed")]
     ExecutorAlreadyInstalled,
+    #[error("io {0}")]
     Io(std::io::Error),
+    #[error("invalid socket addr type")]
     InvalidSocketAddrType,
+    #[error("invalid path")]
     InvalidPath,
 
     // ideally unreachable states
+    #[error("completion state missing")]
     CompletionStateMissing,
+    #[error("polled ignored completion")]
     PolledIgnoredCompletion,
+    #[error("completion op code missing")]
     CompletionOpCodeMissing,
+
+    #[error("buffer overflow")]
+    BufferOverflow,
+    #[error("end of file")]
+    EOF,
+    #[error("integer overflow")]
+    IntegerOverflow,
 }
 
 impl From<std::io::Error> for Error {

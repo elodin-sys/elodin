@@ -1,6 +1,6 @@
 use std::{
     mem::MaybeUninit,
-    ops::{Deref, DerefMut, Range},
+    ops::{Bound, Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
 };
 
@@ -23,6 +23,36 @@ pub unsafe trait IoBuf: Unpin + 'static + Send {
 
     /// The total length of the buffer, including potentially uninitialized data
     fn total_len(&self) -> usize;
+
+    fn try_slice(self, range: impl RangeBounds<usize>) -> Option<Slice<Self>>
+    where
+        Self: Sized,
+    {
+        let begin = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => 0,
+        };
+
+        if begin >= self.init_len() {
+            return None;
+        }
+
+        let end = match range.end_bound() {
+            Bound::Included(&n) => n.checked_add(1).expect("out of range"),
+            Bound::Excluded(&n) => n,
+            Bound::Unbounded => self.init_len(),
+        };
+
+        if !(end <= self.init_len() || begin <= self.init_len()) {
+            return None;
+        }
+
+        Some(Slice {
+            inner: self,
+            range: begin..end,
+        })
+    }
 }
 
 /// A buffer this is safe to pass to io_uring, in a mutable fashion
@@ -153,11 +183,37 @@ impl<T: IoBuf> Slice<T> {
     pub fn set_range(&mut self, range: Range<usize>) {
         assert!(self.try_set_range(range), "range out of bounds")
     }
+
+    pub fn try_sub_slice(self, range: impl RangeBounds<usize>) -> Option<Self> {
+        let begin = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => 0,
+        };
+
+        if begin > self.range.end {
+            return None;
+        }
+
+        let end = match range.end_bound() {
+            Bound::Included(&n) => n.checked_add(1).expect("out of range"),
+            Bound::Excluded(&n) => n,
+            Bound::Unbounded => self.init_len(),
+        };
+        if end > self.range.end {
+            return None;
+        }
+
+        let begin = begin.checked_add(self.range.start)?;
+        let end = end.checked_add(self.range.start)?;
+
+        self.into_inner().try_slice(begin..end)
+    }
 }
 
 unsafe impl<T: IoBuf> IoBuf for Slice<T> {
     fn stable_init_ptr(&self) -> *const u8 {
-        self.deref()[self.range.clone()].as_ptr()
+        self.deref().as_ptr()
     }
 
     fn init_len(&self) -> usize {
@@ -171,8 +227,7 @@ unsafe impl<T: IoBuf> IoBuf for Slice<T> {
 
 unsafe impl<T: IoBufMut> IoBufMut for Slice<T> {
     fn stable_mut_ptr(&mut self) -> NonNull<MaybeUninit<u8>> {
-        let range = self.range.clone();
-        unsafe { NonNull::new_unchecked(self.deref_mut()[range].as_ptr() as *mut MaybeUninit<u8>) }
+        unsafe { NonNull::new_unchecked(self.deref_mut().as_ptr() as *mut MaybeUninit<u8>) }
     }
 
     unsafe fn set_init(&mut self, len: usize) {
