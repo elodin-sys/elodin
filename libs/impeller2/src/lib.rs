@@ -6,5 +6,6 @@ extern crate alloc;
 pub mod buf;
 pub mod com_de;
 pub mod error;
+pub mod registry;
 pub mod table;
 pub mod types;
