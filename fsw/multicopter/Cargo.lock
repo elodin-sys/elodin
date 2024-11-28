@@ -269,6 +269,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+dependencies = [
+ "defmt",
+]
+
+[[package]]
 name = "equator"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -797,13 +806,14 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "stm32-hal2"
 version = "1.8.3"
-source = "git+https://github.com/David-OConnor/stm32-hal.git?rev=a920d7b#a920d7b2a4fd781a76cd732d7af36bf10500440f"
+source = "git+https://github.com/akhilles/stm32-hal.git?rev=ff074e9#ff074e962ccaed34288e6e375b5a1a382888d99b"
 dependencies = [
  "cfg-if",
  "chrono",
  "cortex-m",
  "defmt",
  "embedded-hal 1.0.0",
+ "embedded-io",
  "num-traits",
  "paste",
  "stm32h7",
