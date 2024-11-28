@@ -2,7 +2,7 @@ use dshot_frame::{Command, Frame};
 use embedded_hal::delay::DelayNs;
 use hal::timer;
 
-use crate::{arena::DmaAlloc, dma::DmaBuf, peripheral::*};
+use crate::{arena::ArenaAlloc, dma::DmaBuf, peripheral::*};
 
 const DSHOT_FRAME_SIZE: usize = 16;
 // Size the DMA buffer to hold a DSHOT frame + 0 padding (as a gap between frames) for 4 motors.
@@ -35,7 +35,7 @@ where
     pub fn new<B: AsMut<[u8]> + 'static>(
         mut pwm_timer: timer::Timer<T>,
         dma: DmaChannel<D>,
-        alloc: &mut DmaAlloc<B>,
+        alloc: &mut ArenaAlloc<B>,
     ) -> Self {
         pwm_timer.enable_pwm();
         pwm_timer.enable_dma_interrupt();
