@@ -7,12 +7,12 @@ static TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// A simple bump allocator for DMA buffers backed by memory that's been reserved in a DMA-accessible region.
 /// This allocator does not support deallocation. So, it just leaks memory which is actually fine for DMA buffers.
-pub struct DmaAlloc<B> {
+pub struct ArenaAlloc<B> {
     buf: B,
     pos: usize,
 }
 
-impl DmaAlloc<&'static mut [u8; 4096]> {
+impl ArenaAlloc<&'static mut [u8; 4096]> {
     pub fn take() -> Self {
         let buf = critical_section::with(|_| {
             if TAKEN.swap(true, Ordering::AcqRel) {
@@ -25,7 +25,7 @@ impl DmaAlloc<&'static mut [u8; 4096]> {
     }
 }
 
-impl<'a, B: AsMut<[u8]> + 'a> DmaAlloc<B> {
+impl<'a, B: AsMut<[u8]> + 'a> ArenaAlloc<B> {
     const fn new(buf: B) -> Self {
         Self { buf, pos: 0 }
     }
