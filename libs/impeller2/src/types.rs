@@ -176,17 +176,19 @@ impl<'a> ComponentView<'a> {
     }
 }
 
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug)]
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PacketTy {
     Msg = 0,
     Table = 1,
 }
 
+pub type PacketId = [u8; 3];
+
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct Packet {
     pub packet_ty: PacketTy,
-    pub id: [u8; 3],
+    pub id: PacketId,
     pub body: [u8],
 }
