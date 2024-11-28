@@ -1,0 +1,20 @@
+[package]
+name = "impeller2-stella"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# async
+stellarator.path = "../../stellarator"
+
+# ser-des
+impeller2.path = ".."
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
+serde.version = "1.0"
+serde.features = ["derive"]
+postcard.version = "1.0.10"
+postcard.features = ["alloc", "experimental-derive"]
+
+# errors
+thiserror = "2.0"
