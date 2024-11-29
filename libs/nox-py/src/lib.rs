@@ -11,6 +11,7 @@ use nox_ecs::{
     ErasedSystem,
 };
 use numpy::PyUntypedArray;
+use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -134,6 +135,21 @@ pub fn read_batch_results(path: String) -> Result<(Vec<PyDataFrame>, Vec<String>
     Ok((dfs, ids))
 }
 
+#[pyfunction]
+pub fn _get_cache_dir() -> PyResult<String> {
+    let directory = directories::ProjectDirs::from("systems", "elodin", "elodin-cli")
+        .ok_or_else(|| PyErr::new::<PyOSError, _>("No project directory found"))?;
+
+    let cache_dir_string = directory
+        .cache_dir()
+        .as_os_str()
+        .to_str()
+        .ok_or_else(|| PyErr::new::<PyOSError, _>("Cannot convert OsString to String"))?
+        .to_string();
+
+    Ok(cache_dir_string)
+}
+
 #[pymodule]
 pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ComponentType>()?;
@@ -170,6 +186,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
+    m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
     ukf::register(m)?;
     s10::register(m)?;
     Ok(())
