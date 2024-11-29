@@ -8,6 +8,12 @@ const DSHOT_FRAME_SIZE: usize = 16;
 // Size the DMA buffer to hold a DSHOT frame + 0 padding (as a gap between frames) for 4 motors.
 const DMA_BUF_SIZE: usize = (DSHOT_FRAME_SIZE + 1) * 4;
 
+pub const FRAME_TIME: fugit::MicrosDuration<u32> = fugit::MicrosDuration::<u32>::micros(27);
+pub const INTER_FRAME_DELAY: fugit::MicrosDuration<u32> = fugit::MicrosDuration::<u32>::micros(40);
+
+pub const UPDATE_RATE: fugit::Hertz<u32> = fugit::Hertz::<u32>::Hz(8000);
+pub const UPDATE_PERIOD: fugit::MicrosDuration<u32> = UPDATE_RATE.into_duration();
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Throttle(u16);
 

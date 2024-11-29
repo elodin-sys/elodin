@@ -11,10 +11,18 @@ use fugit::RateExtU32 as _;
 use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{arena::ArenaAlloc, bmm350, crsf, dshot, healing_usart, peripheral::*};
+use roci_multicopter::{
+    arena::ArenaAlloc, bmm350, crsf, dshot, healing_usart, monotonic, peripheral::*,
+};
 
 #[global_allocator]
 static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
+
+const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
+const MAG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(800);
+
+const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
+const MAG_PERIOD: fugit::MicrosDuration<u64> = MAG_RATE.into_duration();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -37,6 +45,9 @@ fn main() -> ! {
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
     defmt::info!("Configured clocks");
 
+    let mut monotonic = monotonic::Monotonic::new(dp.TIM2, &clock_cfg);
+    defmt::info!("Configured monotonic timer");
+
     let usart2 = usart::Usart::new(
         dp.USART2,
         crsf::CRSF_BAUDRATE,
@@ -45,7 +56,7 @@ fn main() -> ! {
     );
     let usart2 = healing_usart::HealingUsart::new(usart2);
     defmt::info!("Configured USART2");
-    let _crsf = crsf::CrsfReceiver::new(Box::new(usart2));
+    let mut crsf = crsf::CrsfReceiver::new(Box::new(usart2));
 
     let i2c = i2c::I2c::new(
         dp.I2C1,
@@ -69,14 +80,35 @@ fn main() -> ! {
 
     let throttle = 0.3;
     dshot_driver.arm_motors(&mut delay);
-    let mut tick = 0;
+
+    let mut last_elrs_update = monotonic.now();
+    let mut last_mag_update = monotonic.now();
+    let mut last_dshot_update = monotonic.now();
+
     loop {
-        tick += 1;
-        if tick % 100 == 0 {
-            let mag_data = bmm350.read_data().unwrap();
-            defmt::info!("BMM350: {}", mag_data);
+        let now = monotonic.now();
+        let ts = now.duration_since_epoch();
+
+        if now.checked_duration_since(last_elrs_update).unwrap() > ELRS_PERIOD {
+            last_elrs_update = now;
+            defmt::trace!("{}: Reading ELRS data", ts);
+
+            crsf.update(monotonic.now());
+        } else if now.checked_duration_since(last_mag_update).unwrap() > MAG_PERIOD {
+            last_mag_update = now;
+            defmt::trace!("{}: Reading BMM350 data", ts);
+
+            match bmm350.read_data() {
+                Ok(mag_data) => defmt::info!("BMM350: {}", mag_data),
+                Err(err) => defmt::error!("BMM350 error: {}", err),
+            }
+        } else if now.checked_duration_since(last_dshot_update).unwrap() > dshot::UPDATE_PERIOD {
+            last_dshot_update = now;
+            defmt::trace!("{}: Sending DSHOT data", ts);
+
+            dshot_driver.write_throttle([throttle.into(); 4]);
         }
-        dshot_driver.write_throttle([throttle.into(); 4]);
-        delay.delay_us(100);
+
+        delay.delay_us(10);
     }
 }
