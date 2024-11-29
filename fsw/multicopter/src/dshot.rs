@@ -1,8 +1,11 @@
 use dshot_frame::{Command, Frame};
 use embedded_hal::delay::DelayNs;
+use fugit::ExtU64 as _;
 use hal::timer;
 
 use crate::{arena::ArenaAlloc, dma::DmaBuf, peripheral::*};
+
+type Instant = fugit::TimerInstant<u64, 1_000_000>;
 
 const DSHOT_FRAME_SIZE: usize = 16;
 // Size the DMA buffer to hold a DSHOT frame + 0 padding (as a gap between frames) for 4 motors.
@@ -29,6 +32,13 @@ impl From<f32> for Throttle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArmState {
+    Disarmed,
+    Arming { end: Instant },
+    Armed,
+}
+
 pub struct Driver<T, D>
 where
     D: HalDmaRegExt,
@@ -36,6 +46,7 @@ where
     pub pwm_timer: timer::Timer<T>,
     pub dma_buf: DmaBuf<DMA_BUF_SIZE, D>,
     max_duty_cycle: u16,
+    arm_state: ArmState,
 }
 
 impl<T, D> Driver<T, D>
@@ -57,6 +68,29 @@ where
             pwm_timer,
             dma_buf: DmaBuf::new(dma, alloc),
             max_duty_cycle,
+            arm_state: ArmState::Disarmed,
+        }
+    }
+
+    fn update_state(&mut self, armed: bool, now: Instant) {
+        match (armed, self.arm_state) {
+            (false, ArmState::Armed) => {
+                defmt::debug!("Disarming motors");
+                self.arm_state = ArmState::Disarmed;
+            }
+            (true, ArmState::Disarmed) => {
+                defmt::debug!("Arming motors");
+                self.arm_state = ArmState::Arming {
+                    end: now + 500.millis(),
+                };
+            }
+            (true, ArmState::Arming { end }) => {
+                if now > end {
+                    self.arm_state = ArmState::Armed;
+                    defmt::debug!("Motors armed");
+                }
+            }
+            _ => {}
         }
     }
 
@@ -67,24 +101,21 @@ where
         }
     }
 
-    pub fn arm_motors<Delay: DelayNs>(&mut self, delay: &mut Delay) {
-        defmt::debug!("Arming motors");
-        // Just send 0 throttle for a while, which seems to work with both AM32 and BLHeli_32 ESCs.
-        // Unfortunately, the DSHOT protocol doesn't provide a way to detect when the ESC is ready.
-        // TODO(Akhil): Replace this with a state machine, but that requires time-keeping which I'll add later.
-        for _ in 0..(5 * 1000) {
-            self.write_throttle([Throttle(0); 4]);
-            delay.delay_ms(1);
-        }
-        defmt::debug!("Motors armed");
-    }
-
-    pub fn write_throttle(&mut self, throttle: [Throttle; 4]) {
+    pub fn write_throttle(&mut self, throttle: [Throttle; 4], armed: bool, now: Instant) {
+        self.update_state(armed, now);
         for (i, throttle) in throttle.into_iter().enumerate() {
-            let frame = Frame::new(throttle.0, false).unwrap();
+            let frame = if self.arm_state != ArmState::Armed {
+                Frame::command(Command::MotorStop, false)
+            } else {
+                Frame::new(throttle.0, false).unwrap()
+            };
             self.write_frame(i, frame);
         }
         self.pwm_timer.write(&mut self.dma_buf);
+    }
+
+    pub fn armed(&self) -> bool {
+        matches!(self.arm_state, ArmState::Armed)
     }
 
     pub fn beep<Delay: DelayNs>(&mut self, delay: &mut Delay) {

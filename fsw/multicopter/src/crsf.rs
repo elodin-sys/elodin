@@ -80,6 +80,12 @@ pub struct Control {
     pub aux: [bool; 12],
 }
 
+impl Control {
+    pub fn armed(&self) -> bool {
+        self.aux[0]
+    }
+}
+
 impl From<RcChannels> for [u16; CRSF_MAX_CHANNEL] {
     fn from(value: RcChannels) -> Self {
         [
