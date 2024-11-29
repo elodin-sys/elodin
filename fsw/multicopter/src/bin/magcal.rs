@@ -9,8 +9,19 @@ use hal::{i2c, pac};
 use roci_multicopter::bmm350;
 use roci_multicopter::bsp::aleph as bsp;
 
+#[global_allocator]
+static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
+        defmt::info!("Configured heap with {} bytes", HEAP_SIZE);
+    }
+
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
     let _pins = bsp::Pins::take().unwrap();
