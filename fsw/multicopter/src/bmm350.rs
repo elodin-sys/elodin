@@ -289,6 +289,21 @@ pub enum Error<E> {
     OtpTimeout,
 }
 
+impl<E> defmt::Format for Error<E> {
+    fn format(&self, fmt: defmt::Formatter) {
+        let err_str = match self {
+            Error::I2c(_) => "I2C error",
+            Error::InvalidChipId => "Invalid chip ID",
+            Error::InvalidPmu => "Invalid PMU",
+            Error::ModeNotSupported => "Mode not supported",
+            Error::BitResetFailed => "Bit reset failed",
+            Error::FluxGuideResetFailed => "Flux guide reset failed",
+            Error::OtpTimeout => "OTP timeout",
+        };
+        defmt::write!(fmt, "{}", err_str)
+    }
+}
+
 impl<E> From<InvalidPmu> for Error<E> {
     fn from(_: InvalidPmu) -> Self {
         Error::InvalidPmu

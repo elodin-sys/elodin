@@ -1,6 +1,5 @@
 use core::{borrow::Borrow, cell::UnsafeCell, ops::Deref};
 
-use critical_section::Mutex;
 use hal::{clocks::Clocks, dma, pac, timer};
 
 use crate::dma::DmaBuf;
@@ -11,10 +10,17 @@ pub trait HalTimerRegExt: Sized {
     const TIMER: u8;
     fn timer(
         self,
-        freq: fugit::Rate<u32, 1, 1_000>,
+        freq: fugit::Hertz<u32>,
         cfg: timer::TimerConfig,
         clocks: &Clocks,
     ) -> timer::Timer<Self>;
+    fn clock_speed(&self, clocks: &Clocks) -> fugit::Hertz<u32> {
+        let timer_freq = match Self::TIMER {
+            1 | 8 => clocks.apb2_timer(),
+            _ => clocks.apb1_timer(),
+        };
+        fugit::Hertz::<u32>::from_raw(timer_freq)
+    }
 }
 
 pub trait HalDmaRegExt: Sized + Deref<Target = pac::dma1::RegisterBlock> + 'static {
@@ -36,9 +42,9 @@ pub trait HalDmaRegExt: Sized + Deref<Target = pac::dma1::RegisterBlock> + 'stat
             dma::DmaChannel::C7,
         ];
         dma_channels.map(|channel| DmaChannel {
-            dma: Mutex::new(unsafe {
+            dma: unsafe {
                 &mut *(&mut dma as *mut dma::Dma<Self> as *mut UnsafeCell<dma::Dma<Self>>)
-            }),
+            },
             channel,
         })
     }
@@ -48,6 +54,10 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
     type HalTimerReg: HalTimerRegExt;
     const ADVANCED_CONTROL: bool;
 
+    fn overflow(&mut self) -> bool;
+    fn read_count(&self) -> u32;
+    fn enable(&mut self);
+    fn update_psc_arr(&mut self, psc: u16, arr: u32);
     fn enable_pwm(&mut self);
     fn enable_dma_interrupt(&mut self);
     fn max_duty_cycle(&self) -> u32;
@@ -144,7 +154,7 @@ pub type Tim3Ch3<'a> = Tim3<'a, 3>;
 pub type Tim3Ch4<'a> = Tim3<'a, 4>;
 
 pub struct DmaChannel<H: HalDmaRegExt> {
-    dma: Mutex<&'static mut UnsafeCell<dma::Dma<H>>>,
+    dma: &'static mut UnsafeCell<dma::Dma<H>>,
     channel: dma::DmaChannel,
 }
 
@@ -163,6 +173,22 @@ macro_rules! impl_hal_timer {
             type HalTimerReg = pac::[<TIM $tim>];
             const ADVANCED_CONTROL: bool = $advanced;
 
+            fn overflow(&mut self) -> bool {
+                let uif = self.regs.sr.read().uif().bit_is_set();
+                self.regs.sr.write(|w| w.uif().clear_bit());
+                uif
+            }
+            fn update_psc_arr(&mut self, psc: u16, arr: u32) {
+                self.set_prescaler(psc);
+                self.set_auto_reload(arr);
+                self.reinitialize();
+            }
+            fn read_count(&self) -> u32 {
+                timer::Timer::<pac::[<TIM $tim>]>::read_count(self)
+            }
+            fn enable(&mut self) {
+                timer::Timer::<pac::[<TIM $tim>]>::enable(self)
+            }
             fn enable_pwm(&mut self) {
                 // if advanced, set MOE bit to enable outputs
                 cond!($advanced, self.regs.bdtr.modify(|_, w| w.moe().set_bit()));
@@ -219,7 +245,7 @@ macro_rules! impl_hal_timer_reg {
             const TIMER: u8 = $tim_num;
             fn timer(
                 self,
-                freq: fugit::Rate<u32, 1, 1_000>,
+                freq: fugit::Hertz<u32>,
                 cfg: timer::TimerConfig,
                 clocks: &Clocks,
             ) -> timer::Timer<Self> {
@@ -263,6 +289,7 @@ macro_rules! impl_timer_dma_mux {
 impl_timer_dma_mux!(1);
 impl_timer_dma_mux!(2);
 impl_timer_dma_mux!(3);
+impl_timer_dma_mux!(4);
 
 impl<H: HalDmaRegExt> DmaChannel<H> {
     pub fn mux<M: DmaMuxInput>(&self, _: &mut M) {
@@ -272,14 +299,10 @@ impl<H: HalDmaRegExt> DmaChannel<H> {
     pub fn clear_interrupt(&mut self) {
         self.dma
             .get_mut()
-            .get_mut()
             .clear_interrupt(self.channel, dma::DmaInterrupt::TransferComplete);
     }
 
     pub fn transfer_complete(&mut self) -> bool {
-        self.dma
-            .get_mut()
-            .get_mut()
-            .transfer_is_complete(self.channel)
+        self.dma.get_mut().transfer_is_complete(self.channel)
     }
 }
