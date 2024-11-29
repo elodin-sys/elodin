@@ -77,6 +77,8 @@ include_dir = "0.7.3"
 walkdir = "2.5.0"
 indicatif = "0.17.8"
 
+directories = "5.0.1"
+
 # temp adcs
 roci-adcs.path = "../roci/adcs"
 
