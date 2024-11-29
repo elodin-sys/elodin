@@ -1,9 +1,12 @@
+import os
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Annotated
 
 import elodin as el
 import jax
 import jax.numpy as np
+from elodin import egm08
 from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
 
@@ -18,6 +21,27 @@ altitude = 400 * 1000
 radius = earth_radius + altitude
 velocity = np.sqrt(G * M / radius)
 SIM_TIME_STEP = 1.0 / 20.0
+
+cache_directory = el._get_cache_dir()
+c_bar_file_name = "C_normal.npy"
+c_full_path = os.path.join(cache_directory, c_bar_file_name)
+
+if not os.path.isfile(c_full_path):
+    c_bar_file_path = urllib.request.urlretrieve(
+        "https://storage.googleapis.com/elodin-assets/C_normal.npy",
+        c_full_path,
+    )
+
+s_bar_file_name = "S_normal.npy"
+s_full_path = os.path.join(cache_directory, s_bar_file_name)
+
+if not os.path.isfile(s_full_path):
+    s_bar_file_path = urllib.request.urlretrieve(
+        "https://storage.googleapis.com/elodin-assets/S_normal.npy",
+        s_full_path,
+    )
+
+gravity_model = egm08.EGM08(2190, c_bar_path=c_full_path, s_bar_path=s_full_path)
 
 # sensors
 GyroOmega = Annotated[
@@ -492,26 +516,11 @@ def gravity_effector(
     a_pos: el.WorldPos,
     a_inertia: el.Inertia,
 ) -> tuple[el.Force, Radius]:
-    r = a_pos.linear()
+    pos = a_pos.linear()
     m = a_inertia.mass()
-    norm = la.norm(r)
-    e_r = r / norm
-    mu = G * M
-    f = -mu * m * r / (norm * norm * norm)
-    z = r[2]
-    e_z = np.array([0.0, 0.0, 1.0])
-    j2 = (
-        -mu
-        * m
-        * J2
-        * earth_radius**2
-        * (
-            3 * z / (norm**5) * e_z
-            + (3.0 / (2.0 * norm**4) - 15.0 * z**2 / (2.0 * norm**6.0)) * e_r
-        )
-    )
-    # j2 = -mu * m * r / (norm ** 3) * ( 1 - (3/2) * J2 * (earth_radius / norm) ** 2 * (5 * z ** 2 / norm ** 2 - np.array([1, 1, 3])))
-    return (force + el.SpatialForce(linear=f + j2), norm)
+    f = gravity_model.compute_field(pos[0], pos[1], pos[2], m)
+    norm = la.norm(pos)
+    return (force + el.SpatialForce(linear=f), norm)
 
 
 @dataclass
@@ -694,7 +703,7 @@ exec = w.run(
         integrator=el.Integrator.SemiImplicit,
     ),
     sim_time_step=SIM_TIME_STEP,
-    run_time_step=0.0,
-    default_playback_speed=25.0,
-    max_ticks=60 * 20 * 128,
+    default_playback_speed=5.0,
+    max_ticks=60 * 20 * 60,
+    optimize=True,
 )
