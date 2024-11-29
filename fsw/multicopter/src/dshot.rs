@@ -11,9 +11,15 @@ const DMA_BUF_SIZE: usize = (DSHOT_FRAME_SIZE + 1) * 4;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Throttle(u16);
 
+impl From<u16> for Throttle {
+    fn from(throttle: u16) -> Self {
+        Self(throttle.clamp(0, 1999))
+    }
+}
+
 impl From<f32> for Throttle {
     fn from(throttle: f32) -> Self {
-        Self((throttle.clamp(0.0, 1.0) * 1999.0) as u16)
+        Self::from((throttle * 1999.0) as u16)
     }
 }
 
