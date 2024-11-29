@@ -1,18 +1,31 @@
 #![no_main]
 #![no_std]
 
+extern crate alloc;
+
+use alloc::boxed::Box;
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use fugit::RateExtU32 as _;
-use hal::{i2c, pac};
+use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{arena::ArenaAlloc, bmm350, dshot, peripheral::*};
+use roci_multicopter::{arena::ArenaAlloc, bmm350, crsf, dshot, healing_usart, peripheral::*};
+
+#[global_allocator]
+static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Starting");
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
+        defmt::info!("Configured heap with {} bytes", HEAP_SIZE);
+    }
 
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
@@ -23,6 +36,16 @@ fn main() -> ! {
     clock_cfg.setup().unwrap();
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
     defmt::info!("Configured clocks");
+
+    let usart2 = usart::Usart::new(
+        dp.USART2,
+        crsf::CRSF_BAUDRATE,
+        usart::UsartConfig::default(),
+        &clock_cfg,
+    );
+    let usart2 = healing_usart::HealingUsart::new(usart2);
+    defmt::info!("Configured USART2");
+    let _crsf = crsf::CrsfReceiver::new(Box::new(usart2));
 
     let i2c = i2c::I2c::new(
         dp.I2C1,
