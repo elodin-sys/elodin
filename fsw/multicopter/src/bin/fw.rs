@@ -78,9 +78,6 @@ fn main() -> ! {
 
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dma1_ch1, &mut alloc);
 
-    let throttle = 0.3;
-    dshot_driver.arm_motors(&mut delay);
-
     let mut last_elrs_update = monotonic.now();
     let mut last_mag_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
@@ -106,7 +103,9 @@ fn main() -> ! {
             last_dshot_update = now;
             defmt::trace!("{}: Sending DSHOT data", ts);
 
-            dshot_driver.write_throttle([throttle.into(); 4]);
+            let control = crsf.frsky();
+            let armed = control.armed();
+            dshot_driver.write_throttle([control.throttle.into(); 4], armed, now);
         }
 
         delay.delay_us(10);
