@@ -1,6 +1,8 @@
 #![no_main]
 #![no_std]
 
+extern crate alloc;
+
 use cortex_m_semihosting::debug;
 
 use defmt_rtt as _;
@@ -10,6 +12,7 @@ use panic_probe as _;
 pub mod arena;
 pub mod bmm350;
 pub mod bsp;
+pub mod crsf;
 pub mod dma;
 pub mod dshot;
 pub mod healing_usart;
