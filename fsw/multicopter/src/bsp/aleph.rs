@@ -1,4 +1,139 @@
-use hal::{clocks, pac};
+use hal::{
+    clocks,
+    gpio::{OutputType, Pin, PinMode, Port},
+    pac,
+};
+
+static mut PINS_TAKEN: bool = false;
+
+pub struct Pins {
+    // I2C1
+    pub pb6: Pin,
+    pub pb7: Pin,
+
+    // I2C2
+    pub pf0: Pin,
+    pub pf1: Pin,
+
+    // I2C4
+    pub pf14: Pin,
+    pub pf15: Pin,
+
+    // TIM1
+    pub pe9: Pin,
+    pub pe11: Pin,
+    pub pe13: Pin,
+    pub pe14: Pin,
+
+    // TIM2
+    pub pa5: Pin,
+    pub pa1: Pin,
+    pub pa2: Pin,
+    pub pa3: Pin,
+
+    // TIM3
+    pub pa6: Pin,
+    pub pa7: Pin,
+    pub pb0: Pin,
+    pub pb1: Pin,
+
+    // TIM4
+    pub pd12: Pin,
+    pub pd13: Pin,
+    pub pd14: Pin,
+    pub pd15: Pin,
+
+    // USART1
+    pub pa9: Pin,
+    pub pa10: Pin,
+
+    // USART2
+    pub pd5: Pin,
+    pub pd6: Pin,
+
+    // USART3
+    pub pd8: Pin,
+    pub pd9: Pin,
+
+    // UART4
+    pub pb8: Pin,
+    pub pb9: Pin,
+
+    // UART7
+    pub pb4: Pin,
+
+    // USART6
+    pub pg14: Pin,
+}
+
+impl Pins {
+    pub fn take() -> Option<Self> {
+        cortex_m::interrupt::free(|_| {
+            if unsafe { PINS_TAKEN } {
+                None
+            } else {
+                Some(unsafe { Self::steal() })
+            }
+        })
+    }
+
+    unsafe fn steal() -> Self {
+        PINS_TAKEN = true;
+        let mut pins = Self {
+            pb6: Pin::new(Port::B, 6, PinMode::Alt(4)),
+            pb7: Pin::new(Port::B, 7, PinMode::Alt(4)),
+
+            pf0: Pin::new(Port::F, 0, PinMode::Alt(4)),
+            pf1: Pin::new(Port::F, 1, PinMode::Alt(4)),
+
+            pf14: Pin::new(Port::F, 14, PinMode::Alt(4)),
+            pf15: Pin::new(Port::F, 15, PinMode::Alt(4)),
+
+            pe9: Pin::new(Port::E, 9, PinMode::Alt(1)),
+            pe11: Pin::new(Port::E, 11, PinMode::Alt(1)),
+            pe13: Pin::new(Port::E, 13, PinMode::Alt(1)),
+            pe14: Pin::new(Port::E, 14, PinMode::Alt(1)),
+
+            pa5: Pin::new(Port::A, 5, PinMode::Alt(1)),
+            pa1: Pin::new(Port::A, 1, PinMode::Alt(1)),
+            pa2: Pin::new(Port::A, 2, PinMode::Alt(1)),
+            pa3: Pin::new(Port::A, 3, PinMode::Alt(1)),
+
+            pa6: Pin::new(Port::A, 6, PinMode::Alt(2)),
+            pa7: Pin::new(Port::A, 7, PinMode::Alt(2)),
+            pb0: Pin::new(Port::B, 0, PinMode::Alt(2)),
+            pb1: Pin::new(Port::B, 1, PinMode::Alt(2)),
+
+            pd12: Pin::new(Port::D, 12, PinMode::Alt(2)),
+            pd13: Pin::new(Port::D, 13, PinMode::Alt(2)),
+            pd14: Pin::new(Port::D, 14, PinMode::Alt(2)),
+            pd15: Pin::new(Port::D, 15, PinMode::Alt(2)),
+
+            pa9: Pin::new(Port::A, 9, PinMode::Alt(7)),
+            pa10: Pin::new(Port::A, 10, PinMode::Alt(7)),
+
+            pd5: Pin::new(Port::D, 5, PinMode::Alt(7)),
+            pd6: Pin::new(Port::D, 6, PinMode::Alt(7)),
+
+            pd8: Pin::new(Port::D, 8, PinMode::Alt(7)),
+            pd9: Pin::new(Port::D, 9, PinMode::Alt(7)),
+
+            pb8: Pin::new(Port::B, 8, PinMode::Alt(8)),
+            pb9: Pin::new(Port::B, 9, PinMode::Alt(8)),
+
+            pb4: Pin::new(Port::B, 4, PinMode::Alt(11)),
+
+            pg14: Pin::new(Port::G, 14, PinMode::Alt(7)),
+        };
+        pins.pb6.output_type(OutputType::OpenDrain);
+        pins.pb7.output_type(OutputType::OpenDrain);
+        pins.pf0.output_type(OutputType::OpenDrain);
+        pins.pf1.output_type(OutputType::OpenDrain);
+        pins.pf14.output_type(OutputType::OpenDrain);
+        pins.pf15.output_type(OutputType::OpenDrain);
+        pins
+    }
+}
 
 pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
     pwr.cr3.modify(|_, w| {
