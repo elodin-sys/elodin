@@ -1,0 +1,40 @@
+[package]
+name = "impeller-db"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# ser-de
+impeller2.path = ".."
+impeller2.features = ["std"]
+impeller2-stella.path = "../stella"
+serde.version = "1.0"
+serde.features = ["derive"]
+postcard = "1.0"
+
+# async
+stellarator.path = "../../stellarator"
+stellarator.features = ["miette"]
+
+# data structures
+memmap2 = "0.9"
+dashmap = "6.1"
+smallvec.version = "1.11.2"
+smallvec.features = ["const_generics", "union", "serde"]
+
+# errors
+thiserror = "2"
+miette.version = "7.2"
+miette.features = ["fancy"]
+
+# logs
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+# rand
+fastrand = "2.2.0"
+
+# args
+clap.version = "4.4.18"
+clap.features = ["derive"]

@@ -23,7 +23,7 @@ impl<'a> Repr for ViewRepr<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ArrayView<'a, T> {
     pub(crate) buf: &'a [T],
     pub(crate) shape: &'a [usize],
@@ -44,10 +44,24 @@ impl<'a, T: Elem> ArrayView<'a, T> {
         self.buf[i]
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        // Safe because we're only reading the bytes and T is guaranteed to be properly aligned
+        unsafe {
+            core::slice::from_raw_parts(
+                self.buf.as_ptr() as *const u8,
+                core::mem::size_of_val(self.buf),
+            )
+        }
+    }
+
     pub fn to_dyn_owned(&self) -> Array<T, Dyn> {
         Array {
             buf: DynArray::from_shape_vec(SmallVec::from_slice(self.shape), self.buf.to_vec())
                 .unwrap(),
         }
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        self.shape
     }
 }

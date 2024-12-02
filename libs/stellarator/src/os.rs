@@ -7,6 +7,8 @@ use std::os::windows::io::{
     AsHandle, AsRawHandle, AsRawSocket, AsSocket, FromRawHandle, RawHandle,
 };
 
+use maitake::time::Clock;
+
 use socket2::Socket;
 
 impl OwnedHandle {
@@ -203,4 +205,38 @@ pub fn pwrite<T: AsRawHandle>(
     }
 
     Ok(bytes_written as usize)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn os_clock() -> Clock {
+    use std::time::Duration;
+
+    use rustix::time::ClockId;
+
+    Clock::new(Duration::new(0, 1), || {
+        let timespec = rustix::time::clock_gettime(ClockId::Monotonic);
+        let sec = timespec.tv_sec as u64;
+        let nano = timespec.tv_nsec as u64;
+        sec * 1_000_000_000 + nano
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub fn os_clock() -> Clock {
+    use std::time::Duration;
+    let mut freq = 0i64;
+    if unsafe { windows_sys::Win32::System::Performance::QueryPerformanceFrequency(&mut freq) } != 0
+    {
+        panic!("failed to get freq");
+    }
+    let duration = Duration::from_nanos(1_000_000_000u64 / freq as u64);
+    Clock::new(duration, || {
+        let mut count = 0i64;
+        if unsafe { windows_sys::Win32::System::Performance::QueryPerformanceCounter(&mut count) }
+            != 0
+        {
+            panic!("failed to get count");
+        };
+        count as u64
+    })
 }

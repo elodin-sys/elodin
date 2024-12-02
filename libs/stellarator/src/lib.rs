@@ -3,6 +3,7 @@ use std::{
     future::Future,
     pin::pin,
     task::{Context, Poll, Waker},
+    time::Duration,
 };
 
 #[cfg(not(target_os = "linux"))]
@@ -24,16 +25,20 @@ pub mod os;
 mod noop_waker;
 
 pub use maitake::task::JoinHandle;
+use maitake::time::Timer;
 #[cfg(not(target_os = "linux"))]
 pub(crate) use poll as reactor;
 #[cfg(target_os = "linux")]
 pub(crate) use uring as reactor;
+
+pub use maitake::sync;
 
 thread_local! {
     static EXEC: Executor = Executor::default();
 }
 
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "miette", derive(miette::Diagnostic))]
 pub enum Error {
     #[error("submission queue full")]
     SubmissionQueueFull,
@@ -79,6 +84,7 @@ pub type BufResult<T, B> = (Result<T, Error>, B);
 pub struct Executor<R: Reactor = DefaultReactor> {
     reactor: RefCell<R>,
     scheduler: maitake::scheduler::LocalScheduler,
+    timer: maitake::time::Timer,
 }
 
 impl<R: Reactor> Executor<R> {
@@ -93,21 +99,25 @@ impl<R: Reactor> Executor<R> {
         let waker = self.reactor.borrow_mut().waker();
         let mut cx = Context::from_waker(&waker);
         loop {
+            self.timer.try_turn();
             self.reactor.borrow_mut().process_io()?;
             let tick = self.scheduler.tick();
             if let Poll::Ready(output) = main_task.as_mut().poll(&mut cx) {
                 self.reactor.borrow_mut().finalize_io()?;
                 return Ok(output.unwrap());
             }
-            if !tick.has_remaining {
-                self.reactor.borrow_mut().wait_for_io()?;
+            let turn = self.timer.try_turn();
+            if !tick.has_remaining && turn.as_ref().map(|t| t.expired == 0).unwrap_or(true) {
+                self.reactor
+                    .borrow_mut()
+                    .wait_for_io(turn.and_then(|turn| turn.time_to_next_deadline()))?;
             }
         }
     }
 }
 
 pub trait Reactor {
-    fn wait_for_io(&mut self) -> Result<(), Error>;
+    fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), Error>;
     fn process_io(&mut self) -> Result<(), Error>;
     fn finalize_io(&mut self) -> Result<(), Error>;
     fn waker(&self) -> Waker;
@@ -144,6 +154,10 @@ where
 {
     Executor::with(|exec| exec.scheduler.spawn(f))
 }
+pub fn sleep(duration: Duration) -> maitake::time::Sleep<'static> {
+    let timer: &'static Timer = unsafe { &*Executor::with(|e| &e.timer as *const _) };
+    timer.sleep(duration)
+}
 
 #[macro_export]
 macro_rules! test {
@@ -168,4 +182,23 @@ macro_rules! rent_read {
     ($call:expr, $buf:ident) => {
         $crate::rent!($call, $buf).map(|len| &$buf[..len])
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn test_sleep() {
+        test!(async {
+            let start = Instant::now();
+            println!("sleep start");
+            sleep(Duration::from_millis(250)).await;
+            println!("slept");
+            let delta = start.elapsed().as_millis().abs_diff(250);
+            assert!(delta <= 10, "Δt ({}) > 10ms", delta)
+        })
+    }
 }

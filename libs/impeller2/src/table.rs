@@ -91,11 +91,11 @@ impl ColumnEntry {
         table: &[u8],
         sink: &mut impl Decomponentize,
     ) -> Result<(), Error> {
-        let shape = self.shape_entry.parse_shape(data)?;
-        let arr_len = arr_len(shape)?;
+        let shape = self.shape_entry.parse_shape(data).unwrap();
+        let arr_len = arr_len(shape).unwrap();
         let arr_size = arr_len * self.shape_entry.prim_type.size();
         let len = self.len as usize;
-        let entity_ids = self.entity_ids_entry.parse(data, len)?;
+        let entity_ids = self.entity_ids_entry.parse(data, len).unwrap();
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let arr_offset = i * arr_size + self.data_col_offset as usize;
             let arr_data = table.get(arr_offset..).ok_or(Error::BufferUnderflow)?;
@@ -199,14 +199,15 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
     }
 
     pub fn column(
-        mut self,
+        &mut self,
         component_id: ComponentId,
         prim_type: PrimType,
         shape: &[u64],
-        entity_ids: &[EntityId],
-    ) -> Result<Self, Error> {
+        entity_ids: impl ExactSizeIterator<Item = EntityId>,
+    ) -> Result<&mut Self, Error> {
+        let len = entity_ids.len() as u64;
         let shape_offset = self.vtable.data.extend_aligned(shape)? as u64;
-        let entity_col_offset = self.vtable.data.extend_aligned(entity_ids)? as u64;
+        let entity_col_offset = self.vtable.data.extend_from_iter_aligned(entity_ids)? as u64;
         let arr_len: usize = shape.iter().try_fold(1usize, |xs, &x| {
             (x as usize).checked_mul(xs).ok_or(Error::OffsetOverflow)
         })?;
@@ -216,7 +217,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         self.data_len += data_len;
 
         let entry = ColumnEntry {
-            len: entity_ids.len() as u64,
+            len,
             component_id,
             shape_entry: ShapeEntry {
                 prim_type,
@@ -234,10 +235,10 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
     }
 
     pub fn entity(
-        mut self,
+        &mut self,
         entity_id: EntityId,
         components: &[(ComponentId, PrimType, &[u64])],
-    ) -> Result<Self, Error> {
+    ) -> Result<&mut Self, Error> {
         let len = components.len() as u64;
         let component_ids = components.iter().map(|(id, _, _)| *id);
         let component_ids_offset = self.vtable.data.extend_from_iter_aligned(component_ids)? as u64;
@@ -334,14 +335,14 @@ mod tests {
 
     #[test]
     fn test_parse_col_entry() -> Result<(), Error> {
-        let vtable: VTable<Vec<Entry>, Vec<u8>> = VTableBuilder::default()
-            .column(
-                ComponentId::new("foo"),
-                PrimType::F32,
-                &[2, 2],
-                &[EntityId(1), EntityId(2)],
-            )?
-            .build();
+        let mut vtable = VTableBuilder::default();
+        vtable.column(
+            ComponentId::new("foo"),
+            PrimType::F32,
+            &[2, 2],
+            [EntityId(1), EntityId(2)].into_iter(),
+        )?;
+        let vtable: VTable<Vec<Entry>, Vec<u8>> = vtable.build();
 
         let arr = nox::array![[[1f32, 0.0], [5.0, 5.0]], [[4.0, 4.0], [1.0, 1.0]]];
         let buf: &[f32] = arr.buf.as_buf();
@@ -368,15 +369,15 @@ mod tests {
 
     #[test]
     fn test_parse_row_entry() -> Result<(), Error> {
-        let vtable: VTable<Vec<Entry>, Vec<u8>> = VTableBuilder::default()
-            .entity(
-                EntityId(0),
-                &[
-                    (ComponentId::new("foo"), PrimType::F32, &[2, 2]),
-                    (ComponentId::new("bar"), PrimType::F64, &[3]),
-                ],
-            )?
-            .build();
+        let mut vtable = VTableBuilder::default();
+        vtable.entity(
+            EntityId(0),
+            &[
+                (ComponentId::new("foo"), PrimType::F32, &[2, 2]),
+                (ComponentId::new("bar"), PrimType::F64, &[3]),
+            ],
+        )?;
+        let vtable: VTable<Vec<Entry>, Vec<u8>> = vtable.build();
 
         let mut table = vec![];
         let arr = nox::array![[1f32, 0.0], [5.0, 5.0]];
