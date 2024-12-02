@@ -4,22 +4,21 @@
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
-use hal::{gpio, i2c, pac};
+use hal::{i2c, pac};
 
+use roci_multicopter::bmm350;
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{bmm350, pin::*};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
+    let _pins = bsp::Pins::take().unwrap();
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
     clock_cfg.setup().unwrap();
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
 
-    PB6::set(&dp.I2C4).output_type(gpio::OutputType::OpenDrain);
-    PB7::set(&dp.I2C4).output_type(gpio::OutputType::OpenDrain);
     let i2c = i2c::I2c::new(
         dp.I2C4,
         i2c::I2cConfig {
