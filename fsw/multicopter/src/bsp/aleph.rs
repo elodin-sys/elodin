@@ -8,62 +8,62 @@ static mut PINS_TAKEN: bool = false;
 
 pub struct Pins {
     // I2C1
-    pub pb6: Pin,
-    pub pb7: Pin,
+    pub pb6: Pin, // SCL
+    pub pb7: Pin, // SDA
 
     // I2C2
-    pub pf0: Pin,
-    pub pf1: Pin,
+    pub pf0: Pin, // SDA
+    pub pf1: Pin, // SCL
 
     // I2C4
-    pub pf14: Pin,
-    pub pf15: Pin,
+    pub pf14: Pin, // SCL
+    pub pf15: Pin, // SDA
 
     // TIM1
-    pub pe9: Pin,
-    pub pe11: Pin,
-    pub pe13: Pin,
-    pub pe14: Pin,
+    pub pe9: Pin,  // CH1
+    pub pe11: Pin, // CH2
+    pub pe13: Pin, // CH3
+    pub pe14: Pin, // CH4
 
     // TIM2
-    pub pa5: Pin,
-    pub pa1: Pin,
-    pub pa2: Pin,
-    pub pa3: Pin,
+    pub pa5: Pin, // CH1
+    pub pa1: Pin, // CH2
+    pub pa2: Pin, // CH3
+    pub pa3: Pin, // CH4
 
     // TIM3
-    pub pa6: Pin,
-    pub pa7: Pin,
-    pub pb0: Pin,
-    pub pb1: Pin,
+    pub pa6: Pin, // CH1
+    pub pa7: Pin, // CH2
+    pub pb0: Pin, // CH3
+    pub pb1: Pin, // CH4
 
     // TIM4
-    pub pd12: Pin,
-    pub pd13: Pin,
-    pub pd14: Pin,
-    pub pd15: Pin,
+    pub pd12: Pin, // CH1
+    pub pd13: Pin, // CH2
+    pub pd14: Pin, // CH3
+    pub pd15: Pin, // CH4
 
     // USART1
-    pub pa9: Pin,
-    pub pa10: Pin,
+    pub pa9: Pin,  // TX
+    pub pa10: Pin, // RX
 
     // USART2
-    pub pd5: Pin,
-    pub pd6: Pin,
+    pub pd5: Pin, // TX
+    pub pd6: Pin, // RX
 
     // USART3
-    pub pd8: Pin,
-    pub pd9: Pin,
+    pub pd8: Pin, // TX
+    pub pd9: Pin, // RX
 
     // UART4
-    pub pb8: Pin,
-    pub pb9: Pin,
+    pub pb8: Pin, // RX
+    pub pb9: Pin, // TX
 
     // UART7
-    pub pb4: Pin,
+    pub pb4: Pin, // TX
 
     // USART6
-    pub pg14: Pin,
+    pub pg14: Pin, // TX
 }
 
 impl Pins {
