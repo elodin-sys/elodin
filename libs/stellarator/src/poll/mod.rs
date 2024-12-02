@@ -1,3 +1,4 @@
+use maitake::time::Timer;
 use pin_project::{pin_project, pinned_drop};
 use polling::Poller;
 use slab::Slab;
@@ -34,8 +35,8 @@ pub enum OpState {
 }
 
 impl Reactor for PollingReactor {
-    fn wait_for_io(&mut self) -> Result<(), crate::Error> {
-        self.poller.wait(&mut self.events, None)?;
+    fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), crate::Error> {
+        self.poller.wait(&mut self.events, timeout)?;
         Ok(())
     }
 
@@ -203,6 +204,7 @@ impl Executor<PollingReactor> {
         Ok(Executor {
             reactor: RefCell::new(reactor),
             scheduler: maitake::scheduler::LocalScheduler::new(),
+            timer: Timer::new(crate::os::os_clock()),
         })
     }
 }
