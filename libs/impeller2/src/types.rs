@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use nox::ArrayView;
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
@@ -20,11 +22,17 @@ use crate::error::Error;
     FromBytes,
 )]
 #[repr(transparent)]
-pub struct ComponentId(u64);
+pub struct ComponentId(pub u64);
 
 impl ComponentId {
     pub const fn new(str: &str) -> Self {
         ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(str))
+    }
+}
+
+impl Display for ComponentId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -45,6 +53,12 @@ impl ComponentId {
 )]
 #[repr(transparent)]
 pub struct EntityId(pub u64);
+
+impl Display for EntityId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
 
 impl TryFrom<&[u8]> for EntityId {
     type Error = Error;
@@ -102,7 +116,7 @@ impl PrimType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum ComponentView<'a> {
     U8(ArrayView<'a, u8>),
     U16(ArrayView<'a, u16>),
@@ -118,6 +132,38 @@ pub enum ComponentView<'a> {
 }
 
 impl<'a> ComponentView<'a> {
+    pub fn shape(&self) -> &[usize] {
+        match *self {
+            Self::U8(ref view) => view.shape(),
+            Self::U16(ref view) => view.shape(),
+            Self::U32(ref view) => view.shape(),
+            Self::U64(ref view) => view.shape(),
+            Self::I8(ref view) => view.shape(),
+            Self::I16(ref view) => view.shape(),
+            Self::I32(ref view) => view.shape(),
+            Self::I64(ref view) => view.shape(),
+            Self::Bool(ref view) => view.shape(),
+            Self::F32(ref view) => view.shape(),
+            Self::F64(ref view) => view.shape(),
+        }
+    }
+
+    pub fn prim_type(&self) -> PrimType {
+        match *self {
+            Self::U8(_) => PrimType::U8,
+            Self::U16(_) => PrimType::U16,
+            Self::U32(_) => PrimType::U32,
+            Self::U64(_) => PrimType::U64,
+            Self::I8(_) => PrimType::I8,
+            Self::I16(_) => PrimType::I16,
+            Self::I32(_) => PrimType::I32,
+            Self::I64(_) => PrimType::I64,
+            Self::Bool(_) => PrimType::Bool,
+            Self::F32(_) => PrimType::F32,
+            Self::F64(_) => PrimType::F64,
+        }
+    }
+
     pub fn try_from_bytes_shape(
         buf: &'a [u8],
         shape: &'a [usize],
@@ -174,6 +220,21 @@ impl<'a> ComponentView<'a> {
             }
         }
     }
+    pub fn as_bytes(&self) -> &[u8] {
+        match *self {
+            Self::U8(ref view) => view.as_bytes(),
+            Self::U16(ref view) => view.as_bytes(),
+            Self::U32(ref view) => view.as_bytes(),
+            Self::U64(ref view) => view.as_bytes(),
+            Self::I8(ref view) => view.as_bytes(),
+            Self::I16(ref view) => view.as_bytes(),
+            Self::I32(ref view) => view.as_bytes(),
+            Self::I64(ref view) => view.as_bytes(),
+            Self::Bool(ref view) => view.as_bytes(),
+            Self::F32(ref view) => view.as_bytes(),
+            Self::F64(ref view) => view.as_bytes(),
+        }
+    }
 }
 
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug, Clone, Copy)]
@@ -183,7 +244,9 @@ pub enum PacketTy {
     Table = 1,
 }
 
-pub type PacketId = [u8; 3];
+pub type PacketId = [u8; 7];
+
+pub const PACKET_HEADER_LEN: usize = 8;
 
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
 #[repr(C)]

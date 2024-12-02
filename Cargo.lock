@@ -107,7 +107,7 @@ dependencies = [
  "serde",
  "serialport",
  "thingbuf",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "toml",
  "tracing 0.1.40",
  "tracing-subscriber",
@@ -697,7 +697,7 @@ checksum = "30ca9a001c1e8ba5149f91a74362376cc6bc5b919d92d988668657bd570bdcec"
 dependencies = [
  "async-task",
  "concurrent-queue",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "futures-lite 2.3.0",
  "slab",
 ]
@@ -833,7 +833,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -860,7 +860,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "uuid 1.11.0",
 ]
@@ -3334,6 +3334,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core 0.9.10",
+]
+
+[[package]]
 name = "dasp_sample"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3661,7 +3675,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-util",
  "toml",
@@ -3689,7 +3703,7 @@ dependencies = [
  "directories",
  "egui",
  "egui_tiles",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "flume",
  "fuzzy-matcher",
  "hex",
@@ -4072,9 +4086,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.1.1"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
+checksum = "486f806e73c5707928240ddc295403b1b93c96a02038563881c4a2fd84b81ac4"
 
 [[package]]
 name = "fdeflate"
@@ -4384,7 +4398,7 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52527eb5074e35e9339c6b4e8d12600c7128b68fb25dcb9fa9dec18f7c25f3a5"
 dependencies = [
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "futures-core",
  "futures-io",
  "parking",
@@ -5539,7 +5553,7 @@ dependencies = [
  "bytes",
  "const-fnv1a-hash",
  "embedded-io-async",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "flume",
  "futures",
  "hashbrown 0.14.5",
@@ -5554,12 +5568,32 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-util",
  "tracing 0.1.40",
  "try_buf",
  "ustr",
+]
+
+[[package]]
+name = "impeller-db"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.20",
+ "dashmap",
+ "fastrand 2.2.0",
+ "impeller2",
+ "impeller2-stella",
+ "memmap2 0.9.5",
+ "miette",
+ "postcard",
+ "serde",
+ "smallvec",
+ "stellarator",
+ "thiserror 2.0.0",
+ "tracing 0.1.40",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5570,8 +5604,9 @@ dependencies = [
  "heapless 0.8.0",
  "miette",
  "nox",
+ "postcard",
  "serde",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "zerocopy 0.8.7",
 ]
 
@@ -6510,7 +6545,7 @@ dependencies = [
  "nox",
  "roci",
  "serialport",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
 ]
 
 [[package]]
@@ -7073,7 +7108,7 @@ dependencies = [
  "seq-macro",
  "serde",
  "smallvec",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "typenum",
  "which 6.0.3",
  "zerocopy 0.8.7",
@@ -7103,7 +7138,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tracing 0.1.40",
  "tracing-subscriber",
@@ -7159,7 +7194,7 @@ dependencies = [
  "s10",
  "serde_json",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-util",
  "toml",
@@ -7186,7 +7221,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "tar",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "ureq",
  "zerocopy 0.8.7",
  "zip",
@@ -8041,7 +8076,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c8c490f422ef9a4efd2cb5b42b76c8613d7e7dfc1caf667b8a3350a5acc066"
 dependencies = [
  "atomic-waker",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "futures-io",
 ]
 
@@ -9382,7 +9417,7 @@ dependencies = [
  "bytes",
  "crossbeam",
  "csv",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "heapless 0.8.0",
  "impeller",
  "nix 0.29.0",
@@ -9698,7 +9733,7 @@ dependencies = [
  "serde",
  "smallvec",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-util",
  "toml",
@@ -10255,7 +10290,7 @@ dependencies = [
  "serde_with",
  "tar",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -10850,6 +10885,7 @@ dependencies = [
  "io-uring",
  "libc",
  "maitake",
+ "miette",
  "pin-project",
  "polling",
  "rustix",
@@ -10858,7 +10894,7 @@ dependencies = [
  "socket2",
  "stack_dst",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.0",
  "waker-fn",
  "windows-sys 0.52.0",
 ]
@@ -11112,7 +11148,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
 dependencies = [
  "cfg-if",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
@@ -11169,11 +11205,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.3"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+checksum = "15291287e9bff1bc6f9ff3409ed9af665bec7a5fc8ac079ea96be07bca0e2668"
 dependencies = [
- "thiserror-impl 2.0.3",
+ "thiserror-impl 2.0.0",
 ]
 
 [[package]]
@@ -11189,9 +11225,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.3"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
+checksum = "22efd00f33f93fa62848a7cab956c3d38c8d43095efda1decfc2b3a5dc0b8972"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -31,6 +31,7 @@ members = [
     "apps/dev-tools",
     "libs/impeller2",
     "libs/impeller2/stella",
+    "libs/impeller2/db",
     "libs/stellarator",
 ]
 exclude = [

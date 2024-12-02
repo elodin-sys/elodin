@@ -221,6 +221,13 @@ impl AsyncWrite for File {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+impl std::os::fd::AsRawFd for File {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        self.handle.as_handle().as_raw_fd()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
