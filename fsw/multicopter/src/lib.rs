@@ -13,7 +13,6 @@ pub mod bsp;
 pub mod dma;
 pub mod dshot;
 pub mod peripheral;
-pub mod pin;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
