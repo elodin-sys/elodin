@@ -2,6 +2,7 @@ use crate::Error;
 use crate::Executor;
 use crate::Reactor;
 use io_uring::{cqueue, squeue};
+use maitake::time::Timer;
 use pin_project::{pin_project, pinned_drop};
 use slab::Slab;
 use std::any::Any;
@@ -9,6 +10,7 @@ use std::future::Future;
 use std::mem;
 use std::pin::Pin;
 use std::task::Poll;
+use std::time::Duration;
 use std::{cell::RefCell, task::Waker};
 
 pub mod ops;
@@ -101,9 +103,21 @@ fn take_completion_op_code<O: OpCode>(completion: CompletionProj<'_, O>) -> O {
 }
 
 impl Reactor for UringReactor {
-    fn wait_for_io(&mut self) -> Result<(), Error> {
-        self.uring.submit_and_wait(1)?;
-        Ok(())
+    fn wait_for_io(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
+        let mut args = io_uring::types::SubmitArgs::new();
+        let timeout = timeout.map(|d| {
+            io_uring::types::Timespec::new()
+                .sec(d.as_secs())
+                .nsec(d.as_nanos() as u32)
+        });
+        if let Some(timeout) = timeout.as_ref() {
+            args = args.timespec(timeout);
+        }
+        match self.uring.submitter().submit_with_args(1, &args) {
+            Ok(_) => Ok(()),
+            Err(err) if err.raw_os_error() == Some(62) => Ok(()),
+            Err(err) => Err(Error::from(err)),
+        }
     }
     fn process_io(&mut self) -> Result<(), Error> {
         self.uring.submit()?;
@@ -221,6 +235,7 @@ impl Executor<UringReactor> {
         Ok(Executor {
             reactor: RefCell::new(reactor),
             scheduler: maitake::scheduler::LocalScheduler::new(),
+            timer: Timer::new(crate::os::os_clock()),
         })
     }
 }

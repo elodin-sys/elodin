@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 use impeller2::{
     com_de::Decomponentize,
     registry::VTableRegistry,
-    types::{self, PacketId, PacketTy},
+    types::{self, PacketId, PacketTy, PACKET_HEADER_LEN},
 };
 use serde::{Deserialize, Serialize};
 use stellarator::{
@@ -11,7 +9,7 @@ use stellarator::{
     io::{AsyncRead, AsyncWrite, LengthDelReader},
     BufResult,
 };
-use zerocopy::{Immutable, KnownLayout, TryFromBytes, Unaligned};
+use zerocopy::TryFromBytes;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -46,7 +44,9 @@ impl<R: AsyncRead> PacketStream<R> {
             types::Packet::try_ref_from_bytes(&packet_buf).unwrap();
         let packet_ty = *packet_ty;
         let id = *id;
-        let buf = packet_buf.try_sub_slice(4..).ok_or(Error::InvalidPacket)?;
+        let buf = packet_buf
+            .try_sub_slice(PACKET_HEADER_LEN..)
+            .ok_or(Error::InvalidPacket)?;
         Ok(match packet_ty {
             PacketTy::Msg => Packet::Msg(MsgBuf { id, buf }),
             PacketTy::Table => Packet::Table(Table { id, buf }),
@@ -55,7 +55,7 @@ impl<R: AsyncRead> PacketStream<R> {
 }
 
 pub struct Table<B: IoBuf> {
-    pub id: [u8; 3],
+    pub id: PacketId,
     pub buf: Slice<B>,
 }
 
@@ -73,7 +73,7 @@ impl<B: IoBuf> Table<B> {
 }
 
 pub struct MsgBuf<B: IoBuf> {
-    pub id: [u8; 3],
+    pub id: PacketId,
     pub buf: Slice<B>,
 }
 
@@ -89,6 +89,15 @@ pub enum Packet<B: IoBuf> {
     Table(Table<B>),
 }
 
+impl<B: IoBuf> Packet<B> {
+    pub fn into_buf(self) -> B {
+        match self {
+            Packet::Msg(msg_buf) => msg_buf.buf.into_inner(),
+            Packet::Table(table) => table.buf.into_inner(),
+        }
+    }
+}
+
 pub struct PacketSink<W: AsyncWrite> {
     writer: W,
 }
@@ -98,99 +107,94 @@ impl<W: AsyncWrite> PacketSink<W> {
         Self { writer }
     }
 
-    pub async fn send<P: AsLenPacket + FromLenPacket + ?Sized>(
-        &self,
-        packet: Arc<P>,
-    ) -> BufResult<(), Arc<P>> {
-        let packet = ArcLenPacket(packet.as_arc_packet());
+    pub async fn send(&self, packet: LenPacket) -> BufResult<(), LenPacket> {
         let (res, packet) = self.writer.write_all(packet).await;
-        (res, P::from_arc_packet(packet.0))
+        (res, packet)
     }
 }
 
-pub trait AsLenPacket {
-    fn as_packet(&self) -> &'_ LenPacket;
-    fn as_arc_packet(self: Arc<Self>) -> Arc<LenPacket>;
-    fn as_box_packet(self: Box<Self>) -> Box<LenPacket>;
-}
-
-pub trait FromLenPacket {
-    fn from_arc_packet(pkt: Arc<LenPacket>) -> Arc<Self>;
-    fn from_box_packet(pkt: Box<LenPacket>) -> Box<Self>;
-}
-
-impl AsLenPacket for LenPacket {
-    fn as_packet(&self) -> &'_ LenPacket {
-        self
-    }
-
-    fn as_arc_packet(self: Arc<Self>) -> Arc<LenPacket> {
-        self
-    }
-
-    fn as_box_packet(self: Box<Self>) -> Box<LenPacket> {
-        self
-    }
-}
-
-impl FromLenPacket for LenPacket {
-    fn from_arc_packet(pkt: Arc<LenPacket>) -> Arc<Self> {
-        pkt
-    }
-
-    fn from_box_packet(pkt: Box<LenPacket>) -> Box<Self> {
-        pkt
-    }
-}
-
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
-#[repr(C)]
 pub struct LenPacket {
-    pub length: [u8; 8],
-    pub packet: types::Packet,
+    pub inner: Vec<u8>,
 }
 
-#[repr(transparent)]
-struct ArcLenPacket(Arc<LenPacket>);
+impl LenPacket {
+    pub fn new(ty: PacketTy, id: PacketId, cap: usize) -> Self {
+        let mut inner = Vec::with_capacity(cap + 16);
+        inner.extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        inner.push(ty as u8);
+        inner.extend_from_slice(&id);
+        Self { inner }
+    }
 
-unsafe impl IoBuf for ArcLenPacket {
+    pub fn msg(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::Msg, id, cap)
+    }
+
+    pub fn table(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::Table, id, cap)
+    }
+
+    fn pkt_len(&mut self) -> u64 {
+        let len = &mut self.inner[..8];
+        u64::from_le_bytes(len.try_into().expect("len wrong size"))
+    }
+
+    pub fn push(&mut self, elem: u8) {
+        let len = self.pkt_len() + 1;
+        self.inner.push(elem);
+        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+    }
+
+    pub fn extend_from_slice(&mut self, buf: &[u8]) {
+        let len = self.pkt_len() + buf.len() as u64;
+        self.inner.extend_from_slice(buf);
+        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+    }
+
+    pub fn clear(&mut self) {
+        let ty = self.inner[8];
+        let id: PacketId = self.inner[9..9 + 7].try_into().unwrap();
+        self.inner.clear();
+        self.inner
+            .extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        self.inner.push(ty);
+        self.inner.extend_from_slice(&id);
+    }
+}
+
+unsafe impl IoBuf for LenPacket {
     fn stable_init_ptr(&self) -> *const u8 {
-        Arc::as_ptr(&self.0) as *const _
+        self.inner.stable_init_ptr()
     }
 
     fn init_len(&self) -> usize {
-        let len = u64::from_le_bytes(self.0.length) as usize;
-        len + 4 + 8
+        self.inner.init_len()
     }
 
     fn total_len(&self) -> usize {
-        let len = u64::from_le_bytes(self.0.length) as usize;
-        len + 4 + 8
+        self.inner.total_len()
     }
 }
 
-pub trait Msg: Serialize + postcard::experimental::max_size::MaxSize {
-    fn id(&self) -> [u8; 3];
+impl postcard::ser_flavors::Flavor for LenPacket {
+    type Output = LenPacket;
 
-    fn to_arc_len_packet(&self) -> Arc<LenPacket> {
-        let mut buf = Arc::new_uninit_slice(Self::POSTCARD_MAX_SIZE + 4 + 8);
-        let data = Arc::get_mut(&mut buf).expect("arc was cloned");
-        for x in data {
-            x.write(0);
-        }
-        let mut buf = unsafe { buf.assume_init() };
-        let data = Arc::get_mut(&mut buf).expect("arc was cloned");
-        const LEN_SIZE: usize = size_of::<u64>();
-        data[LEN_SIZE] = PacketTy::Msg as u8;
-        const PKT_HEADER_SIZE: usize = size_of::<PacketTy>() + size_of::<PacketId>();
-        data[LEN_SIZE + size_of::<PacketTy>()..LEN_SIZE + PKT_HEADER_SIZE]
-            .copy_from_slice(&self.id());
-        let len = postcard::to_slice(self, &mut data[(PKT_HEADER_SIZE + LEN_SIZE)..])
-            .expect("postcarf failed")
-            .len() as u64
-            + 4;
-        data[..8].copy_from_slice(&len.to_le_bytes());
-        unsafe { Arc::from_raw(Arc::into_raw(buf) as *const _) }
+    fn try_push(&mut self, data: u8) -> postcard::Result<()> {
+        self.push(data);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(self)
+    }
+}
+
+pub trait Msg: Serialize {
+    const ID: PacketId;
+
+    fn to_len_packet(&self) -> LenPacket {
+        let msg = LenPacket::msg(Self::ID, 0);
+        postcard::serialize_with_flavor(&self, msg).unwrap()
     }
 }
 
@@ -208,9 +212,7 @@ mod tests {
     }
 
     impl Msg for Foo {
-        fn id(&self) -> [u8; 3] {
-            [0x1, 0x2, 0x3]
-        }
+        const ID: [u8; 7] = [0x1, 0x2, 0x3, 0xFF, 0xFA, 0xAB, 0xAA];
     }
 
     #[test]
@@ -220,7 +222,7 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             stellarator::spawn(async move {
                 let sink = PacketSink::new(listener.accept().await.unwrap());
-                let msg = Foo { bar: 0xBB }.to_arc_len_packet();
+                let msg = Foo { bar: 0xBB }.to_len_packet();
                 sink.send(msg).await.0.unwrap();
             });
             let stream = TcpStream::connect(addr).await.unwrap();
@@ -229,7 +231,7 @@ mod tests {
             let Packet::Msg(m) = stream.next(buf).await.unwrap() else {
                 panic!("non msg pkt");
             };
-            assert_eq!(m.id, [1, 2, 3]);
+            assert_eq!(m.id, Foo::ID);
             let foo: Foo = m.parse().unwrap();
             assert_eq!(foo, Foo { bar: 0xBB });
         })

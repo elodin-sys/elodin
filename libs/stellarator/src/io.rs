@@ -4,6 +4,7 @@ use crate::{
     buf::{self, IoBuf, IoBufMut, Slice},
     rent, BufResult, Error,
 };
+use std::sync::Arc;
 
 pub trait AsyncRead {
     fn read<B: IoBufMut>(&self, buf: B) -> impl Future<Output = BufResult<usize, B>>;
@@ -64,8 +65,15 @@ impl<A: AsyncRead> LengthDelReader<A> {
     pub async fn recv<B: IoBufMut>(&mut self, mut buf: B) -> Result<Slice<B>, Error> {
         let mut total_read = 0;
         while total_read < 8 {
-            let mut slice = buf.try_slice(total_read..).ok_or(Error::BufferOverflow)?;
-            total_read += rent!(self.read(slice).await, slice)?;
+            let mut slice = buf
+                .try_slice(total_read..)
+                .ok_or(Error::BufferOverflow)
+                .unwrap();
+            let len = rent!(self.read(slice).await, slice)?;
+            if len == 0 {
+                return Err(Error::EOF);
+            }
+            total_read += len;
             buf = slice.into_inner();
         }
         let len_buf = &buf::deref(&buf)[..8];
@@ -88,6 +96,41 @@ impl<A: AsyncRead> LengthDelReader<A> {
         Ok(buf)
     }
 }
+
+pub struct OwnedReader<R> {
+    inner: Arc<R>,
+}
+
+impl<R: AsyncRead> AsyncRead for OwnedReader<R> {
+    fn read<B: IoBufMut>(&self, buf: B) -> impl Future<Output = BufResult<usize, B>> {
+        self.inner.read(buf)
+    }
+}
+
+pub struct OwnedWriter<W> {
+    inner: Arc<W>,
+}
+
+impl<W: AsyncWrite> AsyncWrite for OwnedWriter<W> {
+    fn write<B: IoBuf>(&self, buf: B) -> impl Future<Output = BufResult<usize, B>> {
+        self.inner.write(buf)
+    }
+}
+
+pub trait SplitExt: AsyncRead + AsyncWrite + Sized {
+    fn split(self) -> (OwnedReader<Self>, OwnedWriter<Self>)
+    where
+        Self: Sized,
+    {
+        let arc = Arc::new(self);
+        (
+            OwnedReader { inner: arc.clone() },
+            OwnedWriter { inner: arc },
+        )
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite> SplitExt for T {}
 
 #[cfg(test)]
 mod tests {

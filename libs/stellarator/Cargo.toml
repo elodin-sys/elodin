@@ -7,6 +7,7 @@ repository.workspace = true
 [features]
 default = ["std"]
 std = []
+miette = ["dep:miette"]
 
 [dependencies]
 # async
@@ -24,6 +25,9 @@ socket2 = "0.5"
 
 # errors
 thiserror = { version = "2.0", default-features = false }
+miette.version = "7.2"
+miette.features = ["fancy"]
+miette.optional = true
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -38,11 +42,12 @@ smallvec.features = ["const_generics", "union"]
 
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
-rustix = { version = "0.38", features = ["net", "fs", "termios"] }
+rustix = { version = "0.38", features = ["net", "fs", "termios", "thread", "time"] }
+
 
 [target.'cfg(target_os = "windows")'.dependencies]
 rustix = { version = "0.38", features = ["net"] }
-windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+windows-sys = { version = "0.52", features = ["Win32_Storage_FileSystem", "Win32_Foundation", "Win32_System_Performance"] }
 
 [dev-dependencies]
 tempfile = "3.13.0"
