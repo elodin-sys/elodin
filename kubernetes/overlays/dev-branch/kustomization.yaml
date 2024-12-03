@@ -128,14 +128,14 @@ replacements:
 
 images:
 - name: elodin-infra/elo-atc
-  newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64
+  newName: elodin.azurecr.io/elodin-infra/elo-atc/x86_64
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-dashboard
-  newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
+  newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-sim-agent
-  newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
+  newName: elodin.azurecr.io/elodin-infra/elo-sim-agent/x86_64
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-docs
-  newName: us-central1-docker.pkg.dev/elodin-infra/elo-docs/x86_64
+  newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64
   newTag: $BUILDKITE_COMMIT

@@ -39,7 +39,7 @@ spec:
         name: postgres-data
       spec:
         accessModes: [ "ReadWriteOnce" ]
-        storageClassName: premium-rwo
+        storageClassName: managed-csi-premium
         resources:
           requests:
             storage: 10Gi

@@ -16,18 +16,11 @@ defmodule ElodinDashboardWeb.OnboardingLive do
 
     user_agent = get_connect_info(socket, :user_agent)
 
-    device_type =
-      case UAInspector.parse(user_agent) do
-        %UAInspector.Result{device: %UAInspector.Result.Device{type: dt}} -> dt
-        _ -> "unknown"
-      end
-
     Logger.info(
       "onboarding page accessed",
       user_email: current_user["email"],
       onboarding_page: page_num,
       subscription_type: sub_type,
-      device_type: device_type,
       user_agent: user_agent
     )
 
