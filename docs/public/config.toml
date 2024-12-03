@@ -44,7 +44,7 @@ github = "https://github.com/elodin-sys"
 twitter = "https://twitter.com/elodinsystems"
 email = "info@elodin.systems"
 ganalytics = ""
-version = "v0.10.0"
+version = "v0.10.1"
 
 # If running on netlify.app site, set to true
 is_netlify = false
