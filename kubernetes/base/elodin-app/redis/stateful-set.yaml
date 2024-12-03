@@ -55,7 +55,7 @@ spec:
       name: redis-data
     spec:
       accessModes: ["ReadWriteOnce"]
-      storageClassName: premium-rwo
+      storageClassName: managed-csi-premium
       resources:
         requests:
           storage: 5Gi

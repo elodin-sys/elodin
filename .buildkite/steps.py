@@ -1,10 +1,7 @@
 from buildkite import step
-from plugins import gcp_identity_plugin
 
 
-def build_image_step(
-    image_name, target, image_tag="latest", repository="us-central1-docker.pkg.dev"
-):
+def build_image_step(image_name, target, image_tag="latest", repository="elodin.azurecr.io"):
     remote_image_path = f"{repository}/elodin-infra/{image_name}/x86_64:{image_tag}"
 
     pre_command = " && ".join(
@@ -15,7 +12,8 @@ def build_image_step(
 
     command = " && ".join(
         [
-            f"gcloud --quiet auth configure-docker {repository}",
+            "az login --identity",
+            "az acr login --name elodin --expose-token --output tsv --query accessToken | skopeo login elodin.azurecr.io --password-stdin --username 00000000-0000-0000-0000-000000000000",
             f"skopeo --insecure-policy copy docker-archive:\$IMAGE_PATH docker://{remote_image_path}",
         ]
     )
@@ -25,8 +23,7 @@ def build_image_step(
         flake=".#ops",
         pre_command=pre_command,
         command=command,
-        plugins=[gcp_identity_plugin()],
-        agents={"queue": "gcp"},
+        env={"REGISTRY_AUTH_FILE": "./auth.json"},
     )
 
 

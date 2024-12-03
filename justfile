@@ -2,7 +2,7 @@
 #! nix develop .#ops --command just --justfile
 
 k8s_overlays := "kubernetes/overlays"
-artifact_registry := "us-central1-docker.pkg.dev/elodin-infra"
+artifact_registry := "elodin.azurecr.io/elodin-infra"
 repo_sim_agent := "elo-sim-agent/x86_64"
 repo_atc := "elo-atc/x86_64"
 repo_dashboard := "elo-dashboard/x86_64"
@@ -86,16 +86,16 @@ release tag:
   - ../overlays/prod
   images:
   - name: elodin-infra/elo-atc
-    newName: us-central1-docker.pkg.dev/elodin-infra/elo-atc/x86_64
+    newName: elodin.azurecr.io/elodin-infra/elo-atc/x86_64
     newTag: {{tag}}
   - name: elodin-infra/elo-dashboard
-    newName: us-central1-docker.pkg.dev/elodin-infra/elo-dashboard/x86_64
+    newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
     newTag: {{tag}}
   - name: elodin-infra/elo-sim-agent
-    newName: us-central1-docker.pkg.dev/elodin-infra/elo-sim-agent/x86_64
+    newName: elodin.azurecr.io/elodin-infra/elo-sim-agent/x86_64
     newTag: {{tag}}
   - name: elodin-infra/elo-docs
-    newName: us-central1-docker.pkg.dev/elodin-infra/elo-docs/x86_64
+    newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64
     newTag: {{tag}}
   replacements:
   - source:

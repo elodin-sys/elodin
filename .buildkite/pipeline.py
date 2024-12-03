@@ -1,15 +1,10 @@
 import os
 
 from buildkite import group, pipeline, step
-from plugins import gcp_identity_plugin
 from steps import build_image_step, nix_step, rust_step
 from utils import codename
 
-GKE_CONFIG = {
-    "cluster_name": "elodin-dev-gke",
-    "project_id": "elodin-dev",
-    "region": "us-central1",
-}
+AZ_CONFIG = {"cluster_name": "dev", "rg_name": "dev"}
 
 GITHUB_ACTION_TRIGGER = os.getenv("TRIGGERED_FROM_GHA", "") == "1"
 BRANCH_NAME = (
@@ -18,9 +13,8 @@ BRANCH_NAME = (
 
 
 def deploy_k8s_step(branch_name):
-    gke_cluster_name = GKE_CONFIG["cluster_name"]
-    gke_project_id = GKE_CONFIG["project_id"]
-    gke_region = GKE_CONFIG["region"]
+    az_cluster_name = AZ_CONFIG["cluster_name"]
+    az_rg_name = AZ_CONFIG["rg_name"]
 
     is_main = branch_name == "main"
 
@@ -34,8 +28,9 @@ def deploy_k8s_step(branch_name):
 
     command = " && ".join(
         [
-            f"gcloud container clusters get-credentials {gke_cluster_name} --region {gke_region} --project {gke_project_id}",
-            "just decrypt-secrets-force",
+            "az login --identity",
+            f"az aks get-credentials --resource-group {az_rg_name} --name {az_cluster_name} --overwrite-existing",
+            "OP_SERVICE_ACCOUNT_TOKEN=$(cat /run/keys/1password-token) just decrypt-secrets-force",
             f"kubectl kustomize kubernetes/overlays/{overlay_name} > out.yaml",
             f"export CLUSTER_NAME={cluster_name}",
             "envsubst < out.yaml > out-with-envs.yaml",
@@ -49,8 +44,6 @@ def deploy_k8s_step(branch_name):
         flake=".#ops",
         command=command,
         env={"ELO_DECRYPT_SECRETS": "1"},
-        plugins=[gcp_identity_plugin()],
-        agents={"queue": "gcp"},
     )
 
 
@@ -58,7 +51,6 @@ def cleanup_k8s_step(branch_name):
     return step(
         label=":kubernetes: delete dev-branch cluster",
         command=[f"./justfile clean-dev-branch {codename(branch_name)}"],
-        plugins=[gcp_identity_plugin()],
     )
 
 

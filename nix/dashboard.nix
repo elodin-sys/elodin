@@ -30,6 +30,8 @@
       pname = "mix-deps-dashboard";
       hash = "sha256-3T+VBDdbBgImubjb2COWJHcMsHKJSwT/TguESD+FGMQ=";
     };
+    TAILWIND_BIN = "${pkgs.tailwindcss}/bin/tailwindcss";
+    ESBUILD_BIN = "${pkgs.esbuild}/bin/esbuild";
     ELODIN_TYPES_PATH = "./vendor/elodin_types";
     preConfigure = ''
       mkdir -p ./vendor/elodin_types
@@ -42,7 +44,6 @@
       cp -R --no-preserve=mode,ownership  ${../services/dashboard/priv/static/images} ./priv/static/images
     '';
     postBuild = ''
-      mix ua_inspector.download --force
       mix assets.deploy
     '';
   };
