@@ -48,15 +48,14 @@ fn main() -> ! {
     let mut monotonic = monotonic::Monotonic::new(dp.TIM2, &clock_cfg);
     defmt::info!("Configured monotonic timer");
 
-    let usart2 = usart::Usart::new(
-        dp.USART2,
+    let elrs_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
+        dp.USART3,
         crsf::CRSF_BAUDRATE,
         usart::UsartConfig::default(),
         &clock_cfg,
-    );
-    let usart2 = healing_usart::HealingUsart::new(usart2);
-    defmt::info!("Configured USART2");
-    let mut crsf = crsf::CrsfReceiver::new(Box::new(usart2));
+    )));
+    defmt::info!("Configured ELRS UART");
+    let mut crsf = crsf::CrsfReceiver::new(elrs_uart);
 
     let i2c = i2c::I2c::new(
         dp.I2C1,
@@ -96,7 +95,7 @@ fn main() -> ! {
             defmt::trace!("{}: Reading BMM350 data", ts);
 
             match bmm350.read_data() {
-                Ok(mag_data) => defmt::info!("BMM350: {}", mag_data),
+                Ok(mag_data) => defmt::trace!("BMM350: {}", mag_data),
                 Err(err) => defmt::error!("BMM350 error: {}", err),
             }
         } else if now.checked_duration_since(last_dshot_update).unwrap() > dshot::UPDATE_PERIOD {
