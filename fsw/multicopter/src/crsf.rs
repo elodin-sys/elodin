@@ -11,7 +11,7 @@ const CRSF_MAX_CHANNEL: usize = 16;
 
 const RC_MIN: u16 = 172;
 const RC_MAX: u16 = 1811;
-const RC_MID: u16 = 992;
+const RC_MID: u16 = (RC_MIN + RC_MAX) / 2;
 
 type Instant = fugit::TimerInstant<u64, 1_000_000>;
 
@@ -72,6 +72,7 @@ pub struct RcChannels {
     ch16: B11,
 }
 
+#[derive(Debug, Clone, Copy, defmt::Format)]
 pub struct Control {
     pub aileron: f32,
     pub elevator: f32,
@@ -82,7 +83,7 @@ pub struct Control {
 
 impl Control {
     pub fn armed(&self) -> bool {
-        self.aux[0]
+        self.aux[3]
     }
 }
 
@@ -196,18 +197,18 @@ impl CrsfReceiver {
 
     fn aux(&self) -> [bool; 12] {
         [
-            self.channel_data[4] >= RC_MID,
-            self.channel_data[5] >= RC_MID,
-            self.channel_data[6] >= RC_MID,
-            self.channel_data[7] >= RC_MID,
-            self.channel_data[8] >= RC_MID,
-            self.channel_data[9] >= RC_MID,
-            self.channel_data[10] >= RC_MID,
-            self.channel_data[11] >= RC_MID,
-            self.channel_data[12] >= RC_MID,
-            self.channel_data[13] >= RC_MID,
-            self.channel_data[14] >= RC_MID,
-            self.channel_data[15] >= RC_MID,
+            self.channel_data[4] > RC_MID,
+            self.channel_data[5] > RC_MID,
+            self.channel_data[6] > RC_MID,
+            self.channel_data[7] > RC_MID,
+            self.channel_data[8] > RC_MID,
+            self.channel_data[9] > RC_MID,
+            self.channel_data[10] > RC_MID,
+            self.channel_data[11] > RC_MID,
+            self.channel_data[12] > RC_MID,
+            self.channel_data[13] > RC_MID,
+            self.channel_data[14] > RC_MID,
+            self.channel_data[15] > RC_MID,
         ]
     }
 
