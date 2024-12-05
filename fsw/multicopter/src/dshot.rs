@@ -74,7 +74,7 @@ where
 
     fn update_state(&mut self, armed: bool, now: Instant) {
         match (armed, self.arm_state) {
-            (false, ArmState::Armed) => {
+            (false, _) if self.arm_state != ArmState::Disarmed => {
                 defmt::debug!("Disarming motors");
                 self.arm_state = ArmState::Disarmed;
             }
