@@ -25,3 +25,7 @@ nox.default-features = false
 nox-ecs.path = "libs/nox-ecs"
 impeller.path = "libs/impeller"
 impeller.default-features = false
+
+[patch.crates-io]
+# Remove after there's a new release on https://crates.io/crates/faer > 0.19.4
+faer = { git = "https://github.com/sarah-quinones/faer-rs.git", rev = "4f3eb7e" }
