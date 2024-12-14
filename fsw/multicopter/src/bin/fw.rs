@@ -7,12 +7,12 @@ use alloc::boxed::Box;
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
-use fugit::RateExtU32 as _;
+use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{
-    arena::ArenaAlloc, bmm350, crsf, dshot, healing_usart, monotonic, peripheral::*,
+    arena::ArenaAlloc, bmm350, crsf, dshot, healing_usart, led, monotonic, peripheral::*,
 };
 
 #[global_allocator]
@@ -37,7 +37,8 @@ fn main() -> ! {
 
     let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
-    let _pins = bsp::Pins::take().unwrap();
+    let pins = bsp::Pins::take().unwrap();
+    let bsp::Pins { pd10: led_sg0, .. } = pins;
     defmt::info!("Configured peripherals");
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
@@ -47,6 +48,8 @@ fn main() -> ! {
 
     let mut monotonic = monotonic::Monotonic::new(dp.TIM2, &clock_cfg);
     defmt::info!("Configured monotonic timer");
+
+    let mut running_led = led::PeriodicLed::new(led_sg0, 100u32.millis());
 
     let elrs_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.USART3,
@@ -106,6 +109,8 @@ fn main() -> ! {
             let armed = control.armed();
             dshot_driver.write_throttle([control.throttle.into(); 4], armed, now);
         }
+
+        running_led.update(now);
 
         delay.delay_us(10);
     }
