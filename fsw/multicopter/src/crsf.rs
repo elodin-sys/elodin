@@ -4,6 +4,8 @@ use fugit::MicrosDuration;
 use hal::usart::UartError;
 use modular_bitfield::prelude::*;
 
+use crate::monotonic::Instant;
+
 pub const CRSF_BAUDRATE: u32 = 420000;
 const CRSF_SYNC_BYTE: u8 = 0xC8;
 const CRSF_FRAME_SIZE_MAX: usize = 64;
@@ -12,8 +14,6 @@ const CRSF_MAX_CHANNEL: usize = 16;
 const RC_MIN: u16 = 172;
 const RC_MAX: u16 = 1811;
 const RC_MID: u16 = (RC_MIN + RC_MAX) / 2;
-
-type Instant = fugit::TimerInstant<u64, 1_000_000>;
 
 // CRSF protocol:
 // - 420000 baud
