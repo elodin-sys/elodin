@@ -16,6 +16,7 @@ pub mod crsf;
 pub mod dma;
 pub mod dshot;
 pub mod healing_usart;
+pub mod led;
 pub mod monotonic;
 pub mod peripheral;
 

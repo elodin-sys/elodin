@@ -3,6 +3,8 @@ use hal::{clocks, timer};
 
 use crate::peripheral::*;
 
+pub type Instant = fugit::TimerInstant<u64, 1_000_000>;
+
 /// Monotonic timer
 pub struct Monotonic<T>
 where
@@ -50,7 +52,7 @@ where
     }
 
     /// Returns elapsed time.
-    pub fn now(&mut self) -> fugit::TimerInstant<u64, 1_000_000> {
+    pub fn now(&mut self) -> Instant {
         fugit::TimerInstant::<u64, 1_000_000>::from_ticks(self.elapsed_ticks())
     }
 }

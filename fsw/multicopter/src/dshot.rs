@@ -3,9 +3,8 @@ use embedded_hal::delay::DelayNs;
 use fugit::ExtU64 as _;
 use hal::timer;
 
+use crate::monotonic::Instant;
 use crate::{arena::ArenaAlloc, dma::DmaBuf, peripheral::*};
-
-type Instant = fugit::TimerInstant<u64, 1_000_000>;
 
 const DSHOT_FRAME_SIZE: usize = 16;
 // Size the DMA buffer to hold a DSHOT frame + 0 padding (as a gap between frames) for 4 motors.
