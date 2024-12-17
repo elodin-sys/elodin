@@ -9,16 +9,30 @@ use defmt_rtt as _;
 use hal as _;
 use panic_probe as _;
 
-pub mod arena;
 pub mod bmm350;
 pub mod bsp;
 pub mod crsf;
 pub mod dma;
 pub mod dshot;
 pub mod healing_usart;
+pub mod i2c_dma;
 pub mod led;
 pub mod monotonic;
 pub mod peripheral;
+
+#[global_allocator]
+static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
+
+pub fn init_heap() {
+    {
+        use core::mem::MaybeUninit;
+        const HEAP_SIZE: usize = 1024;
+        #[link_section = ".axisram.buffers"]
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
+        defmt::info!("Configured heap with {} bytes", HEAP_SIZE);
+    }
+}
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
