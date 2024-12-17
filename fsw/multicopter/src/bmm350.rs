@@ -1,5 +1,11 @@
+use core::ops::DerefMut;
+
 use bitfield_struct::bitfield;
-use embedded_hal::{delay::DelayNs, i2c::I2c};
+use embedded_hal::delay::DelayNs;
+
+use hal::i2c;
+
+use crate::i2c_dma;
 
 type Duration = fugit::Duration<u32, 1, 1_000_000>;
 
@@ -278,9 +284,9 @@ impl From<Address> for u8 {
     }
 }
 
-#[derive(Debug)]
-pub enum Error<E> {
-    I2c(E),
+#[derive(Debug, defmt::Format)]
+pub enum Error {
+    I2cDma(i2c_dma::Error),
     InvalidChipId,
     InvalidPmu,
     ModeNotSupported,
@@ -289,22 +295,19 @@ pub enum Error<E> {
     OtpTimeout,
 }
 
-impl<E> defmt::Format for Error<E> {
-    fn format(&self, fmt: defmt::Formatter) {
-        let err_str = match self {
-            Error::I2c(_) => "I2C error",
-            Error::InvalidChipId => "Invalid chip ID",
-            Error::InvalidPmu => "Invalid PMU",
-            Error::ModeNotSupported => "Mode not supported",
-            Error::BitResetFailed => "Bit reset failed",
-            Error::FluxGuideResetFailed => "Flux guide reset failed",
-            Error::OtpTimeout => "OTP timeout",
-        };
-        defmt::write!(fmt, "{}", err_str)
+impl From<i2c::Error> for Error {
+    fn from(err: i2c::Error) -> Self {
+        Error::I2cDma(i2c_dma::Error::I2c(err))
     }
 }
 
-impl<E> From<InvalidPmu> for Error<E> {
+impl From<i2c_dma::Error> for Error {
+    fn from(err: i2c_dma::Error) -> Self {
+        Error::I2cDma(err)
+    }
+}
+
+impl From<InvalidPmu> for Error {
     fn from(_: InvalidPmu) -> Self {
         Error::InvalidPmu
     }
@@ -339,20 +342,21 @@ impl SignedExt for u32 {
     }
 }
 
-pub struct Bmm350<I2C> {
-    i2c: I2C,
+pub struct Bmm350 {
     address: u8,
     calibration: Calibration,
+    raw_data: RawData,
+    pub data: CalibratedData,
 }
 
-#[derive(Debug, Clone, Copy, defmt::Format)]
+#[derive(Debug, Clone, Copy, defmt::Format, Default)]
 struct RawData {
     mag: [f32; 3],
     temp: f32,
     time: u32,
 }
 
-#[derive(Debug, Clone, Copy, defmt::Format)]
+#[derive(Debug, Clone, Copy, defmt::Format, Default)]
 pub struct CalibratedData {
     pub mag: [f32; 3],
     pub temp: f32,
@@ -371,23 +375,45 @@ struct Calibration {
     cross_axis: [f32; 4],
 }
 
-impl<I2C: I2c> Bmm350<I2C> {
+impl Bmm350 {
     pub fn new<A: Into<u8>, D: DelayNs>(
-        i2c: I2C,
+        i2c_dma: &mut i2c_dma::I2cDma,
         address: A,
         delay: &mut D,
-    ) -> Result<Self, Error<I2C::Error>> {
+    ) -> Result<Self, Error> {
         let mut bmm350 = Bmm350 {
-            i2c,
             address: address.into(),
             calibration: Calibration::default(),
+            raw_data: RawData::default(),
+            data: CalibratedData::default(),
         };
-        bmm350.init(delay)?;
+        bmm350.init(i2c_dma, delay)?;
         Ok(bmm350)
     }
 
-    fn read_raw_data(&mut self) -> Result<RawData, Error<I2C::Error>> {
-        let data = self.read_registers::<15>(Register::MagXXlsb)?;
+    pub fn update(&mut self, i2c_dma: &mut i2c_dma::I2cDma) -> bool {
+        match self.try_update(i2c_dma) {
+            Ok(updated) => updated,
+            Err(err) => {
+                defmt::warn!("BMM350 error: {}", err);
+                false
+            }
+        }
+    }
+
+    // Based on the following reference implementation:
+    // https://github.com/boschsensortec/BMM350_SensorAPI/blob/4127534c6262f903683ee210b36b85ab2bb504c8/bmm350.c#L899
+    fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma) -> Result<bool, Error> {
+        match i2c_dma.state()? {
+            i2c_dma::State::Idle => {
+                defmt::trace!("Starting BMM350 DMA read");
+                i2c_dma.begin_read(self.address, Register::MagXXlsb.addr(), 15 + 2)?;
+                return Ok(false);
+            }
+            i2c_dma::State::Reading => return Ok(false),
+            i2c_dma::State::Done => {}
+        };
+        let data = &i2c_dma.finish_read()?[2..];
         let mag = [
             (data[0] as u32) | ((data[1] as u32) << 8) | ((data[2] as u32) << 16),
             (data[3] as u32) | ((data[4] as u32) << 8) | ((data[5] as u32) << 16),
@@ -396,22 +422,21 @@ impl<I2C: I2c> Bmm350<I2C> {
         let temp = (data[9] as u32) | ((data[10] as u32) << 8) | ((data[11] as u32) << 16);
         let time = (data[12] as u32) | ((data[13] as u32) << 8) | ((data[14] as u32) << 16);
 
+        if time == self.raw_data.time {
+            defmt::trace!("No new BMM350 data");
+            return Ok(false);
+        }
+
         let mag = mag.map(SignedExt::to_f32::<24>);
         let temp = temp.to_f32::<24>();
-        Ok(RawData { mag, temp, time })
-    }
-
-    // Based on the following reference implementation:
-    // https://github.com/boschsensortec/BMM350_SensorAPI/blob/4127534c6262f903683ee210b36b85ab2bb504c8/bmm350.c#L899
-    pub fn read_data(&mut self) -> Result<CalibratedData, Error<I2C::Error>> {
-        let raw_data = self.read_raw_data()?;
+        self.raw_data = RawData { mag, temp, time };
 
         // Convert raw ADC values to micro-Tesla and degrees Celsius
-        let mut mag = raw_data.mag;
+        let mut mag = self.raw_data.mag;
         mag.iter_mut().enumerate().for_each(|(i, x)| {
             *x *= MEGA_BINARY_TO_DECIMAL / (MAG_SENS[i] * MAG_GAIN_TARGET[i] * ADC_GAIN * LUT_GAIN)
         });
-        let mut temp = raw_data.temp / (TEMP_SENS * ADC_GAIN * LUT_GAIN * 1048576.0);
+        let mut temp = self.raw_data.temp / (TEMP_SENS * ADC_GAIN * LUT_GAIN * 1048576.0);
         if temp > 0.0 {
             temp -= 25.49;
         } else if temp < 0.0 {
@@ -420,7 +445,7 @@ impl<I2C: I2c> Bmm350<I2C> {
         // The output data rate is 400Hz and sensortime is incremented at 25.6kHz
         // So, a new sample is available every (25600 / 400) sensortime ticks
         const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 400;
-        let sample = raw_data.time / TIME_PER_SAMPLE;
+        let sample = self.raw_data.time / TIME_PER_SAMPLE;
 
         // Apply compensation values from OTP
         let cal = &self.calibration;
@@ -444,65 +469,56 @@ impl<I2C: I2c> Bmm350<I2C> {
                     - mag[1] * (cross_z_y - cross_x_y * cross_z_x))
                     / denom,
         ];
-        Ok(CalibratedData { mag, temp, sample })
+        self.data = CalibratedData { mag, temp, sample };
+        Ok(true)
     }
 
     fn write_register<D: Into<u8>>(
         &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
         register: Register,
         data: D,
-    ) -> Result<(), Error<I2C::Error>> {
-        self.i2c
-            .write(self.address, &[register.addr(), data.into()])
-            .map_err(Error::I2c)
+    ) -> Result<(), Error> {
+        embedded_hal::i2c::I2c::write(
+            i2c_dma.deref_mut(),
+            self.address,
+            &[register.addr(), data.into()],
+        )?;
+        Ok(())
     }
 
-    fn read_registers<const N: usize>(
+    fn read_register(
         &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
         register: Register,
-    ) -> Result<[u8; N], Error<I2C::Error>> {
-        // Read 2 more bytes than necessary as per BST-BMM350-DS001-25 #9.2.3.
-        const MAX_LEN: usize = 16;
-        const { assert!(N <= MAX_LEN) }
-        let temp_data = &mut [0; MAX_LEN + 2][..N + 2];
-        self.i2c
-            .write_read(self.address, &[register.addr()], temp_data)
-            .map_err(Error::I2c)?;
-        let mut out = [0; N];
-        out.copy_from_slice(&temp_data[2..]);
-        Ok(out)
-    }
-
-    fn read_register(&mut self, register: Register) -> Result<u8, Error<I2C::Error>> {
+    ) -> Result<u8, Error> {
         // Read 2 more bytes than necessary as per BST-BMM350-DS001-25 #9.2.3.
         let mut data = [0; 3];
-        self.i2c
-            .write_read(self.address, &[register.addr()], &mut data)
-            .map_err(Error::I2c)?;
+        i2c_dma.write_read(self.address, &[register.addr()], &mut data)?;
         Ok(data[2])
     }
 
-    fn read_calibration_data(&mut self) -> Result<(), Error<I2C::Error>> {
+    fn read_calibration_data(&mut self, i2c_dma: &mut i2c_dma::I2cDma) -> Result<(), Error> {
         defmt::debug!("Downloading BMM350 OTP memory");
         let mut data = [0u16; OTP_DATA_LEN];
         for (i, w) in data.iter_mut().enumerate() {
-            *w = self.read_otp_word(i as u8)?;
+            *w = self.read_otp_word(i2c_dma, i as u8)?;
         }
         defmt::debug!("Powering off BMM350 OTP memory");
-        self.write_register(Register::OtpCmdReg, Otp::PowerOff)?;
+        self.write_register(i2c_dma, Register::OtpCmdReg, Otp::PowerOff)?;
         self.calibration = Calibration::new(data);
         defmt::debug!("BMM350 calibration data: {}", self.calibration);
         Ok(())
     }
 
-    fn read_otp_word(&mut self, addr: u8) -> Result<u16, Error<I2C::Error>> {
+    fn read_otp_word(&mut self, i2c_dma: &mut i2c_dma::I2cDma, addr: u8) -> Result<u16, Error> {
         let otp_cmd = Otp::DirectRead as u8 | (addr & 0x1F);
-        self.write_register(Register::OtpCmdReg, otp_cmd)?;
+        self.write_register(i2c_dma, Register::OtpCmdReg, otp_cmd)?;
 
         // Wait for OTP to be ready
         let mut attempts = 100usize;
         loop {
-            let otp_status = self.read_register(Register::OtpStatusReg)?;
+            let otp_status = self.read_register(i2c_dma, Register::OtpStatusReg)?;
             if otp_status & 0x01 != 0 {
                 break;
             }
@@ -512,23 +528,27 @@ impl<I2C: I2c> Bmm350<I2C> {
             }
         }
 
-        let msb = self.read_register(Register::OtpDataMsbReg)?;
-        let lsb = self.read_register(Register::OtpDataLsbReg)?;
+        let msb = self.read_register(i2c_dma, Register::OtpDataMsbReg)?;
+        let lsb = self.read_register(i2c_dma, Register::OtpDataLsbReg)?;
         Ok(((msb as u16) << 8) | lsb as u16)
     }
 
-    fn read_pmu_cmd_status_0(&mut self) -> Result<PmuCmdStatus0, Error<I2C::Error>> {
-        let reg_data = self.read_register(Register::PmuCmdStatus0)?;
+    fn read_pmu_cmd_status_0(
+        &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
+    ) -> Result<PmuCmdStatus0, Error> {
+        let reg_data = self.read_register(i2c_dma, Register::PmuCmdStatus0)?;
         Ok(PmuCmdStatus0::from_bits(reg_data))
     }
 
     fn set_power_mode<D: DelayNs>(
         &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
         mode: Pmu,
         delay: &mut D,
-    ) -> Result<(), Error<I2C::Error>> {
+    ) -> Result<(), Error> {
         defmt::debug!("Setting power mode to {}", mode);
-        self.write_register(Register::PmuCmd, mode)?;
+        self.write_register(i2c_dma, Register::PmuCmd, mode)?;
         let wait = match mode {
             Pmu::SuspendMode => GOTO_SUSPEND_DELAY,
             Pmu::NormalMode => SUSPEND_TO_NORMAL_DELAY,
@@ -540,41 +560,49 @@ impl<I2C: I2c> Bmm350<I2C> {
         Ok(())
     }
 
-    fn mag_reset<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Error<I2C::Error>> {
+    fn mag_reset<D: DelayNs>(
+        &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
+        delay: &mut D,
+    ) -> Result<(), Error> {
         defmt::debug!("Mag resetting BMM350");
         defmt::debug!("Setting BR (Bit Reset)");
-        self.write_register(Register::PmuCmd, Pmu::BitReset)?;
+        self.write_register(i2c_dma, Register::PmuCmd, Pmu::BitReset)?;
         delay.delay_ms(BR_DELAY.to_millis());
-        if self.read_pmu_cmd_status_0()?.pmu_cmd_value() != Pmu::BitReset as u8 {
+        if self.read_pmu_cmd_status_0(i2c_dma)?.pmu_cmd_value() != Pmu::BitReset as u8 {
             return Err(Error::BitResetFailed);
         }
 
         defmt::debug!("Setting FGR (Flux Guide Reset)");
-        self.write_register(Register::PmuCmd, Pmu::FluxGuideReset)?;
+        self.write_register(i2c_dma, Register::PmuCmd, Pmu::FluxGuideReset)?;
         delay.delay_ms(FGR_DELAY.to_millis());
-        if self.read_pmu_cmd_status_0()?.pmu_cmd_value() != Pmu::FluxGuideReset as u8 {
+        if self.read_pmu_cmd_status_0(i2c_dma)?.pmu_cmd_value() != Pmu::FluxGuideReset as u8 {
             return Err(Error::FluxGuideResetFailed);
         }
         Ok(())
     }
 
-    fn init<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Error<I2C::Error>> {
+    fn init<D: DelayNs>(
+        &mut self,
+        i2c_dma: &mut i2c_dma::I2cDma,
+        delay: &mut D,
+    ) -> Result<(), Error> {
         defmt::debug!("Initializing BMM350");
         delay.delay_ms(START_UP_TIME_FROM_POR.to_millis());
 
         defmt::debug!("Soft resetting BMM350");
-        self.write_register(Register::Cmd, Command::SoftReset)?;
+        self.write_register(i2c_dma, Register::Cmd, Command::SoftReset)?;
         delay.delay_ms(SOFT_RESET_DELAY.to_millis());
 
         defmt::debug!("Reading BMM350 chip ID");
-        let chip_id = self.read_register(Register::ChipId)?;
+        let chip_id = self.read_register(i2c_dma, Register::ChipId)?;
         if chip_id != CHIP_ID {
             return Err(Error::InvalidChipId);
         }
 
-        self.read_calibration_data()?;
+        self.read_calibration_data(i2c_dma)?;
 
-        self.mag_reset(delay)?;
+        self.mag_reset(i2c_dma, delay)?;
 
         let reg_data = OdrAverage::new()
             .with_odr(Odr::Hz400)
@@ -584,12 +612,12 @@ impl<I2C: I2c> Bmm350<I2C> {
             reg_data.odr(),
             reg_data.avg()
         );
-        self.write_register(Register::PmuCmdAggrSet, reg_data)?;
-        self.set_power_mode(Pmu::UpdateOdrAndAvg, delay)?;
+        self.write_register(i2c_dma, Register::PmuCmdAggrSet, reg_data)?;
+        self.set_power_mode(i2c_dma, Pmu::UpdateOdrAndAvg, delay)?;
 
         // Suspend before changing power mode
-        self.set_power_mode(Pmu::SuspendMode, delay)?;
-        self.set_power_mode(Pmu::NormalMode, delay)?;
+        self.set_power_mode(i2c_dma, Pmu::SuspendMode, delay)?;
+        self.set_power_mode(i2c_dma, Pmu::NormalMode, delay)?;
 
         defmt::debug!("Finished initializing BMM350");
         Ok(())

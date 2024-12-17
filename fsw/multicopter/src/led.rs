@@ -17,11 +17,11 @@ impl PeriodicLed {
         }
     }
 
-    pub fn update(&mut self, now: Instant) {
+    pub fn update(&mut self, now: Instant) -> bool {
         let Some(last_update) = self.last_update else {
             self.led.toggle();
             self.last_update = Some(now);
-            return;
+            return true;
         };
 
         if now
@@ -31,6 +31,8 @@ impl PeriodicLed {
             defmt::trace!("Toggling LED");
             self.led.toggle();
             self.last_update = Some(now);
+            return true;
         }
+        false
     }
 }
