@@ -226,6 +226,13 @@ impl Pins {
         pins.pc9.pull(Pull::Up);
         pins.pc10.pull(Pull::Up);
         pins.pc11.pull(Pull::Up);
+
+        // Set CAN pins to very high speed
+        pins.pd0.output_speed(OutputSpeed::VeryHigh);
+        pins.pd1.output_speed(OutputSpeed::VeryHigh);
+        pins.pb12.output_speed(OutputSpeed::VeryHigh);
+        pins.pb13.output_speed(OutputSpeed::VeryHigh);
+
         pins
     }
 }
