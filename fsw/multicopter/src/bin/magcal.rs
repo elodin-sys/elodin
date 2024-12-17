@@ -6,44 +6,46 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use hal::{i2c, pac};
 
-use roci_multicopter::bmm350;
 use roci_multicopter::bsp::aleph as bsp;
-
-#[global_allocator]
-static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
+use roci_multicopter::{bmm350, dma::*, i2c_dma::*};
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    {
-        use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 1024;
-        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
-        defmt::info!("Configured heap with {} bytes", HEAP_SIZE);
-    }
+    roci_multicopter::init_heap();
 
     let cp = cortex_m::Peripherals::take().unwrap();
-    let dp = pac::Peripherals::take().unwrap();
+    let mut dp = pac::Peripherals::take().unwrap();
     let _pins = bsp::Pins::take().unwrap();
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
     clock_cfg.setup().unwrap();
     let mut delay = Delay::new(cp.SYST, clock_cfg.systick()).forward();
 
-    let i2c = i2c::I2c::new(
-        dp.I2C4,
+    let [i2c1_rx, ..] = dp.DMA1.split();
+
+    defmt::debug!("Initializing I2C + DMA");
+    let mut i2c1_dma = I2cDma::new(
+        dp.I2C1,
         i2c::I2cConfig {
             speed: i2c::I2cSpeed::FastPlus1M,
             ..Default::default()
         },
+        i2c1_rx,
         &clock_cfg,
+        &mut dp.DMAMUX1,
+        &mut dp.DMAMUX2,
     );
-    let mut bmm350 = bmm350::Bmm350::new(i2c, bmm350::Address::Low, &mut delay).unwrap();
+    let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
 
     defmt::info!("x,y,z");
     loop {
         delay.delay_ms(2);
-        let data = bmm350.read_data().unwrap();
-        defmt::info!("{},{},{}", data.mag[0], data.mag[1], data.mag[2]);
+        bmm350.update(&mut i2c1_dma);
+        defmt::info!(
+            "{},{},{}",
+            bmm350.data.mag[0],
+            bmm350.data.mag[1],
+            bmm350.data.mag[2]
+        );
     }
 }

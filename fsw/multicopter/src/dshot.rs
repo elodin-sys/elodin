@@ -1,10 +1,12 @@
+use alloc::boxed::Box;
+
 use dshot_frame::{Command, Frame};
 use embedded_hal::delay::DelayNs;
 use fugit::ExtU64 as _;
-use hal::timer;
+use hal::{pac, timer};
 
 use crate::monotonic::Instant;
-use crate::{arena::ArenaAlloc, dma::DmaBuf, peripheral::*};
+use crate::{dma::DmaChannel, peripheral::*};
 
 const DSHOT_FRAME_SIZE: usize = 16;
 // Size the DMA buffer to hold a DSHOT frame + 0 padding (as a gap between frames) for 4 motors.
@@ -38,36 +40,39 @@ enum ArmState {
     Armed,
 }
 
-pub struct Driver<T, D>
-where
-    D: HalDmaRegExt,
-{
+pub struct Driver<T> {
     pub pwm_timer: timer::Timer<T>,
-    pub dma_buf: DmaBuf<DMA_BUF_SIZE, D>,
+    dma: DmaChannel,
     max_duty_cycle: u16,
     arm_state: ArmState,
+    shared_buf: Box<[u16]>,
+    staging_buf: Box<[u16]>,
 }
 
-impl<T, D> Driver<T, D>
+impl<T> Driver<T>
 where
     T: HalTimerRegExt,
-    D: HalDmaRegExt,
     timer::Timer<T>: HalTimerExt<HalTimerReg = T> + DmaMuxInput,
 {
-    pub fn new<B: AsMut<[u8]> + 'static>(
+    pub fn new(
         mut pwm_timer: timer::Timer<T>,
-        dma: DmaChannel<D>,
-        alloc: &mut ArenaAlloc<B>,
+        mut dma: DmaChannel,
+        mux1: &mut pac::DMAMUX1,
     ) -> Self {
         pwm_timer.enable_pwm();
         pwm_timer.enable_dma_interrupt();
-        dma.mux(&mut pwm_timer);
+        dma.mux_dma1(timer::Timer::<T>::DMA_INPUT, mux1);
         let max_duty_cycle = pwm_timer.max_duty_cycle() as u16;
+        let shared_buf = alloc::vec![0u16; DMA_BUF_SIZE].into_boxed_slice();
+        let staging_buf = alloc::vec![0u16; DMA_BUF_SIZE].into_boxed_slice();
+
         Self {
             pwm_timer,
-            dma_buf: DmaBuf::new(dma, alloc),
+            dma,
             max_duty_cycle,
             arm_state: ArmState::Disarmed,
+            shared_buf,
+            staging_buf,
         }
     }
 
@@ -96,8 +101,34 @@ where
     fn write_frame(&mut self, motor_index: usize, frame: Frame) {
         let duty_cycles = frame.duty_cycles(self.max_duty_cycle);
         for (duty_cycle_index, duty_cycle) in duty_cycles.into_iter().enumerate() {
-            self.dma_buf.staging_buf[4 * duty_cycle_index + motor_index] = duty_cycle;
+            self.staging_buf[4 * duty_cycle_index + motor_index] = duty_cycle;
         }
+    }
+
+    fn write(&mut self) -> bool {
+        if self.dma.busy() {
+            defmt::warn!("DMA transfer in progress");
+            return false;
+        }
+        self.dma.clear_interrupt();
+
+        let base_addr = TIMX_CCR1_OFFSET / 4;
+        let burst_len = 4u8;
+        assert_eq!(self.staging_buf.len() % burst_len as usize, 0);
+
+        self.shared_buf.copy_from_slice(&self.staging_buf);
+        unsafe {
+            self.pwm_timer.hal_write_dma_burst(
+                &self.shared_buf,
+                base_addr,
+                burst_len,
+                self.dma.channel,
+                Default::default(),
+                false,
+                self.dma.peripheral,
+            );
+        }
+        true
     }
 
     pub fn write_throttle(&mut self, throttle: [Throttle; 4], armed: bool, now: Instant) {
@@ -110,7 +141,7 @@ where
             };
             self.write_frame(i, frame);
         }
-        self.pwm_timer.write(&mut self.dma_buf);
+        self.write();
     }
 
     pub fn armed(&self) -> bool {
@@ -121,8 +152,14 @@ where
         defmt::debug!("Beeping motors");
         let frame = Frame::command(Command::Beep1, false);
         (0..4).for_each(|motor_index| self.write_frame(motor_index, frame));
-        self.pwm_timer.write(&mut self.dma_buf);
+        self.write();
         delay.delay_ms(260);
         defmt::debug!("Motors beeped");
+    }
+}
+
+impl<T> Drop for Driver<T> {
+    fn drop(&mut self) {
+        self.dma.disable();
     }
 }

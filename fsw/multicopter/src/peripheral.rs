@@ -1,10 +1,8 @@
-use core::{borrow::Borrow, cell::UnsafeCell, ops::Deref};
+use core::borrow::Borrow;
 
 use hal::{clocks::Clocks, dma, pac, timer};
 
-use crate::dma::DmaBuf;
-
-const TIMX_CCR1_OFFSET: u8 = 0x34;
+pub const TIMX_CCR1_OFFSET: u8 = 0x34;
 
 pub trait HalTimerRegExt: Sized {
     const TIMER: u8;
@@ -20,33 +18,6 @@ pub trait HalTimerRegExt: Sized {
             _ => clocks.apb1_timer(),
         };
         fugit::Hertz::<u32>::from_raw(timer_freq)
-    }
-}
-
-pub trait HalDmaRegExt: Sized + Deref<Target = pac::dma1::RegisterBlock> + 'static {
-    const DMA: dma::DmaPeriph;
-    fn dma(self) -> dma::Dma<Self> {
-        dma::Dma::new(self)
-    }
-
-    fn split(self) -> [DmaChannel<Self>; 8] {
-        let mut dma = self.dma();
-        let dma_channels = [
-            dma::DmaChannel::C0,
-            dma::DmaChannel::C1,
-            dma::DmaChannel::C2,
-            dma::DmaChannel::C3,
-            dma::DmaChannel::C4,
-            dma::DmaChannel::C5,
-            dma::DmaChannel::C6,
-            dma::DmaChannel::C7,
-        ];
-        dma_channels.map(|channel| DmaChannel {
-            dma: unsafe {
-                &mut *(&mut dma as *mut dma::Dma<Self> as *mut UnsafeCell<dma::Dma<Self>>)
-            },
-            channel,
-        })
     }
 }
 
@@ -76,37 +47,6 @@ pub trait HalTimerExt: Sized + Borrow<timer::Timer<Self::HalTimerReg>> {
         dma_periph: dma::DmaPeriph,
     );
 
-    fn write<const N: usize, H: HalDmaRegExt>(&mut self, dma_buf: &mut DmaBuf<N, H>) -> bool {
-        if dma_buf.transfer_in_progress && !dma_buf.dma_ch.transfer_complete() {
-            defmt::warn!("DMA transfer is not complete");
-            return false;
-        }
-
-        dma_buf.dma_ch.clear_interrupt();
-        dma_buf.transfer_in_progress = false;
-
-        let base_addr = TIMX_CCR1_OFFSET / 4;
-        let burst_len = 4u8;
-        assert_eq!(dma_buf.staging_buf.len() % burst_len as usize, 0);
-        let channel_cfg = dma::ChannelCfg::default();
-
-        dma_buf.shared_buf.copy_from_slice(dma_buf.staging_buf);
-        dma_buf.transfer_in_progress = true;
-        // SAFETY: `dma_buf.shared_buf` is leaked memory, and will remain valid for the lifetime of the program
-        // `dma_buf.shared_buf` can only be written to when the DMA transfer is not in progress to prevent data corruption
-        unsafe {
-            self.hal_write_dma_burst(
-                dma_buf.shared_buf,
-                base_addr,
-                burst_len,
-                dma_buf.dma_ch.channel,
-                channel_cfg,
-                false,
-                H::DMA,
-            );
-        }
-        true
-    }
     fn ch<const CHANNEL: u8>(&self) -> TimCh<CHANNEL, Self::HalTimerReg> {
         TimCh {
             _timer: self.borrow(),
@@ -152,11 +92,6 @@ pub type Tim3Ch1<'a> = Tim3<'a, 1>;
 pub type Tim3Ch2<'a> = Tim3<'a, 2>;
 pub type Tim3Ch3<'a> = Tim3<'a, 3>;
 pub type Tim3Ch4<'a> = Tim3<'a, 4>;
-
-pub struct DmaChannel<H: HalDmaRegExt> {
-    dma: &'static mut UnsafeCell<dma::Dma<H>>,
-    channel: dma::DmaChannel,
-}
 
 macro_rules! cond {
     (true, $val:expr) => {
@@ -268,14 +203,6 @@ impl_hal_timer_reg!(4);
 impl_hal_timer_reg!(5);
 impl_hal_timer_reg!(8);
 
-impl HalDmaRegExt for pac::DMA1 {
-    const DMA: dma::DmaPeriph = dma::DmaPeriph::Dma1;
-}
-
-impl HalDmaRegExt for pac::DMA2 {
-    const DMA: dma::DmaPeriph = dma::DmaPeriph::Dma2;
-}
-
 macro_rules! impl_timer_dma_mux {
     ($tim:literal) => {
         paste::paste! {
@@ -290,19 +217,3 @@ impl_timer_dma_mux!(1);
 impl_timer_dma_mux!(2);
 impl_timer_dma_mux!(3);
 impl_timer_dma_mux!(4);
-
-impl<H: HalDmaRegExt> DmaChannel<H> {
-    pub fn mux<M: DmaMuxInput>(&self, _: &mut M) {
-        dma::mux(H::DMA, self.channel, M::DMA_INPUT);
-    }
-
-    pub fn clear_interrupt(&mut self) {
-        self.dma
-            .get_mut()
-            .clear_interrupt(self.channel, dma::DmaInterrupt::TransferComplete);
-    }
-
-    pub fn transfer_complete(&mut self) -> bool {
-        self.dma.get_mut().transfer_is_complete(self.channel)
-    }
-}
