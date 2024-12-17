@@ -90,7 +90,7 @@ fn main() -> ! {
             dshot_driver.write_throttle([control.throttle.into(); 4], armed, now);
         }
 
-        let mag_updated = bmm350.update(&mut i2c1_dma);
+        let mag_updated = bmm350.update(&mut i2c1_dma, now);
         running_led.update(now);
 
         if mag_updated && bmm350.data.sample % 400 == 0 {
