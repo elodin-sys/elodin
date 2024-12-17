@@ -2,10 +2,12 @@ use core::ops::DerefMut;
 
 use bitfield_struct::bitfield;
 use embedded_hal::delay::DelayNs;
+use fugit::{ExtU32 as _, Hertz, MicrosDuration};
 
 use hal::i2c;
 
 use crate::i2c_dma;
+use crate::monotonic::Instant;
 
 type Duration = fugit::Duration<u32, 1, 1_000_000>;
 
@@ -20,6 +22,9 @@ const SUSPEND_TO_NORMAL_DELAY: Duration = Duration::millis(38);
 const UPD_OAE_DELAY: Duration = Duration::millis(1);
 const BR_DELAY: Duration = Duration::millis(14);
 const FGR_DELAY: Duration = Duration::millis(18);
+
+const MAG_ODR: Hertz<u32> = Hertz::<u32>::Hz(400);
+const MAG_PERIOD: MicrosDuration<u32> = MAG_ODR.into_duration();
 
 const OTP_DATA_LEN: usize = 32;
 const OTP_TEMP_OFF_SENS: usize = 0x0D;
@@ -345,6 +350,7 @@ impl SignedExt for u32 {
 pub struct Bmm350 {
     address: u8,
     calibration: Calibration,
+    next_update: Instant,
     raw_data: RawData,
     pub data: CalibratedData,
 }
@@ -384,6 +390,7 @@ impl Bmm350 {
         let mut bmm350 = Bmm350 {
             address: address.into(),
             calibration: Calibration::default(),
+            next_update: Instant::from_ticks(0),
             raw_data: RawData::default(),
             data: CalibratedData::default(),
         };
@@ -391,8 +398,11 @@ impl Bmm350 {
         Ok(bmm350)
     }
 
-    pub fn update(&mut self, i2c_dma: &mut i2c_dma::I2cDma) -> bool {
-        match self.try_update(i2c_dma) {
+    pub fn update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> bool {
+        if now < self.next_update {
+            return false;
+        }
+        match self.try_update(i2c_dma, now) {
             Ok(updated) => updated,
             Err(err) => {
                 defmt::warn!("BMM350 error: {}", err);
@@ -403,14 +413,18 @@ impl Bmm350 {
 
     // Based on the following reference implementation:
     // https://github.com/boschsensortec/BMM350_SensorAPI/blob/4127534c6262f903683ee210b36b85ab2bb504c8/bmm350.c#L899
-    fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma) -> Result<bool, Error> {
+    fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> Result<bool, Error> {
         match i2c_dma.state()? {
             i2c_dma::State::Idle => {
                 defmt::trace!("Starting BMM350 DMA read");
                 i2c_dma.begin_read(self.address, Register::MagXXlsb.addr(), 15 + 2)?;
+                // Wait at least 200us for the data to be ready
+                self.next_update += 200u32.micros();
                 return Ok(false);
             }
-            i2c_dma::State::Reading => return Ok(false),
+            i2c_dma::State::Reading => {
+                return Ok(false);
+            }
             i2c_dma::State::Done => {}
         };
         let data = &i2c_dma.finish_read()?[2..];
@@ -421,10 +435,23 @@ impl Bmm350 {
         ];
         let temp = (data[9] as u32) | ((data[10] as u32) << 8) | ((data[11] as u32) << 16);
         let time = (data[12] as u32) | ((data[13] as u32) << 8) | ((data[14] as u32) << 16);
-
-        if time == self.raw_data.time {
+        // The output data rate is 400Hz and sensortime is incremented at 25.6kHz
+        // So, a new sample is available every (25600 / 400) sensortime ticks
+        const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 400;
+        let sample = time / TIME_PER_SAMPLE;
+        if sample == self.data.sample {
             defmt::trace!("No new BMM350 data");
+            // Wait 200us and try again
+            self.next_update += 200u32.micros();
             return Ok(false);
+        } else if sample > self.data.sample + 1 && self.data.sample != 0 {
+            let dropped_samples = sample - self.data.sample - 1;
+            defmt::warn!("Dropped {} BMM350 sample(s)", dropped_samples,);
+        }
+
+        // Wait a little bit less than the mag ODR to avoid skipping samples
+        while now >= self.next_update {
+            self.next_update += MAG_PERIOD - 300u32.micros();
         }
 
         let mag = mag.map(SignedExt::to_f32::<24>);
@@ -442,10 +469,6 @@ impl Bmm350 {
         } else if temp < 0.0 {
             temp += 25.49;
         }
-        // The output data rate is 400Hz and sensortime is incremented at 25.6kHz
-        // So, a new sample is available every (25600 / 400) sensortime ticks
-        const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 400;
-        let sample = self.raw_data.time / TIME_PER_SAMPLE;
 
         // Apply compensation values from OTP
         let cal = &self.calibration;
