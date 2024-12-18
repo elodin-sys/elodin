@@ -5,28 +5,39 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use cortex_m::delay::Delay;
+use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{
-    bmm350, crsf, dma::*, dshot, healing_usart, i2c_dma::*, led, monotonic, peripheral::*,
+    bmm350, can, crsf, dma::*, dshot, healing_usart, i2c_dma::*, led, monotonic, peripheral::*,
 };
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
 const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
+
+const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
+const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Starting");
     roci_multicopter::init_heap();
 
+    let pins = bsp::Pins::take().unwrap();
+    let bsp::Pins {
+        pd10: led_sg0,
+        pb15: mut _led_sb0,
+        pb14: mut led_sa0,
+        ..
+    } = pins;
+    defmt::info!("Configured peripherals");
+    led_sa0.set_high();
+
     let cp = cortex_m::Peripherals::take().unwrap();
     let mut dp = pac::Peripherals::take().unwrap();
-    let pins = bsp::Pins::take().unwrap();
-    let bsp::Pins { pd10: led_sg0, .. } = pins;
-    defmt::info!("Configured peripherals");
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
     clock_cfg.setup().unwrap();
@@ -67,11 +78,16 @@ fn main() -> ! {
     );
     let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
 
+    let mut can = can::setup_can(dp.FDCAN1, &dp.RCC);
+    defmt::info!("Configured CAN");
+
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
 
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
+    let mut last_can_update = monotonic.now();
 
+    led_sa0.set_low();
     loop {
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
@@ -88,11 +104,18 @@ fn main() -> ! {
             let control = crsf.frsky();
             let armed = control.armed();
             dshot_driver.write_throttle([control.throttle.into(); 4], armed, now);
+        } else if now.checked_duration_since(last_can_update).unwrap() > CAN_PERIOD {
+            last_can_update = now;
+            defmt::trace!("{}: CAN update", ts);
+            let mut buf = [0u8; 64];
+            if can.receive0(&mut buf).is_ok() {
+                defmt::info!("Received CAN frame");
+            }
         }
 
-        let mag_updated = bmm350.update(&mut i2c1_dma, now);
         running_led.update(now);
 
+        let mag_updated = bmm350.update(&mut i2c1_dma, now);
         if mag_updated && bmm350.data.sample % 400 == 0 {
             defmt::info!(
                 "{}: BMM350 sample {}: {}",
@@ -101,5 +124,6 @@ fn main() -> ! {
                 bmm350.data
             );
         }
+        delay.delay_us(1);
     }
 }
