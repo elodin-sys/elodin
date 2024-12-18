@@ -33,8 +33,9 @@ embedded-hal-compat = "0.13.0"
 embedded-alloc = { version = "0.6", default-features = false, features = ["tlsf"] }
 critical-section = "1.1"
 cortex-m-semihosting = "0.5"
+fdcan = { version = "0.2.1", features = ["fdcan_h7", "embedded-can-03"] }
 
-hal = { package = "stm32-hal2", version = "1.8", features = ["h747cm7", "h7rt", "embedded_hal"] }
+hal = { package = "stm32-hal2", version = "1.8", features = ["h747cm7", "embedded_hal"] }
 fugit = { version = "0.3.7", features = ["defmt"] }
 
 paste = "1.0"

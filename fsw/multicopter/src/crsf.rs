@@ -224,7 +224,9 @@ impl CrsfReceiver {
 
     pub fn update(&mut self, now: Instant) {
         if let Err(err) = self.try_update(now) {
-            defmt::warn!("CRSF error: {}", err);
+            if self.last_frame_time.ticks() != 0 {
+                defmt::warn!("CRSF error: {}", err);
+            }
             self.frame_pos = 0;
         }
     }
