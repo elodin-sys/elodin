@@ -262,6 +262,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-can"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12719661dce6080d174aa0a9df1f61756022dc105c1761bcd37091a0ee5de635"
+dependencies = [
+ "nb 1.1.0",
+]
+
+[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -383,6 +392,21 @@ dependencies = [
  "num-traits",
  "pulp",
  "reborrow",
+]
+
+[[package]]
+name = "fdcan"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a745a7ef1532cc436619631a102c1d2f71e8fd4e82f1ee48c85eaa73c0487e81"
+dependencies = [
+ "bitflags 1.3.2",
+ "embedded-can",
+ "nb 1.1.0",
+ "paste",
+ "static_assertions",
+ "vcell",
+ "volatile-register",
 ]
 
 [[package]]
@@ -805,6 +829,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-compat",
  "embedded-io",
+ "fdcan",
  "fugit",
  "modular-bitfield",
  "nox",

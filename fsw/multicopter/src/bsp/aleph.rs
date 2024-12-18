@@ -100,9 +100,8 @@ pub struct Pins {
     // LEDs
     pub pd11: Pin, // Red 0
     pub pd10: Pin, // Green 0
-    // The following pins are disabled in rev 0.4 due to hardware issue. Re-enable them on future revisions.
-    // pub pb15: Pin, // Blue 0
-    // pub pb14: Pin, // Orange 0
+    pub pb15: Pin, // Blue 0
+    pub pb14: Pin, // Orange 0
 
     // ADC
     pub pf11: Pin, // ADC1 IN2 (current)
@@ -198,9 +197,8 @@ impl Pins {
 
             pd11: Pin::new(Port::D, 11, PinMode::Output),
             pd10: Pin::new(Port::D, 10, PinMode::Output),
-            // The following pins are disabled in rev 0.4 due to hardware issue. Re-enable them on future revisions.
-            // pb15: Pin::new(Port::B, 15, PinMode::Output),
-            // pb14: Pin::new(Port::B, 14, PinMode::Output),
+            pb15: Pin::new(Port::B, 15, PinMode::Output),
+            pb14: Pin::new(Port::B, 14, PinMode::Output),
             pf11: Pin::new(Port::F, 11, PinMode::Analog),
             pf12: Pin::new(Port::F, 12, PinMode::Analog),
             pc4: Pin::new(Port::C, 4, PinMode::Analog),
@@ -232,6 +230,12 @@ impl Pins {
         pins.pd1.output_speed(OutputSpeed::VeryHigh);
         pins.pb12.output_speed(OutputSpeed::VeryHigh);
         pins.pb13.output_speed(OutputSpeed::VeryHigh);
+
+        // Set LED pins to low speed
+        pins.pd11.output_speed(OutputSpeed::Low);
+        pins.pd10.output_speed(OutputSpeed::Low);
+        pins.pb15.output_speed(OutputSpeed::Low);
+        pins.pb14.output_speed(OutputSpeed::Low);
 
         pins
     }
@@ -265,6 +269,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         d2_prescaler2: clocks::ApbPrescaler::Div2, // 100 MHz
         d3_prescaler: clocks::ApbPrescaler::Div2, // 100 MHz
         vos_range: clocks::VosRange::VOS1,
+        can_src: clocks::CanSrc::Hse,
         ..Default::default()
     };
 
