@@ -11,6 +11,7 @@ use panic_probe as _;
 
 pub mod bmm350;
 pub mod bsp;
+pub mod can;
 pub mod crsf;
 pub mod dma;
 pub mod dshot;
