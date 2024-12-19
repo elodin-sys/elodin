@@ -12,7 +12,8 @@ use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{
-    bmm350, can, crsf, dma::*, dshot, healing_usart, i2c_dma::*, led, monotonic, peripheral::*,
+    bmm350, can, crsf, dma::*, dronecan, dshot, healing_usart, i2c_dma::*, led, monotonic,
+    peripheral::*,
 };
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
@@ -78,8 +79,9 @@ fn main() -> ! {
     );
     let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
 
-    let mut can = can::setup_can(dp.FDCAN1, &dp.RCC);
-    defmt::info!("Configured CAN");
+    let can = can::setup_can(dp.FDCAN1, &dp.RCC);
+    let mut can = dronecan::DroneCan::new(can);
+    defmt::info!("Configured DroneCAN");
 
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
 
@@ -107,9 +109,9 @@ fn main() -> ! {
         } else if now.checked_duration_since(last_can_update).unwrap() > CAN_PERIOD {
             last_can_update = now;
             defmt::trace!("{}: CAN update", ts);
-            let mut buf = [0u8; 64];
-            if can.receive0(&mut buf).is_ok() {
-                defmt::info!("Received CAN frame");
+            if let Some(msg) = can.read(now) {
+                let msg = dronecan::Message::try_from(msg).unwrap();
+                defmt::debug!("{}: Received message: {}", ts, msg);
             }
         }
 

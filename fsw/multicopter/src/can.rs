@@ -88,7 +88,7 @@ mod fdcan1 {
             rcc.apb1henr.modify(|_, w| w.fdcanen().set_bit());
             while rcc.apb1henr.read().fdcanen().bit_is_clear() {}
 
-            // Initialisation and RAM layout configuation
+            // Initialisation and RAM layout configuration
             let mut fdcan = fdcan::FdCan::new(Self { rb }).into_config_mode();
             let can = fdcan.instance().inner();
             message_ram_layout!(can, 0x000);
@@ -112,7 +112,7 @@ mod fdcan2 {
             rcc.apb1henr.modify(|_, w| w.fdcanen().set_bit());
             while rcc.apb1henr.read().fdcanen().bit_is_clear() {}
 
-            // Initialisation and RAM layout configuation
+            // Initialisation and RAM layout configuration
             let mut fdcan = fdcan::FdCan::new(Self { rb }).into_config_mode();
             let can = fdcan.instance().inner();
             message_ram_layout!(can, 0x400); // + 1k words = 4kB
@@ -155,7 +155,7 @@ pub fn setup_can(
     can.set_data_bit_timing(data_bit_timing);
     can.set_standard_filter(
         fdcan::filter::StandardFilterSlot::_0,
-        fdcan::filter::StandardFilter::accept_all_into_fifo0(),
+        fdcan::filter::StandardFilter::reject_all(),
     );
     can.set_extended_filter(
         fdcan::filter::ExtendedFilterSlot::_0,
