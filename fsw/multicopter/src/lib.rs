@@ -14,6 +14,7 @@ pub mod bsp;
 pub mod can;
 pub mod crsf;
 pub mod dma;
+pub mod dronecan;
 pub mod dshot;
 pub mod healing_usart;
 pub mod i2c_dma;
