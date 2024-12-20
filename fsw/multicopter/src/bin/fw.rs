@@ -13,7 +13,7 @@ use hal::{i2c, pac, usart};
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{
     bmm350, can, crsf, dma::*, dronecan, dshot, healing_usart, i2c_dma::*, led, monotonic,
-    peripheral::*,
+    peripheral::*, sdmmc,
 };
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
@@ -84,6 +84,9 @@ fn main() -> ! {
     defmt::info!("Configured DroneCAN");
 
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
+    defmt::info!("Configured DSHOT driver");
+
+    let mut _sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
 
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
