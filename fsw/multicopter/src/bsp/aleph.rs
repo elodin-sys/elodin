@@ -5,6 +5,7 @@ use hal::{
 };
 
 static mut PINS_TAKEN: bool = false;
+pub const HSE_FREQ: fugit::Hertz<u32> = fugit::Hertz::<u32>::MHz(16);
 
 pub struct Pins {
     // I2C1, AF: 4
@@ -89,7 +90,7 @@ pub struct Pins {
     pub pa11: Pin, // DM
     pub pa12: Pin, // DP
 
-    // SDIO, AF: 12
+    // SDMMC1, AF: 12
     pub pd2: Pin,  // CMD
     pub pc12: Pin, // CLK
     pub pc8: Pin,  // D0
@@ -251,15 +252,16 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
     });
 
     let clock_cfg = clocks::Clocks {
-        pll_src: clocks::PllSrc::Hse(16_000_000), // 16 MHz
+        pll_src: clocks::PllSrc::Hse(HSE_FREQ.to_Hz()), // 16 MHz
         pll1: clocks::PllCfg {
             enabled: true,
             pllp_en: true,
-            pllq_en: false,
+            pllq_en: true,
             pllr_en: false,
             divm: 2,   // pll_input_speed = 8 MHz
             divn: 100, // vco_speed = 800 MHz
             divp: 2,   // sysclk = 400 MHz
+            divq: 16,  // 50 MHz
             ..Default::default()
         },
         input_src: clocks::InputSrc::Pll1, // 400 MHz (sysclk)
