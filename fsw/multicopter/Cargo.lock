@@ -331,6 +331,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-sdmmc"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb637331040ec9b35f6a8151904d1aca914cc349d14c91b9a3e92ba789b22f3f"
+dependencies = [
+ "byteorder",
+ "defmt",
+ "embedded-hal 1.0.0",
+ "heapless",
+]
+
+[[package]]
 name = "equator"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -871,6 +883,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-compat",
  "embedded-io",
+ "embedded-sdmmc",
  "fdcan",
  "fugit",
  "heapless",
@@ -878,6 +891,7 @@ dependencies = [
  "nox",
  "panic-probe",
  "paste",
+ "sdio-host",
  "stm32-hal2",
 ]
 
@@ -902,6 +916,12 @@ dependencies = [
  "linux-raw-sys",
  "windows-sys",
 ]
+
+[[package]]
+name = "sdio-host"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b328e2cb950eeccd55b7f55c3a963691455dcd044cfb5354f0c5e68d2c2d6ee2"
 
 [[package]]
 name = "semver"

@@ -21,6 +21,7 @@ pub mod i2c_dma;
 pub mod led;
 pub mod monotonic;
 pub mod peripheral;
+pub mod sdmmc;
 
 #[global_allocator]
 static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
