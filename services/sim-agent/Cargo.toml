@@ -23,6 +23,7 @@ tokio.features = ["full"]
 hyper-util.version = "0.1.6"
 hyper-util.features = ["tokio"]
 flume = "0.11"
+futures = "0.3.29"
 
 # logs
 tracing = "0.1"
@@ -74,6 +75,17 @@ tokio-stream = "0.1.14"
 
 sea-orm.version = "1.0"
 sea-orm.features = [ "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "debug-print" ]
+
+# azure
+azure_core.version = "0.21.0"
+azure_core.features = ["tokio", "tokio-fs", "enable_reqwest_rustls"]
+azure_identity.version = "0.21.0"
+azure_identity.features = ["enable_reqwest_rustls"]
+azure_storage_blobs.version = "0.21.0"
+azure_storage_blobs.features = ["enable_reqwest_rustls"]
+azure_storage.version = "0.21.0"
+azure_storage.features = ["enable_reqwest_rustls"]
+
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-vsock = { git = "https://github.com/rust-vsock/tokio-vsock", rev = "3a41323", features = ["tonic-conn"] }

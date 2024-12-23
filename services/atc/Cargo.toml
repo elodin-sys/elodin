@@ -85,10 +85,18 @@ redmq.path = "../../libs/redmq"
 
 # time
 chrono = "0.4"
-
-# gcs
-google-cloud-storage = { version = "0.20.0", default-features = false, features = ["auth", "rustls-tls", "trace"] }
+time = "0.3.36"
 
 # stripe
 async-stripe.version = "0.39"
 async-stripe.features = ["runtime-tokio-hyper-rustls"]
+
+# azure
+azure_core.version = "0.21.0"
+azure_core.features = ["tokio", "tokio-fs", "enable_reqwest_rustls"]
+azure_identity.version = "0.21.0"
+azure_identity.features = ["enable_reqwest_rustls"]
+azure_storage_blobs.version = "0.21.0"
+azure_storage_blobs.features = ["enable_reqwest_rustls"]
+azure_storage.version = "0.21.0"
+azure_storage.features = ["enable_reqwest_rustls"]
