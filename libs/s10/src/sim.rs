@@ -137,7 +137,7 @@ fn run_exec(
 ) -> Result<Vec<Connection>, Error> {
     let mut impeller_exec = ImpellerExec::new(exec, server_rx.clone());
     for conn in existing_connections {
-        impeller_exec.add_connection(conn)?;
+        let _ = impeller_exec.add_connection(conn);
     }
     let mut start = Instant::now();
     let time_step = impeller_exec.run_time_step();
