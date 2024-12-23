@@ -23,3 +23,4 @@ monte_carlo_credit = 60
 [monte_carlo]
 sim_artifacts_bucket_name = "sim-artifacts-dev"
 sim_results_bucket_name = "sim-results-dev"
+azure_account_name = "elodindev"

@@ -69,6 +69,7 @@ pub struct OrcaConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct MonteCarloConfig {
+    pub azure_account_name: String,
     pub sim_artifacts_bucket_name: String,
     pub sim_results_bucket_name: String,
 }

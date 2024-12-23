@@ -22,6 +22,7 @@ pub struct MonteCarloConfig {
     pub redis_url: String,
     pub database_url: String,
     pub pod_name: String,
+    pub azure_account_name: String,
     pub sim_artifacts_bucket_name: String,
     pub sim_results_bucket_name: String,
     #[serde(with = "http_serde::uri", default = "default_vm_addr")]

@@ -40,8 +40,6 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("tonic transport error: {0}")]
     TonicTransport(#[from] tonic::transport::Error),
-    #[error("signed url error: {0}")]
-    SignedURL(#[from] google_cloud_storage::sign::SignedURLError),
     #[error("stripe error: {0}")]
     Stripe(#[from] stripe::StripeError),
     #[error("invalid license type")]
@@ -50,6 +48,8 @@ pub enum Error {
     Uuid(#[from] uuid::Error),
     #[error("serde_json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("azure storage: {0}")]
+    AzureStorage(#[from] azure_storage::Error),
 }
 
 impl From<EventError> for Error {

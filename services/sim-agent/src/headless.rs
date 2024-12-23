@@ -7,10 +7,7 @@ use atc_entity::batches;
 use atc_entity::events::DbExt;
 use elodin_types::{sandbox::*, Batch, BitVec, SampleMetadata, BATCH_TOPIC};
 use fred::prelude::*;
-use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
-use google_cloud_storage::http::objects::download::Range;
-use google_cloud_storage::http::objects::get::GetObjectRequest;
-use google_cloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
+use futures::stream::StreamExt;
 use nox_ecs::nox::Client as NoxClient;
 use nox_ecs::Compiled;
 use nox_ecs::{Seed, WorldExec};
@@ -21,6 +18,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 use tracing::Instrument;
 
+use azure_storage_blobs::prelude::ClientBuilder;
+
 use crate::config::MonteCarloConfig;
 use crate::pytest;
 
@@ -29,7 +28,7 @@ pub struct Runner {
     redis: RedisClient,
     msg_queue: redmq::MsgQueue,
     nox_client: NoxClient,
-    gcs_client: GcsClient,
+    azure_blob: ClientBuilder,
     vm_client: sandbox_client::SandboxClient<Channel>,
     sim_artifacts_bucket_name: String,
     sim_results_bucket_name: String,
@@ -44,16 +43,19 @@ impl Runner {
         let redis_config = RedisConfig::from_url(&config.redis_url)?;
         let redis = Builder::from_config(redis_config).build()?;
         let msg_queue = redmq::MsgQueue::new(&redis, "sim-agent", config.pod_name).await?;
-        let gcs_config = ClientConfig::default().with_auth().await?;
 
         let channel = super::builder_channel(config.tester_addr);
         let vm_client = sandbox_client::SandboxClient::new(channel.clone());
+        let credentials = azure_identity::create_credential()?;
+        let credentials = azure_storage::StorageCredentials::token_credential(credentials);
+        let azure_blob = ClientBuilder::new(config.azure_account_name.clone(), credentials);
+
         Ok(Self {
             db,
             redis,
             msg_queue,
             nox_client: NoxClient::cpu()?,
-            gcs_client: GcsClient::new(gcs_config),
+            azure_blob,
             vm_client,
             sim_artifacts_bucket_name: config.sim_artifacts_bucket_name,
             sim_results_bucket_name: config.sim_results_bucket_name,
@@ -215,17 +217,16 @@ impl Runner {
         run_id: Uuid,
     ) -> anyhow::Result<PathBuf> {
         tracing::info!("downloading sim artifacts for run {}", run_id);
-        let data = self
-            .gcs_client
-            .download_object(
-                &GetObjectRequest {
-                    bucket: self.sim_artifacts_bucket_name.clone(),
-                    object: format!("runs/{}.tar.zst", run_id),
-                    ..Default::default()
-                },
-                &Range::default(),
-            )
-            .await?;
+        let blob_client = self.azure_blob.clone().blob_client(
+            self.sim_artifacts_bucket_name.clone(),
+            format!("runs/{}.tar.zst", run_id),
+        );
+        let mut stream = blob_client.get().into_stream();
+        let mut data = vec![];
+        while let Some(block) = stream.next().await {
+            let block = block?.data.collect().await?;
+            data.extend(block);
+        }
         let zstd = zstd::Decoder::new(data.as_slice())?;
         let mut tar = tar::Archive::new(zstd);
         tar.unpack(temp_dir.path())?;
@@ -234,26 +235,27 @@ impl Runner {
     }
 
     fn upload_archive(&self, archive: File, file_name: String) -> tokio::task::JoinHandle<()> {
-        let start = Instant::now();
-        let gcs_client = self.gcs_client.clone();
-        let bucket = self.sim_results_bucket_name.clone();
-        let len = archive.metadata().unwrap().len();
-        tracing::trace!(file_name, len, "uploading replay archive");
+        // let start = Instant::now();
+        tracing::trace!(file_name, "uploading replay archive");
+        let blob_client = self
+            .azure_blob
+            .clone()
+            .blob_client(self.sim_results_bucket_name.clone(), file_name);
         tokio::spawn(async move {
-            let result = gcs_client
-                .upload_object(
-                    &UploadObjectRequest {
-                        bucket,
-                        ..Default::default()
-                    },
-                    tokio::fs::File::from_std(archive),
-                    &UploadType::Simple(Media::new(file_name.clone())),
-                )
-                .await;
-            let elapsed = start.elapsed();
-            match result {
-                Ok(_) => tracing::debug!(?elapsed, file_name, "uploaded replay archive"),
-                Err(err) => tracing::error!(?err, "gcs upload failed"),
+            let file = match azure_core::tokio::fs::FileStreamBuilder::new(
+                tokio::fs::File::from_std(archive),
+            )
+            .build()
+            .await
+            {
+                Ok(b) => b,
+                Err(err) => {
+                    tracing::error!(?err, "blob upload failed");
+                    return;
+                }
+            };
+            if let Err(err) = blob_client.put_block_blob(file).await {
+                tracing::error!(?err, "blob upload failed")
             }
         })
     }

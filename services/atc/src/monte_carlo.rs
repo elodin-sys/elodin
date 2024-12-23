@@ -1,5 +1,7 @@
-use google_cloud_storage::client::{Client as GcsClient, ClientConfig};
-use google_cloud_storage::sign::{SignedURLMethod, SignedURLOptions};
+use std::time::Duration;
+
+use azure_storage::shared_access_signature::service_sas::BlobSasPermissions;
+use azure_storage_blobs::prelude::ClientBuilder;
 
 use crate::config::MonteCarloConfig;
 use crate::error::Error;
@@ -14,17 +16,20 @@ pub const MAX_SAMPLE_COUNT: usize = 100_000;
 // pub const BUFFER_BATCH_COUNT: usize = 10;
 
 pub struct SimStorageClient {
-    gcs_client: GcsClient,
+    azure_blob: ClientBuilder,
     sim_artifacts_bucket_name: String,
     sim_results_bucket_name: String,
 }
 
 impl SimStorageClient {
     pub async fn new(config: &MonteCarloConfig) -> anyhow::Result<Self> {
-        let gcp_config = ClientConfig::default().with_auth().await?;
-        let gcs_client = GcsClient::new(gcp_config);
+        // let gcp_config = ClientConfig::default().with_auth().await?;
+        // let gcs_client = GcsClient::new(gcp_config);
+        let credentials = azure_identity::create_credential()?;
+        let credentials = azure_storage::StorageCredentials::token_credential(credentials);
+        let azure_blob = ClientBuilder::new(config.azure_account_name.clone(), credentials);
         Ok(SimStorageClient {
-            gcs_client,
+            azure_blob,
             sim_artifacts_bucket_name: config.sim_artifacts_bucket_name.clone(),
             sim_results_bucket_name: config.sim_results_bucket_name.clone(),
         })
@@ -32,21 +37,22 @@ impl SimStorageClient {
 
     pub async fn upload_artifacts_url(&self, id: uuid::Uuid) -> Result<String, Error> {
         let object_name = format!("runs/{}.tar.zst", id);
-        let options = SignedURLOptions {
-            method: SignedURLMethod::PUT,
-            ..Default::default()
-        };
-        let url = self
-            .gcs_client
-            .signed_url(
-                &self.sim_artifacts_bucket_name,
-                &object_name,
-                None,
-                None,
-                options,
+        let blob_client = self
+            .azure_blob
+            .clone()
+            .blob_client(self.sim_artifacts_bucket_name.clone(), object_name);
+        let sas_token = blob_client
+            .shared_access_signature(
+                BlobSasPermissions {
+                    write: true,
+                    create: true,
+                    ..Default::default()
+                },
+                time::OffsetDateTime::now_utc() + Duration::from_secs(3600),
             )
             .await?;
-        Ok(url)
+        let url = blob_client.generate_signed_blob_url(&sas_token)?;
+        Ok(url.to_string())
     }
 
     pub async fn download_results_url(
@@ -55,21 +61,22 @@ impl SimStorageClient {
         batch_number: u32,
     ) -> Result<String, Error> {
         let object_name = format!("runs/{}/batches/{}.tar.zst", id, batch_number);
-        let options = SignedURLOptions {
-            method: SignedURLMethod::GET,
-            ..Default::default()
-        };
-        let url = self
-            .gcs_client
-            .signed_url(
-                &self.sim_results_bucket_name,
-                &object_name,
-                None,
-                None,
-                options,
+
+        let blob_client = self
+            .azure_blob
+            .clone()
+            .blob_client(self.sim_results_bucket_name.clone(), object_name);
+        let sas_token = blob_client
+            .shared_access_signature(
+                BlobSasPermissions {
+                    read: true,
+                    ..Default::default()
+                },
+                time::OffsetDateTime::now_utc() + Duration::from_secs(3600),
             )
             .await?;
-        Ok(url)
+        let url = blob_client.generate_signed_blob_url(&sas_token)?;
+        Ok(url.to_string())
     }
 }
 

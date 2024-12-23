@@ -52,6 +52,9 @@
       ++ lib.optionals stdenv.isDarwin [pkgs.libiconv];
     XLA_EXTENSION_DIR = "${xla_ext}";
     cargoExtraArgs = "--package=sim-agent --package=nox-py";
+    OPENSSL_DIR = "${pkgs.openssl.dev}";
+    OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+    OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs
