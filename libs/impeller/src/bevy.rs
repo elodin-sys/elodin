@@ -339,7 +339,9 @@ fn recv_system(args: RecvSystemArgs) {
                         stream_id: StreamId::CONTROL,
                         payload: Payload::ControlMsg::<Bytes>(ControlMsg::sub_component_id(*id)),
                     };
-                    tx.send(packet).unwrap();
+                    if tx.send(packet).is_err() {
+                        continue;
+                    }
                 }
                 let _ = sim_peer.tx.insert(tx);
 
