@@ -1,4 +1,4 @@
-use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx};
+use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx, TimeSource, VolumeManager};
 use fugit::RateExtU32 as _;
 use hal::{clocks, pac};
 use sdio_host::{
@@ -77,10 +77,6 @@ pub struct Sdmmc {
     rb: pac::SDMMC1,
     clk: Hertz,
     card: Option<SdCard>,
-}
-
-pub struct SdmmcBlockDevice {
-    sdmmc: Sdmmc,
 }
 
 impl Sdmmc {
@@ -635,12 +631,21 @@ impl Sdmmc {
         Ok(self.card)
     }
 
-    pub fn block_device(self) -> SdmmcBlockDevice {
-        SdmmcBlockDevice { sdmmc: self }
+    pub fn connected(&self) -> bool {
+        self.card.is_some()
+    }
+
+    pub fn disconnect(&mut self) {
+        self.power_off();
+        self.card = None;
+    }
+
+    pub fn volume_manager<T: TimeSource>(self, time_source: T) -> VolumeManager<Self, T> {
+        VolumeManager::new(self, time_source)
     }
 }
 
-impl BlockDevice for SdmmcBlockDevice {
+impl BlockDevice for Sdmmc {
     type Error = Error;
 
     fn read(
@@ -651,7 +656,7 @@ impl BlockDevice for SdmmcBlockDevice {
     ) -> Result<(), Self::Error> {
         let start = start_block_idx.0;
         for block_idx in start..(start + blocks.len() as u32) {
-            self.sdmmc.read_block(
+            self.read_block(
                 block_idx,
                 &mut blocks[(block_idx - start) as usize].contents,
             )?;
@@ -662,16 +667,16 @@ impl BlockDevice for SdmmcBlockDevice {
     fn write(&self, blocks: &[Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
         let start = start_block_idx.0;
         let total_length = embedded_sdmmc::Block::LEN * blocks.len();
-        self.sdmmc.write_blocks_begin(start, total_length)?;
+        self.write_blocks_begin(start, total_length)?;
         for block in blocks.iter() {
-            self.sdmmc.write_blocks_feed(&block.contents);
+            self.write_blocks_feed(&block.contents);
         }
-        self.sdmmc.write_blocks_conclude()?;
+        self.write_blocks_conclude()?;
         Ok(())
     }
 
     fn num_blocks(&self) -> Result<BlockCount, Self::Error> {
-        let card = self.sdmmc.card.ok_or(Error::NoCard)?;
+        let card = self.card.ok_or(Error::NoCard)?;
         let blocks = card.size() / embedded_sdmmc::Block::LEN as u64;
         Ok(BlockCount(blocks as u32))
     }
