@@ -9,6 +9,7 @@ use defmt_rtt as _;
 use hal as _;
 use panic_probe as _;
 
+pub mod blackbox;
 pub mod bmm350;
 pub mod bsp;
 pub mod can;
@@ -21,6 +22,7 @@ pub mod i2c_dma;
 pub mod led;
 pub mod monotonic;
 pub mod peripheral;
+pub mod rtc;
 pub mod sdmmc;
 
 #[global_allocator]

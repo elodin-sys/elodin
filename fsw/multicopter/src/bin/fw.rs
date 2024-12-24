@@ -11,16 +11,19 @@ use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
 use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{
-    bmm350, can, crsf, dma::*, dronecan, dshot, healing_usart, i2c_dma::*, led, monotonic,
-    peripheral::*, sdmmc,
-};
+use roci_multicopter::{dma::*, i2c_dma::*, peripheral::*, *};
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
 const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
 
 const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
+
+const SD_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
+const SD_LOG_PERIOD: fugit::MicrosDuration<u64> = SD_LOG_RATE.into_duration();
+
+const SD_FLUSH_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(1);
+const SD_FLUSH_PERIOD: fugit::MicrosDuration<u64> = SD_FLUSH_RATE.into_duration();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -29,6 +32,7 @@ fn main() -> ! {
 
     let pins = bsp::Pins::take().unwrap();
     let bsp::Pins {
+        pd11: led_sr0,
         pd10: led_sg0,
         pb15: mut _led_sb0,
         pb14: mut led_sa0,
@@ -86,11 +90,19 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
-    let mut _sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
+    let sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
+    let volume_mgr = sd.volume_manager(rtc::FakeTime {});
+    defmt::info!("Configured SDMMC");
+
+    let mut blackbox = blackbox::Blackbox::new("aleph", volume_mgr, Some(led_sr0));
+    blackbox.arm("test").unwrap();
+    defmt::info!("Configured blackbox");
 
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
+    let mut last_sd_log = monotonic.now();
+    let mut last_sd_flush = monotonic.now();
 
     led_sa0.set_low();
     loop {
@@ -116,6 +128,25 @@ fn main() -> ! {
                 let msg = dronecan::Message::try_from(msg).unwrap();
                 defmt::debug!("{}: Received message: {}", ts, msg);
             }
+        } else if now.checked_duration_since(last_sd_log).unwrap() > SD_LOG_PERIOD {
+            last_sd_log = now;
+            defmt::trace!("{}: Logging to SD card", ts);
+
+            let record = blackbox::Record {
+                ts: ts.to_millis() as u32,
+                mag: bmm350.data.mag,
+                gyro: [0f32; 3],
+                accel: [0f32; 3],
+                mag_temp: bmm350.data.temp,
+                mag_sample: bmm350.data.sample,
+            };
+            blackbox.write_record(record);
+
+            if now.checked_duration_since(last_sd_flush).unwrap() > SD_FLUSH_PERIOD {
+                last_sd_flush = now;
+                defmt::trace!("{}: Flushing to SD card", ts);
+                blackbox.flush();
+            }
         }
 
         running_led.update(now);
@@ -129,6 +160,6 @@ fn main() -> ! {
                 bmm350.data
             );
         }
-        delay.delay_us(1);
+        delay.delay_ns(1);
     }
 }
