@@ -71,9 +71,9 @@ pub enum Priority {
 }
 
 pub struct RawMessage<'a> {
-    id: Id,
-    crc: Option<u16>,
-    buf: &'a [u8],
+    pub id: Id,
+    pub crc: Option<u16>,
+    pub buf: &'a [u8],
 }
 
 #[derive(defmt::Format)]

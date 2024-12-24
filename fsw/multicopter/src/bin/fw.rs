@@ -121,6 +121,7 @@ fn main() -> ! {
             last_can_update = now;
             defmt::trace!("{}: CAN update", ts);
             if let Some(msg) = can.read(now) {
+                blackbox.write_can(&msg);
                 let msg = dronecan::Message::try_from(msg).unwrap();
                 defmt::debug!("{}: Received message: {}", ts, msg);
             }
