@@ -8,6 +8,7 @@
 //! Successful initialization of the blackbox can be used as a gating condition for arming the
 //! vehicle.
 
+use alloc::boxed::Box;
 use hal::gpio::Pin;
 use zerocopy::IntoBytes;
 
@@ -29,7 +30,9 @@ pub struct Blackbox<'a> {
     volume_mgr: embedded_sdmmc::VolumeManager<sdmmc::Sdmmc, FakeTime, 4, 4, 1>,
     fc_name: &'a str,
     data_file: Option<embedded_sdmmc::RawFile>,
-    led: Option<Pin>,
+    buf: Box<[u8]>,
+    buf_len: usize,
+    led: Pin,
 }
 
 #[derive(Debug, Copy, Clone, defmt::Format)]
@@ -52,13 +55,15 @@ impl<'a> Blackbox<'a> {
     pub fn new(
         fc_name: &'a str,
         volume_mgr: embedded_sdmmc::VolumeManager<sdmmc::Sdmmc, FakeTime, 4, 4, 1>,
-        led: Option<Pin>,
+        led: Pin,
     ) -> Self {
         Self {
             volume_mgr,
             fc_name,
             data_file: None,
             led,
+            buf: alloc::vec![0; 4 * 1024].into_boxed_slice(),
+            buf_len: 0,
         }
     }
 
@@ -85,32 +90,29 @@ impl<'a> Blackbox<'a> {
 
     pub fn write_record(&mut self, record: Record) {
         let record = record.as_bytes();
-        if let Some(data_file) = &mut self.data_file {
-            if let Some(led) = self.led.as_mut() {
-                led.set_high();
-            }
-            let mut data_file = data_file.to_file(&mut self.volume_mgr);
-            if let Err(err) = data_file.write(record) {
+        if record.len() > self.buf.len() - self.buf_len {
+            if let Err(err) = self.flush() {
                 defmt::error!("Failed to write to SD card: {}", Error::from(err));
                 self.data_file = None;
-            } else {
-                self.data_file = Some(data_file.to_raw_file());
             }
         }
-        if let Some(led) = self.led.as_mut() {
-            led.set_low();
-        }
+        self.buf[self.buf_len..self.buf_len + record.len()].copy_from_slice(record);
+        self.buf_len += record.len();
     }
 
-    pub fn flush(&mut self) {
-        if let Some(data_file) = &mut self.data_file {
+    fn flush(&mut self) -> Result<(), Error> {
+        let to_flush = &self.buf[..self.buf_len];
+        self.buf_len = 0;
+        if let Some(data_file) = self.data_file.as_mut() {
+            self.led.set_high();
+            defmt::debug!("Flushing buffered data to SD card");
             let mut data_file = data_file.to_file(&mut self.volume_mgr);
-            if let Err(err) = data_file.flush() {
-                defmt::error!("Failed to flush SD card: {}", Error::from(err));
-                self.data_file = None;
-            }
+            data_file.write(to_flush)?;
+            data_file.flush()?;
             self.data_file = Some(data_file.to_raw_file());
+            self.led.set_low();
         }
+        Ok(())
     }
 
     pub fn disarm(&mut self) -> Result<(), Error> {

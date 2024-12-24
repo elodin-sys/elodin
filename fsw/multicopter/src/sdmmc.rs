@@ -11,7 +11,7 @@ use sdio_host::{
 type Hertz = fugit::Hertz<u32>;
 
 const SD_INIT_FREQ: Hertz = Hertz::kHz(400);
-const SD_NORMAL_FREQ: Hertz = Hertz::MHz(25);
+const SD_NORMAL_FREQ: Hertz = Hertz::MHz(50);
 const SD_KERNEL_FREQ: Hertz = Hertz::MHz(50);
 
 #[derive(defmt::Format, Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -612,11 +612,11 @@ impl Sdmmc {
             ..Default::default()
         });
 
-        // 50MHz -> 25MHz clock divider
+        // 50MHz -> 50MHz clock divider
         let clkdiv = SD_KERNEL_FREQ.to_Hz() / SD_NORMAL_FREQ.to_Hz();
 
-        // Set bus width to 4, and switch to 25MHz
-        defmt::debug!("Setting SD card bus width to 4, frequency to 25MHz");
+        // Set bus width to 4, and switch to 50MHz
+        defmt::debug!("Setting SD card bus width to 4, frequency to 50MHz");
         self.app_cmd(sd_cmd::cmd6(2))?;
         while self.rb.star.read().dpsmact().bit_is_set()
             || self.rb.star.read().cpsmact().bit_is_set()
