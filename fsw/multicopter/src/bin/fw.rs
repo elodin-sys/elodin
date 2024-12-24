@@ -19,11 +19,8 @@ const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
 const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
 
-const SD_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
+const SD_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(100);
 const SD_LOG_PERIOD: fugit::MicrosDuration<u64> = SD_LOG_RATE.into_duration();
-
-const SD_FLUSH_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(1);
-const SD_FLUSH_PERIOD: fugit::MicrosDuration<u64> = SD_FLUSH_RATE.into_duration();
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -94,7 +91,7 @@ fn main() -> ! {
     let volume_mgr = sd.volume_manager(rtc::FakeTime {});
     defmt::info!("Configured SDMMC");
 
-    let mut blackbox = blackbox::Blackbox::new("aleph", volume_mgr, Some(led_sr0));
+    let mut blackbox = blackbox::Blackbox::new("aleph", volume_mgr, led_sr0);
     blackbox.arm("test").unwrap();
     defmt::info!("Configured blackbox");
 
@@ -102,7 +99,6 @@ fn main() -> ! {
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
     let mut last_sd_log = monotonic.now();
-    let mut last_sd_flush = monotonic.now();
 
     led_sa0.set_low();
     loop {
@@ -141,12 +137,6 @@ fn main() -> ! {
                 mag_sample: bmm350.data.sample,
             };
             blackbox.write_record(record);
-
-            if now.checked_duration_since(last_sd_flush).unwrap() > SD_FLUSH_PERIOD {
-                last_sd_flush = now;
-                defmt::trace!("{}: Flushing to SD card", ts);
-                blackbox.flush();
-            }
         }
 
         running_led.update(now);
