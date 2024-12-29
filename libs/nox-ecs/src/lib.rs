@@ -28,6 +28,7 @@ mod query;
 mod system;
 
 pub mod graph;
+pub mod impeller2;
 pub mod six_dof;
 
 pub use component::*;
