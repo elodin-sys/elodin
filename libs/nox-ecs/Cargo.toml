@@ -20,6 +20,12 @@ nox.features = ["xla", "noxpr"]
 impeller.path = "../impeller"
 impeller.features = ["nox", "polars", "xla"]
 
+# impeller2
+stellarator.path = "../stellarator"
+impeller2.path = "../impeller2"
+impeller-db.path = "../impeller2/db"
+impeller2-stella.path = "../impeller2/stella"
+
 # data structures
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]

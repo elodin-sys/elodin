@@ -64,10 +64,10 @@ impl<T: Immutable + TryFromBytes> BufEntry<T> {
 }
 
 #[derive(Serialize, Deserialize, TryFromBytes, Immutable, IntoBytes)]
-struct ShapeEntry {
-    prim_type: PrimType,
-    rank: u64,
-    shape_offset: u64,
+pub(crate) struct ShapeEntry {
+    pub(crate) prim_type: PrimType,
+    pub(crate) rank: u64,
+    pub(crate) shape_offset: u64,
 }
 
 impl ShapeEntry {
