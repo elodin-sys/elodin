@@ -7,5 +7,6 @@ pub mod buf;
 pub mod com_de;
 pub mod error;
 pub mod registry;
+pub mod schema;
 pub mod table;
 pub mod types;

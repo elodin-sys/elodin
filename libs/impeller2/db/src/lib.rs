@@ -1,16 +1,24 @@
-use control::{SetStreamState, Stream, StreamFilter, StreamId, VTableMsg};
+use arc_swap::ArcSwap;
+use control::{
+    ComponentMetadata, EntityMetadata, GetComponentMetadata, GetEntityMetadata, GetSchema,
+    GetTimeSeries, Metadata, SchemaMsg, SetComponentMetadata, SetEntityMetadata, SetStreamState,
+    Stream, StreamFilter, StreamId, VTableMsg,
+};
 use dashmap::DashMap;
 use impeller2::{
     com_de::Decomponentize,
+    schema::Schema,
     table::{VTable, VTableBuilder},
     types::{ComponentId, EntityId, PacketId, PrimType},
 };
 use impeller2_stella::{LenPacket, Msg, Packet, PacketSink};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use std::ffi::OsStr;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     net::SocketAddr,
+    ops::Range,
     path::{Path, PathBuf},
     sync::{
         atomic::{self, AtomicBool, AtomicU64},
@@ -36,18 +44,20 @@ mod registry;
 pub(crate) mod time_series;
 
 pub struct DB {
-    path: PathBuf,
-    latest_tick: AtomicU64,
-    vtable_gen: AtomicU64,
-    vtable_registry: RwLock<registry::VTableRegistry>,
-    components: DashMap<ComponentId, Component>,
-    tick_waker: WaitQueue,
-    streams: DashMap<StreamId, Arc<StreamState>>,
+    pub path: PathBuf,
+    pub latest_tick: AtomicU64,
+    pub vtable_gen: AtomicU64,
+    pub vtable_registry: RwLock<registry::VTableRegistry>,
+    pub components: DashMap<ComponentId, Component>,
+    pub tick_waker: WaitQueue,
+    pub streams: DashMap<StreamId, Arc<StreamState>>,
+    pub entity_metadata: DashMap<EntityId, Metadata>,
 }
 
 impl DB {
     pub fn create(path: PathBuf) -> Self {
         info!(?path, "created db");
+
         DB {
             path,
             latest_tick: AtomicU64::new(0),
@@ -56,6 +66,7 @@ impl DB {
             vtable_gen: AtomicU64::new(0),
             tick_waker: WaitQueue::new(),
             streams: Default::default(),
+            entity_metadata: Default::default(),
         }
     }
 
@@ -65,37 +76,68 @@ impl DB {
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
-            if !path.is_dir() {
+            if !path.is_dir() || path.file_name() == Some(OsStr::new("entity_metadata")) {
                 continue;
             }
+
             let component_id = ComponentId(
                 path.file_name()
                     .and_then(|p| p.to_str())
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidComponentId)?,
             );
+
             let schema = ComponentSchema::read(path.join("schema"))?;
+            let metadata = Metadata::read(path.join("metadata"))?;
+
             let component = Component {
                 schema,
                 entities: DashMap::default(),
+                metadata: arc_swap::ArcSwap::new(Arc::new(metadata)),
             };
+
             for elem in std::fs::read_dir(path)? {
                 let Ok(elem) = elem else { continue };
+
                 let path = elem.path();
-                if path.file_name().and_then(|p| p.to_str()) == Some("schema") {
+                if path
+                    .file_name()
+                    .and_then(|p| p.to_str())
+                    .map(|s| s == "schema" || s == "metadata")
+                    .unwrap_or(false)
+                {
                     continue;
                 }
+
                 let entity_id = EntityId(
                     path.file_name()
                         .and_then(|p| p.to_str())
                         .and_then(|p| p.parse().ok())
                         .ok_or(Error::InvalidComponentId)?,
                 );
+
                 let entity = Entity::open(path, entity_id, component.schema.clone())?;
+
                 latest_tick = latest_tick.max(entity.latest_tick());
                 component.entities.insert(entity_id, entity);
             }
+
             components.insert(component_id, component);
+        }
+
+        let entity_metadata = DashMap::new();
+        for elem in std::fs::read_dir(path.join("entity_metadata"))? {
+            let Ok(elem) = elem else { continue };
+
+            let path = elem.path();
+            let entity_id = EntityId(
+                path.file_name()
+                    .and_then(|p| p.to_str())
+                    .and_then(|p| p.parse().ok())
+                    .ok_or(Error::InvalidComponentId)?,
+            );
+            let metadata = Metadata::read(path)?;
+            entity_metadata.insert(entity_id, metadata);
         }
         info!(db.path = ?path, db.latest_tick = ?latest_tick, "opened db");
         Ok(DB {
@@ -106,26 +148,109 @@ impl DB {
             components,
             tick_waker: WaitQueue::new(),
             streams: Default::default(),
+            entity_metadata,
+        })
+    }
+
+    // pub fn try_get_or_insert_entity(
+    //     &mut self,
+    //     component_id: ComponentId,
+    //     entity_id: EntityId,
+    //     prim_type: PrimType,
+    //     shape: &[u64],
+    // ) -> Result<dashmap::mapref::one::MappedRefMut<'_, EntityId, Entity>, Error> {
+    //     let component = self.components.entry(component_id).or_try_insert_with(|| {
+    //         self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+    //         let schema = ComponentSchema {
+    //             component_id,
+    //             prim_type,
+    //             shape: shape.iter().map(|&x| x as u64).collect(),
+    //         };
+    //         let component_dir = self.path.join(component_id.to_string());
+    //         std::fs::create_dir_all(&component_dir)?;
+    //         let schema_path = component_dir.join("schema");
+    //         schema.write(schema_path)?;
+    //         let metadata = Metadata::default();
+    //         metadata.write(component_dir.join("metadata"))?;
+    //         Ok::<_, Error>(Component {
+    //             schema,
+    //             entities: Default::default(),
+    //             metadata: ArcSwap::new(Arc::new(metadata)),
+    //         })
+    //     })?;
+    //     let entity = component.entities.entry(entity_id).or_try_insert_with(|| {
+    //         self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+    //         let component_dir = self.path.join(component_id.to_string());
+    //         std::fs::create_dir_all(&component_dir)?;
+    //         let path = component_dir.join(entity_id.to_string());
+    //         let start_tick = self.latest_tick.load(atomic::Ordering::SeqCst);
+    //         Entity::create(path, start_tick, entity_id, component.schema.clone())
+    //     })?;
+    //     Ok(entity)
+    // }
+}
+
+pub struct Component {
+    pub schema: ComponentSchema,
+    pub metadata: arc_swap::ArcSwap<Metadata>,
+    pub entities: DashMap<EntityId, Entity>,
+}
+
+impl Component {
+    pub fn try_create(
+        component_id: ComponentId,
+        prim_type: PrimType,
+        shape: &[usize],
+        db_path: &Path,
+    ) -> Result<Self, Error> {
+        let schema = ComponentSchema {
+            component_id,
+            prim_type,
+            shape: shape.iter().map(|&x| x as u64).collect(),
+        };
+        let component_dir = db_path.join(component_id.to_string());
+        std::fs::create_dir_all(&component_dir)?;
+        let schema_path = component_dir.join("schema");
+        schema.write(schema_path)?;
+        let metadata = Metadata::default();
+        metadata.write(component_dir.join("metadata"))?;
+        Ok(Component {
+            schema,
+            entities: Default::default(),
+            metadata: ArcSwap::new(Arc::new(metadata)),
         })
     }
 }
 
-pub struct Component {
-    schema: ComponentSchema,
-    entities: DashMap<EntityId, Entity>,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComponentSchema {
-    component_id: ComponentId,
-    prim_type: PrimType,
-    shape: SmallVec<[u64; 4]>,
+    pub component_id: ComponentId,
+    pub prim_type: PrimType,
+    pub shape: SmallVec<[u64; 4]>,
 }
 
 impl ComponentSchema {
     fn size(&self) -> usize {
         self.shape.iter().product::<u64>() as usize * self.prim_type.size()
     }
+
+    pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let data = std::fs::read(path)?;
+        Ok(postcard::from_bytes(&data)?)
+    }
+
+    fn write(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let data = postcard::to_allocvec(&self)?;
+        std::fs::write(path, data)?;
+        Ok(())
+    }
+
+    pub fn to_schema(&self) -> Schema<Vec<u8>> {
+        Schema::new(self.component_id, self.prim_type, &self.shape).expect("failed to create shape")
+    }
+}
+
+impl Metadata {
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
         let data = std::fs::read(path)?;
         Ok(postcard::from_bytes(&data)?)
@@ -158,10 +283,10 @@ impl Component {
 }
 
 pub struct Entity {
-    entity_id: EntityId,
-    time_series: TimeSeries,
-    writer: SyncMutex<TimeSeriesWriter>,
-    schema: ComponentSchema,
+    pub entity_id: EntityId,
+    pub time_series: TimeSeries,
+    pub writer: SyncMutex<TimeSeriesWriter>,
+    pub schema: ComponentSchema,
 }
 
 impl Entity {
@@ -211,13 +336,23 @@ impl Entity {
         Ok(())
     }
 
-    fn get(&self, tick: u64) -> Option<&[u8]> {
+    fn tick_to_offset(&self, tick: u64) -> Option<usize> {
         let start_tick = self.time_series.start_tick();
         let schema_size = self.schema.size();
-        let buf_start = (tick.checked_sub(start_tick)? as usize).checked_mul(schema_size)?;
+        (tick.checked_sub(start_tick)? as usize).checked_mul(schema_size)
+    }
+
+    fn get(&self, tick: u64) -> Option<&[u8]> {
+        let buf_start = self.tick_to_offset(tick)?;
+        let schema_size = self.schema.size();
         let buf_end = buf_start.checked_add(schema_size)?;
-        let res = self.time_series.get(buf_start..buf_end);
-        res
+        self.time_series.get(buf_start..buf_end)
+    }
+
+    fn get_range(&self, range: Range<u64>) -> Option<&[u8]> {
+        let buf_start = self.tick_to_offset(range.start)?;
+        let buf_end = self.tick_to_offset(range.end)?;
+        self.time_series.get(buf_start..buf_end)
     }
 
     fn len(&self) -> u64 {
@@ -244,19 +379,7 @@ impl Decomponentize for DBSink<'_> {
             .entry(component_id)
             .or_try_insert_with(|| {
                 self.0.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
-                let schema = ComponentSchema {
-                    component_id,
-                    prim_type: value.prim_type(),
-                    shape: value.shape().iter().map(|&x| x as u64).collect(),
-                };
-                let component_dir = self.0.path.join(component_id.to_string());
-                std::fs::create_dir_all(&component_dir)?;
-                let schema_path = component_dir.join("schema");
-                schema.write(schema_path)?;
-                Ok::<_, Error>(Component {
-                    schema,
-                    entities: Default::default(),
-                })
+                Component::try_create(component_id, value.prim_type(), value.shape(), &self.0.path)
             }) {
             Ok(entity) => entity,
             Err(err) => {
@@ -271,7 +394,6 @@ impl Decomponentize for DBSink<'_> {
         let entity = match component.entities.entry(entity_id).or_try_insert_with(|| {
             self.0.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             let component_dir = self.0.path.join(component_id.to_string());
-            std::fs::create_dir_all(&component_dir)?;
             let path = component_dir.join(entity_id.to_string());
             let start_tick = self.0.latest_tick.load(atomic::Ordering::SeqCst);
             Entity::create(path, start_tick, entity_id, component.schema.clone())
@@ -301,9 +423,9 @@ impl Decomponentize for DBSink<'_> {
 }
 
 pub struct Server {
-    listener: TcpListener,
-    db: Arc<DB>,
-    time_step: Duration,
+    pub listener: TcpListener,
+    pub db: Arc<DB>,
+    pub time_step: Duration,
 }
 
 impl Server {
@@ -356,7 +478,7 @@ async fn tick(time_step: Duration, db: Arc<DB>) {
     }
 }
 
-async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
+pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     if let Err(err) = handle_conn_inner(stream, db).await {
         warn!(?err, "error handling stream")
     }
@@ -408,6 +530,113 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
                     state.set_tick(tick);
                 }
             }
+            Packet::Msg(m) if m.id == GetSchema::ID => {
+                let get_schema = m.parse::<GetSchema>()?;
+                if let Some(component) = db.components.get(&get_schema.component_id) {
+                    let schema = component.schema.to_schema();
+                    let tx = tx.lock().await;
+                    if let Err(err) = tx.send(SchemaMsg(schema).to_len_packet()).await.0 {
+                        warn!(?err, "failed to send packet");
+                    }
+                } else {
+                    todo!("send error here")
+                }
+            }
+            Packet::Msg(m) if m.id == GetTimeSeries::ID => {
+                let get_time_series = m.parse::<GetTimeSeries>()?;
+                let Some(component) = db.components.get(&get_time_series.component_id) else {
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let Some(entity) = component.entities.get(&get_time_series.entity_id) else {
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let Some(time_series) = entity.get_range(get_time_series.range) else {
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let mut pkt = LenPacket::time_series(get_time_series.id, time_series.len());
+                pkt.extend_from_slice(time_series); // TODO: make this zero copy
+                let tx = tx.lock().await;
+                if let Err(err) = tx.send(pkt).await.0 {
+                    warn!(?err, "failed to send packet");
+                }
+            }
+            Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
+                let set_component_metadata = m.parse::<SetComponentMetadata>()?;
+                trace!(msg = ?set_component_metadata, "set component metadata");
+                let Some(component) = db.components.get(&set_component_metadata.component_id)
+                else {
+                    trace!(component.id = ?set_component_metadata.component_id, "component not found");
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let metadata = set_component_metadata.metadata;
+                trace!(?metadata, component.id = ?set_component_metadata.component_id, "set component metadata");
+                if let Err(err) = metadata.write(
+                    db.path
+                        .join(set_component_metadata.component_id.to_string())
+                        .join("metadata"),
+                ) {
+                    warn!(?err, "failed to write metadata");
+                }
+                component.metadata.store(Arc::new(metadata));
+            }
+            Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
+                let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
+                let Some(component) = db.components.get(&component_id) else {
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let metadata = component.metadata.load();
+                let msg = ComponentMetadata {
+                    component_id,
+                    metadata: (**metadata).clone(),
+                };
+                let tx = tx.lock().await;
+                if let Err(err) = tx.send(msg.to_len_packet()).await.0 {
+                    warn!(?err, "failed to send packet");
+                }
+            }
+
+            Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
+                let set_entity_metadata = m.parse::<SetEntityMetadata>()?;
+                trace!(msg = ?set_entity_metadata, "set entity metadata");
+                let entity_metadata_path = db.path.join("entity_metadata");
+                if let Err(err) = std::fs::create_dir_all(&entity_metadata_path) {
+                    warn!(?err, "failed to create entity dir");
+                    buf = pkt.into_buf();
+                    continue;
+                }
+                let path = entity_metadata_path.join(set_entity_metadata.entity_id.to_string());
+
+                let metadata = set_entity_metadata.metadata;
+                trace!(?metadata, entity.id = ?set_entity_metadata.entity_id, "set entity metadata");
+                if let Err(err) = metadata.write(&path) {
+                    warn!(?err, "failed to write metadata");
+                    buf = pkt.into_buf();
+                    continue;
+                }
+                db.entity_metadata
+                    .insert(set_entity_metadata.entity_id, metadata);
+            }
+
+            Packet::Msg(m) if m.id == GetEntityMetadata::ID => {
+                let GetEntityMetadata { entity_id } = m.parse::<GetEntityMetadata>()?;
+                let Some(metadata) = db.entity_metadata.get(&entity_id) else {
+                    buf = pkt.into_buf();
+                    continue;
+                };
+                let msg = EntityMetadata {
+                    entity_id,
+                    metadata: metadata.clone(),
+                };
+                let tx = tx.lock().await;
+                if let Err(err) = tx.send(msg.to_len_packet()).await.0 {
+                    warn!(?err, "failed to send packet");
+                }
+            }
             Packet::Table(table) => {
                 let registry = db.vtable_registry.read().await;
                 let mut sink = DBSink(&db);
@@ -421,7 +650,7 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
     }
 }
 
-struct StreamState {
+pub struct StreamState {
     time_step: AtomicU64,
     is_playing: AtomicBool,
     current_tick: AtomicU64,
@@ -478,7 +707,7 @@ async fn handle_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut start = Instant::now();
     let mut current_gen = u64::MAX;
-    let mut table = LenPacket::table([0; 7], 2048 - 16);
+    let mut table = LenPacket::table([0; 3], 2048 - 16);
     loop {
         if state
             .playing_cell
@@ -569,7 +798,7 @@ impl StreamFilter {
             }
         }
         let id = hasher.finish();
-        Ok(id.to_le_bytes()[..7].try_into().unwrap())
+        Ok(id.to_le_bytes()[..3].try_into().unwrap())
     }
 
     fn vtable(&self, db: &DB) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {

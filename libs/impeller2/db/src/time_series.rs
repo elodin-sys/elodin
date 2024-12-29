@@ -129,6 +129,21 @@ impl TimeSeriesWriter {
         Ok(slice)
     }
 
+    pub fn head(&self) -> Result<&[u8], Error> {
+        let len = self.inner.head_len().load(atomic::Ordering::Acquire) as usize;
+
+        let slice: &mut [u8] =
+            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
+
+        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
+        let head_end = end.checked_add(len).ok_or(Error::MapOverflow)?;
+        if head_end > slice.len() {
+            return Err(Error::MapOverflow);
+        }
+        let slice = slice.get_mut(end..head_end).ok_or(Error::MapOverflow)?;
+        Ok(slice)
+    }
+
     /// Commits the existing head into the committed data region, by advancing the `committed_len` value.
     /// The current head value is also copied into the new head region.
     pub fn commit_head_copy(&mut self) -> Result<(), Error> {
@@ -142,6 +157,29 @@ impl TimeSeriesWriter {
         let heads = slice.get_mut(end..new_head_end).ok_or(Error::MapOverflow)?;
         let (head, new_head) = heads.split_at_mut(head_len);
         new_head.copy_from_slice(head);
+        self.inner
+            .committed_len()
+            .store(head_end as u64, atomic::Ordering::Release);
+
+        Ok(())
+    }
+
+    /// Commits the existing head into the committed data region, by advancing the `committed_len` value.
+    /// The current head value is also copied into the new head region.
+    pub fn commit_head(&mut self, head: &[u8]) -> Result<(), Error> {
+        let slice: &mut [u8] =
+            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
+        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
+        let head_len = self.inner.head_len().load(atomic::Ordering::Acquire) as usize;
+        let head_end = end.checked_add(head_len).ok_or(Error::MapOverflow)?;
+
+        let new_head_end = head_end.checked_add(head.len()).ok_or(Error::MapOverflow)?;
+        let heads = slice.get_mut(end..new_head_end).ok_or(Error::MapOverflow)?;
+        let (_, new_head) = heads.split_at_mut(head_len);
+        new_head.copy_from_slice(head);
+        self.inner
+            .head_len()
+            .store(head.len() as u64, atomic::Ordering::Release);
         self.inner
             .committed_len()
             .store(head_end as u64, atomic::Ordering::Release);

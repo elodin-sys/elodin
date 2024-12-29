@@ -116,6 +116,25 @@ impl PrimType {
     }
 }
 
+impl core::fmt::Display for PrimType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let s = match self {
+            PrimType::U8 => "u8",
+            PrimType::U16 => "u16",
+            PrimType::U32 => "u32",
+            PrimType::U64 => "u64",
+            PrimType::I8 => "i8",
+            PrimType::I16 => "i16",
+            PrimType::I32 => "i32",
+            PrimType::I64 => "i64",
+            PrimType::Bool => "bool",
+            PrimType::F32 => "f32",
+            PrimType::F64 => "f64",
+        };
+        core::fmt::Display::fmt(s, f)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ComponentView<'a> {
     U8(ArrayView<'a, u8>),
@@ -242,9 +261,11 @@ impl<'a> ComponentView<'a> {
 pub enum PacketTy {
     Msg = 0,
     Table = 1,
+    TimeSeries = 2,
 }
 
-pub type PacketId = [u8; 7];
+pub type PacketId = [u8; 3];
+pub type RequestId = [u8; 4];
 
 pub const PACKET_HEADER_LEN: usize = 8;
 
@@ -253,5 +274,6 @@ pub const PACKET_HEADER_LEN: usize = 8;
 pub struct Packet {
     pub packet_ty: PacketTy,
     pub id: PacketId,
+    pub request_id: RequestId,
     pub body: [u8],
 }

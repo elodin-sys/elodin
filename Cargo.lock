@@ -5760,6 +5760,7 @@ dependencies = [
 name = "impeller-db"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "clap 4.5.20",
  "dashmap",
  "fastrand 2.2.0",
@@ -5769,6 +5770,7 @@ dependencies = [
  "miette",
  "postcard",
  "serde",
+ "serde_json",
  "smallvec",
  "stellarator",
  "thiserror 2.0.0",
@@ -7307,6 +7309,9 @@ dependencies = [
  "flume",
  "futures",
  "impeller",
+ "impeller-db",
+ "impeller2",
+ "impeller2-stella",
  "ndarray 0.16.1",
  "nox",
  "nox-ecs-macros",
@@ -7317,6 +7322,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "stellarator",
  "tempfile",
  "thiserror 2.0.0",
  "tokio",
@@ -10301,9 +10307,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.132"
+version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
  "itoa",
  "memchr",
