@@ -50,6 +50,7 @@ impl<R: AsyncRead> PacketStream<R> {
         Ok(match packet_ty {
             PacketTy::Msg => Packet::Msg(MsgBuf { id, buf }),
             PacketTy::Table => Packet::Table(Table { id, buf }),
+            PacketTy::TimeSeries => Packet::TimeSeries(TimeSeries { id, buf }),
         })
     }
 }
@@ -82,11 +83,24 @@ impl<B: IoBuf> MsgBuf<B> {
         let msg = postcard::from_bytes(stellarator::buf::deref(&self.buf))?;
         Ok(msg)
     }
+
+    pub fn try_parse<'a, T: Msg + Deserialize<'a> + 'a>(&'a self) -> Option<Result<T, Error>> {
+        if T::ID == self.id {
+            return None;
+        }
+        Some(self.parse())
+    }
+}
+
+pub struct TimeSeries<B: IoBuf> {
+    pub id: PacketId,
+    pub buf: Slice<B>,
 }
 
 pub enum Packet<B: IoBuf> {
     Msg(MsgBuf<B>),
     Table(Table<B>),
+    TimeSeries(TimeSeries<B>),
 }
 
 impl<B: IoBuf> Packet<B> {
@@ -94,6 +108,7 @@ impl<B: IoBuf> Packet<B> {
         match self {
             Packet::Msg(msg_buf) => msg_buf.buf.into_inner(),
             Packet::Table(table) => table.buf.into_inner(),
+            Packet::TimeSeries(time_series) => time_series.buf.into_inner(),
         }
     }
 }
@@ -123,6 +138,7 @@ impl LenPacket {
         inner.extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
         inner.push(ty as u8);
         inner.extend_from_slice(&id);
+        inner.extend_from_slice(&[0; 4]);
         Self { inner }
     }
 
@@ -134,8 +150,12 @@ impl LenPacket {
         Self::new(PacketTy::Table, id, cap)
     }
 
-    fn pkt_len(&mut self) -> u64 {
-        let len = &mut self.inner[..8];
+    pub fn time_series(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::TimeSeries, id, cap)
+    }
+
+    fn pkt_len(&self) -> u64 {
+        let len = &self.inner[..8];
         u64::from_le_bytes(len.try_into().expect("len wrong size"))
     }
 
@@ -151,14 +171,21 @@ impl LenPacket {
         self.inner[..8].copy_from_slice(&len.to_le_bytes());
     }
 
+    pub fn as_packet(&self) -> &impeller2::types::Packet {
+        let len = self.pkt_len() as usize;
+        impeller2::types::Packet::try_ref_from_bytes_with_elems(&self.inner[8..], len)
+            .expect("len packet was not a valid `Packet`")
+    }
+
+    pub fn as_mut_packet(&mut self) -> &mut impeller2::types::Packet {
+        let len = self.pkt_len() as usize;
+        impeller2::types::Packet::try_mut_from_bytes_with_elems(&mut self.inner[8..], len)
+            .expect("len packet was not a valid `Packet`")
+    }
+
     pub fn clear(&mut self) {
-        let ty = self.inner[8];
-        let id: PacketId = self.inner[9..9 + 7].try_into().unwrap();
-        self.inner.clear();
-        self.inner
-            .extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
-        self.inner.push(ty);
-        self.inner.extend_from_slice(&id);
+        self.inner[..8].copy_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        self.inner.truncate(PACKET_HEADER_LEN + 8);
     }
 }
 
@@ -212,7 +239,7 @@ mod tests {
     }
 
     impl Msg for Foo {
-        const ID: [u8; 7] = [0x1, 0x2, 0x3, 0xFF, 0xFA, 0xAB, 0xAA];
+        const ID: PacketId = [0x1, 0x2, 0x3];
     }
 
     #[test]
