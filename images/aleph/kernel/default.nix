@@ -22,10 +22,10 @@
     # postPatch. This is not very efficient.
     src = applyPatches {
       src = fetchFromGitHub {
-        owner = "antmicro";
-        repo = "antmicro-jetson-orin-baseboard-kernel-5-10";
-        rev = "89916ddfb36e841ecf62e15ace9f6348155dd305";
-        hash = "sha256-2Umz741mbjD1+81Y0sYTEZe9QoZBp9b+Ec98e9NwC5g=";
+        owner = "elodin-sys";
+        repo = "aleph-orin-baseboard-kernel-5-10";
+        rev = "277379a0e5b80fb7a4e026a0c39c636657410eaf";
+        hash = "sha256-ckxensO5O03JdwywJGmTeP7mr8gnx+brPwBaFDWnQHM=";
       };
       # Remove device tree overlays with some incorrect "remote-endpoint" nodes.
       # They are strings, but should be phandles. Otherwise, it fails to compile
@@ -113,6 +113,7 @@
         #ERROR: modpost: "xhci_irq" [drivers/usb/host/xhci-tegra.ko] undefined!
         #USB_XHCI_TEGRA = module;
         USB_XHCI_TEGRA = yes;
+        SPIDEV = yes;
         # USB_GADGET = lib.mkForce yes;
         # USB_ETH = lib.mkForce yes;
         # USB_ETH_RNDIS = lib.mkForce yes;
