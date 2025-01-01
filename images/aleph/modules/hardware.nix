@@ -35,7 +35,7 @@ in {
   # Avoids a bunch ofeextra modules we don't have in the tegra_defconfig, like "ata_piix",
   disabledModules = ["profiles/all-hardware.nix"];
   #hardware.deviceTree.name = "tegra234-p3767-0003-p3509-a02.dtb";
-  hardware.deviceTree.name = "tegra234-p3767-0004-antmicro-job.dtb";
+  hardware.deviceTree.name = "tegra234-p3767-0000-aleph.dtb";
   hardware.nvidia-jetpack = {
     enable = true;
     som = "orin-nx";
