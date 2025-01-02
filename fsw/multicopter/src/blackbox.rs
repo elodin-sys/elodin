@@ -2,8 +2,7 @@
 //! onto the SD card. This data can be used for debugging, tuning, and analysis.
 //!
 //! The blackbox only writes data to the SD card when the vehicle is armed. On each arming
-//! event, a new folder is created under the "/<fc_name>/blackbox" directory with the current
-//! date and time (formatted as "YYYYMMDD_HHmmss_SSS").
+//! event, a new folder is created with the current date and time (formatted as "YYYYMMDD_HHmmss_SSS").
 //!
 //! Successful initialization of the blackbox can be used as a gating condition for arming the
 //! vehicle.
@@ -27,9 +26,8 @@ pub struct Record {
     pub mag_sample: u32,
 }
 
-pub struct Blackbox<'a> {
+pub struct Blackbox {
     volume_mgr: embedded_sdmmc::VolumeManager<sdmmc::Sdmmc, FakeTime, 4, 4, 1>,
-    fc_name: &'a str,
     data_file: BufferedFile,
     can_file: BufferedFile,
     led: Pin,
@@ -109,15 +107,13 @@ impl From<embedded_sdmmc::Error<sdmmc::Error>> for Error {
     }
 }
 
-impl<'a> Blackbox<'a> {
+impl Blackbox {
     pub fn new(
-        fc_name: &'a str,
         volume_mgr: embedded_sdmmc::VolumeManager<sdmmc::Sdmmc, FakeTime, 4, 4, 1>,
         led: Pin,
     ) -> Self {
         Self {
             volume_mgr,
-            fc_name,
             data_file: BufferedFile {
                 file: None,
                 buf: alloc::vec![0; 4 * 1024].into_boxed_slice(),
@@ -132,31 +128,23 @@ impl<'a> Blackbox<'a> {
         }
     }
 
+    // TODO: replace dir_name with a timestamp after implementing RTC
     pub fn arm(&mut self, dir_name: &str) -> Result<(), Error> {
         if !self.volume_mgr.device().connected() {
             defmt::warn!("SD card not connected");
             return Ok(());
         }
         let mut volume = self.volume_mgr.open_volume(embedded_sdmmc::VolumeIdx(0))?;
-        let mut root_dir = volume.open_root_dir()?;
-        let mut dir = mkdir_if_not_exists(&mut root_dir, self.fc_name)?;
-        let mut dir = mkdir_if_not_exists(&mut dir, "blackbox")?;
+        let mut dir = volume.open_root_dir()?;
+        defmt::debug!("Creating /{} directory on SD card", dir_name);
         let mut dir = mkdir_if_not_exists(&mut dir, dir_name)?;
+        defmt::debug!("Opening /{}/data.bin on SD card", dir_name);
         let data_file =
             dir.open_file_in_dir("data.bin", embedded_sdmmc::Mode::ReadWriteCreateOrAppend)?;
-        defmt::info!(
-            "Opened /{}/blackbox/{}/data.bin for writing telemetry data",
-            self.fc_name,
-            dir_name
-        );
         self.data_file.file = Some(data_file.to_raw_file());
+        defmt::debug!("Opening /{}/can.bin on SD card", dir_name);
         let can_file =
             dir.open_file_in_dir("can.bin", embedded_sdmmc::Mode::ReadWriteCreateOrAppend)?;
-        defmt::info!(
-            "Opened /{}/blackbox/{}/can.bin for writing CAN data",
-            self.fc_name,
-            dir_name
-        );
         self.can_file.file = Some(can_file.to_raw_file());
         Ok(())
     }
