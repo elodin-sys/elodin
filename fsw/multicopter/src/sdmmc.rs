@@ -11,6 +11,7 @@ use sdio_host::{
 type Hertz = fugit::Hertz<u32>;
 
 const SD_INIT_FREQ: Hertz = Hertz::kHz(400);
+const SDR12_MAX_FREQ: Hertz = Hertz::MHz(25);
 const SD_NORMAL_FREQ: Hertz = Hertz::MHz(50);
 const SD_KERNEL_FREQ: Hertz = Hertz::MHz(50);
 
@@ -110,15 +111,15 @@ impl Sdmmc {
         rcc.ahb3rstr.modify(|_, w| w.sdmmc1rst().set_bit());
         rcc.ahb3rstr.modify(|_, w| w.sdmmc1rst().clear_bit());
 
-        // 50MHz -> 400kHz clock divider
-        let init_clkdiv = SD_KERNEL_FREQ.to_Hz() / SD_INIT_FREQ.to_Hz();
+        let (clkdiv, clk) = Self::clk_div(SD_INIT_FREQ.to_Hz())?;
+        defmt::debug!("CLKDIV: {}, SDMMC clock: {}Hz", clkdiv, clk.to_Hz());
 
         // Configure SDMMC clock
         rb.clkcr.write(|w| unsafe {
             w.widbus()
                 .bits(0) // Set bus width to 1
                 .clkdiv()
-                .bits(init_clkdiv as u16) // 400kHz
+                .bits(clkdiv) // 400kHz
                 .pwrsav()
                 .clear_bit() // Power saving disabled
                 .negedge()
@@ -129,13 +130,26 @@ impl Sdmmc {
 
         let mut sdmmc = Sdmmc {
             rb,
-            clk: SD_KERNEL_FREQ / init_clkdiv,
+            clk,
             card: None,
         };
 
         sdmmc.power_off();
         sdmmc.try_connect()?;
         Ok(sdmmc)
+    }
+
+    fn clk_div(sdmmc_ck: u32) -> Result<(u16, Hertz), Error> {
+        match SD_KERNEL_FREQ.raw().div_ceil(sdmmc_ck) {
+            0 | 1 => Ok((0, SD_KERNEL_FREQ)),
+            x @ 2..=2046 => {
+                let clk_div = ((x + 1) / 2) as u16;
+                let clk = Hertz::from_raw(SD_KERNEL_FREQ.raw() / (clk_div as u32 * 2));
+
+                Ok((clk_div, clk))
+            }
+            _ => Err(Error::BadClock),
+        }
     }
 
     fn power_off(&mut self) {
@@ -460,6 +474,18 @@ impl Sdmmc {
         Ok(CardStatus::from(self.rb.resp1r.read().bits()))
     }
 
+    fn wait_card_ready(&self) -> Result<(), Error> {
+        let mut timeout: u32 = 0xFFFF_FFFF;
+        // Try to read card status (CMD13)
+        while timeout > 0 {
+            if self.card_ready()? {
+                return Ok(());
+            }
+            timeout -= 1;
+        }
+        Err(Error::SoftwareTimeout)
+    }
+
     fn card_ready(&self) -> Result<bool, Error> {
         Ok(self.read_status()?.state() == CurrentState::Transfer)
     }
@@ -501,16 +527,7 @@ impl Sdmmc {
         self.cmd(common_cmd::stop_transmission())?; // CMD12
         self.status_to_result()?;
         self.clear_static_interrupt_flags();
-
-        let mut timeout: u32 = 0xFFFF_FFFF;
-        // Try to read card status (CMD13)
-        while timeout > 0 {
-            if self.card_ready()? {
-                return Ok(());
-            }
-            timeout -= 1;
-        }
-        Err(Error::SoftwareTimeout)
+        self.wait_card_ready()
     }
 
     fn get_scr(&self, rca: u16) -> Result<SCR, Error> {
@@ -612,23 +629,103 @@ impl Sdmmc {
             ..Default::default()
         });
 
-        // 50MHz -> 50MHz clock divider
-        let clkdiv = SD_KERNEL_FREQ.to_Hz() / SD_NORMAL_FREQ.to_Hz();
-
-        // Set bus width to 4, and switch to 50MHz
+        // Set bus width to 4
         defmt::debug!("Setting SD card bus width to 4, frequency to 50MHz");
         self.app_cmd(sd_cmd::cmd6(2))?;
         while self.rb.star.read().dpsmact().bit_is_set()
             || self.rb.star.read().cpsmact().bit_is_set()
         {}
-        self.rb
-            .clkcr
-            .modify(|_, w| unsafe { w.widbus().bits(1).clkdiv().bits(clkdiv as u16) });
-        self.clk = SD_KERNEL_FREQ / clkdiv;
+        self.rb.clkcr.modify(|_, w| unsafe { w.widbus().bits(1) });
 
+        // Set frequency to maximum SDR12 frequency
+        self.set_freq(SDR12_MAX_FREQ)?;
+        self.read_sd_status()?;
+
+        // Switch to SDR25 signaling
+        let signaling = self.switch_signaling_mode(SdCardSignaling::SDR25)?;
+        defmt::debug!("Switched to {:?}", signaling);
+        self.set_freq(SD_NORMAL_FREQ)?;
+        if signaling != SdCardSignaling::SDR25 || !self.card_ready()? {
+            return Err(Error::SignalingSwitchFailed);
+        }
         self.read_sd_status()?;
 
         Ok(self.card)
+    }
+
+    fn set_freq(&mut self, freq: Hertz) -> Result<(), Error> {
+        let (clkdiv, clk) = Self::clk_div(freq.to_Hz())?;
+        defmt::debug!("CLKDIV: {}, SDMMC clock: {}Hz", clkdiv, clk.to_Hz());
+        self.rb
+            .clkcr
+            .modify(|_, w| unsafe { w.clkdiv().bits(clkdiv) });
+        self.clk = clk;
+        Ok(())
+    }
+
+    fn switch_signaling_mode(&self, signaling: SdCardSignaling) -> Result<SdCardSignaling, Error> {
+        // NB PLSS v7_10 4.3.10.4: "the use of SET_BLK_LEN command is not
+        // necessary"
+
+        let set_function = 0x8000_0000
+            | match signaling {
+                // See PLSS v7_10 Table 4-11
+                SdCardSignaling::DDR50 => 0xFF_FF04,
+                SdCardSignaling::SDR104 => 0xFF_1F03,
+                SdCardSignaling::SDR50 => 0xFF_1F02,
+                SdCardSignaling::SDR25 => 0xFF_FF01,
+                SdCardSignaling::SDR12 => 0xFF_FF00,
+            };
+
+        // Prepare the transfer
+        self.start_datapath_transfer(64, 6, Dir::CardToHost);
+        self.cmd(sd_cmd::cmd6(set_function))?; // CMD6
+
+        let mut status = [0u32; 16];
+        let mut idx = 0;
+        let mut sta_reg;
+        while {
+            sta_reg = self.rb.star.read();
+            !(sta_reg.rxoverr().bit()
+                || sta_reg.dcrcfail().bit()
+                || sta_reg.dtimeout().bit()
+                || sta_reg.dbckend().bit())
+        } {
+            if sta_reg.rxfifohf().bit() {
+                for _ in 0..8 {
+                    status[idx] = self.rb.fifor.read().bits();
+                    idx += 1;
+                }
+            }
+
+            if idx == status.len() {
+                break;
+            }
+        }
+
+        self.status_to_result()?;
+
+        // Host is allowed to use the new functions at least 8
+        // clocks after the end of the switch command
+        // transaction. We know the current clock period is < 80ns,
+        // so a total delay of 640ns is required here
+        for _ in 0..300 {
+            cortex_m::asm::nop();
+        }
+
+        // Support Bits of Functions in Function Group 1
+        let _support_bits = u32::from_be(status[3]) >> 16;
+        // Function Selection of Function Group 1
+        let selection = (u32::from_be(status[4]) >> 24) & 0xF;
+
+        match selection {
+            0 => Ok(SdCardSignaling::SDR12),
+            1 => Ok(SdCardSignaling::SDR25),
+            2 => Ok(SdCardSignaling::SDR50),
+            3 => Ok(SdCardSignaling::SDR104),
+            4 => Ok(SdCardSignaling::DDR50),
+            _ => Err(Error::UnsupportedCardType),
+        }
     }
 
     pub fn connected(&self) -> bool {

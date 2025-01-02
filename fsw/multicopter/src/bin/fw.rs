@@ -91,7 +91,7 @@ fn main() -> ! {
     let volume_mgr = sd.volume_manager(rtc::FakeTime {});
     defmt::info!("Configured SDMMC");
 
-    let mut blackbox = blackbox::Blackbox::new("aleph", volume_mgr, led_sr0);
+    let mut blackbox = blackbox::Blackbox::new(volume_mgr, led_sr0);
     blackbox.arm("test").unwrap();
     defmt::info!("Configured blackbox");
 
