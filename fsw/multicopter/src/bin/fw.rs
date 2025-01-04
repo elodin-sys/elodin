@@ -38,8 +38,13 @@ fn main() -> ! {
     defmt::info!("Configured peripherals");
     led_sa0.set_high();
 
-    let cp = cortex_m::Peripherals::take().unwrap();
+    let mut cp = cortex_m::Peripherals::take().unwrap();
     let mut dp = pac::Peripherals::take().unwrap();
+
+    // Enable tracing and debugging in general
+    cp.DCB.enable_trace();
+    // Enable the cycle counter
+    cp.DWT.enable_cycle_counter();
 
     let clock_cfg = bsp::clock_cfg(dp.PWR);
     clock_cfg.setup().unwrap();
