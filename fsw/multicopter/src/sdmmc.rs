@@ -8,12 +8,14 @@ use sdio_host::{
     sd_cmd, Cmd,
 };
 
+use crate::dwt::DwtTimer;
+
 type Hertz = fugit::Hertz<u32>;
 
 const SD_INIT_FREQ: Hertz = Hertz::kHz(400);
 const SDR12_MAX_FREQ: Hertz = Hertz::MHz(25);
 const SD_NORMAL_FREQ: Hertz = Hertz::MHz(50);
-const SD_KERNEL_FREQ: Hertz = Hertz::MHz(50);
+const SD_KERNEL_FREQ: Hertz = Hertz::MHz(100);
 
 #[derive(defmt::Format, Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum SdCardSignaling {
@@ -78,6 +80,7 @@ pub struct Sdmmc {
     rb: pac::SDMMC1,
     clk: Hertz,
     card: Option<SdCard>,
+    dwt: DwtTimer,
 }
 
 impl Sdmmc {
@@ -111,8 +114,8 @@ impl Sdmmc {
         rcc.ahb3rstr.modify(|_, w| w.sdmmc1rst().set_bit());
         rcc.ahb3rstr.modify(|_, w| w.sdmmc1rst().clear_bit());
 
-        let (clkdiv, clk) = Self::clk_div(SD_INIT_FREQ.to_Hz())?;
-        defmt::debug!("CLKDIV: {}, SDMMC clock: {}Hz", clkdiv, clk.to_Hz());
+        let (clkdiv, clk) = Self::clk_div(SD_INIT_FREQ)?;
+        defmt::debug!("CLKDIV: {}, SDMMC clock: {}kHz", clkdiv, clk.to_kHz());
 
         // Configure SDMMC clock
         rb.clkcr.write(|w| unsafe {
@@ -132,6 +135,7 @@ impl Sdmmc {
             rb,
             clk,
             card: None,
+            dwt: DwtTimer::new(clocks),
         };
 
         sdmmc.power_off();
@@ -139,8 +143,8 @@ impl Sdmmc {
         Ok(sdmmc)
     }
 
-    fn clk_div(sdmmc_ck: u32) -> Result<(u16, Hertz), Error> {
-        match SD_KERNEL_FREQ.raw().div_ceil(sdmmc_ck) {
+    fn clk_div(sdmmc_ck: Hertz) -> Result<(u16, Hertz), Error> {
+        match SD_KERNEL_FREQ.raw().div_ceil(sdmmc_ck.raw()) {
             0 | 1 => Ok((0, SD_KERNEL_FREQ)),
             x @ 2..=2046 => {
                 let clk_div = ((x + 1) / 2) as u16;
@@ -296,6 +300,11 @@ impl Sdmmc {
         let card = self.card.as_mut().ok_or(Error::NoCard)?;
         card.status = status.into();
 
+        Ok(())
+    }
+
+    fn log_sd_status(&self) -> Result<(), Error> {
+        let card = self.card.as_ref().ok_or(Error::NoCard)?;
         let bus_width = match card.status.bus_width() {
             BusWidth::One => 1,
             BusWidth::Four => 4,
@@ -337,7 +346,6 @@ impl Sdmmc {
             "SD card blocks: {}",
             card.size() / embedded_sdmmc::Block::LEN as u64
         );
-
         Ok(())
     }
 
@@ -444,14 +452,12 @@ impl Sdmmc {
     }
 
     fn write_blocks_feed(&self, buffer: &[u8]) {
+        let feed_start = self.dwt.now();
         let mut i = 0;
         let mut status;
         while {
             status = self.rb.star.read();
-            !(status.txunderr().bit()
-                || status.dcrcfail().bit()
-                || status.dtimeout().bit()
-                || status.dataend().bit())
+            !(status.txunderr().bit() || status.dcrcfail().bit() || status.dtimeout().bit())
         } {
             if status.txfifohe().bit() {
                 for _ in 0..8 {
@@ -467,6 +473,14 @@ impl Sdmmc {
                 break;
             }
         }
+        let feed_elapsed = feed_start.elapsed();
+        let throughput = (buffer.len() * 8) as f32 / feed_elapsed.to_micros() as f32;
+        defmt::trace!(
+            "SDMMC write: {} B / {} ({} Mbps)",
+            buffer.len(),
+            feed_elapsed,
+            throughput
+        );
     }
 
     fn read_status(&self) -> Result<CardStatus<Self>, Error> {
@@ -475,10 +489,13 @@ impl Sdmmc {
     }
 
     fn wait_card_ready(&self) -> Result<(), Error> {
+        let card_ready_start = self.dwt.now();
         let mut timeout: u32 = 0xFFFF_FFFF;
         // Try to read card status (CMD13)
         while timeout > 0 {
             if self.card_ready()? {
+                let card_ready_elapsed = card_ready_start.elapsed();
+                defmt::trace!("SDMMC card ready wait: {}", card_ready_elapsed);
                 return Ok(());
             }
             timeout -= 1;
@@ -516,6 +533,7 @@ impl Sdmmc {
     }
 
     fn write_blocks_conclude(&self) -> Result<(), Error> {
+        let status_wait_start = self.dwt.now();
         let mut status;
         while {
             status = self.rb.star.read();
@@ -526,8 +544,11 @@ impl Sdmmc {
         } {}
         self.cmd(common_cmd::stop_transmission())?; // CMD12
         self.status_to_result()?;
+        let status_wait_elapsed = status_wait_start.elapsed();
+        defmt::trace!("SDMMC write status wait: {}", status_wait_elapsed);
         self.clear_static_interrupt_flags();
-        self.wait_card_ready()
+        self.wait_card_ready()?;
+        Ok(())
     }
 
     fn get_scr(&self, rca: u16) -> Result<SCR, Error> {
@@ -649,13 +670,14 @@ impl Sdmmc {
             return Err(Error::SignalingSwitchFailed);
         }
         self.read_sd_status()?;
+        self.log_sd_status()?;
 
         Ok(self.card)
     }
 
     fn set_freq(&mut self, freq: Hertz) -> Result<(), Error> {
-        let (clkdiv, clk) = Self::clk_div(freq.to_Hz())?;
-        defmt::debug!("CLKDIV: {}, SDMMC clock: {}Hz", clkdiv, clk.to_Hz());
+        let (clkdiv, clk) = Self::clk_div(freq)?;
+        defmt::debug!("CLKDIV: {}, SDMMC clock: {}kHz", clkdiv, clk.to_kHz());
         self.rb
             .clkcr
             .modify(|_, w| unsafe { w.clkdiv().bits(clkdiv) });
