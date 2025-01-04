@@ -17,6 +17,7 @@ pub mod crsf;
 pub mod dma;
 pub mod dronecan;
 pub mod dshot;
+pub mod dwt;
 pub mod healing_usart;
 pub mod i2c_dma;
 pub mod led;
