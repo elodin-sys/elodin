@@ -261,7 +261,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
             divm: 2,   // pll_input_speed = 8 MHz
             divn: 100, // vco_speed = 800 MHz
             divp: 2,   // sysclk = 400 MHz
-            divq: 16,  // 50 MHz
+            divq: 8,   // 100 MHz
             ..Default::default()
         },
         input_src: clocks::InputSrc::Pll1, // 400 MHz (sysclk)
