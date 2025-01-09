@@ -61,7 +61,7 @@ pub struct Read<'fd, T> {
     offset: Option<u64>,
 }
 
-impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
+impl<T: IoBufMut> OpCode for Read<'_, T> {
     type Output = BufResult<usize, T>;
 
     fn output(self, entry: cqueue::Entry) -> Self::Output {
@@ -102,7 +102,7 @@ pub struct Write<'fd, T> {
     offset: Option<u64>,
 }
 
-impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
+impl<T: IoBuf> OpCode for Write<'_, T> {
     type Output = BufResult<usize, T>;
 
     fn output(self, entry: cqueue::Entry) -> Self::Output {
@@ -220,7 +220,7 @@ pub struct Accept<'fd> {
     flags: i32,
 }
 
-impl<'fd> OpCode for Accept<'fd> {
+impl OpCode for Accept<'_> {
     type Output = BufResult<Socket, Box<SockAddrRaw>>;
 
     fn output(self, entry: cqueue::Entry) -> Self::Output {
@@ -274,7 +274,7 @@ pub struct Connect<'fd> {
     sock_addr: Box<SockAddrRaw>,
 }
 
-impl<'fd> OpCode for Connect<'fd> {
+impl OpCode for Connect<'_> {
     type Output = Result<(), Error>;
 
     fn output(self, entry: cqueue::Entry) -> Self::Output {

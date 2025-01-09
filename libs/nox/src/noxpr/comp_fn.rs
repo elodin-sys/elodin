@@ -66,7 +66,7 @@ pub trait FromBuilder {
     }
 }
 
-impl<'b> FromBuilder for &'b Builder {
+impl FromBuilder for &Builder {
     type Item<'a> = &'a Builder;
 
     fn from_builder(builder: &Builder) -> Self::Item<'_> {

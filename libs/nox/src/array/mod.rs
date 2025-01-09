@@ -118,7 +118,10 @@ pub trait ArrayDim: TensorDim {
 }
 
 impl ArrayDim for ScalarDim {
-    type Buf<T> = T where T: Elem;
+    type Buf<T>
+        = T
+    where
+        T: Elem;
 
     type Shape = [usize; 0];
 
@@ -140,7 +143,10 @@ impl ArrayDim for ScalarDim {
 }
 
 impl<const D: usize> ArrayDim for Const<D> {
-    type Buf<T> = [T; D] where T: Elem;
+    type Buf<T>
+        = [T; D]
+    where
+        T: Elem;
 
     type Shape = [usize; 1];
 
@@ -159,7 +165,10 @@ impl<const D: usize> ArrayDim for Const<D> {
 }
 
 impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
-    type Buf<T> = [[T; D2]; D1] where T: Elem;
+    type Buf<T>
+        = [[T; D2]; D1]
+    where
+        T: Elem;
 
     type Shape = [usize; 2];
 
@@ -179,7 +188,10 @@ impl<const D1: usize, const D2: usize> ArrayDim for (Const<D1>, Const<D2>) {
 impl<const D1: usize, const D2: usize, const D3: usize> ArrayDim
     for (Const<D1>, Const<D2>, Const<D3>)
 {
-    type Buf<T> = [[[T; D3]; D2]; D1] where T: Elem;
+    type Buf<T>
+        = [[[T; D3]; D2]; D1]
+    where
+        T: Elem;
     type Shape = [usize; 3];
 
     fn array_shape<T: Elem>(_buf: &Self::Buf<T>) -> Self::Shape {
@@ -1249,7 +1261,10 @@ pub trait MappableDim {
 }
 
 impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
-    type MappedDim<D> = (D1, D) where D: Dim;
+    type MappedDim<D>
+        = (D1, D)
+    where
+        D: Dim;
 
     type ElemDim = D2;
 }

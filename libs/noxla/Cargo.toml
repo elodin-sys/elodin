@@ -9,6 +9,7 @@ repository = "https://github.com/elodin-sys/elodin"
 [features]
 shared = []
 cuda = ["shared"]
+cargo-clippy = []
 
 [dependencies]
 thiserror = { version = "2.0", default-features = false }

@@ -305,7 +305,7 @@ impl CrsfReceiver {
 
     pub fn is_connected(&self, now: Instant) -> bool {
         now.checked_duration_since(self.last_frame_time)
-            .map_or(false, |d| d < LINK_STATUS_UPDATE_TIMEOUT)
+            .is_some_and(|d| d < LINK_STATUS_UPDATE_TIMEOUT)
     }
 }
 

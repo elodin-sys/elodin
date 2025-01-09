@@ -78,7 +78,7 @@ impl<T: RealField, R: OwnedRepr> Add for MRP<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: OwnedRepr> Add<MRP<T, R>> for &'a MRP<T, R> {
+impl<T: RealField, R: OwnedRepr> Add<MRP<T, R>> for &MRP<T, R> {
     type Output = MRP<T, R>;
 
     fn add(self, rhs: MRP<T, R>) -> Self::Output {

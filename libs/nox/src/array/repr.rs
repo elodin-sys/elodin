@@ -4,7 +4,10 @@ use super::*;
 pub struct ArrayRepr;
 
 impl Repr for ArrayRepr {
-    type Inner<T, D: Dim> = Array<T, D> where T: Elem;
+    type Inner<T, D: Dim>
+        = Array<T, D>
+    where
+        T: Elem;
 
     type Shape<D: Dim> = D::Shape;
     fn shape<T1: Elem, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Shape<D1> {

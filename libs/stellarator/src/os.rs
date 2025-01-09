@@ -72,7 +72,7 @@ pub enum BorrowedHandle<'a> {
 }
 
 #[cfg(not(target_os = "windows"))]
-impl<'a> std::os::fd::AsRawFd for BorrowedHandle<'a> {
+impl std::os::fd::AsRawFd for BorrowedHandle<'_> {
     fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
         use std::os::fd::AsFd;
         match self {
@@ -83,7 +83,7 @@ impl<'a> std::os::fd::AsRawFd for BorrowedHandle<'a> {
 }
 
 #[cfg(not(target_os = "windows"))]
-impl<'a> std::os::fd::AsFd for BorrowedHandle<'a> {
+impl std::os::fd::AsFd for BorrowedHandle<'_> {
     fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
         match self {
             BorrowedHandle::Fd(fd) => *fd,

@@ -40,7 +40,7 @@ macro_rules! ser_to_string {
     };
 }
 
-impl<'a> ser::Serializer for &'a mut Serializer {
+impl ser::Serializer for &mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -150,7 +150,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeStruct for &'a mut Serializer {
+impl ser::SerializeStruct for &mut Serializer {
     type Ok = ();
     type Error = Error;
 
@@ -172,7 +172,7 @@ impl<'a> ser::SerializeStruct for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::Serializer for &'a mut StringSerializer {
+impl ser::Serializer for &mut StringSerializer {
     type Ok = ();
     type Error = Error;
 

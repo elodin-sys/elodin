@@ -10,6 +10,7 @@
 "som" = "som"
 "lits" = "lits"
 "ba" = "ba"
+"datatime" = "datatime"
 
 [files]
 extend-exclude = [
@@ -25,4 +26,3 @@ extend-exclude = [
  "libs/basilisk-rs/basilisk/**/*"
 ]
 ignore-vcs = true
-

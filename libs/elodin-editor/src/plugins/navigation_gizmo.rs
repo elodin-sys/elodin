@@ -299,6 +299,7 @@ pub fn drag_nav_gizmo(
     editor_cam.send_screenspace_input(delta);
 }
 
+#[allow(clippy::type_complexity)]
 fn side_clicked_cb(
     direction: Dir3,
 ) -> impl Fn(
