@@ -61,7 +61,10 @@ impl<T: Elem> ArrayBuf<T> for DynArray<T, Vec<T>> {
 }
 
 impl ArrayDim for Dyn {
-    type Buf<T> = DynArray<T> where T: Clone + Elem;
+    type Buf<T>
+        = DynArray<T>
+    where
+        T: Clone + Elem;
 
     type Shape = SmallVec<[usize; 4]>;
 
@@ -79,7 +82,10 @@ impl ArrayDim for Dyn {
 }
 
 impl ArrayDim for (Dyn, Dyn) {
-    type Buf<T> = DynArray<T> where T: Clone + Elem;
+    type Buf<T>
+        = DynArray<T>
+    where
+        T: Clone + Elem;
 
     type Shape = SmallVec<[usize; 4]>;
 
@@ -97,7 +103,10 @@ impl ArrayDim for (Dyn, Dyn) {
 }
 
 impl ArrayDim for (Dyn, Dyn, Dyn) {
-    type Buf<T> = DynArray<T> where T: Clone + Elem;
+    type Buf<T>
+        = DynArray<T>
+    where
+        T: Clone + Elem;
 
     type Shape = SmallVec<[usize; 4]>;
 

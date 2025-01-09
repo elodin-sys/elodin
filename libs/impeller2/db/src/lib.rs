@@ -823,19 +823,19 @@ impl StreamFilter {
                 let component = db
                     .components
                     .get(&component_id)
-                    .ok_or_else(|| Error::ComponentNotFound(component_id))?;
+                    .ok_or(Error::ComponentNotFound(component_id))?;
                 component.add_to_vtable(&mut vtable)?;
             }
             (Some(component_id), Some(entity_id)) => {
                 let component = db
                     .components
                     .get(&component_id)
-                    .ok_or_else(|| Error::ComponentNotFound(component_id))?;
+                    .ok_or(Error::ComponentNotFound(component_id))?;
 
                 let entity = component
                     .entities
                     .get(&entity_id)
-                    .ok_or_else(|| Error::EntityNotFound(entity_id))?;
+                    .ok_or(Error::EntityNotFound(entity_id))?;
                 entity.add_to_vtable(&mut vtable)?;
             }
         }

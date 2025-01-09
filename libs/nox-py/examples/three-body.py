@@ -72,7 +72,7 @@ def gravity(
     query: el.Query[el.WorldPos, el.Inertia],
 ) -> el.Query[el.Force]:
     # Create a fold function to take an accumulator and the query results for the
-    # left and right entities, and apply Netwon's law of universal gravitation:
+    # left and right entities, and apply Newton's law of universal gravitation:
     def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
         r = a_pos.linear() - b_pos.linear()
         m = a_inertia.mass()
