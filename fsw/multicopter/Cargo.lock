@@ -964,8 +964,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stm32-hal2"
-version = "1.8.4"
-source = "git+https://github.com/akhilles/stm32-hal.git?rev=5a4b8bf#5a4b8bfe6c28d055bc3b777d418d46c2d46b8f54"
+version = "1.8.5"
+source = "git+https://github.com/akhilles/stm32-hal.git?rev=4ea09cc#4ea09cc64f86d0fc4a4325af20c3a9ddffa541db"
 dependencies = [
  "cfg-if",
  "chrono",

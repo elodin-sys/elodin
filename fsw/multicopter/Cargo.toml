@@ -56,5 +56,5 @@ defmt-test = "0.3"
 faer = { git = "https://github.com/sarah-quinones/faer-rs.git", rev = "4f3eb7e" }
 
 # Remove after https://github.com/David-OConnor/stm32-hal/pull/111 is merged
-# and there's a new release on https://crates.io/crates/stm32-hal2 > 1.8.4
-hal = { package = "stm32-hal2", git = "https://github.com/akhilles/stm32-hal.git", rev = "5a4b8bf" }
+# and there's a new release on https://crates.io/crates/stm32-hal2 > 1.8.5
+hal = { package = "stm32-hal2", git = "https://github.com/akhilles/stm32-hal.git", rev = "4ea09cc" }
