@@ -341,7 +341,7 @@ enum TabState {
     Inactive,
 }
 
-impl<'a, 'w, 's> egui_tiles::Behavior<Pane> for TreeBehavior<'a, 'w, 's> {
+impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
     fn on_edit(&mut self, edit_action: egui_tiles::EditAction) {
         // NOTE: Override accidental selection onDrag
         if edit_action == egui_tiles::EditAction::TabSelected {

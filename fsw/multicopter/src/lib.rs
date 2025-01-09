@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+use core::ptr::addr_of_mut;
 use cortex_m_semihosting::debug;
 
 use defmt_rtt as _;
@@ -35,7 +36,7 @@ pub fn init_heap() {
         const HEAP_SIZE: usize = 64 * 1024;
         #[link_section = ".axisram.buffers"]
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) };
+        unsafe { HEAP.init(addr_of_mut!(HEAP_MEM) as usize, HEAP_SIZE) };
         defmt::info!("Configured heap with {} bytes", HEAP_SIZE);
     }
 }

@@ -95,7 +95,7 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
     }
 }
 
-impl<'fd, T: IoBufMut> OpCode for Read<'fd, T> {
+impl<T: IoBufMut> OpCode for Read<'_, T> {
     type Output = BufResult<usize, T>;
 
     fn initial_state(&self) -> OpState {
@@ -199,7 +199,7 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
     }
 }
 
-impl<'fd, T: IoBuf> OpCode for Write<'fd, T> {
+impl<T: IoBuf> OpCode for Write<'_, T> {
     type Output = BufResult<usize, T>;
 
     fn initial_state(&self) -> OpState {
@@ -331,7 +331,7 @@ impl<'fd> Connect<'fd> {
     }
 }
 
-impl<'fd> OpCode for Connect<'fd> {
+impl OpCode for Connect<'_> {
     type Output = Result<(), Error>;
 
     fn event(&self) -> Option<polling::Event> {
@@ -374,7 +374,7 @@ impl<'fd> Accept<'fd> {
     }
 }
 
-impl<'fd> OpCode for Accept<'fd> {
+impl OpCode for Accept<'_> {
     type Output = BufResult<Socket, Box<SockAddrRaw>>;
 
     fn event(&self) -> Option<polling::Event> {

@@ -12,7 +12,7 @@ pub struct ViewRepr<'a> {
 
 impl<'a> Repr for ViewRepr<'a> {
     type Inner<T, D: crate::Dim>
-    = ArrayView<'a, T>
+        = ArrayView<'a, T>
     where
         T: crate::Elem;
 

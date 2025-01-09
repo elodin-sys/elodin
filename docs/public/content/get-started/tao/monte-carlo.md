@@ -16,7 +16,7 @@ With our physics toolkit, you can simulate a wide variety of physical situations
 Our primary goal is to test control systems for aerospace vehicles.
 It's not sufficient to test the control systems in just one situation; you need to test them across the entire gamut of possible outcomes.
 To do that, you can use Monte Carlo testing. Monte Carlo is a tongue-in-cheek reference to the famous Monaco casino.
-The name originated in the depths of the Manhatten Project during WW2, where they needed a clandestine name to mask the details of the technique.
+The name originated in the depths of the Manhattan Project during WW2, where they needed a clandestine name to mask the details of the technique.
 
 As the name would suggest, Monte Carlo methods work by randomly sampling a system. In this case, the random sampling is of the control system and simulations. You randomize a set of input values to the simulation and then record outputs for each iteration.
 

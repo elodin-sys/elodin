@@ -186,7 +186,7 @@ pub trait Slice {
         Self: Sized;
 }
 
-impl<'a> Slice for &'a [u8] {
+impl Slice for &[u8] {
     fn try_get_slice(&mut self, len: usize) -> Option<Self> {
         let out = self.get(..len)?;
         *self = &self[len..];

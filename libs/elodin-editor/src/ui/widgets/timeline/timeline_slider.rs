@@ -163,7 +163,7 @@ impl<'a> Timeline<'a> {
     }
 }
 
-impl<'a> Timeline<'a> {
+impl Timeline<'_> {
     fn allocate_slider_space(&self, ui: &mut egui::Ui) -> egui::Response {
         ui.allocate_response(
             egui::emath::vec2(self.width, self.height),
@@ -340,7 +340,7 @@ impl<'a> Timeline<'a> {
     }
 }
 
-impl<'a> egui::Widget for Timeline<'a> {
+impl egui::Widget for Timeline<'_> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         let inner_response = ui.horizontal(|ui| self.add_contents(ui));
         inner_response.inner | inner_response.response

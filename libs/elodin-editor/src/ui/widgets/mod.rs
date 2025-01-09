@@ -78,7 +78,6 @@ impl RootWidgetSystemExt for World {
 }
 
 /// ui.Widget
-
 pub trait WidgetSystemExt {
     fn add_widget<S: WidgetSystem<Args = ()> + 'static>(
         &mut self,
@@ -124,7 +123,6 @@ impl WidgetSystemExt for egui::Ui {
 }
 
 /// Widget Traits
-
 pub trait RootWidgetSystem: SystemParam {
     type Args;
     type Output;

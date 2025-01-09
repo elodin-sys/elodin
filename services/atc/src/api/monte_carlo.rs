@@ -68,7 +68,7 @@ impl api::Api {
         let batch_count = (samples + batch_size - 1) / batch_size;
         for i in 0..batch_count {
             let samples = batch_size.min(samples);
-            let byte_count = (samples as usize + 8 - 1) / 8;
+            let byte_count = (samples as usize).div_ceil(8);
             let failures = vec![0; byte_count];
             atc_entity::batches::ActiveModel {
                 run_id: sea_orm::Set(id),

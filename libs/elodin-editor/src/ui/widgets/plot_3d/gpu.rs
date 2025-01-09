@@ -381,10 +381,6 @@ type LineQueryMut = (
     Option<&'static mut GpuLine>,
 );
 
-pub fn div_up(a: usize, b: usize) -> usize {
-    (a + (b - 1)) / b
-}
-
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
@@ -399,7 +395,7 @@ fn extract_lines(
                 continue;
             };
             let buffer_len =
-                div_up(line.processed_data.len(), BUFFER_CHUNK_SIZE) * BUFFER_CHUNK_SIZE;
+                line.processed_data.len().div_ceil(BUFFER_CHUNK_SIZE) * BUFFER_CHUNK_SIZE;
             let mut new_buffer = |buffer_len: usize| {
                 let buffer_descriptor = BufferDescriptor {
                     label: Some("Line Vertex Buffer"),

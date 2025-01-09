@@ -35,7 +35,7 @@ members = [
     "libs/stellarator",
 ]
 exclude = [
-    "fsw/multicopter", 
+    "fsw/multicopter",
     "fsw/blackbox",
     "docs/memserve",
 ]
@@ -82,7 +82,3 @@ impeller.default-features = false
 impeller.version = "0.10.1"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
-
-[patch.crates-io]
-# Remove after there's a new release on https://crates.io/crates/faer > 0.19.4
-faer = { git = "https://github.com/sarah-quinones/faer-rs.git", rev = "4f3eb7e" }
