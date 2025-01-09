@@ -87,7 +87,7 @@ pub struct BufferArgsRef<'a> {
     pub(crate) buffers: BufferArgsInner,
 }
 
-impl<'a> Default for BufferArgsRef<'a> {
+impl Default for BufferArgsRef<'_> {
     fn default() -> Self {
         Self {
             phantom_data: Default::default(),

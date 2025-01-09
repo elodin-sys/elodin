@@ -26,7 +26,7 @@ impl PeriodicLed {
 
         if now
             .checked_duration_since(last_update)
-            .map_or(false, |d| d > (self.period / 2))
+            .is_some_and(|d| d > (self.period / 2))
         {
             defmt::trace!("Toggling LED");
             self.led.toggle();

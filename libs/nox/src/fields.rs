@@ -13,7 +13,6 @@ impl<T> Elem for T where T: Copy + Default + 'static {}
 
 /// Represents a mathematical field, supporting basic arithmetic operations,
 /// matrix multiplication, and the generation of standard constants.
-
 pub trait Field:
     TensorItem<Elem = Self>
     + Copy

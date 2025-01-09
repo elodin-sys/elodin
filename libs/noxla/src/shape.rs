@@ -162,7 +162,7 @@ impl RawShape {
                 return self->element_type();
             })
         };
-        FromPrimitive::from_i32(ty).ok_or_else(|| Error::UnexpectedElementType(ty))
+        FromPrimitive::from_i32(ty).ok_or(Error::UnexpectedElementType(ty))
     }
 
     pub fn size(&self) -> usize {

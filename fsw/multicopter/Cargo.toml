@@ -52,9 +52,6 @@ zerocopy = { version = "0.8", default-features = false, features = ["derive"] }
 defmt-test = "0.3"
 
 [patch.crates-io]
-# Remove after there's a new release on https://crates.io/crates/faer > 0.19.4
-faer = { git = "https://github.com/sarah-quinones/faer-rs.git", rev = "4f3eb7e" }
-
 # Remove after https://github.com/David-OConnor/stm32-hal/pull/111 is merged
 # and there's a new release on https://crates.io/crates/stm32-hal2 > 1.8.5
 hal = { package = "stm32-hal2", git = "https://github.com/akhilles/stm32-hal.git", rev = "4ea09cc" }

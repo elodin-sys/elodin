@@ -573,7 +573,6 @@ impl Noxpr {
     }
 
     /// Creates a square root transformation of the `Noxpr`.
-
     pub fn sqrt(self) -> Self {
         Self::new(NoxprNode::Sqrt(self))
     }

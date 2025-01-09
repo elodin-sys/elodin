@@ -252,7 +252,7 @@ impl<'a, T: RealField, R: OwnedRepr> Mul<&'a Quaternion<T, R>> for Quaternion<T,
     }
 }
 
-impl<'a, T: RealField, R: OwnedRepr> Mul<Quaternion<T, R>> for &'a Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<Quaternion<T, R>> for &Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn mul(self, rhs: Quaternion<T, R>) -> Self::Output {
@@ -287,7 +287,7 @@ impl<T: RealField, R: OwnedRepr> Mul<Vector<T, 3, R>> for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: OwnedRepr> Mul<Vector<T, 3, R>> for &'a Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Mul<Vector<T, 3, R>> for &Quaternion<T, R> {
     type Output = Vector<T, 3, R>;
 
     fn mul(self, rhs: Vector<T, 3, R>) -> Self::Output {
@@ -307,7 +307,7 @@ impl<T: RealField, R: OwnedRepr> Add for Quaternion<T, R> {
     }
 }
 
-impl<'a, T: RealField, R: OwnedRepr> Add<Quaternion<T, R>> for &'a Quaternion<T, R> {
+impl<T: RealField, R: OwnedRepr> Add<Quaternion<T, R>> for &Quaternion<T, R> {
     type Output = Quaternion<T, R>;
 
     fn add(self, rhs: Quaternion<T, R>) -> Self::Output {

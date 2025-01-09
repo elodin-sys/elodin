@@ -68,7 +68,10 @@ pub trait TensorItem {
 
 impl<T: Elem> TensorItem for T {
     type Item = Scalar<T>;
-    type Tensor<D> = Tensor<T, D> where D: Dim;
+    type Tensor<D>
+        = Tensor<T, D>
+    where
+        D: Dim;
     type Dim = ();
 
     type Elem = T;
