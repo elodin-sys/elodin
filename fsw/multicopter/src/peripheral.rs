@@ -12,7 +12,7 @@ pub trait HalTimerRegExt: Sized {
         cfg: timer::TimerConfig,
         clocks: &Clocks,
     ) -> timer::Timer<Self>;
-    fn clock_speed(&self, clocks: &Clocks) -> fugit::Hertz<u32> {
+    fn clock_speed(clocks: &Clocks) -> fugit::Hertz<u32> {
         let timer_freq = match Self::TIMER {
             1 | 8 => clocks.apb2_timer(),
             _ => clocks.apb1_timer(),

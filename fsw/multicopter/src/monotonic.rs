@@ -21,7 +21,7 @@ where
     timer::Timer<T>: HalTimerExt<HalTimerReg = T>,
 {
     pub fn new(timer_reg: T, clocks: &clocks::Clocks) -> Self {
-        let timer_clock_speed = timer_reg.clock_speed(clocks);
+        let timer_clock_speed = T::clock_speed(clocks);
         // Set prescaler such that timer clock is 1MHz
         let psc = (timer_clock_speed.to_Hz() / 1_000_000 - 1) as u16;
         let timer_cfg = timer::TimerConfig {
