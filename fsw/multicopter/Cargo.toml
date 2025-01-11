@@ -25,12 +25,17 @@ harness = false
 defmt = "0.3"
 defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
-cortex-m = { version = "0.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m = { version = "0.7", features = [
+    "inline-asm",
+    "critical-section-single-core",
+] }
 cortex-m-rt = "0.7"
-embedded-hal = { version = "1.0", features=["defmt-03"] }
+embedded-hal = { version = "1.0", features = ["defmt-03"] }
 embedded-io = { version = "0.6", features = ["defmt-03"] }
 embedded-hal-compat = "0.13.0"
-embedded-alloc = { version = "0.6", default-features = false, features = ["tlsf"] }
+embedded-alloc = { version = "0.6", default-features = false, features = [
+    "tlsf",
+] }
 critical-section = "1.1"
 cortex-m-semihosting = "0.5"
 fdcan = { version = "0.2.1", features = ["fdcan_h7", "embedded-can-03"] }
