@@ -11,6 +11,7 @@ use hal as _;
 use panic_probe as _;
 
 pub mod blackbox;
+pub mod bmi270;
 pub mod bmm350;
 pub mod bsp;
 pub mod can;
