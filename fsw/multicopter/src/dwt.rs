@@ -1,10 +1,11 @@
 use cortex_m::peripheral::DWT;
 use hal::clocks::Clocks;
 
-type Duration = fugit::Duration<u32, 1, 1_000_000>;
+type Duration = fugit::MicrosDuration<u32>;
 
+#[derive(Clone, Copy)]
 pub struct DwtTimer {
-    core_frequency: u32,
+    pub core_frequency: u32,
 }
 
 impl DwtTimer {
@@ -30,9 +31,9 @@ pub struct CycleCount {
 
 impl CycleCount {
     pub fn elapsed(&self) -> Duration {
-        let elapsed_microseconds = DWT::cycle_count().wrapping_sub(self.cycle_count);
+        let elapsed_cycles = DWT::cycle_count().wrapping_sub(self.cycle_count);
         let cycles_per_microsecond = self.core_frequency / 1_000_000;
-        let elapsed_microseconds = elapsed_microseconds / cycles_per_microsecond;
+        let elapsed_microseconds = elapsed_cycles / cycles_per_microsecond;
         Duration::micros(elapsed_microseconds)
     }
 }

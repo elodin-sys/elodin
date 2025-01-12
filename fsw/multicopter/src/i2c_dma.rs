@@ -51,7 +51,7 @@ impl From<pac::I2C3> for I2cRegs {
     fn from(_: pac::I2C3) -> Self {
         I2cRegs {
             peripheral: I2cPperipheral::I2C3,
-            regs: unsafe { &*pac::I2C3::ptr() },
+            regs: pac::I2C3::ptr(),
         }
     }
 }
@@ -60,7 +60,7 @@ impl From<pac::I2C4> for I2cRegs {
     fn from(_: pac::I2C4) -> Self {
         I2cRegs {
             peripheral: I2cPperipheral::I2C4,
-            regs: unsafe { &*pac::I2C4::ptr() },
+            regs: pac::I2C4::ptr(),
         }
     }
 }

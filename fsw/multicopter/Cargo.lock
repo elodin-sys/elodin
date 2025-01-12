@@ -331,17 +331,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-sdmmc"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb637331040ec9b35f6a8151904d1aca914cc349d14c91b9a3e92ba789b22f3f"
-dependencies = [
- "byteorder",
- "embedded-hal 1.0.0",
- "heapless",
-]
-
-[[package]]
 name = "equator"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,6 +415,15 @@ dependencies = [
  "num-traits",
  "pulp 0.18.22",
  "reborrow",
+]
+
+[[package]]
+name = "fatfs"
+version = "0.4.0"
+source = "git+https://github.com/rafalh/rust-fatfs.git?rev=c4bb769#c4bb76929eb115f228720631b4110f827b998653"
+dependencies = [
+ "bitflags 2.6.0",
+ "log",
 ]
 
 [[package]]
@@ -620,6 +618,12 @@ name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
+
+[[package]]
+name = "log"
+version = "0.4.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "modular-bitfield"
@@ -896,7 +900,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-compat",
  "embedded-io",
- "embedded-sdmmc",
+ "fatfs",
  "fdcan",
  "fugit",
  "heapless",
