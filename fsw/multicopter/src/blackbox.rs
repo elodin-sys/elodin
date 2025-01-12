@@ -220,11 +220,6 @@ fn append<'a>(
         defmt::debug!("Seeking {} bytes to aligned cursor", offset);
         file.seek(fatfs::SeekFrom::Current(offset))?;
     }
-    // This write + seek trick is used to front-load bookkeeping
-    file.write_all(&[0; MIN_CLUSTER_SIZE])?;
-    file.seek(fatfs::SeekFrom::Current(-(MIN_CLUSTER_SIZE as i64)))?;
-    file.flush()?;
-
     Ok(BufferedFile::new(file, buf_size))
 }
 
