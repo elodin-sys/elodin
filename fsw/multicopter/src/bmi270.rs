@@ -32,7 +32,7 @@ const GYR_OFFSET_XYZ_VAL: u8 = 0x40;
 
 const POR_DELAY_MICRO_SECONDS: Duration = Duration::micros(550); // YESSS 501, not 500, 501
 const CONFIG_DELAY_MILLI_SECONDS: Duration = Duration::millis(50);
-const WRITE_2_WRITE_DELAY_MICROS_SECONDS: Duration = Duration::micros(5);
+const WRITE_2_WRITE_DELAY_MICROS_SECONDS: Duration = Duration::micros(50);
 
 const SENSOR_ODR_HZ: Hertz<u32> = Hertz::<u32>::Hz(6400);
 const SENSORPERIOD_MICRO_SECONDS: MicrosDuration<u32> = SENSOR_ODR_HZ.into_duration();
@@ -75,9 +75,9 @@ pub enum Registers {
 }
 
 #[repr(u8)]
-pub enum I2cAddress {
-    AddressLow = 0x68,
-    AddressHigh = 0x69,
+pub enum Address {
+    Low = 0x68,
+    High = 0x69,
 }
 
 #[repr(u8)]
@@ -130,10 +130,10 @@ impl From<i2c_dma::Error> for Error {
 
 pub struct Bmi270 {
     i2c_address: u8,
-    accel_scale: f64,
-    gyr_scale: f64,
-    pub gyro_dps: [f64; 3],
-    pub accel_g: [f64; 3],
+    accel_scale: f32,
+    gyr_scale: f32,
+    pub gyro_dps: [f32; 3],
+    pub accel_g: [f32; 3],
     sample_count: u32,
     raw_data: [i16; 6], //[accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
     next_update: Instant,
@@ -141,16 +141,16 @@ pub struct Bmi270 {
 
 impl Bmi270 {
     pub fn new<D: DelayNs>(
-        i2c_address: I2cAddress,
         i2c_dma_perph: &mut i2c_dma::I2cDma,
+        i2c_address: Address,
         delay: &mut D,
     ) -> Result<Self, Error> {
         let mut bmi270 = Bmi270 {
             i2c_address: i2c_address as u8,
             accel_scale: 0.0,
             gyr_scale: 0.0,
-            gyro_dps: [0f64; 3],
-            accel_g: [0f64; 3],
+            gyro_dps: [0f32; 3],
+            accel_g: [0f32; 3],
             sample_count: 0,
             raw_data: [0; 6],
             next_update: Instant::from_ticks(0),
@@ -184,17 +184,26 @@ impl Bmi270 {
         Ok(data[0])
     }
 
-    fn read_imu_data_dma(
-        &mut self,
-        i2c_dma: &mut i2c_dma::I2cDma,
-        now: Instant,
-    ) -> Result<bool, Error> {
+    pub fn update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> bool {
+        if now < self.next_update {
+            return false;
+        }
+        match self.try_update(i2c_dma, now) {
+            Ok(updated) => updated,
+            Err(err) => {
+                defmt::trace!("BMI270 error: {}", err);
+                false
+            }
+        }
+    }
+
+    fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> Result<bool, Error> {
         match i2c_dma.state()? {
             i2c_dma::State::Idle => {
-                defmt::trace!("Starting BMM350 DMA read");
+                defmt::trace!("Starting BMI270 DMA read");
                 i2c_dma.begin_read(self.i2c_address, Registers::AccelXLsb as u8, 15)?;
-                // Wait at least 200us for the data to be ready
-                self.next_update += 200u32.micros();
+                // Wait at least 150us for the data to be ready
+                self.next_update += 150u32.micros();
                 return Ok(false);
             }
             i2c_dma::State::Reading => {
@@ -214,17 +223,15 @@ impl Bmi270 {
         let sample = time / TIME_PER_SAMPLE;
         if sample == self.sample_count {
             defmt::trace!("No new BMI270 data");
-            // Wait 200us and try again
-            self.next_update += 200u32.micros();
             return Ok(false);
         } else if sample > self.sample_count + 1 && self.sample_count != 0 {
             let dropped_samples = sample - self.sample_count - 1;
-            defmt::warn!("Dropped {} BMMI270 sample(s)", dropped_samples,);
+            defmt::trace!("Dropped {} BMI270 sample(s)", dropped_samples);
         }
 
         // Wait a little bit less than the mag ODR to avoid skipping samples
         while now >= self.next_update {
-            self.next_update += SENSORPERIOD_MICRO_SECONDS - 150u32.micros();
+            self.next_update += SENSORPERIOD_MICRO_SECONDS;
         }
 
         self.raw_data = [
@@ -237,6 +244,18 @@ impl Bmi270 {
         ];
 
         self.sample_count = sample;
+
+        let accel_x_g = self.raw_data[0] as f32 * self.accel_scale;
+        let accel_y_g = self.raw_data[1] as f32 * self.accel_scale;
+        let accel_z_g = self.raw_data[2] as f32 * self.accel_scale;
+
+        self.accel_g = [accel_x_g, accel_y_g, accel_z_g];
+
+        let gyro_x_dps = self.raw_data[3] as f32 * self.gyr_scale;
+        let gyro_y_dps = self.raw_data[4] as f32 * self.gyr_scale;
+        let gyro_z_dps = self.raw_data[5] as f32 * self.gyr_scale;
+
+        self.gyro_dps = [gyro_x_dps, gyro_y_dps, gyro_z_dps];
 
         Ok(true)
     }
@@ -279,25 +298,6 @@ impl Bmi270 {
         }
     }
 
-    pub fn update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> Result<(), Error> {
-        if self.read_imu_data_dma(i2c_dma, now).is_ok() {
-            let accel_x_g = self.raw_data[0] as f64 * self.accel_scale;
-            let accel_y_g = self.raw_data[1] as f64 * self.accel_scale;
-            let accel_z_g = self.raw_data[2] as f64 * self.accel_scale;
-
-            self.accel_g = [accel_x_g, accel_y_g, accel_z_g];
-
-            let gyro_x_dps = self.raw_data[3] as f64 * self.gyr_scale;
-            let gyro_y_dps = self.raw_data[4] as f64 * self.gyr_scale;
-            let gyro_z_dps = self.raw_data[5] as f64 * self.gyr_scale;
-
-            self.gyro_dps = [gyro_x_dps, gyro_y_dps, gyro_z_dps];
-        } else {
-            self.read_imu_data_dma(i2c_dma, now).err();
-        }
-        Ok(())
-    }
-
     pub fn init<D: DelayNs>(
         &mut self,
         i2c_dma: &mut i2c_dma::I2cDma,
@@ -316,11 +316,11 @@ impl Bmi270 {
 
         defmt::debug!("Configuring BMI270");
         self.write_register(i2c_dma, Registers::PowerConfg, POWER_CONF_REG_VAL)?;
-        delay.delay_ms(CONFIG_DELAY_MILLI_SECONDS.to_millis());
+        delay.delay_us(POR_DELAY_MICRO_SECONDS.to_micros());
         self.write_register(i2c_dma, Registers::InitCtrl, START_INITIALIZATION)?;
         self.burst_write(i2c_dma, CONFIG_FILE, delay);
         self.write_register(i2c_dma, Registers::InitCtrl, STOP_INITIALIZATION)?;
-        delay.delay_us(POR_DELAY_MICRO_SECONDS.to_micros());
+        delay.delay_ms(CONFIG_DELAY_MILLI_SECONDS.to_millis());
 
         let status = self.read_register(i2c_dma, Registers::InternalStatus)?;
         defmt::debug!("Internal status: {=u8}", status);
@@ -334,13 +334,13 @@ impl Bmi270 {
         delay.delay_us(WRITE_2_WRITE_DELAY_MICROS_SECONDS.to_micros());
 
         self.write_register(i2c_dma, Registers::AccelRange, ACC_RANGE_REG_VAL)?;
-        self.accel_scale = 0.2442002442e-3;
+        self.accel_scale = 2.442002e-4;
         delay.delay_us(WRITE_2_WRITE_DELAY_MICROS_SECONDS.to_micros());
 
         self.write_register(i2c_dma, Registers::GyrConf, GYR_CONF_REG_VAL)?;
         delay.delay_us(WRITE_2_WRITE_DELAY_MICROS_SECONDS.to_micros());
         self.write_register(i2c_dma, Registers::GyrRange, GYR_RANGE_REG_VAL)?;
-        self.gyr_scale = 6.0975609756e-2;
+        self.gyr_scale = 6.097561e-2;
 
         self.write_register(i2c_dma, Registers::AccelOffsetX, 0x01)?;
         delay.delay_us(WRITE_2_WRITE_DELAY_MICROS_SECONDS.to_micros());

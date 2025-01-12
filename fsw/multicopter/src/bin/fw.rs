@@ -65,7 +65,7 @@ fn main() -> ! {
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
     defmt::info!("Configured PWM timer");
 
-    let [i2c1_rx, dshot_tx, ..] = dp.DMA1.split();
+    let [i2c1_rx, i2c2_rx, dshot_tx, ..] = dp.DMA1.split();
 
     let sd = sdmmc::Sdmmc::new(&dp.RCC, dp.SDMMC1, &clock_cfg).unwrap();
     defmt::info!("Configured SDMMC");
@@ -85,8 +85,21 @@ fn main() -> ! {
         &mut dp.DMAMUX1,
         &mut dp.DMAMUX2,
     );
+    let mut i2c2_dma = I2cDma::new(
+        dp.I2C2,
+        i2c::I2cConfig {
+            speed: i2c::I2cSpeed::FastPlus1M,
+            ..Default::default()
+        },
+        i2c2_rx,
+        &clock_cfg,
+        &mut dp.DMAMUX1,
+        &mut dp.DMAMUX2,
+    );
     let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMM350");
+    let mut bmi270 = bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay).unwrap();
+    defmt::info!("Configured BMI270");
 
     let can = can::setup_can(dp.FDCAN1, &dp.RCC);
     let mut can = dronecan::DroneCan::new(can);
@@ -129,12 +142,13 @@ fn main() -> ! {
         running_led.update(now);
 
         let mag_updated = bmm350.update(&mut i2c1_dma, now);
+        let _ = bmi270.update(&mut i2c2_dma, now);
         if mag_updated {
             let record = blackbox::Record {
                 ts: ts.to_millis() as u32,
                 mag: bmm350.data.mag,
-                gyro: [0f32; 3],
-                accel: [0f32; 3],
+                gyro: bmi270.gyro_dps,
+                accel: bmi270.accel_g,
                 mag_temp: bmm350.data.temp,
                 mag_sample: bmm350.data.sample,
             };
