@@ -641,8 +641,6 @@ impl Bmm350 {
         // Suspend before changing power mode
         self.set_power_mode(i2c_dma, Pmu::SuspendMode, delay)?;
         self.set_power_mode(i2c_dma, Pmu::NormalMode, delay)?;
-
-        defmt::debug!("Finished initializing BMM350");
         Ok(())
     }
 }

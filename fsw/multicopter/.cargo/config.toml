@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = ["probe-rs", "run", "--chip", "STM32H747IITx", "--log-format", "{L} {s} @ {F}:{l}", "--verify"]
+runner = ["probe-rs", "run", "--chip", "STM32H747IITx", "--log-format", "{L} {s} @ {F}:{l}", "--speed", "10000"]
 rustflags = [
   "-C", "linker=flip-link",
   "-C", "link-arg=--nmagic",

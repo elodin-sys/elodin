@@ -1,5 +1,6 @@
-use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx, TimeSource, VolumeManager};
-use fugit::RateExtU32 as _;
+use core::ops::Deref;
+
+use fugit::{ExtU32, RateExtU32 as _};
 use hal::{clocks, pac};
 use sdio_host::{
     common_cmd::{self, ResponseLen},
@@ -7,8 +8,12 @@ use sdio_host::{
     sd::{BusWidth, SDStatus, CIC, SCR, SD},
     sd_cmd, Cmd,
 };
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
+use crate::blackbox::SdmmcFs;
 use crate::dwt::DwtTimer;
+
+const DMA_BUF_SIZE: usize = 512 * 64; // 32KB
 
 type Hertz = fugit::Hertz<u32>;
 
@@ -16,6 +21,8 @@ const SD_INIT_FREQ: Hertz = Hertz::kHz(400);
 const SDR12_MAX_FREQ: Hertz = Hertz::MHz(25);
 const SD_NORMAL_FREQ: Hertz = Hertz::MHz(50);
 const SD_KERNEL_FREQ: Hertz = Hertz::MHz(100);
+
+const BLOCK_LEN: usize = 512;
 
 #[derive(defmt::Format, Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum SdCardSignaling {
@@ -41,12 +48,11 @@ pub enum Error {
     BadClock,
     InvalidConfiguration,
     SignalingSwitchFailed,
-}
-
-impl Error {
-    pub fn timeout(&self) -> bool {
-        matches!(self, Error::Timeout | Error::SoftwareTimeout)
-    }
+    UnexpectedEof,
+    WriteZero,
+    FatFsNotFound,
+    Busy,
+    WriteCacheFull,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -58,6 +64,15 @@ pub struct SdCard {
     pub csd: CSD<SD>,
     pub scr: SCR,
     pub status: SDStatus,
+    pub fatfs_info: FatFsInfo,
+}
+
+#[derive(Clone, Copy, Default, defmt::Format)]
+pub struct FatFsInfo {
+    start_lba: u64,
+    sector_size: u64,
+    num_sectors: u64,
+    cursor: u64,
 }
 
 impl SdCard {
@@ -76,11 +91,69 @@ enum PowerControl {
     On = 0b11,
 }
 
+#[derive(Clone)]
 pub struct Sdmmc {
-    rb: pac::SDMMC1,
-    clk: Hertz,
+    rb: &'static pac::sdmmc1::RegisterBlock,
     card: Option<SdCard>,
     dwt: DwtTimer,
+    block_cache: FifoBlockCache,
+    dma_buf: alloc::boxed::Box<[u8]>,
+}
+
+#[derive(Default, Clone)]
+struct FifoBlockCache {
+    blocks: [Block; 8],
+    next: usize,
+}
+
+#[derive(Clone)]
+struct Block {
+    index: u32,
+    data: [u8; 512],
+    dirty: bool,
+    stale: bool,
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Block {
+            index: 0,
+            data: [0; 512],
+            dirty: false,
+            stale: true,
+        }
+    }
+}
+
+impl Block {
+    fn needs_writeback(&self) -> bool {
+        self.dirty && !self.stale
+    }
+}
+
+impl FifoBlockCache {
+    fn clear(&mut self) {
+        self.blocks.iter_mut().for_each(|b| b.stale = true);
+    }
+
+    fn get(&self, index: u32) -> Option<&[u8; 512]> {
+        self.blocks
+            .iter()
+            .filter(|b| !b.stale)
+            .find(|b| b.index == index)
+            .map(|b| &b.data)
+    }
+
+    fn get_mut(&mut self, index: u32) -> Option<&mut [u8; 512]> {
+        self.blocks
+            .iter_mut()
+            .filter(|b| !b.stale)
+            .find(|b| b.index == index)
+            .map(|b| {
+                b.dirty = true;
+                &mut b.data
+            })
+    }
 }
 
 impl Sdmmc {
@@ -128,19 +201,18 @@ impl Sdmmc {
                 .negedge()
                 .clear_bit()
                 .hwfc_en()
-                .set_bit()
+                .set_bit() // Hardware flow control enabled
+                .busspeed()
+                .clear_bit() // Normal speed
         });
 
-        let mut sdmmc = Sdmmc {
-            rb,
-            clk,
+        Ok(Sdmmc {
+            rb: unsafe { &*(rb.deref() as *const _) },
             card: None,
             dwt: DwtTimer::new(clocks),
-        };
-
-        sdmmc.power_off();
-        sdmmc.try_connect()?;
-        Ok(sdmmc)
+            block_cache: FifoBlockCache::default(),
+            dma_buf: alloc::vec![0u8; DMA_BUF_SIZE].into_boxed_slice(),
+        })
     }
 
     fn clk_div(sdmmc_ck: Hertz) -> Result<(u16, Hertz), Error> {
@@ -170,95 +242,8 @@ impl Sdmmc {
             .modify(|_, w| unsafe { w.pwrctrl().bits(PowerControl::On as u8) });
     }
 
-    fn cmd<R: common_cmd::Resp>(&self, cmd: Cmd<R>) -> Result<(), Error> {
-        // Clear interrupts
-        self.rb.icr.modify(|_, w| {
-            w.ccrcfailc() // CRC FAIL
-                .set_bit()
-                .ctimeoutc() // TIMEOUT
-                .set_bit()
-                .cmdrendc() // CMD R END
-                .set_bit()
-                .cmdsentc() // CMD SENT
-                .set_bit()
-                .dataendc()
-                .set_bit()
-                .dbckendc()
-                .set_bit()
-                .dcrcfailc()
-                .set_bit()
-                .dtimeoutc()
-                .set_bit()
-                .sdioitc() // SDIO IT
-                .set_bit()
-                .rxoverrc()
-                .set_bit()
-                .txunderrc()
-                .set_bit()
-        });
-
-        // CP state machine must be idle
-        while self.rb.star.read().cpsmact().bit_is_set() {}
-
-        // Command arg
-        self.rb.argr.write(|w| unsafe { w.cmdarg().bits(cmd.arg) });
-
-        // Determine what kind of response the CPSM should wait for
-        let waitresp = match cmd.response_len() {
-            ResponseLen::Zero => 0,
-            ResponseLen::R48 => 1, // short response, expect CMDREND or CCRCFAIL
-            ResponseLen::R136 => 3, // long response, expect CMDREND or CCRCFAIL
-        };
-
-        // Special mode in CP State Machine
-        // CMD12: Stop Transmission
-        let cpsm_stop_transmission = cmd.cmd == 12;
-
-        // Command index and start CP State Machine
-        self.rb.cmdr.write(|w| unsafe {
-            w.waitint()
-                .clear_bit()
-                .waitresp() // No / Short / Long
-                .bits(waitresp)
-                .cmdstop() // CPSM Stop Transmission
-                .bit(cpsm_stop_transmission)
-                .cmdindex()
-                .bits(cmd.cmd)
-                .cpsmen()
-                .set_bit()
-        });
-
-        let mut timeout: u32 = 0xFFFF_FFFF;
-
-        let mut status;
-        if cmd.response_len() == ResponseLen::Zero {
-            // Wait for CMDSENT or a timeout
-            while {
-                status = self.rb.star.read();
-                !(status.ctimeout().bit() || status.cmdsent().bit()) && timeout > 0
-            } {
-                timeout -= 1;
-            }
-        } else {
-            // Wait for CMDREND or CCRCFAIL or a timeout
-            while {
-                status = self.rb.star.read();
-                !(status.ctimeout().bit() || status.cmdrend().bit() || status.ccrcfail().bit())
-                    && timeout > 0
-            } {
-                timeout -= 1;
-            }
-        }
-
-        if status.ctimeout().bit_is_set() {
-            return Err(Error::Timeout);
-        } else if timeout == 0 {
-            return Err(Error::SoftwareTimeout);
-        } else if status.ccrcfail().bit() {
-            return Err(Error::Crc);
-        }
-
-        Ok(())
+    fn cmd<R: common_cmd::Resp>(&self, command: Cmd<R>) -> Result<(), Error> {
+        cmd(self.rb, command)
     }
 
     fn card_rca(&self) -> u16 {
@@ -279,11 +264,8 @@ impl Sdmmc {
         let mut idx = 0;
         let mut sta_reg;
         while {
-            sta_reg = self.rb.star.read();
-            !(sta_reg.rxoverr().bit()
-                || sta_reg.dcrcfail().bit()
-                || sta_reg.dtimeout().bit()
-                || sta_reg.dbckend().bit())
+            sta_reg = self.rb.star.read().to_result()?;
+            sta_reg.dbckend().bit_is_clear()
         } {
             if sta_reg.rxfifohf().bit() {
                 for _ in 0..8 {
@@ -296,7 +278,6 @@ impl Sdmmc {
                 break;
             }
         }
-        self.status_to_result()?;
         let card = self.card.as_mut().ok_or(Error::NoCard)?;
         card.status = status.into();
 
@@ -342,37 +323,11 @@ impl Sdmmc {
         defmt::debug!("SD card erase timeout (s): {}", card.status.erase_timeout());
         defmt::debug!("SD card discard support: {}", card.status.discard_support());
         defmt::debug!("SD card size (MB): {}", card.size() / 1_000_000);
-        defmt::debug!(
-            "SD card blocks: {}",
-            card.size() / embedded_sdmmc::Block::LEN as u64
-        );
+        defmt::debug!("SD card blocks: {}", card.size() / BLOCK_LEN as u64);
         Ok(())
     }
 
-    fn status_to_result(&self) -> Result<(), Error> {
-        let status = self.rb.star.read();
-        if status.dcrcfail().bit() {
-            return Err(Error::DataCrcFail);
-        } else if status.rxoverr().bit() {
-            return Err(Error::RxOverFlow);
-        } else if status.txunderr().bit() {
-            return Err(Error::TxUnderFlow);
-        } else if status.dtimeout().bit() {
-            return Err(Error::Timeout);
-        }
-        Ok(())
-    }
-
-    fn start_datapath_transfer(&self, length_bytes: u32, block_size: u8, direction: Dir) {
-        assert!(block_size <= 14, "Block size up to 2^14 bytes");
-
-        // Block Size must be greater than 0 ( != 1 byte) in DDR mode
-        let ddr = self.rb.clkcr.read().ddr().bit_is_set();
-        assert!(
-            !ddr || block_size != 0,
-            "Block size must be >= 1, or >= 2 in DDR mode"
-        );
-
+    fn start_datapath_transfer(&self, len: u32, block_size: u8, direction: Dir) {
         let dtdir = matches!(direction, Dir::CardToHost);
 
         // Command AND Data state machines must be idle
@@ -380,107 +335,137 @@ impl Sdmmc {
             || self.rb.star.read().cpsmact().bit_is_set()
         {}
 
-        // Data timeout, in bus cycles
-        self.rb
-            .dtimer
-            .write(|w| unsafe { w.datatime().bits(5_000_000) });
-        // Data length, in bytes
-        self.rb
-            .dlenr
-            .write(|w| unsafe { w.datalength().bits(length_bytes) });
-        // Transfer
+        self.rb.dtimer.write(|w| w.datatime().variant(0xFFFF_FFFF));
+        self.rb.dlenr.write(|w| w.datalength().variant(len));
         self.rb.dctrl.write(|w| unsafe {
             w.dblocksize()
                 .bits(block_size) // 2^n bytes block size
                 .dtdir()
                 .bit(dtdir)
+                .dtmode()
+                .variant(0)
                 .dten()
                 .set_bit() // Enable transfer
         });
     }
 
-    pub fn read_block(&self, address: u32, buffer: &mut [u8; 512]) -> Result<(), Error> {
-        self.card.ok_or(Error::NoCard)?;
-        self.start_datapath_transfer(512, 9, Dir::CardToHost);
-        self.cmd(common_cmd::read_single_block(address))?;
+    fn start_dma_transfer(&self, len: u32, block_size: u8, direction: Dir) {
+        let dtdir = matches!(direction, Dir::CardToHost);
 
-        let mut i = 0;
-        let mut status;
-        while {
-            status = self.rb.star.read();
-            !(status.rxoverr().bit()
-                || status.dcrcfail().bit()
-                || status.dtimeout().bit()
-                || status.dataend().bit())
-        } {
-            if status.rxfifohf().bit() {
-                for _ in 0..8 {
-                    let bytes = self.rb.fifor.read().bits().to_le_bytes();
-                    buffer[i..i + 4].copy_from_slice(&bytes);
-                    i += 4;
-                }
-            }
+        self.rb.dtimer.write(|w| w.datatime().variant(0xFFFF_FFFF));
+        self.rb.dlenr.write(|w| w.datalength().variant(len));
+        // This delay is needed due to some hardware bug in SDMMC + IDMA
+        for _ in 0..300 {
+            cortex_m::asm::nop();
+        }
+        self.rb.dctrl.write(|w| {
+            w.dblocksize()
+                .variant(block_size) // 2^n bytes block size
+                .dtdir()
+                .bit(dtdir)
+                .dtmode()
+                .variant(0)
+                .dten()
+                .clear_bit() // Enable transfer
+        });
+        self.rb.cmdr.modify(|_, w| w.cmdtrans().set_bit());
+        self.rb
+            .idmabase0r
+            .write(|w| w.idmabase0().variant(self.dma_buf.as_ptr() as u32));
+        self.rb.idmactrlr.write(|w| w.idmaen().set_bit());
+    }
 
-            if i >= buffer.len() {
-                break;
+    pub fn bench(&mut self, start_block: u32) -> Result<(), Error> {
+        let block_counts = [1, 4, 8, 16, 32, 64, 128];
+        for &blocks in &block_counts {
+            let len = 512 * blocks;
+            let mut total_duration = fugit::MicrosDuration::<u32>::from_ticks(0);
+            const ITERATIONS: u32 = 10;
+            for _ in 0..ITERATIONS {
+                let duration = self.bench_write(start_block, blocks)?;
+                total_duration += duration;
             }
+            let avg_duration = total_duration / ITERATIONS;
+            let mb_per_sec = len as f32 / avg_duration.to_micros() as f32;
+            defmt::info!(
+                "Wrote {} blocks ({} bytes) in {}: {} MB/s",
+                blocks,
+                len,
+                avg_duration,
+                mb_per_sec
+            );
         }
         Ok(())
     }
 
-    pub fn write_block(&self, address: u32, buffer: &[u8; 512]) -> Result<(), Error> {
-        self.write_blocks(address, buffer)
+    fn bench_write(
+        &mut self,
+        start_block: u32,
+        num_blocks: usize,
+    ) -> Result<fugit::MicrosDuration<u32>, Error> {
+        let buf = alloc::vec![0u8; 512 * num_blocks].into_boxed_slice();
+        let start = self.dwt.now();
+        self.write_blocks(start_block, &buf)?;
+        self.wait_card_ready(true)?;
+        let elapsed = start.elapsed();
+        Ok(elapsed)
     }
 
-    pub fn write_blocks(&self, address: u32, buffer: &[u8]) -> Result<(), Error> {
-        self.write_blocks_begin(address, buffer.len())?;
-        self.write_blocks_feed(buffer);
-        self.write_blocks_conclude()?;
+    fn write_block(&mut self, address: u32, buffer: [u8; BLOCK_LEN]) -> Result<(), Error> {
+        let start = self.dwt.now();
+        self.wait_card_ready(false)?;
+        self.start_dma_transfer(BLOCK_LEN as u32, 9, Dir::HostToCard);
+        self.dma_buf[..BLOCK_LEN].copy_from_slice(&buffer);
+        self.cmd(common_cmd::write_single_block(address))?;
+        self.rb.dctrl.modify(|_, w| w.dten().set_bit());
+        let elapsed = start.elapsed();
+        if elapsed > fugit::MillisDuration::<u32>::millis(1) {
+            defmt::warn!("SDMMC single-block write took {}", elapsed);
+        }
         Ok(())
     }
 
-    fn write_blocks_begin(&self, address: u32, buffer_len: usize) -> Result<(), Error> {
-        self.card.ok_or(Error::NoCard)?;
+    fn write_blocks(&mut self, address: u32, buffer: &[u8]) -> Result<(), Error> {
+        let start = self.dwt.now();
+        let n_blocks = buffer.len() as u32 / 512;
         assert!(
-            buffer_len % 512 == 0,
+            buffer.len() % 512 == 0,
             "Buffer length must be a multiple of 512"
         );
-        let n_blocks = buffer_len / 512;
-        self.start_datapath_transfer(512 * n_blocks as u32, 9, Dir::HostToCard);
-        self.cmd(common_cmd::write_multiple_blocks(address))?; // CMD25
+        assert!(
+            buffer.len() <= self.dma_buf.len(),
+            "Buffer length must be less than or equal to dma buffer size"
+        );
+        self.card_ready(true)?;
+        self.invalidate(address..=address + n_blocks)?;
+
+        self.start_dma_transfer(buffer.len() as u32, 9, Dir::HostToCard);
+        self.dma_buf[..buffer.len()].copy_from_slice(buffer);
+        if n_blocks == 1 {
+            self.cmd(common_cmd::write_single_block(address))?;
+        } else {
+            self.cmd(common_cmd::cmd::<common_cmd::R1>(23, n_blocks))?;
+            self.cmd(common_cmd::write_multiple_blocks(address))?;
+        }
+        self.rb.dctrl.modify(|_, w| w.dten().set_bit());
+        let elapsed = start.elapsed();
+        if elapsed > fugit::MillisDuration::<u32>::millis(1) {
+            defmt::warn!("SDMMC multi-block write took {}", elapsed);
+        }
         Ok(())
     }
 
-    fn write_blocks_feed(&self, buffer: &[u8]) {
-        let feed_start = self.dwt.now();
-        let mut i = 0;
-        let mut status;
-        while {
-            status = self.rb.star.read();
-            !(status.txunderr().bit() || status.dcrcfail().bit() || status.dtimeout().bit())
-        } {
-            if status.txfifohe().bit() {
-                for _ in 0..8 {
-                    let mut wb = [0u8; 4];
-                    wb.copy_from_slice(&buffer[i..i + 4]);
-                    let word = u32::from_le_bytes(wb);
-                    self.rb.fifor.write(|w| unsafe { w.bits(word) });
-                    i += 4;
-                }
-            }
-
-            if i >= buffer.len() {
-                break;
-            }
-        }
-        let feed_elapsed = feed_start.elapsed();
-        let throughput = (buffer.len() * 8) as f32 / feed_elapsed.to_micros() as f32;
-        defmt::trace!(
-            "SDMMC write: {} B / {} ({} Mbps)",
-            buffer.len(),
-            feed_elapsed,
-            throughput
-        );
+    pub fn read_block(&mut self, address: u32) -> Result<[u8; BLOCK_LEN], Error> {
+        let start = self.dwt.now();
+        self.card_ready(false)?;
+        self.start_dma_transfer(BLOCK_LEN as u32, 9, Dir::CardToHost);
+        self.cmd(common_cmd::read_single_block(address))?;
+        self.rb.dctrl.modify(|_, w| w.dten().set_bit());
+        while self.rb.star.read().dataend().bit_is_clear() {}
+        let mut buffer = [0u8; BLOCK_LEN];
+        buffer.copy_from_slice(&self.dma_buf[..BLOCK_LEN]);
+        let _elapsed = start.elapsed();
+        Ok(buffer)
     }
 
     fn read_status(&self) -> Result<CardStatus<Self>, Error> {
@@ -488,66 +473,41 @@ impl Sdmmc {
         Ok(CardStatus::from(self.rb.resp1r.read().bits()))
     }
 
-    fn wait_card_ready(&self) -> Result<(), Error> {
-        let card_ready_start = self.dwt.now();
-        let mut timeout: u32 = 0xFFFF_FFFF;
-        // Try to read card status (CMD13)
-        while timeout > 0 {
-            if self.card_ready()? {
-                let card_ready_elapsed = card_ready_start.elapsed();
-                defmt::trace!("SDMMC card ready wait: {}", card_ready_elapsed);
-                return Ok(());
+    fn wait_card_ready(&mut self, write_back: bool) -> Result<(), Error> {
+        let timeout: fugit::MicrosDuration<u32> = 1000u32.millis();
+        let start = self.dwt.now();
+        while start.elapsed() < timeout {
+            match self.card_ready(write_back) {
+                Ok(_) => return Ok(()),
+                Err(Error::Busy) => {}
+                Err(err) => return Err(err),
             }
-            timeout -= 1;
         }
         Err(Error::SoftwareTimeout)
     }
 
-    fn card_ready(&self) -> Result<bool, Error> {
-        Ok(self.read_status()?.state() == CurrentState::Transfer)
-    }
-
-    fn clear_static_interrupt_flags(&self) {
-        self.rb.icr.modify(|_, w| {
-            w.dcrcfailc()
-                .set_bit()
-                .dtimeoutc()
-                .set_bit()
-                .txunderrc()
-                .set_bit()
-                .rxoverrc()
-                .set_bit()
-                .dataendc()
-                .set_bit()
-                .dholdc()
-                .set_bit()
-                .dbckendc()
-                .set_bit()
-                .dabortc()
-                .set_bit()
-                .idmatec()
-                .set_bit()
-                .idmabtcc()
-                .set_bit()
-        });
-    }
-
-    fn write_blocks_conclude(&self) -> Result<(), Error> {
-        let status_wait_start = self.dwt.now();
-        let mut status;
-        while {
-            status = self.rb.star.read();
-            !(status.txunderr().bit()
-                || status.dcrcfail().bit()
-                || status.dtimeout().bit()
-                || status.dataend().bit())
-        } {}
-        self.cmd(common_cmd::stop_transmission())?; // CMD12
-        self.status_to_result()?;
-        let status_wait_elapsed = status_wait_start.elapsed();
-        defmt::trace!("SDMMC write status wait: {}", status_wait_elapsed);
-        self.clear_static_interrupt_flags();
-        self.wait_card_ready()?;
+    fn card_ready(&mut self, write_back: bool) -> Result<(), Error> {
+        let status = self.rb.star.read().to_result()?;
+        if status.dpsmact().bit_is_set() || status.cpsmact().bit_is_set() {
+            return Err(Error::Busy);
+        }
+        let sd_state = self.read_status()?.state();
+        if sd_state != CurrentState::Transfer {
+            return Err(Error::Busy);
+        }
+        if write_back {
+            let dirty_block = self
+                .block_cache
+                .blocks
+                .iter_mut()
+                .find(|b| b.needs_writeback());
+            if let Some(block) = dirty_block {
+                block.dirty = false;
+                let block = block.clone();
+                self.write_block(block.index, block.data)?;
+                return Err(Error::Busy);
+            }
+        }
         Ok(())
     }
 
@@ -560,12 +520,8 @@ impl Sdmmc {
         let mut i = 0;
         let mut status;
         while {
-            status = self.rb.star.read();
-
-            !(status.rxoverr().bit()
-                || status.dcrcfail().bit()
-                || status.dtimeout().bit()
-                || status.dbckend().bit())
+            status = self.rb.star.read().to_result()?;
+            status.dbckend().bit_is_clear()
         } {
             if status.rxfifoe().bit_is_clear() {
                 // FIFO not empty
@@ -578,11 +534,11 @@ impl Sdmmc {
             }
         }
 
-        self.status_to_result()?;
         Ok(SCR::from(scr))
     }
 
-    fn try_connect(&mut self) -> Result<Option<SdCard>, Error> {
+    pub fn try_connect(&mut self) -> Result<(), Error> {
+        self.disconnect();
         self.power_on();
         self.cmd(common_cmd::idle())?;
 
@@ -591,9 +547,8 @@ impl Sdmmc {
                 defmt::debug!("SD card detected");
             }
             Err(Error::Timeout) => {
-                defmt::debug!("No SD card detected");
                 self.power_off();
-                return Ok(None);
+                return Err(Error::NoCard);
             }
             Err(err) => return Err(err),
         }
@@ -666,13 +621,14 @@ impl Sdmmc {
         let signaling = self.switch_signaling_mode(SdCardSignaling::SDR25)?;
         defmt::debug!("Switched to {:?}", signaling);
         self.set_freq(SD_NORMAL_FREQ)?;
-        if signaling != SdCardSignaling::SDR25 || !self.card_ready()? {
+        if signaling != SdCardSignaling::SDR25 || self.card_ready(false).is_err() {
             return Err(Error::SignalingSwitchFailed);
         }
         self.read_sd_status()?;
         self.log_sd_status()?;
-
-        Ok(self.card)
+        self.wait_card_ready(false)?;
+        self.find_fatfs()?;
+        Ok(())
     }
 
     fn set_freq(&mut self, freq: Hertz) -> Result<(), Error> {
@@ -681,7 +637,6 @@ impl Sdmmc {
         self.rb
             .clkcr
             .modify(|_, w| unsafe { w.clkdiv().bits(clkdiv) });
-        self.clk = clk;
         Ok(())
     }
 
@@ -707,11 +662,8 @@ impl Sdmmc {
         let mut idx = 0;
         let mut sta_reg;
         while {
-            sta_reg = self.rb.star.read();
-            !(sta_reg.rxoverr().bit()
-                || sta_reg.dcrcfail().bit()
-                || sta_reg.dtimeout().bit()
-                || sta_reg.dbckend().bit())
+            sta_reg = self.rb.star.read().to_result()?;
+            sta_reg.dbckend().bit_is_clear()
         } {
             if sta_reg.rxfifohf().bit() {
                 for _ in 0..8 {
@@ -725,8 +677,6 @@ impl Sdmmc {
             }
         }
 
-        self.status_to_result()?;
-
         // Host is allowed to use the new functions at least 8
         // clocks after the end of the switch command
         // transaction. We know the current clock period is < 80ns,
@@ -739,65 +689,302 @@ impl Sdmmc {
         let _support_bits = u32::from_be(status[3]) >> 16;
         // Function Selection of Function Group 1
         let selection = (u32::from_be(status[4]) >> 24) & 0xF;
+        let sd_signaling = match selection {
+            0 => SdCardSignaling::SDR12,
+            1 => SdCardSignaling::SDR25,
+            2 => SdCardSignaling::SDR50,
+            3 => SdCardSignaling::SDR104,
+            4 => SdCardSignaling::DDR50,
+            _ => return Err(Error::UnsupportedCardType),
+        };
 
-        match selection {
-            0 => Ok(SdCardSignaling::SDR12),
-            1 => Ok(SdCardSignaling::SDR25),
-            2 => Ok(SdCardSignaling::SDR50),
-            3 => Ok(SdCardSignaling::SDR104),
-            4 => Ok(SdCardSignaling::DDR50),
-            _ => Err(Error::UnsupportedCardType),
+        if selection > 0 {
+            while self.rb.star.read().dpsmact().bit_is_set()
+                || self.rb.star.read().cpsmact().bit_is_set()
+            {}
+            self.rb.clkcr.modify(|_, w| w.busspeed().set_bit());
         }
+
+        Ok(sd_signaling)
     }
 
-    pub fn connected(&self) -> bool {
-        self.card.is_some()
+    pub fn fatfs(self, led: hal::gpio::Pin) -> SdmmcFs {
+        SdmmcFs::new(self, led)
+    }
+
+    pub fn connected(&mut self) -> bool {
+        self.card.is_some() && self.read_sd_status().is_ok()
     }
 
     pub fn disconnect(&mut self) {
         self.power_off();
+        self.block_cache.clear();
         self.card = None;
     }
 
-    pub fn volume_manager<T: TimeSource>(self, time_source: T) -> VolumeManager<Self, T> {
-        VolumeManager::new(self, time_source)
+    // Find the first fat32 partition in the MBR
+    fn find_fatfs(&mut self) -> Result<(), Error> {
+        let buffer = self.read_block(0)?;
+        let mbr = Mbr::read_from_bytes(&buffer).map_err(|_| Error::InvalidConfiguration)?;
+        // Validate MBR signature
+        if mbr.signature != 0xAA55 {
+            return Err(Error::InvalidConfiguration);
+        }
+        let card = self.card.as_mut().ok_or(Error::NoCard)?;
+        for partition in mbr.partitions {
+            if partition.partition_type == 0x0C || partition.partition_type == 0x0B {
+                card.fatfs_info = FatFsInfo {
+                    start_lba: partition.start_lba as u64,
+                    num_sectors: partition.num_sectors as u64,
+                    sector_size: 512,
+                    cursor: partition.start_lba as u64 * 512,
+                };
+                defmt::debug!("Found FAT32 partition: {}", card.fatfs_info);
+                return Ok(());
+            }
+        }
+        Err(Error::FatFsNotFound)
+    }
+
+    fn fatfs_info(&mut self) -> Result<&mut FatFsInfo, Error> {
+        let card = self.card.as_mut().ok_or(Error::NoCard)?;
+        Ok(&mut card.fatfs_info)
+    }
+
+    fn insert(&mut self, index: u32, data: [u8; 512], dirty: bool) -> Result<(), Error> {
+        let cache_index = self.block_cache.next;
+        self.block_cache.next = (cache_index + 1) % self.block_cache.blocks.len();
+        let block = &mut self.block_cache.blocks[cache_index];
+        if block.needs_writeback() {
+            return Err(Error::Busy);
+        }
+        *block = Block {
+            index,
+            data,
+            dirty,
+            stale: false,
+        };
+        Ok(())
+    }
+
+    fn invalidate(&mut self, block_range: core::ops::RangeInclusive<u32>) -> Result<(), Error> {
+        self.block_cache
+            .blocks
+            .iter_mut()
+            .filter(|b| block_range.contains(&b.index))
+            .for_each(|b| b.stale = true);
+        Ok(())
     }
 }
 
-impl BlockDevice for Sdmmc {
+fn cmd<R: common_cmd::Resp>(rb: &pac::sdmmc1::RegisterBlock, cmd: Cmd<R>) -> Result<(), Error> {
+    // CP state machine must be idle
+    while rb.star.read().cpsmact().bit_is_set() {}
+
+    // Clear status flags
+    rb.icr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+
+    // Command arg
+    rb.argr.write(|w| unsafe { w.cmdarg().bits(cmd.arg) });
+
+    // Determine what kind of response the CPSM should wait for
+    let waitresp = match cmd.response_len() {
+        ResponseLen::Zero => 0,
+        ResponseLen::R48 => 1,  // short response, expect CMDREND or CCRCFAIL
+        ResponseLen::R136 => 3, // long response, expect CMDREND or CCRCFAIL
+    };
+
+    // Special mode in CP State Machine
+    // CMD12: Stop Transmission
+    let cpsm_stop_transmission = cmd.cmd == 12;
+
+    // Command index and start CP State Machine
+    rb.cmdr.write(|w| unsafe {
+        w.waitint()
+            .clear_bit()
+            .waitresp() // No / Short / Long
+            .bits(waitresp)
+            .cmdstop() // CPSM Stop Transmission
+            .bit(cpsm_stop_transmission)
+            .cmdindex()
+            .bits(cmd.cmd)
+            .cpsmen()
+            .set_bit()
+    });
+
+    let mut attempts_remaining = 100_000_000;
+    let mut status;
+    if cmd.response_len() == ResponseLen::Zero {
+        // Wait for CMDSENT or a timeout
+        while {
+            status = rb.star.read();
+            !(status.ctimeout().bit() || status.cmdsent().bit()) && attempts_remaining > 0
+        } {
+            attempts_remaining -= 1;
+        }
+    } else {
+        // Wait for CMDREND or CCRCFAIL or a timeout
+        while {
+            status = rb.star.read();
+            !(status.ctimeout().bit() || status.cmdrend().bit() || status.ccrcfail().bit())
+                && attempts_remaining > 0
+        } {
+            attempts_remaining -= 1;
+        }
+    }
+
+    status.to_result()?;
+    if attempts_remaining == 0 {
+        return Err(Error::SoftwareTimeout);
+    }
+    Ok(())
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, defmt::Format)]
+#[repr(C)]
+pub struct PartitionEntry {
+    pub boot_flag: u8,
+    pub start_head: u8,
+    pub start_sector_cylinder: u16,
+    pub partition_type: u8,
+    pub end_head: u8,
+    pub end_sector_cylinder: u16,
+    pub start_lba: u32,
+    pub num_sectors: u32,
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable)]
+#[repr(C, packed)]
+struct Mbr {
+    pub bootstrap: [u8; 446],
+    pub partitions: [PartitionEntry; 4],
+    pub signature: u16,
+}
+
+impl fatfs::IoError for Error {
+    fn is_interrupted(&self) -> bool {
+        matches!(self, Error::Busy)
+    }
+
+    fn new_unexpected_eof_error() -> Self {
+        Error::UnexpectedEof
+    }
+
+    fn new_write_zero_error() -> Self {
+        Error::WriteZero
+    }
+}
+
+impl fatfs::IoBase for Sdmmc {
     type Error = Error;
+}
 
-    fn read(
-        &self,
-        blocks: &mut [Block],
-        start_block_idx: BlockIdx,
-        _reason: &str,
-    ) -> Result<(), Self::Error> {
-        let start = start_block_idx.0;
-        for block_idx in start..(start + blocks.len() as u32) {
-            self.read_block(
-                block_idx,
-                &mut blocks[(block_idx - start) as usize].contents,
-            )?;
+impl fatfs::Seek for Sdmmc {
+    fn seek(&mut self, pos: fatfs::SeekFrom) -> Result<u64, Self::Error> {
+        let card = self.card.as_mut().ok_or(Error::NoCard)?;
+        let fatfs = &mut card.fatfs_info;
+        match pos {
+            fatfs::SeekFrom::Start(offset) => {
+                let start = fatfs.start_lba * fatfs.sector_size;
+                fatfs.cursor = start.saturating_add(offset);
+                defmt::trace!("Seek {} from 0 -> {}", offset, fatfs.cursor);
+            }
+            fatfs::SeekFrom::End(offset) => {
+                let end = (fatfs.start_lba + fatfs.num_sectors) * fatfs.sector_size;
+                fatfs.cursor = (end as i64).saturating_sub(offset) as u64;
+                defmt::trace!("Seek {} from {} -> {}", offset, end, fatfs.cursor);
+            }
+            fatfs::SeekFrom::Current(offset) => {
+                let current = fatfs.cursor as i64;
+                fatfs.cursor = current.saturating_add(offset) as u64;
+                defmt::trace!("Seek {} from {} -> {}", offset, current, fatfs.cursor);
+            }
         }
-        Ok(())
+        Ok(fatfs.cursor)
+    }
+}
+
+impl fatfs::Read for Sdmmc {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        let start = self.dwt.now();
+        let cursor = self.fatfs_info()?.cursor as usize;
+        let block_index = (cursor / BLOCK_LEN) as u32;
+        let start_offset = cursor % BLOCK_LEN;
+        defmt::trace!(
+            "Reading {} bytes from {} (block {})",
+            buf.len(),
+            cursor,
+            block_index
+        );
+
+        let len = buf.len().min(BLOCK_LEN - start_offset);
+        match self.block_cache.get(block_index) {
+            Some(block) => {
+                buf[..len].copy_from_slice(&block[start_offset..start_offset + len]);
+            }
+            None => {
+                let block = self.read_block(block_index)?;
+                defmt::trace!(
+                    "Read block {} after cache miss in {}",
+                    block_index,
+                    start.elapsed()
+                );
+                buf[..len].copy_from_slice(&block[start_offset..start_offset + len]);
+                self.insert(block_index, block, false)?;
+            }
+        };
+        self.fatfs_info()?.cursor += len as u64;
+        Ok(len)
+    }
+}
+
+impl fatfs::Write for Sdmmc {
+    fn write(&mut self, mut buf: &[u8]) -> Result<usize, Self::Error> {
+        let start = self.dwt.now();
+        let cursor = self.fatfs_info()?.cursor as usize;
+        buf = &buf[..buf.len().min(self.dma_buf.len())];
+        let block_index = (cursor / BLOCK_LEN) as u32;
+        let start_offset = cursor % BLOCK_LEN;
+        let mut end_offset = (cursor + buf.len()) % BLOCK_LEN;
+        defmt::trace!(
+            "Writing {} bytes to {} (block {})",
+            buf.len(),
+            cursor,
+            block_index,
+        );
+        if buf.len() > BLOCK_LEN && end_offset != 0 {
+            // Align large writes to block boundary
+            // Can only do this with the end of the buffer
+            buf = &buf[..buf.len() - end_offset];
+            end_offset = 0;
+        }
+        if start_offset != 0 || end_offset != 0 {
+            buf = &buf[..buf.len().min(BLOCK_LEN - start_offset)];
+            match self.block_cache.get_mut(block_index) {
+                Some(block) => {
+                    block[start_offset..start_offset + buf.len()].copy_from_slice(buf);
+                }
+                None => {
+                    let mut block = self.read_block(block_index)?;
+                    defmt::trace!(
+                        "Read block {} for writing after cache miss in {}",
+                        block_index,
+                        start.elapsed()
+                    );
+                    block[start_offset..start_offset + buf.len()].copy_from_slice(buf);
+                    self.insert(block_index, block, true)?;
+                }
+            };
+        } else {
+            self.write_blocks(block_index, buf)?;
+        };
+        self.fatfs_info()?.cursor += buf.len() as u64;
+        Ok(buf.len())
     }
 
-    fn write(&self, blocks: &[Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
-        let start = start_block_idx.0;
-        let total_length = embedded_sdmmc::Block::LEN * blocks.len();
-        self.write_blocks_begin(start, total_length)?;
-        for block in blocks.iter() {
-            self.write_blocks_feed(&block.contents);
-        }
-        self.write_blocks_conclude()?;
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        let _ = self.card_ready(true);
         Ok(())
-    }
-
-    fn num_blocks(&self) -> Result<BlockCount, Self::Error> {
-        let card = self.card.ok_or(Error::NoCard)?;
-        let blocks = card.size() / embedded_sdmmc::Block::LEN as u64;
-        Ok(BlockCount(blocks as u32))
     }
 }
 
@@ -818,6 +1005,26 @@ impl ResultExt for Result<(), Error> {
         match self {
             Err(Error::Crc) => Ok(()),
             res => res,
+        }
+    }
+}
+
+trait StatusExt: Sized {
+    fn to_result(self) -> Result<Self, Error>;
+}
+
+impl StatusExt for pac::sdmmc1::star::R {
+    fn to_result(self) -> Result<Self, Error> {
+        if self.dcrcfail().bit() {
+            Err(Error::DataCrcFail)
+        } else if self.rxoverr().bit() {
+            Err(Error::RxOverFlow)
+        } else if self.txunderr().bit() {
+            Err(Error::TxUnderFlow)
+        } else if self.dtimeout().bit() {
+            Err(Error::Timeout)
+        } else {
+            Ok(self)
         }
     }
 }
