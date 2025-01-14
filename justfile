@@ -48,7 +48,7 @@ sync-assets:
   gsutil rsync -r assets gs://elodin-assets
 
 sync-open-source:
-  git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --path libs/noxla --path libs/s10 --prune-empty always --target ../elodin
+  git filter-repo --refs main --path examples --path libs/roci --path libs/conduit --path libs/impeller --path libs/impeller2 --path libs/nox --path libs/nox-ecs --path libs/nox-ecs-macros --path libs/nox-py --path libs/xla-rs --path libs/noxla --path libs/s10 --path libs/stellarator --path fsw --path rust-toolchain.toml --prune-empty always --target ../elodin
   (cd ../elodin && \
    git checkout -b old-main origin/main && \
    git rebase main --committer-date-is-author-date && \
