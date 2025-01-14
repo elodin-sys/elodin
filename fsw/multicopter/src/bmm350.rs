@@ -11,8 +11,6 @@ use crate::monotonic::Instant;
 
 type Duration = fugit::Duration<u32, 1, 1_000_000>;
 
-const ADDR_LOW: u8 = 0x14;
-const ADDR_HIGH: u8 = 0x15;
 const CHIP_ID: u8 = 0x33;
 
 const START_UP_TIME_FROM_POR: Duration = Duration::millis(3);
@@ -275,18 +273,10 @@ impl From<Otp> for u8 {
     }
 }
 
+#[repr(u8)]
 pub enum Address {
-    Low,
-    High,
-}
-
-impl From<Address> for u8 {
-    fn from(address: Address) -> u8 {
-        match address {
-            Address::Low => ADDR_LOW,
-            Address::High => ADDR_HIGH,
-        }
-    }
+    Low = 0x14,
+    High = 0x15,
 }
 
 #[derive(Debug, defmt::Format)]
@@ -382,13 +372,13 @@ struct Calibration {
 }
 
 impl Bmm350 {
-    pub fn new<A: Into<u8>, D: DelayNs>(
+    pub fn new<D: DelayNs>(
         i2c_dma: &mut i2c_dma::I2cDma,
-        address: A,
+        address: Address,
         delay: &mut D,
     ) -> Result<Self, Error> {
         let mut bmm350 = Bmm350 {
-            address: address.into(),
+            address: address as u8,
             calibration: Calibration::default(),
             next_update: Instant::from_ticks(0),
             raw_data: RawData::default(),
