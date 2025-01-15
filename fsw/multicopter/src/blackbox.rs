@@ -18,7 +18,7 @@ type File<'a> =
 const RESET_PERIOD: fugit::MicrosDuration<u32> = fugit::MicrosDuration::<u32>::millis(100);
 const MIN_CLUSTER_SIZE: usize = 512 * 8;
 
-#[derive(zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable)]
+#[derive(zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable, Clone)]
 #[repr(C)]
 pub struct Record {
     pub ts: u32, // in milliseconds

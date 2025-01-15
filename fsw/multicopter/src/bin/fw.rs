@@ -9,6 +9,7 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
+use zerocopy::IntoBytes;
 
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{dma::*, i2c_dma::*, peripheral::*, *};
@@ -18,6 +19,10 @@ const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
 
 const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
+
+const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(100);
+const USB_LOG_PERIOD: fugit::MicrosDuration<u64> = USB_LOG_RATE.into_duration();
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Starting");
@@ -29,6 +34,8 @@ fn main() -> ! {
         pd10: led_sg0,
         pb15: mut _led_sb0,
         pb14: mut led_sa0,
+        pa11: usb_dm,
+        pa12: usb_dp,
         ..
     } = pins;
     defmt::info!("Configured peripherals");
@@ -110,12 +117,25 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
+    let usb_bus = usb_serial::usb_bus(
+        dp.OTG2_HS_GLOBAL,
+        dp.OTG2_HS_DEVICE,
+        dp.OTG2_HS_PWRCLK,
+        &clock_cfg,
+        usb_dm,
+        usb_dp,
+    );
+    let mut usb_serial = usb_serial::UsbSerial::new(&usb_bus);
+    defmt::info!("Configured usb_serial");
+
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
+    let mut last_usb_log = monotonic.now();
 
     led_sa0.set_low();
     loop {
+        usb_serial.poll();
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
 
@@ -139,13 +159,29 @@ fn main() -> ! {
                     defmt::debug!("{}: Received message: {}", ts, msg);
                 }
             }
+        } else if now.checked_duration_since(last_usb_log).unwrap() > USB_LOG_PERIOD {
+            last_usb_log = now;
+            let record = blackbox::Record {
+                ts: ts.to_millis() as u32,
+                mag: bmm350.data.mag,
+                gyro: bmi270.gyro_dps,
+                accel: bmi270.accel_g,
+                mag_temp: bmm350.data.temp,
+                mag_sample: bmm350.data.sample,
+                baro: bmp581.data.pressure_pascal,
+                baro_temp: bmp581.data.temp_c,
+            };
+            let mut cobs = [0u8; 128];
+            let len = cobs::encode(record.as_bytes(), &mut cobs[1..]);
+            let _ = usb_serial.write(&cobs[0..=len]);
+            let _ = usb_serial.flush();
         }
 
         running_led.update(now);
-
         let mag_updated = bmm350.update(&mut i2c1_dma, now);
         let _ = bmi270.update(&mut i2c2_dma, now);
         let _ = bmp581.update(&mut i2c1_dma, now);
+
         if mag_updated {
             let record = blackbox::Record {
                 ts: ts.to_millis() as u32,
@@ -159,6 +195,7 @@ fn main() -> ! {
             };
             blackbox.write_record(record);
         }
+
         if mag_updated && bmm350.data.sample % 400 == 0 {
             defmt::info!(
                 "{}: BMM350 sample {}: {}",
@@ -167,6 +204,6 @@ fn main() -> ! {
                 bmm350.data
             );
         }
-        delay.delay_ns(1);
+        delay.delay_ns(0);
     }
 }
