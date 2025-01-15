@@ -2,14 +2,14 @@
 title = "NumPy, JAX & NOX"
 description = "JAX & NOX"
 draft = false
-weight = 107
+weight = 167
 sort_by = "weight"
 
 [extra]
 toc = true
 top = false
 icon = ""
-order = 7
+order = 67
 +++
 
 When setting about to develop an open and composable physics engine, deciding how to support numerical computation in an efficient and

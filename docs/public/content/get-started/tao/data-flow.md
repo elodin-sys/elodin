@@ -2,14 +2,14 @@
 title = "ECS Data Flow"
 description = "ECS Data Flow"
 draft = false
-weight = 105
+weight = 165
 sort_by = "weight"
 
 [extra]
 toc = true
 top = false
 icon = ""
-order = 5
+order = 65
 +++
 
 One of the pernicious difficulties we encountered developing the physics toolkit was how different components should communicate.

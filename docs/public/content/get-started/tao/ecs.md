@@ -2,14 +2,14 @@
 title = "Why ECS for Physics?"
 description = "Why ECS for Physics?"
 draft = false
-weight = 104
+weight = 164
 sort_by = "weight"
 
 [extra]
 toc = true
 top = false
 icon = ""
-order = 4
+order = 64
 +++
 
 At Elodin's core is a physics toolkit that utilizes the ECS design pattern.

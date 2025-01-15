@@ -2,14 +2,14 @@
 title = "What is Elodin"
 description = "What is Elodin"
 draft = false
-weight = 103
+weight = 163
 sort_by = "weight"
 
 [extra]
 toc = true
 top = false
 icon = ""
-order = 3
+order = 63
 +++
 
 ## Hardware is Hard
