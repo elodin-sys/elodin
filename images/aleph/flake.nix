@@ -3,27 +3,38 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
     jetpack.url = "github:elodin-sys/jetpack-nixos/nvpmode-fix";
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     #jetpack.url = "github:anduril/jetpack-nixos/master";
     flake-utils.url = "github:numtide/flake-utils";
+    crane = {
+      url = "github:ipetkov/crane";
+    };
   };
   outputs = {
     self,
     nixpkgs,
     flake-utils,
     jetpack,
+    crane,
+    rust-overlay,
   }:
     flake-utils.lib.eachDefaultSystem (
       system: let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [jetpack.overlays.default];
+          overlays = [jetpack.overlays.default rust-overlay.overlays.default];
         };
       in rec {
         nixosModules.default = {
           pkgs,
           config,
           ...
-        }: {
+        }: let
+          file-bridge = ./aleph-file-bridge;
+        in {
           imports = [
             "${nixpkgs}/nixos/modules/profiles/minimal.nix"
             jetpack.nixosModules.default
@@ -36,12 +47,25 @@
 
           nixpkgs.overlays = [
             jetpack.overlays.default
+            rust-overlay.overlays.default
           ];
-
+          systemd.services.file-bridge = {
+            wantedBy = ["multi-user.target"];
+            after = ["network.target"];
+            description = "start aleph-file-bridge";
+            serviceConfig = {
+              Type = "exec";
+              User = "root";
+              ExecStart = "${file-bridge}";
+              KillSignal = "SIGINT";
+              Environment = "RUST_LOG=debug";
+            };
+          };
           system.stateVersion = "24.05";
           i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
           services.openssh.settings.PasswordAuthentication = true;
           services.openssh.enable = true;
+          services.openssh.settings.PermitRootLogin = "yes";
           security.sudo.wheelNeedsPassword = false;
           users.users.root.password = "root";
           networking.hostName = "aleph";

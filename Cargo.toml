@@ -33,6 +33,7 @@ members = [
     "libs/impeller2/stella",
     "libs/impeller2/db",
     "libs/stellarator",
+    "fsw/file-bridge"
 ]
 exclude = [
     "fsw/multicopter",

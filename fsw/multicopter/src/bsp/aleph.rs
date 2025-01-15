@@ -264,6 +264,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
             divq: 8,   // 100 MHz
             ..Default::default()
         },
+        hsi48_on: true,
         input_src: clocks::InputSrc::Pll1, // 400 MHz (sysclk)
         d1_core_prescaler: clocks::HclkPrescaler::Div1, // 400 MHz (M7 core)
         hclk_prescaler: clocks::HclkPrescaler::Div2, // 200 MHz (hclk, M4 core)

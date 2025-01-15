@@ -27,6 +27,7 @@ pub mod led;
 pub mod monotonic;
 pub mod peripheral;
 pub mod sdmmc;
+pub mod usb_serial;
 
 #[global_allocator]
 static HEAP: embedded_alloc::TlsfHeap = embedded_alloc::TlsfHeap::empty();
