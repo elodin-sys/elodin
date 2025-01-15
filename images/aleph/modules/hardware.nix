@@ -39,7 +39,6 @@ in {
   hardware.nvidia-jetpack = {
     enable = true;
     som = "orin-nx";
-    sku = "0001";
     carrierBoard = "devkit";
     #kernel.realtime = true;
   };
