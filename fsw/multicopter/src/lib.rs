@@ -13,6 +13,7 @@ use panic_probe as _;
 pub mod blackbox;
 pub mod bmi270;
 pub mod bmm350;
+pub mod bmp581;
 pub mod bsp;
 pub mod can;
 pub mod crsf;

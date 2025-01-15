@@ -27,6 +27,8 @@ pub struct Record {
     pub accel: [f32; 3],
     pub mag_temp: f32,
     pub mag_sample: u32,
+    pub baro: f32,
+    pub baro_temp: f32,
 }
 
 pub struct SdmmcFs {
