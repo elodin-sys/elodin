@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "libs/impeller",
+    "libs/nox",
+    "libs/nox-ecs",
+    "libs/nox-ecs-macros",
+    "libs/nox-py",
+    "libs/noxla",
+    "libs/s10",
+]
+exclude = [
+    "fsw/multicopter",
+    "fsw/blackbox",
+]
+
+[workspace.package]
+version = "0.1.0"
+repository = "https://github.com/elodin-sys/elodin"
+
+[workspace.dependencies]
+xla.package = "noxla"
+xla.path = "libs/noxla"
+roci.path = "libs/roci"
+roci.default-features = false
+roci-adcs.path = "libs/roci/adcs"
+nox.path = "libs/nox"
+nox.default-features = false
+nox-ecs.path = "libs/nox-ecs"
+impeller.path = "libs/impeller"
+impeller.default-features = false
