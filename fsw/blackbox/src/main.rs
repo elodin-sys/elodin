@@ -3,7 +3,6 @@ use std::io::Read;
 use zerocopy::FromBytes;
 
 #[derive(zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable)]
-#[repr(C)]
 pub struct Record {
     pub ts: u32, // in milliseconds
     pub mag: [f32; 3],
@@ -11,6 +10,8 @@ pub struct Record {
     pub accel: [f32; 3],
     pub mag_temp: f32,
     pub mag_sample: u32,
+    pub baro: f32,
+    pub baro_temp: f32,
 }
 
 fn main() {
@@ -27,7 +28,7 @@ fn main() {
     );
     while let Ok((record, remaining)) = Record::read_from_prefix(input) {
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             record.ts,
             record.mag[0],
             record.mag[1],
@@ -39,7 +40,9 @@ fn main() {
             record.accel[1],
             record.accel[2],
             record.mag_temp,
-            record.mag_sample
+            record.mag_sample,
+            record.baro,
+            record.baro_temp
         );
         input = remaining;
     }
