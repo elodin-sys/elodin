@@ -77,6 +77,7 @@ pub struct I2cDma {
     dma: DmaChannel,
     read_buf: Box<[u8]>,
     read_len: usize,
+    last_read_address: u8,
 }
 
 impl Deref for I2cDma {
@@ -132,6 +133,7 @@ impl I2cDma {
             dma: dma_channel,
             read_buf,
             read_len: 0,
+            last_read_address: 0,
         }
     }
 
@@ -167,7 +169,7 @@ impl I2cDma {
         Ok(())
     }
 
-    pub fn state(&mut self) -> Result<State, Error> {
+    pub fn state(&mut self) -> Result<(State, u8), Error> {
         // First, check for errors
         let isr = self.i2c.regs.isr.read();
         if isr.berr().bit_is_set() {
@@ -200,13 +202,14 @@ impl I2cDma {
         } else {
             State::Done
         };
-        Ok(state)
+        Ok((state, self.last_read_address))
     }
 
     pub fn begin_read(&mut self, addr: u8, register: u8, read_len: usize) -> Result<(), Error> {
-        if self.state()? == State::Reading {
+        if self.state()?.0 == State::Reading {
             return Err(Error::Busy);
         }
+        self.last_read_address = addr;
         self.read_len = read_len;
         defmt::trace!("Setting I2C CR2 to write");
         self.i2c.regs.cr2.write(|w| {
@@ -239,13 +242,14 @@ impl I2cDma {
     }
 
     pub fn finish_read(&mut self) -> Result<&[u8], Error> {
-        match self.state()? {
+        match self.state()?.0 {
             State::Idle => Err(Error::ReadNotStarted),
             State::Reading => Err(Error::Busy),
             State::Done => {
                 let buf = &self.read_buf[..self.read_len];
                 self.read_len = 0;
                 self.dma.clear_interrupt();
+                self.last_read_address = 0;
                 Ok(buf)
             }
         }
