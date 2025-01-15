@@ -26,7 +26,7 @@ const ACC_RANGE_REG_VAL: u8 = 0x02; // acc_range = ±8g
 const GYR_CONF_REG_VAL: u8 = 0b11101110; // gyr_filter_perf = high performance mode
                                          // gyr_noise_perf = high performance mdode
                                          // gyr_bwp = normal mode
-                                         // gyr_odr = 6.4 kHz
+                                         // gyr_odr = 3.2 kHz
 const GYR_RANGE_REG_VAL: u8 = 0x00; // gyr_range = ±2000 dps
 const GYR_OFFSET_XYZ_VAL: u8 = 0x40;
 
@@ -34,7 +34,7 @@ const POR_DELAY_MICRO_SECONDS: Duration = Duration::micros(550); // YESSS 501, n
 const CONFIG_DELAY_MILLI_SECONDS: Duration = Duration::millis(50);
 const WRITE_2_WRITE_DELAY_MICROS_SECONDS: Duration = Duration::micros(50);
 
-const SENSOR_ODR_HZ: Hertz<u32> = Hertz::<u32>::Hz(6400);
+const SENSOR_ODR_HZ: Hertz<u32> = Hertz::<u32>::Hz(3200);
 const SENSORPERIOD_MICRO_SECONDS: MicrosDuration<u32> = SENSOR_ODR_HZ.into_duration();
 const SENSOR_TIME_HZ: u32 = 25600;
 
@@ -198,7 +198,7 @@ impl Bmi270 {
     }
 
     fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> Result<bool, Error> {
-        match i2c_dma.state()? {
+        match i2c_dma.state()?.0 {
             i2c_dma::State::Idle => {
                 defmt::trace!("Starting BMI270 DMA read");
                 i2c_dma.begin_read(self.i2c_address, Registers::AccelXLsb as u8, 15)?;
@@ -211,51 +211,56 @@ impl Bmi270 {
             }
             i2c_dma::State::Done => {}
         };
-        let raw_data = i2c_dma.finish_read()?;
+        if i2c_dma.state()?.1 == self.i2c_address {
+            let raw_data = i2c_dma.finish_read()?;
 
-        let time =
-            (raw_data[12] as u32) | ((raw_data[13] as u32) << 8) | ((raw_data[14] as u32) << 16);
+            let time = (raw_data[12] as u32)
+                | ((raw_data[13] as u32) << 8)
+                | ((raw_data[14] as u32) << 16);
 
-        // The output data rate is 6.4 kHz and sensortime is incremented at 25.6kHz
-        // So, a new sample is available every (4) sensortime ticks
-        const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 6400;
+            // The output data rate is 6.4 kHz and sensortime is incremented at 25.6kHz
+            // So, a new sample is available every (4) sensortime ticks
+            const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 3200;
 
-        let sample = time / TIME_PER_SAMPLE;
-        if sample == self.sample_count {
-            defmt::trace!("No new BMI270 data");
+            let sample = time / TIME_PER_SAMPLE;
+            if sample == self.sample_count {
+                defmt::trace!("No new BMI270 data");
+                return Ok(false);
+            } else if sample > self.sample_count + 1 && self.sample_count != 0 {
+                let dropped_samples = sample - self.sample_count - 1;
+                defmt::trace!("Dropped {} BMI270 sample(s)", dropped_samples);
+            }
+
+            // Wait a little bit less than the mag ODR to avoid skipping samples
+            while now >= self.next_update {
+                self.next_update += SENSORPERIOD_MICRO_SECONDS;
+            }
+
+            self.raw_data = [
+                i16::from(raw_data[0]) | (i16::from(raw_data[1]) << 8),
+                i16::from(raw_data[2]) | (i16::from(raw_data[3]) << 8),
+                i16::from(raw_data[4]) | (i16::from(raw_data[5]) << 8),
+                i16::from(raw_data[6]) | (i16::from(raw_data[7]) << 8),
+                i16::from(raw_data[8]) | (i16::from(raw_data[9]) << 8),
+                i16::from(raw_data[10]) | (i16::from(raw_data[11]) << 8),
+            ];
+
+            self.sample_count = sample;
+
+            let accel_x_g = self.raw_data[0] as f32 * self.accel_scale;
+            let accel_y_g = self.raw_data[1] as f32 * self.accel_scale;
+            let accel_z_g = self.raw_data[2] as f32 * self.accel_scale;
+
+            self.accel_g = [accel_x_g, accel_y_g, accel_z_g];
+
+            let gyro_x_dps = self.raw_data[3] as f32 * self.gyr_scale;
+            let gyro_y_dps = self.raw_data[4] as f32 * self.gyr_scale;
+            let gyro_z_dps = self.raw_data[5] as f32 * self.gyr_scale;
+
+            self.gyro_dps = [gyro_x_dps, gyro_y_dps, gyro_z_dps];
+        } else {
             return Ok(false);
-        } else if sample > self.sample_count + 1 && self.sample_count != 0 {
-            let dropped_samples = sample - self.sample_count - 1;
-            defmt::trace!("Dropped {} BMI270 sample(s)", dropped_samples);
         }
-
-        // Wait a little bit less than the mag ODR to avoid skipping samples
-        while now >= self.next_update {
-            self.next_update += SENSORPERIOD_MICRO_SECONDS;
-        }
-
-        self.raw_data = [
-            i16::from(raw_data[0]) | (i16::from(raw_data[1]) << 8),
-            i16::from(raw_data[2]) | (i16::from(raw_data[3]) << 8),
-            i16::from(raw_data[4]) | (i16::from(raw_data[5]) << 8),
-            i16::from(raw_data[6]) | (i16::from(raw_data[7]) << 8),
-            i16::from(raw_data[8]) | (i16::from(raw_data[9]) << 8),
-            i16::from(raw_data[10]) | (i16::from(raw_data[11]) << 8),
-        ];
-
-        self.sample_count = sample;
-
-        let accel_x_g = self.raw_data[0] as f32 * self.accel_scale;
-        let accel_y_g = self.raw_data[1] as f32 * self.accel_scale;
-        let accel_z_g = self.raw_data[2] as f32 * self.accel_scale;
-
-        self.accel_g = [accel_x_g, accel_y_g, accel_z_g];
-
-        let gyro_x_dps = self.raw_data[3] as f32 * self.gyr_scale;
-        let gyro_y_dps = self.raw_data[4] as f32 * self.gyr_scale;
-        let gyro_z_dps = self.raw_data[5] as f32 * self.gyr_scale;
-
-        self.gyro_dps = [gyro_x_dps, gyro_y_dps, gyro_z_dps];
 
         Ok(true)
     }

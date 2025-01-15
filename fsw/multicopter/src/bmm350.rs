@@ -404,7 +404,7 @@ impl Bmm350 {
     // Based on the following reference implementation:
     // https://github.com/boschsensortec/BMM350_SensorAPI/blob/4127534c6262f903683ee210b36b85ab2bb504c8/bmm350.c#L899
     fn try_update(&mut self, i2c_dma: &mut i2c_dma::I2cDma, now: Instant) -> Result<bool, Error> {
-        match i2c_dma.state()? {
+        match i2c_dma.state()?.0 {
             i2c_dma::State::Idle => {
                 defmt::trace!("Starting BMM350 DMA read");
                 i2c_dma.begin_read(self.address, Register::MagXXlsb.addr(), 15 + 2)?;
@@ -417,72 +417,77 @@ impl Bmm350 {
             }
             i2c_dma::State::Done => {}
         };
-        let data = &i2c_dma.finish_read()?[2..];
-        let mag = [
-            (data[0] as u32) | ((data[1] as u32) << 8) | ((data[2] as u32) << 16),
-            (data[3] as u32) | ((data[4] as u32) << 8) | ((data[5] as u32) << 16),
-            (data[6] as u32) | ((data[7] as u32) << 8) | ((data[8] as u32) << 16),
-        ];
-        let temp = (data[9] as u32) | ((data[10] as u32) << 8) | ((data[11] as u32) << 16);
-        let time = (data[12] as u32) | ((data[13] as u32) << 8) | ((data[14] as u32) << 16);
-        // The output data rate is 400Hz and sensortime is incremented at 25.6kHz
-        // So, a new sample is available every (25600 / 400) sensortime ticks
-        const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 400;
-        let sample = time / TIME_PER_SAMPLE;
-        if sample == self.data.sample {
-            defmt::trace!("No new BMM350 data");
-            // Wait 200us and try again
-            self.next_update += 200u32.micros();
+        if i2c_dma.state()?.1 == self.address {
+            let data = &i2c_dma.finish_read()?[2..];
+            let mag = [
+                (data[0] as u32) | ((data[1] as u32) << 8) | ((data[2] as u32) << 16),
+                (data[3] as u32) | ((data[4] as u32) << 8) | ((data[5] as u32) << 16),
+                (data[6] as u32) | ((data[7] as u32) << 8) | ((data[8] as u32) << 16),
+            ];
+            let temp = (data[9] as u32) | ((data[10] as u32) << 8) | ((data[11] as u32) << 16);
+            let time = (data[12] as u32) | ((data[13] as u32) << 8) | ((data[14] as u32) << 16);
+            // The output data rate is 400Hz and sensortime is incremented at 25.6kHz
+            // So, a new sample is available every (25600 / 400) sensortime ticks
+            const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 400;
+            let sample = time / TIME_PER_SAMPLE;
+            if sample == self.data.sample {
+                defmt::trace!("No new BMM350 data");
+                // Wait 200us and try again
+                self.next_update += 200u32.micros();
+                return Ok(false);
+            } else if sample > self.data.sample + 1 && self.data.sample != 0 {
+                let dropped_samples = sample - self.data.sample - 1;
+                defmt::warn!("Dropped {} BMM350 sample(s)", dropped_samples,);
+            }
+
+            // Wait a little bit less than the mag ODR to avoid skipping samples
+            while now >= self.next_update {
+                self.next_update += MAG_PERIOD - 300u32.micros();
+            }
+
+            let mag = mag.map(SignedExt::to_f32::<24>);
+            let temp = temp.to_f32::<24>();
+            self.raw_data = RawData { mag, temp, time };
+
+            // Convert raw ADC values to micro-Tesla and degrees Celsius
+            let mut mag = self.raw_data.mag;
+            mag.iter_mut().enumerate().for_each(|(i, x)| {
+                *x *= MEGA_BINARY_TO_DECIMAL
+                    / (MAG_SENS[i] * MAG_GAIN_TARGET[i] * ADC_GAIN * LUT_GAIN)
+            });
+            let mut temp = self.raw_data.temp / (TEMP_SENS * ADC_GAIN * LUT_GAIN * 1048576.0);
+            if temp > 0.0 {
+                temp -= 25.49;
+            } else if temp < 0.0 {
+                temp += 25.49;
+            }
+
+            // Apply compensation values from OTP
+            let cal = &self.calibration;
+            temp *= 1.0 + cal.temp_sensitivity;
+            temp += cal.temp_offset;
+            mag.iter_mut().enumerate().for_each(|(i, m)| {
+                *m *= 1.0 + cal.mag_sensitivity[i];
+                *m += cal.mag_offset[i];
+                *m += cal.dut_tco[i] * (temp - cal.dut_t0);
+                *m /= 1.0 + cal.dut_tcs[i] * (temp - cal.dut_t0);
+            });
+
+            // Apply cross-axis sensitivity compensation
+            let [cross_x_y, cross_y_x, cross_z_x, cross_z_y] = cal.cross_axis;
+            let denom = 1.0 - cross_y_x * cross_x_y;
+            mag = [
+                (mag[0] - cross_x_y * mag[1]) / denom,
+                (mag[1] - cross_y_x * mag[0]) / denom,
+                mag[2]
+                    + (mag[0] * (cross_y_x * cross_z_y - cross_z_x)
+                        - mag[1] * (cross_z_y - cross_x_y * cross_z_x))
+                        / denom,
+            ];
+            self.data = CalibratedData { mag, temp, sample };
+        } else {
             return Ok(false);
-        } else if sample > self.data.sample + 1 && self.data.sample != 0 {
-            let dropped_samples = sample - self.data.sample - 1;
-            defmt::warn!("Dropped {} BMM350 sample(s)", dropped_samples,);
         }
-
-        // Wait a little bit less than the mag ODR to avoid skipping samples
-        while now >= self.next_update {
-            self.next_update += MAG_PERIOD - 300u32.micros();
-        }
-
-        let mag = mag.map(SignedExt::to_f32::<24>);
-        let temp = temp.to_f32::<24>();
-        self.raw_data = RawData { mag, temp, time };
-
-        // Convert raw ADC values to micro-Tesla and degrees Celsius
-        let mut mag = self.raw_data.mag;
-        mag.iter_mut().enumerate().for_each(|(i, x)| {
-            *x *= MEGA_BINARY_TO_DECIMAL / (MAG_SENS[i] * MAG_GAIN_TARGET[i] * ADC_GAIN * LUT_GAIN)
-        });
-        let mut temp = self.raw_data.temp / (TEMP_SENS * ADC_GAIN * LUT_GAIN * 1048576.0);
-        if temp > 0.0 {
-            temp -= 25.49;
-        } else if temp < 0.0 {
-            temp += 25.49;
-        }
-
-        // Apply compensation values from OTP
-        let cal = &self.calibration;
-        temp *= 1.0 + cal.temp_sensitivity;
-        temp += cal.temp_offset;
-        mag.iter_mut().enumerate().for_each(|(i, m)| {
-            *m *= 1.0 + cal.mag_sensitivity[i];
-            *m += cal.mag_offset[i];
-            *m += cal.dut_tco[i] * (temp - cal.dut_t0);
-            *m /= 1.0 + cal.dut_tcs[i] * (temp - cal.dut_t0);
-        });
-
-        // Apply cross-axis sensitivity compensation
-        let [cross_x_y, cross_y_x, cross_z_x, cross_z_y] = cal.cross_axis;
-        let denom = 1.0 - cross_y_x * cross_x_y;
-        mag = [
-            (mag[0] - cross_x_y * mag[1]) / denom,
-            (mag[1] - cross_y_x * mag[0]) / denom,
-            mag[2]
-                + (mag[0] * (cross_y_x * cross_z_y - cross_z_x)
-                    - mag[1] * (cross_z_y - cross_x_y * cross_z_x))
-                    / denom,
-        ];
-        self.data = CalibratedData { mag, temp, sample };
         Ok(true)
     }
 

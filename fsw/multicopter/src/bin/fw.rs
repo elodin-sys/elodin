@@ -98,6 +98,8 @@ fn main() -> ! {
     );
     let mut bmm350 = bmm350::Bmm350::new(&mut i2c1_dma, bmm350::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMM350");
+    let mut bmp581 = bmp581::Bmp581::new(&mut i2c1_dma, bmp581::Address::Low, &mut delay).unwrap();
+    defmt::info!("Configured BMP581");
     let mut bmi270 = bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay).unwrap();
     defmt::info!("Configured BMI270");
 
@@ -143,6 +145,7 @@ fn main() -> ! {
 
         let mag_updated = bmm350.update(&mut i2c1_dma, now);
         let _ = bmi270.update(&mut i2c2_dma, now);
+        let _ = bmp581.update(&mut i2c1_dma, now);
         if mag_updated {
             let record = blackbox::Record {
                 ts: ts.to_millis() as u32,
@@ -151,6 +154,8 @@ fn main() -> ! {
                 accel: bmi270.accel_g,
                 mag_temp: bmm350.data.temp,
                 mag_sample: bmm350.data.sample,
+                baro: bmp581.data.pressure_pascal,
+                baro_temp: bmp581.data.temp_c,
             };
             blackbox.write_record(record);
         }
