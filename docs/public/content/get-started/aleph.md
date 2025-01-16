@@ -86,6 +86,11 @@ ls -l /dev/tty*
 screen /dev/tty.usbserial-DK0FQC0Q 115200
 ```
 
+{% alert(kind="info") %}
+Sometimes, such as on Ubuntu you may need to grant permissions to the device before connecting with
+screen, i.e. `sudo chmod 666 /dev/ttyUSB0`
+{% end %}
+
 **Windows**
 ```sh
 # find the newly connected USB serial device
@@ -152,11 +157,11 @@ will be at `10.224.0.1`
 ## Development Workflows
 
 Software development for Aleph consists of:
-- Building and installing an OS image onto the carrier board
+- Developing OS updates for the carrier board
 - Developing AI/ML workloads for the carrier board
 - Developing firmware for the FC board
 
-### Install OS on Carrier Board
+### Developing OS Updates for the Carrier Board
 
 *Coming Soon*
 
@@ -204,22 +209,74 @@ from the included SD card.
 
 ## Reset to Factory Settings
 
-### Carrier Board (AI)
-*Coming Soon*
+### Carrier Board
 
-### Flash FC Board's RP2040
+The following steps will reset the carrier board to a known good state with the default firmware and OS image that was shipped with the device.
+This process is not required for typical iterative development, but can be useful if you encounter issues with the carrier board
+or if you want to update the Linux kernel.
+
+#### Pre-requisites
+
+1. Acquire a laptop or desktop computer running Ubuntu 24.04 LTS, with at least 100GB in storage space available.
+2. Install the following dependencies:
+```sh
+sudo apt install git git-lfs curl device-tree-compiler screen
+```
+3. Install [determinate nix](https://github.com/DeterminateSystems/nix-installer?tab=readme-ov-file#install-determinate) and open a new terminal session.
+
+{% alert(kind="info") %}
+A new terminal session is required after installing Nix because it needs to set up environment variables and shell configurations
+that are only loaded during terminal initialization. This ensures the Nix package manager is properly added to your system PATH
+and all Nix-related commands become available.
+{% end %}
+
+4. Disable automatic mounting of external storage devices.
+```sh
+gsettings set org.gnome.desktop.media-handling automount false
+gsettings set org.gnome.desktop.media-handling automount-open false
+```
+
+{% alert(kind="info") %}
+Automatic mounting can interfere with the flashing process because the device needs to be accessed directly for programming/flashing purposes.
+This can be re-enabled after the flashing process is complete.
+{% end %}
+
+#### Build and Flash
+
+1. Clone the elodin repository with `git clone https://github.com/elodin-sys/elodin.git`.
+2. Navigate to the aleph image build folder with `cd elodin/images/aleph`.
+3. Run `nix build .#initrd_flash` to build the carrier board's OS image, firmware, and flashing script.
+
+{% alert(kind="info") %}
+This build can take a very long time, over an hour. You'll see a build progress bar similar to this:
+
+`[10/428/617 built, 953 copied (10910.1 MiB), 2826.5 MiB DL]`
+
+Which refers to packages `building now / built / total to be built`
+{% end %}
+
+4. Connect your Aleph carrier board to USB-C power, and connect the USB-C Ethernet port to your computer.
+5. Hold the "RECOV" button, press and release the "RESET", release the "RECOV" button to enter recovery mode.
+6. Run `lsusb` in your terminal and confirm that a device named "NVIDIA ... APX" is present.
+```bash
+lsusb | grep -i nvidia
+...
+Bus 001 Device 026: ID 0955:7523 NVIDIA Corp. APX
+```
+7. Run the flashing script: `sudo result/bin/initrd-flash-aleph`.
+8. You should see a successful flash message, and the carrier board will reboot into the new OS image.
+9. Connect via the USB-C serial port and test as described above.
+
+
+### FC Board RP2040 Debugger
 
 This is easiest to perform when separated from the stack to provide access to the bootloader button.
 
 1. While pressing the bootloader button, connect Aleph FC to your computer and confirm that all 3 red power LEDs (labelled “USB”, “5v0”, and “3v3”) are on.
-
 2. Your computer should recognize a new drive labeled "RPI-RP2".
-
 3. Download the debugger UF2 firmware file [here](https://storage.googleapis.com/elodin-releases/debugger/debugprobe.uf2).
-
 4. Drag and drop the UF2 firmware file onto the "RPI-RP2" drive. This flashes the necessary firmware onto the built-in debugger, and resets the board.
 Confirm that the “RG0” green LED is now on.
-
 5. Continue to re-flash the firmware as needed using the development process described above.
 
 ## Betaflight
