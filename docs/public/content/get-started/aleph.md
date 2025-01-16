@@ -46,12 +46,13 @@ Use the provided screws to secure the boards together via the pre-mounted stando
 
 ## Powering On
 
-Both the carrier and FC boards come with software pre-installed. During normal development, you'll use up to 3x USB cables to power and connect
-to the boards. The connections are as follows:
+Both the carrier and FC boards come with software pre-installed.
+During normal development, you'll use 2 USB-C cables: one to power the board, and the other to connect to your laptop:
 
-- (A) USB-C connected to a 30W+ power supply for the carrier board
-- (B) USB-C connected to your laptop for an ethernet connection to the carrier board, allowing SSH access
-- (C) USB-C connected to your laptop for a serial debugger access (optional)
+1. Connect "USB-C Power" to a 30W+ USB-PD power supply.
+2. Either:
+    - Connect "USB-C w/ Serial" to your laptop for serial console access.
+    - **OR** Connect "USB-C w/ Ethernet" to your laptop for an ethernet connection to the carrier board, allowing SSH access
 
 <img src="/assets/aleph-usb-con.jpg" alt="aleph-usb-con"/>
 <br></br>
@@ -59,19 +60,28 @@ to the boards. The connections are as follows:
 Go ahead and connect your USB-C cables now. Aleph will power on automatically when connected to power. If the fan doesn't spin, it may be in manual mode.
 There is a switch on the underside of the carrier board to toggle between manual and automatic power-on. Toggle to automatic and reconnect the power.
 
+{% alert(kind="info") %}
+Not all high wattage USB-C power supplies support USB-PD.
+For example, some USB-C laptop chargers provide 50W+ but use a proprietary protocol incompatible with USB-PD.
+Make sure to use a USB-C power supply that explicitly advertises USB-PD support.
+You can also use a lab power supply set to 12-18V DC (minimum 30W).
+{% end %}
+
 {% alert(kind="warning") %}
-Make sure to connect the power supply first, in order to avoid any potential issues with the carrier board not booting up properly.
+Make sure to connect the power cable first.
+Otherwise, the laptop will attempt to power the board over the data cable, but it cannot provide enough wattage
+for the Orin module to boot successfully. This will cause the board to power cycle repeatedly.
 {% end %}
 
 ### Connecting via Serial USB
 
 You can connect to Aleph and observe the boot process by connecting a USB-C cable to the carrier board's USB-C port labeled "Serial". Once connected,
-you open a terminal and run the following command to observe the boot process:
+open a terminal and run the following command to observe the boot process:
 
 **Linux/macOS**
 ```sh
 # find the newly connected USB serial device
-ls -l /dev/tty.usbserial*
+ls -l /dev/tty*
 # connect to the device (for example)
 screen /dev/tty.usbserial-DK0FQC0Q 115200
 ```
@@ -180,7 +190,7 @@ irm https://github.com/probe-rs/probe-rs/releases/tag/v0.24.0/download/probe-rs-
 Clone the `elodin` repository and navigate to the `fsw` directory:
 
 ```sh
-git clone git@github.com:elodin-sys/elodin.git
+git clone https://github.com/elodin-sys/elodin.git
 cd elodin/fsw
 ```
 
