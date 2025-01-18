@@ -14,13 +14,13 @@ use std::{
     process::Stdio,
     time::Duration,
 };
+use stellarator::util::CancelToken;
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
     task::JoinSet,
 };
-use tokio_util::sync::CancellationToken;
 
 use crate::{error::Error, watch::watch};
 
@@ -42,7 +42,7 @@ impl Recipe {
         self,
         name: String,
         release: bool,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
             Recipe::Cargo(c) => c.run(name, release, cancel_token).boxed(),
@@ -57,7 +57,7 @@ impl Recipe {
         self,
         name: String,
         release: bool,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> BoxFuture<'static, Result<(), Error>> {
         match self {
             Recipe::Cargo(c) => c.watch(name, release, cancel_token).boxed(),
@@ -78,7 +78,7 @@ pub struct GroupRecipe {
 }
 
 impl GroupRecipe {
-    async fn run(self, release: bool, cancel_token: CancellationToken) -> Result<(), Error> {
+    async fn run(self, release: bool, cancel_token: CancelToken) -> Result<(), Error> {
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
@@ -94,7 +94,7 @@ impl GroupRecipe {
         Ok(())
     }
 
-    async fn watch(self, release: bool, cancel_token: CancellationToken) -> Result<(), Error> {
+    async fn watch(self, release: bool, cancel_token: CancelToken) -> Result<(), Error> {
         let mut recipes: JoinSet<_> = self
             .recipes
             .into_iter()
@@ -120,12 +120,12 @@ pub struct ProcessRecipe {
 }
 
 impl ProcessRecipe {
-    pub async fn run(self, name: String, cancel_token: CancellationToken) -> Result<(), Error> {
+    pub async fn run(self, name: String, cancel_token: CancelToken) -> Result<(), Error> {
         self.process_args.run(name, self.cmd, cancel_token).await?;
         Ok(())
     }
 
-    pub async fn watch(self, name: String, cancel_token: CancellationToken) -> Result<(), Error> {
+    pub async fn watch(self, name: String, cancel_token: CancelToken) -> Result<(), Error> {
         if self.no_watch {
             return self.run(name, cancel_token).await;
         }
@@ -177,7 +177,7 @@ impl ProcessArgs {
         self,
         name: String,
         cmd: String,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> Result<(), ProcessError> {
         loop {
             let mut child = Command::new(&cmd);
@@ -208,7 +208,7 @@ impl ProcessArgs {
             tokio::spawn(async move { print_logs(stdout, &stdout_name, Color::Blue).await });
             tokio::spawn(async move { print_logs(stderr, &stderr_name, Color::Red).await });
             tokio::select! {
-                _ = cancel_token.cancelled() => {
+                _ = cancel_token.wait() => {
                     child.kill().await?;
                     return Ok(())
                 }
@@ -301,7 +301,7 @@ impl CargoRecipe {
     pub async fn build(
         &mut self,
         release: bool,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> Result<Utf8PathBuf, Error> {
         let mut cmd = Command::new(cargo_path());
         let manifest_path = if self.path.is_dir() {
@@ -335,7 +335,7 @@ impl CargoRecipe {
         }
         let mut child = cmd.spawn()?;
         let status = tokio::select! {
-             _ = cancel_token.cancelled() => {
+             _ = cancel_token.wait() => {
                 child.kill().await?;
                 return Err(Error::PackageBuild(package_name.to_string()));
             }
@@ -359,7 +359,7 @@ impl CargoRecipe {
         mut self,
         name: String,
         release: bool,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> Result<(), Error> {
         let path = self.build(release, cancel_token.clone()).await?;
         self.process_args
@@ -372,7 +372,7 @@ impl CargoRecipe {
         self,
         name: String,
         release: bool,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> Result<(), Error> {
         let dirs = self.watch_dirs();
 

@@ -48,6 +48,24 @@ pub enum Error {
         )
     )]
     InvalidComponentData,
+    #[error("vtable not found")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::vtable_not_found), help("vtable not found"))
+    )]
+    VTableNotFound,
+    #[error("postcard {0}")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::postcard), help("postcard"))
+    )]
+    Postcard(#[from] postcard::Error),
+    #[error("invalid packet")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::invalid_packet), help("invalid_packet"))
+    )]
+    InvalidPacket,
 }
 
 impl<A, B: ?Sized> From<zerocopy::CastError<A, B>> for Error {

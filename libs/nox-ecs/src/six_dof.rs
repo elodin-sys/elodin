@@ -212,14 +212,15 @@ mod tests {
     use crate::World;
     use crate::WorldExt;
     use approx::assert_relative_eq;
-    use impeller::ComponentExt;
-    use impeller::ComponentId;
+    use impeller2::component::Component;
+    use impeller2::types::ComponentId;
     use nox::tensor;
     use nox::ArrayRepr;
     use nox::Quaternion;
     use nox::SpatialTransform;
     use nox::Vector3;
     use std::f64::consts::FRAC_PI_2;
+    use std::time::Duration;
 
     #[test]
     fn test_six_dof_ang_vel() {
@@ -246,8 +247,8 @@ mod tests {
         let client = nox::Client::cpu().unwrap();
         let mut exec = world
             .builder()
+            .sim_time_step(Duration::from_secs_f64(time_step))
             .tick_pipeline(six_dof(|| (), Integrator::Rk4))
-            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client)
@@ -256,7 +257,8 @@ mod tests {
             exec.run().unwrap();
         }
         let column = exec
-            .column_at_tick(ComponentId::new("world_pos"), 120)
+            .world
+            .column_by_id(ComponentId::new("world_pos"))
             .unwrap();
         let (_, pos) = column
             .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
@@ -328,8 +330,8 @@ mod tests {
         let time_step = 1.0 / 120.0;
         let mut exec = world
             .builder()
+            .sim_time_step(Duration::from_secs_f64(time_step))
             .tick_pipeline(six_dof(|| constant_torque, Integrator::Rk4))
-            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
             .build()
             .unwrap()
             .compile(client.clone())
@@ -338,7 +340,8 @@ mod tests {
             exec.run().unwrap();
         }
         let actual = exec
-            .column_at_tick(WorldAccel::<Op>::COMPONENT_ID, 120)
+            .world
+            .column_by_id(WorldAccel::<Op>::COMPONENT_ID)
             .unwrap()
             .typed_buf::<[f64; 6]>()
             .unwrap()[0];
@@ -426,28 +429,22 @@ mod tests {
         let time_step = 1.0 / 1.0;
         let world = world
             .builder()
+            .sim_time_step(Duration::from_secs_f64(time_step))
             .tick_pipeline(six_dof(|| constant_force, Integrator::Rk4))
-            .sim_time_step(std::time::Duration::from_secs_f64(time_step))
             .run();
-        let column = world
-            .column_at_tick(ComponentId::new("world_pos"), 1)
-            .unwrap();
+        let column = world.column_by_id(ComponentId::new("world_pos")).unwrap();
         let (_, pos) = column
             .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
             .next()
             .unwrap();
 
-        let vel = world
-            .column_at_tick(ComponentId::new("world_vel"), 1)
-            .unwrap();
+        let vel = world.column_by_id(ComponentId::new("world_vel")).unwrap();
         let (_, vel) = vel
             .typed_iter::<SpatialMotion<f64, ArrayRepr>>()
             .next()
             .unwrap();
 
-        let accel = world
-            .column_at_tick(ComponentId::new("world_accel"), 1)
-            .unwrap();
+        let accel = world.column_by_id(ComponentId::new("world_accel")).unwrap();
         let (_, accel) = accel
             .typed_iter::<SpatialMotion<f64, ArrayRepr>>()
             .next()

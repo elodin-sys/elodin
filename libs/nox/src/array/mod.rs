@@ -1107,6 +1107,41 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
             shape,
         }
     }
+
+    pub fn shape(&self) -> &[usize] {
+        D1::shape_slice(&self.buf)
+    }
+
+    /// Returns an iterator that yields both the current N-dimensional index and a mutable reference to
+    /// each element in the array.
+    ///
+    /// The index is represented as a slice containing the position along each dimension.
+    pub fn indexed_iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&<D1 as ArrayDim>::Shape, &mut T1)> {
+        let dims = D1::array_shape(&self.buf);
+        let stride = D1::strides(&self.buf);
+        let mut indexes = dims.clone();
+        let mut offsets = dims.clone();
+        for i in offsets.as_mut().iter_mut() {
+            *i = 0;
+        }
+        for i in indexes.as_mut().iter_mut() {
+            *i = 0;
+        }
+        let len = self.buf.as_buf().len();
+        StrideIteratorMut {
+            buf: self.buf.as_mut_buf(),
+            stride,
+            indexes,
+            offsets,
+            dims,
+            phantom: PhantomData,
+            bump_index: false,
+        }
+        .enumerate()
+        .take(len)
+    }
 }
 
 pub trait SquareDim: ArrayDim {
@@ -1571,6 +1606,32 @@ where
     }
 }
 
+impl<T: Copy + Default + 'static, D: Dim> crate::ReprMonad<ArrayRepr> for Array<T, D> {
+    type Elem = T;
+    type Dim = D;
+
+    type Map<N: OwnedRepr> = Array<T, D>;
+
+    fn map<N: OwnedRepr>(
+        self,
+        _func: impl Fn(Array<Self::Elem, Self::Dim>) -> N::Inner<Self::Elem, Self::Dim>,
+    ) -> Self::Map<N> {
+        self
+    }
+
+    fn inner(&self) -> &Array<Self::Elem, Self::Dim> {
+        self
+    }
+
+    fn into_inner(self) -> Array<Self::Elem, Self::Dim> {
+        self
+    }
+
+    fn from_inner(inner: Array<Self::Elem, Self::Dim>) -> Self {
+        inner
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1878,5 +1939,15 @@ mod tests {
             rows,
             vec![array![1.0, 2.0], array![5.0, 8.0], array![9.0, 9.0]]
         );
+    }
+
+    #[test]
+    fn test_iter_indexed_mut() {
+        let mut a = array![[1.0, 2.0], [5.0, 8.0], [9.0, 9.0]];
+        let mut count = 0;
+        for _ in a.indexed_iter_mut() {
+            count += 1;
+        }
+        assert_eq!(count, 6)
     }
 }

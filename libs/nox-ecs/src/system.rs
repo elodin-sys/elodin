@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
-use impeller::{ComponentId, World};
+use crate::{utils::SchemaExt, World};
+use impeller2::types::ComponentId;
 use nox::{ArrayTy, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprTy};
 
 use crate::{ComponentArray, Error};
@@ -58,9 +59,10 @@ impl<'a> SystemBuilder<'a> {
         let column = self
             .world
             .column_by_id(id)
-            .ok_or(Error::ComponentNotFound)?;
+            .ok_or(Error::ComponentNotFound)
+            .unwrap();
         let len = column.len();
-        let mut ty: ArrayTy = column.metadata.component_type.clone().into();
+        let mut ty: ArrayTy = column.schema.clone().to_array_ty();
         ty.shape.insert(0, len as i64);
         let op = Noxpr::parameter(
             self.inputs.len() as i64,
@@ -107,8 +109,11 @@ impl CompiledSystem {
             if let Some(op) = vars.get(&id) {
                 args.push(op.clone());
             } else {
-                let col = world.column_by_id(id).ok_or(Error::ComponentNotFound)?;
-                let mut ty: ArrayTy = col.metadata.component_type.clone().into();
+                let col = world
+                    .column_by_id(id)
+                    .ok_or(Error::ComponentNotFound)
+                    .unwrap();
+                let mut ty: ArrayTy = col.schema.to_array_ty();
                 ty.shape.insert(0, col.len() as i64);
                 let ty = nox::NoxprTy::ArrayTy(ty);
                 let var = Noxpr::parameter(vars.len() as i64, ty, vars.len().to_string());
@@ -130,7 +135,10 @@ impl CompiledSystem {
         let out = Noxpr::call(self.computation, args);
         if self.outputs.len() == 1 {
             let id = self.outputs[0];
-            let col = world.column_by_id(id).ok_or(Error::ComponentNotFound)?;
+            let col = world
+                .column_by_id(id)
+                .ok_or(Error::ComponentNotFound)
+                .unwrap();
             let len = col.len();
             let arr = ComponentArray {
                 buffer: out,
@@ -143,7 +151,10 @@ impl CompiledSystem {
             vars.insert(self.outputs[0], arr);
         } else {
             for (i, id) in self.outputs.iter().enumerate() {
-                let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+                let col = world
+                    .column_by_id(*id)
+                    .ok_or(Error::ComponentNotFound)
+                    .unwrap();
                 let len = col.len();
                 let out = out.get_tuple_element(i);
                 let arr = ComponentArray {

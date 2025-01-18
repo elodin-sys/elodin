@@ -4,7 +4,7 @@ use crate::*;
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nox_ecs::Compiled;
-use pyo3_polars::{PyDataFrame, PySeries};
+use pyo3_polars::PySeries;
 
 #[pyclass]
 pub struct Exec {
@@ -48,11 +48,11 @@ impl Exec {
         self.exec.write_to_dir(path).map_err(Error::from)
     }
 
-    pub fn history(&mut self) -> Result<PyDataFrame, Error> {
-        let polars_world = self.exec.world.polars()?;
-        let df = polars_world.join_archetypes()?;
-        Ok(PyDataFrame(df))
-    }
+    // pub fn history(&mut self) -> Result<PyDataFrame, Error> {
+    //     let polars_world = self.exec.world.polars()?;
+    //     let df = polars_world.join_archetypes()?;
+    //     Ok(PyDataFrame(df))
+    // }
 
     fn column_array(&self, name: String) -> Result<PySeries, Error> {
         let id = ComponentId::new(&name);

@@ -25,7 +25,7 @@ pub enum Error {
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
     #[error("impeller error {0}")]
-    Impeller(#[from] impeller::Error),
+    Impeller(#[from] impeller2::error::Error),
     #[error("polars error {0}")]
     Polars(#[from] polars::error::PolarsError),
 }

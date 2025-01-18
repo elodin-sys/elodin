@@ -2,7 +2,7 @@ use nox::{Op, OwnedRepr, ReprMonad, Scalar};
 use nox_ecs_macros::{Component, ReprMonad};
 
 pub trait Component:
-    impeller::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
+    impeller2::component::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
 {
 }
 
@@ -30,7 +30,7 @@ impl Time {
 #[cfg(test)]
 mod tests {
     use crate::{Seed, WorldPos};
-    use impeller::Component;
+    use impeller2::component::Component;
     use nox::Op;
 
     #[test]

@@ -297,7 +297,7 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     }
 
     pub fn typed_iter<T: Component + ValueRepr>(&self) -> impl Iterator<Item = (EntityId, T)> + '_ {
-        assert_eq!(self.metadata.component_type, T::component_type());
+        assert_eq!(self.metadata.component_id, T::COMPONENT_ID);
         self.entity_ids().zip(
             self.values_iter()
                 .filter_map(|v| T::from_component_value(v)),

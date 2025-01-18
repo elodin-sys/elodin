@@ -1,14 +1,13 @@
 use crate::EntityId;
 use crate::{Color, Error, PyBufBytes};
-use impeller::ComponentId;
-use nox_ecs::impeller;
-use nox_ecs::impeller::Asset;
+use impeller2::component::Asset;
+use impeller2::types::ComponentId;
 use pyo3::prelude::*;
 
 #[pyclass]
 #[derive(Clone)]
 pub struct VectorArrow {
-    inner: impeller::well_known::VectorArrow,
+    inner: impeller2_wkt::VectorArrow,
 }
 
 #[pymethods]
@@ -25,7 +24,7 @@ impl VectorArrow {
         scale: f32,
     ) -> Self {
         Self {
-            inner: impeller::well_known::VectorArrow {
+            inner: impeller2_wkt::VectorArrow {
                 entity_id: entity.inner,
                 id: ComponentId::new(&component_name),
                 range: offset..offset + 2,
@@ -38,7 +37,7 @@ impl VectorArrow {
     }
 
     pub fn asset_name(&self) -> &'static str {
-        impeller::well_known::VectorArrow::ASSET_NAME
+        impeller2_wkt::VectorArrow::NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {
@@ -50,7 +49,7 @@ impl VectorArrow {
 #[pyclass]
 #[derive(Clone)]
 pub struct BodyAxes {
-    inner: impeller::well_known::BodyAxes,
+    inner: impeller2_wkt::BodyAxes,
 }
 
 #[pymethods]
@@ -59,7 +58,7 @@ impl BodyAxes {
     #[pyo3(signature = (entity, scale=1.0))]
     fn new(entity: EntityId, scale: f32) -> Self {
         Self {
-            inner: impeller::well_known::BodyAxes {
+            inner: impeller2_wkt::BodyAxes {
                 entity_id: entity.inner,
                 scale,
             },
@@ -67,7 +66,7 @@ impl BodyAxes {
     }
 
     pub fn asset_name(&self) -> &'static str {
-        impeller::well_known::BodyAxes::ASSET_NAME
+        impeller2_wkt::BodyAxes::NAME
     }
 
     pub fn bytes(&self) -> Result<PyBufBytes, Error> {
