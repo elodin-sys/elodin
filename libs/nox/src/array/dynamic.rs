@@ -21,7 +21,11 @@ impl<T: Elem, S> DynArray<T, S> {
 
 impl<T: Elem> DynArray<T, Vec<T>> {
     pub fn from_shape_vec(shape: SmallVec<[usize; 4]>, storage: Vec<T>) -> Option<Self> {
-        let expected_len: usize = shape.iter().copied().sum();
+        let expected_len: usize = if shape.is_empty() {
+            1
+        } else {
+            shape.iter().copied().product()
+        };
         if expected_len != storage.len() {
             return None;
         }

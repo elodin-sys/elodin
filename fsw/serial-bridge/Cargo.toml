@@ -1,0 +1,26 @@
+[package]
+name = "aleph-serial-bridge"
+edition = "2021"
+version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+
+serialport = "4.6.1"
+
+# async 
+stellarator.path = "../../libs/stellarator"
+stellarator.features = ["miette"]
+impeller2-stella.path = "../../libs/impeller2/stella"
+
+# ser-de
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt.path = "../../libs/impeller2/wkt"
+cobs = "0.2"
+zerocopy.version = "0.8.2"
+
+# rand
+fastrand = "2.2.0"

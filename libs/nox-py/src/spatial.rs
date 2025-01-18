@@ -1,10 +1,9 @@
 use core::ops::{Add, Mul};
 
-use impeller::ComponentExt;
 use nox_ecs::nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
 use pyo3::{prelude::*, types::PyTuple};
 
-use crate::{Component, Error, Metadata};
+use crate::{Component, Error};
 
 #[pyclass]
 #[derive(Clone)]
@@ -79,15 +78,13 @@ impl SpatialTransform {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox::SpatialTransform::<f64>::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox::SpatialTransform<f64>>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 
     fn __add__(&self, py: Python<'_>, rhs: PyObject) -> PyResult<PyObject> {
@@ -161,15 +158,13 @@ impl SpatialMotion {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox::SpatialMotion::<f64>::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox::SpatialMotion<f64>>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 
     fn __add__(&self, other: &SpatialMotion) -> Self {
@@ -248,15 +243,13 @@ impl SpatialForce {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox::SpatialForce::<f64>::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox::SpatialForce<f64>>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 
     fn __add__(&self, other: &SpatialForce) -> Self {
@@ -315,15 +308,13 @@ impl Quaternion {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox::Quaternion::<f64>::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox::Quaternion<f64>>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 
     #[staticmethod]
@@ -442,14 +433,12 @@ impl SpatialInertia {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox::SpatialInertia::<f64>::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox::SpatialInertia<f64>>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 }

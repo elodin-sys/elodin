@@ -1,0 +1,25 @@
+[package]
+name = "impeller2-wkt"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+bevy = ["dep:bevy", "std", "gui"]
+nox = ["dep:nox"]
+gui = ["nox"]
+std = ["impeller2/std"]
+
+[dependencies]
+impeller2.path = ".."
+nox.path = "../../nox"
+nox.features = ["serde"]
+nox.optional = true
+
+# bevy
+bevy.version = "0.15"
+bevy.optional = true
+
+# serde
+serde.version = "1.0"
+serde.features = ["derive"]
+postcard.version = "1.0.8"

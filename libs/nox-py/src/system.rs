@@ -1,11 +1,12 @@
 use crate::*;
 
-use impeller::World;
+use nox_ecs::utils::PrimTypeExt;
 use nox_ecs::{
     graph::{EdgeComponent, GraphQuery, TotalEdge},
     nox::{jax::JaxNoxprFn, NoxprComp, NoxprFn, NoxprNode, NoxprTy},
     CompiledSystem, Exec, ExecMetadata, SystemParam,
 };
+use nox_ecs::{ComponentSchema, World};
 use pyo3::types::{IntoPyDict, PyBytes, PyTuple};
 use std::{collections::HashMap, sync::Arc};
 
@@ -85,8 +86,12 @@ impl nox_ecs::System for PyFnSystem {
             let arg_metadata = ArgMetadata {
                 entity_map: col.entity_map(),
                 len: col.len(),
-                metadata: Metadata {
-                    inner: col.metadata.clone(),
+                schema: col.schema.clone(),
+                component: Component {
+                    name: col.metadata.name.to_string(),
+                    ty: Some(col.schema.clone().into()),
+                    asset: col.metadata.asset,
+                    metadata: col.metadata.metadata.metadata.clone(),
                 },
             };
             py_builder.arg_map.insert(id, (arg_metadata, index));
@@ -141,13 +146,12 @@ impl CompiledSystemExt for CompiledSystem {
             let col = world
                 .column_by_id(*id)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
-            let ty = col.metadata.component_type.clone();
-            let elem_ty = ty.primitive_ty.element_type();
-            let dtype = nox::jax::dtype(&elem_ty)?;
+            let elem_ty = col.schema.prim_type;
+            let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
             let shape = PyTuple::new_bound(
                 py,
-                std::iter::once(col.len() as i64)
-                    .chain(ty.shape.iter().copied())
+                std::iter::once(col.len() as u64)
+                    .chain(col.schema.shape.iter().copied())
                     .collect::<Vec<_>>(),
             );
             let arr = jnp.call_method1("zeros", (shape, dtype))?; // NOTE(sphw): this could be a huge bottleneck
@@ -203,9 +207,10 @@ pub struct SystemBuilder {
 
 #[derive(Clone)]
 pub struct ArgMetadata {
-    pub entity_map: BTreeMap<impeller::EntityId, usize>,
+    pub entity_map: BTreeMap<impeller2::types::EntityId, usize>,
     pub len: usize,
-    pub metadata: Metadata,
+    pub schema: ComponentSchema,
+    pub component: Component,
 }
 
 impl SystemBuilder {

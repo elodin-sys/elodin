@@ -2,7 +2,7 @@ use crate::recipe::Recipe;
 use clap::Parser;
 use miette::miette;
 use std::collections::HashMap;
-use tokio_util::sync::CancellationToken;
+use stellarator::util::CancelToken;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -31,7 +31,7 @@ pub async fn run_recipe(
     watch: bool,
     release: bool,
 ) -> miette::Result<()> {
-    let cancel_token = CancellationToken::new();
+    let cancel_token = CancelToken::new();
     let ctrl_c_cancel_token = cancel_token.clone();
     tokio::spawn(async move {
         let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope

@@ -1,13 +1,11 @@
 use crate::*;
 
-use impeller::ArchetypeName;
-
 use numpy::PyUntypedArray;
 
+#[derive(Debug)]
 pub struct Archetype<'py> {
-    pub component_data: Vec<Metadata>,
+    pub component_data: Vec<Component>,
     pub arrays: Vec<&'py PyUntypedArray>,
-    pub archetype_name: ArchetypeName,
 }
 
 impl Archetype<'_> {
@@ -21,19 +19,14 @@ impl Archetype<'_> {
 
 impl<'s> FromPyObject<'s> for Archetype<'s> {
     fn extract(archetype: &'s PyAny) -> PyResult<Self> {
-        let archetype_name = archetype
-            .call_method0("archetype_name")?
-            .extract::<String>()?;
-        let archetype_name = ArchetypeName::from(archetype_name.as_str());
         let component_data = archetype
             .call_method0("component_data")?
-            .extract::<Vec<Metadata>>()?;
+            .extract::<Vec<Component>>()?;
         let arrays = archetype.call_method0("arrays")?;
         let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
         Ok(Self {
             component_data,
             arrays,
-            archetype_name,
         })
     }
 }
@@ -47,7 +40,8 @@ impl<'py> FromPyObject<'py> for Spawnable<'py> {
     fn extract(ob: &'py PyAny) -> PyResult<Self> {
         if let Ok(archetype_seq) = ob.extract::<Vec<Archetype>>() {
             Ok(Self::Archetypes(archetype_seq))
-        } else if let Ok(archetype) = Archetype::extract(ob) {
+        } else if ob.getattr("component_data").is_ok() {
+            let archetype = Archetype::extract(ob)?;
             Ok(Self::Archetypes(vec![archetype]))
         } else {
             let name = ob.call_method0("asset_name")?.extract()?;

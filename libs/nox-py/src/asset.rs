@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::*;
 
 #[pyclass]
@@ -39,7 +37,7 @@ impl PyAsset {
 #[derive(Clone)]
 #[pyclass]
 pub struct Handle {
-    pub inner: impeller::Handle<()>,
+    pub inner: nox_ecs::Handle<()>,
 }
 
 #[pymethods]
@@ -64,19 +62,17 @@ impl Handle {
     }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: impeller::Metadata {
-                name: Cow::Borrowed("handle"),
-                component_type: impeller::ComponentType::u64(),
-                asset: true,
-                tags: Default::default(),
-            },
+    fn metadata() -> Component {
+        Component {
+            name: "handle".to_string(),
+            ty: Some(ComponentType::u64()),
+            asset: true,
+            metadata: Default::default(),
         }
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 }

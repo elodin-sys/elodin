@@ -1,12 +1,11 @@
 use crate::*;
 use ::s10::{cli::run_recipe, GroupRecipe, SimRecipe};
 use clap::Parser;
+use impeller2::types::PrimType;
+use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
-use nox_ecs::{
-    impeller, increment_sim_tick, nox, spawn_tcp_server, IntoSystem, System as _, TimeStep, World,
-    WorldExt,
-};
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time};
+use nox_ecs::{increment_sim_tick, nox, ComponentSchema, IntoSystem, System as _, TimeStep, World};
+use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -18,6 +17,8 @@ pub enum Args {
     Run {
         #[arg(default_value = "0.0.0.0:2240")]
         addr: SocketAddr,
+        #[arg(long, default_value = "false")]
+        no_s10: bool,
     },
     Plan {
         out_dir: PathBuf,
@@ -39,22 +40,23 @@ pub struct WorldBuilder {
 }
 
 impl WorldBuilder {
-    fn insert_entity_id(&mut self, archetype: &Archetype, entity_id: EntityId) {
-        let archetype_name = archetype.archetype_name;
-        let columns = archetype.component_data.iter().cloned();
-        for metadata in columns {
-            let id = metadata.component_id();
-            self.world
-                .component_map
-                .insert(id, (archetype_name, metadata.inner));
-            self.world.host.entry(id).or_default();
-        }
-        self.world
-            .entity_ids
-            .entry(archetype_name)
-            .or_default()
-            .extend_from_slice(&entity_id.inner.0.to_le_bytes());
-    }
+    // fn insert_entity_id(&mut self, archetype: &Archetype, entity_id: EntityId) {
+    //     let archetype_name = archetype.archetype_name;
+    //     let columns = archetype.component_data.iter().cloned();
+    //     for metadata in columns {
+    //         let id = metadata.component_id();
+    //         self.world
+    //             .component_map
+    //             .insert(id, (archetype_name, metadata.inner));
+    //         self.world.host.entry(id).or_default();
+    //     }
+    //     // self.world
+    //     //     .metadata
+    //     //     .entity_ids
+    //     //     .entry(archetype_name)
+    //     //     .or_default()
+    //     //     .extend_from_slice(&entity_id.inner.0.to_le_bytes());
+    // }
 
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
         let sim = SimRecipe {
@@ -68,10 +70,7 @@ impl WorldBuilder {
                 .recipes
                 .iter()
                 .map(|(n, r)| (n.clone(), r.clone()))
-                .chain(std::iter::once((
-                    "sim".to_string(),
-                    ::s10::Recipe::Sim(sim),
-                )))
+                .chain(iter::once(("sim".to_string(), ::s10::Recipe::Sim(sim))))
                 .collect(),
         };
         ::s10::Recipe::Group(group)
@@ -87,14 +86,19 @@ impl WorldBuilder {
 
     pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
         let entity_id = EntityId {
-            inner: impeller::EntityId(self.world.entity_len),
+            inner: impeller2::types::EntityId(self.world.entity_len()),
         };
         self.insert(entity_id, spawnable)?;
-        self.world.entity_len += 1;
+        self.world.metadata.entity_len += 1;
         if let Some(name) = name {
-            let metadata = EntityMetadata::new(name, None);
-            let metadata = self.world.insert_asset(metadata.inner);
-            self.world.insert_with_id(metadata, entity_id.inner);
+            self.world.metadata.entity_metadata.insert(
+                entity_id.inner,
+                EntityMetadata {
+                    entity_id: entity_id.inner,
+                    name: name.to_string(),
+                    metadata: Default::default(),
+                },
+            );
         }
         Ok(entity_id)
     }
@@ -103,37 +107,69 @@ impl WorldBuilder {
         match spawnable {
             Spawnable::Archetypes(archetypes) => {
                 for archetype in archetypes {
-                    self.insert_entity_id(&archetype, entity_id);
                     for (arr, component) in archetype.arrays.iter().zip(archetype.component_data) {
-                        let mut col = self
-                            .world
-                            .column_by_id_mut(ComponentId::new(&component.name))
-                            .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                        let ty = &col.metadata.component_type;
-                        let size = ty.primitive_ty.element_type().element_size_in_bytes();
+                        let component_id = ComponentId::new(&component.name);
+                        let metadata = ComponentMetadata {
+                            component_id,
+                            name: component.name.clone().into(),
+                            metadata: impeller2_wkt::Metadata {
+                                metadata: component.metadata.clone(),
+                            },
+                            asset: component.asset,
+                        };
+
+                        self.world.metadata.component_map.insert(
+                            component_id,
+                            (ComponentSchema::from(component.clone()), metadata),
+                        );
+                        let buffer = self.world.host.entry(component_id).or_default();
+                        let ty = component.ty.unwrap();
+                        let prim_ty: PrimType = ty.ty.into();
+                        let size = prim_ty.size();
                         let buf = unsafe { arr.buf(size) };
-                        col.push_raw(buf);
+                        buffer.buffer.extend_from_slice(buf);
+                        buffer
+                            .entity_ids
+                            .extend_from_slice(&entity_id.inner.0.to_le_bytes());
+                        self.world.dirty_components.insert(component_id);
                     }
                 }
                 Ok(())
             }
             Spawnable::Asset { name, bytes } => {
-                let metadata = impeller::Metadata::asset(&name);
-                let component_id = metadata.component_id();
-                let archetype_name = metadata.component_name().into();
-                let inner = self.world.assets.insert_bytes(bytes.bytes);
-                let archetype = Archetype {
-                    component_data: vec![Metadata { inner: metadata }],
-                    arrays: vec![],
-                    archetype_name,
+                let name = format!("asset_handle_{name}");
+                let component_id = ComponentId::new(&name);
+                let metadata = ComponentMetadata {
+                    component_id,
+                    name: name.into(),
+                    metadata: impeller2_wkt::Metadata {
+                        metadata: Default::default(),
+                    },
+                    asset: true,
                 };
 
-                self.insert_entity_id(&archetype, entity_id);
-                let mut col = self
-                    .world
-                    .column_by_id_mut(component_id)
-                    .ok_or(nox_ecs::Error::ComponentNotFound)?;
-                col.push_raw(&inner.id.to_le_bytes());
+                self.world.metadata.component_map.insert(
+                    component_id,
+                    (
+                        ComponentSchema {
+                            component_id,
+                            prim_type: PrimType::U64,
+                            shape: iter::empty().collect(),
+                            dim: iter::empty().collect(),
+                        },
+                        metadata,
+                    ),
+                );
+                let inner = self.world.assets.insert_bytes(bytes.bytes);
+
+                let buffer = self.world.host.entry(component_id).or_default();
+                buffer.buffer.extend_from_slice(&inner.id.to_le_bytes());
+                buffer
+                    .entity_ids
+                    .extend_from_slice(&entity_id.inner.0.to_le_bytes());
+
+                self.world.dirty_components.insert(component_id);
+
                 Ok(())
             }
         }
@@ -150,67 +186,67 @@ impl WorldBuilder {
         Ok(())
     }
 
-    #[cfg(feature = "server")]
-    #[pyo3(signature = (
-        sys,
-        daemon = False,
-        sim_time_step = 1.0 / 120.0,
-        default_playback_speed = 1.0,
-        max_ticks = None,
-        addr = "127.0.0.1:0",
-    ))]
-    pub fn serve(
-        &mut self,
-        py: Python<'_>,
-        sys: PyObject,
-        daemon: bool,
-        sim_time_step: f64,
-        default_playback_speed: f64,
-        max_ticks: Option<u64>,
-        addr: String,
-    ) -> Result<String, Error> {
-        use self::web_socket::spawn_ws_server;
-        use tokio_util::sync::CancellationToken;
+    // #[cfg(feature = "server")]
+    // #[pyo3(signature = (
+    //     sys,
+    //     daemon = False,
+    //     sim_time_step = 1.0 / 120.0,
+    //     default_playback_speed = 1.0,
+    //     max_ticks = None,
+    //     addr = "127.0.0.1:0",
+    // ))]
+    // pub fn serve(
+    //     &mut self,
+    //     py: Python<'_>,
+    //     sys: PyObject,
+    //     daemon: bool,
+    //     sim_time_step: f64,
+    //     default_playback_speed: f64,
+    //     max_ticks: Option<u64>,
+    //     addr: String,
+    // ) -> Result<String, Error> {
+    //     use self::web_socket::spawn_ws_server;
+    //     use tokio_util::sync::CancellationToken;
 
-        let _ = tracing_subscriber::fmt::fmt()
-            .with_env_filter(
-                EnvFilter::builder()
-                    .with_default_directive("info".parse().expect("invalid filter"))
-                    .from_env_lossy(),
-            )
-            .try_init();
+    //     let _ = tracing_subscriber::fmt::fmt()
+    //         .with_env_filter(
+    //             EnvFilter::builder()
+    //                 .with_default_directive("info".parse().expect("invalid filter"))
+    //                 .from_env_lossy(),
+    //         )
+    //         .try_init();
 
-        let exec =
-            self.build_uncompiled(py, sys, sim_time_step, default_playback_speed, max_ticks)?;
+    //     let exec =
+    //         self.build_uncompiled(py, sys, sim_time_step, default_playback_speed, max_ticks)?;
 
-        let client = nox::Client::cpu()?;
+    //     let client = nox::Client::cpu()?;
 
-        let (tx, rx) = flume::unbounded();
-        if daemon {
-            let cancel_token = CancellationToken::new();
-            std::thread::spawn(move || {
-                spawn_ws_server(
-                    addr.parse().unwrap(),
-                    exec,
-                    &client,
-                    Some(cancel_token.clone()),
-                    || cancel_token.is_cancelled(),
-                    tx,
-                )
-                .unwrap();
-            });
-        } else {
-            spawn_ws_server(
-                addr.parse().unwrap(),
-                exec,
-                &client,
-                None,
-                || py.check_signals().is_err(),
-                tx,
-            )?;
-        }
-        Ok(rx.recv().unwrap().to_string())
-    }
+    //     let (tx, rx) = flume::unbounded();
+    //     if daemon {
+    //         let cancel_token = CancellationToken::new();
+    //         std::thread::spawn(move || {
+    //             spawn_ws_server(
+    //                 addr.parse().unwrap(),
+    //                 exec,
+    //                 &client,
+    //                 Some(cancel_token.clone()),
+    //                 || cancel_token.is_cancelled(),
+    //                 tx,
+    //             )
+    //             .unwrap();
+    //         });
+    //     } else {
+    //         spawn_ws_server(
+    //             addr.parse().unwrap(),
+    //             exec,
+    //             &client,
+    //             None,
+    //             || py.check_signals().is_err(),
+    //             tx,
+    //         )?;
+    //     }
+    //     Ok(rx.recv().unwrap().to_string())
+    // }
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
@@ -270,7 +306,7 @@ impl WorldBuilder {
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
-            Args::Run { addr } => {
+            Args::Run { addr, no_s10 } => {
                 let exec = self.build_uncompiled(
                     py,
                     sys,
@@ -284,20 +320,35 @@ impl WorldBuilder {
                     client.disable_optimizations();
                 }
                 let recipes = self.recipes.clone();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .build()
-                        .map_err(|err| miette!("rt err {}", err))
-                        .unwrap();
-                    let group = ::s10::Recipe::Group(GroupRecipe {
-                        recipes,
-                        ..Default::default()
+                if !no_s10 {
+                    std::thread::spawn(move || {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .build()
+                            .map_err(|err| miette!("rt err {}", err))
+                            .unwrap();
+                        let group = ::s10::Recipe::Group(GroupRecipe {
+                            recipes,
+                            ..Default::default()
+                        });
+                        rt.block_on(run_recipe("world".to_string(), group, false, false))
+                            .unwrap();
                     });
-                    rt.block_on(run_recipe("world".to_string(), group, false, false))
-                        .unwrap();
-                });
-                spawn_tcp_server(addr, exec, client, || py.check_signals().is_err())?;
-                Ok(None)
+                }
+                let exec = exec.compile(client)?;
+                py.allow_threads(|| {
+                    stellarator::run(|| {
+                        let tmpfile = tempfile::tempdir().unwrap().into_path();
+                        nox_ecs::impeller2_server::Server::new(
+                            impeller_db::Server::new(tmpfile.join("db"), addr).unwrap(),
+                            exec,
+                        )
+                        .run_with_cancellation(|| {
+                            Python::with_gil(|py| py.check_signals().is_err())
+                        })
+                    })?;
+
+                    Ok(None)
+                })
             }
             Args::Plan { addr, out_dir } => {
                 let recipe = self.sim_recipe(path, addr, optimize);
@@ -383,22 +434,22 @@ impl WorldBuilder {
     ) -> Result<nox_ecs::WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
-        self.world.sim_time_step = TimeStep(ts);
-        self.world.run_time_step = TimeStep(ts);
-        self.world.default_playback_speed = default_playback_speed;
+        self.world.metadata.sim_time_step = TimeStep(ts);
+        self.world.metadata.run_time_step = TimeStep(ts);
+        self.world.metadata.default_playback_speed = default_playback_speed;
         if let Some(ts) = run_time_step {
             let ts = time::Duration::from_secs_f64(ts);
-            self.world.run_time_step = TimeStep(ts);
+            self.world.metadata.run_time_step = TimeStep(ts);
         }
         if let Some(max_ticks) = max_ticks {
-            self.world.max_tick = max_ticks;
+            self.world.metadata.max_tick = max_ticks;
         }
 
-        self.world.add_globals();
+        self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
-        let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
-        let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
+        let xla_exec = increment_sim_tick.pipe(sys).compile(&world).unwrap();
+        let tick_exec = xla_exec.compile_hlo_module(py, &world).unwrap();
 
         let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);

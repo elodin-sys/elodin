@@ -13,7 +13,7 @@ default = []
 std = ["thiserror/std", "faer/std", "num-traits/std"]
 jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
 cuda = ["shared", "xla"]
-noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write", "zerocopy"]
+noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
 xla = ["dep:xla", "lapack-src", "std"]
 shared = []
 serde = ["dep:serde"]
@@ -39,8 +39,8 @@ itertools.version = "0.12.0"
 itertools.optional = true
 indent_write.version = "2.2.0"
 indent_write.optional = true
+
 zerocopy.version = "0.8.2"
-zerocopy.optional = true
 
 # noxla - a wrapper around raw xla
 xla = { optional = true, workspace = true }

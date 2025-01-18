@@ -38,7 +38,7 @@ use crate::{
 };
 
 /// An entry that points to a series of arrays that are all associated with a single component
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ColumnEntry {
     len: u64,
     component_id: ComponentId,
@@ -53,6 +53,14 @@ struct BufEntry<T> {
     phantom_data: PhantomData<T>,
 }
 
+impl<T> std::fmt::Debug for BufEntry<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BufEntry")
+            .field("offset", &self.offset)
+            .finish()
+    }
+}
+
 impl<T: Immutable + TryFromBytes> BufEntry<T> {
     pub fn parse<'a>(&self, vdata: &'a [u8], len: usize) -> Result<&'a [T], Error> {
         let offset: usize = self.offset.try_into().map_err(|_| Error::OffsetOverflow)?;
@@ -63,7 +71,7 @@ impl<T: Immutable + TryFromBytes> BufEntry<T> {
     }
 }
 
-#[derive(Serialize, Deserialize, TryFromBytes, Immutable, IntoBytes)]
+#[derive(Serialize, Deserialize, TryFromBytes, Immutable, IntoBytes, Debug)]
 pub(crate) struct ShapeEntry {
     pub(crate) prim_type: PrimType,
     pub(crate) rank: u64,
@@ -108,7 +116,7 @@ impl ColumnEntry {
 }
 
 /// An entry that points to a single entity's components. It points to a contiguous series of component arrays. The associated components_ids and shapes are all stored in the [`VTable`]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RowEntry {
     len: u64,
     entity_id: EntityId,
@@ -141,21 +149,21 @@ impl RowEntry {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MetadataEntry {
     id: u64,
     len: u64,
     offset: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Entry {
     Column(ColumnEntry),
     Entity(RowEntry),
     Metadata(MetadataEntry),
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct VTable<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> {
     #[serde(bound(deserialize = ""))]
     entries: EntryBuf,
@@ -205,19 +213,25 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         shape: &[u64],
         entity_ids: impl ExactSizeIterator<Item = EntityId>,
     ) -> Result<&mut Self, Error> {
-        let len = entity_ids.len() as u64;
+        let len = entity_ids.len();
         let shape_offset = self.vtable.data.extend_aligned(shape)? as u64;
         let entity_col_offset = self.vtable.data.extend_from_iter_aligned(entity_ids)? as u64;
-        let arr_len: usize = shape.iter().try_fold(1usize, |xs, &x| {
-            (x as usize).checked_mul(xs).ok_or(Error::OffsetOverflow)
-        })?;
-        let data_len = arr_len * prim_type.size();
+        let arr_len: usize = if shape.is_empty() {
+            1
+        } else {
+            shape.iter().try_fold(1usize, |xs, &x| {
+                (x as usize).checked_mul(xs).ok_or(Error::OffsetOverflow)
+            })?
+        };
+        let data_len = len * arr_len * prim_type.size();
 
-        let data_col_offset = self.data_len as u64;
-        self.data_len += data_len;
+        let padding = prim_type.padding(self.data_len);
+        let total_len = data_len.checked_add(padding).ok_or(Error::OffsetOverflow)?;
+        let data_col_offset = (self.data_len + padding) as u64;
+        self.data_len += total_len;
 
         let entry = ColumnEntry {
-            len,
+            len: len as u64,
             component_id,
             shape_entry: ShapeEntry {
                 prim_type,

@@ -1,4 +1,3 @@
-use convert_case::{Case, Casing};
 use darling::ast::{self};
 use darling::{FromDeriveInput, FromField};
 use proc_macro::TokenStream;
@@ -34,16 +33,12 @@ pub fn archetype(input: TokenStream) -> TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect::<Vec<_>>();
     let where_clause = &generics.where_clause;
-    let name = ident.to_string().to_case(Case::Snake);
     quote! {
-        impl #crate_name::impeller::Archetype for #ident #generics #where_clause {
-            fn name() -> #crate_name::impeller::ArchetypeName {
-                #crate_name::impeller::ArchetypeName::from(#name)
-            }
-
-            fn components() -> Vec<#crate_name::impeller::Metadata> {
-                use #crate_name::impeller::ComponentExt;
-                vec![#( <#tys>::metadata(), )*]
+        impl #crate_name::Archetype for #ident #generics #where_clause {
+            fn components() -> Vec<(#crate_name::impeller2::schema::Schema<Vec<u64>>, #crate_name::impeller2_wkt::ComponentMetadata)> {
+                use #crate_name::impeller2::component::Component;
+                use #crate_name::archetype::ComponentExt;
+                vec![#( (<#tys>::schema(), <#tys>::metadata()), )*]
             }
 
             fn insert_into_world(self, world: &mut #crate_name::World) {

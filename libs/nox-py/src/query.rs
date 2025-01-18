@@ -2,7 +2,7 @@ use crate::*;
 
 use core::marker::PhantomData;
 
-use impeller::ComponentId;
+use impeller2::types::ComponentId;
 use nox_ecs::{join_many, nox::Noxpr};
 use nox_ecs::{join_query, update_var, ComponentArray};
 
@@ -10,7 +10,7 @@ use nox_ecs::{join_query, update_var, ComponentArray};
 #[derive(Clone)]
 pub struct QueryInner {
     pub query: nox_ecs::Query<()>,
-    pub metadata: Vec<Metadata>,
+    pub metadata: Vec<Component>,
 }
 
 #[pymethods]
@@ -51,10 +51,10 @@ impl QueryInner {
                         buffer: Noxpr::jax(buffer.clone()),
                         len: meta.len,
                         entity_map: meta.entity_map,
-                        component_id: meta.metadata.component_id(),
+                        component_id: meta.schema.component_id,
                         phantom_data: PhantomData,
                     },
-                    meta.metadata,
+                    meta.component,
                 ))
             })
             .try_fold((None, vec![]), |(mut query, mut metadata), res| {
@@ -72,7 +72,7 @@ impl QueryInner {
         Ok(Self { query, metadata })
     }
 
-    pub fn map(&self, new_buf: PyObject, metadata: Metadata) -> QueryInner {
+    pub fn map(&self, new_buf: PyObject, metadata: Component) -> QueryInner {
         let expr = Noxpr::jax(new_buf);
         QueryInner {
             query: nox_ecs::Query {
@@ -91,7 +91,7 @@ impl QueryInner {
             .query
             .exprs
             .iter()
-            .zip(self.metadata.iter().map(|m| m.inner.component_id()))
+            .zip(self.metadata.iter().map(|m| m.component_id()))
         {
             let Some((meta, index)) = builder.get_var(id) else {
                 return Err(nox_ecs::Error::ComponentNotFound.into());
@@ -140,9 +140,9 @@ impl QueryInner {
 #[pyclass]
 #[derive(Clone)]
 pub struct QueryMetadata {
-    pub entity_map: BTreeMap<impeller::EntityId, usize>,
+    pub entity_map: BTreeMap<impeller2::types::EntityId, usize>,
     pub len: usize,
-    pub metadata: Vec<Metadata>,
+    pub metadata: Vec<Component>,
 }
 
 #[pymethods]

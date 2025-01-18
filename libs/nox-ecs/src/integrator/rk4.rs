@@ -1,7 +1,7 @@
 use crate::globals::SimulationTimeStep;
 use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
+use crate::World;
 use crate::{ComponentArray, ComponentGroup, Error, Query};
-use impeller::World;
 use nox::Scalar;
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};

@@ -2,11 +2,11 @@ use crate::*;
 
 use std::collections::HashMap;
 
-use nox_ecs::impeller;
-use nox_ecs::impeller::TagValue;
+use impeller2_wkt::MetadataValue;
 use pyo3::types::PyList;
+use pyo3::{intern, types::PySequence};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[pyclass]
 pub struct Component {
     #[pyo3(set)]
@@ -15,7 +15,26 @@ pub struct Component {
     pub ty: Option<ComponentType>,
     #[pyo3(get, set)]
     pub asset: bool,
-    pub metadata: HashMap<String, TagValue>,
+    pub metadata: HashMap<String, MetadataValue>,
+}
+
+impl Component {
+    pub fn component_id(&self) -> ComponentId {
+        ComponentId::new(&self.name)
+    }
+
+    pub fn from_component<C: impeller2::component::Component>() -> Self {
+        let schema = C::schema();
+        Component {
+            name: C::NAME.to_string(),
+            ty: Some(ComponentType {
+                shape: schema.shape().iter().map(|&x| x as u64).collect(),
+                ty: schema.prim_type().into(),
+            }),
+            asset: C::ASSET,
+            metadata: Default::default(),
+        }
+    }
 }
 
 #[pymethods]
@@ -33,13 +52,13 @@ impl Component {
             .into_iter()
             .map(|(k, v)| {
                 let value = if let Ok(s) = v.extract::<String>(py) {
-                    TagValue::String(s)
+                    MetadataValue::String(s)
                 } else if let Ok(f) = v.extract::<bool>(py) {
-                    TagValue::Bool(f)
+                    MetadataValue::Bool(f)
                 } else if let Ok(v) = v.extract::<i64>(py) {
-                    TagValue::Int(v)
+                    MetadataValue::I64(v)
                 } else {
-                    TagValue::Unit
+                    MetadataValue::Unit
                 };
                 (k, value)
             })
@@ -60,13 +79,14 @@ impl Component {
 
     #[staticmethod]
     pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
-        Metadata::of(py, component).map(|metadata| metadata.inner.name.to_string())
+        Component::of(py, component).map(|metadata| metadata.name.to_string())
     }
 
     #[staticmethod]
     pub fn index(py: Python<'_>, component: PyObject) -> Result<ShapeIndexer, Error> {
-        let metadata = Metadata::of(py, component)?.inner;
-        let ty = metadata.component_type;
+        let component = Component::of(py, component)?;
+        //let metadata = Metadata::of(py, component)?.inner;
+        let ty = component.ty.unwrap();
         let strides: Vec<usize> = ty
             .shape
             .iter()
@@ -80,11 +100,48 @@ impl Component {
         let strides = strides.into_iter().rev().collect();
         let shape = ty.shape.iter().map(|x| *x as usize).collect();
         Ok(ShapeIndexer::new(
-            metadata.name.to_string(),
+            component.name.to_string(),
             shape,
             vec![],
             strides,
         ))
+    }
+
+    #[staticmethod]
+    pub fn of(py: Python<'_>, component: PyObject) -> Result<Self, Error> {
+        let mut component_data = component
+            .getattr(py, intern!(py, "__metadata__"))
+            .and_then(|metadata| {
+                metadata
+                    .downcast_bound::<PySequence>(py)
+                    .map_err(PyErr::from)
+                    .and_then(|seq| seq.get_item(0))
+                    .and_then(|item| item.extract::<Component>())
+            })?;
+
+        if component_data.ty.is_none() {
+            if let Some(base_ty) = component
+                .getattr(py, intern!(py, "__origin__"))
+                .and_then(|origin| origin.getattr(py, intern!(py, "__metadata__")))
+                .and_then(|metadata| {
+                    metadata
+                        .downcast_bound::<PySequence>(py)
+                        .map_err(PyErr::from)
+                        .and_then(|seq| seq.get_item(0))
+                        .and_then(|item| item.extract::<Component>())
+                })
+                .ok()
+                .and_then(|component| component.ty)
+            {
+                component_data.ty = Some(base_ty);
+            }
+        }
+
+        if component_data.ty.is_none() {
+            println!("{:?}", component_data);
+            return Err(PyValueError::new_err("component type not found").into());
+        }
+        Ok(component_data)
     }
 }
 
@@ -94,13 +151,13 @@ pub struct ComponentType {
     #[pyo3(get, set)]
     pub ty: PrimitiveType,
     #[pyo3(get, set)]
-    pub shape: Vec<i64>,
+    pub shape: Vec<u64>,
 }
 
 #[pymethods]
 impl ComponentType {
     #[new]
-    pub fn new(ty: PrimitiveType, shape: Vec<i64>) -> Self {
+    pub fn new(ty: PrimitiveType, shape: Vec<u64>) -> Self {
         Self { ty, shape }
     }
 
@@ -168,20 +225,23 @@ impl ComponentType {
     }
 }
 
-impl From<impeller::ComponentType> for ComponentType {
-    fn from(val: impeller::ComponentType) -> Self {
+impl From<impeller_db::ComponentSchema> for ComponentType {
+    fn from(val: impeller_db::ComponentSchema) -> Self {
         ComponentType {
-            ty: val.primitive_ty.into(),
+            ty: val.prim_type.into(),
             shape: val.shape.to_vec(),
         }
     }
 }
 
-impl From<ComponentType> for impeller::ComponentType {
-    fn from(val: ComponentType) -> Self {
-        impeller::ComponentType {
-            primitive_ty: val.ty.into(),
-            shape: val.shape.into(),
+impl From<Component> for impeller_db::ComponentSchema {
+    fn from(val: Component) -> Self {
+        let ty = val.ty.unwrap();
+        impeller_db::ComponentSchema {
+            component_id: ComponentId::new(&val.name),
+            prim_type: ty.ty.into(),
+            shape: ty.shape.iter().copied().collect(),
+            dim: ty.shape.iter().map(|x| *x as usize).collect(),
         }
     }
 }
@@ -202,38 +262,38 @@ pub enum PrimitiveType {
     Bool,
 }
 
-impl From<impeller::PrimitiveTy> for PrimitiveType {
-    fn from(val: impeller::PrimitiveTy) -> Self {
+impl From<impeller2::types::PrimType> for PrimitiveType {
+    fn from(val: impeller2::types::PrimType) -> Self {
         match val {
-            impeller::PrimitiveTy::F64 => PrimitiveType::F64,
-            impeller::PrimitiveTy::F32 => PrimitiveType::F32,
-            impeller::PrimitiveTy::U64 => PrimitiveType::U64,
-            impeller::PrimitiveTy::U32 => PrimitiveType::U32,
-            impeller::PrimitiveTy::U16 => PrimitiveType::U16,
-            impeller::PrimitiveTy::U8 => PrimitiveType::U8,
-            impeller::PrimitiveTy::I64 => PrimitiveType::I64,
-            impeller::PrimitiveTy::I32 => PrimitiveType::I32,
-            impeller::PrimitiveTy::I16 => PrimitiveType::I16,
-            impeller::PrimitiveTy::I8 => PrimitiveType::I8,
-            impeller::PrimitiveTy::Bool => PrimitiveType::Bool,
+            impeller2::types::PrimType::F64 => PrimitiveType::F64,
+            impeller2::types::PrimType::F32 => PrimitiveType::F32,
+            impeller2::types::PrimType::U64 => PrimitiveType::U64,
+            impeller2::types::PrimType::U32 => PrimitiveType::U32,
+            impeller2::types::PrimType::U16 => PrimitiveType::U16,
+            impeller2::types::PrimType::U8 => PrimitiveType::U8,
+            impeller2::types::PrimType::I64 => PrimitiveType::I64,
+            impeller2::types::PrimType::I32 => PrimitiveType::I32,
+            impeller2::types::PrimType::I16 => PrimitiveType::I16,
+            impeller2::types::PrimType::I8 => PrimitiveType::I8,
+            impeller2::types::PrimType::Bool => PrimitiveType::Bool,
         }
     }
 }
 
-impl From<PrimitiveType> for impeller::PrimitiveTy {
+impl From<PrimitiveType> for impeller2::types::PrimType {
     fn from(val: PrimitiveType) -> Self {
         match val {
-            PrimitiveType::F64 => impeller::PrimitiveTy::F64,
-            PrimitiveType::F32 => impeller::PrimitiveTy::F32,
-            PrimitiveType::U64 => impeller::PrimitiveTy::U64,
-            PrimitiveType::U32 => impeller::PrimitiveTy::U32,
-            PrimitiveType::U16 => impeller::PrimitiveTy::U16,
-            PrimitiveType::U8 => impeller::PrimitiveTy::U8,
-            PrimitiveType::I64 => impeller::PrimitiveTy::I64,
-            PrimitiveType::I32 => impeller::PrimitiveTy::I32,
-            PrimitiveType::I16 => impeller::PrimitiveTy::I16,
-            PrimitiveType::I8 => impeller::PrimitiveTy::I8,
-            PrimitiveType::Bool => impeller::PrimitiveTy::Bool,
+            PrimitiveType::F64 => impeller2::types::PrimType::F64,
+            PrimitiveType::F32 => impeller2::types::PrimType::F32,
+            PrimitiveType::U64 => impeller2::types::PrimType::U64,
+            PrimitiveType::U32 => impeller2::types::PrimType::U32,
+            PrimitiveType::U16 => impeller2::types::PrimType::U16,
+            PrimitiveType::U8 => impeller2::types::PrimType::U8,
+            PrimitiveType::I64 => impeller2::types::PrimType::I64,
+            PrimitiveType::I32 => impeller2::types::PrimType::I32,
+            PrimitiveType::I16 => impeller2::types::PrimType::I16,
+            PrimitiveType::I8 => impeller2::types::PrimType::I8,
+            PrimitiveType::Bool => impeller2::types::PrimType::Bool,
         }
     }
 }

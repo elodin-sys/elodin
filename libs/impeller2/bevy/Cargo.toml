@@ -1,0 +1,47 @@
+[package]
+name = "impeller2-bevy"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["tcp"]
+tcp = ["stellarator", "impeller2-stella"]
+
+[dependencies]
+impeller2.path = ".."
+impeller2.features = ["bevy", "std"]
+impeller2-wkt.path = "../wkt"
+impeller2-wkt.features = ["gui", "bevy"]
+nox.path = "../../nox"
+
+# bevy
+bevy.version = "0.15"
+bevy.default-features = false
+
+# channels
+thingbuf = "0.1.6"
+
+# async
+stellarator.path = "../../stellarator"
+stellarator.optional = true
+stellarator.features = ["miette"]
+impeller2-stella.path = "../stella"
+impeller2-stella.optional = true
+futures-lite = "2.5.0"
+
+# helpers
+replace_with = "0.1.7"
+smallvec.version = "1.11.2"
+
+# error
+miette.version = "7.2"
+miette.features = ["fancy-no-syscall"]
+
+# rand
+fastrand = "2.2"
+
+
+# serde
+serde.version = "1.0"
+postcard.version = "1.0.8"
+postcard.features = ["alloc"]
