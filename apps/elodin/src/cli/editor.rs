@@ -2,19 +2,13 @@ use bevy::window::WindowResized;
 use bevy::{prelude::*, utils::tracing};
 use core::fmt;
 use elodin_editor::EditorPlugin;
-use impeller::bevy::{ImpellerSubscribePlugin, Subscriptions};
-use impeller::bevy_sync::SyncPlugin;
-use impeller::World;
-use impeller::{client::MsgPair, server::handle_socket};
-use impeller::{serve_replay, Replay};
 use miette::{miette, Context, IntoDiagnostic};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
-use tokio::net::TcpStream;
+use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
-use tokio_util::sync::CancellationToken;
 
 use super::Cli;
 
@@ -73,7 +67,7 @@ impl std::str::FromStr for Simulator {
 async fn run_recipe(
     cache_dir: PathBuf,
     path: PathBuf,
-    cancel_token: CancellationToken,
+    cancel_token: CancelToken,
 ) -> miette::Result<()> {
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -133,7 +127,7 @@ impl Cli {
         &self,
         args: &Args,
         rt: Runtime,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
         let dirs = self.dirs().into_diagnostic()?;
@@ -162,7 +156,7 @@ impl Cli {
         &self,
         _args: &Args,
         rt: Runtime,
-        cancel_token: CancellationToken,
+        cancel_token: CancelToken,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         Ok(std::thread::spawn(move || {
             rt.block_on(async move {
@@ -176,34 +170,30 @@ impl Cli {
     }
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
-        let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
-        let cancel_token = CancellationToken::new();
+        //let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
+        let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
         match args.sim {
             Simulator::Addr(addr) => {
-                app.add_plugins(SimClient { addr, bevy_tx });
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(addr));
             }
             Simulator::File(_) => {
-                app.add_plugins(SimClient {
-                    addr: "127.0.0.1:2240".parse().unwrap(),
-                    bevy_tx,
-                });
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(SocketAddr::new(
+                    [127, 0, 0, 1].into(),
+                    2240,
+                )));
             }
-            Simulator::ReplayDir(path) => {
-                let world = World::read_from_dir(&path).into_diagnostic()?;
-                let replay = Replay::new(world, bevy_tx);
-                app.insert_resource(replay);
-                app.add_systems(Update, serve_replay);
+            Simulator::ReplayDir(_) => {
+                // TODO
+                // let world = World::read_from_dir(&path).into_diagnostic()?;
+                // let replay = Replay::new(world, bevy_tx);
+                // app.insert_resource(replay);
+                // app.add_systems(Update, serve_replay);
             }
         };
-        app.add_plugins(SyncPlugin {
-            plugin: sub,
-            subscriptions: Subscriptions::default(),
-            enable_pbr: true,
-        })
-        .insert_resource(CancelToken(cancel_token.clone()))
-        .add_systems(Update, check_cancel_token);
+        app.insert_resource(BevyCancelToken(cancel_token.clone()))
+            .add_systems(Update, check_cancel_token);
         app.run();
         cancel_token.cancel();
         thread.join().map_err(|_| miette!("join error"))?
@@ -254,9 +244,9 @@ impl Cli {
 }
 
 #[derive(Resource)]
-struct CancelToken(CancellationToken);
+struct BevyCancelToken(CancelToken);
 
-fn check_cancel_token(token: Res<CancelToken>, mut exit: EventWriter<AppExit>) {
+fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: EventWriter<AppExit>) {
     if token.0.is_cancelled() {
         exit.send(AppExit::Success);
     }
@@ -278,41 +268,41 @@ fn on_window_resize(
     }
 }
 
-#[derive(Clone)]
-struct SimClient {
-    addr: SocketAddr,
-    bevy_tx: flume::Sender<MsgPair>,
-}
+// #[derive(Clone)]
+// struct SimClient {
+//     addr: SocketAddr,
+//     bevy_tx: flume::Sender<MsgPair>,
+// }
 
-impl Plugin for SimClient {
-    fn build(&self, _: &mut App) {
-        let c = self.clone();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime failed to start");
-            rt.block_on(async move {
-                loop {
-                    let Ok(socket) = TcpStream::connect(c.addr).await else {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        continue;
-                    };
-                    let (rx_socket, tx_socket) = socket.into_split();
+// impl Plugin for SimClient {
+//     fn build(&self, _: &mut App) {
+//         let c = self.clone();
+//         std::thread::spawn(move || {
+//             let rt = tokio::runtime::Builder::new_current_thread()
+//                 .enable_all()
+//                 .build()
+//                 .expect("tokio runtime failed to start");
+//             rt.block_on(async move {
+//                 loop {
+//                     let Ok(socket) = TcpStream::connect(c.addr).await else {
+//                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+//                         continue;
+//                     };
+//                     let (rx_socket, tx_socket) = socket.into_split();
 
-                    if let Err(err) = handle_socket(
-                        c.bevy_tx.clone(),
-                        tx_socket,
-                        rx_socket,
-                        std::iter::empty(),
-                        std::iter::empty(),
-                    )
-                    .await
-                    {
-                        tracing::warn!(?err, "socket error");
-                    }
-                }
-            });
-        });
-    }
-}
+//                     if let Err(err) = handle_socket(
+//                         c.bevy_tx.clone(),
+//                         tx_socket,
+//                         rx_socket,
+//                         std::iter::empty(),
+//                         std::iter::empty(),
+//                     )
+//                     .await
+//                     {
+//                         tracing::warn!(?err, "socket error");
+//                     }
+//                 }
+//             });
+//         });
+//     }
+// }

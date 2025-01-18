@@ -1,5 +1,5 @@
 use crate::MainCamera;
-use bevy::animation::{AnimationTarget, AnimationTargetId};
+use bevy::animation::{animated_field, AnimationTarget, AnimationTargetId};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
@@ -7,7 +7,6 @@ use bevy::render::view::RenderLayers;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use bevy_egui::EguiContexts;
-use bevy_mod_picking::prelude::*;
 use std::f32::consts;
 
 pub struct NavigationGizmoPlugin;
@@ -16,7 +15,8 @@ impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderLayerAlloc>()
             .add_systems(PostUpdate, set_camera_viewport)
-            .add_systems(PostUpdate, sync_nav_camera);
+            .add_systems(PostUpdate, sync_nav_camera)
+            .add_plugins(MeshPickingPlugin);
     }
 }
 
@@ -24,7 +24,7 @@ impl Plugin for NavigationGizmoPlugin {
 pub struct NavGizmoCamera;
 
 fn cube_color_highlight(
-    event: Listener<Pointer<Over>>,
+    event: Trigger<Pointer<Over>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -36,11 +36,11 @@ fn cube_color_highlight(
 
         animation.add_curve_to_target(
             target,
-            VariableCurve {
-                keyframe_timestamps: vec![0.0, 0.1],
-                keyframes: Keyframes::Scale(vec![Vec3::splat(1.0), Vec3::splat(1.3)]),
-                interpolation: Interpolation::Linear,
-            },
+            AnimatableCurve::new(
+                animated_field![Transform::scale],
+                AnimatableKeyframeCurve::new([(0.0, Vec3::splat(1.0)), (0.1, Vec3::splat(1.3))])
+                    .expect("bad curve"),
+            ),
         );
         let (graph, animation_index) = AnimationGraph::from_clip(animations.add(animation));
 
@@ -49,7 +49,7 @@ fn cube_color_highlight(
         player.play(animation_index);
         commands
             .entity(entity)
-            .insert(graphs.add(graph))
+            .insert(AnimationGraphHandle(graphs.add(graph)))
             .insert(player)
             .insert(AnimationTarget {
                 id: target,
@@ -59,7 +59,7 @@ fn cube_color_highlight(
 }
 
 fn cube_color_reset(
-    event: Listener<Pointer<Out>>,
+    event: Trigger<Pointer<Out>>,
     mut target_query: Query<Entity>,
     mut animations: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -71,11 +71,11 @@ fn cube_color_reset(
 
         animation.add_curve_to_target(
             target,
-            VariableCurve {
-                keyframe_timestamps: vec![0.0, 0.1],
-                keyframes: Keyframes::Scale(vec![Vec3::splat(1.3), Vec3::splat(1.0)]),
-                interpolation: Interpolation::Linear,
-            },
+            AnimatableCurve::new(
+                animated_field![Transform::scale],
+                AnimatableKeyframeCurve::new([(0.0, Vec3::splat(1.3)), (0.1, Vec3::splat(1.0))])
+                    .expect("bad curve"),
+            ),
         );
         let (graph, animation_index) = AnimationGraph::from_clip(animations.add(animation));
 
@@ -84,7 +84,7 @@ fn cube_color_reset(
         player.play(animation_index);
         commands
             .entity(entity)
-            .insert(graphs.add(graph))
+            .insert(AnimationGraphHandle(graphs.add(graph)))
             .insert(player)
             .insert(AnimationTarget {
                 id: target,
@@ -149,8 +149,8 @@ pub fn spawn_gizmo(
             NavGizmoParent { main_camera },
             Transform::from_xyz(0.0, 0.0, 0.0),
             GlobalTransform::default(),
-            On::<Pointer<Drag>>::run(drag_nav_gizmo),
         ))
+        .observe(drag_nav_gizmo)
         .id();
 
     let distance = 0.35;
@@ -208,15 +208,12 @@ pub fn spawn_gizmo(
         };
         commands
             .spawn((
-                PbrBundle {
-                    mesh: meshes.add(Mesh::from(Cuboid::new(0.03, 0.03, distance))),
-                    material: materials.add(material.clone()),
-                    transform: Transform {
-                        translation: transform.translation / 2.0,
-                        rotation: transform.rotation,
-                        ..Default::default()
-                    },
-                    ..default()
+                Mesh3d(meshes.add(Mesh::from(Cuboid::new(0.03, 0.03, distance)))),
+                MeshMaterial3d(materials.add(material.clone())),
+                Transform {
+                    translation: transform.translation / 2.0,
+                    rotation: transform.rotation,
+                    ..Default::default()
                 },
                 NavGizmoParent { main_camera },
                 render_layers.clone(),
@@ -224,36 +221,29 @@ pub fn spawn_gizmo(
             .set_parent(nav_gizmo);
         commands
             .spawn((
-                PbrBundle {
-                    mesh: sphere.clone(),
-                    material: materials.add(material),
-                    transform,
-                    ..default()
-                },
+                Mesh3d(sphere.clone()),
+                MeshMaterial3d(materials.add(material)),
+                transform,
                 NavGizmoParent { main_camera },
-                On::<Pointer<Over>>::run(cube_color_highlight),
-                On::<Pointer<Out>>::run(cube_color_reset),
-                On::<Pointer<Click>>::run(cb),
                 render_layers.clone(),
             ))
+            .observe(cube_color_highlight)
+            .observe(cube_color_reset)
+            .observe(cb)
             .set_parent(nav_gizmo);
     }
 
     let nav_gizmo_camera = commands
         .spawn((
-            Camera3dBundle {
-                transform: Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
-                camera: Camera {
-                    order: 3,
-                    hdr: false,
-                    // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
-                    clear_color: ClearColorConfig::None,
-
-                    ..Default::default()
-                },
-                camera_3d: Camera3d { ..default() },
-                ..default()
+            Transform::from_xyz(0.0, 0.0, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
+            Camera {
+                order: 3,
+                hdr: false,
+                // NOTE: Don't clear on the NavGizmoCamera because the MainCamera already cleared the window
+                clear_color: ClearColorConfig::None,
+                ..Default::default()
             },
+            Camera3d::default(),
             render_layers.clone(),
             NavGizmoParent { main_camera },
             NavGizmoCamera,
@@ -267,7 +257,7 @@ pub fn spawn_gizmo(
 pub struct DraggedMarker;
 
 pub fn drag_nav_gizmo(
-    drag: Listener<Pointer<Drag>>,
+    drag: Trigger<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     mut commands: Commands,
@@ -303,13 +293,13 @@ pub fn drag_nav_gizmo(
 fn side_clicked_cb(
     direction: Dir3,
 ) -> impl Fn(
-    Listener<Pointer<Click>>,
+    Trigger<Pointer<Click>>,
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
     EventWriter<LookToTrigger>,
 ) {
-    move |click: Listener<Pointer<Click>>,
+    move |click: Trigger<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
@@ -347,15 +337,14 @@ pub fn sync_nav_camera(
 }
 
 pub fn set_camera_viewport(
-    window: Query<&Window>,
-    egui_settings: Res<bevy_egui::EguiSettings>,
+    window: Query<(&Window, &bevy_egui::EguiSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,
 ) {
     let margin = 8.0;
     let side_length = 128.0;
-    let Some(window) = window.iter().next() else {
+    let Some((window, egui_settings)) = window.iter().next() else {
         return;
     };
     let scale_factor = window.scale_factor() * egui_settings.scale_factor;

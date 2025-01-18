@@ -1,26 +1,259 @@
 use bevy::asset::Asset;
-use bevy::ecs::query::Without;
-use bevy::ecs::system::Commands;
+use bevy::log::warn;
 use bevy::math::{DVec3, Vec3};
+use bevy::prelude::{InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{Assets, Handle},
-    ecs::system::Query,
-    log::warn,
+    ecs::system::{Commands, Query},
     prelude::Resource,
 };
-use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use impeller::bytes::Bytes;
-use impeller::{
-    client::Msg, ser_de::ColumnValue, ComponentId, ComponentValue, ControlMsg, EntityId,
-};
+use big_space::{FloatingOriginSettings, GridCell};
+use impeller2::types::PrimType;
+use impeller2::types::{ComponentId, ComponentView, EntityId, OwnedPacket};
+use impeller2_bevy::{ComponentValueMap, EntityMap, PacketHandlerInput, PacketHandlers};
+use impeller2_wkt::{MaxTick, Tick};
+use zerocopy::{Immutable, TryFromBytes};
 
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::chunks::{Chunks, ShadowBuffer, Unloaded, CHUNK_SIZE};
-use crate::ui::widgets::entity_data::Plot3dData;
+pub fn collect_entity_data(
+    mut collected_graph_data: ResMut<CollectedGraphData>,
+    max_tick: Res<MaxTick>,
+) {
+    collected_graph_data.tick_range = 0..max_tick.0;
+}
 
-use super::gpu::LineBundle;
+pub fn pkt_handler(
+    PacketHandlerInput { packet, registry }: PacketHandlerInput,
+    mut collected_graph_data: ResMut<CollectedGraphData>,
+    mut lines: ResMut<Assets<LineData>>,
+    tick: Res<Tick>,
+    floating_origin: Res<FloatingOriginSettings>,
+) {
+    let mut tick = *tick;
+    if let OwnedPacket::Table(table) = packet {
+        if let Err(err) = table.sink(registry, &mut tick) {
+            warn!(?err, "tick sink failed");
+        }
+        if let Err(err) = table.sink(
+            registry,
+            &mut |component_id, entity_id, view: ComponentView<'_>| {
+                let Some(plot_data) =
+                    collected_graph_data.get_component_mut(&entity_id, &component_id)
+                else {
+                    return;
+                };
+                plot_data.add_values(view, &mut lines, tick.0, &floating_origin);
+            },
+        ) {
+            warn!(?err, "graph sink failed");
+        }
+    }
+}
+
+pub trait AsF64 {
+    fn as_f64(&self) -> f64;
+}
+
+macro_rules! impl_as_f64 {
+    ($($t:ty),*) => {
+        $(
+            impl AsF64 for $t {
+                fn as_f64(&self) -> f64 { *self as f64 }
+            }
+        )*
+    };
+}
+
+impl_as_f64!(u8, u16, u32, u64, i8, i16, i32, i64, f32);
+
+impl AsF64 for f64 {
+    fn as_f64(&self) -> f64 {
+        *self
+    }
+}
+
+impl AsF64 for bool {
+    fn as_f64(&self) -> f64 {
+        if *self {
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
+fn process_time_series<T>(
+    time_series_buf: &[u8],
+    len: usize,
+    time_range: &Range<u64>,
+    plot_data: &mut PlotDataComponent,
+    lines: &mut Assets<LineData>,
+    floating_origin: &FloatingOriginSettings,
+) where
+    T: AsF64 + TryFromBytes + Immutable,
+{
+    let Ok(data) = <[T]>::try_ref_from_bytes(time_series_buf) else {
+        return;
+    };
+    let mut tick = time_range.start;
+    for chunk in data.chunks(len) {
+        let Some(x) = chunk.get(plot_data.indexes[0]) else {
+            continue;
+        };
+        let Some(y) = chunk.get(plot_data.indexes[1]) else {
+            continue;
+        };
+        let Some(z) = chunk.get(plot_data.indexes[2]) else {
+            continue;
+        };
+
+        let value = DVec3::new(x.as_f64(), y.as_f64(), z.as_f64());
+
+        if let Some(line) = &plot_data.line {
+            let line = lines.get_mut(line.id()).expect("missing line asset");
+            line.push(tick as usize, value, floating_origin);
+        }
+        tick += 1;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn time_series_handler(
+    entity_id: EntityId,
+    component_id: ComponentId,
+    time_range: Range<u64>,
+) -> impl Fn(
+    InRef<OwnedPacket<Vec<u8>>>,
+    ResMut<CollectedGraphData>,
+    Res<EntityMap>,
+    Query<&ComponentValueMap>,
+    ResMut<Assets<LineData>>,
+    Res<FloatingOriginSettings>,
+) {
+    move |InRef(pkt),
+          mut collected_graph_data: ResMut<CollectedGraphData>,
+          entity_map: Res<EntityMap>,
+          component_values,
+          mut lines,
+          floating_origin| match pkt {
+        OwnedPacket::Msg(_) => {}
+        OwnedPacket::Table(_) => {}
+        OwnedPacket::TimeSeries(time_series) => {
+            let Some(entity) = entity_map.get(&entity_id) else {
+                return;
+            };
+            let Ok(component_value_map) = component_values.get(*entity) else {
+                return;
+            };
+            let Some(current_value) = component_value_map.get(&component_id) else {
+                return;
+            };
+            let Some(plot_data) = collected_graph_data.get_component_mut(&entity_id, &component_id)
+            else {
+                return;
+            };
+            let len = current_value.shape().iter().fold(1usize, |xs, &x| x * xs);
+            let buf = &time_series.buf;
+            match current_value.prim_type() {
+                PrimType::U8 => process_time_series::<u8>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::U16 => process_time_series::<u16>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::U32 => process_time_series::<u32>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::U64 => process_time_series::<u64>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::I8 => process_time_series::<i8>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::I16 => process_time_series::<i16>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::I32 => process_time_series::<i32>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::I64 => process_time_series::<i64>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::Bool => process_time_series::<bool>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::F32 => process_time_series::<f32>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+                PrimType::F64 => process_time_series::<f64>(
+                    buf,
+                    len,
+                    &time_range,
+                    plot_data,
+                    &mut lines,
+                    &floating_origin,
+                ),
+            }
+        }
+    }
+}
+pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
+    let sys = commands.register_system(pkt_handler);
+    packet_handlers.0.push(sys);
+}
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -42,7 +275,7 @@ impl PlotDataComponent {
 
     pub fn add_values(
         &mut self,
-        component_value: &ComponentValue,
+        component_value: ComponentView<'_>,
         assets: &mut Assets<LineData>,
         tick: u64,
         floating_origin: &FloatingOriginSettings,
@@ -93,6 +326,15 @@ impl CollectedGraphData {
             .get(entity_id)
             .and_then(|entity| entity.components.get(component_id))
     }
+    pub fn get_component_mut(
+        &mut self,
+        entity_id: &EntityId,
+        component_id: &ComponentId,
+    ) -> Option<&mut PlotDataComponent> {
+        self.entities
+            .get_mut(entity_id)
+            .and_then(|entity| entity.components.get_mut(component_id))
+    }
     pub fn get_line(
         &self,
         entity_id: &EntityId,
@@ -102,65 +344,6 @@ impl CollectedGraphData {
             .get(entity_id)
             .and_then(|entity| entity.components.get(component_id))
             .and_then(|component| component.line.as_ref())
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn collect_entity_data(
-    msg: &Msg<Bytes>,
-    collected_graph_data: &mut CollectedGraphData,
-    graphs: &mut Query<Plot3dData, Without<FloatingOrigin>>,
-    lines: &mut Assets<LineData>,
-    floating_origin: &FloatingOriginSettings,
-    origin: &Query<(&GridCell<i128>, &FloatingOrigin)>,
-    commands: &mut Commands,
-) {
-    match &msg {
-        Msg::Control(ControlMsg::StartSim { .. }) => {
-            collected_graph_data.entities.clear();
-            collected_graph_data.tick_range = 0..0;
-            for graph in graphs.iter_mut() {
-                commands.entity(graph.0).remove::<LineBundle>();
-            }
-        }
-        Msg::Control(ControlMsg::Tick {
-            tick,
-            max_tick: _,
-            simulating: _,
-        }) => {
-            if collected_graph_data.tick_range.end < *tick {
-                collected_graph_data.tick_range.end = *tick;
-            }
-        }
-        Msg::Column(col) => {
-            let component_id = col.metadata.component_id();
-            for res in col.iter() {
-                let Ok(ColumnValue { entity_id, value }) = res else {
-                    warn!("error parsing column value");
-                    continue;
-                };
-                let Some(entity) = collected_graph_data.entities.get_mut(&entity_id) else {
-                    continue;
-                };
-                let Some(component) = entity.components.get_mut(&component_id) else {
-                    continue;
-                };
-                component.add_values(&value, lines, col.payload.time, floating_origin);
-            }
-        }
-        _ => {}
-    }
-    let (origin_cell, _) = origin.single();
-
-    for (_, line, mut grid_cell, transform, mut global) in graphs {
-        let Some(line) = lines.get_mut(line) else {
-            continue;
-        };
-        *grid_cell = line.grid_cell;
-        let grid_cell_delta = *grid_cell - *origin_cell;
-        *global = transform
-            .with_translation(floating_origin.grid_position(&grid_cell_delta, transform))
-            .into();
     }
 }
 

@@ -82,7 +82,11 @@ impl<A: AsyncRead> LengthDelReader<A> {
         let required_len = len.checked_add(8).ok_or(Error::IntegerOverflow)?;
         while total_read < required_len {
             let mut slice = buf.try_slice(total_read..).ok_or(Error::BufferOverflow)?;
-            total_read += rent!(self.read(slice).await, slice)?;
+            let read_len = rent!(self.read(slice).await, slice)?;
+            if read_len == 0 {
+                return Err(Error::EOF);
+            }
+            total_read += read_len;
             buf = slice.into_inner();
         }
         let extra_read = total_read.saturating_sub(required_len);

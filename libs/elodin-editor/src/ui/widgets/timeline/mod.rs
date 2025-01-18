@@ -4,7 +4,7 @@ use bevy::ecs::{
 };
 use bevy_egui::{egui, EguiContexts};
 use egui::emath::Numeric;
-use impeller::bevy::{MaxTick, Tick, TimeStep};
+use impeller2_wkt::{MaxTick, SimulationTimeStep, Tick};
 use timeline_controls::TimelineControls;
 use timeline_ranges::{TimelineRanges, TimelineRangesPanel};
 
@@ -117,7 +117,7 @@ pub struct TimelinePanel<'w, 's> {
     images: Local<'s, images::Images>,
     tick: Res<'w, Tick>,
     max_tick: Res<'w, MaxTick>,
-    tick_time: Res<'w, TimeStep>,
+    tick_time: Res<'w, SimulationTimeStep>,
     timeline_ranges: Res<'w, TimelineRanges>,
 }
 
@@ -141,7 +141,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         let ranges_not_empty = state_mut.timeline_ranges.is_not_empty();
 
         let active_range = 0..=max_tick.0;
-        let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
+        let frames_per_second = 1.0 / tick_time.0;
 
         let timeline_icons = TimelineIcons {
             jump_to_start: contexts.add_image(images.icon_jump_to_start.clone_weak()),

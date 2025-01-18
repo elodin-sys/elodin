@@ -8,12 +8,17 @@ repository.workspace = true
 default = ["std"]
 std = []
 miette = ["dep:miette"]
+futures = ["dep:futures"]
+tokio = ["dep:tokio"]
 
 [dependencies]
 # async
-maitake.git = "https://github.com/hawkw/mycelium.git"
-maitake.rev = "ba56bb4d02f46fb59754b7b88bddc2e8ca99c1f5"
+maitake.path = "maitake"
 pin-project = "1.1.6"
+futures-lite = "2.5.0"
+futures.version = "0.3.30"
+futures.optional = true
+futures.default-features = false
 
 # dsts
 slab = "0.4"
@@ -21,7 +26,8 @@ stack_dst = "0.8"
 
 # syscalls
 libc = "0.2"
-socket2 = "0.5"
+socket2.version = "0.5"
+socket2.features = ["all"]
 
 # errors
 thiserror = { version = "2.0", default-features = false }
@@ -29,9 +35,18 @@ miette.version = "7.2"
 miette.features = ["fancy"]
 miette.optional = true
 
+# sub-crates
+stellarator-buf.path = "./buf"
+
+# tokio-compat
+tokio.version = "1.3"
+tokio.default-features = false
+tokio.features = ["rt-multi-thread"]
+tokio.optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7.1"
+spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 polling = "3.7"
@@ -39,7 +54,6 @@ blocking = "1.3"
 waker-fn = "1.2.0"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
-
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 rustix = { version = "0.38", features = ["net", "fs", "termios", "thread", "time"] }

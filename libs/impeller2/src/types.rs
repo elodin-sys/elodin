@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 use crate::error::Error;
+use stellarator_buf::{IoBuf, Slice};
 
 #[derive(
     Serialize,
@@ -51,8 +52,15 @@ impl Display for ComponentId {
     Hash,
     FromBytes,
 )]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[repr(transparent)]
 pub struct EntityId(pub u64);
+
+impl From<u64> for EntityId {
+    fn from(value: u64) -> Self {
+        EntityId(value)
+    }
+}
 
 impl Display for EntityId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -99,6 +107,28 @@ pub enum PrimType {
 }
 
 impl PrimType {
+    pub const fn padding(&self, offset: usize) -> usize {
+        let align = self.alignment();
+        let offset_rounded = (offset + align - 1) & !(align - 1);
+        offset_rounded - offset
+    }
+
+    pub const fn alignment(&self) -> usize {
+        match self {
+            PrimType::U8 => core::mem::align_of::<u8>(),
+            PrimType::U16 => core::mem::align_of::<u16>(),
+            PrimType::U32 => core::mem::align_of::<u32>(),
+            PrimType::U64 => core::mem::align_of::<u64>(),
+            PrimType::I8 => core::mem::align_of::<i8>(),
+            PrimType::I16 => core::mem::align_of::<i16>(),
+            PrimType::I32 => core::mem::align_of::<i32>(),
+            PrimType::I64 => core::mem::align_of::<i64>(),
+            PrimType::Bool => core::mem::align_of::<bool>(),
+            PrimType::F32 => core::mem::align_of::<f32>(),
+            PrimType::F64 => core::mem::align_of::<f64>(),
+        }
+    }
+
     pub const fn size(&self) -> usize {
         match self {
             PrimType::U8 => core::mem::size_of::<u8>(),
@@ -112,6 +142,22 @@ impl PrimType {
             PrimType::Bool => core::mem::size_of::<bool>(),
             PrimType::F32 => core::mem::size_of::<f32>(),
             PrimType::F64 => core::mem::size_of::<f64>(),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PrimType::U8 => "u8",
+            PrimType::U16 => "u16",
+            PrimType::U32 => "u32",
+            PrimType::U64 => "u64",
+            PrimType::I8 => "i8",
+            PrimType::I16 => "i16",
+            PrimType::I32 => "i32",
+            PrimType::I64 => "i64",
+            PrimType::Bool => "bool",
+            PrimType::F32 => "f32",
+            PrimType::F64 => "f64",
         }
     }
 }
@@ -254,6 +300,102 @@ impl<'a> ComponentView<'a> {
             Self::F64(ref view) => view.as_bytes(),
         }
     }
+
+    #[cfg(feature = "std")]
+    pub fn iter<'i>(&'i self) -> Box<dyn Iterator<Item = ElementValue> + 'i> {
+        match self {
+            ComponentView::U8(u8) => Box::new(u8.buf().iter().map(|&x| ElementValue::U8(x))),
+            ComponentView::U16(u16) => Box::new(u16.buf().iter().map(|&x| ElementValue::U16(x))),
+            ComponentView::U32(u32) => Box::new(u32.buf().iter().map(|&x| ElementValue::U32(x))),
+            ComponentView::U64(u64) => Box::new(u64.buf().iter().map(|&x| ElementValue::U64(x))),
+            ComponentView::I8(i8) => Box::new(i8.buf().iter().map(|&x| ElementValue::I8(x))),
+            ComponentView::I16(i16) => Box::new(i16.buf().iter().map(|&x| ElementValue::I16(x))),
+            ComponentView::I32(i32) => Box::new(i32.buf().iter().map(|&x| ElementValue::I32(x))),
+            ComponentView::I64(i64) => Box::new(i64.buf().iter().map(|&x| ElementValue::I64(x))),
+            ComponentView::Bool(bool) => {
+                Box::new(bool.buf().iter().map(|&x| ElementValue::Bool(x)))
+            }
+            ComponentView::F32(f32) => Box::new(f32.buf().iter().map(|&x| ElementValue::F32(x))),
+            ComponentView::F64(f64) => Box::new(f64.buf().iter().map(|&x| ElementValue::F64(x))),
+        }
+    }
+
+    pub fn get(&self, i: usize) -> Option<ElementValue> {
+        match self {
+            Self::U8(x) => x.buf().get(i).map(|&x| ElementValue::U8(x)),
+            Self::U16(x) => x.buf().get(i).map(|&x| ElementValue::U16(x)),
+            Self::U32(x) => x.buf().get(i).map(|&x| ElementValue::U32(x)),
+            Self::U64(x) => x.buf().get(i).map(|&x| ElementValue::U64(x)),
+            Self::I8(x) => x.buf().get(i).map(|&x| ElementValue::I8(x)),
+            Self::I16(x) => x.buf().get(i).map(|&x| ElementValue::I16(x)),
+            Self::I32(x) => x.buf().get(i).map(|&x| ElementValue::I32(x)),
+            Self::I64(x) => x.buf().get(i).map(|&x| ElementValue::I64(x)),
+            Self::Bool(x) => x.buf().get(i).map(|&x| ElementValue::Bool(x)),
+            Self::F32(x) => x.buf().get(i).map(|&x| ElementValue::F32(x)),
+            Self::F64(x) => x.buf().get(i).map(|&x| ElementValue::F64(x)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum ElementValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    F64(f64),
+    F32(f32),
+    Bool(bool),
+}
+
+impl ElementValue {
+    pub fn as_f64(&self) -> f64 {
+        match *self {
+            ElementValue::U8(x) => x as f64,
+            ElementValue::U16(x) => x as f64,
+            ElementValue::U32(x) => x as f64,
+            ElementValue::U64(x) => x as f64,
+            ElementValue::I8(x) => x as f64,
+            ElementValue::I16(x) => x as f64,
+            ElementValue::I32(x) => x as f64,
+            ElementValue::I64(x) => x as f64,
+            ElementValue::F64(x) => x,
+            ElementValue::F32(x) => x as f64,
+            ElementValue::Bool(x) => {
+                if x {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+
+    pub fn as_f32(&self) -> f32 {
+        match *self {
+            ElementValue::U8(x) => x as f32,
+            ElementValue::U16(x) => x as f32,
+            ElementValue::U32(x) => x as f32,
+            ElementValue::U64(x) => x as f32,
+            ElementValue::I8(x) => x as f32,
+            ElementValue::I16(x) => x as f32,
+            ElementValue::I32(x) => x as f32,
+            ElementValue::I64(x) => x as f32,
+            ElementValue::F32(x) => x,
+            ElementValue::F64(x) => x as f32,
+            ElementValue::Bool(x) => {
+                if x {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
 }
 
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug, Clone, Copy)]
@@ -276,4 +418,187 @@ pub struct Packet {
     pub id: PacketId,
     pub request_id: RequestId,
     pub body: [u8],
+}
+
+pub trait Msg: Serialize {
+    const ID: PacketId;
+}
+
+#[derive(Clone)]
+pub struct LenPacket {
+    pub inner: Vec<u8>,
+}
+
+impl LenPacket {
+    pub fn new(ty: PacketTy, id: PacketId, cap: usize) -> Self {
+        let mut inner = Vec::with_capacity(cap + 16);
+        inner.extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        inner.push(ty as u8);
+        inner.extend_from_slice(&id);
+        inner.extend_from_slice(&[0; 4]);
+        Self { inner }
+    }
+
+    pub fn msg(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::Msg, id, cap)
+    }
+
+    pub fn table(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::Table, id, cap)
+    }
+
+    pub fn time_series(id: PacketId, cap: usize) -> Self {
+        Self::new(PacketTy::TimeSeries, id, cap)
+    }
+
+    fn pkt_len(&self) -> u64 {
+        let len = &self.inner[..8];
+        u64::from_le_bytes(len.try_into().expect("len wrong size"))
+    }
+
+    pub fn pad_for_type(&mut self, ty: PrimType) {
+        for _ in 0..ty.padding(self.inner.len()) {
+            self.push(0);
+        }
+    }
+
+    pub fn push(&mut self, elem: u8) {
+        let len = self.pkt_len() + 1;
+        self.inner.push(elem);
+        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+    }
+
+    pub fn extend_from_slice(&mut self, buf: &[u8]) {
+        let len = self.pkt_len() + buf.len() as u64;
+        self.inner.extend_from_slice(buf);
+        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+    }
+
+    pub fn as_packet(&self) -> &Packet {
+        let len = self.pkt_len() as usize;
+        Packet::try_ref_from_bytes_with_elems(&self.inner[8..], len)
+            .expect("len packet was not a valid `Packet`")
+    }
+
+    pub fn as_mut_packet(&mut self) -> &mut Packet {
+        let len = self.pkt_len() as usize;
+        Packet::try_mut_from_bytes_with_elems(&mut self.inner[8..], len)
+            .expect("len packet was not a valid `Packet`")
+    }
+
+    pub fn clear(&mut self) {
+        self.inner[..8].copy_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        self.inner.truncate(PACKET_HEADER_LEN + 8);
+    }
+}
+
+impl postcard::ser_flavors::Flavor for LenPacket {
+    type Output = LenPacket;
+
+    fn try_push(&mut self, data: u8) -> postcard::Result<()> {
+        self.push(data);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(self)
+    }
+}
+
+pub trait MsgExt: Msg {
+    fn to_len_packet(&self) -> LenPacket {
+        let msg = LenPacket::msg(Self::ID, 0);
+        postcard::serialize_with_flavor(&self, msg).unwrap()
+    }
+}
+
+impl<M: Msg> MsgExt for M {}
+
+pub enum OwnedPacket<B: IoBuf> {
+    Msg(MsgBuf<B>),
+    Table(OwnedTable<B>),
+    TimeSeries(TimeSeries<B>),
+}
+
+impl<B: IoBuf> OwnedPacket<B> {
+    pub fn parse(packet_buf: Slice<B>) -> Result<Self, Error> {
+        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(&packet_buf).unwrap();
+        let packet_ty = *packet_ty;
+        let id = *id;
+        let buf = packet_buf
+            .try_sub_slice(PACKET_HEADER_LEN..)
+            .ok_or(Error::InvalidPacket)?;
+        Ok(match packet_ty {
+            PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, buf }),
+            PacketTy::Table => OwnedPacket::Table(OwnedTable { id, buf }),
+            PacketTy::TimeSeries => OwnedPacket::TimeSeries(TimeSeries { id, buf }),
+        })
+    }
+}
+
+pub struct OwnedTable<B: IoBuf> {
+    pub id: PacketId,
+    pub buf: Slice<B>,
+}
+
+impl<B: IoBuf> OwnedTable<B> {
+    pub fn sink(
+        &self,
+        registry: &impl crate::registry::VTableRegistry,
+        sink: &mut impl crate::com_de::Decomponentize,
+    ) -> Result<(), Error> {
+        let vtable = registry.get(&self.id).ok_or(Error::VTableNotFound)?;
+        vtable.parse_table(stellarator_buf::deref(&self.buf), sink)
+    }
+}
+
+pub struct MsgBuf<B: IoBuf> {
+    pub id: PacketId,
+    pub buf: Slice<B>,
+}
+
+impl<B: IoBuf> MsgBuf<B> {
+    pub fn parse<'a, T: Deserialize<'a> + 'a>(&'a self) -> Result<T, Error> {
+        let msg = postcard::from_bytes(stellarator_buf::deref(&self.buf))?;
+        Ok(msg)
+    }
+
+    pub fn try_parse<'a, T: Msg + Deserialize<'a> + 'a>(&'a self) -> Option<Result<T, Error>> {
+        if T::ID == self.id {
+            return None;
+        }
+        Some(self.parse())
+    }
+}
+
+pub struct TimeSeries<B: IoBuf> {
+    pub id: PacketId,
+    pub buf: Slice<B>,
+}
+
+impl<B: IoBuf> OwnedPacket<B> {
+    pub fn into_buf(self) -> B {
+        match self {
+            Self::Msg(msg_buf) => msg_buf.buf.into_inner(),
+            Self::Table(table) => table.buf.into_inner(),
+            Self::TimeSeries(time_series) => time_series.buf.into_inner(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_padding() {
+        assert_eq!(PrimType::F64.padding(1), 7);
+        assert_eq!(PrimType::F64.padding(11), 5);
+        assert_eq!(PrimType::F32.padding(2), 2);
+        assert_eq!(PrimType::F32.padding(22), 2);
+        assert_eq!(PrimType::F32.padding(0), 0);
+        assert_eq!(PrimType::U8.padding(5), 0);
+        assert_eq!(PrimType::U16.padding(12), 0);
+        assert_eq!(PrimType::U16.padding(11), 1);
+    }
 }

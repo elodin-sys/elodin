@@ -47,14 +47,14 @@ pub fn component_group(input: TokenStream) -> TokenStream {
             }
 
 
-           fn component_arrays_new<'a>(
+           fn component_arrays<'a>(
                 builder: &'a #crate_name::system::SystemBuilder,
             ) -> impl Iterator<Item = #crate_name::ComponentArray<()>> + 'a {
-                <(#(#params,)*)>::component_arrays_new(builder)
+                <(#(#params,)*)>::component_arrays(builder)
             }
 
 
-            fn component_types() -> impl Iterator<Item = #crate_name::ComponentType> {
+            fn component_types() -> impl Iterator<Item = #crate_name::ComponentSchema> {
                 <(#(#params,)*)>::component_types()
             }
 

@@ -1,9 +1,13 @@
+use impeller2::{
+    component::Component,
+    types::{ComponentId, ComponentView, EntityId},
+};
+
 use bytes::Buf;
-use impeller::{ComponentId, ComponentType, ComponentValue, EntityId};
 use nox::{xla::Literal, ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{Component, ComponentArray, ComponentGroup, Query};
+use crate::{ComponentArray, ComponentGroup, Query};
 
 #[derive(Clone)]
 pub struct GraphQuery<E> {
@@ -65,22 +69,35 @@ impl ReprMonad<Op> for Edge {
     }
 }
 
-impl impeller::Component for Edge {
+// impl impeller::Component for Edge {
+//     const NAME: &'static str = "edge";
+
+//     fn component_type() -> impeller::ComponentType {
+//         ComponentType {
+//             primitive_ty: impeller::PrimitiveTy::U64,
+//             shape: smallvec::smallvec![2],
+//         }
+//     }
+// }
+
+impl crate::component::Component for Edge {}
+
+impl Component for Edge {
     const NAME: &'static str = "edge";
 
-    fn component_type() -> impeller::ComponentType {
-        ComponentType {
-            primitive_ty: impeller::PrimitiveTy::U64,
-            shape: smallvec::smallvec![2],
-        }
+    fn schema() -> impeller2::schema::Schema<Vec<u64>> {
+        impeller2::schema::Schema::new(
+            Self::COMPONENT_ID,
+            impeller2::types::PrimType::U64,
+            [2usize],
+        )
+        .unwrap()
     }
 }
 
-impl Component for Edge {}
-
 pub trait EdgeComponent: Component {
     fn to_edge(&self) -> Edge;
-    fn from_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_value(value: ComponentView<'_>) -> Option<Self>
     where
         Self: Sized;
 }
@@ -90,15 +107,15 @@ impl EdgeComponent for Edge {
         self.clone()
     }
 
-    fn from_value(value: ComponentValue<'_>) -> Option<Self>
+    fn from_value(value: ComponentView<'_>) -> Option<Self>
     where
         Self: Sized,
     {
-        let ComponentValue::U64(val) = value else {
+        let ComponentView::U64(val) = value else {
             return None;
         };
-        let from = EntityId(*val.get(0)?);
-        let to = EntityId(*val.get(1)?);
+        let from = EntityId(val.get(0));
+        let to = EntityId(val.get(1));
         Some(Edge { from, to })
     }
 }
@@ -114,7 +131,7 @@ impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
 
     fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
         let col = builder.world.column::<E>().unwrap();
-        let ty = &col.metadata.component_type;
+        let ty = &col.schema;
         let buf = &mut &col.column[..];
         let edges = (0..col.len())
             .map(move |_| {
@@ -130,7 +147,7 @@ impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
         })
     }
 
-    fn component_ids() -> impl Iterator<Item = impeller::ComponentId> {
+    fn component_ids() -> impl Iterator<Item = ComponentId> {
         std::iter::empty()
     }
 
@@ -147,9 +164,9 @@ impl crate::system::SystemParam for GraphQuery<TotalEdge> {
     }
 
     fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
-        let edges = (0..builder.world.entity_len)
+        let edges = (0..builder.world.entity_len())
             .flat_map(|from| {
-                (0..builder.world.entity_len)
+                (0..builder.world.entity_len())
                     .filter(move |to| from != *to)
                     .map(move |to| Edge::new(from, to))
             })
@@ -160,7 +177,7 @@ impl crate::system::SystemParam for GraphQuery<TotalEdge> {
         })
     }
 
-    fn component_ids() -> impl Iterator<Item = impeller::ComponentId> {
+    fn component_ids() -> impl Iterator<Item = ComponentId> {
         std::iter::empty()
     }
 
@@ -317,7 +334,7 @@ impl<E> GraphQuery<E> {
 mod tests {
 
     use nox::{tensor, Matrix, OwnedRepr, Scalar, Vector};
-    use nox_ecs_macros::ReprMonad;
+    use nox_ecs_macros::{Component, ReprMonad};
 
     use crate::IntoSystemExt;
 

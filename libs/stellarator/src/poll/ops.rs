@@ -109,7 +109,7 @@ impl<T: IoBufMut> OpCode for Read<'_, T> {
         match &self.state {
             ReadState::Blocking(_) => None,
             ReadState::NonBlocking { sock, .. } => {
-                Some(Event::readable(sock.as_raw_os_handle() as usize))
+                Some(Event::readable(sock.as_raw_os_handle() as usize).with_interrupt())
             }
         }
     }
@@ -213,7 +213,7 @@ impl<T: IoBuf> OpCode for Write<'_, T> {
         match &self.state {
             WriteState::Blocking(_) => None,
             WriteState::NonBlocking { sock, .. } => {
-                Some(Event::writable(sock.as_raw_os_handle() as usize))
+                Some(Event::writable(sock.as_raw_os_handle() as usize).with_interrupt())
             }
         }
     }
@@ -290,7 +290,10 @@ impl OpCode for Open {
 
 impl Open {
     pub fn new(path: PathBuf, options: &crate::fs::OpenOptions) -> Result<Self, Error> {
-        let flags = options.access_mode()? | options.creation_mode()? | options.custom_flags;
+        let flags = libc::O_CLOEXEC
+            | options.access_mode()?
+            | options.creation_mode()?
+            | options.custom_flags;
         let mode = options.mode as libc::c_uint;
         Ok(Open(unblock(move || {
             let path = path.to_str().ok_or(Error::InvalidPath)?;

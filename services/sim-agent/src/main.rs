@@ -1,4 +1,3 @@
-use anyhow::Context;
 use config::SandboxConfig;
 use elodin_types::sandbox::{
     self,
@@ -6,12 +5,17 @@ use elodin_types::sandbox::{
     sandbox_control_server::{SandboxControl, SandboxControlServer},
     BuildReq, FileTransferReq, UpdateCodeReq, UpdateCodeResp,
 };
-use impeller::client::MsgPair;
-use impeller::server::TcpServer;
-use nox_ecs::nox::Client;
-use nox_ecs::{Compiled, ImpellerExec, WorldExec};
-use std::{io::Seek, time::Duration};
-use std::{net::SocketAddr, thread, time::Instant};
+use nox_ecs::WorldExec;
+use std::net::SocketAddr;
+use std::{
+    io::Seek,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use stellarator::struc_con::Joinable;
 use tokio::io::AsyncWriteExt;
 use tonic::{
     async_trait,
@@ -43,16 +47,15 @@ async fn main() -> anyhow::Result<()> {
         builder_addr,
     }) = config.sandbox
     {
-        let (server_tx, server_rx) = flume::unbounded();
-        let sim_runner = SimRunner::new(server_rx)?;
-        let control = ControlService::new(sim_runner, control_addr, builder_addr)?;
+        let (world_tx, world_rx) = flume::unbounded();
+        let control = ControlService::new(control_addr, builder_addr, world_tx)?;
         tasks.spawn(control.run().instrument(info_span!("control").or_current()));
-        let sim = async move {
-            let sim = TcpServer::bind(server_tx, sim_addr).await?;
-            sim.run().await?;
+        tasks.spawn(async move {
+            stellarator::struc_con::stellar(move || run_sim(world_rx, sim_addr))
+                .join()
+                .await?;
             Ok(())
-        };
-        tasks.spawn(sim.instrument(info_span!("sim").or_current()));
+        });
     }
 
     if let Some(mc_agent_config) = config.monte_carlo {
@@ -66,24 +69,50 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn run_sim(world_rx: flume::Receiver<WorldExec>, sim_addr: SocketAddr) -> anyhow::Result<()> {
+    let mut cancel = Arc::new(AtomicBool::new(false));
+    let client = nox_ecs::nox::Client::cpu()?;
+    while let Ok(world_exec) = world_rx.recv_async().await {
+        cancel.store(true, Ordering::SeqCst);
+        cancel = Arc::new(AtomicBool::new(false));
+        let Ok(world_exec) = world_exec.compile(client.clone()) else {
+            continue;
+        };
+        let cancel = cancel.clone();
+        let tmpfile = tempfile::tempdir().unwrap().into_path();
+        stellarator::spawn(
+            nox_ecs::impeller2_server::Server::new(
+                impeller_db::Server::new(tmpfile.join("db"), sim_addr).unwrap(),
+                world_exec,
+            )
+            .run_with_cancellation(move || cancel.load(Ordering::SeqCst)),
+        );
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct ControlService {
     sim_builder_health: HealthClient<Channel>,
     sim_builder: SandboxClient<Channel>,
-    sim_runner: SimRunner,
     address: SocketAddr,
+    world_channel: flume::Sender<WorldExec>,
 }
 
 impl ControlService {
-    fn new(sim_runner: SimRunner, address: SocketAddr, addr: Uri) -> anyhow::Result<Self> {
+    fn new(
+        address: SocketAddr,
+        addr: Uri,
+        world_channel: flume::Sender<WorldExec>,
+    ) -> anyhow::Result<Self> {
         let channel = builder_channel(addr);
         let sim_builder = SandboxClient::new(channel.clone());
         let sim_builder_health = HealthClient::new(channel);
         Ok(Self {
             sim_builder_health,
             sim_builder,
-            sim_runner,
             address,
+            world_channel,
         })
     }
 
@@ -162,7 +191,7 @@ impl ControlService {
             }
         };
 
-        self.sim_runner.update(exec)?;
+        self.world_channel.send_async(exec).await?;
 
         Ok(UpdateCodeResp {
             status: sandbox::Status::Success.into(),
@@ -209,52 +238,6 @@ impl SandboxControl for ControlService {
                 Err(status)
             }
         }
-    }
-}
-
-#[derive(Clone)]
-struct SimRunner {
-    client: Client,
-    exec_tx: flume::Sender<WorldExec<Compiled>>,
-}
-
-impl SimRunner {
-    fn new(server_rx: flume::Receiver<MsgPair>) -> anyhow::Result<Self> {
-        let mut client = Client::cpu()?;
-        client.disable_optimizations();
-        let (exec_tx, exec_rx) = flume::bounded(1);
-        std::thread::spawn(move || -> anyhow::Result<()> {
-            let exec: WorldExec<Compiled> = exec_rx.recv()?;
-            let mut impeller_exec = ImpellerExec::new(exec, server_rx.clone());
-            loop {
-                let start = Instant::now();
-                if let Err(err) = impeller_exec.run() {
-                    error!(?err, "failed to run impeller exec");
-                    return Err(err.into());
-                }
-                let sleep_time = impeller_exec
-                    .run_time_step()
-                    .saturating_sub(start.elapsed());
-                thread::sleep(sleep_time);
-
-                if let Ok(exec) = exec_rx.try_recv() {
-                    tracing::info!("received new code, updating sim");
-                    let conns = impeller_exec.connections().to_vec();
-                    impeller_exec = ImpellerExec::new(exec, server_rx.clone());
-                    for conn in conns {
-                        impeller_exec.add_connection(conn)?;
-                    }
-                }
-            }
-        });
-        Ok(Self { client, exec_tx })
-    }
-
-    fn update(&self, exec: WorldExec) -> anyhow::Result<()> {
-        let exec = exec.compile(self.client.clone())?;
-        self.exec_tx
-            .try_send(exec)
-            .context("failed to send new exec to sim runner")
     }
 }
 

@@ -1,11 +1,12 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
     asset::embedded_asset,
-    core_pipeline::{bloom::BloomSettings, tonemapping::Tonemapping},
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
+    math::{DQuat, DVec3},
     pbr::{
         wireframe::{WireframeConfig, WireframePlugin},
         DirectionalLightShadowMap,
@@ -22,14 +23,18 @@ use bevy::{
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
-use bevy_mod_picking::prelude::*;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use impeller::{
-    well_known::{Viewport, WorldPos},
-    ControlMsg, EntityId,
+use impeller2::types::Msg;
+use impeller2::types::OwnedPacket;
+use impeller2_bevy::{
+    AssetHandle, ComponentValueMap, CurrentStreamId, EntityMap, NewConnection, PacketHandlerInput,
+    PacketHandlers, PacketTx,
 };
+use impeller2_wkt::Glb;
+use impeller2_wkt::{SetStreamState, Tick, Viewport, WorldPos};
+use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
-use ui::{tiles, EntityPair, HoveredEntity};
+use ui::tiles;
 
 pub mod chunks;
 mod plugins;
@@ -140,14 +145,15 @@ impl Plugin for EditorPlugin {
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
-            .add_plugins(DefaultPickingPlugins)
+            //.add_plugins(DefaultPickingPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin)
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
-            .add_plugins(crate::plugins::gizmos::GizmoPlugin)
+            .add_plugins(impeller2_bevy::Impeller2Plugin)
+            //.add_plugins(crate::plugins::gizmos::GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(WireframePlugin)
@@ -157,8 +163,15 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             .add_systems(Startup, spawn_clear_bg)
-            .add_systems(Update, make_entities_selectable)
+            .add_systems(Startup, setup_clear_state)
+            //.add_systems(Update, make_entities_selectable)
+            .add_systems(PreUpdate, setup_cell)
+            .add_systems(PreUpdate, sync_res::<Tick>)
+            .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(PreUpdate, sync_pos)
+            .add_systems(PreUpdate, sync_mesh_to_bevy)
+            .add_systems(PreUpdate, sync_material_to_bevy)
+            .add_systems(PreUpdate, sync_glb_to_bevy)
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .insert_resource(WireframeConfig {
@@ -173,7 +186,7 @@ impl Plugin for EditorPlugin {
         #[cfg(target_os = "macos")]
         app.add_systems(Startup, setup_titlebar);
 
-        app.insert_resource(Msaa::default());
+        //app.insert_resource(Msaa::default());
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -201,42 +214,35 @@ fn setup_floating_origin(mut commands: Commands) {
 }
 
 fn spawn_clear_bg(mut commands: Commands) {
-    commands.spawn((Camera2dBundle::default(), IsDefaultUiCamera));
+    commands.spawn((Camera2d, IsDefaultUiCamera));
     let bg_color = Color::Srgba(Srgba::hex("#0C0C0C").unwrap());
     // root node
     commands
-        .spawn(NodeBundle {
-            style: Style {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                justify_content: JustifyContent::Stretch,
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Stretch,
+            flex_direction: FlexDirection::Column,
             ..default()
         })
         .with_children(|parent| {
-            parent.spawn(NodeBundle {
-                style: Style {
+            parent
+                .spawn(Node {
                     height: Val::Px(56.0),
                     ..default()
-                },
-                background_color: if cfg!(target_os = "macos") {
-                    Color::NONE.into()
+                })
+                .insert(BackgroundColor(if cfg!(target_os = "macos") {
+                    Color::NONE
                 } else {
-                    bg_color.into()
-                },
-                ..default()
-            });
+                    bg_color
+                }));
 
-            parent.spawn(NodeBundle {
-                style: Style {
+            parent
+                .spawn(Node {
                     height: Val::Percent(100.0),
                     ..default()
-                },
-                background_color: bg_color.into(),
-                ..default()
-            });
+                })
+                .insert(BackgroundColor(bg_color));
         });
 }
 
@@ -278,30 +284,26 @@ fn spawn_main_camera(
         ))
         .id();
     let mut camera = commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
-                .looking_at(Vec3::ZERO, Vec3::Y),
-            camera: Camera {
-                hdr: false,
-                clear_color: ClearColorConfig::None,
-                order: 1,
-                ..Default::default()
-            },
-            projection: Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov.to_radians(),
-                ..Default::default()
-            }),
-            tonemapping: Tonemapping::TonyMcMapface,
-            exposure: Exposure::from_physical_camera(PhysicalCameraParameters {
-                aperture_f_stops: 2.8,
-                shutter_speed_s: 1.0 / 200.0,
-                sensitivity_iso: 400.0,
-                // full frame sensor height
-                sensor_height: 24.0 / 1000.0,
-            }),
-
-            ..default()
+        Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera3d::default(),
+        Camera {
+            hdr: false,
+            clear_color: ClearColorConfig::None,
+            order: 1,
+            ..Default::default()
         },
+        Projection::Perspective(PerspectiveProjection {
+            fov: viewport.fov.to_radians(),
+            ..Default::default()
+        }),
+        Tonemapping::TonyMcMapface,
+        Exposure::from_physical_camera(PhysicalCameraParameters {
+            aperture_f_stops: 2.8,
+            shutter_speed_s: 1.0 / 200.0,
+            sensitivity_iso: 400.0,
+            // full frame sensor height
+            sensor_height: 24.0 / 1000.0,
+        }),
         main_camera_layers,
         MainCamera,
         GridCell::<i128>::default(),
@@ -313,15 +315,16 @@ fn spawn_main_camera(
             last_anchor_depth: 2.0,
             ..Default::default()
         },
-        impeller::bevy::Persistent,
+        //impeller::bevy::Persistent,
         GridHandle { grid: grid_id },
     ));
 
-    camera.insert(BloomSettings { ..default() });
+    camera.insert(Bloom { ..default() });
     camera.insert(EnvironmentMapLight {
         diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
         specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),
         intensity: 2000.0,
+        ..Default::default()
     });
 
     let camera = camera.id();
@@ -624,35 +627,13 @@ fn set_icon_mac() {
 #[derive(Component)]
 pub struct EntityConfigured;
 
-fn make_entities_selectable(
-    mut commands: Commands,
-    entities: Query<(&EntityId, Entity), Without<EntityConfigured>>,
+pub fn setup_cell(
+    query: Query<Entity, (With<WorldPos>, Without<GridCell<i128>>)>,
+    mut cmds: Commands,
 ) {
-    for (entity_id, entity) in entities.iter() {
-        let entity_id = entity_id.to_owned();
-        commands.entity(entity).insert((
-            EntityConfigured,
-            On::<Pointer<Out>>::run(
-                move |_event: Listener<Pointer<Out>>, mut hovered_entity: ResMut<HoveredEntity>| {
-                    hovered_entity.0 = None
-                },
-            ),
-            On::<Pointer<Over>>::run(
-                move |_event: Listener<Pointer<Over>>,
-                      mut hovered_entity: ResMut<HoveredEntity>,
-                      viewport_contains_pointer: Res<tiles::ViewportContainsPointer>| {
-                    hovered_entity.0 = if viewport_contains_pointer.0 {
-                        Some(EntityPair {
-                            bevy: entity,
-                            impeller: entity_id,
-                        })
-                    }
-                    else {
-                        None
-                    };
-                },
-            ),
-        ));
+    for e in query.iter() {
+        cmds.entity(e)
+            .insert((Transform::default(), GridCell::<i128>::default()));
     }
 }
 
@@ -676,8 +657,178 @@ pub fn sync_pos(
         });
 }
 
-pub fn sync_paused(paused: Res<ui::Paused>, mut event: EventWriter<ControlMsg>) {
-    if paused.is_changed() {
-        event.send(ControlMsg::SetPlaying(!paused.0));
+pub trait WorldPosExt {
+    fn bevy_pos(&self) -> DVec3;
+    fn bevy_att(&self) -> DQuat;
+}
+
+impl WorldPosExt for WorldPos {
+    fn bevy_pos(&self) -> DVec3 {
+        let [x, y, z] = self.pos.parts().map(Tensor::into_buf);
+        DVec3::new(x, z, -y)
     }
+
+    fn bevy_att(&self) -> DQuat {
+        let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
+        let x = i;
+        let y = k;
+        let z = -j;
+        DQuat::from_xyzw(x, y, z, w)
+    }
+}
+
+pub fn sync_paused(
+    paused: Res<ui::Paused>,
+    event: ResMut<PacketTx>,
+    stream_id: Res<CurrentStreamId>,
+) {
+    if paused.is_changed() {
+        event.send_msg(SetStreamState {
+            id: stream_id.0,
+            playing: Some(!paused.0),
+            tick: None,
+        })
+    }
+}
+
+#[derive(Default)]
+struct SyncedMeshes(HashMap<AssetHandle<impeller2_wkt::Mesh>, Handle<Mesh>>);
+
+fn sync_mesh_to_bevy(
+    mesh: Query<(
+        Entity,
+        &impeller2_wkt::Mesh,
+        &AssetHandle<impeller2_wkt::Mesh>,
+    )>,
+    mut mesh_assets: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+    mut cache: Local<SyncedMeshes>,
+) {
+    for (entity, mesh, handle) in mesh.iter() {
+        let mut entity = commands.entity(entity);
+        let mesh = if let Some(mesh) = cache.0.get(handle) {
+            mesh.clone()
+        } else {
+            let mesh = mesh.clone().into_bevy();
+            let mesh = mesh_assets.add(mesh);
+            cache.0.insert(handle.clone(), mesh.clone());
+            mesh
+        };
+        entity.insert(Mesh3d(mesh));
+    }
+}
+
+pub trait BevyExt {
+    type Bevy;
+    fn into_bevy(self) -> Self::Bevy;
+}
+impl BevyExt for impeller2_wkt::Mesh {
+    type Bevy = Mesh;
+
+    fn into_bevy(self) -> Self::Bevy {
+        match self {
+            impeller2_wkt::Mesh::Sphere { radius } => {
+                bevy::math::primitives::Sphere { radius }.into()
+            }
+            impeller2_wkt::Mesh::Box { x, y, z } => {
+                bevy::math::primitives::Cuboid::new(x, y, z).into()
+            }
+            impeller2_wkt::Mesh::Cylinder { radius, height } => {
+                bevy::math::primitives::Cylinder::new(radius, height).into()
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct SyncedMaterials(HashMap<AssetHandle<impeller2_wkt::Material>, Handle<StandardMaterial>>);
+fn sync_material_to_bevy(
+    material: Query<(
+        Entity,
+        &impeller2_wkt::Material,
+        &AssetHandle<impeller2_wkt::Material>,
+    )>,
+    mut material_assets: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+    mut cache: Local<SyncedMaterials>,
+) {
+    for (entity, material, handle) in material.iter() {
+        let mut entity = commands.entity(entity);
+        let material = if let Some(material) = cache.0.get(handle) {
+            material.clone()
+        } else {
+            let material = material.clone().into_bevy();
+            let material = material_assets.add(material);
+            cache.0.insert(handle.clone(), material.clone());
+            material
+        };
+        entity.insert(MeshMaterial3d(material));
+    }
+}
+
+impl BevyExt for impeller2_wkt::Material {
+    type Bevy = StandardMaterial;
+
+    fn into_bevy(self) -> Self::Bevy {
+        bevy::prelude::StandardMaterial {
+            base_color: Color::srgb(self.base_color.r, self.base_color.g, self.base_color.b),
+            ..Default::default()
+        }
+    }
+}
+
+fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
+    for t in &q {
+        *res = t.clone();
+    }
+}
+
+#[derive(Default)]
+struct SyncedGlbs(HashMap<AssetHandle<Glb>, Handle<Scene>>);
+
+fn sync_glb_to_bevy(
+    mut commands: Commands,
+    mut cache: Local<SyncedGlbs>,
+    glb: Query<(Entity, &Glb, &AssetHandle<Glb>)>,
+    assets: Res<AssetServer>,
+) {
+    for (entity, glb, handle) in glb.iter() {
+        let Glb(u) = glb;
+        let mut entity = commands.entity(entity);
+        let scene = if let Some(glb) = cache.0.get(handle) {
+            glb.clone()
+        } else {
+            let url = format!("{u}#Scene0");
+            let scene = assets.load(&url);
+            cache.0.insert(handle.clone(), scene.clone());
+            scene
+        };
+        entity.insert(SceneRoot(scene));
+    }
+}
+
+pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
+    let sys = commands.register_system(clear_state_new_connection);
+    packet_handlers.0.push(sys);
+}
+
+fn clear_state_new_connection(
+    PacketHandlerInput { packet, .. }: PacketHandlerInput,
+    mut entity_map: ResMut<EntityMap>,
+    mut value_map: Query<&mut ComponentValueMap>,
+    mut commands: Commands,
+) {
+    match packet {
+        OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
+        _ => return,
+    }
+    entity_map.0.retain(|_, entity| {
+        if let Some(entity) = commands.get_entity(*entity) {
+            entity.despawn_recursive();
+        }
+        false
+    });
+    value_map.iter_mut().for_each(|mut map| {
+        map.0.clear();
+    });
 }

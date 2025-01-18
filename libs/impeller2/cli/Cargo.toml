@@ -1,0 +1,47 @@
+[package]
+name = "impeller2-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["highlight"]
+highlight = ["syntastica", "syntastica-parsers", "syntastica-themes"]
+
+[dependencies]
+# lua
+mlua.version = "0.10"
+mlua.features = ["luau", "serialize", "vendored", "async", "anyhow"]
+
+# repl
+rustyline.version = "15.0.0"
+rustyline.features = ["derive"]
+nu-ansi-term = "0.49"
+directories = "5.0.1"
+syntastica.version = "0.4.1"
+syntastica.optional = true
+syntastica-parsers.version = "0.4.1"
+syntastica-parsers.features = ["lua"]
+syntastica-parsers.optional = true
+syntastica-themes.version = "0.4.1"
+syntastica-themes.optional = true
+
+# async
+stellarator.path = "../../stellarator"
+stellarator.features = ["miette"]
+impeller2-stella.path = "../stella"
+
+# ser-de
+impeller2.path = ".."
+impeller2.features = ["std"]
+impeller2-wkt.path = "../wkt"
+serde.version = "1.0"
+serde.features = ["derive"]
+postcard = "1.0"
+zerocopy = "0.8"
+
+# rand
+fastrand = "2.2.0"
+
+# anyhow
+anyhow = "1"

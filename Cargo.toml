@@ -32,8 +32,15 @@ members = [
     "libs/impeller2",
     "libs/impeller2/stella",
     "libs/impeller2/db",
+    "libs/impeller2/bevy",
+    "libs/impeller2/wkt",
+    "libs/impeller2/cli",
     "libs/stellarator",
-    "fsw/file-bridge"
+    "libs/stellarator/buf",
+    "libs/stellarator/maitake",
+    "libs/stellarator/maitake/util",
+    "fsw/file-bridge",
+    "fsw/serial-bridge",
 ]
 exclude = [
     "fsw/multicopter",

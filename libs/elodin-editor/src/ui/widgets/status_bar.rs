@@ -5,7 +5,7 @@ use bevy::{
         world::World,
     },
 };
-use impeller::bevy::{MaxTick, Tick, TimeStep};
+use impeller2_wkt::{MaxTick, SimulationTimeStep, Tick};
 
 use crate::ui::colors;
 
@@ -13,7 +13,7 @@ use super::RootWidgetSystem;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w> {
-    tick_time: Res<'w, TimeStep>,
+    tick_time: Res<'w, SimulationTimeStep>,
     current_tick: Res<'w, Tick>,
     max_tick: Res<'w, MaxTick>,
     diagnostics: Res<'w, DiagnosticsStore>,
@@ -49,11 +49,7 @@ impl RootWidgetSystem for StatusBar<'_> {
 
                     // Status
 
-                    ui.add(editor_status_label(
-                        tick_time.0.as_secs_f64(),
-                        current_tick.0,
-                        max_tick.0,
-                    ));
+                    ui.add(editor_status_label(tick_time.0, current_tick.0, max_tick.0));
 
                     // Editor FPS
 
@@ -70,8 +66,8 @@ impl RootWidgetSystem for StatusBar<'_> {
 
                     // Simulator TPS
 
-                    let sim_fps = if tick_time.0.as_secs_f64() > 0.0 {
-                        format!("{:>6.1}", 1.0 / tick_time.0.as_secs_f64())
+                    let sim_fps = if tick_time.0 > 0.0 {
+                        format!("{:>6.1}", 1.0 / tick_time.0)
                     } else {
                         String::from("N/A")
                     };

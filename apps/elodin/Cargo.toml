@@ -27,21 +27,21 @@ ignore = "0.4"
 tar = "0.4.40"
 tempfile = "3.10.0"
 tokio = { version = "1.35.1", features = ["full"] }
-tokio-util.version = "0.7.11"
-tokio-util.features = ["rt"]
 tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+stellarator.path = "../../libs/stellarator"
 uuid = "1.7.0"
 directories = "5.0.1"
 zstd = "0.13.0"
-bevy.version = "0.14"
+bevy.version = "0.15"
 flume = "0.11.0"
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
 
 elodin-types.path = "../../libs/elodin-types/rust"
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
-impeller.path = "../../libs/impeller"
-impeller.features = ["tokio", "polars"]
+impeller2-bevy.path = "../../libs/impeller2/bevy"
+# impeller.path = "../../libs/impeller"
+# impeller.features = ["tokio", "polars"]
 
 # crypto
 ring = "0.17"

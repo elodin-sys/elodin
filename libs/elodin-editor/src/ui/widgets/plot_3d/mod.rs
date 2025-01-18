@@ -1,41 +1,36 @@
 use std::collections::BTreeMap;
 
 use bevy::{
-    app::{Plugin, Update},
-    asset::{Assets, Handle},
+    app::{Startup, Update},
+    asset::Assets,
     ecs::{
         entity::Entity,
-        event::EventWriter,
         query::{With, Without},
-        schedule::IntoSystemConfigs,
         system::{Commands, Query, Res, ResMut},
     },
     math::{Mat4, Vec4},
     render::view::RenderLayers,
 };
 use big_space::GridCell;
-use impeller::{
-    bevy::Tick,
-    query::MetadataStore,
-    well_known::{EntityMetadata, Line3d},
-    ControlMsg,
-};
+use gpu::LineDataHandle;
+use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry};
+use impeller2_wkt::MaxTick;
+use impeller2_wkt::{EntityMetadata, GetTimeSeries, Line3d};
 
+use self::data::collect_entity_data;
 use self::{
     data::{CollectedGraphData, LineData, PlotDataComponent, PlotDataEntity},
     gpu::{LineBundle, LineConfig, LineUniform},
 };
-
-use super::entity_data::collect_entity_data;
 
 pub mod data;
 pub mod gpu;
 
 pub fn sync_line_plot_3d(
     mut collected_graph_data: ResMut<CollectedGraphData>,
-    line_plot_3d_query: Query<(Entity, &EntityMetadata, &Line3d), Without<Handle<LineData>>>,
-    metadata_store: Res<MetadataStore>,
-    mut uniforms: Query<(&Line3d, &mut LineUniform), With<Handle<LineData>>>,
+    line_plot_3d_query: Query<(Entity, &EntityMetadata, &Line3d), Without<LineDataHandle>>,
+    metadata_store: Res<ComponentMetadataRegistry>,
+    mut uniforms: Query<(&Line3d, &mut LineUniform), With<LineDataHandle>>,
     mut line_3ds: ResMut<Assets<LineData>>,
     mut commands: Commands,
 ) {
@@ -65,7 +60,7 @@ pub fn sync_line_plot_3d(
             line
         };
         commands.entity(entity).insert(LineBundle {
-            line,
+            line: LineDataHandle(line),
             uniform: LineUniform {
                 line_width: line_plot.line_width,
                 color: Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0),
@@ -91,13 +86,13 @@ pub fn sync_line_plot_3d(
 }
 
 pub fn set_line_plot_3d_range(
-    mut query: Query<(&Handle<LineData>, &Line3d)>,
+    mut query: Query<(&LineDataHandle, &Line3d)>,
     mut line_3ds: ResMut<Assets<LineData>>,
-    max_tick: Res<Tick>,
-    mut control_msg: EventWriter<ControlMsg>,
+    max_tick: Res<MaxTick>,
+    mut commands: Commands,
 ) {
     for (handle, meta) in &mut query {
-        let Some(line) = line_3ds.get_mut(handle) else {
+        let Some(line) = line_3ds.get_mut(&handle.0) else {
             continue;
         };
         let new_range = 0..max_tick.0 as usize;
@@ -118,14 +113,21 @@ pub fn set_line_plot_3d_range(
 
                 if end.saturating_sub(start) > 0 {
                     chunk.unfetched.remove_range(start as u32..end as u32);
-                    control_msg.send(ControlMsg::Query {
-                        time_range,
-                        query: impeller::Query {
+
+                    let packet_id = fastrand::u64(..).to_le_bytes()[..3]
+                        .try_into()
+                        .expect("id wrong size");
+
+                    commands.send_req_with_handler(
+                        GetTimeSeries {
+                            id: packet_id,
+                            range: time_range.clone(),
+                            entity_id: meta.entity,
                             component_id: meta.component_id,
-                            with_component_ids: vec![],
-                            entity_ids: vec![meta.entity],
                         },
-                    });
+                        packet_id,
+                        data::time_series_handler(meta.entity, meta.component_id, time_range),
+                    );
                 }
             }
         }
@@ -134,11 +136,13 @@ pub fn set_line_plot_3d_range(
 
 pub struct LinePlot3dPlugin;
 
-impl Plugin for LinePlot3dPlugin {
+impl bevy::app::Plugin for LinePlot3dPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<CollectedGraphData>()
             .add_plugins(gpu::Plot3dGpuPlugin)
             .add_systems(Update, sync_line_plot_3d)
-            .add_systems(Update, set_line_plot_3d_range.after(collect_entity_data));
+            .add_systems(Startup, data::setup_pkt_handler)
+            .add_systems(Update, collect_entity_data)
+            .add_systems(Update, set_line_plot_3d_range);
     }
 }

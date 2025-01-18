@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use impeller::{client::AsyncClient, ColumnPayload, Packet, Payload, StreamId};
+use impeller2::{client::AsyncClient, ColumnPayload, Packet, Payload, StreamId};
 use pyo3::prelude::*;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
@@ -7,24 +7,24 @@ use tokio::sync::Mutex;
 use crate::{Archetype, EntityId, Error, Metadata, PyUntypedArrayExt};
 
 #[pyclass]
-pub struct Impeller {
-    inner: Arc<Mutex<ImpellerInner>>,
+pub struct Impeller2 {
+    inner: Arc<Mutex<Impeller2Inner>>,
     rt: tokio::runtime::Runtime,
 }
 
-pub struct ImpellerInner {
+pub struct Impeller2Inner {
     addr: SocketAddr,
-    client: Option<impeller::client::TcpClient>,
+    client: Option<impeller2::client::TcpClient>,
 }
 
 #[pymethods]
-impl Impeller {
+impl Impeller2 {
     #[staticmethod]
     pub fn tcp(addr: String) -> Result<Self, Error> {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let addr: SocketAddr = addr.parse().unwrap();
-        let inner = Arc::new(Mutex::new(ImpellerInner::new(addr)));
-        Ok(Impeller { inner, rt })
+        let inner = Arc::new(Mutex::new(Impeller2Inner::new(addr)));
+        Ok(Impeller2 { inner, rt })
     }
 
     pub fn send(
@@ -44,7 +44,7 @@ impl Impeller {
             .iter()
             .zip(component_data.iter())
             .map(|(arr, data)| {
-                let ty: impeller::ComponentType = data.component_type.clone();
+                let ty: impeller2::ComponentType = data.component_type.clone();
                 let elem_size = ty.primitive_ty.element_type().element_size_in_bytes();
                 unsafe { Bytes::copy_from_slice(arr.buf(elem_size)) }
             })
@@ -56,12 +56,12 @@ impl Impeller {
     }
 }
 
-impl ImpellerInner {
+impl Impeller2Inner {
     fn new(addr: SocketAddr) -> Self {
         Self { addr, client: None }
     }
 
-    async fn client(&mut self) -> Result<&mut impeller::client::TcpClient, Error> {
+    async fn client(&mut self) -> Result<&mut impeller2::client::TcpClient, Error> {
         if let Some(ref mut client) = self.client {
             Ok(client)
         } else {
@@ -82,7 +82,7 @@ impl ImpellerInner {
         for _ in 0..2 {
             match send_inner(client, entity_id, &component_data, &arrays, time).await {
                 Ok(_) => break,
-                Err(impeller::Error::Io(_)) => {
+                Err(impeller2::Error::Io(_)) => {
                     continue;
                 }
                 Err(err) => return Err(err.into()),
@@ -93,12 +93,12 @@ impl ImpellerInner {
 }
 
 async fn send_inner(
-    client: &mut impeller::client::TcpClient,
+    client: &mut impeller2::client::TcpClient,
     entity_id: EntityId,
     component_data: &[Metadata],
     arrays: &[Bytes],
     time: u64,
-) -> Result<(), impeller::Error> {
+) -> Result<(), impeller2::Error> {
     let stream_id = StreamId::rand();
     for (data, value_buf) in component_data.iter().zip(arrays.iter()) {
         let packet: Packet<Payload<Bytes>> = Packet::start_stream(stream_id, data.inner.clone());

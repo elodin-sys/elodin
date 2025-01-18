@@ -16,16 +16,18 @@ type DefaultReactor = poll::PollingReactor;
 #[cfg(target_os = "linux")]
 type DefaultReactor = uring::UringReactor;
 
-pub mod buf;
+pub use stellarator_buf as buf;
 pub mod fs;
 pub mod io;
 pub mod net;
 pub mod os;
+pub mod struc_con;
+pub mod util;
 
 mod noop_waker;
 
-pub use maitake::task::JoinHandle;
-use maitake::time::Timer;
+use maitake::{scheduler::ExternalWaker, time::Timer};
+use pin_project::pin_project;
 #[cfg(not(target_os = "linux"))]
 pub(crate) use poll as reactor;
 #[cfg(target_os = "linux")]
@@ -65,6 +67,9 @@ pub enum Error {
     EOF,
     #[error("integer overflow")]
     IntegerOverflow,
+
+    #[error("join failed")]
+    JoinFailed,
 }
 
 impl From<std::io::Error> for Error {
@@ -121,6 +126,7 @@ pub trait Reactor {
     fn process_io(&mut self) -> Result<(), Error>;
     fn finalize_io(&mut self) -> Result<(), Error>;
     fn waker(&self) -> Waker;
+    fn external_waker(&self) -> impl ExternalWaker;
 }
 
 pub fn run<R, F>(func: impl FnOnce() -> F) -> R
@@ -152,11 +158,44 @@ where
     F: Future + 'static,
     F::Output: Send + 'static,
 {
-    Executor::with(|exec| exec.scheduler.spawn(f))
+    JoinHandle(Executor::with(|exec| exec.scheduler.spawn(f)))
 }
+
 pub fn sleep(duration: Duration) -> maitake::time::Sleep<'static> {
     let timer: &'static Timer = unsafe { &*Executor::with(|e| &e.timer as *const _) };
     timer.sleep(duration)
+}
+
+#[pin_project]
+pub struct JoinHandle<O>(#[pin] pub maitake::task::JoinHandle<O>);
+
+impl<O> JoinHandle<O> {
+    pub fn drop_guard(self) -> JoinHandleDropGuard<O> {
+        JoinHandleDropGuard(self)
+    }
+}
+
+pub struct JoinHandleDropGuard<T>(crate::JoinHandle<T>);
+
+impl<T> Drop for JoinHandleDropGuard<T> {
+    fn drop(&mut self) {
+        self.0 .0.cancel();
+    }
+}
+
+impl<O> Future for JoinHandle<O> {
+    type Output = <maitake::task::JoinHandle<O> as Future>::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().0.poll(cx)
+    }
+}
+
+#[cfg(feature = "futures")]
+impl<O> futures::future::FusedFuture for JoinHandle<O> {
+    fn is_terminated(&self) -> bool {
+        self.0.is_complete()
+    }
 }
 
 #[macro_export]

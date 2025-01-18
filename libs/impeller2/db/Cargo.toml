@@ -8,14 +8,18 @@ publish = false
 # ser-de
 impeller2.path = ".."
 impeller2.features = ["std"]
-impeller2-stella.path = "../stella"
+impeller2-wkt.path = "../wkt"
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.0"
+nox.path = "../../nox"
+nox.default-features = false
 
 # async
 stellarator.path = "../../stellarator"
 stellarator.features = ["miette"]
+impeller2-stella.path = "../stella"
+futures-lite = "2.5.0"
 
 # data structures
 memmap2 = "0.9"
@@ -39,4 +43,3 @@ fastrand = "2.2.0"
 # cli
 clap.version = "4.4.18"
 clap.features = ["derive"]
-serde_json = "1.0.133"

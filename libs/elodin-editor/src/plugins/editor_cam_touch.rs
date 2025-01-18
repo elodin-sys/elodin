@@ -108,13 +108,13 @@ impl TouchTracker {
                 // Rotate
                 let prev_vec = prev2_pos - prev1_pos;
                 let curr_vec = curr2_pos - curr1_pos;
-                let prev_angle_negy = prev_vec.angle_between(Vec2::NEG_Y);
-                let curr_angle_negy = curr_vec.angle_between(Vec2::NEG_Y);
-                let prev_angle_posy = prev_vec.angle_between(Vec2::Y);
-                let curr_angle_posy = curr_vec.angle_between(Vec2::Y);
+                let prev_angle_negy = prev_vec.angle_to(Vec2::NEG_Y);
+                let curr_angle_negy = curr_vec.angle_to(Vec2::NEG_Y);
+                let prev_angle_posy = prev_vec.angle_to(Vec2::Y);
+                let curr_angle_posy = curr_vec.angle_to(Vec2::Y);
                 let rotate_angle_negy = curr_angle_negy - prev_angle_negy;
                 let rotate_angle_posy = curr_angle_posy - prev_angle_posy;
-                // The angle between -1deg and +1deg is 358deg according to Vec2::angle_between,
+                // The angle between -1deg and +1deg is 358deg according to Vec2::angle_to,
                 // but we want the answer to be +2deg (or -2deg if swapped). Therefore, we calculate
                 // two angles - one from UP and one from DOWN, and use the one with the smallest
                 // absolute value. This is necessary to get a predictable result when the two touches

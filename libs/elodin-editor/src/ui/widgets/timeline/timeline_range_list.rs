@@ -2,7 +2,8 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
-use impeller::bevy::MaxTick;
+use egui::UiBuilder;
+use impeller2_wkt::MaxTick;
 
 use crate::ui::{
     colors::{self, with_opacity},
@@ -100,7 +101,7 @@ impl WidgetSystem for TimelineRangeListHeader<'_> {
 
                 // Button
 
-                ui.allocate_ui_at_rect(inner_rect, |ui| {
+                ui.allocate_new_ui(UiBuilder::new().max_rect(inner_rect), |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = ui.add(
                             EImageButton::new(icons.add)
@@ -209,7 +210,7 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
                 ui.scope(|ui| {
                     // Label
 
-                    ui.allocate_ui_at_rect(inner_rect, |ui| {
+                    ui.allocate_new_ui(UiBuilder::new().max_rect(inner_rect), |ui| {
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             let btn = ui.add(
                                 EImageButton::new(icons.range_loop)
@@ -259,7 +260,7 @@ impl WidgetSystem for TimelineRangeList<'_, '_> {
 
                     // Button
 
-                    ui.allocate_ui_at_rect(inner_rect, |ui| {
+                    ui.allocate_new_ui(UiBuilder::new().max_rect(inner_rect), |ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let remove_btn = ui.add(
                                 EImageButton::new(icons.remove)

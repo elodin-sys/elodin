@@ -703,7 +703,7 @@ exec = w.run(
         integrator=el.Integrator.SemiImplicit,
     ),
     sim_time_step=SIM_TIME_STEP,
-    default_playback_speed=5.0,
+    default_playback_speed=20.0,
     max_ticks=60 * 20 * 60,
     optimize=True,
 )

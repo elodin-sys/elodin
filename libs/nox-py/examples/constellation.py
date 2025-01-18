@@ -430,7 +430,7 @@ def spawn_sat(x, y, w: el.World):
 
 
 sat = spawn_sat(0, 0, w)
-count = 20
+count = 256
 bound = int(count**0.5 / 2)
 for x in range(-bound, bound):
     for y in range(-bound, bound):

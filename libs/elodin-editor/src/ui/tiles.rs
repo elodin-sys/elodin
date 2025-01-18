@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
 
 use bevy::{
     ecs::system::{SystemParam, SystemState},
@@ -12,13 +15,11 @@ use bevy_egui::{
 };
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
+use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller::{
-    bevy::{ComponentValueMap, EntityMap, Tick, TimeStep},
-    query::MetadataStore,
-    well_known::{EntityMetadata, Graph, Panel, Viewport},
-    ComponentId, ControlMsg, EntityId,
-};
+use impeller2::types::{ComponentId, EntityId};
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
+use impeller2_wkt::{EntityMetadata, Graph, MaxTick, Panel, SimulationTimeStep, Tick, Viewport};
 use nox::Tensor;
 
 use super::{
@@ -26,7 +27,7 @@ use super::{
     widgets::{
         button::{EImageButton, ETileButton},
         modal::ModalNewTile,
-        plot::{self, GraphBundle, GraphState, Line, Plot},
+        plot::{self, gpu::LineHandle, GraphBundle, GraphState, Line, Plot},
         timeline::timeline_ranges::{TimelineRangeId, TimelineRanges},
         WidgetSystem, WidgetSystemExt,
     },
@@ -148,14 +149,14 @@ impl Pane {
         graphs_state: &mut Query<&mut GraphState>,
         timeline_ranges: &TimelineRanges,
         lines: &mut Assets<Line>,
-        lines_query: &Query<&Handle<Line>>,
+        lines_query: &Query<&LineHandle>,
         commands: &mut Commands,
         icons: &TileIcons,
         entity_map: &EntityMap,
         entity_metadata: &Query<&EntityMetadata>,
-        metadata_store: &MetadataStore,
-        control_msg: &mut EventWriter<ControlMsg>,
+        metadata_store: &ComponentMetadataRegistry,
         component_value_query: &Query<&ComponentValueMap>,
+        max_tick: MaxTick,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -190,7 +191,7 @@ impl Pane {
                         entity_map,
                         entity_metadata,
                         metadata_store,
-                        control_msg,
+                        max_tick,
                     )
                     .render(
                         ui,
@@ -218,9 +219,9 @@ impl Pane {
                     return egui_tiles::UiResponse::None;
                 };
 
-                pane.label = format!("Component Monitor: {:?}", metadata.component_name());
+                pane.label = format!("Component Monitor: {:?}", metadata.name);
                 for value in component_value_map.0.iter() {
-                    ui.label(format!("{:?}: {:?}", metadata.component_name(), value));
+                    ui.label(format!("{:?}: {:?}", metadata.name, value));
                 }
                 egui_tiles::UiResponse::None
             }
@@ -314,17 +315,17 @@ struct TreeBehavior<'a, 'w, 's> {
     timeline_ranges: &'a TimelineRanges,
     collected_graph_data: &'a mut CollectedGraphData,
     lines: &'a mut Assets<Line>,
-    line_query: &'a Query<'w, 's, &'static Handle<Line>>,
+    line_query: &'a Query<'w, 's, &'static LineHandle>,
     graph_state_query: &'a mut Query<'w, 's, &'static mut GraphState>,
     time_step: std::time::Duration,
     current_tick: u64,
     commands: &'a mut Commands<'w, 's>,
     entity_map: &'a EntityMap,
     entity_metadata: &'a Query<'w, 's, &'static EntityMetadata>,
-    metadata_store: &'a MetadataStore,
-    control_msg: &'a mut EventWriter<'w, ControlMsg>,
+    metadata_store: &'a ComponentMetadataRegistry,
     new_tile_state: ResMut<'w, NewTileState>,
     component_value_query: &'a Query<'w, 's, &'static ComponentValueMap>,
+    max_tick: MaxTick,
 }
 
 pub enum TreeAction {
@@ -375,8 +376,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
             self.entity_map,
             self.entity_metadata,
             self.metadata_store,
-            self.control_msg,
             self.component_value_query,
+            self.max_tick,
         )
     }
 
@@ -703,8 +704,11 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
 
         let desired_size = egui::vec2(button_width * 3.0 + button_spacing, button_height);
 
-        ui.allocate_ui_at_rect(
-            egui::Rect::from_center_size(ui.max_rect().center(), desired_size),
+        ui.allocate_new_ui(
+            UiBuilder::new().max_rect(egui::Rect::from_center_size(
+                ui.max_rect().center(),
+                desired_size,
+            )),
             |ui| {
                 ui.horizontal(|ui| {
                     ui.style_mut().spacing.item_spacing = egui::vec2(button_spacing, 0.0);
@@ -767,20 +771,20 @@ pub struct TileLayout<'w, 's> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     collected_graph_data: ResMut<'w, CollectedGraphData>,
-    time_step: Res<'w, TimeStep>,
+    time_step: Res<'w, SimulationTimeStep>,
     tick: Res<'w, Tick>,
     lines: ResMut<'w, Assets<Line>>,
-    line_query: Query<'w, 's, &'static Handle<Line>>,
+    line_query: Query<'w, 's, &'static LineHandle>,
     graph_state_query: Query<'w, 's, &'static mut GraphState>,
     entity_map: Res<'w, EntityMap>,
     entity_metadata: Query<'w, 's, &'static EntityMetadata>,
-    metadata_store: Res<'w, MetadataStore>,
-    control_msg: EventWriter<'w, ControlMsg>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam_query: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
     component_value_query: Query<'w, 's, &'static ComponentValueMap>,
     new_tile_state: ResMut<'w, NewTileState>,
+    max_tick: Res<'w, MaxTick>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -813,12 +817,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
             entity_map,
             entity_metadata,
             metadata_store,
-            mut control_msg,
             mut viewport_contains_pointer,
             mut editor_cam_query,
             grid_cell,
             new_tile_state,
             component_value_query,
+            max_tick,
         } = state_mut;
 
         let icons = args;
@@ -840,7 +844,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
             selected_object: selected_object.as_mut(),
             timeline_ranges: timeline_ranges.as_ref(),
             collected_graph_data: collected_graph_data.as_mut(),
-            time_step: time_step.0,
+            time_step: Duration::from_secs_f64(time_step.0),
             current_tick: tick.0,
             lines: lines.as_mut(),
             commands: &mut commands,
@@ -849,9 +853,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
             entity_map: &entity_map,
             entity_metadata: &entity_metadata,
             metadata_store: &metadata_store,
-            control_msg: &mut control_msg,
             component_value_query: &component_value_query,
             new_tile_state,
+            max_tick: *max_tick,
         };
         ui_state.tree.ui(&mut behavior, ui);
         for diff in behavior.tree_actions.drain(..) {
@@ -1007,7 +1011,7 @@ pub struct SyncedViewport;
 
 #[derive(SystemParam)]
 pub struct SyncViewportParams<'w, 's> {
-    panels: Query<'w, 's, (Entity, &'static impeller::well_known::Panel), Without<SyncedViewport>>,
+    panels: Query<'w, 's, (Entity, &'static Panel), Without<SyncedViewport>>,
     commands: Commands<'w, 's>,
     tile_state: ResMut<'w, TileState>,
     asset_server: Res<'w, AssetServer>,
@@ -1017,8 +1021,9 @@ pub struct SyncViewportParams<'w, 's> {
     entity_map: Res<'w, EntityMap>,
     entity_metadata: Query<'w, 's, &'static EntityMetadata>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>>,
-    metadata_store: Res<'w, MetadataStore>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     hdr_enabled: ResMut<'w, HdrEnabled>,
+    component_values: Query<'w, 's, &'static ComponentValueMap>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -1035,6 +1040,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
         grid_cell,
         metadata_store,
         mut hdr_enabled,
+        component_values,
     } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
@@ -1051,6 +1057,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &grid_cell,
             &metadata_store,
             &mut hdr_enabled,
+            &component_values,
         );
 
         commands.entity(entity).insert(SyncedViewport);
@@ -1070,11 +1077,12 @@ fn spawn_panel(
     entity_map: &Res<EntityMap>,
     entity_metadata: &Query<&EntityMetadata>,
     grid_cell: &Query<&GridCell<i128>>,
-    metadata_store: &Res<MetadataStore>,
+    metadata_store: &Res<ComponentMetadataRegistry>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
+    component_values: &Query<&ComponentValueMap>,
 ) -> Option<TileId> {
     match panel {
-        impeller::well_known::Panel::Viewport(viewport) => {
+        Panel::Viewport(viewport) => {
             let label = viewport_label(viewport, entity_map, entity_metadata);
             let pane = ViewportPane::spawn(
                 commands,
@@ -1111,7 +1119,7 @@ fn spawn_panel(
             hdr_enabled.0 |= viewport.hdr;
             ui_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
         }
-        impeller::well_known::Panel::VSplit(split) => {
+        Panel::VSplit(split) => {
             let tile_id = ui_state.insert_tile(
                 Tile::Container(Container::new_linear(
                     egui_tiles::LinearDir::Vertical,
@@ -1135,11 +1143,12 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
+                    component_values,
                 );
             });
             tile_id
         }
-        impeller::well_known::Panel::HSplit(split) => {
+        Panel::HSplit(split) => {
             let tile_id = ui_state.insert_tile(
                 Tile::Container(Container::new_linear(
                     egui_tiles::LinearDir::Horizontal,
@@ -1163,17 +1172,25 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
+                    component_values,
                 );
             });
             tile_id
         }
-        impeller::well_known::Panel::Graph(graph) => {
+        Panel::Graph(graph) => {
             let mut entities = BTreeMap::<EntityId, GraphStateEntity>::default();
+            // TODO
             for entity in graph.entities.iter() {
                 let mut components: BTreeMap<ComponentId, Vec<(bool, Color32)>> = BTreeMap::new();
+                let Some(bevy_entity) = entity_map.get(&entity.entity_id) else {
+                    continue;
+                };
+                let Ok(component_values) = component_values.get(*bevy_entity) else {
+                    continue;
+                };
                 for component in entity.components.iter() {
-                    if let Some(metadata) = metadata_store.get_metadata(&component.component_id) {
-                        let len = metadata.component_type.shape.iter().product::<i64>() as usize;
+                    if let Some(value) = component_values.get(&component.component_id) {
+                        let len = value.shape().iter().product::<usize>();
                         let values =
                             components.entry(component.component_id).or_insert_with(|| {
                                 (0..len)
@@ -1274,7 +1291,7 @@ fn graph_label(
     graph: &Graph,
     entity_map: &EntityMap,
     entity_metadata: &Query<&EntityMetadata>,
-    metadata_store: &MetadataStore,
+    metadata_store: &ComponentMetadataRegistry,
 ) -> String {
     graph
         .name

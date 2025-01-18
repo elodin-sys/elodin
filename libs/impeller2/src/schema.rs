@@ -1,37 +1,40 @@
 use serde::{Deserialize, Serialize};
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
-    buf::{Buf, ByteBufExt},
+    buf::Buf,
     error::Error,
-    table::ShapeEntry,
     types::{ComponentId, PrimType},
 };
 
-#[derive(Serialize, Deserialize)]
-pub struct Schema<DataBuf: Buf<u8>> {
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct Schema<S: Buf<u64>> {
     component_id: ComponentId,
-    shape_entry: ShapeEntry,
+    prim_type: PrimType,
     #[serde(bound(deserialize = ""))]
-    data: DataBuf,
+    shape: S,
 }
 
-impl<D: Buf<u8>> Schema<D> {
-    pub fn new(
+impl<D: Buf<u64>> Schema<D> {
+    pub fn new<T, I>(
         component_id: ComponentId,
         prim_type: PrimType,
-        shape: &[u64],
-    ) -> Result<Self, Error> {
+        shape: I,
+    ) -> Result<Self, Error>
+    where
+        T: DimElem,
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
         let mut data = D::default();
-        let rank = shape.len() as u64;
-        let shape_offset = data.extend_aligned(shape)? as u64;
+        let shape = shape.into_iter();
+        for dim in shape {
+            data.push(dim.into_u64())?;
+        }
         Ok(Self {
             component_id,
-            shape_entry: ShapeEntry {
-                prim_type,
-                rank,
-                shape_offset,
-            },
-            data,
+            shape: data,
+            prim_type,
         })
     }
 
@@ -40,12 +43,33 @@ impl<D: Buf<u8>> Schema<D> {
     }
 
     pub fn prim_type(&self) -> PrimType {
-        self.shape_entry.prim_type
+        self.prim_type
     }
 
     pub fn shape(&self) -> &[usize] {
-        self.shape_entry
-            .parse_shape(self.data.as_slice())
-            .expect("shape not found")
+        let bytes = self.shape.as_slice().as_bytes();
+        <[usize]>::ref_from_bytes(bytes).unwrap()
+    }
+}
+
+pub trait DimElem {
+    fn into_u64(self) -> u64;
+}
+
+impl DimElem for u64 {
+    fn into_u64(self) -> u64 {
+        self
+    }
+}
+
+impl DimElem for usize {
+    fn into_u64(self) -> u64 {
+        self as u64
+    }
+}
+
+impl<T: DimElem + Copy> DimElem for &'_ T {
+    fn into_u64(self) -> u64 {
+        (*self).into_u64()
     }
 }

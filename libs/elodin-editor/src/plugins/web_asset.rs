@@ -133,7 +133,7 @@ impl Client {
 }
 
 impl AssetReader for Client {
-    async fn read<'a>(&'a self, path: &'a Path) -> Result<Box<Reader<'a>>, AssetReaderError> {
+    async fn read<'a>(&'a self, path: &'a Path) -> Result<Box<dyn Reader>, AssetReaderError> {
         let url = self.url(path)?;
         let cached_asset = self.cache.get(&url);
 
@@ -146,10 +146,10 @@ impl AssetReader for Client {
             self.cache.put(&url, cached_asset);
         }
         let reader = VecReader::new(bytes);
-        Ok(Box::new(reader) as Box<Reader<'a>>)
+        Ok(Box::new(reader) as Box<dyn Reader>)
     }
 
-    async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<Box<Reader<'a>>, AssetReaderError> {
+    async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<Box<dyn Reader>, AssetReaderError> {
         Err(AssetReaderError::NotFound(path.to_owned()))
     }
 

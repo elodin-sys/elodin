@@ -20,7 +20,7 @@ impl UdpSocket {
         )?;
 
         socket.set_reuse_address(true)?;
-        socket.set_nonblocking(true)?;
+        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
         socket.bind(&addr.into())?;
 
         Ok(UdpSocket { socket })

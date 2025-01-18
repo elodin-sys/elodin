@@ -1,7 +1,7 @@
 use bevy::{
     asset::{AssetServer, Handle},
     ecs::world::{FromWorld, World},
-    render::texture::Image,
+    image::Image,
 };
 
 pub struct Images {

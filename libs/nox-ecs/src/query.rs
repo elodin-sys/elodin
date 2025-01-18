@@ -1,5 +1,6 @@
-use crate::{system::SystemBuilder, Component, ComponentArray, ComponentExt, Error, SystemParam};
-use impeller::{ComponentId, ComponentType, EntityId};
+use crate::{system::SystemBuilder, Component, ComponentArray, Error, SystemParam};
+use impeller2::types::{ComponentId, EntityId};
+use impeller_db::ComponentSchema;
 use nox::{xla, ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad};
 use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};
@@ -51,11 +52,11 @@ pub trait ComponentGroup {
 
     fn init(builder: &mut SystemBuilder) -> Result<(), Error>;
 
-    fn component_arrays_new<'a>(
+    fn component_arrays<'a>(
         builder: &'a SystemBuilder,
     ) -> impl Iterator<Item = ComponentArray<()>> + 'a;
 
-    fn component_types() -> impl Iterator<Item = ComponentType>;
+    fn component_types() -> impl Iterator<Item = ComponentSchema>;
     fn component_ids() -> impl Iterator<Item = ComponentId>;
     fn component_count() -> usize;
 
@@ -80,18 +81,18 @@ macro_rules! impl_group {
 
             }
 
-            fn component_arrays_new<'a>(
+            fn component_arrays<'a>(
                 builder: &'a crate::system::SystemBuilder,
             ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
                 let iter = std::iter::empty();
                 $(
-                    let iter = iter.chain($param::component_arrays_new(builder));
+                    let iter = iter.chain($param::component_arrays(builder));
                 )*
                 iter
             }
 
 
-            fn component_types() -> impl Iterator<Item = ComponentType> {
+            fn component_types() -> impl Iterator<Item = ComponentSchema> {
                 let iter = std::iter::empty();
                 $(
                     let iter = iter.chain($param::component_types());
@@ -104,27 +105,27 @@ macro_rules! impl_group {
                 0 $(
                     + <$param>::component_count()
                 )*
-           }
+            }
 
-          fn component_ids() -> impl Iterator<Item = ComponentId> {
-                let iter = std::iter::empty();
-                $(
-                    let iter = iter.chain($param::component_ids());
-                )*
-                iter
-          }
+            fn component_ids() -> impl Iterator<Item = ComponentId> {
+                    let iter = std::iter::empty();
+                    $(
+                        let iter = iter.chain($param::component_ids());
+                    )*
+                    iter
+            }
 
-          fn map_axes() -> &'static [usize] {
-              &[0; $num]
-          }
+            fn map_axes() -> &'static [usize] {
+                &[0; $num]
+            }
 
-          #[allow(non_snake_case)]
-          fn into_noxpr(self) -> Noxpr {
-              let ($($param,)*) = self;
-              Noxpr::tuple(vec![
-                  $($param.into_noxpr(),)*
-              ])
-          }
+            #[allow(non_snake_case)]
+            fn into_noxpr(self) -> Noxpr {
+                let ($($param,)*) = self;
+                Noxpr::tuple(vec![
+                    $($param.into_noxpr(),)*
+                ])
+            }
         }
     }
 }
@@ -142,7 +143,7 @@ where
         <ComponentArray<T> as crate::system::SystemParam>::init(builder)
     }
 
-    fn component_arrays_new<'a>(
+    fn component_arrays<'a>(
         builder: &'a SystemBuilder,
     ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
         use crate::system::SystemParam;
@@ -157,8 +158,8 @@ where
         1
     }
 
-    fn component_types() -> impl Iterator<Item = ComponentType> {
-        std::iter::once(T::component_type())
+    fn component_types() -> impl Iterator<Item = ComponentSchema> {
+        std::iter::once(T::schema().into())
     }
 
     fn component_ids() -> impl Iterator<Item = ComponentId> {
@@ -191,7 +192,7 @@ impl<G: ComponentGroup> crate::system::SystemParam for Query<G> {
     }
 
     fn param(builder: &SystemBuilder) -> Result<Self::Item, Error> {
-        Ok(G::component_arrays_new(builder)
+        Ok(G::component_arrays(builder)
             .fold(None, |mut query, a| {
                 if query.is_some() {
                     query = Some(join_many(query.take().unwrap(), &a));
