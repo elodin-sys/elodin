@@ -1,9 +1,9 @@
 use impeller2::{
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, PacketId},
+    types::{ComponentId, EntityId, Msg, PacketId},
 };
-use impeller2_stella::Msg;
+use impeller2_stella::MsgExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{collections::HashMap, ops::Range};

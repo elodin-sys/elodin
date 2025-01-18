@@ -1,12 +1,10 @@
 use std::collections::HashSet;
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use impeller::{ComponentId, PolarsWorld};
+use impeller2::types::ComponentId;
 use nox_ecs::{
-    impeller,
     nox::{self, Noxpr},
     ErasedSystem,
 };
@@ -14,7 +12,6 @@ use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 use tracing_subscriber::EnvFilter;
 
 mod archetype;
@@ -24,7 +21,7 @@ mod entity;
 mod error;
 mod exec;
 mod graph;
-mod impeller_client;
+// //mod impeller_client;
 mod linalg;
 mod query;
 mod s10;
@@ -33,9 +30,6 @@ mod system;
 mod ukf;
 mod well_known;
 mod world_builder;
-
-#[cfg(feature = "server")]
-mod web_socket;
 
 pub use archetype::*;
 pub use asset::*;
@@ -113,27 +107,27 @@ pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrat
     System { inner: sys }
 }
 
-#[pyfunction]
-pub fn read_batch_results(path: String) -> Result<(Vec<PyDataFrame>, Vec<String>), Error> {
-    let sample_dirs = walkdir::WalkDir::new(path)
-        .max_depth(2)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .filter(|entry| entry.file_name() == "sample.json")
-        .filter_map(|entry| entry.path().parent().map(Path::to_path_buf))
-        .collect::<HashSet<_>>();
-    let mut dfs = Vec::default();
-    let mut ids = Vec::default();
-    for sample_dir in sample_dirs {
-        let dir_name = sample_dir.file_name().unwrap().to_string_lossy();
-        ids.push(dir_name.to_string());
-        let world = PolarsWorld::read_from_dir(sample_dir)?;
-        let df = world.join_archetypes()?;
-        dfs.push(PyDataFrame(df));
-    }
-    Ok((dfs, ids))
-}
+// #[pyfunction]
+// pub fn read_batch_results(path: String) -> Result<(Vec<PyDataFrame>, Vec<String>), Error> {
+//     let sample_dirs = walkdir::WalkDir::new(path)
+//         .max_depth(2)
+//         .into_iter()
+//         .filter_map(Result::ok)
+//         .filter(|entry| entry.file_type().is_file())
+//         .filter(|entry| entry.file_name() == "sample.json")
+//         .filter_map(|entry| entry.path().parent().map(Path::to_path_buf))
+//         .collect::<HashSet<_>>();
+//     let mut dfs = Vec::default();
+//     let mut ids = Vec::default();
+//     for sample_dir in sample_dirs {
+//         let dir_name = sample_dir.file_name().unwrap().to_string_lossy();
+//         ids.push(dir_name.to_string());
+//         let world = PolarsWorld::read_from_dir(sample_dir)?;
+//         let df = world.join_archetypes()?;
+//         dfs.push(PyDataFrame(df));
+//     }
+//     Ok((dfs, ids))
+// }
 
 #[pyfunction]
 pub fn _get_cache_dir() -> PyResult<String> {
@@ -165,12 +159,11 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Material>()?;
     m.add_class::<Handle>()?;
     m.add_class::<PrimitiveType>()?;
-    m.add_class::<Metadata>()?;
     m.add_class::<QueryInner>()?;
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
-    m.add_class::<impeller_client::Impeller>()?;
+    //m.add_class::<impeller_client::Impeller>()?;
     m.add_class::<VectorArrow>()?;
     m.add_class::<BodyAxes>()?;
     m.add_class::<Color>()?;
@@ -184,7 +177,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SystemBuilder>()?;
     m.add_class::<System>()?;
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
-    m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
+    //m.add_function(wrap_pyfunction!(read_batch_results, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
     ukf::register(m)?;

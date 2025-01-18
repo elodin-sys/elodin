@@ -103,14 +103,14 @@ B = TypeVarTuple("B")
 
 class Query(Generic[Unpack[A]]):
     bufs: list[jax.Array]
-    component_data: list[Metadata]
+    component_data: list[Component]
     component_classes: list[type[Any]]
     inner: QueryInner
 
     def __init__(
         self,
         inner: QueryInner,
-        component_data: list[Metadata],
+        component_data: list[Component],
         component_classes: list[type[Any]],
     ):
         self.bufs = inner.arrays()
@@ -138,12 +138,12 @@ class Query(Generic[Unpack[A]]):
         component_data = []
         component_classes = []
         for out_tp, buf in zip(out_tps_tuple, bufs):
-            this_inner = self.inner.map(buf, Metadata.of(out_tp))  # type: ignore
+            this_inner = self.inner.map(buf, Component.of(out_tp))  # type: ignore
             if inner is None:
                 inner = this_inner
             else:
                 inner = inner.join_query(this_inner)
-            component_data += [Metadata.of(out_tp)]  # type: ignore
+            component_data += [Component.of(out_tp)]  # type: ignore
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
@@ -171,7 +171,7 @@ class Query(Generic[Unpack[A]]):
         component_data = []
         component_classes = []
         for t_arg in t_args:
-            component_data.append(Metadata.of(t_arg))
+            component_data.append(Component.of(t_arg))
             component_classes.append(t_arg)
             ids.append(Component.name(t_arg))
         return Query(
@@ -298,7 +298,7 @@ class GraphQuery(Generic[E]):
                 out_bufs = new_bufs
             else:
                 out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
-        component_data = Metadata.of(return_type)
+        component_data = Component.of(return_type)
         return Query(
             self.inner.map(
                 left_query.inner,
@@ -319,8 +319,8 @@ class Archetype(Protocol):
     def archetype_name(cls) -> str:
         return snake_case_pattern.sub("_", cls.__name__).lower()
 
-    def component_data(self) -> list[Metadata]:
-        return [Metadata.of(v) for v in typing.get_type_hints(self, include_extras=True).values()]
+    def component_data(self) -> list[Component]:
+        return [Component.of(v) for v in typing.get_type_hints(self, include_extras=True).values()]
 
     def arrays(self) -> list[numpy.ndarray]:
         return [
@@ -418,10 +418,10 @@ Camera = Annotated[
 class C:
     def __init__(self, tys: Union[tuple[Type], Type], values: Union[tuple[Any], Any]):
         if isinstance(tys, tuple) and isinstance(values, tuple):
-            self.data = [Metadata.of(ty) for ty in tys]  # type: ignore
+            self.data = [Component.of(ty) for ty in tys]  # type: ignore
             self.bufs = [numpy.asarray(tree_flatten(v)[0][0]) for v in values]
         else:
-            self.data = [Metadata.of(tys)]  # type: ignore
+            self.data = [Component.of(tys)]  # type: ignore
             self.bufs = [numpy.asarray(tree_flatten(values)[0][0])]
 
     @classmethod

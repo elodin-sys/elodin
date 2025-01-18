@@ -88,27 +88,6 @@ impl From<ComponentType> for ArrayTy {
     }
 }
 
-#[cfg(feature = "xla")]
-impl<T: Component + nox::ReprMonad<nox::Op> + 'static> crate::Archetype for T {
-    fn name() -> ArchetypeName {
-        ArchetypeName::from(T::NAME)
-    }
-
-    fn components() -> Vec<Metadata> {
-        vec![T::metadata()]
-    }
-
-    fn insert_into_world(self, world: &mut crate::World) {
-        use std::ops::Deref;
-        let mut col = world.column_mut::<T>().unwrap();
-        let op = self.into_inner();
-        let NoxprNode::Constant(c) = op.deref() else {
-            panic!("push into host column must be constant expr");
-        };
-        col.push_raw(c.data.raw_buf());
-    }
-}
-
 impl<T: Field + PrimitiveTyElement, D: Dim + ConstDim, R: OwnedRepr> Component for Tensor<T, D, R> {
     const NAME: &'static str = concat_str!("tensor_", T::PRIMITIVE_TY.display_str());
     fn component_type() -> ComponentType {
@@ -322,21 +301,21 @@ where
     }
 }
 
-#[cfg(feature = "xla")]
-impl crate::Archetype for Shape {
-    fn name() -> ArchetypeName {
-        ArchetypeName::from("Shape")
-    }
+// #[cfg(feature = "xla")]
+// impl crate::Archetype for Shape {
+//     fn name() -> ArchetypeName {
+//         ArchetypeName::from("Shape")
+//     }
 
-    fn components() -> Vec<Metadata> {
-        vec![Handle::<Mesh>::metadata(), Handle::<Material>::metadata()]
-    }
+//     fn components() -> Vec<Metadata> {
+//         vec![Handle::<Mesh>::metadata(), Handle::<Material>::metadata()]
+//     }
 
-    fn insert_into_world(self, world: &mut crate::World) {
-        self.mesh.insert_into_world(world);
-        self.material.insert_into_world(world);
-    }
-}
+//     fn insert_into_world(self, world: &mut crate::World) {
+//         self.mesh.insert_into_world(world);
+//         self.material.insert_into_world(world);
+//     }
+// }
 
 pub trait ComponentValueDimable: ArrayDim {
     type ValueDim: ndarray::Dimension;

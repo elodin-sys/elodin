@@ -27,7 +27,7 @@ pub const fn concat_buf<const MAX_LEN: usize>(left: &str, right: &str) -> ([u8; 
 macro_rules! concat_str {
     ($left:expr, $right:expr) => {
         // # Safety: the concatenation of two valid utf8 strings is valid utf8.
-        unsafe { crate::buf_and_len_to_str(&crate::concat_buf::<64>($left, $right)) }
+        unsafe { $crate::util::buf_and_len_to_str(&$crate::util::concat_buf::<64>($left, $right)) }
     };
 }
 

@@ -11,6 +11,7 @@
 "lits" = "lits"
 "ba" = "ba"
 "datatime" = "datatime"
+"struc" = "struc"
 
 [files]
 extend-exclude = [
@@ -23,6 +24,7 @@ extend-exclude = [
  "images/orin-nano/flake.nix",
  "services/dashboard/priv/static/fonts/**/*",
  "**/simulink/**/*.xml",
- "libs/basilisk-rs/basilisk/**/*"
+ "libs/basilisk-rs/basilisk/**/*",
+ "libs/stellarator/maitake"
 ]
 ignore-vcs = true

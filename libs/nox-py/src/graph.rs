@@ -1,6 +1,7 @@
 use super::*;
 
-use impeller::{ComponentExt, ComponentId};
+use impeller2::types::ComponentId;
+//use impeller::{ComponentExt, ComponentId};
 use nox_ecs::graph::{exprs_from_edges_queries, GraphQuery};
 use nox_ecs::nox::ReprMonad;
 use pyo3::types::{PyDict, PyList};
@@ -74,7 +75,7 @@ impl GraphQueryInner {
         from_query: QueryInner,
         to_query: QueryInner,
         new_buf: PyObject,
-        metadata: Metadata,
+        metadata: Component,
     ) -> QueryInner {
         let mut entity_map = BTreeMap::new();
         let mut len = 0;
@@ -131,15 +132,13 @@ impl Edge {
     // }
 
     #[classattr]
-    fn metadata() -> Metadata {
-        Metadata {
-            inner: nox_ecs::graph::Edge::metadata(),
-        }
+    fn metadata() -> Component {
+        Component::from_component::<nox_ecs::graph::Edge>()
     }
 
     #[classattr]
     fn __metadata__() -> (Component,) {
-        (Self::metadata().into(),)
+        (Self::metadata(),)
     }
 
     #[staticmethod]

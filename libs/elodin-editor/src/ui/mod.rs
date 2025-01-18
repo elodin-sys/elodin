@@ -16,12 +16,13 @@ use big_space::GridCell;
 
 use egui::Rounding;
 use egui_tiles::TileId;
-use impeller::{
-    bevy::{ComponentValueMap, Received},
-    well_known::EntityMetadata,
-    ComponentId, EntityId,
+use impeller2::types::{ComponentId, EntityId};
+use impeller2_bevy::ComponentValueMap;
+use impeller2_wkt::EntityMetadata;
+use widgets::{
+    command_palette::CommandPaletteState,
+    timeline::{self, timeline_slider},
 };
-use widgets::{command_palette::CommandPaletteState, timeline};
 use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
 use crate::{plugins::LogicalKeyState, GridHandle, MainCamera};
@@ -73,7 +74,7 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: impeller::EntityId) -> bool {
+    pub fn is_entity_selected(&self, id: impeller2::types::EntityId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
@@ -169,7 +170,9 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<ViewportRange>()
+            .init_resource::<timeline_slider::UITick>()
             .init_resource::<command_palette::CommandPaletteState>()
+            .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
@@ -609,8 +612,7 @@ struct CameraViewportQuery {
 }
 
 fn set_camera_viewport(
-    window: Query<&Window>,
-    egui_settings: Res<bevy_egui::EguiSettings>,
+    window: Query<(&Window, &bevy_egui::EguiSettings)>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
     for CameraViewportQueryItem {
@@ -630,7 +632,7 @@ fn set_camera_viewport(
             continue;
         };
         camera.is_active = true;
-        let Some(window) = window.iter().next() else {
+        let Some((window, egui_settings)) = window.iter().next() else {
             continue;
         };
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
@@ -649,7 +651,7 @@ fn set_camera_viewport(
 
 fn sync_camera_grid_cell(
     mut query: Query<(Option<&Parent>, &mut GridCell<i128>), With<MainCamera>>,
-    entity_transform_query: Query<&GridCell<i128>, (With<Received>, Without<MainCamera>)>,
+    entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
 ) {
     for (parent, mut grid_cell) in query.iter_mut() {
         if let Some(parent) = parent {

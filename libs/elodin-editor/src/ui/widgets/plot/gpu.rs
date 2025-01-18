@@ -1,25 +1,23 @@
 use bevy::asset::{AssetApp, Assets};
 use bevy::color::ColorToComponents;
-use bevy::core_pipeline::prepass::{
-    DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass,
-};
+use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
-use bevy::ecs::query::Has;
 use bevy::ecs::schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
-use bevy::ecs::world::{Mut, World};
 use bevy::math::{FloatOrd, Vec4};
-use bevy::pbr::SetMeshViewBindGroup;
+use bevy::prelude::Deref;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
 use bevy::render::render_phase::{
     DrawFunctions, PhaseItemExtraIndex, RenderCommandResult, SetItemPipeline,
     ViewSortedRenderPhases,
 };
 
+use bevy::image::BevyDefault;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa, RenderLayers};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
+use bevy::sprite::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
 use bevy::{
     app::Plugin,
     asset::{load_internal_asset, Handle},
@@ -32,18 +30,18 @@ use bevy::{
         },
         world::FromWorld,
     },
-    pbr::{MeshPipeline, MeshPipelineKey},
     prelude::Color,
     render::{
         extract_component::UniformComponentPlugin,
         render_phase::{AddRenderCommand, PhaseItem, RenderCommand},
         render_resource::{binding_types::uniform_buffer, *},
         renderer::RenderDevice,
-        texture::BevyDefault,
         view::ViewTarget,
         RenderApp,
     },
 };
+use bevy_render::extract_component::ExtractComponent;
+use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
 use std::mem;
 
 use crate::ui::widgets::plot::Line;
@@ -61,7 +59,10 @@ pub struct PlotGpuPlugin;
 impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
-            .init_resource::<CachedSystemState>()
+            //.add_plugins(ExtractComponentPlugin::<LineHandle>::default())
+            //.add_plugins(ExtractComponentPlugin::<LineUniform>::default())
+            //.add_plugins(ExtractComponentPlugin::<LineConfig>::default())
+            //.add_plugins(RenderAssetPlugin::<LineData>)
             .init_asset::<Line>();
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
@@ -110,14 +111,18 @@ impl Plugin for PlotGpuPlugin {
     }
 }
 
+#[derive(Component, Deref, Debug, Clone, ExtractComponent)]
+#[require(SyncToRenderWorld)]
+pub struct LineHandle(pub Handle<Line>);
+
 #[derive(Bundle)]
 pub struct LineBundle {
-    pub line: Handle<Line>,
+    pub line: LineHandle,
     pub uniform: LineUniform,
     pub config: LineConfig,
 }
 
-#[derive(Component, ShaderType, Clone, Copy)]
+#[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
 pub struct LineUniform {
     pub line_width: f32,
     pub color: Vec4,
@@ -167,14 +172,14 @@ fn prepare_uniform_bind_group(
 
 #[derive(Resource)]
 pub struct LinePipeline {
-    mesh_pipeline: MeshPipeline,
+    mesh_pipeline: Mesh2dPipeline,
     uniform_layout: BindGroupLayout,
 }
 
 impl FromWorld for LinePipeline {
     fn from_world(world: &mut bevy::prelude::World) -> Self {
         Self {
-            mesh_pipeline: world.resource::<MeshPipeline>().clone(),
+            mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
             uniform_layout: world.resource::<UniformLayout>().layout.clone(),
         }
     }
@@ -182,7 +187,7 @@ impl FromWorld for LinePipeline {
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
-    view_key: MeshPipelineKey,
+    view_key: Mesh2dPipelineKey,
 }
 
 impl SpecializedRenderPipeline for LinePipeline {
@@ -197,14 +202,11 @@ impl SpecializedRenderPipeline for LinePipeline {
             "SIXTEEN_BYTE_ALIGNMENT".into(),
         ];
 
-        let view_layout = self
-            .mesh_pipeline
-            .get_view_layout(key.view_key.into())
-            .clone();
+        let view_layout = self.mesh_pipeline.view_layout.clone();
 
         let layout = vec![view_layout, self.uniform_layout.clone()];
 
-        let format = if key.view_key.contains(MeshPipelineKey::HDR) {
+        let format = if key.view_key.contains(Mesh2dPipelineKey::HDR) {
             ViewTarget::TEXTURE_FORMAT_HDR
         } else {
             TextureFormat::bevy_default()
@@ -229,7 +231,22 @@ impl SpecializedRenderPipeline for LinePipeline {
             }),
             layout,
             primitive: PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(DepthStencilState {
+                format: CORE_2D_DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: CompareFunction::Always,
+                stencil: StencilState {
+                    front: StencilFaceState::IGNORE,
+                    back: StencilFaceState::IGNORE,
+                    read_mask: 0,
+                    write_mask: 0,
+                },
+                bias: DepthBiasState {
+                    constant: 0,
+                    slope_scale: 0.0,
+                    clamp: 0.0,
+                },
+            }),
             multisample: MultisampleState {
                 count: key.view_key.msaa_samples(),
                 mask: !0,
@@ -237,36 +254,40 @@ impl SpecializedRenderPipeline for LinePipeline {
             },
             label: Some("Plot Line Pipeline".into()),
             push_constant_ranges: vec![],
+            zero_initialize_workgroup_memory: false,
         }
     }
 }
 
 fn line_vertex_buffer_layouts() -> Vec<VertexBufferLayout> {
-    let pos_layout = VertexBufferLayout {
+    let pos_a_layout = VertexBufferLayout {
         array_stride: VertexFormat::Float32.size(),
         step_mode: VertexStepMode::Instance,
-        attributes: vec![
-            VertexAttribute {
-                format: VertexFormat::Float32,
-                offset: 0,
-                shader_location: 0,
-            },
-            VertexAttribute {
-                format: VertexFormat::Float32,
-                offset: 4,
-                shader_location: 1,
-            },
-        ],
+        attributes: vec![VertexAttribute {
+            format: VertexFormat::Float32,
+            offset: 0,
+            shader_location: 0,
+        }],
     };
-    vec![pos_layout]
+    let pos_b_layout = VertexBufferLayout {
+        array_stride: VertexFormat::Float32.size(),
+        step_mode: VertexStepMode::Instance,
+        attributes: vec![VertexAttribute {
+            format: VertexFormat::Float32,
+            offset: 0,
+            shader_location: 1,
+        }],
+    };
+
+    vec![pos_a_layout, pos_b_layout]
 }
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, ExtractComponent)]
 pub struct LineConfig {
     pub render_layers: RenderLayers,
 }
 
-#[derive(Clone, Component)]
+#[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
     position_buffer: Buffer,
     position_count: u32,
@@ -287,7 +308,7 @@ impl<P: PhaseItem> RenderCommand<P> for SetLineBindGroup {
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(uniform_index) = uniform_index else {
-            return RenderCommandResult::Failure;
+            return RenderCommandResult::Failure("no uniform index");
         };
         pass.set_bind_group(
             1,
@@ -315,10 +336,11 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(gpu_line) = handle else {
-            return RenderCommandResult::Failure;
+            println!("no gpu line");
+            return RenderCommandResult::Failure("no gpu line");
         };
         pass.set_vertex_buffer(0, gpu_line.position_buffer.slice(..));
-        pass.set_vertex_buffer(1, gpu_line.position_buffer.slice(..));
+        pass.set_vertex_buffer(1, gpu_line.position_buffer.slice(4..));
         let instances = u32::max(gpu_line.position_count, 1) - 1;
         pass.draw(0..6, 0..instances);
         RenderCommandResult::Success
@@ -327,31 +349,14 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
 
 type DrawLine2d = (
     SetItemPipeline,
-    SetMeshViewBindGroup<0>,
+    SetMesh2dViewBindGroup<0>,
     SetLineBindGroup,
     DrawLine,
 );
 
-#[derive(Resource)]
-struct CachedSystemState {
-    state: SystemState<(
-        Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<Line>>,
-        Commands<'static, 'static>,
-    )>,
-}
-
-impl FromWorld for CachedSystemState {
-    fn from_world(world: &mut World) -> Self {
-        Self {
-            state: SystemState::new(world),
-        }
-    }
-}
-
 type LineQueryMut = (
     Entity,
-    &'static Handle<Line>,
+    &'static LineHandle,
     &'static LineConfig,
     &'static mut LineUniform,
     Option<&'static mut GpuLine>,
@@ -363,71 +368,70 @@ fn extract_lines(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
-    main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, mut line_assets, mut main_commands) = cached_state.state.get_mut(world);
-        for (entity, line_handle, config, mut uniform, gpu_line) in lines.iter_mut() {
-            let Some(line) = line_assets.get_mut(line_handle) else {
-                continue;
+    let mut state = SystemState::<(
+        Query<'static, 'static, LineQueryMut>,
+        ResMut<'static, Assets<Line>>,
+        Commands<'static, 'static>,
+    )>::new(&mut main_world);
+    let (mut lines, mut line_assets, mut main_commands) = state.get_mut(&mut main_world);
+    for (entity, line_handle, config, mut uniform, gpu_line) in lines.iter_mut() {
+        let Some(line) = line_assets.get_mut(&line_handle.0) else {
+            continue;
+        };
+        let line = &mut line.data;
+        let (range, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
+            gpu_line.position_count = line.current_range.len() as u32;
+            let range = line
+                .invalidated_range
+                .take()
+                .unwrap_or_else(|| line.current_range.clone());
+            uniform.chunk_size = 1.0;
+            (range, *uniform, gpu_line.clone())
+        } else {
+            let buffer_descriptor = BufferDescriptor {
+                label: Some("Line Vertex Buffer"),
+                size: (mem::size_of::<f32>() * 2_000_000) as u64,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             };
-            let line = &mut line.data;
-            let (range, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
-                gpu_line.position_count = line.averaged_data.len() as u32;
-                let range = line
-                    .invalidated_range
-                    .take()
-                    .unwrap_or_else(|| 0..line.averaged_data.len());
-                uniform.chunk_size = line.chunk_size as f32;
-                (range, *uniform, gpu_line.clone())
+            let buffer = render_device.create_buffer(&buffer_descriptor);
+            let gpu_line = GpuLine {
+                position_buffer: buffer,
+                position_count: line.current_range.len() as u32,
+            };
+            let mut uniform = *uniform;
+            uniform.chunk_size = 1.0;
+            main_commands.entity(entity).insert(gpu_line.clone());
+            (line.current_range.clone(), uniform, gpu_line)
+        };
+
+        let buffer = gpu_line.position_buffer.clone();
+        commands.spawn((
+            MainEntity::from(entity),
+            LineBundle {
+                line: line_handle.clone(),
+                config: config.clone(),
+                uniform,
+            },
+            gpu_line,
+            TemporaryRenderEntity,
+        ));
+
+        for chunk in line.data.chunks_range(range.clone()) {
+            let data_index = range.start.saturating_sub(chunk.range.start);
+            let buffer_index = if range.start > chunk.range.start {
+                range.start
             } else {
-                let buffer_descriptor = BufferDescriptor {
-                    label: Some("Line Vertex Buffer"),
-                    size: (mem::size_of::<f32>() * 15_000) as u64,
-                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                };
-                let buffer = render_device.create_buffer(&buffer_descriptor);
-                let gpu_line = GpuLine {
-                    position_buffer: buffer,
-                    position_count: line.averaged_data.len() as u32,
-                };
-                let mut uniform = *uniform;
-                uniform.chunk_size = line.chunk_size as f32;
-                main_commands.get_or_spawn(entity).insert(gpu_line.clone());
-                (0..line.averaged_data.len(), uniform, gpu_line)
-            };
-
-            let buffer = gpu_line.position_buffer.clone();
-            commands.get_or_spawn(entity).insert((
-                LineBundle {
-                    line: line_handle.clone(),
-                    config: config.clone(),
-                    uniform,
-                },
-                gpu_line,
-            ));
-
-            let index = range.start as u64 * 4;
-            let data = &line.averaged_data[range];
-            let data = &data[..(data.len().min(15_000))];
-            let data = bytemuck::cast_slice(data);
-            render_queue.0.write_buffer(&buffer, index, data);
+                chunk.range.start
+            } - line.current_range.start;
+            let buffer_index = buffer_index * size_of::<f32>();
+            let data = bytemuck::cast_slice(&chunk.data[data_index..]);
+            render_queue
+                .0
+                .write_buffer(&buffer, buffer_index as u64, data);
         }
-        cached_state.state.apply(world)
-    })
+    }
 }
-
-type ViewQuery = (
-    Entity,
-    &'static ExtractedView,
-    //&'static mut ViewSortedRenderPhases<Transparent2d>,
-    Option<&'static RenderLayers>,
-    (
-        Has<NormalPrepass>,
-        Has<DepthPrepass>,
-        Has<MotionVectorPrepass>,
-        Has<DeferredPrepass>,
-    ),
-);
 
 #[allow(clippy::too_many_arguments)]
 fn queue_line(
@@ -435,55 +439,34 @@ fn queue_line(
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
-    msaa: Res<Msaa>,
-    lines: Query<(Entity, &Handle<Line>, &LineConfig)>,
-    mut views: Query<ViewQuery>,
+    lines: Query<(Entity, &MainEntity, &LineConfig)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent2d>>,
+    mut views: Query<(Entity, &ExtractedView, &Msaa, Option<&RenderLayers>)>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawLine2d>().unwrap();
 
-    for (
-        view_entity,
-        view,
-        //mut transparent_phase,
-        render_layers,
-        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
-    ) in &mut views
-    {
+    for (view_entity, view, msaa, render_layers) in &mut views {
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view_entity) else {
             continue;
         };
-        let render_layers = render_layers.cloned().unwrap_or_default();
 
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::from_hdr(view.hdr);
+        let mesh_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
+            | Mesh2dPipelineKey::from_hdr(view.hdr);
 
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
-
-        for (entity, _handle, config) in &lines {
-            if !config.render_layers.intersects(&render_layers) {
+        let render_layers = render_layers.unwrap_or_default();
+        for (entity, main_entity, config) in &lines {
+            if !config.render_layers.intersects(render_layers) {
                 continue;
             }
 
-            let pipeline =
-                pipelines.specialize(&pipeline_cache, &pipeline, LinePipelineKey { view_key });
+            let pipeline = pipelines.specialize(
+                &pipeline_cache,
+                &pipeline,
+                LinePipelineKey { view_key: mesh_key },
+            );
 
             transparent_phase.add(Transparent2d {
-                entity,
+                entity: (entity, *main_entity),
                 draw_function,
                 pipeline,
                 batch_range: 0..1,

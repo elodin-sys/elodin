@@ -1,8 +1,8 @@
 let
   dev_user = {
+    lib,
     username,
     sha256,
-    lib,
   }: {
     openssh.authorizedKeys.keys =
       lib.splitString "\n"

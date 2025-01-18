@@ -14,25 +14,23 @@ nox.path = "../nox"
 nox.default-features = false
 
 # bevy
-bevy.version = "=0.14.1"
+bevy.version = "0.15"
 bevy.features = ["wayland"]
-bevy_render.version = "=0.14.1"
-bevy_color.version = "=0.14.2"
-bevy_egui.version = "0.29"
-egui.version = "0.28"
+bevy_render.version = "0.15"
+bevy_color.version = "0.15"
+bevy_egui.version = "0.31"
+egui.version = "0.29"
 egui.features = ["rayon"]
-egui_tiles = "0.9"
+egui_tiles = "0.10"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.13"
-bevy_mod_picking = { version = "0.20.0", default-features = false, features = [
-    "backend_raycast",
-] }
+bevy_infinite_grid = "0.14"
 big_space.git = "https://github.com/elodin-sys/big_space.git"
-big_space.branch = "no_prop_rot_v0.14"
-bevy_editor_cam = "0.3.0"
-bevy_framepace = "0.17"
+big_space.branch = "no_prop_rot_v0.15"
+#big_space.path = "../../../big_space"
+bevy_editor_cam = "0.5.0"
+bevy_framepace = "0.18"
 
 # rand
 fastrand.version = "2"
@@ -46,8 +44,13 @@ reqwest = { version = "0.12", features = [
     "rustls-tls",
     "gzip",
 ], default-features = false }
-impeller.path = "../../libs/impeller"
-impeller.features = ["bevy"]
+impeller2.path = "../../libs/impeller2"
+impeller2-bevy.path = "../../libs/impeller2/bevy"
+impeller2-bevy.default-features = false
+impeller2-wkt.path = "../../libs/impeller2/wkt"
+impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
+# impeller.path = "../../libs/impeller"
+# impeller.features = ["bevy"]
 
 # search
 fuzzy-matcher = "0.3.7"
@@ -64,6 +67,9 @@ opener = "0.7.1"
 directories = "5.0"
 hex = "0.4.3"
 web-time = "1.1.0"
+const-fnv1a-hash = "1.1.0"
+zerocopy = "0.8.14"
+
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }

@@ -1,10 +1,10 @@
 use core::marker::PhantomData;
-
 use smallvec::SmallVec;
+use zerocopy::{Immutable, TryFromBytes};
 
-use crate::{utils::calculate_strides, Array, DimGet, Dyn, Elem, Repr};
+use crate::{utils::calculate_strides, Array, ConstDim, Dim, DimGet, Dyn, Elem, Repr};
 
-use super::dynamic::DynArray;
+use super::{dynamic::DynArray, ArrayBuf};
 
 pub struct ViewRepr<'a> {
     _phantom: PhantomData<&'a ()>,
@@ -30,6 +30,15 @@ pub struct ArrayView<'a, T> {
 }
 
 impl<'a, T: Elem> ArrayView<'a, T> {
+    pub fn from_bytes_shape_unchecked(buf: &'a [u8], shape: &'a [usize]) -> Option<Self>
+    where
+        [T]: TryFromBytes + Immutable,
+    {
+        let count = shape.iter().product();
+        let buf = <[T]>::try_ref_from_bytes_with_elems(buf, count).ok()?;
+        Some(ArrayView { buf, shape })
+    }
+
     pub fn from_buf_shape_unchecked(buf: &'a [T], shape: &'a [usize]) -> Self {
         ArrayView { buf, shape }
     }
@@ -61,7 +70,20 @@ impl<'a, T: Elem> ArrayView<'a, T> {
         }
     }
 
+    pub fn try_to_owned<D: ConstDim + Dim>(&self) -> Option<Array<T, D>> {
+        if self.shape != D::DIM {
+            return None;
+        }
+        let mut arr = Array::<T, D>::zeroed(D::DIM);
+        arr.buf.as_mut_buf().copy_from_slice(self.buf);
+        Some(arr)
+    }
+
     pub fn shape(&self) -> &[usize] {
         self.shape
+    }
+
+    pub fn buf(&self) -> &[T] {
+        self.buf
     }
 }

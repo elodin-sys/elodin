@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use bevy::{
     ecs::{
         entity::Entity,
-        event::EventWriter,
         query::With,
         system::{Commands, IntoSystem, Query, Res, ResMut, System},
         world::World,
@@ -13,12 +12,9 @@ use bevy::{
 };
 use bevy_infinite_grid::InfiniteGrid;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use impeller::{
-    bevy::Simulating,
-    query::MetadataStore,
-    well_known::{BodyAxes, EntityMetadata},
-    ComponentId, ControlMsg,
-};
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentMetadataRegistry, PacketTx};
+use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings};
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
@@ -155,7 +151,7 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
     PaletteItem::new(
         entity_metadata.name.clone(),
         "Entities",
-        move |entities: Query<EntityData>, metadata: Res<MetadataStore>| {
+        move |entities: Query<EntityData>, metadata: Res<ComponentMetadataRegistry>| {
             let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
             let items = components
                 .0
@@ -168,7 +164,7 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
                         move |entities: Query<EntityData>,
                               mut render_layer_alloc: ResMut<RenderLayerAlloc>,
                               mut tile_state: ResMut<tiles::TileState>| {
-                            let component_id = item.component_id();
+                            let component_id = item.component_id;
                             let Ok((entity_id, _, component_value_map, _)) = entities.get(entity)
                             else {
                                 return PaletteEvent::Exit;
@@ -318,24 +314,20 @@ impl Default for PalettePage {
                 },
             ),
             PaletteItem::new(
-                "Toggle Simulating",
-                VIEWPORT_LABEL,
-                |mut event: EventWriter<ControlMsg>, simulating: Res<Simulating>| {
-                    event.send(ControlMsg::SetSimulating(!simulating.0));
+                "Toggle Recording",
+                SIMULATION_LABEL,
+                |packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>| {
+                    simulating.0 = !simulating.0;
+                    packet_tx.send_msg(SetDbSettings {
+                        recording: Some(simulating.0),
+                        ..Default::default()
+                    });
                     PaletteEvent::Exit
                 },
             ),
             create_graph(),
             create_viewport(),
             toggle_body_axes(),
-            PaletteItem::new(
-                "Save Replay",
-                SIMULATION_LABEL,
-                |mut event: EventWriter<ControlMsg>| {
-                    event.send(ControlMsg::SaveReplay);
-                    PaletteEvent::Exit
-                },
-            ),
             PaletteItem::new("Documentation", HELP_LABEL, || {
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit

@@ -1,6 +1,9 @@
-use impeller::well_known::{Material, Mesh};
-use nox::{tensor, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform};
-use nox_ecs::{six_dof::*, spawn_tcp_server, Integrator, Query, World, WorldExt, WorldPos};
+use impeller2::component::Component;
+use impeller2_wkt::{Color, Line3d, Material, Mesh, Panel, Viewport};
+use nox::{
+    tensor, ArrayRepr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector3,
+};
+use nox_ecs::{six_dof::*, Integrator, Query, World, WorldExt, WorldPos};
 
 fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     const G: f64 = 6.649e-11;
@@ -8,6 +11,8 @@ fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     pos.map(|world_pos: WorldPos, inertia: Inertia, force: Force| {
         let mass = inertia.0.mass();
         let r = world_pos.0.linear();
+        let mask: Vector3<f64> = tensor![1.0, 1.0, 0.0].into();
+        let r = r * mask;
         let norm = r.clone().norm();
         let force = force.0
             + SpatialForce::from_linear(
@@ -22,17 +27,17 @@ fn main() {
     stellarator::run(|| async {
         tracing_subscriber::fmt::init();
         let mut world = World::default();
-        let shape = world.insert_shape(Mesh::sphere(0.1, 36, 18), Material::color(1.0, 1.0, 1.0));
+        let shape = world.insert_shape(Mesh::sphere(0.1), Material::color(1.0, 0.0, 0.0));
 
-        let shape_b = world.insert_shape(Mesh::sphere(0.1, 36, 18), Material::color(0.5, 1.0, 1.0));
+        let shape_b = world.insert_shape(Mesh::sphere(0.1), Material::color(0.5, 1.0, 1.0));
 
-        world
+        let a = world
             .spawn(Body {
                 pos: WorldPos(SpatialTransform {
-                    inner: tensor![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                    inner: tensor![1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0].into(),
                 }),
                 vel: WorldVel(SpatialMotion {
-                    inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 1.0].into(),
+                    inner: tensor![0.0, 0.0, 0.0, 0.0, -1.0, 0.0].into(),
                 }),
                 accel: WorldAccel(SpatialMotion {
                     inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
@@ -44,15 +49,16 @@ fn main() {
                     inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
                 }),
             })
-            .insert(shape);
+            .insert(shape)
+            .id();
 
-        world
+        let b = world
             .spawn(Body {
                 pos: WorldPos(SpatialTransform {
-                    inner: tensor![2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
+                    inner: tensor![1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0].into(),
                 }),
                 vel: WorldVel(SpatialMotion {
-                    inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 2.0].into(),
+                    inner: tensor![0.0, 0.0, 0.0, 0.0, 1.0, 2.0].into(),
                 }),
                 accel: WorldAccel(SpatialMotion {
                     inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
@@ -64,18 +70,40 @@ fn main() {
                     inner: tensor![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0].into(),
                 }),
             })
-            .insert(shape_b);
+            .insert(shape_b)
+            .id();
+        let panel = world.insert_asset(Panel::Viewport(Viewport {
+            ..Default::default()
+        }));
+        world.spawn(panel);
+        let asset = world.insert_asset(Line3d {
+            entity: b,
+            component_id: <WorldPos<ArrayRepr>>::COMPONENT_ID,
+            index: [4, 5, 6],
+            line_width: 10.0,
+            color: Color::YOLK,
+            perspective: true,
+        });
+        world.spawn(asset);
 
-        let time_step = std::time::Duration::from_secs_f64(1.0 / 240.0);
+        let asset = world.insert_asset(Line3d {
+            entity: a,
+            component_id: <WorldPos<ArrayRepr>>::COMPONENT_ID,
+            index: [4, 5, 6],
+            line_width: 10.0,
+            color: Color::MINT,
+            perspective: true,
+        });
+        world.spawn(asset);
+
         let exec = world
             .builder()
             .tick_pipeline(six_dof(|| gravity, Integrator::Rk4))
-            .run_time_step(time_step)
             .build()
             .unwrap();
         let client = nox::Client::cpu().unwrap();
         let exec = exec.compile(client).unwrap();
-        nox_ecs::impeller2::Server::new(
+        nox_ecs::impeller2_server::Server::new(
             impeller_db::Server::new("./test", "0.0.0.0:2240".parse().unwrap()).unwrap(),
             exec,
         )
@@ -83,5 +111,4 @@ fn main() {
         .await
         .unwrap()
     })
-    //spawn_tcp_server("0.0.0.0:2240".parse().unwrap(), exec, client, || false).unwrap();
 }

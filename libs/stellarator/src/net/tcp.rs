@@ -20,7 +20,8 @@ impl TcpStream {
             socket2::Type::STREAM,
             Some(socket2::Protocol::TCP),
         )?;
-        socket.set_nonblocking(true)?;
+        socket.set_cloexec(true)?;
+        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
         let addr: SockAddr = addr.into();
         Completion::run(ops::Connect::new(&socket, Box::new(addr.into()))?).await?;
 
@@ -64,9 +65,11 @@ impl TcpListener {
             Some(socket2::Protocol::TCP),
         )?;
 
+        socket.set_cloexec(true)?;
+        socket.set_reuse_address(true)?;
         socket.bind(&addr.into())?;
         socket.listen(1024)?;
-        socket.set_nonblocking(true)?;
+        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
 
         Ok(TcpListener { socket })
     }
@@ -74,6 +77,7 @@ impl TcpListener {
     pub async fn accept(&self) -> Result<TcpStream, Error> {
         let op = ops::Accept::new(&self.socket, Box::new(SockAddrRaw::zeroed()));
         let socket = Completion::run(op).await.0?;
+        socket.set_cloexec(true)?;
         Ok(TcpStream { socket })
     }
 

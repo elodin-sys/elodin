@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use miette::miette;
 use miette::Context;
 use miette::IntoDiagnostic;
-use tokio_util::sync::CancellationToken;
+use stellarator::util::CancelToken;
 use tracing_subscriber::EnvFilter;
 
 mod auth;
@@ -87,7 +87,7 @@ impl Cli {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self
-                .run_sim(args, rt, CancellationToken::new())?
+                .run_sim(args, rt, CancelToken::new())?
                 .join()
                 .map_err(|_| miette!("join error"))?,
             Some(Commands::Create(args)) => self.create_template(args).into_diagnostic(),

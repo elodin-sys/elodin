@@ -14,7 +14,8 @@ use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
-use impeller::{well_known::WorldPos, ComponentExt};
+use impeller2::component::Component;
+use impeller2_wkt::WorldPos;
 
 use crate::ui::widgets::label::label_with_buttons;
 use crate::ui::widgets::WidgetSystem;
@@ -96,7 +97,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 )[0];
 
                 theme::configure_combo_box(ui.style_mut());
-                egui::ComboBox::from_id_source("TRACK ENTITY")
+                egui::ComboBox::from_id_salt("TRACK ENTITY")
                     .selected_text(selected_name)
                     .show_ui(ui, |ui| {
                         theme::configure_combo_item(ui.style_mut());

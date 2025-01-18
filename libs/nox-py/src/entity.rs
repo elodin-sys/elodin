@@ -1,12 +1,10 @@
 use crate::*;
 use core::fmt;
 
-use nox_ecs::impeller;
-
 #[derive(Clone, Copy)]
 #[pyclass]
 pub struct EntityId {
-    pub inner: impeller::EntityId,
+    pub inner: impeller2::types::EntityId,
 }
 
 #[pymethods]

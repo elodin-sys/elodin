@@ -8,6 +8,7 @@ repository.workspace = true
 default = ["alloc"]
 std = ["miette", "alloc"]
 alloc = []
+bevy = ["dep:bevy"]
 
 
 [dependencies]
@@ -25,6 +26,7 @@ heapless.version = "0.8"
 heapless.features = ["serde"]
 nox.path = "../nox"
 nox.default-features = false
+stellarator-buf.path = "../stellarator/buf"
 
 # errors
 thiserror = { version = "2.0", default-features = false }
@@ -33,3 +35,8 @@ miette.optional = true
 
 # hash
 const-fnv1a-hash = "1.1.0"
+
+# bevy
+bevy.version = "0.15"
+bevy.default-features = false
+bevy.optional = true

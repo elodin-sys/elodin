@@ -9,6 +9,7 @@ pub trait Unloaded: Clone {
 }
 
 const UNLOADED: u64 = 0b111111111111000000000000000000000000000000000000000000011111111;
+const UNLOADED_F32: u32 = 0b1111111110000000000000000011111;
 impl Unloaded for f64 {
     fn is_unloaded(&self) -> bool {
         self.to_bits() == UNLOADED
@@ -46,6 +47,17 @@ impl Unloaded for Vec3 {
     }
 }
 
+impl Unloaded for f32 {
+    fn is_unloaded(&self) -> bool {
+        self.to_bits() == UNLOADED_F32
+    }
+
+    #[inline(always)]
+    fn unloaded() -> Self {
+        f32::from_bits(UNLOADED_F32)
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Chunk<T: Unloaded> {
     pub range: Range<usize>,
@@ -68,7 +80,7 @@ pub struct Chunks<T: Unloaded> {
     chunks: Vec<Option<Chunk<T>>>,
 }
 
-pub const CHUNK_SIZE: usize = 0x2000;
+pub const CHUNK_SIZE: usize = 0x1000;
 
 impl<T: Unloaded> Chunks<T> {
     pub fn range(&mut self, range: Range<usize>) -> impl Iterator<Item = &mut T> {
@@ -143,6 +155,16 @@ impl<T: Unloaded> Chunks<T> {
                 return;
             }
         }
+    }
+
+    pub fn get(&self, tick: usize) -> Option<&T> {
+        let chunk = tick / CHUNK_SIZE;
+        // let start = requested_range.start / CHUNK_SIZE;
+        // let end = requested_range.end / CHUNK_SIZE;
+        // let range = start..=end;
+        let chunk = self.chunks.get(chunk)?.as_ref()?;
+        let i = tick - chunk.range.start;
+        chunk.data.get(i)
     }
 
     pub fn set_unfetched(&mut self, range: Range<usize>) {

@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, ops::RangeInclusive};
 
 use bevy::ecs::{
-    event::EventWriter,
     system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath::Numeric, Response};
-use impeller::{bevy::Tick, ControlMsg};
+use impeller2_bevy::{CurrentStreamId, PacketTx};
+use impeller2_wkt::{SetStreamState, Tick};
 
 use crate::ui::{colors, ViewportRange};
 use crate::ui::{
@@ -208,9 +208,10 @@ pub fn timeline_range(
 pub struct TimelineRangesPanel<'w, 's> {
     timeline_ranges: ResMut<'w, TimelineRanges>,
     tick: ResMut<'w, Tick>,
-    event: EventWriter<'w, ControlMsg>,
+    event: Res<'w, PacketTx>,
     viewport_range: Res<'w, ViewportRange>,
     selected_object: Res<'w, SelectedObject>,
+    current_stream_id: Res<'w, CurrentStreamId>,
     graph_states: Query<'w, 's, &'static GraphState>,
 }
 
@@ -226,14 +227,17 @@ impl WidgetSystem for TimelineRangesPanel<'_, '_> {
     ) -> Self::Output {
         let (line_height, full_range, position_range) = args;
 
-        let state_mut = state.get_mut(world);
-        let mut timeline_ranges = state_mut.timeline_ranges;
-        let mut tick = state_mut.tick;
-        let mut event = state_mut.event;
-        let viewport_range = state_mut.viewport_range;
-        let graph_states = state_mut.graph_states;
+        let TimelineRangesPanel {
+            mut timeline_ranges,
+            mut tick,
+            event,
+            viewport_range,
+            selected_object,
+            current_stream_id,
+            graph_states,
+        } = state.get_mut(world);
 
-        let selected_graph_range_id = match state_mut.selected_object.to_owned() {
+        let selected_graph_range_id = match selected_object.to_owned() {
             SelectedObject::Graph { graph_id, .. } => {
                 if let Ok(graph_state) = graph_states.get(graph_id) {
                     if let Some(range_id) = graph_state.range_id {
@@ -259,7 +263,7 @@ impl WidgetSystem for TimelineRangesPanel<'_, '_> {
 
                 if !fixed_range.contains(&tick.0) {
                     tick.0 = fixed_range.start;
-                    event.send(ControlMsg::Rewind(tick.0));
+                    event.send_msg(SetStreamState::rewind(**current_stream_id, tick.0))
                 }
             }
         }

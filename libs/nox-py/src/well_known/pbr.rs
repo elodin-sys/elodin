@@ -1,12 +1,11 @@
 use crate::*;
 
-use nox_ecs::impeller;
-use nox_ecs::impeller::Asset;
+use impeller2::component::Asset;
 
 #[pyclass]
 #[derive(Clone)]
 pub struct Mesh {
-    pub inner: impeller::well_known::Mesh,
+    pub inner: impeller2_wkt::Mesh,
 }
 
 #[pymethods]
@@ -19,26 +18,26 @@ impl Mesh {
     #[staticmethod]
     pub fn cuboid(x: f32, y: f32, z: f32) -> Self {
         Self {
-            inner: impeller::well_known::Mesh::cuboid(x, y, z),
+            inner: impeller2_wkt::Mesh::cuboid(x, y, z),
         }
     }
 
     #[staticmethod]
     pub fn sphere(radius: f32) -> Self {
         Self {
-            inner: impeller::well_known::Mesh::sphere(radius, 36, 18),
+            inner: impeller2_wkt::Mesh::sphere(radius),
         }
     }
 
     pub fn asset_name(&self) -> &'static str {
-        impeller::well_known::Mesh::ASSET_NAME
+        impeller2_wkt::Mesh::NAME
     }
 }
 
 #[pyclass]
 #[derive(Clone)]
 pub struct Material {
-    pub inner: impeller::well_known::Material,
+    pub inner: impeller2_wkt::Material,
 }
 
 #[pymethods]
@@ -51,18 +50,18 @@ impl Material {
     #[staticmethod]
     fn color(r: f32, g: f32, b: f32) -> Self {
         Material {
-            inner: impeller::well_known::Material::color(r, g, b),
+            inner: impeller2_wkt::Material::color(r, g, b),
         }
     }
     pub fn asset_name(&self) -> &'static str {
-        impeller::well_known::Material::ASSET_NAME
+        impeller2_wkt::Material::NAME
     }
 }
 
 #[derive(Clone)]
 #[pyclass]
 pub struct Color {
-    pub inner: impeller::well_known::Color,
+    pub inner: impeller2_wkt::Color,
 }
 
 #[pymethods]
@@ -70,62 +69,62 @@ impl Color {
     #[new]
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Color {
-            inner: impeller::well_known::Color::rgb(r, g, b),
+            inner: impeller2_wkt::Color::rgb(r, g, b),
         }
     }
 
     #[classattr]
     pub const TURQUOISE: Self = Color {
-        inner: impeller::well_known::Color::TURQUOISE,
+        inner: impeller2_wkt::Color::TURQUOISE,
     };
 
     #[classattr]
     pub const SLATE: Self = Color {
-        inner: impeller::well_known::Color::SLATE,
+        inner: impeller2_wkt::Color::SLATE,
     };
 
     #[classattr]
     pub const PUMPKIN: Self = Color {
-        inner: impeller::well_known::Color::PUMPKIN,
+        inner: impeller2_wkt::Color::PUMPKIN,
     };
 
     #[classattr]
     pub const YOLK: Self = Color {
-        inner: impeller::well_known::Color::YOLK,
+        inner: impeller2_wkt::Color::YOLK,
     };
 
     #[classattr]
     pub const PEACH: Self = Color {
-        inner: impeller::well_known::Color::PEACH,
+        inner: impeller2_wkt::Color::PEACH,
     };
 
     #[classattr]
     pub const REDDISH: Self = Color {
-        inner: impeller::well_known::Color::REDDISH,
+        inner: impeller2_wkt::Color::REDDISH,
     };
 
     #[classattr]
     pub const HYPERBLUE: Self = Color {
-        inner: impeller::well_known::Color::HYPERBLUE,
+        inner: impeller2_wkt::Color::HYPERBLUE,
     };
 
     #[classattr]
     pub const MINT: Self = Color {
-        inner: impeller::well_known::Color::MINT,
+        inner: impeller2_wkt::Color::MINT,
     };
 }
 
 #[derive(Clone)]
 #[pyclass]
 pub struct Glb {
-    pub inner: impeller::well_known::Glb,
+    pub inner: impeller2_wkt::Glb,
 }
 
 #[pymethods]
 impl Glb {
     #[new]
     pub fn new(url: String) -> Result<Self, Error> {
-        let inner = impeller::well_known::Glb(url);
+        let inner = impeller2_wkt::Glb(url);
         Ok(Glb { inner })
     }
 
@@ -135,6 +134,6 @@ impl Glb {
     }
 
     pub fn asset_name(&self) -> &'static str {
-        impeller::well_known::Glb::ASSET_NAME
+        impeller2_wkt::Glb::NAME
     }
 }

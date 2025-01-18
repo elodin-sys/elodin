@@ -3,6 +3,7 @@ use crate::ui::{
     utils::{self, Shrink4},
 };
 use bevy_egui::egui;
+use egui::UiBuilder;
 
 use super::button::EImageButton;
 
@@ -128,14 +129,14 @@ pub fn label_with_buttons<const N: usize>(
                 ui.spacing().interact_size.y,
             );
 
-            ui.allocate_ui_at_rect(label_rect, |ui| {
+            ui.allocate_new_ui(UiBuilder::new().max_rect(label_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let text = egui::RichText::new(label.to_string()).color(color);
                     ui.add(egui::Label::new(text));
                 });
             });
 
-            ui.allocate_ui_at_rect(btn_rect, |ui| {
+            ui.allocate_new_ui(UiBuilder::new().max_rect(btn_rect), |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     for (i, btn_icon) in btn_icons.iter().enumerate() {
                         let btn = ui.add(

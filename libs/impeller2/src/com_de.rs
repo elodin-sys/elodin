@@ -1,4 +1,7 @@
-use crate::types::{ComponentId, ComponentView, EntityId};
+use crate::{
+    error::Error,
+    types::{ComponentId, ComponentView, EntityId},
+};
 
 pub trait Componentize {
     fn sink_columns(&self, output: &mut impl Decomponentize);
@@ -65,6 +68,21 @@ impl Decomponentize for () {
     ) {
     }
 }
+
+impl<F> Decomponentize for F
+where
+    F: for<'a> FnMut(ComponentId, EntityId, ComponentView<'_>),
+{
+    fn apply_value(
+        &mut self,
+        component_id: ComponentId,
+        entity_id: EntityId,
+        value: ComponentView<'_>,
+    ) {
+        (self)(component_id, entity_id, value)
+    }
+}
+
 macro_rules! impl_decomponentize {
     ($($ty:tt),+) => {
         impl<$($ty),*> Decomponentize for ($($ty,)*)
@@ -104,3 +122,11 @@ impl_decomponentize!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T1
 impl_decomponentize!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16);
 impl_decomponentize!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17);
 impl_decomponentize!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18);
+
+pub trait FromComponentView: Sized {
+    fn from_component_view(view: ComponentView<'_>) -> Result<Self, Error>;
+}
+
+pub trait AsComponentView {
+    fn as_component_view(&self) -> ComponentView<'_>;
+}

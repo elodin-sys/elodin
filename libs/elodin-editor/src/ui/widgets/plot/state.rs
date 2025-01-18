@@ -8,8 +8,8 @@ use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::egui::{self, Color32};
 
-use impeller::ComponentValue;
-use impeller::{ComponentId, EntityId};
+use impeller2::types::{ComponentId, EntityId};
+use impeller2_bevy::ComponentValue;
 
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
 use crate::ui::widgets::timeline::timeline_ranges::TimelineRangeId;
@@ -22,7 +22,10 @@ pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 #[derive(Bundle)]
 pub struct GraphBundle {
     pub graph_state: GraphState,
-    pub camera: Camera2dBundle,
+    pub camera: Camera,
+    pub camera_2d: Camera2d,
+    pub projection: OrthographicProjection,
+    pub tonemapping: Tonemapping,
     pub viewport_rect: ViewportRect,
     pub render_layers: RenderLayers,
     pub main_camera: MainCamera,
@@ -50,7 +53,16 @@ impl GraphBundle {
             todo!("ran out of layers")
         };
         let render_layers = RenderLayers::layer(layer);
-        let camera = Camera2dBundle {
+        let graph_state = GraphState {
+            entities,
+            range_id,
+            enabled_lines: BTreeMap::new(),
+            render_layers: render_layers.clone(),
+            line_width: 2.0,
+            zoom_factor: Vec2::ONE,
+            pan_offset: Vec2::ZERO,
+        };
+        GraphBundle {
             camera: Camera {
                 order: 2,
                 hdr: false,
@@ -68,20 +80,8 @@ impl GraphBundle {
                 scale: 1.0,
                 area: Rect::new(0., 0., 500., 1.),
             },
-            ..Default::default()
-        };
-        let graph_state = GraphState {
-            entities,
-            range_id,
-            enabled_lines: BTreeMap::new(),
-            render_layers: render_layers.clone(),
-            line_width: 2.0,
-            zoom_factor: Vec2::ONE,
-            pan_offset: Vec2::ZERO,
-        };
-        GraphBundle {
             graph_state,
-            camera,
+            camera_2d: Camera2d,
             viewport_rect: ViewportRect(None),
             main_camera: MainCamera,
             render_layers,

@@ -8,7 +8,9 @@ use bevy::{
     window::Window,
 };
 use bevy_egui::{egui, EguiContexts};
-use impeller::{query::MetadataStore, well_known::WorldPos, ComponentExt};
+use impeller2::component::Component;
+use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_wkt::WorldPos;
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
@@ -109,7 +111,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
 pub struct ModalUpdateGraph<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
     setting_modal_state: ResMut<'w, SettingModalState>,
-    metadata_store: Res<'w, MetadataStore>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
 }
 
@@ -178,7 +180,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("ENTITY")
+            egui::ComboBox::from_id_salt("ENTITY")
                 .width(width)
                 .selected_text(selected_entity_label)
                 .show_ui(ui, |ui| {
@@ -210,12 +212,12 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
 
             let selected_component_label = selected_component
                 .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
-                .map(|m| m.component_name())
+                .map(|m| m.name.as_ref())
                 .unwrap_or_else(|| "NONE");
 
             ui.scope(|ui| {
                 theme::configure_combo_box(ui.style_mut());
-                egui::ComboBox::from_id_source("COMPONENT")
+                egui::ComboBox::from_id_salt("COMPONENT")
                     .width(width)
                     .selected_text(selected_component_label)
                     .show_ui(ui, |ui| {
@@ -230,7 +232,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
                             ui.selectable_value(
                                 m_component_id,
                                 Some(*component_id),
-                                metadata.component_name(),
+                                metadata.name.clone(),
                             );
                         }
                     });
@@ -337,7 +339,7 @@ impl WidgetSystem for ModalNewTile<'_> {
 #[derive(SystemParam)]
 pub struct ModalNewGraphTile<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    metadata_store: Res<'w, MetadataStore>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     timeline_ranges: Res<'w, TimelineRanges>,
     new_tile_state: ResMut<'w, tiles::NewTileState>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
@@ -412,7 +414,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("ENTITY")
+            egui::ComboBox::from_id_salt("ENTITY")
                 .width(width)
                 .selected_text(selected_entity_label)
                 .show_ui(ui, |ui| {
@@ -457,7 +459,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
 
         let selected_component_label = selected_component
             .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
-            .map(|m| m.component_name())
+            .map(|m| m.name.as_ref())
             .unwrap_or_else(|| "None");
 
         ui.scope(|ui| {
@@ -466,7 +468,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
             }
 
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("COMPONENT")
+            egui::ComboBox::from_id_salt("COMPONENT")
                 .width(width)
                 .selected_text(selected_component_label)
                 .show_ui(ui, |ui| {
@@ -481,7 +483,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
                         ui.selectable_value(
                             m_component_id,
                             Some(*component_id),
-                            metadata.component_name(),
+                            metadata.name.clone(),
                         );
                     }
                 });
@@ -504,7 +506,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("RANGE")
+            egui::ComboBox::from_id_salt("RANGE")
                 .width(width)
                 .selected_text(selected_range_label)
                 .show_ui(ui, |ui| {
@@ -644,7 +646,7 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("ENTITY")
+            egui::ComboBox::from_id_salt("ENTITY")
                 .width(width)
                 .selected_text(selected_entity_label)
                 .show_ui(ui, |ui| {
@@ -686,7 +688,7 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("RANGE")
+            egui::ComboBox::from_id_salt("RANGE")
                 .width(width)
                 .selected_text(selected_range_label)
                 .show_ui(ui, |ui| {
@@ -748,7 +750,7 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalNewComponentMonitorTile<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    metadata_store: Res<'w, MetadataStore>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     new_tile_state: ResMut<'w, tiles::NewTileState>,
     tile_state: ResMut<'w, tiles::TileState>,
 }
@@ -816,7 +818,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("ENTITY")
+            egui::ComboBox::from_id_salt("ENTITY")
                 .width(width)
                 .selected_text(selected_entity_label)
                 .show_ui(ui, |ui| {
@@ -860,7 +862,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
 
         let selected_component_label = selected_component
             .and_then(|(component_id, _)| metadata_store.get_metadata(component_id))
-            .map(|m| m.component_name())
+            .map(|m| m.name.as_ref())
             .unwrap_or_else(|| "None");
 
         ui.scope(|ui| {
@@ -869,7 +871,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
             }
 
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("COMPONENT")
+            egui::ComboBox::from_id_salt("COMPONENT")
                 .width(width)
                 .selected_text(selected_component_label)
                 .show_ui(ui, |ui| {
@@ -884,7 +886,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
                         ui.selectable_value(
                             m_component_id,
                             Some(*component_id),
-                            metadata.component_name(),
+                            metadata.name.clone(),
                         );
                     }
                 });

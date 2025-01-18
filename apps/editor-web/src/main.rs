@@ -6,8 +6,11 @@ use bevy::ecs::system::Res;
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use elodin_editor::ui::FullscreenState;
 use elodin_editor::EditorPlugin;
-use impeller::bevy::{ImpellerSubscribePlugin, Subscriptions};
-use impeller::bevy_sync::SyncPlugin;
+use impeller2::types::LenPacket;
+use impeller2_bevy::CurrentStreamId;
+use impeller2_bevy::FilledRecycle;
+use impeller2_bevy::{PacketRx, PacketTx};
+use thingbuf::mpsc;
 use tracing::error;
 
 mod web_sock;
@@ -16,21 +19,22 @@ fn main() {
     //tracing_wasm::set_as_global_default();
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let url = get_url().unwrap();
-    let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
-    web_sock::spawn_wasm(url, bevy_tx).unwrap();
+    let (incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(512, FilledRecycle);
+    let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(512);
+    let stream_id = fastrand::u64(..);
+    web_sock::spawn_wasm(url, outgoing_packet_rx, incoming_packet_tx, stream_id).unwrap();
     App::new()
         .add_plugins(EditorPlugin::default())
-        .add_plugins(SyncPlugin {
-            plugin: sub,
-            subscriptions: Subscriptions::default(),
-            enable_pbr: true,
-        })
         .add_systems(PostStartup, hide_loader.pipe(handle_error))
         .add_systems(
             PostStartup,
             show_canvas.pipe(handle_error).after(hide_loader),
         )
         .add_systems(Update, fullscreen.pipe(handle_error))
+        .insert_resource(PacketTx(outgoing_packet_tx))
+        .insert_resource(PacketRx(incoming_packet_rx))
+        .insert_resource(CurrentStreamId(stream_id))
+        .add_systems(Update, impeller2_bevy::sink)
         .run();
 }
 

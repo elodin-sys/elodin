@@ -35,11 +35,11 @@ pub fn component(input: TokenStream) -> TokenStream {
     };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     quote! {
-        impl #impl_generics #crate_name::impeller::Component for #ident #ty_generics #where_clause {
+        impl #impl_generics #crate_name::impeller2::component::Component for #ident #ty_generics #where_clause {
             const NAME: &'static str = #name;
 
-            fn component_type() -> #crate_name::impeller::ComponentType {
-                <#ty as #crate_name::impeller::Component>::component_type()
+            fn schema() -> #crate_name::impeller2::schema::Schema<Vec<u64>> {
+                <#ty as #crate_name::impeller2::component::Component>::schema()
             }
         }
 

@@ -7,7 +7,9 @@ use bevy_egui::egui;
 use smallvec::SmallVec;
 
 use egui::Align;
-use impeller::{bevy::MaxTick, query::MetadataStore, ComponentId, EntityId};
+use impeller2::types::{ComponentId, EntityId};
+use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_wkt::MaxTick;
 
 use crate::ui::{
     colors::{self, with_opacity},
@@ -28,7 +30,7 @@ pub struct InspectorGraph<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
     timeline_ranges: ResMut<'w, TimelineRanges>,
     max_tick: Res<'w, MaxTick>,
-    metadata_store: Res<'w, MetadataStore>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
 }
 
@@ -95,7 +97,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
         ui.scope(|ui| {
             theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_source("RANGE")
+            egui::ComboBox::from_id_salt("RANGE")
                 .width(ui.available_width())
                 .selected_text(selected_range_label)
                 .show_ui(ui, |ui| {
@@ -150,7 +152,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     let Some(metadata) = metadata_store.get_metadata(component_id) else {
                         continue;
                     };
-                    let component_label = metadata.component_name();
+                    let component_label = metadata.name.clone();
                     let element_names = metadata.element_names();
 
                     let component_label_margin = egui::Margin::symmetric(0.0, 18.0);

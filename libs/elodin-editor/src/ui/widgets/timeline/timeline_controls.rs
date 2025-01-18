@@ -1,13 +1,10 @@
 use bevy::ecs::{
-    event::EventWriter,
     system::{Res, ResMut, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
-use impeller::{
-    bevy::{MaxTick, Tick, TimeStep},
-    ControlMsg,
-};
+use impeller2_bevy::{CurrentStreamId, PacketTx};
+use impeller2_wkt::{MaxTick, SetStreamState, SimulationTimeStep, Tick};
 
 use crate::ui::{
     colors::{self, with_opacity},
@@ -20,11 +17,12 @@ use super::TimelineIcons;
 
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
-    event: EventWriter<'w, ControlMsg>,
+    event: Res<'w, PacketTx>,
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, Tick>,
     max_tick: Res<'w, MaxTick>,
-    tick_time: Res<'w, TimeStep>,
+    tick_time: Res<'w, SimulationTimeStep>,
+    stream_id: Res<'w, CurrentStreamId>,
 }
 
 impl WidgetSystem for TimelineControls<'_> {
@@ -37,17 +35,17 @@ impl WidgetSystem for TimelineControls<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
-
         let icons = args;
+        let TimelineControls {
+            event,
+            mut paused,
+            mut tick,
+            max_tick,
+            tick_time,
+            stream_id,
+        } = state.get_mut(world);
 
-        let mut paused = state_mut.paused;
-        let max_tick = state_mut.max_tick;
-        let mut tick = state_mut.tick;
-        let mut event = state_mut.event;
-        let tick_time = state_mut.tick_time;
-
-        let frames_per_second = 1.0 / tick_time.0.as_secs_f64();
+        let frames_per_second = 1.0 / tick_time.0;
 
         let mut tick_changed = false;
 
@@ -158,7 +156,7 @@ impl WidgetSystem for TimelineControls<'_> {
             });
 
         if tick_changed {
-            event.send(ControlMsg::Rewind(tick.0));
+            event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
         }
     }
 }

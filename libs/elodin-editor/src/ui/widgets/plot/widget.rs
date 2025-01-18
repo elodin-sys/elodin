@@ -1,8 +1,8 @@
 use bevy::{
-    asset::{Assets, Handle},
+    asset::Assets,
     ecs::{
         entity::Entity,
-        event::{EventReader, EventWriter},
+        event::EventReader,
         query::With,
         system::{Commands, Local, Query, Res},
     },
@@ -17,10 +17,9 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, Layout};
 use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
-use impeller::{
-    bevy::EntityMap, query::MetadataStore, well_known::EntityMetadata, ComponentId, ControlMsg,
-    EntityId,
-};
+use impeller2::types::{ComponentId, EntityId};
+use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
+use impeller2_wkt::{EntityMetadata, GetTimeSeries, MaxTick};
 use itertools::{Itertools, MinMaxResult};
 use std::{
     fmt::Debug,
@@ -43,7 +42,7 @@ use crate::{
     },
 };
 
-use super::{PlotDataComponent, PlotDataEntity};
+use super::{gpu::LineHandle, PlotDataComponent, PlotDataEntity};
 
 #[derive(Debug)]
 pub struct Plot {
@@ -153,16 +152,13 @@ impl Plot {
         graph_id: Entity,
         entity_map: &EntityMap,
         entity_metadata: &Query<&EntityMetadata>,
-        metadata_store: &MetadataStore,
-        control_msg: &mut EventWriter<ControlMsg>,
+        metadata_store: &ComponentMetadataRegistry,
+        max_tick: MaxTick,
     ) -> Self {
         self.rect = ui.max_rect();
         self.inner_rect = get_inner_rect(self.rect);
 
         // calc max_length
-
-        let width_in_px = ui.available_width() * ui.ctx().pixels_per_point();
-        let max_length = width_in_px.ceil() as usize * 2;
 
         if let Some(timeline_range) = timeline_range {
             let (a, b) = timeline_range.values;
@@ -187,7 +183,6 @@ impl Plot {
                                     .and_then(|handle| lines.get_mut(handle))
                                 {
                                     minmax_lines.push(vec![line.min, line.max]);
-                                    line.data.max_count = max_length;
                                 }
                             }
                         }
@@ -269,7 +264,7 @@ impl Plot {
                 let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                     continue;
                 };
-                let component_label = component_metadata.component_name();
+                let component_label = component_metadata.name.clone();
                 let element_names = component_metadata.element_names();
                 let component = entity.components.entry(*component_id).or_insert_with(|| {
                     PlotDataComponent::new(
@@ -295,8 +290,10 @@ impl Plot {
                         if let Some(values) = lines.get_mut(line) {
                             values.data.current_range =
                                 (self.tick_range.start as usize)..(self.tick_range.end as usize);
-                            values.data.max_count = max_length;
                             for chunk in values.data.range() {
+                                chunk
+                                    .unfetched
+                                    .remove_range(max_tick.0 as u32..chunk.range.end as u32);
                                 if !chunk.unfetched.is_empty() {
                                     let start =
                                         chunk.unfetched.min().expect("unexpected empty chunk")
@@ -308,23 +305,32 @@ impl Plot {
                                         end += 1;
                                     }
                                     let start = start.max(self.tick_range.start);
-                                    let end = end.min(self.tick_range.end) + 1;
+                                    let end = end.min(self.tick_range.end);
                                     let time_range = start..end;
 
                                     if end.saturating_sub(start) > 0 {
                                         chunk.unfetched.remove_range(start as u32..end as u32);
-                                        control_msg.send(ControlMsg::Query {
-                                            time_range,
-                                            query: impeller::Query {
+                                        let packet_id = fastrand::u64(..).to_le_bytes()[..3]
+                                            .try_into()
+                                            .expect("id wrong size");
+
+                                        commands.send_req_with_handler(
+                                            GetTimeSeries {
+                                                id: packet_id,
+                                                range: time_range.clone(),
+                                                entity_id: *entity_id,
                                                 component_id: *component_id,
-                                                with_component_ids: vec![],
-                                                entity_ids: vec![*entity_id],
                                             },
-                                        });
+                                            packet_id,
+                                            super::time_series_handler(
+                                                *entity_id,
+                                                *component_id,
+                                                time_range,
+                                            ),
+                                        );
                                     }
                                 }
                             }
-                            values.data.recalculate_avg_data();
                         }
                     }
 
@@ -332,7 +338,7 @@ impl Plot {
                         (None, true) => {
                             let entity = commands
                                 .spawn(LineBundle {
-                                    line: line.clone(),
+                                    line: LineHandle(line.clone()),
                                     uniform: LineUniform::new(
                                         graph_state.line_width,
                                         color.into_bevy(),
@@ -574,7 +580,7 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
-        line_handles: &Query<&Handle<Line>>,
+        line_handles: &Query<&LineHandle>,
         graph_state: &GraphState,
         collected_graph_data: &CollectedGraphData,
         pointer_pos: egui::Pos2,
@@ -629,10 +635,9 @@ impl Plot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line) = lines.get(line_handle) else {
+                    let Some(line) = lines.get(&line_handle.0) else {
                         continue;
                     };
-                    let index = tick / line.data.chunk_size;
                     if current_entity_id.as_ref() != Some(entity_id) {
                         ui.add_space(8.0);
                         ui.add(egui::Separator::default().grow(16.0 * 2.0));
@@ -687,8 +692,7 @@ impl Plot {
                         });
                         let value = line
                             .data
-                            .averaged_data
-                            .get(index)
+                            .get(tick)
                             .map(|x| format!("{:.2}", x))
                             .unwrap_or_else(|| "N/A".to_string());
                         ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
@@ -740,7 +744,7 @@ impl Plot {
         &self,
         ui: &mut egui::Ui,
         lines: &Assets<Line>,
-        line_handles: &Query<&Handle<Line>>,
+        line_handles: &Query<&LineHandle>,
         collected_graph_data: &CollectedGraphData,
         graph_state: &GraphState,
         scrub_icon: &egui::TextureId,
@@ -811,11 +815,10 @@ impl Plot {
                     let Ok(line_handle) = line_handles.get(*entity) else {
                         continue;
                     };
-                    let Some(line) = lines.get(line_handle) else {
+                    let Some(line) = lines.get(&line_handle.0) else {
                         continue;
                     };
-                    let x_index = x_index / line.data.chunk_size;
-                    let Some(y) = line.data.averaged_data.get(x_index) else {
+                    let Some(y) = line.data.get(x_index) else {
                         continue;
                     };
                     let y_offset = *y as f64 - self.bounds.min_y;
@@ -899,14 +902,14 @@ impl PlotBounds {
         }
     }
 
-    pub fn from_lines(baseline: &Range<u64>, lines: &[Vec<f64>]) -> Self {
+    pub fn from_lines(baseline: &Range<u64>, lines: &[Vec<f32>]) -> Self {
         let (min_x, max_x) = (baseline.start as f64, baseline.end as f64);
 
         let minmax_y = lines.iter().flatten().minmax();
 
         let (min_y, max_y) = match minmax_y {
-            MinMaxResult::MinMax(min_y, max_y) => (*min_y, *max_y),
-            MinMaxResult::OneElement(y) => (*y, *y),
+            MinMaxResult::MinMax(min_y, max_y) => (*min_y as f64, *max_y as f64),
+            MinMaxResult::OneElement(y) => (*y as f64, *y as f64),
             _ => (0.0, 0.0),
         };
         let min_y = sigfig_round(min_y, 2);

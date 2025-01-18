@@ -1,13 +1,16 @@
 use std::ops::RangeInclusive;
 
-use bevy::ecs::{
-    change_detection::DetectChangesMut,
-    event::EventWriter,
-    system::{ResMut, SystemParam, SystemState},
-    world::World,
+use bevy::{
+    ecs::{
+        change_detection::DetectChangesMut,
+        system::{ResMut, SystemParam, SystemState},
+        world::World,
+    },
+    prelude::{Deref, DerefMut, Res, Resource},
 };
 use bevy_egui::egui;
-use impeller::{bevy::Tick, ControlMsg};
+use impeller2_bevy::{CurrentStreamId, PacketTx};
+use impeller2_wkt::{SetStreamState, Tick};
 
 use crate::ui::{colors, utils, widgets::WidgetSystem};
 
@@ -347,10 +350,14 @@ impl egui::Widget for Timeline<'_> {
     }
 }
 
+#[derive(Resource, Deref, DerefMut, Clone, Debug, Default)]
+pub struct UITick(pub u64);
+
 #[derive(SystemParam)]
 pub struct TimelineSlider<'w> {
-    event: EventWriter<'w, ControlMsg>,
-    tick: ResMut<'w, Tick>,
+    event: Res<'w, PacketTx>,
+    tick: ResMut<'w, UITick>,
+    current_stream_id: Res<'w, CurrentStreamId>,
 }
 
 impl WidgetSystem for TimelineSlider<'_> {
@@ -363,13 +370,14 @@ impl WidgetSystem for TimelineSlider<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let TimelineSlider {
+            event,
+            mut tick,
+            current_stream_id,
+        } = state.get_mut(world);
 
         let (icons, timeline_args) = args;
         let handle_icon = icons.handle;
-
-        let mut tick = state_mut.tick;
-        let mut event = state_mut.event;
 
         ui.horizontal(|ui| {
             let response = ui
@@ -388,8 +396,12 @@ impl WidgetSystem for TimelineSlider<'_> {
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
 
             if response.changed() {
-                event.send(ControlMsg::Rewind(tick.0));
+                event.send_msg(SetStreamState::rewind(**current_stream_id, tick.0))
             }
         });
     }
+}
+
+pub fn sync_ui_tick(tick: Res<Tick>, mut ui_tick: ResMut<UITick>) {
+    ui_tick.0 = tick.0;
 }

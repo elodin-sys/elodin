@@ -1,4 +1,3 @@
-use alloc::borrow::Cow;
 use bytemuck::{Pod, Zeroable};
 use bytes::Bytes;
 use core::{fmt, hash::Hash, mem::size_of, ops::Range};
@@ -9,8 +8,6 @@ use smallvec::SmallVec;
 
 #[cfg(feature = "std")]
 use crate::query::MetadataStore;
-#[cfg(feature = "std")]
-use crate::world::World;
 use crate::Handle;
 #[cfg(feature = "std")]
 type HashSet<T> = std::collections::HashSet<T>;
@@ -32,7 +29,7 @@ impl EntityId {
     #[cfg(feature = "std")]
     pub fn metadata() -> Metadata {
         let mut metadata = Metadata {
-            name: Cow::Borrowed(Self::NAME),
+            name: std::borrow::Cow::Borrowed(Self::NAME),
             component_type: ComponentType::u64(),
             asset: false,
             tags: Some(HashMap::default()),
@@ -493,7 +490,7 @@ pub trait ComponentExt: Component {
     #[cfg(feature = "std")]
     fn metadata() -> Metadata {
         Metadata {
-            name: Cow::Borrowed(Self::NAME),
+            name: std::borrow::Cow::Borrowed(Self::NAME),
             component_type: Self::component_type(),
             asset: Self::ASSET,
             tags: Default::default(),
@@ -502,13 +499,6 @@ pub trait ComponentExt: Component {
 }
 
 impl<C: Component> ComponentExt for C {}
-
-#[cfg(feature = "std")]
-pub trait Archetype {
-    fn name() -> ArchetypeName;
-    fn components() -> Vec<Metadata>;
-    fn insert_into_world(self, world: &mut World);
-}
 
 pub trait ValueRepr {
     type ValueDim: ComponentValueDim;
@@ -656,7 +646,7 @@ pub enum MetadataQuery {
 #[cfg(feature = "std")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
-    pub name: Cow<'static, str>,
+    pub name: std::borrow::Cow<'static, str>,
     pub component_type: ComponentType,
     pub tags: Option<HashMap<String, TagValue>>,
     pub asset: bool,

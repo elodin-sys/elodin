@@ -334,8 +334,6 @@ fn compress(file: &mut File) -> Result<File, Error> {
 enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("impeller error: {0}")]
-    Impeller(#[from] impeller::Error),
     #[error("nox ecs error: {0}")]
     NoxEcs(#[from] nox_ecs::Error),
     #[error("tonic error: {0}")]

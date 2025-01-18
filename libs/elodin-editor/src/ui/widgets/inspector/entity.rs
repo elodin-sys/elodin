@@ -1,20 +1,13 @@
 use std::{collections::BTreeMap, fmt::Display};
 
 use bevy::ecs::{
-    event::EventWriter,
     system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-
-use impeller::{
-    bevy::ColumnPayloadMsg,
-    ndarray::{self, Dimension},
-    query::MetadataStore,
-    ser_de::ColumnValue,
-    ColumnPayload, ComponentValue, ElementValueMut,
-};
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, ElementValueMut};
+use smallvec::SmallVec;
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
@@ -37,8 +30,7 @@ use super::{empty_inspector, InspectorIcons};
 pub struct InspectorEntity<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     tile_state: ResMut<'w, tiles::TileState>,
-    metadata_store: Res<'w, MetadataStore>,
-    column_payload_writer: EventWriter<'w, ColumnPayloadMsg>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     filter: ResMut<'w, ComponentFilter>,
 }
@@ -60,7 +52,6 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let mut entities = state_mut.entities;
         let mut tile_state = state_mut.tile_state;
         let metadata_store = state_mut.metadata_store;
-        let mut column_payload_writer = state_mut.column_payload_writer;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
         let Ok((entity_id, _, mut component_value_map, metadata)) = entities.get_mut(pair.bevy)
         else {
@@ -108,7 +99,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             .keys()
             .filter_map(|id| {
                 let metadata = metadata_store.get_metadata(id)?;
-                let priority = metadata.priority();
+                let priority = metadata.metadata.priority();
                 Some((*id, priority, metadata))
             })
             .filter_map(|(id, priority, metadata)| {
@@ -116,7 +107,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     Some((id, priority, metadata))
                 } else {
                     matcher
-                        .fuzzy_match(metadata.component_name(), &state_mut.filter.0)
+                        .fuzzy_match(&metadata.name, &state_mut.filter.0)
                         .map(|score| (id, score, metadata))
                 }
             })
@@ -129,7 +120,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
         for (component_id, _, metadata) in components.into_iter().rev() {
             let component_value = component_value_map.0.get_mut(&component_id).unwrap();
-            let label = metadata.component_name();
+            let label = metadata.name.clone();
             let element_names = metadata.element_names();
 
             ui.add(egui::Separator::default().spacing(32.0));
@@ -138,26 +129,26 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
             let res = inspector_item_multi(
                 ui,
-                label,
+                &label,
                 element_names,
                 component_value,
                 icon_chart,
                 &mut create_graph,
             );
             if res.changed() {
-                if let Ok(payload) = ColumnPayload::try_from_value_iter(
-                    0,
-                    std::iter::once(ColumnValue {
-                        entity_id,
-                        value: component_value.clone(),
-                    }),
-                ) {
-                    column_payload_writer.send(ColumnPayloadMsg {
-                        component_name: metadata.component_name().to_string(),
-                        component_type: component_value.ty(),
-                        payload,
-                    });
-                }
+                // if let Ok(payload) = ColumnPayload::try_from_value_iter(
+                //     0,
+                //     std::iter::once(ColumnValue {
+                //         entity_id,
+                //         value: component_value.clone(),
+                //     }),
+                // ) {
+                //     column_payload_writer.send(ColumnPayloadMsg {
+                //         component_name: metadata.name.to_string(),
+                //         component_type: component_value.ty(),
+                //         payload,
+                //     });
+                // }
             }
 
             if create_graph {
@@ -305,10 +296,7 @@ fn inspector_item_multi(
                 |res: Option<egui::Response>, ((dim_i, value), element_name)| {
                     let label = element_name
                         .map(|name| name.to_string())
-                        .unwrap_or_else(|| {
-                            let dim_i = DimIndexFormat(dim_i);
-                            format!("{dim_i}")
-                        });
+                        .unwrap_or_else(|| format!("{dim_i:?}"));
 
                     let new_res = ui.add(inspector_item_value(&label, value, desired_size));
                     if let Some(res) = res {
@@ -327,13 +315,12 @@ fn inspector_item_multi(
     }
 }
 
-pub struct DimIndexFormat(ndarray::Dim<ndarray::IxDynImpl>);
+pub struct DimIndexFormat(SmallVec<[usize; 4]>);
 impl Display for DimIndexFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let view = self.0.as_array_view();
-        for (i, x) in view.iter().enumerate() {
+        for (i, x) in self.0.iter().enumerate() {
             write!(f, "{x}")?;
-            if i + 1 < view.len() {
+            if i + 1 < self.0.len() {
                 write!(f, ".")?;
             }
         }

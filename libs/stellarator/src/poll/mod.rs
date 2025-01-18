@@ -75,6 +75,26 @@ impl Reactor for PollingReactor {
             }
         })
     }
+
+    fn external_waker(&self) -> impl maitake::scheduler::ExternalWaker {
+        ExternalWaker {
+            poller: self.poller.clone(),
+        }
+    }
+}
+#[derive(Debug)]
+struct ExternalWaker {
+    poller: Arc<Poller>,
+}
+
+impl maitake::scheduler::ExternalWaker for ExternalWaker {
+    fn wake(&self) {
+        for _ in 0..1024 {
+            if self.poller.notify().is_ok() {
+                break;
+            }
+        }
+    }
 }
 
 impl PollingReactor {
@@ -201,9 +221,11 @@ impl Executor<PollingReactor> {
             events: Default::default(),
             fds: Default::default(),
         };
+        let scheduler =
+            maitake::scheduler::LocalScheduler::with_external_waker(reactor.external_waker());
         Ok(Executor {
             reactor: RefCell::new(reactor),
-            scheduler: maitake::scheduler::LocalScheduler::new(),
+            scheduler,
             timer: Timer::new(crate::os::os_clock()),
         })
     }
