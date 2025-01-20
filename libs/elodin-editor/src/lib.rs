@@ -687,6 +687,7 @@ pub fn sync_paused(
             id: stream_id.0,
             playing: Some(!paused.0),
             tick: None,
+            time_step: None,
         })
     }
 }

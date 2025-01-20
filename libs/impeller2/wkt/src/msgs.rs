@@ -28,16 +28,11 @@ impl Msg for VTableMsg {
 pub struct Stream {
     #[serde(default)]
     pub filter: StreamFilter,
-    #[serde(default = "default_time_step")]
-    pub time_step: Duration,
+    pub time_step: Option<Duration>,
     #[serde(default)]
     pub start_tick: Option<u64>,
     #[serde(default)]
     pub id: StreamId,
-}
-
-fn default_time_step() -> Duration {
-    Duration::from_secs_f64(1.0 / 60.0)
 }
 
 pub type StreamId = u64;
@@ -57,6 +52,7 @@ pub struct SetStreamState {
     pub id: StreamId,
     pub playing: Option<bool>,
     pub tick: Option<u64>,
+    pub time_step: Option<Duration>,
 }
 
 impl SetStreamState {
@@ -65,6 +61,7 @@ impl SetStreamState {
             id,
             playing: None,
             tick: Some(tick),
+            time_step: None,
         }
     }
 }
