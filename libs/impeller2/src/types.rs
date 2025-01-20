@@ -27,7 +27,13 @@ pub struct ComponentId(pub u64);
 
 impl ComponentId {
     pub const fn new(str: &str) -> Self {
-        ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(str))
+        ComponentId(const_fnv1a_hash::fnv1a_hash_str_64(str) & !(1u64 << 63)) // NOTE: we mask the last bit so the number can fit in an i64, and thus be lua compatible
+    }
+}
+
+impl From<&'_ str> for ComponentId {
+    fn from(value: &'_ str) -> Self {
+        ComponentId::new(value)
     }
 }
 
@@ -82,6 +88,11 @@ impl TryFrom<&[u8]> for EntityId {
         Ok(EntityId(u64::from_le_bytes(bytes)))
     }
 }
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for EntityId {}
+#[cfg(feature = "mlua")]
+impl mlua::UserData for ComponentId {}
 
 #[derive(
     Serialize,
@@ -520,6 +531,7 @@ pub trait MsgExt: Msg {
 
 impl<M: Msg> MsgExt for M {}
 
+#[derive(Debug)]
 pub enum OwnedPacket<B: IoBuf> {
     Msg(MsgBuf<B>),
     Table(OwnedTable<B>),
@@ -528,7 +540,7 @@ pub enum OwnedPacket<B: IoBuf> {
 
 impl<B: IoBuf> OwnedPacket<B> {
     pub fn parse(packet_buf: Slice<B>) -> Result<Self, Error> {
-        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(&packet_buf).unwrap();
+        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(&packet_buf)?;
         let packet_ty = *packet_ty;
         let id = *id;
         let buf = packet_buf
@@ -542,6 +554,7 @@ impl<B: IoBuf> OwnedPacket<B> {
     }
 }
 
+#[derive(Debug)]
 pub struct OwnedTable<B: IoBuf> {
     pub id: PacketId,
     pub buf: Slice<B>,
@@ -558,6 +571,7 @@ impl<B: IoBuf> OwnedTable<B> {
     }
 }
 
+#[derive(Debug)]
 pub struct MsgBuf<B: IoBuf> {
     pub id: PacketId,
     pub buf: Slice<B>,
@@ -577,6 +591,7 @@ impl<B: IoBuf> MsgBuf<B> {
     }
 }
 
+#[derive(Debug)]
 pub struct TimeSeries<B: IoBuf> {
     pub id: PacketId,
     pub buf: Slice<B>,

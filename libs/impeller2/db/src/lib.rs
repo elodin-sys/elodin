@@ -39,7 +39,7 @@ use stellarator::{
     sync::{Mutex, RwLock, WaitCell, WaitQueue},
 };
 use time_series::{TimeSeries, TimeSeriesWriter};
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 pub use error::Error;
 
@@ -556,7 +556,8 @@ impl Server {
         stellarator::spawn(tick(db.clone()));
         loop {
             let stream = listener.accept().await?;
-            stellarator::spawn(handle_conn(stream, db.clone()));
+            let conn_db = db.clone();
+            stellarator::struc_con::stellar(move || handle_conn(stream, conn_db));
         }
     }
 }
@@ -567,7 +568,6 @@ async fn tick(db: Arc<DB>) {
         if !db.recording_cell.wait().await {
             return;
         }
-        trace!("tick");
         for kv in db.components.iter() {
             for entity_kv in kv.value().entities.iter() {
                 let entity = entity_kv.value();
@@ -608,15 +608,34 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     }
 }
 
+async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> {
+    let (rx, tx) = stream.split();
+    let mut rx = impeller2_stella::PacketStream::new(rx);
+    let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
+    let mut buf = vec![0u8; 1024 * 64];
+    loop {
+        let pkt = rx.next(buf).await?;
+        match handle_packet(&pkt, &db, &tx).await {
+            Ok(_) => {}
+            Err(err) if err.is_stream_closed() => {}
+            Err(err) => {
+                warn!(?err, "error handling packet");
+            }
+        }
+        buf = pkt.into_buf();
+    }
+}
+
 async fn handle_packet(
     pkt: &Packet<Vec<u8>>,
     db: &Arc<DB>,
     tx: &Arc<Mutex<impeller2_stella::PacketSink<OwnedWriter<TcpStream>>>>,
 ) -> Result<(), Error> {
-    trace!("handling pkt");
+    trace!(?pkt, "handling pkt");
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
+            debug!(id = ?vtable.id, "inserting vtable");
             let mut registry = db.vtable_registry.write().await;
             registry.map.insert(vtable.id, vtable.vtable);
         }
@@ -628,7 +647,7 @@ async fn handle_packet(
                 db.latest_tick.load(atomic::Ordering::Relaxed),
                 &db.time_step,
             ));
-            trace!(stream.id = ?stream_id, "inserting stream");
+            debug!(stream.id = ?stream_id, "inserting stream");
             db.streams.insert(stream_id, state.clone());
             let db = db.clone();
             let tx = tx.clone();
@@ -649,7 +668,7 @@ async fn handle_packet(
                 warn!(stream.id = stream_id, "stream not found");
                 return Ok(());
             };
-            trace!(msg = ?set_stream_state, "set_stream_state received");
+            debug!(msg = ?set_stream_state, "set_stream_state received");
             if let Some(playing) = set_stream_state.playing {
                 state.set_playing(playing);
             }
@@ -672,7 +691,7 @@ async fn handle_packet(
         }
         Packet::Msg(m) if m.id == GetTimeSeries::ID => {
             let get_time_series = m.parse::<GetTimeSeries>()?;
-            trace!(msg = ?get_time_series, "get time series");
+            debug!(msg = ?get_time_series, "get time series");
 
             let tx = tx.clone();
             let db = db.clone();
@@ -703,9 +722,9 @@ async fn handle_packet(
                 name,
                 asset,
             } = m.parse::<SetComponentMetadata>()?;
-            trace!(component.id = ?component_id, name = ?name, metadata = ?metadata, "set component metadata");
+            debug!(component.id = ?component_id, name = ?name, metadata = ?metadata, "set component metadata");
             let Some(component) = db.components.get(&component_id) else {
-                trace!(component.id = ?component_id, "component not found");
+                debug!(component.id = ?component_id, "component not found");
                 return Ok(());
             };
             let metadata = ComponentMetadata {
@@ -714,7 +733,7 @@ async fn handle_packet(
                 metadata,
                 asset,
             };
-            trace!(?metadata, component.id = ?component_id, "set component metadata");
+            debug!(?metadata, component.id = ?component_id, "set component metadata");
             metadata.write(db.path.join(component_id.to_string()).join("metadata"))?;
             component.metadata.store(Arc::new(metadata));
         }
@@ -732,7 +751,7 @@ async fn handle_packet(
 
         Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
             let set_entity_metadata = m.parse::<SetEntityMetadata>()?;
-            trace!(msg = ?set_entity_metadata, "set entity metadata");
+            debug!(msg = ?set_entity_metadata, "set entity metadata");
             let entity_metadata_path = db.path.join("entity_metadata");
             std::fs::create_dir_all(&entity_metadata_path)?;
             let path = entity_metadata_path.join(set_entity_metadata.entity_id.to_string());
@@ -742,7 +761,7 @@ async fn handle_packet(
                 name: set_entity_metadata.name,
                 metadata: set_entity_metadata.metadata,
             };
-            trace!(?metadata, entity.id = ?set_entity_metadata.entity_id, "set entity metadata");
+            debug!(?metadata, entity.id = ?set_entity_metadata.entity_id, "set entity metadata");
             metadata.write(&path)?;
             db.entity_metadata
                 .insert(set_entity_metadata.entity_id, metadata);
@@ -862,7 +881,7 @@ async fn handle_packet(
             tx.send(settings.to_len_packet()).await.0?;
         }
         Packet::Table(table) => {
-            trace!(table.len = table.buf.len(), "sinking table");
+            debug!(table.len = table.buf.len(), "sinking table");
             let registry = db.vtable_registry.read().await;
             let mut sink = DBSink(db);
             table.sink(&*registry, &mut sink)?;
@@ -870,24 +889,6 @@ async fn handle_packet(
         _ => {}
     }
     Ok(())
-}
-
-async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> {
-    let (rx, tx) = stream.split();
-    let mut rx = impeller2_stella::PacketStream::new(rx);
-    let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
-    let mut buf = vec![0u8; 1024 * 64];
-    loop {
-        let pkt = rx.next(buf).await?;
-        match handle_packet(&pkt, &db, &tx).await {
-            Ok(_) => {}
-            Err(err) if err.is_stream_closed() => {}
-            Err(err) => {
-                warn!(?err, "error handling packet");
-            }
-        }
-        buf = pkt.into_buf();
-    }
 }
 
 pub struct StreamState {
@@ -986,21 +987,21 @@ async fn handle_stream<A: AsyncWrite>(
         }
 
         let gen = db.vtable_gen.load(atomic::Ordering::SeqCst);
+        if gen != current_gen {
+            let stream = stream.lock().await;
+            let id: PacketId = state.stream_id.to_le_bytes()[..3].try_into().unwrap();
+            table = LenPacket::table(id, 2048 - 16);
+            let vtable = state.filter.vtable(&db)?;
+            let msg = VTableMsg { id, vtable };
+            stream.send(msg.to_len_packet()).await.0?;
+            current_gen = gen;
+        }
+        table.clear();
+        if let Err(err) = state.filter.populate_table(&db, &mut table, tick) {
+            warn!(?err, "failed to populate table");
+        }
         {
             let stream = stream.lock().await;
-            if gen != current_gen {
-                let id: PacketId = state.stream_id.to_le_bytes()[..3].try_into().unwrap();
-                table = LenPacket::table(id, 2048 - 16);
-                let vtable = state.filter.vtable(&db)?;
-                let msg = VTableMsg { id, vtable };
-                stream.send(msg.to_len_packet()).await.0?;
-                current_gen = gen;
-            }
-            table.clear();
-            if let Err(err) = state.filter.populate_table(&db, &mut table, tick) {
-                warn!(?err, "failed to populate table");
-            }
-
             rent!(stream.send(table).await, table)?;
         }
 

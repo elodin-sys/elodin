@@ -9,6 +9,7 @@ default = ["alloc"]
 std = ["miette", "alloc"]
 alloc = []
 bevy = ["dep:bevy"]
+mlua = ["dep:mlua"]
 
 
 [dependencies]
@@ -40,3 +41,8 @@ const-fnv1a-hash = "1.1.0"
 bevy.version = "0.15"
 bevy.default-features = false
 bevy.optional = true
+
+# lua
+mlua.version = "0.10"
+mlua.features = ["serialize"]
+mlua.optional = true
