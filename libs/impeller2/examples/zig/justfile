@@ -1,0 +1,3 @@
+run: 
+  impeller2-cli vtable.lua > ./vtable.bin
+  zig run main.zig

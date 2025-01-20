@@ -3,7 +3,7 @@ use std::{net::SocketAddr, time::Duration};
 use impeller2::types::{LenPacket, MsgExt};
 use impeller2::{
     table::VTableBuilder,
-    types::{ComponentId, EntityId, PrimType},
+    types::{EntityId, PrimType},
 };
 use impeller2_wkt::VTableMsg;
 use stellarator::io::SplitExt;
@@ -29,42 +29,13 @@ async fn connect() -> anyhow::Result<()> {
     let tx = impeller2_stella::PacketSink::new(tx);
 
     let mut vtable: VTableBuilder<Vec<_>, Vec<_>> = VTableBuilder::default();
-    vtable.column(
-        ComponentId::new("ts"),
-        PrimType::U32,
-        &[1u64],
-        std::iter::once(EntityId(0)),
-    )?;
-    vtable.column(
-        ComponentId::new("mag"),
-        PrimType::F32,
-        &[3u64],
-        std::iter::once(EntityId(0)),
-    )?;
-    vtable.column(
-        ComponentId::new("gyro"),
-        PrimType::F32,
-        &[3u64],
-        std::iter::once(EntityId(0)),
-    )?;
-    vtable.column(
-        ComponentId::new("accel"),
-        PrimType::F32,
-        &[3u64],
-        std::iter::once(EntityId(0)),
-    )?;
-    vtable.column(
-        ComponentId::new("mag_temp"),
-        PrimType::F32,
-        &[1u64],
-        std::iter::once(EntityId(0)),
-    )?;
-    vtable.column(
-        ComponentId::new("mag_sample"),
-        PrimType::U32,
-        &[1u64],
-        std::iter::once(EntityId(0)),
-    )?;
+    vtable.column("ts", PrimType::U32, [1], [EntityId(0)])?;
+    vtable.column("mag", PrimType::F32, [3], [EntityId(0)])?;
+    vtable.column("gyro", PrimType::F32, [3], [EntityId(0)])?;
+    vtable.column("accel", PrimType::F32, [3], [EntityId(0)])?;
+    vtable.column("mag_temp", PrimType::F32, [], [EntityId(0)])?;
+    vtable.column("mag_sample", PrimType::U32, [], [EntityId(0)])?;
+    vtable.column("baro", PrimType::F32, [], [EntityId(0)])?;
 
     let vtable = vtable.build();
     let id: [u8; 3] = fastrand::u64(..).to_le_bytes()[..3]

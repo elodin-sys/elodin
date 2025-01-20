@@ -11,7 +11,7 @@ highlight = ["syntastica", "syntastica-parsers", "syntastica-themes"]
 [dependencies]
 # lua
 mlua.version = "0.10"
-mlua.features = ["luau", "serialize", "vendored", "async", "anyhow"]
+mlua.features = ["lua54", "serialize", "vendored", "async", "anyhow"]
 
 # repl
 rustyline.version = "15.0.0"
@@ -33,7 +33,7 @@ impeller2-stella.path = "../stella"
 
 # ser-de
 impeller2.path = ".."
-impeller2.features = ["std"]
+impeller2.features = ["std", "mlua"]
 impeller2-wkt.path = "../wkt"
 serde.version = "1.0"
 serde.features = ["derive"]
@@ -45,3 +45,7 @@ fastrand = "2.2.0"
 
 # anyhow
 anyhow = "1"
+
+# args
+clap.version = "4.5"
+clap.features = ["derive"]
