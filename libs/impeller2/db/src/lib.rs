@@ -626,6 +626,7 @@ async fn handle_packet(
             let state = Arc::new(StreamState::from_state(
                 stream,
                 db.latest_tick.load(atomic::Ordering::Relaxed),
+                &db.time_step,
             ));
             trace!(stream.id = ?stream_id, "inserting stream");
             db.streams.insert(stream_id, state.clone());
@@ -654,6 +655,9 @@ async fn handle_packet(
             }
             if let Some(tick) = set_stream_state.tick {
                 state.set_tick(tick);
+            }
+            if let Some(time_step) = set_stream_state.time_step {
+                state.set_time_step(time_step);
             }
         }
         Packet::Msg(m) if m.id == GetSchema::ID => {
@@ -896,10 +900,15 @@ pub struct StreamState {
 }
 
 impl StreamState {
-    fn from_state(stream: Stream, latest_tick: u64) -> StreamState {
+    fn from_state(stream: Stream, latest_tick: u64, db_timestep: &AtomicU64) -> StreamState {
         StreamState {
             stream_id: stream.id,
-            time_step: AtomicU64::new(stream.time_step.as_nanos() as u64),
+            time_step: AtomicU64::new(
+                stream
+                    .time_step
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or_else(|| db_timestep.load(atomic::Ordering::Relaxed)),
+            ),
             is_scrubbed: AtomicBool::new(false),
             current_tick: AtomicU64::new(stream.start_tick.unwrap_or(latest_tick)),
             playing_cell: PlayingCell::new(true),
@@ -915,6 +924,11 @@ impl StreamState {
         self.is_scrubbed.store(true, atomic::Ordering::SeqCst);
         self.current_tick.store(tick, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake();
+    }
+
+    fn set_time_step(&self, time_step: Duration) {
+        self.time_step
+            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn time_step(&self) -> Duration {

@@ -31,6 +31,12 @@ impl ComponentId {
     }
 }
 
+impl From<&'_ str> for ComponentId {
+    fn from(value: &'_ str) -> Self {
+        ComponentId::new(value)
+    }
+}
+
 impl Display for ComponentId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Display::fmt(&self.0, f)

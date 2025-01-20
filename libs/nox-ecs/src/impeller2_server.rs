@@ -113,6 +113,10 @@ pub(crate) fn init_db(db: &impeller_db::DB, world: &mut World) -> Result<(), imp
             component.metadata.store(Arc::new(metadata.clone()));
         }
     }
+    db.time_step.store(
+        world.metadata.run_time_step.0.as_nanos() as u64,
+        atomic::Ordering::SeqCst,
+    );
     Ok(())
 }
 
