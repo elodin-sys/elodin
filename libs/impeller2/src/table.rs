@@ -38,7 +38,7 @@ use crate::{
 };
 
 /// An entry that points to a series of arrays that are all associated with a single component
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ColumnEntry {
     len: u64,
     component_id: ComponentId,
@@ -51,6 +51,15 @@ pub struct ColumnEntry {
 struct BufEntry<T> {
     offset: u64,
     phantom_data: PhantomData<T>,
+}
+
+impl<T> Clone for BufEntry<T> {
+    fn clone(&self) -> Self {
+        Self {
+            offset: self.offset,
+            phantom_data: PhantomData,
+        }
+    }
 }
 
 impl<T> std::fmt::Debug for BufEntry<T> {
@@ -71,7 +80,7 @@ impl<T: Immutable + TryFromBytes> BufEntry<T> {
     }
 }
 
-#[derive(Serialize, Deserialize, TryFromBytes, Immutable, IntoBytes, Debug)]
+#[derive(Serialize, Deserialize, TryFromBytes, Immutable, IntoBytes, Debug, Clone)]
 pub(crate) struct ShapeEntry {
     pub(crate) prim_type: PrimType,
     pub(crate) rank: u64,
@@ -116,7 +125,7 @@ impl ColumnEntry {
 }
 
 /// An entry that points to a single entity's components. It points to a contiguous series of component arrays. The associated components_ids and shapes are all stored in the [`VTable`]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RowEntry {
     len: u64,
     entity_id: EntityId,
@@ -149,14 +158,14 @@ impl RowEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MetadataEntry {
     id: u64,
     len: u64,
     offset: u64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Entry {
     Column(ColumnEntry),
     Entity(RowEntry),
@@ -170,6 +179,16 @@ pub struct VTable<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> {
     #[serde(bound(deserialize = ""))]
     data: DataBuf,
 }
+
+impl Clone for VTable<Vec<Entry>, Vec<u8>> {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            data: self.data.clone(),
+        }
+    }
+}
+
 impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTable<EntryBuf, DataBuf> {
     pub fn parse_table(&self, table: &[u8], sink: &mut impl Decomponentize) -> Result<(), Error> {
         let data = self.data.as_slice();
@@ -201,18 +220,33 @@ pub struct VTableBuilder<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> {
     data_len: usize,
 }
 
+impl Clone for VTableBuilder<Vec<Entry>, Vec<u8>> {
+    fn clone(&self) -> Self {
+        Self {
+            vtable: self.vtable.clone(),
+            data_len: self.data_len,
+        }
+    }
+}
+
 impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
     pub fn build(self) -> VTable<EntryBuf, DataBuf> {
         self.vtable
     }
 
-    pub fn column(
+    pub fn column<I: IntoIterator<Item = EntityId>>(
         &mut self,
-        component_id: ComponentId,
+        component_id: impl Into<ComponentId>,
         prim_type: PrimType,
-        shape: &[u64],
-        entity_ids: impl ExactSizeIterator<Item = EntityId>,
-    ) -> Result<&mut Self, Error> {
+        shape: impl AsRef<[u64]>,
+        entity_ids: I,
+    ) -> Result<&mut Self, Error>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        let shape = shape.as_ref();
+        let entity_ids = entity_ids.into_iter();
+        let component_id = component_id.into();
         let len = entity_ids.len();
         let shape_offset = self.vtable.data.extend_aligned(shape)? as u64;
         let entity_col_offset = self.vtable.data.extend_from_iter_aligned(entity_ids)? as u64;

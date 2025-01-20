@@ -1,0 +1,5 @@
+run: 
+  impeller2-cli vtable.lua > ./vtable.bin
+  xxd -i vtable.bin > vtable.h
+  cc main.c
+  ./a.out

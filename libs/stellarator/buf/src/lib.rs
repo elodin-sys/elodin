@@ -211,6 +211,12 @@ impl<T: IoBuf> Slice<T> {
     }
 }
 
+impl<T: IoBuf> std::fmt::Debug for Slice<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Slice").field(&deref(self)).finish()
+    }
+}
+
 unsafe impl<T: IoBuf> IoBuf for Slice<T> {
     fn stable_init_ptr(&self) -> *const u8 {
         self.deref().as_ptr()
