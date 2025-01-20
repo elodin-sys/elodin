@@ -380,7 +380,7 @@ Inertia = Annotated[
 ]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})]
 SimulationTick = Annotated[
-    jax.Array, Component("simulation_tick", ComponentType.F64, metadata={"priority": 7})
+    jax.Array, Component("tick", ComponentType.F64, metadata={"priority": 7})
 ]
 SimulationTimeStep = Annotated[
     jax.Array,
