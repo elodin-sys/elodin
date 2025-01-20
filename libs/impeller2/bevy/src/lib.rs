@@ -890,7 +890,7 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
                 component_id: None,
                 entity_id: None,
             },
-            time_step: Duration::from_secs_f64(1.0 / 60.0),
+            time_step: None,
             start_tick: Some(0),
             id: stream_id,
         }
@@ -900,7 +900,7 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
                 component_id: None,
                 entity_id: None,
             },
-            time_step: Duration::ZERO,
+            time_step: Some(Duration::ZERO),
             start_tick: None,
             id: fastrand::u64(..),
         }

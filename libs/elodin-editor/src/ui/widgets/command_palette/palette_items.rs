@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use bevy::{
     ecs::{
@@ -13,8 +13,10 @@ use bevy::{
 use bevy_infinite_grid::InfiniteGrid;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use impeller2::types::ComponentId;
-use impeller2_bevy::{ComponentMetadataRegistry, PacketTx};
-use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings};
+use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
+use impeller2_wkt::{
+    BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState, SimulationTimeStep,
+};
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
@@ -275,6 +277,41 @@ fn create_viewport() -> PaletteItem {
     )
 }
 
+fn set_playback_speed() -> PaletteItem {
+    PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, || {
+        let speeds = [
+            0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
+        ];
+        let next_page = PalettePage::new(
+            speeds
+                .into_iter()
+                .map(|speed| {
+                    PaletteItem::new(
+                        speed.to_string(),
+                        "SPEED".to_string(),
+                        move |packet_tx: Res<PacketTx>,
+                              time_step: Res<SimulationTimeStep>,
+                              stream_id: Res<CurrentStreamId>| {
+                            packet_tx.send_msg(SetStreamState {
+                                id: stream_id.0,
+                                playing: None,
+                                tick: None,
+                                time_step: Some(Duration::from_secs_f64(time_step.0 / speed)),
+                            });
+                            PaletteEvent::Exit
+                        },
+                    )
+                })
+                .collect(),
+        );
+
+        PaletteEvent::NextPage {
+            prev_page_label: None,
+            next_page,
+        }
+    })
+}
+
 impl Default for PalettePage {
     fn default() -> PalettePage {
         PalettePage::new(vec![
@@ -325,6 +362,7 @@ impl Default for PalettePage {
                     PaletteEvent::Exit
                 },
             ),
+            set_playback_speed(),
             create_graph(),
             create_viewport(),
             toggle_body_axes(),
