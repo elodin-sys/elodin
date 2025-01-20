@@ -863,7 +863,7 @@ async fn handle_packet(
             let SetDbSettings {
                 recording,
                 time_step,
-            } = dbg!(m.parse::<SetDbSettings>())?;
+            } = m.parse::<SetDbSettings>()?;
             if let Some(recording) = recording {
                 db.recording_cell.set_playing(recording);
             }
@@ -873,7 +873,7 @@ async fn handle_packet(
             }
             db.save_db_state()?;
             let tx = tx.lock().await;
-            tx.send(dbg!(db.db_settings()).to_len_packet()).await.0?;
+            tx.send(db.db_settings().to_len_packet()).await.0?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
             let tx = tx.lock().await;
