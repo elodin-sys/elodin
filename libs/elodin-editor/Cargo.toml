@@ -25,7 +25,7 @@ egui_tiles = "0.10"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.14"
+bevy_infinite_grid = "=0.14.0" # the released version of infinite grid has a bug with hdr this commit is just before that release
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot_v0.15"
 #big_space.path = "../../../big_space"

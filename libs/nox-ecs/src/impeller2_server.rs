@@ -200,6 +200,9 @@ async fn tick(
             return;
         }
         stellarator::sleep(sleep_time).await;
-        start += time_step;
+        let now = Instant::now();
+        while start < now {
+            start += time_step;
+        }
     }
 }
