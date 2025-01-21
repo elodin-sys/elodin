@@ -2126,9 +2126,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_infinite_grid"
-version = "0.14.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4f72cf6124521c180c21361cae9d007abf589091f359a372b3f14fd83edb3a1"
+checksum = "55c5afa9b6b745befade95dd456a5be2efb7889425331b8871ee2c27211d4633"
 dependencies = [
  "bevy 0.15.1",
  "bevy_internal 0.15.1",
@@ -6872,6 +6872,7 @@ dependencies = [
  "const-fnv1a-hash",
  "heapless 0.8.0",
  "miette",
+ "mlua",
  "nox",
  "postcard",
  "serde",
@@ -6905,6 +6906,7 @@ name = "impeller2-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 4.5.20",
  "directories",
  "fastrand 2.2.0",
  "impeller2",
@@ -7802,15 +7804,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "luau0-src"
-version = "0.11.2+luau653"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02313a53daf1fae25e82f7e7ca56180b72d1f08c514426672877cd957298201c"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "lz4"
 version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8135,7 +8128,6 @@ dependencies = [
  "either",
  "erased-serde",
  "futures-util",
- "libloading 0.8.5",
  "mlua-sys",
  "num-traits",
  "parking_lot 0.12.3",
@@ -8154,7 +8146,6 @@ dependencies = [
  "cfg-if",
  "lua-src",
  "luajit-src",
- "luau0-src",
  "pkg-config",
 ]
 

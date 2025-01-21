@@ -1,6 +1,7 @@
 use arc_swap::ArcSwap;
 use assets::Assets;
 use dashmap::DashMap;
+use futures_lite::future;
 use impeller2::types::OwnedPacket as Packet;
 use impeller2::{
     com_de::Decomponentize,
@@ -45,7 +46,6 @@ pub use error::Error;
 
 mod assets;
 mod error;
-//mod registry;
 pub(crate) mod time_series;
 
 pub struct DB {
@@ -594,7 +594,10 @@ async fn tick(db: Arc<DB>) {
         let time_step = db.time_step();
         let sleep_time = time_step.saturating_sub(start.elapsed());
         stellarator::sleep(sleep_time).await;
-        start += time_step;
+        let now = Instant::now();
+        while start < now {
+            start += time_step;
+        }
     }
 }
 
@@ -963,7 +966,6 @@ async fn handle_stream<A: AsyncWrite>(
     state: Arc<StreamState>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
-    let mut start = Instant::now();
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 3], 2048 - 16);
     loop {
@@ -976,16 +978,21 @@ async fn handle_stream<A: AsyncWrite>(
         {
             return Ok(());
         }
-        let tick = state.current_tick();
-        if db
-            .tick_waker
-            .wait_for(|| db.latest_tick.load(atomic::Ordering::Relaxed) > tick)
-            .await
-            .is_err()
+        if future::race(
+            db.tick_waker
+                .wait_for(|| db.latest_tick.load(atomic::Ordering::Relaxed) > state.current_tick()),
+            state
+                .playing_cell
+                .wait_cell
+                .wait_for(|| db.latest_tick.load(atomic::Ordering::Relaxed) > state.current_tick()),
+        )
+        .await
+        .is_err()
         {
             return Ok(());
         }
-
+        let start = Instant::now();
+        let tick = state.current_tick();
         let gen = db.vtable_gen.load(atomic::Ordering::SeqCst);
         if gen != current_gen {
             let stream = stream.lock().await;
@@ -1014,7 +1021,6 @@ async fn handle_stream<A: AsyncWrite>(
             stellarator::sleep(sleep_time),
         )
         .await;
-        start += time_step;
         state.try_increment_tick(tick);
     }
 }
