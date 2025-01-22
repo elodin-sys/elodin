@@ -37,7 +37,7 @@ use stellarator::{
     io::{AsyncWrite, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream},
     rent,
-    sync::{Mutex, RwLock, WaitCell, WaitQueue},
+    sync::{Mutex, RwLock, WaitQueue},
 };
 use time_series::{TimeSeries, TimeSeriesWriter};
 use tracing::{debug, info, trace, warn};
@@ -927,7 +927,7 @@ impl StreamState {
     fn set_tick(&self, tick: u64) {
         self.is_scrubbed.store(true, atomic::Ordering::SeqCst);
         self.current_tick.store(tick, atomic::Ordering::SeqCst);
-        self.playing_cell.wait_cell.wake();
+        self.playing_cell.wait_cell.wake_all();
     }
 
     fn set_time_step(&self, time_step: Duration) {
@@ -1185,20 +1185,20 @@ impl StreamFilterExt for StreamFilter {
 
 pub struct PlayingCell {
     is_playing: AtomicBool,
-    wait_cell: WaitCell,
+    wait_cell: WaitQueue,
 }
 
 impl PlayingCell {
     fn new(is_playing: bool) -> Self {
         Self {
             is_playing: AtomicBool::new(is_playing),
-            wait_cell: WaitCell::new(),
+            wait_cell: WaitQueue::new(),
         }
     }
 
     fn set_playing(&self, playing: bool) {
         self.is_playing.store(playing, atomic::Ordering::SeqCst);
-        self.wait_cell.wake();
+        self.wait_cell.wake_all();
     }
 
     fn is_playing(&self) -> bool {
