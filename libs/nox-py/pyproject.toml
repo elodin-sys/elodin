@@ -17,6 +17,7 @@ dependencies = [
     "polars",
     "pytest",
 ]
+version = "0.10.1"
 
 [project.optional-dependencies]
 tests = ["pytest"]
