@@ -31,7 +31,7 @@ where
             .map_err(io::Error::other)?;
     }
     let mut proc_cancel_token;
-    loop {
+    while !cancel_token.is_cancelled() {
         proc_cancel_token = cancel_token.child();
         let mut set = JoinSet::new();
         set.spawn(builder(proc_cancel_token.clone()));

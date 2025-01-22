@@ -7,18 +7,18 @@ use std::{
     },
 };
 
-use maitake::sync::WaitCell;
+use maitake::sync::WaitQueue;
 
 pub struct CancelTokenInner {
     cancelled: AtomicBool,
-    wait_cell: WaitCell,
+    wait_cell: WaitQueue,
 }
 
 impl Default for CancelTokenInner {
     fn default() -> Self {
         Self {
             cancelled: AtomicBool::new(false),
-            wait_cell: WaitCell::new(),
+            wait_cell: WaitQueue::new(),
         }
     }
 }
@@ -37,7 +37,7 @@ impl CancelTokenInner {
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        self.wait_cell.wake();
+        self.wait_cell.wake_all();
     }
 }
 
@@ -109,7 +109,7 @@ impl Drop for CancelTokenDropGuard {
 
 struct OneshotInner<T> {
     value: UnsafeCell<MaybeUninit<T>>,
-    wait_cell: WaitCell,
+    wait_cell: WaitQueue,
 }
 
 pub struct OneshotRx<T>(Arc<OneshotInner<T>>);
@@ -142,7 +142,7 @@ impl<T> OneshotTx<T> {
 pub fn oneshot<T>() -> (OneshotTx<T>, OneshotRx<T>) {
     let inner = Arc::new(OneshotInner {
         value: UnsafeCell::new(MaybeUninit::uninit()),
-        wait_cell: WaitCell::new(),
+        wait_cell: WaitQueue::new(),
     });
     (OneshotTx(inner.clone()), OneshotRx(inner))
 }
