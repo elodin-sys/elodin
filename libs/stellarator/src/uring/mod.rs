@@ -2,6 +2,7 @@ use crate::Error;
 use crate::Executor;
 use crate::Reactor;
 use io_uring::{cqueue, squeue};
+use maitake::scheduler::ExternalWaker as _;
 use maitake::time::Timer;
 use pin_project::{pin_project, pinned_drop};
 use slab::Slab;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 use std::{cell::RefCell, task::Waker};
+use waker_fn::waker_fn;
 
 pub mod ops;
 
@@ -167,7 +169,10 @@ impl Reactor for UringReactor {
     }
 
     fn waker(&self) -> Waker {
-        crate::noop_waker::noop_waker()
+        let waker = self.external_waker();
+        waker_fn(move || {
+            waker.wake();
+        })
     }
 
     fn external_waker(&self) -> impl maitake::scheduler::ExternalWaker {
@@ -352,6 +357,7 @@ impl maitake::scheduler::ExternalWaker for ExternalWaker {
         self.ring.with_submission(|mut s| {
             let sqe = io_uring::opcode::Nop::new().build().user_data(u64::MAX);
             let _ = unsafe { s.push(&sqe) };
-        })
+        });
+        let _ = self.ring.submitter().submit();
     }
 }

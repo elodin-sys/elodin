@@ -225,7 +225,9 @@ macro_rules! rent_read {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::{sync::Arc, time::Instant};
+
+    use sync::WaitCell;
 
     use super::*;
 
@@ -238,6 +240,21 @@ mod tests {
             println!("slept");
             let delta = start.elapsed().as_millis().abs_diff(250);
             assert!(delta <= 10, "Δt ({}) > 10ms", delta)
+        })
+    }
+
+    #[test]
+    fn test_cross_thread_wake() {
+        let a = Arc::new(WaitCell::new());
+        let b = a.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            b.wake();
+            println!("woke wait cell");
+        });
+        test!(async move {
+            println!("waiting wait cell");
+            a.wait().await;
         })
     }
 }

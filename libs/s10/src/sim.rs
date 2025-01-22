@@ -34,14 +34,11 @@ impl SimRecipe {
     pub async fn run_inner(&self, cancel_token: CancelToken) -> Result<(), Error> {
         debug!("running sim");
 
-        let mut child = KillGroupOnDrop(
-            python_tokio_command()?
-                .process_group(0)
-                .arg(&self.path)
-                .arg("run")
-                .arg("--no-s10")
-                .spawn()?,
-        );
+        let mut cmd = python_tokio_command()?;
+        if !cfg!(target_os = "linux") {
+            cmd.process_group(0); // NOTE(sphw): this causes all sorts of issues on linux, not sure why
+        }
+        let mut child = cmd.arg(&self.path).arg("run").arg("--no-s10").spawn()?;
 
         tokio::select! {
             _ = cancel_token.wait() => {
@@ -106,26 +103,4 @@ pub fn python_command() -> Result<std::process::Command, Error> {
 
 pub fn python_tokio_command() -> Result<Command, Error> {
     Ok(python_command()?.into())
-}
-
-pub struct KillGroupOnDrop(tokio::process::Child);
-
-impl KillGroupOnDrop {
-    pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        self.0.wait().await
-    }
-
-    pub fn id(&self) -> Option<u32> {
-        self.0.id()
-    }
-}
-impl Drop for KillGroupOnDrop {
-    fn drop(&mut self) {
-        if let Some(pid) = self.0.id() {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pid as i32),
-                nix::sys::signal::Signal::SIGTERM,
-            );
-        }
-    }
 }

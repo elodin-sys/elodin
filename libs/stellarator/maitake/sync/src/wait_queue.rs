@@ -1437,6 +1437,9 @@ impl<Lock: ScopedRawMutex> Future for Wait<'_, Lock> {
     }
 }
 
+unsafe impl<Lock: ScopedRawMutex> Sync for Wait<'_, Lock> {}
+unsafe impl<Lock: ScopedRawMutex> Send for Wait<'_, Lock> {}
+
 #[pinned_drop]
 impl<Lock: ScopedRawMutex> PinnedDrop for Wait<'_, Lock> {
     fn drop(mut self: Pin<&mut Self>) {
