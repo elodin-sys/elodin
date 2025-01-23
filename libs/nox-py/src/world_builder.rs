@@ -339,7 +339,7 @@ impl WorldBuilder {
                     stellarator::run(|| {
                         let tmpfile = tempfile::tempdir().unwrap().into_path();
                         nox_ecs::impeller2_server::Server::new(
-                            impeller_db::Server::new(tmpfile.join("db"), addr).unwrap(),
+                            elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
                             exec,
                         )
                         .run_with_cancellation(|| {

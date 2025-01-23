@@ -28,7 +28,7 @@ impl PrimTypeExt for PrimType {
     }
 }
 
-impl SchemaExt for impeller_db::ComponentSchema {
+impl SchemaExt for elodin_db::ComponentSchema {
     fn element_type(&self) -> ElementType {
         self.prim_type.to_element_type()
     }

@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::utils::SchemaExt;
 use assets::Handle;
 use bytemuck::Pod;
+use elodin_db::{ComponentSchema, MetadataExt, DB};
 use impeller2::com_de::FromComponentView;
 use impeller2::{
     component::{Asset, Component},
@@ -11,7 +12,6 @@ use impeller2::{
 };
 use impeller2_server::init_db;
 use impeller2_wkt::{ComponentMetadata, Material, Mesh};
-use impeller_db::{ComponentSchema, MetadataExt, DB};
 //use impeller::{well_known, Asset, AssetStore, Component, ComponentValue, ComponentMetadata, ValueRepr};
 
 use crate::*;

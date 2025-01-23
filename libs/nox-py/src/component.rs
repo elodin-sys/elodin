@@ -225,8 +225,8 @@ impl ComponentType {
     }
 }
 
-impl From<impeller_db::ComponentSchema> for ComponentType {
-    fn from(val: impeller_db::ComponentSchema) -> Self {
+impl From<elodin_db::ComponentSchema> for ComponentType {
+    fn from(val: elodin_db::ComponentSchema) -> Self {
         ComponentType {
             ty: val.prim_type.into(),
             shape: val.shape.to_vec(),
@@ -234,10 +234,10 @@ impl From<impeller_db::ComponentSchema> for ComponentType {
     }
 }
 
-impl From<Component> for impeller_db::ComponentSchema {
+impl From<Component> for elodin_db::ComponentSchema {
     fn from(val: Component) -> Self {
         let ty = val.ty.unwrap();
-        impeller_db::ComponentSchema {
+        elodin_db::ComponentSchema {
             component_id: ComponentId::new(&val.name),
             prim_type: ty.ty.into(),
             shape: ty.shape.iter().copied().collect(),

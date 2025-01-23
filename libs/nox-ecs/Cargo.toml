@@ -22,7 +22,7 @@ stellarator.path = "../stellarator"
 impeller2.path = "../impeller2"
 impeller2-wkt.path = "../impeller2/wkt"
 impeller2-wkt.features = ["gui", "std"]
-impeller-db.path = "../impeller2/db"
+elodin-db.path = "../db"
 impeller2-stella.path = "../impeller2/stella"
 futures-lite = "2.5.0"
 

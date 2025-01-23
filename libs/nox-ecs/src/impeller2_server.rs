@@ -1,5 +1,5 @@
-use impeller_db::MetadataExt;
-use impeller_db::{handle_conn, DB};
+use elodin_db::MetadataExt;
+use elodin_db::{handle_conn, DB};
 use nox_ecs::Error;
 use smallvec::SmallVec;
 use std::{
@@ -13,12 +13,12 @@ use tracing::warn;
 use crate::{Compiled, World, WorldExec};
 
 pub struct Server {
-    db: impeller_db::Server,
+    db: elodin_db::Server,
     world: WorldExec<Compiled>,
 }
 
 impl Server {
-    pub fn new(db: impeller_db::Server, world: WorldExec<Compiled>) -> Self {
+    pub fn new(db: elodin_db::Server, world: WorldExec<Compiled>) -> Self {
         Self { db, world }
     }
 
@@ -31,7 +31,7 @@ impl Server {
         is_cancelled: impl Fn() -> bool + 'static,
     ) -> Result<(), Error> {
         let Self { db, mut world } = self;
-        let impeller_db::Server { listener, db } = db;
+        let elodin_db::Server { listener, db } = db;
         init_db(&db, &mut world.world)?;
         let tick_db = db.clone();
         let stream: Thread<Option<Result<(), Error>>> =
@@ -52,7 +52,7 @@ impl Server {
     }
 }
 
-pub(crate) fn init_db(db: &impeller_db::DB, world: &mut World) -> Result<(), impeller_db::Error> {
+pub(crate) fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
     for (id, asset) in world.assets.iter().enumerate() {
         db.assets.insert(id as u64, &asset.inner)?;
     }
@@ -63,7 +63,7 @@ pub(crate) fn init_db(db: &impeller_db::DB, world: &mut World) -> Result<(), imp
         };
         let component_id = impeller2::types::ComponentId(component_id.0);
         let db_component = db.components.entry(component_id).or_try_insert_with(|| {
-            impeller_db::Component::try_create(component_id, schema.prim_type, &shape, &db.path)
+            elodin_db::Component::try_create(component_id, schema.prim_type, &shape, &db.path)
         })?;
         let size = schema.size();
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
@@ -75,14 +75,14 @@ pub(crate) fn init_db(db: &impeller_db::DB, world: &mut World) -> Result<(), imp
                 .join(component_id.to_string())
                 .join(entity_id.to_string());
             let start_tick = db.latest_tick.load(atomic::Ordering::SeqCst);
-            let entity = match impeller_db::Entity::create(
+            let entity = match elodin_db::Entity::create(
                 path,
                 start_tick,
                 entity_id,
                 db_component.schema.clone(),
             ) {
                 Ok(entity) => entity,
-                Err(impeller_db::Error::Io(err)) if err.kind() == io::ErrorKind::AlreadyExists => {
+                Err(elodin_db::Error::Io(err)) if err.kind() == io::ErrorKind::AlreadyExists => {
                     continue;
                 }
                 Err(err) => return Err(err),

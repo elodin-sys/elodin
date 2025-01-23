@@ -46,7 +46,7 @@ pub use query::*;
 pub use system::*;
 pub use world::*;
 
-pub use impeller_db::ComponentSchema;
+pub use elodin_db::ComponentSchema;
 pub use nox_ecs_macros::{Archetype, Component};
 
 pub use impeller2_wkt;
@@ -633,7 +633,7 @@ pub enum Error {
     #[error("python error")]
     PyO3(#[from] pyo3::PyErr),
     #[error("impeller db {0}")]
-    ImpellerDB(#[from] impeller_db::Error),
+    DB(#[from] elodin_db::Error),
     #[error("stellarator error {0}")]
     Stellar(#[from] stellarator::Error),
     #[error("polars error {0}")]

@@ -104,7 +104,7 @@ fn main() {
         let client = nox::Client::cpu().unwrap();
         let exec = exec.compile(client).unwrap();
         nox_ecs::impeller2_server::Server::new(
-            impeller_db::Server::new("./test", "0.0.0.0:2240".parse().unwrap()).unwrap(),
+            elodin_db::Server::new("./test", "0.0.0.0:2240".parse().unwrap()).unwrap(),
             exec,
         )
         .run()

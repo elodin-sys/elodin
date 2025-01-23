@@ -1,6 +1,6 @@
 use crate::{system::SystemBuilder, Component, ComponentArray, Error, SystemParam};
+use elodin_db::ComponentSchema;
 use impeller2::types::{ComponentId, EntityId};
-use impeller_db::ComponentSchema;
 use nox::{xla, ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad};
 use smallvec::{smallvec, SmallVec};
 use std::{collections::BTreeMap, marker::PhantomData};

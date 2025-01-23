@@ -42,7 +42,7 @@ toml = "0.8"
 impeller2.path = "../impeller2"
 impeller2-wkt.path = "../impeller2/wkt"
 impeller2-wkt.features = ["gui", "std"]
-impeller-db.path = "../impeller2/db"
+elodin-db.path = "../db"
 
 # async
 stellarator.path = "../stellarator"
