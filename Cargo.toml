@@ -31,10 +31,10 @@ members = [
     "apps/dev-tools",
     "libs/impeller2",
     "libs/impeller2/stella",
-    "libs/impeller2/db",
     "libs/impeller2/bevy",
     "libs/impeller2/wkt",
-    "libs/impeller2/cli",
+    "libs/db",
+    "libs/db/cli",
     "libs/stellarator",
     "libs/stellarator/buf",
     "libs/stellarator/maitake",
@@ -90,3 +90,7 @@ impeller.default-features = false
 impeller.version = "0.10.1"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

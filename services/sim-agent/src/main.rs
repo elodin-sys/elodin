@@ -82,7 +82,7 @@ async fn run_sim(world_rx: flume::Receiver<WorldExec>, sim_addr: SocketAddr) -> 
         let tmpfile = tempfile::tempdir().unwrap().into_path();
         stellarator::spawn(
             nox_ecs::impeller2_server::Server::new(
-                impeller_db::Server::new(tmpfile.join("db"), sim_addr).unwrap(),
+                elodin_db::Server::new(tmpfile.join("db"), sim_addr).unwrap(),
                 world_exec,
             )
             .run_with_cancellation(move || cancel.load(Ordering::SeqCst)),
