@@ -418,7 +418,12 @@ impl WorldBuilder {
             client.disable_optimizations();
         }
         let exec = exec.compile(client.clone())?;
-        Ok(Exec { exec })
+        let db_dir = tempfile::tempdir()?;
+        let db_dir = db_dir.into_path();
+        Ok(Exec {
+            exec,
+            db: elodin_db::DB::create(db_dir.join("db"))?,
+        })
     }
 }
 

@@ -1,5 +1,6 @@
 import argparse
 
+import elodin as el
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
@@ -18,8 +19,7 @@ if args.export_dir:
     exec.write_to_dir(args.export_dir)
 else:
     fig, ax = plt.subplots()
-    df = exec.history()
-    df = df.sort("tick").select(["tick", "world_pos"]).drop_nulls()
+    df = exec.history("world_pos", el.EntityId(1))
     df = df.with_columns(
         pl.col("world_pos").arr.get(4).alias("x"),
         pl.col("world_pos").arr.get(5).alias("y"),
