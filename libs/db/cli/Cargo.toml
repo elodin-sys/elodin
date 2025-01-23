@@ -29,12 +29,12 @@ syntastica-themes.optional = true
 # async
 stellarator.path = "../../stellarator"
 stellarator.features = ["miette"]
-impeller2-stella.path = "../stella"
+impeller2-stella.path = "../../impeller2/stella"
 
 # ser-de
-impeller2.path = ".."
+impeller2.path = "../../impeller2"
 impeller2.features = ["std", "mlua"]
-impeller2-wkt.path = "../wkt"
+impeller2-wkt.path = "../../impeller2/wkt"
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.0"

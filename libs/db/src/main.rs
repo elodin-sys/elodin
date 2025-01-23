@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use impeller_db::Server;
+use elodin_db::Server;
 use miette::IntoDiagnostic;
 
 #[derive(Parser, Debug)]

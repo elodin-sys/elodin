@@ -1,6 +1,6 @@
+use elodin_db::ComponentSchema;
 use impeller2::types::PrimType;
 use impeller2_wkt::ComponentMetadata;
-use impeller_db::ComponentSchema;
 use polars::{prelude::ArrowDataType, series::Series};
 use polars_arrow::array::{Array, PrimitiveArray};
 

@@ -62,7 +62,7 @@ tar = "0.4.40"
 zstd = "0.13.0"
 tempfile = "3.10.0"
 nox-ecs = { path = "../../libs/nox-ecs" }
-impeller-db = { path = "../../libs/impeller2/db" }
+elodin-db = { path = "../../libs/db" }
 atc-entity = { path = "../../libs/atc/entity" }
 tower = { version = "0.5.0", features = ["util"] }
 crc = "3.0.1"

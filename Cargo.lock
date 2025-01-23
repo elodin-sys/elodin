@@ -4759,6 +4759,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "elodin-db"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "clap 4.5.20",
+ "dashmap",
+ "fastrand 2.2.0",
+ "futures-lite 2.5.0",
+ "impeller2",
+ "impeller2-stella",
+ "impeller2-wkt",
+ "memmap2 0.9.5",
+ "miette",
+ "nox",
+ "postcard",
+ "serde",
+ "smallvec",
+ "stellarator",
+ "thiserror 2.0.0",
+ "tracing 0.1.40",
+ "tracing-subscriber 0.3.18",
+]
+
+[[package]]
 name = "elodin-editor"
 version = "0.1.0"
 dependencies = [
@@ -6841,30 +6865,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller-db"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "clap 4.5.20",
- "dashmap",
- "fastrand 2.2.0",
- "futures-lite 2.5.0",
- "impeller2",
- "impeller2-stella",
- "impeller2-wkt",
- "memmap2 0.9.5",
- "miette",
- "nox",
- "postcard",
- "serde",
- "smallvec",
- "stellarator",
- "thiserror 2.0.0",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
-]
-
-[[package]]
 name = "impeller2"
 version = "0.10.1"
 dependencies = [
@@ -8634,8 +8634,8 @@ dependencies = [
  "byteorder",
  "bytes",
  "directories",
+ "elodin-db",
  "futures-lite 2.5.0",
- "impeller-db",
  "impeller2",
  "impeller2-stella",
  "impeller2-wkt",
@@ -8689,9 +8689,9 @@ dependencies = [
  "bytes",
  "clap 4.5.20",
  "directories",
+ "elodin-db",
  "flume",
  "futures",
- "impeller-db",
  "impeller2",
  "impeller2-wkt",
  "include_dir",
@@ -11583,11 +11583,11 @@ dependencies = [
  "async-watcher",
  "cargo_metadata",
  "clap 4.5.20",
+ "elodin-db",
  "flume",
  "futures",
  "futures-lite 2.5.0",
  "ignore",
- "impeller-db",
  "interpolator",
  "miette",
  "nix 0.29.0",
@@ -12146,6 +12146,7 @@ dependencies = [
  "chrono",
  "config",
  "crc",
+ "elodin-db",
  "elodin-types",
  "flume",
  "fred",
@@ -12154,7 +12155,6 @@ dependencies = [
  "google-cloud-storage",
  "http-serde",
  "hyper-util",
- "impeller-db",
  "nox-ecs",
  "postcard",
  "redmq",
