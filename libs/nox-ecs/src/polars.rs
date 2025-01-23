@@ -27,12 +27,12 @@ pub fn to_series(
     Series::from_arrow(&metadata.name, array).map_err(Error::from)
 }
 
-fn prim_array<T: polars_arrow::types::NativeType>(buf: &[u8]) -> Box<dyn Array> {
+pub fn prim_array<T: polars_arrow::types::NativeType>(buf: &[u8]) -> Box<dyn Array> {
     let buf = bytemuck::cast_slice::<_, T>(buf);
     Box::new(PrimitiveArray::from_slice(buf))
 }
 
-fn arrow_data_type(ty: PrimType) -> ArrowDataType {
+pub fn arrow_data_type(ty: PrimType) -> ArrowDataType {
     match ty {
         PrimType::U8 => ArrowDataType::UInt8,
         PrimType::U16 => ArrowDataType::UInt16,

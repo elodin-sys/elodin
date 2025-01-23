@@ -52,7 +52,7 @@ impl Server {
     }
 }
 
-pub(crate) fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
+pub fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
     for (id, asset) in world.assets.iter().enumerate() {
         db.assets.insert(id as u64, &asset.inner)?;
     }
@@ -96,8 +96,10 @@ pub(crate) fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodi
             db_component.entities.insert(entity_id, entity);
         }
     }
+    let entity_metadata_path = db.path.join("entity_metadata");
+    std::fs::create_dir_all(&entity_metadata_path)?;
     for (id, metadata) in world.entity_metadata().iter() {
-        let path = db.path.join("entity_metadata").join(id.to_string());
+        let path = entity_metadata_path.join(id.to_string());
         db.entity_metadata.insert(*id, metadata.clone());
         if let Err(err) = metadata.write(&path) {
             warn!(?err, "failed to write metadata");
@@ -120,7 +122,7 @@ pub(crate) fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodi
     Ok(())
 }
 
-pub(crate) fn copy_db_to_world(db: &DB, world: &mut WorldExec<Compiled>) {
+pub fn copy_db_to_world(db: &DB, world: &mut WorldExec<Compiled>) {
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
         let Some(component) = db
             .components
@@ -149,7 +151,7 @@ pub(crate) fn copy_db_to_world(db: &DB, world: &mut WorldExec<Compiled>) {
     }
 }
 
-fn commit_world_head(db: &DB, world: &mut WorldExec<Compiled>) {
+pub fn commit_world_head(db: &DB, world: &mut WorldExec<Compiled>) {
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
         let Some(component) = db
             .components

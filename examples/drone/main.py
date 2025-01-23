@@ -121,8 +121,10 @@ args = sys.argv[1:]
 if "--telemetry" in args:
     exec = world().build(system(only_rate_control=True))
     exec.run(Config.GLOBAL.total_sim_ticks)
-    df = exec.history()
-    df = df.select("tick", "body_ang_vel", "motor_ang_vel").sort("tick").drop_nulls()
+    body_ang_vel = exec.history("body_ang_vel", el.EntityId(1))
+    motor_ang_vel = exec.history("motor_ang_vel", el.EntityId(1))
+    df = body_ang_vel.join(motor_ang_vel, on="tick")
+    # df = df.select("tick", "body_ang_vel", "motor_ang_vel").sort("tick").drop_nulls()
     df = df.select(
         pl.col("body_ang_vel").arr.get(0).alias("body_ang_vel_x"),
         pl.col("body_ang_vel").arr.get(1).alias("body_ang_vel_y"),
