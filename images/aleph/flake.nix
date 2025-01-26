@@ -1,13 +1,12 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
-    jetpack.url = "github:elodin-sys/jetpack-nixos/nvpmode-fix";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    jetpack.url = "github:anduril/jetpack-nixos/master";
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
-    #jetpack.url = "github:anduril/jetpack-nixos/master";
     flake-utils.url = "github:numtide/flake-utils";
     crane = {
       url = "github:ipetkov/crane";
@@ -16,6 +15,7 @@
   outputs = {
     self,
     nixpkgs,
+    nixpkgs-unstable,
     flake-utils,
     jetpack,
     crane,
@@ -25,42 +25,34 @@
       system: let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [jetpack.overlays.default rust-overlay.overlays.default];
+          overlays = [
+            jetpack.overlays.default
+            rust-overlay.overlays.default
+          ];
         };
       in rec {
         nixosModules.default = {
           pkgs,
           config,
           ...
-        }: let
-          file-bridge = ./aleph-file-bridge;
-        in {
+        }: {
           imports = [
             "${nixpkgs}/nixos/modules/profiles/minimal.nix"
             jetpack.nixosModules.default
             ./modules/usb_eth.nix
             ./modules/hardware.nix
             ./modules/elodin_dev.nix
-            ./modules/raw.nix
             ./modules/minimal.nix
+            # ./modules/aleph-serial-bridge.nix
+            ./modules/sd_image.nix
+            ./modules/systemd-boot-dtb.nix
           ];
 
           nixpkgs.overlays = [
             jetpack.overlays.default
             rust-overlay.overlays.default
+            (final: prev: {serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};})
           ];
-          systemd.services.file-bridge = {
-            wantedBy = ["multi-user.target"];
-            after = ["network.target"];
-            description = "start aleph-file-bridge";
-            serviceConfig = {
-              Type = "exec";
-              User = "root";
-              ExecStart = "${file-bridge}";
-              KillSignal = "SIGINT";
-              Environment = "RUST_LOG=debug";
-            };
-          };
           system.stateVersion = "24.05";
           i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
           services.openssh.settings.PasswordAuthentication = true;
@@ -77,6 +69,18 @@
             htop
             dtc
           ];
+        };
+        nixosModules.app = {lib, ...}: {
+          imports = [nixosModules.default];
+          fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
+          fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
+        };
+        nixosModules.installer = {...}: {
+          imports = [
+            nixosModules.default
+            ./modules/installer.nix
+          ];
+          aleph.installer.system = nixosConfigurations.default.config.system.build.toplevel;
         };
         networking.hostName = "aleph";
         nixosConfigurations = let
@@ -95,28 +99,19 @@
                   modules;
               };
         in {
-          default = cross-config [nixosModules.default];
+          default = cross-config [nixosModules.app];
+          installer = cross-config [nixosModules.installer];
         };
         packages = {
           default = nixosConfigurations.default.config.system.build.sdImage;
           ext4 = nixosConfigurations.default.config.system.build.raw;
           toplevel = nixosConfigurations.default.config.system.build.toplevel;
-          initrd_flash = pkgs.writeShellScriptBin "initrd-flash-aleph" ''
-            set -euo pipefail
-            WORKDIR=$(mktemp -d)
-            function on_exit() {
-               echo "cleaning up workdir"
-               rm -rf "$WORKDIR"
-            }
-            trap on_exit EXIT
-            cp -r ${./flash-dance.tar.xz} $WORKDIR/flash_dance.tar.xz
-            chmod -R u+w "$WORKDIR"
-            export PATH=${pkgs.lib.makeBinPath pkgs.nvidia-jetpack.flash-tools.flashDeps}:${pkgs.dtc}/bin:$PATH
-            cd "$WORKDIR"
-            tar xf flash_dance.tar.xz
-            cd "flash-dance"
-            cp ${packages.ext4} rootfs.ext4
-            sudo ./initrd-flash
+          sdimage = nixosConfigurations.installer.config.system.build.sdImage;
+          flash-uefi = pkgs.runCommand "flash-uefi" {} ''
+            mkdir -p $out
+            cp ${jetpack.outputs.packages.${system}.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit $out/flash-uefi
+            sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/t186ref/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
+            chmod +x $out/flash-uefi
           '';
         };
       }

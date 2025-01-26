@@ -3,9 +3,9 @@
   crane,
   ...
 }: let
-  rustToolchain = pkgs.rust-bin.stable.latest.default;
+  rustToolchain = pkgs.rust-bin.stable."1.84.0".default;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/file-bridge/Cargo.toml;};
+  crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../fsw/serial-bridge/Cargo.toml;};
   src = pkgs.nix-gitignore.gitignoreSource [] ../../../.;
   commonArgs = {
     inherit (crateName) pname version;
@@ -16,8 +16,9 @@
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-in
-  craneLib.buildPackage (commonArgs
+  bin = craneLib.buildPackage (commonArgs
     // {
       inherit cargoArtifacts;
-    })
+    });
+in
+  bin
