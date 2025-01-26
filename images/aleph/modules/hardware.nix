@@ -17,10 +17,31 @@
     aleph.kernelPackages = prev.linuxPackagesFor kernel;
   };
 in {
-  nixpkgs.overlays = [overlay];
+  nixpkgs.overlays = [
+    overlay
+    (final: prev: {
+      systemd = prev.systemd.overrideAttrs (prevAttrs: {
+        patches =
+          prevAttrs.patches
+          ++ [
+            ./systemd-boot-double-dtb-buffer-size.patch
+          ];
+      });
+      systemd-minimal = prev.systemd-minimal.overrideAttrs (prevAttrs: {
+        patches =
+          prevAttrs.patches
+          ++ [
+            ./systemd-boot-double-dtb-buffer-size.patch
+          ];
+      });
+    })
+  ];
+  sdImage.compressImage = false;
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.systemd-boot.installDeviceTree = true;
+  boot.loader.efi.canTouchEfiVariables = false;
   boot.loader.grub.enable = false;
-  boot.loader.generic-extlinux-compatible.enable = true;
-  boot.loader.generic-extlinux-compatible.useGenerationDeviceTree = true;
+  boot.loader.systemd-boot-dtb.enable = true;
   boot.kernelPackages = lib.mkForce pkgs.aleph.kernelPackages;
   boot.kernelParams = [
     "console=tty0"

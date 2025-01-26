@@ -1,7 +1,7 @@
-From 3318fcece3c98b27170b8a8b59429797fe5935df Mon Sep 17 00:00:00 2001
+From bda1b6c431cffc63b166dabc72087a3eaeb5ee8e Mon Sep 17 00:00:00 2001
 From: Antonio Borneo <antonio.borneo@st.com>
 Date: Wed, 25 Nov 2020 00:07:56 +0100
-Subject: [PATCH 7/9] net: phy: realtek: read actual speed on rtl8211f to
+Subject: [PATCH 2/3] net: phy: realtek: read actual speed on rtl8211f to
  detect downshift
 
 The rtl8211f supports downshift and before commit 5502b218e001
@@ -27,10 +27,10 @@ Signed-off-by: Jakub Kicinski <kuba@kernel.org>
  1 file changed, 1 insertion(+)
 
 diff --git a/drivers/net/phy/realtek.c b/drivers/net/phy/realtek.c
-index 7c38f7fbb2e4..118c6028229b 100644
+index d56d5dc6d713..b5841fd056e7 100644
 --- a/drivers/net/phy/realtek.c
 +++ b/drivers/net/phy/realtek.c
-@@ -811,6 +811,7 @@ static struct phy_driver realtek_drvs[] = {
+@@ -812,6 +812,7 @@ static struct phy_driver realtek_drvs[] = {
  		PHY_ID_MATCH_EXACT(0x001cc916),
  		.name		= "RTL8211F Gigabit Ethernet",
  		.config_init	= &rtl8211f_config_init,
@@ -39,5 +39,5 @@ index 7c38f7fbb2e4..118c6028229b 100644
  		.config_intr	= &rtl8211f_config_intr,
  		.get_wol	= &rtl8211f_get_wol,
 -- 
-2.42.0
+2.45.1
 

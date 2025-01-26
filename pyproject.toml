@@ -7,7 +7,7 @@ dependencies = ["elodin", "matplotlib>=3.9.2", "polars>=1.10.0"]
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["vendor", "basilisk"]
+extend-exclude = ["vendor", "basilisk", "images/aleph/modules/mk-esp-contents.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
