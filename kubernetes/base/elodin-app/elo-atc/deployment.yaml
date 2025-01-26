@@ -25,14 +25,8 @@ spec:
         - secretRef:
             name: elo-atc-secret
         env:
-        - name: ELODIN_POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: ELODIN_ORCA.IMAGE_NAME
-          value: elodin-infra/elo-sim-agent:latest
         - name: RUST_LOG
-          value: info,atc=debug,redmq=debug
+          value: info,atc=debug
         volumeMounts:
         - name: config
           mountPath: /etc/elodin

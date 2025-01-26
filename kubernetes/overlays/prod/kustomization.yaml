@@ -4,12 +4,6 @@ kind: Kustomization
 resources:
 - ../../base/
 
-replicas:
-- name: sim-agent-balloon
-  count: 4
-- name: sim-agent-mc
-  count: 8
-
 patches:
 - target:
     kind: Ingress
@@ -64,20 +58,6 @@ patches:
     - op: replace
       path: /subjects/0/namespace
       value: elodin-app-prod
-- patch: |-
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: elo-atc
-      annotations:
-        iam.gke.io/gcp-service-account: sim-gcs@elodin-prod.iam.gserviceaccount.com
-- patch: |-
-    apiVersion: v1
-    kind: ServiceAccount
-    metadata:
-      name: elo-sim-agent
-      annotations:
-        iam.gke.io/gcp-service-account: sim-gcs@elodin-prod.iam.gserviceaccount.com
 
 
 configMapGenerator:

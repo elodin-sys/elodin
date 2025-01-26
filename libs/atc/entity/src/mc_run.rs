@@ -44,30 +44,3 @@ pub enum Status {
     #[sea_orm(num_value = 2)]
     Done,
 }
-
-impl From<Status> for elodin_types::api::monte_carlo_run::Status {
-    fn from(val: Status) -> Self {
-        use elodin_types::api::monte_carlo_run;
-        match val {
-            Status::Pending => monte_carlo_run::Status::Pending,
-            Status::Running => monte_carlo_run::Status::Running,
-            Status::Done => monte_carlo_run::Status::Done,
-        }
-    }
-}
-
-impl From<Model> for elodin_types::api::MonteCarloRun {
-    fn from(run: Model) -> Self {
-        use elodin_types::api::MonteCarloRun;
-        MonteCarloRun {
-            id: run.id.as_bytes().to_vec(),
-            samples: run.samples as u32,
-            name: run.name,
-            metadata: run.metadata.to_string(),
-            status: elodin_types::api::monte_carlo_run::Status::from(run.status).into(),
-            max_duration: run.max_duration as u64,
-            started: run.started.map(|t| t.timestamp() as u64),
-            batches: vec![],
-        }
-    }
-}

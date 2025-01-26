@@ -9,6 +9,4 @@ labels:
 resources:
   - service-account.yaml
   - deployment.yaml
-  # - autoscaler.yaml
-  - proxy.yaml
   - service.yaml

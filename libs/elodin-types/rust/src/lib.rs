@@ -1,49 +1,5 @@
 pub mod api {
-    use crate::ValidationError;
-
     tonic::include_proto!("elodin.types.api");
-
-    impl UpdateSandboxReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl BootSandboxReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl GetSandboxReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl DeleteSandboxReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl Page {
-        pub fn last_id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.last_id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl StartMonteCarloRunReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
-
-    impl GetMonteCarloRunReq {
-        pub fn id(&self) -> Result<uuid::Uuid, ValidationError> {
-            uuid::Uuid::from_slice(&self.id).map_err(|_| ValidationError)
-        }
-    }
 }
 
 pub mod sandbox {

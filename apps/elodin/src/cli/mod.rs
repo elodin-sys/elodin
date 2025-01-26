@@ -9,7 +9,6 @@ mod auth;
 mod create;
 mod editor;
 mod license;
-mod monte_carlo;
 
 #[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -26,8 +25,6 @@ pub struct Cli {
 enum Commands {
     /// Obtain access credentials for your user account
     Login,
-    /// Manage your Monte Carlo runs
-    MonteCarlo(monte_carlo::Args),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulaton in headless mode
@@ -73,17 +70,17 @@ impl Cli {
             std::process::exit(1);
         }
 
-        match self.command {
-            // un-licensed commands
-            Some(Commands::Login) | Some(Commands::Create(_)) | None => {}
-            // licensed commands
-            _ => {
-                rt.block_on(self.verify_license_key())?;
-            }
-        }
+        // Temporarily make all commands available un-licensed
+        // match self.command {
+        //     // un-licensed commands
+        //     Some(Commands::Login) | Some(Commands::Create(_)) | None => {}
+        //     // licensed commands
+        //     _ => {
+        //         rt.block_on(self.verify_license_key())?;
+        //     }
+        // }
         match &self.command {
             Some(Commands::Login) => rt.block_on(self.login()),
-            Some(Commands::MonteCarlo(args)) => rt.block_on(self.monte_carlo(args)),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self

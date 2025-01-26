@@ -48,8 +48,6 @@ pub enum Error {
     Uuid(#[from] uuid::Error),
     #[error("serde_json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
-    #[error("azure storage: {0}")]
-    AzureStorage(#[from] azure_storage::Error),
 }
 
 impl From<EventError> for Error {

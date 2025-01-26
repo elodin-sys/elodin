@@ -58,12 +58,11 @@
           ./nix/wasm-bindgen-cli.nix
           ./nix/shell.nix
           ./nix/atc.nix
-          ./nix/sim-agent.nix
           ./nix/editor-web.nix
           ./nix/dashboard.nix
           ./nix/docs.nix
           ./nix/elodin-cli.nix
-          ./nix/sim-builder.nix
+          ./nix/elodin-py.nix
         ];
       };
     };

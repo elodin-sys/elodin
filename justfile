@@ -3,7 +3,6 @@
 
 k8s_overlays := "kubernetes/overlays"
 artifact_registry := "elodin.azurecr.io/elodin-infra"
-repo_sim_agent := "elo-sim-agent/x86_64"
 repo_atc := "elo-atc/x86_64"
 repo_dashboard := "elo-dashboard/x86_64"
 repo_docs := "elo-docs/x86_64"
@@ -21,14 +20,12 @@ decrypt-secrets *FLAGS:
   op inject {{FLAGS}} -i {{k8s_overlays}}/dev/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev/elo-dashboard-secret.env
   op inject {{FLAGS}} -i {{k8s_overlays}}/dev-branch/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev-branch/elo-dashboard-secret.env
   op inject {{FLAGS}} -i {{k8s_overlays}}/prod/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/prod/elo-dashboard-secret.env
-  op read op://Infrastructure/GCS/dev/sim-gcs-key.json | jq > {{k8s_overlays}}/dev-branch/sim-gcs-key.json
 
 decrypt-secrets-force:
   just decrypt-secrets --force
 
 re-tag-images old_tag new_tag:
   @ echo "   📌 Adding '{{new_tag}}' tag to images with '{{old_tag}}' tag"
-  gcloud artifacts docker tags add {{artifact_registry}}/{{repo_sim_agent}}:{{old_tag}} {{artifact_registry}}/{{repo_sim_agent}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_atc}}:{{old_tag}} {{artifact_registry}}/{{repo_atc}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_dashboard}}:{{old_tag}} {{artifact_registry}}/{{repo_dashboard}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_docs}}:{{old_tag}} {{artifact_registry}}/{{repo_docs}}:{{new_tag}}
@@ -42,7 +39,6 @@ re-tag-images-current new_tag:
 clean-dev-branch branch_codename:
   gcloud container clusters get-credentials {{cluster}} --region {{region}} --project {{project}}
   kubectl get namespace elodin-app-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-app-{{branch_codename}} || echo "elodin-app-{{branch_codename}} already deleted"
-  kubectl get namespace elodin-vms-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-vms-{{branch_codename}} || echo "elodin-vms-{{branch_codename}} already deleted"
 
 sync-assets:
   gsutil rsync -r assets gs://elodin-assets
@@ -91,23 +87,9 @@ release tag:
   - name: elodin-infra/elo-dashboard
     newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
     newTag: {{tag}}
-  - name: elodin-infra/elo-sim-agent
-    newName: elodin.azurecr.io/elodin-infra/elo-sim-agent/x86_64
-    newTag: {{tag}}
   - name: elodin-infra/elo-docs
     newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64
     newTag: {{tag}}
-  replacements:
-  - source:
-      kind: Deployment
-      name: sim-agent-mc
-      fieldPath: spec.template.spec.containers.[name=sim-agent-mc].image
-    targets:
-    - select:
-        kind: Deployment
-        name: elo-atc
-      fieldPaths:
-      - spec.template.spec.containers.[name=elo-atc].env.[name=ELODIN_ORCA.IMAGE_NAME].value
   EOF
   kubectl kustomize kubernetes/deploy | kubectl --cluster gke_elodin-prod_us-central1_elodin-prod-gke apply -f -
 

@@ -63,29 +63,3 @@ pub enum Status {
     #[sea_orm(num_value = 3)]
     Running,
 }
-
-impl From<Status> for elodin_types::api::sandbox::Status {
-    fn from(val: Status) -> Self {
-        use elodin_types::api::sandbox;
-        match val {
-            Status::Off => sandbox::Status::Off,
-            Status::VmBooting => sandbox::Status::VmBooting,
-            Status::Error => sandbox::Status::Error,
-            Status::Running => sandbox::Status::Running,
-        }
-    }
-}
-
-impl From<Model> for elodin_types::api::Sandbox {
-    fn from(sandbox: Model) -> Self {
-        elodin_types::api::Sandbox {
-            id: sandbox.id.as_bytes().to_vec(),
-            name: sandbox.name,
-            code: sandbox.code,
-            draft_code: sandbox.draft_code,
-            status: elodin_types::api::sandbox::Status::from(sandbox.status).into(),
-            public: sandbox.public,
-            user_id: sandbox.user_id.map(|id| id.as_bytes().to_vec()),
-        }
-    }
-}
