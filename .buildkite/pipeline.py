@@ -137,11 +137,6 @@ cluster_app_deploy_steps = [
                 image_tag="\$BUILDKITE_COMMIT",
             ),
             build_image_step(
-                image_name="elo-sim-agent",
-                target="sim-agent-image",
-                image_tag="\$BUILDKITE_COMMIT",
-            ),
-            build_image_step(
                 image_name="elo-docs",
                 target="docs-image",
                 image_tag="\$BUILDKITE_COMMIT",

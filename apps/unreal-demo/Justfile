@@ -1,9 +1,0 @@
-run: pull build
-  ue4 run 
-pull:
-   git lfs pull -I .
-build-rust:
-   cargo build --release --package elodin_plugin; mkdir -p Binaries; cp ../../target/release/libelodin_plugin.dylib Binaries/rustplugin.dylib
-build-ue4:
-    ue4 build Development Editor   
-build: build-rust build-ue4

@@ -47,7 +47,7 @@ kubectl get all -n elodin-app-prod
 
 Kubernetes folder contains everything necessary to configure a cluster.
 
-`elodin-app`/`elodin-vms` folders contains all resources that would be placed in namespaces with the respective names
+`elodin-app` folders contains all resources that would be placed in namespaces with the respective names
 
 ## Extra Notes
 

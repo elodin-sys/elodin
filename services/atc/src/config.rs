@@ -2,20 +2,14 @@ use config::{ConfigError, Environment, File};
 use redact::serde::redact_secret;
 use redact::Secret;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     pub api: Option<ApiConfig>,
-    pub orca: Option<OrcaConfig>,
-    pub garbage_collect: Option<GarbageCollect>,
-    #[serde(default)]
-    pub monte_carlo: MonteCarloConfig,
     pub database_url: String,
     pub redis_url: String,
     pub migrate: bool,
-    pub pod_name: String,
     pub env: ElodinEnvironment,
 }
 
@@ -58,33 +52,6 @@ pub struct StripePlanConfig {
 pub struct Auth0Config {
     pub domain: String,
     pub client_id: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct OrcaConfig {
-    pub vm_namespace: String,
-    pub image_name: String,
-    pub runtime_class: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct MonteCarloConfig {
-    pub azure_account_name: String,
-    pub sim_artifacts_bucket_name: String,
-    pub sim_results_bucket_name: String,
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct GarbageCollect {
-    pub enabled: bool,
-    #[serde(default = "default_gc_timeout")]
-    #[serde_as(as = "serde_with::DurationSecondsWithFrac<f64>")]
-    pub timeout: Duration,
-}
-
-fn default_gc_timeout() -> Duration {
-    Duration::from_secs(5 * 60)
 }
 
 impl Config {

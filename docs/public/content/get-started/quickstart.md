@@ -99,25 +99,6 @@ python3 ball/plot.py
 For more information on data frames check out
 [Polars DataFrame](https://docs.pola.rs/user-guide/concepts/data-structures/#dataframe)
 
-## Monte Carlo
-
-Run Monte Carlo simulations to explore the state space.
-
-1. Create an account at https://app.elodin.systems to receive 60 free minutes of hosted simulation time (per month).
-2. Authorize `elodin` to access the Monte Carlo platform.
-    ```sh
-    elodin login
-    ```
-3. Create a new simulation from the bouncing ball template, which includes random sampling and asserts.
-    ```sh
-    elodin create --template ball
-    ```
-4. Start a 100 sample Monte Carlo run with a maximum sim duration of 15s.
-    {% alert(kind="notice") %}Add `--open` to automatically open the dashboard url in the browser.{% end %}
-    ```sh
-    elodin monte-carlo run --name ball ball/main.py --max-duration 15 --samples 100
-    ```
-
 ## Next Steps
 
 Try out the following tutorials to learn how to build simulations using Elodin:

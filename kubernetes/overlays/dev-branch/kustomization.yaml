@@ -39,37 +39,12 @@ patches:
       path: /metadata/name
       value: elodin-app-$CLUSTER_NAME
 - target:
-    kind: Namespace
-    name: elodin-vms
-  patch: |-
-    - op: replace
-      path: /metadata/name
-      value: elodin-vms-$CLUSTER_NAME
-- target:
-    namespace: elodin-vms
-  patch: |-
-    - op: replace
-      path: /metadata/namespace
-      value: elodin-vms-$CLUSTER_NAME
-- target:
     kind: RoleBinding
     name: elo-atc
   patch: |-
     - op: replace
       path: /subjects/0/namespace
       value: elodin-app-$CLUSTER_NAME
-- target:
-    kind: Deployment
-    name: elo-atc
-  path: atc-gcs-key-patch.yaml
-- target:
-    kind: Deployment
-    name: elo-atc-proxy
-  path: atc-gcs-key-patch.yaml
-- target:
-    kind: Deployment
-    name: sim-agent-mc
-  path: sim-agent-gcs-key-patch.yaml
 
 configMapGenerator:
 - name: elo-atc-config
@@ -78,14 +53,6 @@ configMapGenerator:
   - atc.toml=elo-atc-config.toml
   literals:
   - ELODIN_API.BASE_URL=https://$CLUSTER_NAME.elodin.dev
-- name: elo-atc-proxy-config
-  namespace: elodin-app
-  files:
-  - atc.toml=elo-atc-proxy-config.toml
-- name: elo-sim-config
-  namespace: elodin-vms
-  files:
-  - sim.toml=elo-sim-config.toml
 - name: elo-dashboard
   namespace: elodin-app
   literals:
@@ -105,26 +72,6 @@ secretGenerator:
   namespace: elodin-app
   envs:
   - elo-dashboard-secret.env
-- name: sim-gcs-key
-  namespace: elodin-app
-  files:
-  - sim-gcs-key.json
-- name: sim-gcs-key
-  namespace: elodin-vms
-  files:
-  - sim-gcs-key.json
-
-replacements:
-- source:
-    kind: Deployment
-    name: sim-agent-mc
-    fieldPath: spec.template.spec.containers.[name=sim-agent-mc].image
-  targets:
-  - select:
-      kind: Deployment
-      name: elo-atc
-    fieldPaths:
-    - spec.template.spec.containers.[name=elo-atc].env.[name=ELODIN_ORCA.IMAGE_NAME].value
 
 images:
 - name: elodin-infra/elo-atc
@@ -132,9 +79,6 @@ images:
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-dashboard
   newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
-  newTag: $BUILDKITE_COMMIT
-- name: elodin-infra/elo-sim-agent
-  newName: elodin.azurecr.io/elodin-infra/elo-sim-agent/x86_64
   newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-docs
   newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64

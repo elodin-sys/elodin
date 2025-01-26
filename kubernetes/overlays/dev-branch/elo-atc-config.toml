@@ -21,9 +21,6 @@ subscription_price = "price_1PBnNDG68UBhCjJFLZMvrR92"
 trial_length = 2592000  # 30 days
 monte_carlo_credit = 60
 
-[orca]
-vm_namespace = "elodin-vms-$CLUSTER_NAME"
-
 [garbage_collect]
 enabled = true
 timeout = 600.0

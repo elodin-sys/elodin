@@ -81,7 +81,6 @@ k8s-openapi = { version = "0.22", features = ["latest"] }
 
 # queue
 fred = { version = "9", features = ["i-pubsub", "partial-tracing", "subscriber-client"] }
-redmq.path = "../../libs/redmq"
 
 # time
 chrono = "0.4"
@@ -90,13 +89,3 @@ time = "0.3.36"
 # stripe
 async-stripe.version = "0.39"
 async-stripe.features = ["runtime-tokio-hyper-rustls"]
-
-# azure
-azure_core.version = "0.21.0"
-azure_core.features = ["tokio", "tokio-fs", "enable_reqwest_rustls"]
-azure_identity.version = "0.21.0"
-azure_identity.features = ["enable_reqwest_rustls"]
-azure_storage_blobs.version = "0.21.0"
-azure_storage_blobs.features = ["enable_reqwest_rustls"]
-azure_storage.version = "0.21.0"
-azure_storage.features = ["enable_reqwest_rustls"]

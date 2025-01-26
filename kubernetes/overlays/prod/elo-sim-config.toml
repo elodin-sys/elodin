@@ -1,5 +1,0 @@
-[monte_carlo]
-redis_url = "redis://redis.elodin-app-prod.svc.cluster.local:6379"
-database_url = "postgresql://postgres:secret@postgres.elodin-app-prod.svc.cluster.local:5432/postgres"
-sim_artifacts_bucket_name = "sim-artifacts"
-sim_results_bucket_name = "sim-results"

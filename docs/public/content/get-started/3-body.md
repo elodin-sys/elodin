@@ -362,7 +362,7 @@ Post what you discover in the [Elodin Discord](https://discord.gg/7vzr8j6)!
 
 ## Next Steps
 
-In the next tutorial we'll explore adding multiple systems, breaking up your code into project files, and running Monte Carlo simulations:
+In the next tutorial we'll explore adding multiple systems and breaking up your code into files:
 
 {% cardlink(title="Bouncing Ball Tutorial", icon="ball", href="/get-started/bouncing-ball/") %}
 Learn how to model a bouncing ball in windy conditions.

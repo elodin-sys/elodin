@@ -1,7 +1,11 @@
+use super::auth::AuthInterceptor;
+use elodin_types::api::api_client::ApiClient;
 use elodin_types::api::{GenerateLicenseReq, LicenseType};
 use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tonic::transport::ClientTlsConfig;
+use tonic::{service::interceptor::InterceptedService, transport};
 use uuid::Uuid;
 
 use super::Cli;
@@ -10,6 +14,8 @@ const PUBLIC_KEY: &[u8] = &[
     51, 103, 111, 138, 222, 73, 65, 199, 75, 97, 94, 218, 95, 159, 191, 166, 82, 106, 48, 104, 17,
     136, 6, 75, 93, 37, 184, 82, 188, 194, 130, 20,
 ];
+
+type Client = ApiClient<InterceptedService<transport::Channel, AuthInterceptor>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct LicenseKey {
@@ -68,6 +74,7 @@ impl SignedLicenseKey {
 }
 
 impl Cli {
+    #[allow(dead_code)]
     pub async fn verify_license_key(&self) -> Result<(), LicenseKeyError> {
         match self.license_key().await {
             Ok(key) if key.license_type == LicenseType::None => Err(LicenseKeyError::NoLicenseKey),
@@ -117,6 +124,25 @@ impl Cli {
             .into_diagnostic()
             .map_err(LicenseKeyError::Other)?;
         signed_license_key.verify()
+    }
+
+    async fn client(&self) -> miette::Result<Client> {
+        let auth_interceptor = self.auth_interceptor()?;
+        let channel = transport::Endpoint::from_shared(self.url.clone())
+            .into_diagnostic()?
+            .tls_config(
+                ClientTlsConfig::default()
+                    .with_webpki_roots()
+                    .assume_http2(true),
+            )
+            .into_diagnostic()?
+            .timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .connect()
+            .await
+            .into_diagnostic()?;
+        let client = ApiClient::with_interceptor(channel, auth_interceptor);
+        Ok(client)
     }
 
     async fn pull_license_key(&self) -> miette::Result<()> {
