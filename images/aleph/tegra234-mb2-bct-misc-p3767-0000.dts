@@ -1,0 +1,16 @@
+/dts-v1/;
+
+#include "tegra234-mb2-bct-common.dtsi"
+
+/ {
+	mb2-misc {
+		eeprom {
+			cvm_eeprom_i2c_instance = <0>;
+			cvm_eeprom_i2c_slave_address = <0xa0>;
+			cvm_eeprom_read_size = <0x100>;
+			cvb_eeprom_i2c_instance = <0x0>;
+			cvb_eeprom_i2c_slave_address = <0xae>;
+			cvb_eeprom_read_size = <0x0>;
+		};
+	};
+};

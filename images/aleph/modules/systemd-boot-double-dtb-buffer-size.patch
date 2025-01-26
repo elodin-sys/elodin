@@ -1,0 +1,46 @@
+From f3b523c80624a164889928bc255c6d16da7b20da Mon Sep 17 00:00:00 2001
+From: Mika Tammi <mika.tammi@unikie.com>
+Date: Thu, 11 Apr 2024 20:23:32 +0300
+Subject: Double the device tree buffer size
+
+Signed-off-by: Mika Tammi <mika.tammi@unikie.com>
+---
+ src/boot/efi/devicetree.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+index caafef24d3..8395fd2c79 100644
+--- a/src/boot/efi/devicetree.c
++++ b/src/boot/efi/devicetree.c
+@@ -4,6 +4,8 @@
+ #include "proto/dt-fixup.h"
+ #include "util.h"
+
++#include <endian.h>
++
+ #define FDT_V1_SIZE (7*4)
+ 
+ static EFI_STATUS devicetree_allocate(struct devicetree_state *state, size_t size) {
+@@ -87,7 +89,8 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+                 /* 32MB device tree blob doesn't seem right */
+                 return EFI_INVALID_PARAMETER;
+ 
+-        len = info->FileSize;
++        /* Double the length to be allocated so there's space for modifications */
++        len = info->FileSize * 4;
+ 
+         err = devicetree_allocate(state, len);
+         if (err != EFI_SUCCESS)
+@@ -101,6 +104,10 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
++        /* Double the size inside the device tree structure */
++        uint32_t *totalsize = (uint32_t *)(((char *)PHYSICAL_ADDRESS_TO_POINTER(state->addr) + 4));
++        (*totalsize) = htobe32(be32toh(*totalsize) * 4);
++
+         return BS->InstallConfigurationTable(
+                         MAKE_GUID_PTR(EFI_DTB_TABLE), PHYSICAL_ADDRESS_TO_POINTER(state->addr));
+ }
+--
+2.42.0

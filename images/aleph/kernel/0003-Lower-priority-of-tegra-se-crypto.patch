@@ -1,7 +1,7 @@
-From 34095615d3d70848fef9cb12f86a03594086ac10 Mon Sep 17 00:00:00 2001
+From fb490ced52c6c0b0677da05f7945f9f49c73b582 Mon Sep 17 00:00:00 2001
 From: Daniel Fullmer <dfullmer@anduril.com>
 Date: Sat, 18 Nov 2023 21:33:53 -0800
-Subject: [PATCH 8/9] Lower priority of tegra-se crypto
+Subject: [PATCH 3/3] Lower priority of tegra-se crypto
 
 It is far too flaky and slow to be useful.  I get approximately 150MB/s
 when benchmarking encryption with AES-CBC using this module, while I get
@@ -25,10 +25,10 @@ devices expects this driver to be loaded so it can set the SE frequency.
  1 file changed, 26 insertions(+), 26 deletions(-)
 
 diff --git a/nvidia/drivers/crypto/tegra-se-nvhost.c b/nvidia/drivers/crypto/tegra-se-nvhost.c
-index 62e005da3dab..9b7c360a7048 100644
+index c114d71550b8..49c2c45d05b3 100644
 --- a/nvidia/drivers/crypto/tegra-se-nvhost.c
 +++ b/nvidia/drivers/crypto/tegra-se-nvhost.c
-@@ -6392,7 +6392,7 @@ static struct aead_alg aead_algs[] = {
+@@ -6394,7 +6394,7 @@ static struct aead_alg aead_algs[] = {
  		.base = {
  			.cra_name	= "ccm(aes)",
  			.cra_driver_name = "ccm-aes-tegra",
@@ -37,7 +37,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
  			.cra_ctxsize	= sizeof(struct tegra_se_aes_ccm_ctx),
  			.cra_module	= THIS_MODULE,
-@@ -6410,7 +6410,7 @@ static struct aead_alg aead_algs[] = {
+@@ -6412,7 +6412,7 @@ static struct aead_alg aead_algs[] = {
  		.base = {
  			.cra_name	= "gcm(aes)",
  			.cra_driver_name = "gcm-aes-tegra",
@@ -46,7 +46,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
  			.cra_ctxsize	= sizeof(struct tegra_se_aes_gcm_ctx),
  			.cra_module	= THIS_MODULE,
-@@ -6428,7 +6428,7 @@ static struct kpp_alg dh_algs[] = {
+@@ -6430,7 +6430,7 @@ static struct kpp_alg dh_algs[] = {
  	.base = {
  		.cra_name = "dh",
  		.cra_driver_name = "tegra-se-dh",
@@ -55,7 +55,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.cra_module = THIS_MODULE,
  		.cra_ctxsize = sizeof(struct tegra_se_dh_context),
  		}
-@@ -6443,7 +6443,7 @@ static struct rng_alg rng_algs[] = {
+@@ -6445,7 +6445,7 @@ static struct rng_alg rng_algs[] = {
  		.base = {
  			.cra_name = "rng_drbg",
  			.cra_driver_name = "rng_drbg-aes-tegra",
@@ -64,7 +64,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_RNG,
  			.cra_ctxsize = sizeof(struct tegra_se_rng_context),
  			.cra_module = THIS_MODULE,
-@@ -6457,7 +6457,7 @@ static struct skcipher_alg aes_algs[] = {
+@@ -6459,7 +6459,7 @@ static struct skcipher_alg aes_algs[] = {
  	{
  		.base.cra_name		= "xts(aes)",
  		.base.cra_driver_name	= "xts-aes-tegra",
@@ -73,7 +73,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.base.cra_flags		= CRYPTO_ALG_TYPE_SKCIPHER |
  					  CRYPTO_ALG_ASYNC,
  		.base.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
-@@ -6476,7 +6476,7 @@ static struct skcipher_alg aes_algs[] = {
+@@ -6478,7 +6478,7 @@ static struct skcipher_alg aes_algs[] = {
  	{
  		.base.cra_name		= "cbc(aes)",
  		.base.cra_driver_name	= "cbc-aes-tegra",
@@ -82,7 +82,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.base.cra_flags		= CRYPTO_ALG_TYPE_SKCIPHER |
  					  CRYPTO_ALG_ASYNC,
  		.base.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
-@@ -6495,7 +6495,7 @@ static struct skcipher_alg aes_algs[] = {
+@@ -6497,7 +6497,7 @@ static struct skcipher_alg aes_algs[] = {
  	{
  		.base.cra_name		= "ecb(aes)",
  		.base.cra_driver_name	= "ecb-aes-tegra",
@@ -91,7 +91,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.base.cra_flags		= CRYPTO_ALG_TYPE_SKCIPHER |
  					  CRYPTO_ALG_ASYNC,
  		.base.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
-@@ -6514,7 +6514,7 @@ static struct skcipher_alg aes_algs[] = {
+@@ -6516,7 +6516,7 @@ static struct skcipher_alg aes_algs[] = {
  	{
  		.base.cra_name		= "ctr(aes)",
  		.base.cra_driver_name	= "ctr-aes-tegra",
@@ -100,7 +100,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.base.cra_flags		= CRYPTO_ALG_TYPE_SKCIPHER |
  					  CRYPTO_ALG_ASYNC,
  		.base.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
-@@ -6533,7 +6533,7 @@ static struct skcipher_alg aes_algs[] = {
+@@ -6535,7 +6535,7 @@ static struct skcipher_alg aes_algs[] = {
  	{
  		.base.cra_name		= "ofb(aes)",
  		.base.cra_driver_name	= "ofb-aes-tegra",
@@ -109,7 +109,7 @@ index 62e005da3dab..9b7c360a7048 100644
  		.base.cra_flags		= CRYPTO_ALG_TYPE_SKCIPHER |
  					  CRYPTO_ALG_ASYNC,
  		.base.cra_blocksize	= TEGRA_SE_AES_BLOCK_SIZE,
-@@ -6566,7 +6566,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6568,7 +6568,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "cmac(aes)",
  			.cra_driver_name = "tegra-se-cmac(aes)",
@@ -118,7 +118,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = TEGRA_SE_AES_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_aes_cmac_context),
-@@ -6588,7 +6588,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6590,7 +6590,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha1",
  			.cra_driver_name = "tegra-se-sha1",
@@ -127,7 +127,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA1_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6610,7 +6610,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6612,7 +6612,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha224",
  			.cra_driver_name = "tegra-se-sha224",
@@ -136,7 +136,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA224_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6632,7 +6632,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6634,7 +6634,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha256",
  			.cra_driver_name = "tegra-se-sha256",
@@ -145,7 +145,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA256_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6654,7 +6654,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6656,7 +6656,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha384",
  			.cra_driver_name = "tegra-se-sha384",
@@ -154,7 +154,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA384_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6676,7 +6676,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6678,7 +6678,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha512",
  			.cra_driver_name = "tegra-se-sha512",
@@ -163,7 +163,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA512_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6698,7 +6698,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6700,7 +6700,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha3-224",
  			.cra_driver_name = "tegra-se-sha3-224",
@@ -172,7 +172,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_224_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6720,7 +6720,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6722,7 +6722,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha3-256",
  			.cra_driver_name = "tegra-se-sha3-256",
@@ -181,7 +181,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_256_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6742,7 +6742,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6744,7 +6744,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha3-384",
  			.cra_driver_name = "tegra-se-sha3-384",
@@ -190,7 +190,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_384_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6764,7 +6764,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6766,7 +6766,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "sha3-512",
  			.cra_driver_name = "tegra-se-sha3-512",
@@ -199,7 +199,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_512_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6786,7 +6786,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6788,7 +6788,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "shake128",
  			.cra_driver_name = "tegra-se-shake128",
@@ -208,7 +208,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_512_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6808,7 +6808,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6810,7 +6810,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "shake256",
  			.cra_driver_name = "tegra-se-shake256",
@@ -217,7 +217,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA3_512_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6831,7 +6831,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6833,7 +6833,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "hmac(sha224)",
  			.cra_driver_name = "tegra-se-hmac-sha224",
@@ -226,7 +226,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA224_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6854,7 +6854,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6856,7 +6856,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "hmac(sha256)",
  			.cra_driver_name = "tegra-se-hmac-sha256",
@@ -235,7 +235,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA256_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6877,7 +6877,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6879,7 +6879,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "hmac(sha384)",
  			.cra_driver_name = "tegra-se-hmac-sha384",
@@ -244,7 +244,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA384_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6900,7 +6900,7 @@ static struct ahash_alg hash_algs[] = {
+@@ -6902,7 +6902,7 @@ static struct ahash_alg hash_algs[] = {
  		.halg.base = {
  			.cra_name = "hmac(sha512)",
  			.cra_driver_name = "tegra-se-hmac-sha512",
@@ -253,7 +253,7 @@ index 62e005da3dab..9b7c360a7048 100644
  			.cra_flags = CRYPTO_ALG_TYPE_AHASH,
  			.cra_blocksize = SHA512_BLOCK_SIZE,
  			.cra_ctxsize = sizeof(struct tegra_se_sha_context),
-@@ -6924,7 +6924,7 @@ static struct akcipher_alg rsa_alg = {
+@@ -6926,7 +6926,7 @@ static struct akcipher_alg rsa_alg = {
  	.base = {
  		.cra_name = "rsa-pka0",
  		.cra_driver_name = "tegra-se-pka0-rsa",
@@ -263,5 +263,5 @@ index 62e005da3dab..9b7c360a7048 100644
  		.cra_module = THIS_MODULE,
  	}
 -- 
-2.42.0
+2.45.1
 

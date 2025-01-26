@@ -8,12 +8,12 @@
   structuredExtraConfig ? {},
   argsOverride ? {},
   buildLinux,
-  gcc11Stdenv,
   ...
 } @ args:
-(buildLinux.override {stdenv = gcc11Stdenv;}) (args
+buildLinux (args
   // {
-    version = "5.10.104" + lib.optionalString realtime "-rt70";
+    # See Makefile in kernel source root for VERSION/PATCHLEVEL/SUBLEVEL. See realtime patch for rt version
+    version = "5.10.216" + lib.optionalString realtime "-rt108";
     extraMeta.branch = "5.10";
 
     defconfig = "tegra_defconfig";
@@ -24,8 +24,10 @@
       src = fetchFromGitHub {
         owner = "elodin-sys";
         repo = "aleph-orin-baseboard-kernel-5-10";
-        rev = "277379a0e5b80fb7a4e026a0c39c636657410eaf";
-        hash = "sha256-ckxensO5O03JdwywJGmTeP7mr8gnx+brPwBaFDWnQHM=";
+        rev = "9e01df1bdb56f48acb3e9334a00258abafd5ae60";
+        hash = "sha256-1MS0jckLgtbCPBzdxlyUnO6BAFL/8H6pdy3i8bTMG7c=";
+        #hash = "sha256-RUAmvgnwXimL00rO1TyiF/ALV/rMtfldHAedqcmaHxs=";
+        #YCOEGQ943EbrApdVFKs+l+g2XWZ8TvdqRxcK8F9ebo8=";
       };
       # Remove device tree overlays with some incorrect "remote-endpoint" nodes.
       # They are strings, but should be phandles. Otherwise, it fails to compile
@@ -65,15 +67,6 @@
           '';
         }
 
-        # Fix "FAILED: load BTF from vmlinux: Unknown error -22" by including a
-        # number of patches from the 5.10 LTS branch. Unclear exactly which one is needed.
-        # See also: https://github.com/NixOS/nixpkgs/pull/194551
-        {patch = ./0001-bpf-Generate-BTF_KIND_FLOAT-when-linking-vmlinux.patch;}
-        {patch = ./0002-kbuild-Quote-OBJCOPY-var-to-avoid-a-pahole-call-brea.patch;}
-        {patch = ./0003-kbuild-skip-per-CPU-BTF-generation-for-pahole-v1.18-.patch;}
-        {patch = ./0004-kbuild-Unify-options-for-BTF-generation-for-vmlinux-.patch;}
-        {patch = ./0005-kbuild-Add-skip_encoding_btf_enum64-option-to-pahole.patch;}
-
         # Fix "FAILED: resolved symbol udp_sock"
         # This is caused by having multiple structs of the same name in the BTF output.
         # For example, `bpftool btf dump file vmlinux | grep "STRUCT 'udp_sock'"`
@@ -82,22 +75,14 @@
         # Without this patch, resolve_btfids doesn't handle this case and
         # miscounts, leading to the failure. The underlying cause of why we have
         # multiple structs of the same name is still unresolved as of 2023-07-29
-        {patch = ./0006-tools-resolve_btfids-Warn-when-having-multiple-IDs-f.patch;}
+        {patch = ./0001-tools-resolve_btfids-Warn-when-having-multiple-IDs-f.patch;}
 
         # Fix Ethernet "downshifting" (e.g.1000Base-T -> 100Base-T) with realtek
         # PHY used on Xavier NX
-        {patch = ./0007-net-phy-realtek-read-actual-speed-on-rtl8211f-to-det.patch;}
+        {patch = ./0002-net-phy-realtek-read-actual-speed-on-rtl8211f-to-det.patch;}
 
         # Lower priority of tegra-se crypto modules since they're slow and flaky
-        {patch = ./0008-Lower-priority-of-tegra-se-crypto.patch;}
-
-        # Include patch from linux-stable that (for some reason) appears to fix
-        # random crashes very early in boot process on Xavier NX specifically
-        # Remove when updating to 35.5.0
-        #{ patch = ./0009-Revert-random-use-static-branch-for-crng_ready.patch; }
-
-        # Fix an issue building with gcc13
-        {patch = ./0010-bonding-gcc13-synchronize-bond_-a-t-lb_xmit-types.patch;}
+        {patch = ./0003-Lower-priority-of-tegra-se-crypto.patch;}
       ]
       ++ kernelPatches;
 
@@ -113,11 +98,6 @@
         #ERROR: modpost: "xhci_irq" [drivers/usb/host/xhci-tegra.ko] undefined!
         #USB_XHCI_TEGRA = module;
         USB_XHCI_TEGRA = yes;
-        SPIDEV = yes;
-        # USB_GADGET = lib.mkForce yes;
-        # USB_ETH = lib.mkForce yes;
-        # USB_ETH_RNDIS = lib.mkForce yes;
-        # INET = yes;
 
         # stage-1 links /lib/firmware to the /nix/store path in the initramfs.
         # However, since it's builtin and not a module, that's too late, since

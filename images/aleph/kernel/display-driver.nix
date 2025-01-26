@@ -6,13 +6,15 @@
   gitRepos,
   l4tVersion,
 }:
-stdenv.mkDerivation rec {
+stdenv.mkDerivation {
   pname = "nvidia-display-driver";
   version = "jetson_${l4tVersion}";
 
   src = gitRepos."tegra/kernel-src/nv-kernel-display-driver";
 
-  setSourceRoot = "sourceRoot=$(echo */NVIDIA-kernel-module-source-TempVersion)";
+  setSourceRoot = "sourceRoot=$(echo */nvdisplay)";
+
+  patches = [./display-driver-reproducibility-fix.patch];
 
   nativeBuildInputs = kernel.moduleBuildDependencies;
 
@@ -28,7 +30,7 @@ stdenv.mkDerivation rec {
     ];
 
   # Avoid an error in modpost: "__stack_chk_guard" [.../nvidia.ko] undefined
-  NIX_CFLAGS_COMPILE = "-fno-stack-protector";
+  NIX_CFLAGS_COMPILE = "-fno-stack-protector -Wno-implicit-function-declaration";
 
   installTargets = ["modules_install"];
   enableParallelBuilding = true;

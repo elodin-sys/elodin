@@ -11,30 +11,26 @@
       prefixLength = 24;
     }
   ];
-  services.kea.dhcp4 = {
+  networking.interfaces.usb0.ipv6.addresses = [
+    {
+      address = "fd48:2240:ffff::";
+      prefixLength = 64;
+    }
+  ];
+  services.radvd = {
     enable = true;
-    settings = {
-      interfaces-config.interfaces = ["usb0"];
-      lease-database = {
-        name = "/var/lib/kea/dhcp4.leases";
-        persist = true;
-        type = "memfile";
+    config = ''
+      interface usb0 {
+        AdvSendAdvert on;
+        prefix fd48:2240:ffff::/64 {
+          AdvAutonomous on;
+          AdvRouterAddr off;
+          AdvOnLink on;
+        };
       };
-      rebind-timer = 2000;
-      renew-timer = 1000;
-      subnet4 = [
-        {
-          pools = [
-            {
-              pool = "10.224.0.2 - 10.224.0.254";
-            }
-          ];
-          subnet = "10.224.0.0/24";
-        }
-      ];
-      valid-lifetime = 4000;
-    };
+    '';
   };
+  boot.kernel.sysctl = {"net.ipv6.conf.all.forwarding" = true;};
   services.avahi = {
     enable = true;
     publish = {
