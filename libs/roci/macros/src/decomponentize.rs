@@ -25,19 +25,19 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         entity_id,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller };
+    let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let if_arms = fields.fields.iter().map(|field| {
         let ty = &field.ty;
         let component_id = match &field.component_id {
             Some(c) => quote! {
-                #crate_name::impeller::ComponentId::new(#c)
+                #impeller::types::ComponentId::new(#c)
             },
             None => {
                 quote! {
-                    #crate_name::impeller::ComponentId::new(<#ty as #crate_name::impeller::Component>::NAME)
+                    <#ty as #impeller::component::Component>::COMPONENT_ID
                 }
-            },
+            }
         };
         let ident = &field.ident;
         let name = field
@@ -50,14 +50,14 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
             quote! {
-                const #const_name: #impeller::ComponentId = #component_id;
-                if component_id == #const_name && entity_id == #impeller::EntityId(#id) {
-                    if let Some(val) = <#ty>::from_component_value(value.clone()) {
+                const #const_name: #impeller::types::ComponentId = #component_id;
+                if component_id == #const_name && entity_id == #impeller::types::EntityId(#id) {
+                    if let Ok(val) = <#ty as #impeller::com_de::FromComponentView>::from_component_view(view.clone()) {
                         self.#ident = val;
-                        }
+                    }
                 }
             }
-        }else {
+        } else {
             quote! {
                 self.#ident.apply_value(component_id, entity_id, value.clone());
             }
@@ -65,12 +65,11 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
     });
     quote! {
         impl #crate_name::Decomponentize for #ident #generics #where_clause {
-            fn apply_value<D: #impeller::ComponentValueDim>(&mut self,
-                            component_id: #impeller::ComponentId,
-                            entity_id: #impeller::EntityId,
-                            value: #impeller::ComponentValue<'_, D>
+            fn apply_value(&mut self,
+                            component_id: #impeller::types::ComponentId,
+                            entity_id: #impeller::types::EntityId,
+                            view: #impeller::types::ComponentView<'_>
             ) {
-                use #impeller::ValueRepr;
                 #(#if_arms)*
             }
         }

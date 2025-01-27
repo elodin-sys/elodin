@@ -212,6 +212,46 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTable<EntryBuf, DataBuf> {
             _ => None,
         })
     }
+
+    pub fn id_pair_iter(&self) -> impl Iterator<Item = (EntityId, ComponentId)> + '_ {
+        let columns = self
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Column(e) => {
+                    let ids = e
+                        .entity_ids_entry
+                        .parse(self.data.as_slice(), e.len as usize)
+                        .ok()?;
+                    Some((e.component_id, ids))
+                }
+                _ => None,
+            })
+            .flat_map(|(component_id, ids)| {
+                ids.iter()
+                    .copied()
+                    .map(move |entity_id| (entity_id, component_id))
+            });
+        let entities = self
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Entity(e) => {
+                    let ids = e
+                        .component_ids_entry
+                        .parse(self.data.as_slice(), e.len as usize)
+                        .ok()?;
+                    Some((e.entity_id, ids))
+                }
+                _ => None,
+            })
+            .flat_map(|(entity_id, ids)| {
+                ids.iter()
+                    .copied()
+                    .map(move |component_id| (entity_id, component_id))
+            });
+        columns.chain(entities)
+    }
 }
 
 #[derive(Default)]
@@ -234,29 +274,32 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         self.vtable
     }
 
-    pub fn column<I: IntoIterator<Item = EntityId>>(
+    pub fn column<I: IntoIterator<Item = EntityId>, S: IntoIterator<Item = u64>>(
         &mut self,
         component_id: impl Into<ComponentId>,
         prim_type: PrimType,
-        shape: impl AsRef<[u64]>,
+        shape: S,
         entity_ids: I,
     ) -> Result<&mut Self, Error>
     where
         I::IntoIter: ExactSizeIterator,
     {
-        let shape = shape.as_ref();
+        let shape = shape.into_iter();
         let entity_ids = entity_ids.into_iter();
         let component_id = component_id.into();
         let len = entity_ids.len();
-        let shape_offset = self.vtable.data.extend_aligned(shape)? as u64;
+        let mut rank: u64 = 0;
+        let mut arr_len: usize = 1;
+        self.vtable.data.pad_for_alignment::<u64>()?;
+        let shape_offset = self.vtable.data.as_slice().len() as u64;
+        for d in shape {
+            rank = rank.checked_add(1).ok_or(Error::OffsetOverflow)?;
+            arr_len = arr_len
+                .checked_mul(d as usize)
+                .ok_or(Error::OffsetOverflow)?;
+            self.vtable.data.push_aligned(d)?;
+        }
         let entity_col_offset = self.vtable.data.extend_from_iter_aligned(entity_ids)? as u64;
-        let arr_len: usize = if shape.is_empty() {
-            1
-        } else {
-            shape.iter().try_fold(1usize, |xs, &x| {
-                (x as usize).checked_mul(xs).ok_or(Error::OffsetOverflow)
-            })?
-        };
         let data_len = len * arr_len * prim_type.size();
 
         let padding = prim_type.padding(self.data_len);
@@ -269,7 +312,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
             component_id,
             shape_entry: ShapeEntry {
                 prim_type,
-                rank: shape.len() as u64,
+                rank,
                 shape_offset,
             },
             entity_ids_entry: BufEntry {
@@ -387,7 +430,7 @@ mod tests {
         vtable.column(
             ComponentId::new("foo"),
             PrimType::F32,
-            &[2, 2],
+            [2, 2],
             [EntityId(1), EntityId(2)].into_iter(),
         )?;
         let vtable: VTable<Vec<Entry>, Vec<u8>> = vtable.build();

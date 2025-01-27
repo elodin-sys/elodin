@@ -1,9 +1,10 @@
-use impeller::{ComponentId, Metadata};
+use impeller2::types::ComponentId;
+use impeller2_wkt::ComponentMetadata;
 
 pub trait Metadatatize {
-    fn get_metadata(&self, component_id: ComponentId) -> Option<&Metadata>;
+    fn get_metadata(&self, component_id: ComponentId) -> Option<&ComponentMetadata>;
 
-    fn metadata() -> impl Iterator<Item = Metadata> {
+    fn metadata() -> impl Iterator<Item = ComponentMetadata> {
         std::iter::empty()
     }
 }
@@ -15,7 +16,7 @@ macro_rules! impl_metadatatize {
             $($ty: Metadatatize),+
         {
             #[allow(unused_parens, non_snake_case)]
-            fn get_metadata(&self, component_id: ComponentId) -> Option<&Metadata> {
+            fn get_metadata(&self, component_id: ComponentId) -> Option<&ComponentMetadata> {
                 let ($($ty,)*) = self;
                 None$(
                     .or_else(|| $ty.get_metadata(component_id))

@@ -1,13 +1,10 @@
 use combinators::Pipe;
 use drivers::DriverMode;
 
-mod componentize;
-mod decomponentize;
 mod system_fn;
 
-pub use componentize::*;
-pub use decomponentize::*;
-pub use impeller;
+pub use impeller2;
+pub use impeller2::com_de::{Componentize, Decomponentize};
 pub use roci_macros::{Componentize, Decomponentize, Metadatatize};
 pub use system_fn::*;
 
@@ -15,9 +12,10 @@ pub mod combinators;
 #[cfg(feature = "csv")]
 pub mod csv;
 pub mod drivers;
-#[cfg(feature = "tokio")]
-pub mod tokio;
 pub mod types;
+
+#[cfg(feature = "stellar")]
+pub mod tcp;
 
 #[cfg(feature = "std")]
 pub mod metadata;

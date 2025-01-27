@@ -9,15 +9,16 @@ repository = "https://github.com/elodin-sys/elodin"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["csv", "std"]
-std = ["impeller/std"]
+default = ["csv", "std", "stellar"]
+std = []
 csv = ["dep:csv", "serde"]
-tokio = ["dep:tokio", "tokio-stream", "tokio-util", "fastrand", "impeller/tokio", "impeller/std", "std"]
+stellar = ["dep:stellarator", "impeller2-stella", "impeller2/thingbuf", "fastrand"]
+#tokio = ["dep:tokio", "tokio-stream", "tokio-util", "fastrand", "impeller/tokio", "impeller/std", "std"]
 
 [dependencies]
-impeller.workspace = true
-impeller.default-features = false
-impeller.features = ["rand"]
+impeller2.path = "../impeller2"
+impeller2.features = ["std"]
+impeller2-wkt.path = "../impeller2/wkt"
 
 # datastructures
 heapless = "0.8"
@@ -25,20 +26,25 @@ crossbeam = "0.8.4"
 bbqueue = "0.5.1"
 thingbuf = "0.1.6"
 spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
-bytes.version = "1.6.1"
-bytes.default-features = false
 
 # async
-tokio.version = "1.34"
-tokio.features = ["full"]
-tokio.optional = true
-tokio-stream.version = "0.1.15"
-tokio-stream.optional = true
-tokio-util.version = "0.7"
-tokio-util.features = ["codec"]
-tokio-util.optional = true
-fastrand.version = "2"
+stellarator.path = "../stellarator"
+stellarator.optional = true
+impeller2-stella.path = "../impeller2/stella"
+impeller2-stella.features = ["thingbuf"]
+impeller2-stella.optional = true
+fastrand.version = "2.2.0"
 fastrand.optional = true
+# tokio.version = "1.34"
+# tokio.features = ["full"]
+# tokio.optional = true
+# tokio-stream.version = "0.1.15"
+# tokio-stream.optional = true
+# tokio-util.version = "0.7"
+# tokio-util.features = ["codec"]
+# tokio-util.optional = true
+# fastrand.version = "2"
+# fastrand.optional = true
 
 # logs
 tracing = "0.1.40"

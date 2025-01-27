@@ -10,7 +10,7 @@ std = ["miette", "alloc"]
 alloc = []
 bevy = ["dep:bevy"]
 mlua = ["dep:mlua"]
-
+thingbuf = ["dep:thingbuf", "replace_with"]
 
 [dependencies]
 # ser-des
@@ -46,3 +46,9 @@ bevy.optional = true
 mlua.version = "0.10"
 mlua.features = ["serialize"]
 mlua.optional = true
+
+# thingbuf
+thingbuf.version = "0.1.6"
+thingbuf.optional = true
+replace_with.version = "0.1.7"
+replace_with.optional = true

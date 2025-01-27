@@ -116,7 +116,12 @@ impl Client {
         let component_id = ComponentId(component_id);
         let entity_id = EntityId(entity_id);
         let mut vtable: VTableBuilder<Vec<_>, Vec<_>> = VTableBuilder::default();
-        vtable.column(component_id, prim_type, &shape, std::iter::once(entity_id))?;
+        vtable.column(
+            component_id,
+            prim_type,
+            shape.into_iter(),
+            std::iter::once(entity_id),
+        )?;
         let vtable = vtable.build();
         let id: [u8; 3] = fastrand::u64(..).to_le_bytes()[..3]
             .try_into()
