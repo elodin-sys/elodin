@@ -26,7 +26,6 @@ tokio.features = ["full"]
 futures.version = "0.3.30"
 futures-lite = "2.5.0"
 stellarator.path = "../stellarator"
-elodin-db.path = "../db"
 nix.version = "0.29"
 nix.features = ["signal"]
 
@@ -62,3 +61,4 @@ which = "6.0.3"
 nox-ecs.path = "../nox-ecs"
 tempfile.version = "3.10.0"
 flume.version = "0.11"
+elodin-db.path = "../db"

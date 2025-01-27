@@ -526,7 +526,7 @@ fn set_icon_windows() {
             cyBottomHeight: 40,
         };
         winapi::um::dwmapi::DwmExtendFrameIntoClientArea(window_handle, &margins);
-        let mut rect = winapi::shared::windef::RECT::default();
+        let mut rect: winapi::shared::windef::RECT = std::mem::zeroed();
         winapi::um::winuser::GetWindowRect(window_handle, &mut rect);
     }
 
