@@ -24,7 +24,6 @@ from typing import (
 
 import jax
 import numpy
-import pytest
 from jax.tree_util import tree_flatten, tree_unflatten
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -32,39 +31,9 @@ from .elodin import *
 
 __doc__ = elodin.__doc__
 
-_called_from_test = False
-_has_df_key = pytest.StashKey[str]()
-
 jax.config.update("jax_enable_x64", True)
 
 Self = TypeVar("Self")
-
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--batch-results",
-        action="store",
-        default="",
-        help="path to batch results directory",
-    )
-
-
-def pytest_configure(config):
-    global _called_from_test
-    _called_from_test = True
-
-
-def pytest_unconfigure(config):
-    global _called_from_test
-    _called_from_test = False
-
-
-def pytest_generate_tests(metafunc):
-    if "df" in metafunc.fixturenames and _has_df_key not in metafunc.definition.stash:
-        metafunc.definition.stash[_has_df_key] = True
-        path = metafunc.config.getoption("batch_results")
-        dfs, sample_numbers = read_batch_results(path)
-        metafunc.parametrize("df", dfs, ids=sample_numbers)
 
 
 def system(func) -> System:
@@ -486,24 +455,6 @@ class World(WorldBuilder):
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
-
-    def view(
-        self,
-        system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
-        default_playback_speed: float = 1.0,
-    ) -> Any:
-        from IPython.display import IFrame
-
-        addr = super().serve(
-            system,
-            True,
-            sim_time_step,
-            run_time_step,
-            default_playback_speed,
-        )
-        return IFrame(f"http://{addr}", width=960, height=540)
 
     def glb(self, url: str) -> Scene:
         return Scene(self.insert_asset(Glb(url)))  # type: ignore
