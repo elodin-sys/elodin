@@ -22,6 +22,18 @@ struct PacketHeader {
     uint32_t req_id;
 };
 
+ssize_t write_all(int fd, const void *buf, size_t count) {
+    size_t written = 0;
+    while (written < count) {
+        ssize_t n = write(fd, buf + written, count - written);
+        if (n < 0) {
+            return n;
+        }
+        written += n;
+    }
+    return written;
+}
+
 int main() {
     // Create TCP socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -50,8 +62,8 @@ int main() {
     };
 
     // Send vtable header and data
-    if (write(sock, &vtable_header, sizeof(vtable_header)) != sizeof(vtable_header) ||
-        write(sock, vtable_bin, vtable_bin_len) != vtable_bin_len) {
+    if (write_all(sock, &vtable_header, sizeof(vtable_header)) != sizeof(vtable_header) ||
+        write_all(sock, vtable_bin, vtable_bin_len) != vtable_bin_len) {
         perror("failed to send vtable");
         return 1;
     }
@@ -61,7 +73,7 @@ int main() {
     double val = 1.0;
     while (1) {
         double sin_val = sin(val);
-        
+
         struct PacketHeader table_header = {
             .len = 8 + 8,
             .ty = PACKET_TABLE,
@@ -69,8 +81,8 @@ int main() {
             .req_id = 0
         };
 
-        if (write(sock, &table_header, sizeof(table_header)) != sizeof(table_header) ||
-            write(sock, &sin_val, sizeof(sin_val)) != sizeof(sin_val)) {
+        if (write_all(sock, &table_header, sizeof(table_header)) != sizeof(table_header) ||
+            write_all(sock, &sin_val, sizeof(sin_val)) != sizeof(sin_val)) {
             perror("failed to send data");
             return 1;
         }
