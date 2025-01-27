@@ -371,7 +371,7 @@ impl Component {
         vtable.column(
             self.schema.component_id,
             self.schema.prim_type,
-            &self.schema.shape,
+            self.schema.shape.iter().copied(),
             self.entities
                 .iter()
                 .map(|kv| *kv.key())

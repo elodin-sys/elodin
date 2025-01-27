@@ -3,9 +3,19 @@ name = "impeller2-stella"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+thingbuf = [
+    "dep:thingbuf",
+    "impeller2/thingbuf",
+    "impeller2-wkt",
+    "stellarator/miette"
+    ]
+
 [dependencies]
 # async
 stellarator.path = "../../stellarator"
+futures-lite = "2.5.0"
+futures-concurrency = "7.6.2"
 
 # ser-des
 impeller2.path = ".."
@@ -20,3 +30,9 @@ postcard.features = ["alloc", "experimental-derive"]
 # errors
 thiserror = "2.0"
 miette.version = "7.2"
+
+# thingbuf
+thingbuf.version = "0.1.6"
+thingbuf.optional = true
+impeller2-wkt.path = "../wkt"
+impeller2-wkt.optional = true

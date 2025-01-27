@@ -1,6 +1,8 @@
+use impeller2::types::FilledRecycle;
 use impeller2::types::LenPacket;
+use impeller2::types::MaybeFilledPacket;
 use impeller2::types::OwnedPacket;
-use impeller2_bevy::{new_connection_packets, FilledRecycle, MaybeFilledPacket};
+use impeller2_bevy::new_connection_packets;
 use impeller2_wkt::StreamId;
 use stellarator_buf::IoBuf;
 use thingbuf::mpsc;

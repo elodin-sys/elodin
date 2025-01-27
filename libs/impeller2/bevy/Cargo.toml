@@ -9,7 +9,7 @@ tcp = ["stellarator", "impeller2-stella"]
 
 [dependencies]
 impeller2.path = ".."
-impeller2.features = ["bevy", "std"]
+impeller2.features = ["bevy", "std", "thingbuf"]
 impeller2-wkt.path = "../wkt"
 impeller2-wkt.features = ["gui", "bevy"]
 nox.path = "../../nox"
@@ -26,11 +26,11 @@ stellarator.path = "../../stellarator"
 stellarator.optional = true
 stellarator.features = ["miette"]
 impeller2-stella.path = "../stella"
+impeller2-stella.features = ["thingbuf"]
 impeller2-stella.optional = true
 futures-lite = "2.5.0"
 
 # helpers
-replace_with = "0.1.7"
 smallvec.version = "1.11.2"
 
 # error

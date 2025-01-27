@@ -1,9 +1,10 @@
+use std::net::SocketAddr;
+
 use basilisk::{
     att_control::MrpPD,
     channel::BskChannel,
     sys::{AttGuidMsgPayload, CmdTorqueBodyMsgPayload},
 };
-use impeller::Query;
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
 use roci::{
     drivers::{os_sleep_driver, Driver, Hz},
@@ -11,7 +12,7 @@ use roci::{
 };
 use roci_macros::{Componentize, Decomponentize};
 
-#[derive(Debug, Default, Componentize, Decomponentize, Metadatatize)]
+#[derive(Debug, Default, Componentize, Decomponentize)]
 #[roci(entity_id = 3)]
 struct World {
     world_pos: SpatialTransform<f64, ArrayRepr>,
@@ -79,24 +80,7 @@ impl System for MRPHandler {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    let (server_tx, server_rx) =
-        tokio::tcp_listen::<Hz<10>>("127.0.0.1:2241".parse().unwrap(), &[], World::metadata());
-    let (sim_tx, sim_rx) = tokio::tcp_connect::<Hz<10>>(
-        "127.0.0.1:2240".parse().unwrap(),
-        &[
-            Query::with_id("goal"),
-            Query::with_id("world_pos"),
-            Query::with_id("ang_vel_est"),
-        ],
-        World::metadata().filter(|m| m.name == "control_force"),
-    );
-
-    os_sleep_driver(
-        server_rx
-            .pipe(sim_rx)
-            .pipe(MRPHandler::new())
-            .pipe(sim_tx)
-            .pipe(server_tx),
-    )
-    .run();
+    let (tcp_tx, tcp_rx) =
+        roci::tcp::tcp_pair::<World, _>(SocketAddr::new([127, 0, 0, 1].into(), 2240));
+    os_sleep_driver(tcp_rx.pipe(MRPHandler::new()).pipe(tcp_tx)).run();
 }

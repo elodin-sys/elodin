@@ -1,14 +1,12 @@
 use anyhow::anyhow;
 use bevy::app::Update;
 use bevy::ecs::change_detection::DetectChanges;
-use bevy::ecs::schedule::IntoSystemConfigs;
-use bevy::ecs::system::Res;
+use bevy::ecs::{schedule::IntoSystemConfigs, system::Res};
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use elodin_editor::ui::FullscreenState;
 use elodin_editor::EditorPlugin;
-use impeller2::types::LenPacket;
+use impeller2::types::{FilledRecycle, LenPacket};
 use impeller2_bevy::CurrentStreamId;
-use impeller2_bevy::FilledRecycle;
 use impeller2_bevy::{PacketRx, PacketTx};
 use thingbuf::mpsc;
 use tracing::error;
