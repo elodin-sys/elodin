@@ -1,14 +1,24 @@
 [package]
 name = "elodin-db"
-version = "0.1.0"
+version.workspace = true
+repository.workspace = true
 edition = "2021"
-publish = false
+publish = true
+description = "Elodin Database"
+authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
+
+[package.metadata.wix]
+upgrade-guid = "154415C8-2D06-41C4-87DA-A9AB1842801B"
+path-guid = "1AF0FF55-0176-42C0-AD24-CF35FA4F1DC5"
+license = false
+eula = false
 
 [dependencies]
 # ser-de
 impeller2.path = "../impeller2"
 impeller2.features = ["std"]
 impeller2-wkt.path = "../impeller2/wkt"
+impeller2-cli = { path = "cli", default-features = false }
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.0"

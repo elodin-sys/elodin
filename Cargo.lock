@@ -3629,7 +3629,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db"
-version = "0.1.0"
+version = "0.10.1"
 dependencies = [
  "arc-swap",
  "clap 4.5.20",
@@ -3637,6 +3637,7 @@ dependencies = [
  "fastrand 2.2.0",
  "futures-lite 2.5.0",
  "impeller2",
+ "impeller2-cli",
  "impeller2-stella",
  "impeller2-wkt",
  "memmap2 0.9.5",

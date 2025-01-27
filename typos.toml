@@ -12,6 +12,7 @@
 "ba" = "ba"
 "datatime" = "datatime"
 "struc" = "struc"
+"LICENS" = "LICENS"
 
 [files]
 extend-exclude = [

@@ -1,10 +1,13 @@
 [workspace]
-members = ["cargo:."]
+members = [
+  "cargo:.",
+  "cargo:libs/db",
+]
 
 # Config for 'dist'
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.24.0"
+cargo-dist-version = "0.28.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
@@ -19,7 +22,7 @@ allow-dirty = ["ci"]
 precise-builds = true
 # The archive format to use for non-windows builds (defaults .tar.xz)
 unix-archive = ".tar.gz"
-# Whether to auto-include files like READMEs, LICENSES, and CHANGELOGs (default true)
+# Whether to auto-include files like READMEs, LICENSEs, and CHANGELOGs (default true)
 auto-includes = false
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
@@ -27,8 +30,12 @@ install-path = "CARGO_HOME"
 install-updater = false
 
 [dist.github-custom-runners]
-x86_64-unknown-linux-gnu = "ubuntu-22.04"
-aarch64-apple-darwin = "macos-14"
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm-large"
+x86_64-unknown-linux-gnu = "ubuntu-22.04-xl"
+aarch64-unknown-linux-musl = "ubuntu-22.04-arm-large"
+x86_64-unknown-linux-musl = "ubuntu-22.04-xl"
+x86_64-pc-windows-msvc = "windows-xl"
+aarch64-apple-darwin = "macos-14-xlarge"
 
 [dist.dependencies.apt]
 "g++" = '*'
