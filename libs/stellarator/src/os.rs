@@ -225,15 +225,16 @@ pub fn os_clock() -> Clock {
 pub fn os_clock() -> Clock {
     use std::time::Duration;
     let mut freq = 0i64;
-    if unsafe { windows_sys::Win32::System::Performance::QueryPerformanceFrequency(&mut freq) } != 0
-    {
-        panic!("failed to get freq");
+    let res =
+        unsafe { windows_sys::Win32::System::Performance::QueryPerformanceFrequency(&mut freq) };
+    if res == 0 {
+        panic!("failed to get freq {res:?}");
     }
     let duration = Duration::from_nanos(1_000_000_000u64 / freq as u64);
     Clock::new(duration, || {
         let mut count = 0i64;
         if unsafe { windows_sys::Win32::System::Performance::QueryPerformanceCounter(&mut count) }
-            != 0
+            == 0
         {
             panic!("failed to get count");
         };
