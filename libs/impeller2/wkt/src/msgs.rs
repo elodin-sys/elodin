@@ -218,3 +218,10 @@ pub struct GetDbSettings;
 impl Msg for GetDbSettings {
     const ID: PacketId = [224, 0, 21];
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct NewConnection;
+
+impl Msg for NewConnection {
+    const ID: PacketId = [224, 255, 1];
+}

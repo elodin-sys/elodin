@@ -4,7 +4,6 @@ members = [
     "apps/editor-web",
     "libs/elodin-editor",
     "libs/elodin-types/rust",
-    "libs/impeller",
     "libs/nox",
     "libs/nox-ecs",
     "libs/nox-ecs-macros",

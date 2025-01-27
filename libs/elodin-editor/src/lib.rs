@@ -27,11 +27,11 @@ use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::Msg;
 use impeller2::types::OwnedPacket;
 use impeller2_bevy::{
-    AssetHandle, ComponentValueMap, CurrentStreamId, EntityMap, NewConnection, PacketHandlerInput,
-    PacketHandlers, PacketTx,
+    AssetHandle, ComponentValueMap, CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers,
+    PacketTx,
 };
 use impeller2_wkt::Glb;
-use impeller2_wkt::{SetStreamState, Tick, Viewport, WorldPos};
+use impeller2_wkt::{NewConnection, SetStreamState, Tick, Viewport, WorldPos};
 use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::tiles;

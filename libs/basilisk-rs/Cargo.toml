@@ -31,9 +31,7 @@ cc = "1.0.97"
 [dev-dependencies]
 approx = "0.5.1"
 roci.path = "../roci"
-roci.features = ["tokio"]
+roci.features = ["stellar"]
 roci-macros.path = "../roci/macros"
 tracing-subscriber = "0.3"
 nox.path = "../nox"
-impeller.path = "../impeller"
-impeller.features = ["nox"]

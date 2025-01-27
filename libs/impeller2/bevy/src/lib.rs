@@ -12,6 +12,7 @@ use bevy::{
 use impeller2::types::{
     ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt,
 };
+use impeller2::types::{FilledRecycle, MaybeFilledPacket};
 use impeller2::util::concat_str;
 use impeller2::{
     com_de::Decomponentize,
@@ -25,68 +26,19 @@ use impeller2_wkt::{
     Stream, StreamFilter, StreamId, SubscribeMaxTick, Tick, VTableMsg, VectorArrow, WorldPos,
 };
 use nox::{Array, ArrayBuf, Dyn};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
-    mem,
     ops::Deref,
     time::Duration,
 };
-use thingbuf::{mpsc, Recycle};
+use thingbuf::mpsc;
 
 #[cfg(feature = "tcp")]
 mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
-
-pub enum MaybeFilledPacket {
-    Taken,
-    Unfilled(Vec<u8>),
-    Packet(OwnedPacket<Vec<u8>>),
-}
-
-impl MaybeFilledPacket {
-    fn recycle(&mut self) {
-        replace_with::replace_with_or_abort(self, |this| match this {
-            MaybeFilledPacket::Unfilled(mut vec) => {
-                vec.resize(512 * 1024, 0);
-                MaybeFilledPacket::Unfilled(vec)
-            }
-            MaybeFilledPacket::Packet(packet) => {
-                let mut vec = packet.into_buf();
-                vec.resize(512 * 1024, 0);
-                MaybeFilledPacket::Unfilled(vec)
-            }
-            MaybeFilledPacket::Taken => MaybeFilledPacket::default(),
-        })
-    }
-
-    pub fn take_buf(&mut self) -> Option<Vec<u8>> {
-        match mem::replace(self, MaybeFilledPacket::Taken) {
-            MaybeFilledPacket::Taken => None,
-            MaybeFilledPacket::Unfilled(buf) => Some(buf),
-            MaybeFilledPacket::Packet(pkt) => Some(pkt.into_buf()),
-        }
-    }
-}
-
-impl Default for MaybeFilledPacket {
-    fn default() -> Self {
-        Self::Unfilled(vec![0u8; 512 * 1024])
-    }
-}
-
-pub struct FilledRecycle;
-impl Recycle<MaybeFilledPacket> for FilledRecycle {
-    fn new_element(&self) -> MaybeFilledPacket {
-        MaybeFilledPacket::default()
-    }
-
-    fn recycle(&self, element: &mut MaybeFilledPacket) {
-        element.recycle();
-    }
-}
 
 #[derive(Resource)]
 pub struct PacketRx(pub mpsc::Receiver<MaybeFilledPacket, FilledRecycle>);
@@ -874,13 +826,6 @@ impl CommandsExt for Commands<'_, '_> {
         };
         self.queue(cmd);
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct NewConnection;
-
-impl Msg for NewConnection {
-    const ID: PacketId = [224, 255, 1];
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {

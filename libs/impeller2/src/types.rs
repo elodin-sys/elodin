@@ -1,10 +1,10 @@
-use core::fmt::Display;
+use core::{fmt::Display, mem};
 
 use nox::ArrayView;
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
-use crate::error::Error;
+use crate::{buf::ByteBufExt, error::Error};
 use stellarator_buf::{IoBuf, Slice};
 
 #[derive(
@@ -479,6 +479,14 @@ impl LenPacket {
         self.inner[..8].copy_from_slice(&len.to_le_bytes());
     }
 
+    pub fn extend_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: &[V]) {
+        let old_len = self.inner.len();
+        let _ = self.inner.extend_aligned(val);
+        let new_len = self.inner.len();
+        let len = self.pkt_len() + (new_len - old_len) as u64;
+        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+    }
+
     pub fn extend_from_slice(&mut self, buf: &[u8]) {
         let len = self.pkt_len() + buf.len() as u64;
         self.inner.extend_from_slice(buf);
@@ -598,6 +606,58 @@ impl<B: IoBuf> OwnedPacket<B> {
             Self::Table(table) => table.buf.into_inner(),
             Self::TimeSeries(time_series) => time_series.buf.into_inner(),
         }
+    }
+}
+
+pub enum MaybeFilledPacket {
+    Taken,
+    Unfilled(Vec<u8>),
+    Packet(OwnedPacket<Vec<u8>>),
+}
+
+impl MaybeFilledPacket {
+    #[cfg(feature = "thingbuf")]
+    fn recycle(&mut self) {
+        replace_with::replace_with_or_abort(self, |this| match this {
+            MaybeFilledPacket::Unfilled(mut vec) => {
+                vec.resize(512 * 1024, 0);
+                MaybeFilledPacket::Unfilled(vec)
+            }
+            MaybeFilledPacket::Packet(packet) => {
+                let mut vec = packet.into_buf();
+                vec.resize(512 * 1024, 0);
+                MaybeFilledPacket::Unfilled(vec)
+            }
+            MaybeFilledPacket::Taken => MaybeFilledPacket::default(),
+        })
+    }
+
+    pub fn take_buf(&mut self) -> Option<Vec<u8>> {
+        match mem::replace(self, MaybeFilledPacket::Taken) {
+            MaybeFilledPacket::Taken => None,
+            MaybeFilledPacket::Unfilled(buf) => Some(buf),
+            MaybeFilledPacket::Packet(pkt) => Some(pkt.into_buf()),
+        }
+    }
+}
+
+impl Default for MaybeFilledPacket {
+    fn default() -> Self {
+        Self::Unfilled(vec![0u8; 512 * 1024])
+    }
+}
+
+#[cfg(feature = "thingbuf")]
+pub struct FilledRecycle;
+
+#[cfg(feature = "thingbuf")]
+impl thingbuf::Recycle<MaybeFilledPacket> for FilledRecycle {
+    fn new_element(&self) -> MaybeFilledPacket {
+        MaybeFilledPacket::default()
+    }
+
+    fn recycle(&self, element: &mut MaybeFilledPacket) {
+        element.recycle();
     }
 }
 
