@@ -108,7 +108,7 @@ def gravity(inertia: el.Inertia, f: el.Force) -> el.Force:
     return f + el.SpatialForce(linear=jnp.array([0.0, 0.0, -9.81]) * inertia.mass())
 
 
-def world() -> el.World:
+def world() -> tuple[el.World, el.EntityId]:
     world = el.World()
     drone = world.spawn(
         [
@@ -184,7 +184,7 @@ def world() -> el.World:
         ),
         name="Rate Control Panel",
     )
-    return world
+    return world, drone
 
 
 def inner_loop(run_count: int, system: el.System) -> el.System:
