@@ -1,5 +1,3 @@
-use clap::Parser;
-
 use impeller2::{
     com_de::Decomponentize,
     table::{Entry, VTableBuilder},
@@ -393,14 +391,12 @@ impl Highlighter for CliHelper {
     }
 }
 
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
-struct Args {
+#[derive(clap::Args, Clone, Debug)]
+pub struct Args {
     pub path: Option<PathBuf>,
 }
 
-async fn run() -> anyhow::Result<()> {
-    let args = Args::parse();
+pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = Lua::new();
     let client = lua.create_async_function(|_lua, addr: String| async move {
         let addr = addr.parse().map_err(anyhow::Error::from)?;
@@ -572,10 +568,6 @@ async fn run() -> anyhow::Result<()> {
             }
         }
     }
-}
-
-fn main() -> anyhow::Result<()> {
-    stellarator::run(run)
 }
 
 fn print_usage_line(name: impl Display, desc: impl Display) {
