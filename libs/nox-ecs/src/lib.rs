@@ -432,23 +432,6 @@ impl<S: ExecState> WorldExec<S> {
         }
     }
 
-    // pub fn column_at_tick(
-    //     &self,
-    //     component_id: ComponentId,
-    //     tick: u64,
-    // ) -> Option<ColumnRef<'_, &Vec<u8>>> {
-    // if self.simulating && self.exec.world.tick() < self.exec.world.max_tick() {
-    //     }
-    //     let column = self.world.history.get(tick as usize)?.get(&component_id)?;
-    //     let (schema, metadata) = self.world.component_map.get(&component_id)?;
-    //     Some(ColumnRef {
-    //         column: &column.buffer,
-    //         entities: &column.entity_ids,
-    //         metadata,
-    //         schema,
-    //     })
-    // }
-
     pub fn write_to_dir(&mut self, dir: impl AsRef<Path>) -> Result<(), Error> {
         let start = &mut Instant::now();
         let dir = dir.as_ref();
@@ -480,27 +463,6 @@ impl WorldExec<Uncompiled> {
             profiler: self.profiler,
         })
     }
-
-    pub fn read_from_dir(dir: impl AsRef<Path>) -> Result<WorldExec, Error> {
-        let dir = dir.as_ref();
-        let world_dir = dir.join("world");
-        let tick_exec = Exec::read_from_dir(dir.join("tick_exec"))?;
-        let startup_exec_path = dir.join("startup_exec");
-        let startup_exec = if startup_exec_path.exists() {
-            Some(Exec::read_from_dir(&startup_exec_path)?)
-        } else {
-            None
-        };
-        let world = World::read_from_dir(&world_dir)?;
-        let world_exec = Self {
-            world,
-            client_buffers: Default::default(),
-            tick_exec,
-            startup_exec,
-            profiler: Default::default(),
-        };
-        Ok(world_exec)
-    }
 }
 
 impl WorldExec<Compiled> {
@@ -512,7 +474,6 @@ impl WorldExec<Compiled> {
             startup_exec.run(&mut self.client_buffers)?;
             self.copy_to_host()?;
         }
-        //self.world.ensure_history();
         self.tick_exec.run(&mut self.client_buffers)?;
         self.profiler.execute_buffers.observe(start);
         self.copy_to_host()?;

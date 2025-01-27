@@ -176,45 +176,6 @@ impl World {
         col.column[..8].copy_from_slice(&bytes);
     }
 
-    // #[allow(clippy::too_many_arguments)]
-    // pub fn new(
-    //     //mut history: Vec<Buffers>,
-    //     component_map: HashMap<ComponentId, (ComponentSchema, ComponentMetadata)>,
-    //     entity_metadata: HashMap<EntityId, EntityMetadata>,
-    //     asset_store: AssetStore,
-    //     sim_time_step: TimeStep,
-    //     run_time_step: TimeStep,
-    //     default_playback_speed: f64,
-    //     max_tick: u64,
-    // ) -> Self {
-    //     let host = history.pop().unwrap_or_default();
-    //     let tick = history.len() as u64;
-    //     let max_entity_id = history.last().and_then(|b| {
-    //         b.values()
-    //             .flat_map(|b| bytemuck::try_cast_slice::<_, u64>(b.entity_ids.as_slice()).ok())
-    //             .flat_map(|ids| ids.iter())
-    //             .copied()
-    //             .max()
-    //     });
-    //     let entity_len = max_entity_id.map(|id| id + 1).unwrap_or(0);
-    //     let dirty_components = host.keys().copied().collect();
-    //     Self {
-    //         host,
-    //         history,
-    //         //entity_ids,
-    //         dirty_components,
-    //         component_map,
-    //         assets: asset_store,
-    //         tick,
-    //         entity_len,
-    //         run_time_step,
-    //         sim_time_step,
-    //         default_playback_speed,
-    //         max_tick,
-    //         entity_metadata,
-    //     }
-    // }
-
     pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
         let entity_id = EntityId(self.metadata.entity_len);
         self.spawn_with_id(archetype, entity_id)
@@ -286,29 +247,6 @@ impl World {
         Ok(())
     }
 
-    pub fn read_from_dir(world_dir: &Path) -> Result<Self, Error> {
-        let this = Self::read(world_dir.join("world"))?;
-        Ok(this)
-    }
-
-    // pub fn column_at_tick(
-    //     &self,
-    //     component_id: ComponentId,
-    //     tick: u64,
-    // ) -> Option<ColumnRef<'_, &Vec<u8>>> {
-    //     if tick == self.tick {
-    //         return self.column_by_id(component_id);
-    //     }
-    //     let column = self.history.get(tick as usize)?.get(&component_id)?;
-    //     let (schema, metadata) = self.component_map.get(&component_id)?;
-    //     Some(ColumnRef {
-    //         column: &column.buffer,
-    //         entities: &column.entity_ids,
-    //         metadata,
-    //         schema,
-    //     })
-    // }
-
     pub fn entity_ids(&self) -> HashSet<EntityId> {
         self.host
             .values()
@@ -332,16 +270,8 @@ impl World {
     }
 
     pub fn advance_tick(&mut self) {
-        //self.history.push(self.host.clone());
         self.metadata.tick += 1;
     }
-
-    // pub fn ensure_history(&mut self) {
-    //     if self.history.is_empty() {
-    //         // Push the initial state into history
-    //         self.history.push(self.host.clone());
-    //     }
-    // }
 }
 
 impl Clone for World {
@@ -349,7 +279,6 @@ impl Clone for World {
         let dirty_components = self.host.keys().copied().collect();
         Self {
             host: self.host.clone(),
-            //history: self.history.clone(),
             dirty_components,
             metadata: WorldMetadata {
                 component_map: self.metadata.component_map.clone(),

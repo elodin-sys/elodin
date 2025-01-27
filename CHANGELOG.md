@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** Add required `component_name` and `entity_id` arguments to `Exec.history` function.
 
 ## v0.10
 

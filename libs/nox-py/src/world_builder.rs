@@ -275,16 +275,6 @@ impl WorldBuilder {
             )
             .try_init();
 
-        let pytesting = py
-            .import_bound("elodin")?
-            .getattr("_called_from_test")
-            .unwrap()
-            .extract::<bool>()?;
-        // If executed by pytest, don't run the server
-        if pytesting {
-            return Ok(None);
-        }
-
         let args = py
             .import_bound("sys")?
             .getattr("argv")?

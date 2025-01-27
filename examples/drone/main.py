@@ -118,13 +118,13 @@ TALON_QUAD_CONFIG.set_as_global()
 # EDU_450_CONFIG.set_as_global()
 
 args = sys.argv[1:]
+world, drone = world()
 if "--telemetry" in args:
-    exec = world().build(system(only_rate_control=True))
+    exec = world.build(system(only_rate_control=True))
     exec.run(Config.GLOBAL.total_sim_ticks)
-    body_ang_vel = exec.history("body_ang_vel", el.EntityId(1))
-    motor_ang_vel = exec.history("motor_ang_vel", el.EntityId(1))
+    body_ang_vel = exec.history("body_ang_vel", drone)
+    motor_ang_vel = exec.history("motor_ang_vel", drone)
     df = body_ang_vel.join(motor_ang_vel, on="tick")
-    # df = df.select("tick", "body_ang_vel", "motor_ang_vel").sort("tick").drop_nulls()
     df = df.select(
         pl.col("body_ang_vel").arr.get(0).alias("body_ang_vel_x"),
         pl.col("body_ang_vel").arr.get(1).alias("body_ang_vel_y"),
@@ -136,7 +136,7 @@ if "--telemetry" in args:
     )
     df.write_csv("telemetry.csv")
 else:
-    world().run(
+    world.run(
         system(),
         sim_time_step=Config.GLOBAL.dt,
         run_time_step=0.0,

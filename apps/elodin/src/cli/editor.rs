@@ -186,10 +186,6 @@ impl Cli {
             }
             Simulator::ReplayDir(_) => {
                 // TODO
-                // let world = World::read_from_dir(&path).into_diagnostic()?;
-                // let replay = Replay::new(world, bevy_tx);
-                // app.insert_resource(replay);
-                // app.add_systems(Update, serve_replay);
             }
         };
         app.insert_resource(BevyCancelToken(cancel_token.clone()))

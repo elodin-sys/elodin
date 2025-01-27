@@ -29,7 +29,9 @@ fn main() {
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let python_dir = out_dir.join("python");
     std::fs::create_dir_all(&python_dir).unwrap();
-    let python = std::fs::canonicalize(which::which("python3").unwrap()).unwrap();
+    let python = which::which("python3").unwrap();
+    println!("cargo:rerun-if-changed={}", python.display());
+    let python = std::fs::canonicalize(python).unwrap();
     let python_home = python.parent().unwrap().parent().unwrap();
     let python_lib = python_home.join("lib");
 
