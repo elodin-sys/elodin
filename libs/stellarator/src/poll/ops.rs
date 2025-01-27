@@ -288,9 +288,15 @@ impl OpCode for Open {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+const DEFAULT_OPEN_FLAGS: i32 = libc::O_CLOEXEC;
+
+#[cfg(target_os = "windows")]
+const DEFAULT_OPEN_FLAGS: i32 = 0;
+
 impl Open {
     pub fn new(path: PathBuf, options: &crate::fs::OpenOptions) -> Result<Self, Error> {
-        let flags = libc::O_CLOEXEC
+        let flags = DEFAULT_OPEN_FLAGS
             | options.access_mode()?
             | options.creation_mode()?
             | options.custom_flags;
