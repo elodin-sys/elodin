@@ -230,7 +230,10 @@ impl SpecializedRenderPipeline for LinePipeline {
                 })],
             }),
             layout,
-            primitive: PrimitiveState::default(),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_2D_DEPTH_FORMAT,
                 depth_write_enabled: false,
@@ -342,7 +345,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         pass.set_vertex_buffer(0, gpu_line.position_buffer.slice(..));
         pass.set_vertex_buffer(1, gpu_line.position_buffer.slice(4..));
         let instances = u32::max(gpu_line.position_count, 1) - 1;
-        pass.draw(0..6, 0..instances);
+        pass.draw(0..4, 0..instances);
         RenderCommandResult::Success
     }
 }
@@ -425,7 +428,8 @@ fn extract_lines(
                 chunk.range.start
             } - line.current_range.start;
             let buffer_index = buffer_index * size_of::<f32>();
-            let data = bytemuck::cast_slice(&chunk.data[data_index..]);
+            let len = (range.end.saturating_sub(chunk.range.start)).min(chunk.data.len());
+            let data = bytemuck::cast_slice(&chunk.data[data_index..len]);
             render_queue
                 .0
                 .write_buffer(&buffer, buffer_index as u64, data);
