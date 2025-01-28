@@ -550,7 +550,7 @@ impl Server {
     pub fn new(path: impl AsRef<Path>, addr: SocketAddr) -> Result<Server, Error> {
         let listener = TcpListener::bind(addr)?;
         let path = path.as_ref().to_path_buf();
-        let db = if path.exists() {
+        let db = if path.exists() && path.join("entity_metadata").exists() {
             DB::open(path)?
         } else {
             DB::create(path)?
