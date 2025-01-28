@@ -23,10 +23,10 @@ const ACC_CONF_REG_VAL: u8 = 0b10101100; // acc_filter perf = high performance m
                                          // acc_bwp = filter in normal mode, avberage 8 samples
                                          // acc_odr = 1.6 kHz
 const ACC_RANGE_REG_VAL: u8 = 0x02; // acc_range = ±8g
-const GYR_CONF_REG_VAL: u8 = 0b11101110; // gyr_filter_perf = high performance mode
+const GYR_CONF_REG_VAL: u8 = 0b11101101; // gyr_filter_perf = high performance mode
                                          // gyr_noise_perf = high performance mdode
                                          // gyr_bwp = normal mode
-                                         // gyr_odr = 3.2 kHz
+                                         // gyr_odr = 6.4 kHz
 const GYR_RANGE_REG_VAL: u8 = 0x00; // gyr_range = ±2000 dps
 const GYR_OFFSET_XYZ_VAL: u8 = 0x40;
 
@@ -34,9 +34,9 @@ const POR_DELAY_MICRO_SECONDS: Duration = Duration::micros(550); // YESSS 501, n
 const CONFIG_DELAY_MILLI_SECONDS: Duration = Duration::millis(50);
 const WRITE_2_WRITE_DELAY_MICROS_SECONDS: Duration = Duration::micros(50);
 
-const SENSOR_ODR_HZ: Hertz<u32> = Hertz::<u32>::Hz(3200);
+const SENSOR_ODR_HZ: Hertz<u32> = Hertz::<u32>::Hz(6400);
 const SENSORPERIOD_MICRO_SECONDS: MicrosDuration<u32> = SENSOR_ODR_HZ.into_duration();
-const SENSOR_TIME_HZ: u32 = 25600;
+const SENSOR_TIME_HZ: Hertz<u32> = Hertz::<u32>::Hz(25600);
 
 #[repr(u8)]
 pub enum Registers {
@@ -134,7 +134,7 @@ pub struct Bmi270 {
     gyr_scale: f32,
     pub gyro_dps: [f32; 3],
     pub accel_g: [f32; 3],
-    sample_count: u32,
+    pub sample_count: u32,
     raw_data: [i16; 6], //[accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
     next_update: Instant,
 }
@@ -202,8 +202,10 @@ impl Bmi270 {
             i2c_dma::State::Idle => {
                 defmt::trace!("Starting BMI270 DMA read");
                 i2c_dma.begin_read(self.i2c_address, Registers::AccelXLsb as u8, 15)?;
-                // Wait at least 150us for the data to be ready
-                self.next_update += 150u32.micros();
+                // Wait at least 135 us based on the following calculations
+                // transaction size: 120 bits of data(15 bytes) + 15 ack bits = 135 bits
+                // at 1MHz (1 us) bus speed each transaction will take: 135 bits * 1 us = 135 us/transaction
+                self.next_update += 135u32.micros();
                 return Ok(false);
             }
             i2c_dma::State::Reading => {
@@ -220,7 +222,7 @@ impl Bmi270 {
 
             // The output data rate is 6.4 kHz and sensortime is incremented at 25.6kHz
             // So, a new sample is available every (4) sensortime ticks
-            const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ / 3200;
+            const TIME_PER_SAMPLE: u32 = SENSOR_TIME_HZ.to_Hz() / SENSOR_ODR_HZ.to_Hz();
 
             let sample = time / TIME_PER_SAMPLE;
             if sample == self.sample_count {
