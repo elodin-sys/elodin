@@ -119,6 +119,15 @@ pub fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::E
         world.metadata.run_time_step.0.as_nanos() as u64,
         atomic::Ordering::SeqCst,
     );
+    let default_stream_time_step = Duration::from_secs_f64(
+        world.metadata.sim_time_step.0.as_secs_f64() / world.metadata.default_playback_speed,
+    );
+    db.default_stream_time_step.store(
+        default_stream_time_step.as_nanos() as u64,
+        atomic::Ordering::SeqCst,
+    );
+    let _ = db.save_db_state();
+
     Ok(())
 }
 
@@ -188,7 +197,12 @@ async fn tick(
     is_cancelled: impl Fn() -> bool + 'static,
 ) {
     let mut start = Instant::now();
+    let mut tick = 0;
     while db.recording_cell.wait().await {
+        if tick >= world.world.max_tick() {
+            db.recording_cell.set_playing(false);
+            world.world.metadata.max_tick = u64::MAX;
+        }
         copy_db_to_world(&db, &mut world);
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
@@ -206,5 +220,6 @@ async fn tick(
         while start < now {
             start += time_step;
         }
+        tick += 1;
     }
 }
