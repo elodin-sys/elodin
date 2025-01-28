@@ -13,6 +13,13 @@ order = 1
 +++
 
 
+## v0.11
+
+### v0.11.0
+- **(breaking)** Add required `component_name` and `entity_id` arguments to `Exec.history` function.
+- Change playback speed in the editor using the "Set Playback Speed" command in the command palette.
+- Display plot data as soon as it is available rather than waiting for the simulation playback.
+
 ## v0.10
 
 ### v0.10.1
