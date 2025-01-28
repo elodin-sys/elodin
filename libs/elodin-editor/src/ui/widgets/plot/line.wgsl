@@ -25,7 +25,8 @@ struct VertexOutput {
   @builtin(position) clip_position : vec4<f32>, @location(0) color : vec4<f32>,
 };
 
-@vertexfn vertex(vertex VertexInput) -> VertexOutput {
+@vertex
+fn vertex(vertex: VertexInput) -> VertexOutput {
   // initially based on https://github.com/wwwtyro/instanced-lines-demos/blob/c1e57960b39cf1acce9bd27ded164e5e013fdb36/src/commands.js#L768
   // This implementation has diverged heavily - In particular we are using triangle line strip vertices and many extraneous math operations were removed
   var positions = array<vec2<f32>, 4>(
@@ -58,6 +59,7 @@ struct FragmentOutput {
   @location(0) color : vec4<f32>,
 };
 
-@fragmentfn fragment(in : FragmentInput) -> FragmentOutput {
+@fragment
+fn fragment(in : FragmentInput) -> FragmentOutput {
   return FragmentOutput(in.color);
 }
