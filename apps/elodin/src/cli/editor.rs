@@ -100,6 +100,7 @@ async fn run_recipe(
             return Err(miette!("error generating s10 plan from python file"));
         }
         path = out_dir.join("s10.toml");
+        tracing::info!("Generated s10 plan: {}", path.display());
     }
 
     // If not a s10 plan file, bail out
@@ -137,7 +138,8 @@ impl Cli {
                 let ctrl_c_cancel_token = cancel_token.clone();
                 tokio::spawn(async move {
                     let _drop = ctrl_c_cancel_token.drop_guard(); // binding needs to be named to ensure drop is called at end of scope
-                    tokio::signal::ctrl_c().await
+                    tokio::signal::ctrl_c().await.unwrap();
+                    tracing::info!("Received Ctrl-C, shutting down");
                 });
                 if let Simulator::File(path) = &sim {
                     let res = run_recipe(cache_dir, path.clone(), cancel_token.clone()).await;
@@ -170,7 +172,6 @@ impl Cli {
     }
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
-        //let (sub, bevy_tx) = ImpellerSubscribePlugin::pair();
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
@@ -263,42 +264,3 @@ fn on_window_resize(
         }
     }
 }
-
-// #[derive(Clone)]
-// struct SimClient {
-//     addr: SocketAddr,
-//     bevy_tx: flume::Sender<MsgPair>,
-// }
-
-// impl Plugin for SimClient {
-//     fn build(&self, _: &mut App) {
-//         let c = self.clone();
-//         std::thread::spawn(move || {
-//             let rt = tokio::runtime::Builder::new_current_thread()
-//                 .enable_all()
-//                 .build()
-//                 .expect("tokio runtime failed to start");
-//             rt.block_on(async move {
-//                 loop {
-//                     let Ok(socket) = TcpStream::connect(c.addr).await else {
-//                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-//                         continue;
-//                     };
-//                     let (rx_socket, tx_socket) = socket.into_split();
-
-//                     if let Err(err) = handle_socket(
-//                         c.bevy_tx.clone(),
-//                         tx_socket,
-//                         rx_socket,
-//                         std::iter::empty(),
-//                         std::iter::empty(),
-//                     )
-//                     .await
-//                     {
-//                         tracing::warn!(?err, "socket error");
-//                     }
-//                 }
-//             });
-//         });
-//     }
-// }
