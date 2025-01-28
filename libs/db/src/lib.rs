@@ -60,6 +60,7 @@ pub struct DB {
     pub assets: Assets,
     pub recording_cell: PlayingCell,
     pub time_step: AtomicU64,
+    pub default_stream_time_step: AtomicU64,
 }
 
 impl DB {
@@ -73,6 +74,8 @@ impl DB {
         let assets = Assets::open(path.join("assets"))?;
         std::fs::create_dir_all(path.join("entity_metadata"))?;
 
+        let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
+        let time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let db = DB {
             path,
             latest_tick: AtomicU64::new(0),
@@ -84,7 +87,8 @@ impl DB {
             entity_metadata: Default::default(),
             recording_cell: PlayingCell::new(true),
             assets,
-            time_step: AtomicU64::new(time_step.as_nanos() as u64),
+            time_step,
+            default_stream_time_step,
         };
         db.init_globals();
         db.save_db_state()?;
@@ -105,10 +109,13 @@ impl DB {
         DbSettings {
             recording: self.recording_cell.is_playing(),
             time_step: Duration::from_nanos(self.time_step.load(atomic::Ordering::SeqCst)),
+            default_stream_time_step: Duration::from_nanos(
+                self.default_stream_time_step.load(atomic::Ordering::SeqCst),
+            ),
         }
     }
 
-    fn save_db_state(&self) -> Result<(), Error> {
+    pub fn save_db_state(&self) -> Result<(), Error> {
         let db_state = self.db_settings();
         db_state.write(self.path.join("db_state"))
     }
@@ -200,6 +207,9 @@ impl DB {
             assets,
             recording_cell: PlayingCell::new(db_state.recording),
             time_step: AtomicU64::new(db_state.time_step.as_nanos() as u64),
+            default_stream_time_step: AtomicU64::new(
+                db_state.default_stream_time_step.as_nanos() as u64
+            ),
         })
     }
 
@@ -648,7 +658,7 @@ async fn handle_packet(
             let state = Arc::new(StreamState::from_state(
                 stream,
                 db.latest_tick.load(atomic::Ordering::Relaxed),
-                &db.time_step,
+                &db.default_stream_time_step,
             ));
             debug!(stream.id = ?stream_id, "inserting stream");
             db.streams.insert(stream_id, state.clone());
@@ -1196,7 +1206,7 @@ impl PlayingCell {
         }
     }
 
-    fn set_playing(&self, playing: bool) {
+    pub fn set_playing(&self, playing: bool) {
         self.is_playing.store(playing, atomic::Ordering::SeqCst);
         self.wait_cell.wake_all();
     }

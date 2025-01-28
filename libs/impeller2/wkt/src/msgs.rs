@@ -206,6 +206,7 @@ impl Msg for SetDbSettings {
 pub struct DbSettings {
     pub recording: bool,
     pub time_step: Duration,
+    pub default_stream_time_step: Duration,
 }
 
 impl Msg for DbSettings {

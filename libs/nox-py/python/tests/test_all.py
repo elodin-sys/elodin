@@ -56,7 +56,6 @@ def test_basic_system():
     y1 = exec.column_array(el.Component.id(Y))
     assert (x1 == [1000000.0, 15015015.0]).all()
     assert (y1 == [500.0, 500.0]).all()
-    exec.write_to_dir("/tmp/pytest-example")
 
 
 def test_six_dof():
