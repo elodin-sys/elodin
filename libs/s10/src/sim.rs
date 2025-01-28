@@ -28,26 +28,22 @@ fn default_addr() -> SocketAddr {
 
 impl SimRecipe {
     pub async fn run(self, cancel_token: CancelToken) -> Result<(), Error> {
-        self.run_inner(cancel_token).await
-    }
-
-    pub async fn run_inner(&self, cancel_token: CancelToken) -> Result<(), Error> {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        if !cfg!(target_os = "linux") {
-            cmd.process_group(0); // NOTE(sphw): this causes all sorts of issues on linux, not sure why
-        }
-        let mut child = cmd.arg(&self.path).arg("run").arg("--no-s10").spawn()?;
+        let port = crate::liveness::serve_tokio().await?;
+        let mut child = cmd
+            .arg(&self.path)
+            .arg("run")
+            .arg("--no-s10")
+            .arg("--liveness-port")
+            .arg(port.to_string())
+            .spawn()?;
 
         tokio::select! {
             _ = cancel_token.wait() => {
-                if let Some(pid) = child.id() {
-                    let _ = nix::sys::signal::killpg(
-                        nix::unistd::Pid::from_raw(pid as i32),
-                        nix::sys::signal::Signal::SIGTERM,
-                    );
-                }
+                child.kill().await?;
+                tracing::info!("Waiting for sim process to exit");
                 let _ = child.wait().await;
                 Ok(())
             }

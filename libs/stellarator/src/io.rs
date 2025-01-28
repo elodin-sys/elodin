@@ -8,6 +8,25 @@ use std::sync::Arc;
 
 pub trait AsyncRead {
     fn read<B: IoBufMut>(&self, buf: B) -> impl Future<Output = BufResult<usize, B>>;
+
+    fn read_exact<B: IoBufMut>(&self, mut buf: B) -> impl Future<Output = BufResult<(), B>> {
+        async {
+            let mut total_read = 0;
+            while total_read < buf.init_len() {
+                let slice = buf.try_slice(total_read..).expect("invalid slice");
+
+                match self.read(slice).await {
+                    (Ok(0), slice) => return (Err(Error::EOF), slice.into_inner()),
+                    (Ok(n), slice) => {
+                        total_read += n;
+                        buf = slice.into_inner();
+                    }
+                    (Err(err), slice) => return (Err(err), slice.into_inner()),
+                }
+            }
+            (Ok(()), buf)
+        }
+    }
 }
 
 pub trait AsyncWrite {

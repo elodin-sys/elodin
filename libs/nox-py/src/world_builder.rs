@@ -19,6 +19,8 @@ pub enum Args {
         addr: SocketAddr,
         #[arg(long, default_value = "false")]
         no_s10: bool,
+        #[arg(long, default_value = "false")]
+        liveness_port: Option<u16>,
     },
     Plan {
         out_dir: PathBuf,
@@ -40,24 +42,6 @@ pub struct WorldBuilder {
 }
 
 impl WorldBuilder {
-    // fn insert_entity_id(&mut self, archetype: &Archetype, entity_id: EntityId) {
-    //     let archetype_name = archetype.archetype_name;
-    //     let columns = archetype.component_data.iter().cloned();
-    //     for metadata in columns {
-    //         let id = metadata.component_id();
-    //         self.world
-    //             .component_map
-    //             .insert(id, (archetype_name, metadata.inner));
-    //         self.world.host.entry(id).or_default();
-    //     }
-    //     // self.world
-    //     //     .metadata
-    //     //     .entity_ids
-    //     //     .entry(archetype_name)
-    //     //     .or_default()
-    //     //     .extend_from_slice(&entity_id.inner.0.to_le_bytes());
-    // }
-
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
         let sim = SimRecipe {
             path,
@@ -186,68 +170,6 @@ impl WorldBuilder {
         Ok(())
     }
 
-    // #[cfg(feature = "server")]
-    // #[pyo3(signature = (
-    //     sys,
-    //     daemon = False,
-    //     sim_time_step = 1.0 / 120.0,
-    //     default_playback_speed = 1.0,
-    //     max_ticks = None,
-    //     addr = "127.0.0.1:0",
-    // ))]
-    // pub fn serve(
-    //     &mut self,
-    //     py: Python<'_>,
-    //     sys: PyObject,
-    //     daemon: bool,
-    //     sim_time_step: f64,
-    //     default_playback_speed: f64,
-    //     max_ticks: Option<u64>,
-    //     addr: String,
-    // ) -> Result<String, Error> {
-    //     use self::web_socket::spawn_ws_server;
-    //     use tokio_util::sync::CancellationToken;
-
-    //     let _ = tracing_subscriber::fmt::fmt()
-    //         .with_env_filter(
-    //             EnvFilter::builder()
-    //                 .with_default_directive("info".parse().expect("invalid filter"))
-    //                 .from_env_lossy(),
-    //         )
-    //         .try_init();
-
-    //     let exec =
-    //         self.build_uncompiled(py, sys, sim_time_step, default_playback_speed, max_ticks)?;
-
-    //     let client = nox::Client::cpu()?;
-
-    //     let (tx, rx) = flume::unbounded();
-    //     if daemon {
-    //         let cancel_token = CancellationToken::new();
-    //         std::thread::spawn(move || {
-    //             spawn_ws_server(
-    //                 addr.parse().unwrap(),
-    //                 exec,
-    //                 &client,
-    //                 Some(cancel_token.clone()),
-    //                 || cancel_token.is_cancelled(),
-    //                 tx,
-    //             )
-    //             .unwrap();
-    //         });
-    //     } else {
-    //         spawn_ws_server(
-    //             addr.parse().unwrap(),
-    //             exec,
-    //             &client,
-    //             None,
-    //             || py.check_signals().is_err(),
-    //             tx,
-    //         )?;
-    //     }
-    //     Ok(rx.recv().unwrap().to_string())
-    // }
-
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         sys,
@@ -296,7 +218,11 @@ impl WorldBuilder {
                 exec.write_to_dir(dir)?;
                 Ok(None)
             }
-            Args::Run { addr, no_s10 } => {
+            Args::Run {
+                addr,
+                no_s10,
+                liveness_port,
+            } => {
                 let exec = self.build_uncompiled(
                     py,
                     sys,
@@ -327,6 +253,9 @@ impl WorldBuilder {
                 let exec = exec.compile(client)?;
                 py.allow_threads(|| {
                     stellarator::run(|| {
+                        if let Some(port) = liveness_port {
+                            ::s10::liveness::monitor(port);
+                        }
                         let tmpfile = tempfile::tempdir().unwrap().into_path();
                         nox_ecs::impeller2_server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
