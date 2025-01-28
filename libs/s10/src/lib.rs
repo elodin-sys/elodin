@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod error;
+pub mod liveness;
 pub mod recipe;
 #[cfg(not(target_os = "windows"))]
 pub mod sim;

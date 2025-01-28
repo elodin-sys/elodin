@@ -37,6 +37,12 @@ impl TcpStream {
         Completion::run(ops::Write::new(self.as_handle(), buf, None)).await
     }
 
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.socket
+            .peer_addr()
+            .map(|addr| addr.as_socket().unwrap())
+    }
+
     fn as_handle(&self) -> BorrowedHandle<'_> {
         BorrowedHandle::Socket(&self.socket)
     }
@@ -59,7 +65,7 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind(addr: SocketAddr) -> Result<TcpListener, Error> {
+    pub fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::STREAM,

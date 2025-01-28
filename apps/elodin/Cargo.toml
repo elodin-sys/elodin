@@ -40,8 +40,6 @@ elodin-types.path = "../../libs/elodin-types/rust"
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
 impeller2-bevy.path = "../../libs/impeller2/bevy"
-# impeller.path = "../../libs/impeller"
-# impeller.features = ["tokio", "polars"]
 
 # crypto
 ring = "0.17"
