@@ -360,7 +360,7 @@ impl Highlighter for CliHelper {
         default: bool,
     ) -> Cow<'b, str> {
         if default {
-            Owned(Color::Blue.bold().paint("impeller ❯❯ ").to_string())
+            Owned(Color::Blue.bold().paint("db ❯❯ ").to_string())
         } else {
             Borrowed(prompt)
         }
@@ -443,7 +443,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         editor.set_helper(Some(h));
 
         loop {
-            let mut prompt = "impeller ❯❯ ";
+            let mut prompt = "db ❯❯ ";
             let mut line = String::new();
             loop {
                 match editor.readline(prompt) {
