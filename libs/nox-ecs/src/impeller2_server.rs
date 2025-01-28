@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use std::{
     io,
     sync::{atomic, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use stellarator::struc_con::{Joinable, Thread};
 use tracing::warn;
@@ -196,7 +196,7 @@ async fn tick(
         commit_world_head(&db, &mut world);
         db.latest_tick.fetch_add(1, atomic::Ordering::Release);
         db.tick_waker.wake_all();
-        let time_step = db.time_step();
+        let time_step = db.time_step().max(Duration::from_micros(100));
         let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
             return;
