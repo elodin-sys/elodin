@@ -13,7 +13,7 @@
   ];
   networking.interfaces.usb0.ipv6.addresses = [
     {
-      address = "fd48:2240:ffff::";
+      address = "fde1:2240:a1ef::1";
       prefixLength = 64;
     }
   ];
@@ -22,7 +22,9 @@
     config = ''
       interface usb0 {
         AdvSendAdvert on;
-        prefix fd48:2240:ffff::/64 {
+        MaxRtrAdvInterval 20;
+        MinRtrAdvInterval 10;
+        prefix fde1:2240:a1ef::/64 {
           AdvAutonomous on;
           AdvRouterAddr off;
           AdvOnLink on;
