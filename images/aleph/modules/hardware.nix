@@ -39,9 +39,9 @@ in {
   sdImage.compressImage = false;
   boot.loader.systemd-boot.enable = true;
   boot.loader.systemd-boot.installDeviceTree = true;
+  boot.loader.systemd-boot-dtb.enable = true;
   boot.loader.efi.canTouchEfiVariables = false;
   boot.loader.grub.enable = false;
-  boot.loader.systemd-boot-dtb.enable = true;
   boot.kernelPackages = lib.mkForce pkgs.aleph.kernelPackages;
   boot.kernelParams = [
     "console=tty0"
@@ -64,7 +64,4 @@ in {
     #kernel.realtime = true;
   };
   hardware.firmware = [pkgs.linux-firmware];
-  system.activationScripts.extlinux-fixed-path.text = ''
-    ${pkgs.gnused}/bin/sed -i 's/\.\.\/nixos/\/boot\/nixos/g' /boot/extlinux/extlinux.conf # Jetson doesn't like relative paths
-  '';
 }
