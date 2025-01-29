@@ -21,7 +21,7 @@
 
   # changes sourced from: https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/profiles/perlless.nix
   boot.initrd.systemd.enable = true;
-  boot.initrd.systemd.enableTpm2 = false;
+  boot.initrd.systemd.tpm2.enable = false;
   # system.etc.overlay.enable = lib.mkDefault true; # renable once we are on upstream kernel
   # services.userborn.enable = lib.mkDefault true;
 

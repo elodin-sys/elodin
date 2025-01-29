@@ -34,19 +34,21 @@
         nixosModules.default = {
           pkgs,
           config,
+          lib,
           ...
         }: {
-          imports = [
-            "${nixpkgs}/nixos/modules/profiles/minimal.nix"
-            jetpack.nixosModules.default
-            ./modules/usb_eth.nix
-            ./modules/hardware.nix
-            ./modules/elodin_dev.nix
-            ./modules/minimal.nix
-            # ./modules/aleph-serial-bridge.nix
-            ./modules/sd_image.nix
-            ./modules/systemd-boot-dtb.nix
-          ];
+          imports =
+            [
+              "${nixpkgs}/nixos/modules/profiles/minimal.nix"
+              jetpack.nixosModules.default
+              ./modules/usb_eth.nix
+              ./modules/hardware.nix
+              ./modules/minimal.nix
+              # ./modules/aleph-serial-bridge.nix
+              ./modules/sd_image.nix
+              ./modules/systemd-boot-dtb.nix
+            ]
+            ++ lib.optional (builtins.pathExists ./modules/elodin_dev.nix) ./modules/elodin_dev.nix;
 
           nixpkgs.overlays = [
             jetpack.overlays.default
@@ -61,6 +63,9 @@
           security.sudo.wheelNeedsPassword = false;
           users.users.root.password = "root";
           networking.hostName = "aleph";
+          networking.wireless.enable = true;
+          networking.dhcpcd.enable = true;
+          nix.settings.trusted-users = ["root" "@wheel"];
           environment.systemPackages = with pkgs; [
             pciutils
             usbutils
@@ -82,7 +87,6 @@
           ];
           aleph.installer.system = nixosConfigurations.default.config.system.build.toplevel;
         };
-        networking.hostName = "aleph";
         nixosConfigurations = let
           toGuest = builtins.replaceStrings ["darwin"] ["linux"];
           # this fun little hack lets you build nixos modules on macOS or Linux on either x86 or arm64
