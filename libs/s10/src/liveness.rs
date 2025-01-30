@@ -4,39 +4,46 @@ use std::{
 };
 
 use stellarator::{io::AsyncRead, net};
-use tokio::io::AsyncWriteExt;
+use tokio::{io::AsyncWriteExt, sync::OnceCell};
 
 pub async fn serve_tokio() -> std::io::Result<u16> {
-    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    let local_addr = listener.local_addr()?;
-    let port = local_addr.port();
-    tokio::spawn(async move {
-        tracing::info!("Serving liveness on {}", local_addr);
-        loop {
-            let mut stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
-                Err(err) => {
-                    tracing::error!("Error accepting connection: {}", err);
-                    break;
-                }
-            };
-            tokio::spawn(async move {
-                let mut i = 0u64;
-                loop {
-                    let buf = i.to_be_bytes().to_vec();
-                    let result = stream.write_all(&buf).await;
-                    if let Err(err) = result {
-                        tracing::error!("Error writing to socket: {}", err);
+    static PORT: OnceCell<u16> = OnceCell::const_new();
+
+    // Only need to run one instance of the liveness server
+    PORT.get_or_try_init(|| async move {
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        let port = local_addr.port();
+        tokio::spawn(async move {
+            tracing::info!("Serving liveness on {}", local_addr);
+            loop {
+                let mut stream = match listener.accept().await {
+                    Ok((stream, _)) => stream,
+                    Err(err) => {
+                        tracing::error!("Error accepting connection: {}", err);
                         break;
                     }
-                    i += 1;
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-            });
-        }
-    });
-    Ok(port)
+                };
+                tokio::spawn(async move {
+                    let mut i = 0u64;
+                    loop {
+                        let buf = i.to_be_bytes().to_vec();
+                        let result = stream.write_all(&buf).await;
+                        if let Err(err) = result {
+                            tracing::debug!("Error writing to socket: {}", err);
+                            break;
+                        }
+                        i += 1;
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                });
+            }
+        });
+        Ok(port)
+    })
+    .await
+    .copied()
 }
 
 pub fn monitor(port: u16) {
