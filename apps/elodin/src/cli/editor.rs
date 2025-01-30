@@ -100,7 +100,7 @@ async fn run_recipe(
             return Err(miette!("error generating s10 plan from python file"));
         }
         path = out_dir.join("s10.toml");
-        tracing::info!("Generated s10 plan: {}", path.display());
+        tracing::debug!("Generated s10 plan: {}", path.display());
     }
 
     // If not a s10 plan file, bail out

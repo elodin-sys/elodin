@@ -122,6 +122,42 @@ impl TileState {
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
+
+    pub fn clear(&mut self, commands: &mut Commands, selected_object: &mut SelectedObject) {
+        for (tile_id, tile) in self.tree.tiles.iter() {
+            match tile {
+                Tile::Pane(Pane::Viewport(viewport)) => {
+                    if let Some(camera) = viewport.camera {
+                        commands.entity(camera).despawn();
+                    }
+                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
+                        commands.entity(nav_gizmo_camera).despawn();
+                    }
+                    if let Some(nav_gizmo) = viewport.nav_gizmo {
+                        commands.entity(nav_gizmo).despawn();
+                    }
+                }
+                Tile::Pane(Pane::Graph(graph)) => {
+                    commands.entity(graph.id).despawn_recursive();
+                    if let Some(graph_id) = self.graphs.get(tile_id) {
+                        commands.entity(*graph_id).despawn();
+                        self.graphs.remove(tile_id);
+                    }
+                }
+                _ => {}
+            }
+
+            if selected_object.is_tile_selected(*tile_id) {
+                *selected_object = SelectedObject::None;
+            }
+        }
+
+        if let Some(root_id) = self.tree.root() {
+            if let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id) {
+                root.retain(|_| false);
+            };
+        };
+    }
 }
 
 enum Pane {

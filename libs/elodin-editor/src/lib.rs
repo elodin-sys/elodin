@@ -34,7 +34,10 @@ use impeller2_wkt::Glb;
 use impeller2_wkt::{NewConnection, SetStreamState, Tick, Viewport, WorldPos};
 use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
-use ui::tiles;
+use ui::{
+    tiles::{self, TileState},
+    SelectedObject,
+};
 
 pub mod chunks;
 mod plugins;
@@ -813,9 +816,14 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
     packet_handlers.0.push(sys);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
+    mut ui_state: ResMut<TileState>,
+    mut selected_object: ResMut<SelectedObject>,
+    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+    mut graph_data_3d: ResMut<ui::widgets::plot_3d::data::CollectedGraphData>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut commands: Commands,
 ) {
@@ -832,4 +840,7 @@ fn clear_state_new_connection(
     value_map.iter_mut().for_each(|mut map| {
         map.0.clear();
     });
+    ui_state.clear(&mut commands, &mut selected_object);
+    render_layer_alloc.free_all();
+    *graph_data_3d = Default::default();
 }

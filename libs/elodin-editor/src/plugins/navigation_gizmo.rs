@@ -120,6 +120,10 @@ impl RenderLayerAlloc {
     pub fn free(&mut self, layer: usize) {
         self.0 |= 1 << layer;
     }
+
+    pub fn free_all(&mut self) {
+        self.0 = !1;
+    }
 }
 
 #[derive(Component, Debug)]
