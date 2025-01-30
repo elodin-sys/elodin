@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Fix bug where live reload would fail with an "Address already in use" error.
+- **(fix)** Fix bug where duplicate panels would be created on live reload.
 
 ## v0.11
 
