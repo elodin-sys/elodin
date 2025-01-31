@@ -160,7 +160,6 @@ version = "0.11.0"
 dependencies = [
  "anyhow",
  "cobs",
- "fastrand 2.2.0",
  "libc",
  "serialport",
  "zerocopy 0.8.14",
@@ -724,7 +723,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74775c968d086c9d1fcf647270d79a469762dad4df4fc180f4511bea9dbba0cb"
 dependencies = [
  "async-trait",
- "notify 5.2.0",
+ "notify",
  "serde",
  "thiserror 1.0.69",
  "tokio",
@@ -753,7 +752,6 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "serde_with",
  "thiserror 2.0.0",
  "tokio",
  "tokio-util",
@@ -1004,12 +1002,6 @@ dependencies = [
  "tracing 0.1.40",
  "tracing-subscriber 0.3.18",
 ]
-
-[[package]]
-name = "bbqueue"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3baa8859d1a4c7411039a75c0599a4640ef1c9a8fc811e4325b00e6cfe0a55"
 
 [[package]]
 name = "bevy"
@@ -3067,19 +3059,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
-name = "crossbeam"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-deque",
- "crossbeam-epoch",
- "crossbeam-queue",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3562,7 +3541,6 @@ dependencies = [
  "directories",
  "elodin-editor",
  "elodin-types",
- "flume",
  "ignore",
  "impeller2-bevy",
  "machine-uid",
@@ -3576,7 +3554,6 @@ dependencies = [
  "serde_json",
  "stellarator",
  "tar",
- "tempfile",
  "thiserror 2.0.0",
  "tokio",
  "toml 0.8.19",
@@ -3631,7 +3608,6 @@ dependencies = [
  "egui",
  "egui_tiles",
  "fastrand 2.2.0",
- "flume",
  "fuzzy-matcher",
  "hex",
  "image",
@@ -3659,7 +3635,6 @@ name = "elodin-types"
 version = "0.1.0"
 dependencies = [
  "bit-vec 0.8.0",
- "chrono",
  "prost 0.13.3",
  "serde",
  "tonic 0.12.3",
@@ -5436,25 +5411,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "include_dir"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
-dependencies = [
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "indent_write"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5578,12 +5534,6 @@ checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "interpolator"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 
 [[package]]
 name = "io-kit-sys"
@@ -6710,35 +6660,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify"
-version = "6.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6205bd8bb1e454ad2e27422015fb5e4f2bcc7e08fa8f27058670d208324a4d2d"
-dependencies = [
- "bitflags 2.6.0",
- "crossbeam-channel",
- "filetime",
- "fsevent-sys",
- "inotify 0.9.6",
- "kqueue",
- "libc",
- "log",
- "mio 0.8.11",
- "walkdir",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "notify-debouncer-mini"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d40b221972a1fc5ef4d858a2f671fb34c75983eb385463dff3780eeff6a9d43"
-dependencies = [
- "log",
- "notify 6.1.1",
-]
-
-[[package]]
 name = "nox"
 version = "0.11.0"
 dependencies = [
@@ -6776,7 +6697,6 @@ dependencies = [
  "bytemuck",
  "byteorder",
  "bytes",
- "directories",
  "elodin-db",
  "futures-lite 2.5.0",
  "impeller2",
@@ -6797,7 +6717,6 @@ dependencies = [
  "thiserror 2.0.0",
  "tracing 0.1.40",
  "tracing-subscriber 0.3.18",
- "ustr",
 ]
 
 [[package]]
@@ -6830,15 +6749,10 @@ dependencies = [
  "clap 4.5.20",
  "directories",
  "elodin-db",
- "flume",
- "futures",
  "impeller2",
  "impeller2-wkt",
- "include_dir",
  "indicatif",
  "miette",
- "notify 6.1.1",
- "notify-debouncer-mini",
  "nox-ecs",
  "nox-ecs-macros",
  "numpy",
@@ -6852,7 +6766,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.0",
  "tokio",
- "tokio-util",
  "toml 0.8.19",
  "tracing 0.1.40",
  "tracing-subscriber 0.3.18",
@@ -8682,8 +8595,6 @@ dependencies = [
 name = "roci"
 version = "0.11.0"
 dependencies = [
- "bbqueue",
- "crossbeam",
  "csv",
  "fastrand 2.2.0",
  "heapless 0.8.0",
@@ -8694,7 +8605,6 @@ dependencies = [
  "nox",
  "roci-macros",
  "serde",
- "spin",
  "stellarator",
  "thingbuf",
  "tracing 0.1.40",
@@ -9023,11 +8933,9 @@ dependencies = [
  "cargo_metadata",
  "clap 4.5.20",
  "elodin-db",
- "flume",
  "futures",
  "futures-lite 2.5.0",
  "ignore",
- "interpolator",
  "miette",
  "nix 0.29.0",
  "nox-ecs",
@@ -9035,13 +8943,11 @@ dependencies = [
  "serde",
  "smallvec",
  "stellarator",
- "tempfile",
  "thiserror 2.0.0",
  "tokio",
  "toml 0.8.19",
  "tracing 0.1.40",
  "tracing-subscriber 0.3.18",
- "ustr",
  "which 6.0.3",
 ]
 
@@ -10579,8 +10485,6 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
- "futures-util",
- "hashbrown 0.14.5",
  "pin-project-lite",
  "tokio",
 ]
@@ -11190,19 +11094,6 @@ name = "urlencoding"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
-
-[[package]]
-name = "ustr"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e904a2279a4a36d2356425bb20be271029cc650c335bc82af8bfae30085a3d0"
-dependencies = [
- "ahash 0.8.11",
- "byteorder",
- "lazy_static",
- "parking_lot",
- "serde",
-]
 
 [[package]]
 name = "utf8parse"

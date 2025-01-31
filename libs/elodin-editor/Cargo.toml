@@ -35,9 +35,6 @@ bevy_framepace = "0.18"
 # rand
 fastrand.version = "2"
 
-# channel
-flume = "0.11"
-
 # protocols
 postcard.version = "1.0.8"
 reqwest = { version = "0.12", features = [

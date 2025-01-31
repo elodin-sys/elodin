@@ -33,7 +33,6 @@ bytemuck.version = "1.14"
 bytemuck.features = ["derive"]
 ndarray = "0.16.1"
 byteorder = "1.5.0"
-ustr = { version = "1.0.0", features = ["serde"] }
 
 # errors
 thiserror = { version = "2.0", default-features = false }
@@ -59,8 +58,6 @@ serde.version = "1.0"
 serde_json = "1.0"
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]
-
-directories = "5.0.1"
 
 # python
 pyo3.version = "0.21.0"
