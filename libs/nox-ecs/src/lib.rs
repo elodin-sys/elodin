@@ -29,9 +29,9 @@ mod profile;
 mod query;
 mod system;
 
+pub mod arrow;
 pub mod graph;
 pub mod impeller2_server;
-pub mod polars;
 pub mod six_dof;
 pub mod world;
 
@@ -597,8 +597,8 @@ pub enum Error {
     DB(#[from] elodin_db::Error),
     #[error("stellarator error {0}")]
     Stellar(#[from] stellarator::Error),
-    #[error("polars error {0}")]
-    Polars(#[from] ::polars::error::PolarsError),
+    #[error("arrow error {0}")]
+    Arrow(#[from] ::arrow::error::ArrowError),
 }
 
 impl From<nox::xla::Error> for Error {

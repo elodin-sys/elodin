@@ -54,10 +54,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # serialize
-polars.version = "0.41"
-polars.features = ["parquet", "dtype-array", "lazy"]
-polars-arrow.version = "0.41"
-polars-arrow.features = ["arrow_rs"]
+arrow = { version = "54", default-features = false, features = ["ipc"] }
 serde.version = "1.0"
 serde_json = "1.0"
 postcard.version = "1.0.8"

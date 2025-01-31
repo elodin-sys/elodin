@@ -7,7 +7,6 @@ publish = false
 
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
-# server = ["axum", "futures", "tokio-util/io"]
 cuda = ["nox-ecs/cuda"]
 shared = ["nox-ecs/shared"]
 
@@ -20,9 +19,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-polars = "0.41"
 pyo3 = "0.21.0"
-pyo3-polars = "0.15.0"
 numpy.version = "0.21"
 
 # nox
@@ -71,10 +68,6 @@ notify-debouncer-mini = { version = "0.4.1", default-features = false }
 flume = "0.11.0"
 tempfile = "3.10.0"
 
-# web-socket
-axum.version = "0.7"
-axum.features = ["ws"]
-axum.optional = true
 futures.version = "0.3.29"
 futures.optional = true
 include_dir = "0.7.3"

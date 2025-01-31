@@ -4,8 +4,6 @@ use crate::*;
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nox_ecs::Compiled;
-use polars::{frame::DataFrame, series::Series};
-use pyo3_polars::{PyDataFrame, PySeries};
 
 #[pyclass]
 pub struct Exec {
@@ -52,11 +50,12 @@ impl Exec {
         self.exec.write_to_dir(path).map_err(Error::from)
     }
 
-    pub fn history(
+    pub fn history<'a>(
         &mut self,
+        py: Python<'a>,
         component_name: String,
         entity_id: EntityId,
-    ) -> Result<PyDataFrame, Error> {
+    ) -> Result<Bound<'a, PyAny>, Error> {
         let id = ComponentId::new(&component_name);
         let component = self
             .db
@@ -68,27 +67,47 @@ impl Exec {
             .entities
             .get(&entity_id)
             .ok_or(elodin_db::Error::EntityNotFound(entity_id))?;
-        let series = nox_ecs::polars::to_series(
+
+        let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
+        let path = temp_file.path().to_owned();
+        nox_ecs::arrow::write_ipc(
             entity.time_series.get(..).expect("failed to get data"),
             &entity.schema,
             &component.metadata.load(),
-        )?
-        .with_name(&component_name);
-        let start_tick = entity.time_series.start_tick();
-        let tick_series = (start_tick..start_tick + series.len() as u64)
-            .collect::<Series>()
-            .with_name("tick");
-        Ok(PyDataFrame(DataFrame::new(vec![series, tick_series])?))
+            path.clone(),
+        )?;
+
+        let df = py
+            .import_bound("polars")?
+            .call_method1("read_ipc", (path,))?;
+        Ok(df)
     }
 
-    fn column_array(&self, name: String) -> Result<PySeries, Error> {
-        let id = ComponentId::new(&name);
+    fn column_array<'a>(
+        &self,
+        py: Python<'a>,
+        component_name: String,
+    ) -> Result<Bound<'a, PyAny>, Error> {
+        let id = ComponentId::new(&component_name);
         let series = self
             .exec
             .world
             .column_by_id(id)
-            .ok_or(nox_ecs::Error::ComponentNotFound)?
-            .series()?;
-        Ok(PySeries(series))
+            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+
+        let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
+        let path = temp_file.path().to_owned();
+        nox_ecs::arrow::write_ipc(
+            series.column.as_ref(),
+            series.schema,
+            series.metadata,
+            path.clone(),
+        )?;
+
+        let series = py
+            .import_bound("polars")?
+            .call_method1("read_ipc", (path,))?
+            .get_item(component_name)?;
+        Ok(series)
     }
 }
