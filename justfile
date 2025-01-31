@@ -108,3 +108,8 @@ public-changelog:
   old_version=$(cat ./docs/public/config.toml | yq -p toml '.extra.version')
   new_version=$(just version)
   sed -i "" "s/$old_version/$new_version/g" docs/public/config.toml
+
+install:
+  @echo "🚧 Installing elodin and elodin-db to ~/.local/bin"
+  cargo build --release --package elodin --package elodin-db
+  cp target/release/elodin target/release/elodin-db ~/.local/bin

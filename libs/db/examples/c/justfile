@@ -1,10 +1,7 @@
 client:
-  cargo run --release --package elodin-db -- lua vtable.lua | xxd -i -n vtable_bin > vtable.h
+  cargo run --example vtable-gen > vtable.h
   cc main.c -lm -o db-client
   ./db-client
 
 db:
   cargo run --release --package elodin-db -- run 127.0.0.1:2240 /tmp/db
-
-editor:
-  cargo run --release --package elodin -- editor
