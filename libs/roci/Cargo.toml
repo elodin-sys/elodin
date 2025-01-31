@@ -22,10 +22,7 @@ impeller2-wkt.path = "../impeller2/wkt"
 
 # datastructures
 heapless = "0.8"
-crossbeam = "0.8.4"
-bbqueue = "0.5.1"
 thingbuf = "0.1.6"
-spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
 
 # async
 stellarator.path = "../stellarator"
