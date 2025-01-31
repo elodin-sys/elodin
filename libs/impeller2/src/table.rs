@@ -175,7 +175,7 @@ pub enum Entry {
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct VTable<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> {
     #[serde(bound(deserialize = ""))]
-    entries: EntryBuf,
+    pub entries: EntryBuf,
     #[serde(bound(deserialize = ""))]
     data: DataBuf,
 }
