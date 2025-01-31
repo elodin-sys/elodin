@@ -1,10 +1,12 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Fix bug where live reload would fail with an "Address already in use" error.
-- **(fix)** Fix bug where duplicate panels would be created on live reload.
 
 ## v0.11
+
+### v0.11.1
+- **(fix)** Fix bug where live reload would fail with an "Address already in use" error.
+- **(fix)** Fix bug where duplicate panels would be created on live reload.
 
 ### v0.11.0
 - **(breaking)** Add required `component_name` and `entity_id` arguments to `Exec.history` function.
