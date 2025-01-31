@@ -1,12 +1,12 @@
 use super::{Claims, UserInfo};
 use crate::error::Error;
-use futures::Future;
 use jsonwebtoken::{
     decode, decode_header,
     jwk::{AlgorithmParameters, JwkSet},
     Algorithm, DecodingKey, Validation,
 };
 use reqwest::Client;
+use std::future::Future;
 use std::str::FromStr;
 use tonic::{Request, Response, Status};
 

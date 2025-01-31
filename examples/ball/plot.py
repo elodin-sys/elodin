@@ -27,5 +27,6 @@ else:
     )
     distance = np.linalg.norm(df.select(["x", "y", "z"]).to_numpy(), axis=1)
     df = df.with_columns(pl.Series(distance).alias("distance"))
-    ax.plot(df["tick"], df["distance"])
+    ticks = np.arange(df.shape[0])
+    ax.plot(ticks, df["distance"])
     plt.show()
