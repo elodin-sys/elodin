@@ -21,7 +21,6 @@ mod entity;
 mod error;
 mod exec;
 mod graph;
-// //mod impeller_client;
 mod linalg;
 mod query;
 mod s10;

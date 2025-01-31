@@ -24,6 +24,7 @@ serde.features = ["derive"]
 postcard = "1.0"
 nox.path = "../nox"
 nox.default-features = false
+zerocopy = "0.8"
 
 # async
 stellarator.path = "../stellarator"
