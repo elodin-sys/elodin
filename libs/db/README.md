@@ -30,6 +30,12 @@ cc examples/c/main.c -lm -o examples/c/db-client
 ./examples/c/db-client
 ```
 
+To populate the database with the necessary metadata, the C client first needs to send an initial message that describes the components it will be streaming as well as the on-wire format of the data (vtable). This message can be generated ahead of time and embedded into a C header file by running the following command:
+
+```sh
+cargo run --example vtable-gen > examples/c/vtable.h
+```
+
 ### Connect to the database using the CLI
 
 Launch a LUA REPL to interact with the database:

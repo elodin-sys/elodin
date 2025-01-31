@@ -207,6 +207,33 @@ pub enum ComponentView<'a> {
     F64(ArrayView<'a, f64>),
 }
 
+impl<'a> From<ComponentView<'a>> for i64 {
+    fn from(value: ComponentView<'a>) -> Self {
+        match value {
+            ComponentView::I64(view) => view.buf()[0],
+            _ => panic!("invalid component type"),
+        }
+    }
+}
+
+impl<'a> From<ComponentView<'a>> for f32 {
+    fn from(value: ComponentView<'a>) -> Self {
+        match value {
+            ComponentView::F32(view) => view.buf()[0],
+            _ => panic!("invalid component type"),
+        }
+    }
+}
+
+impl<'a> From<ComponentView<'a>> for [f32; 3] {
+    fn from(value: ComponentView<'a>) -> Self {
+        match value {
+            ComponentView::F32(view) => view.buf().try_into().unwrap(),
+            _ => panic!("invalid component type"),
+        }
+    }
+}
+
 impl<'a> ComponentView<'a> {
     pub fn shape(&self) -> &[usize] {
         match *self {

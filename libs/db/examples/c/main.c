@@ -7,28 +7,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <assert.h>
+
 #include "./vtable.h"
 
-enum PacketType {
-    PACKET_MSG = 0,
-    PACKET_TABLE = 1,
-    PACKET_TIME_SERIES = 2
-};
-
-struct PacketHeader {
-    uint64_t len;
-    uint8_t ty;
-    uint8_t packet_id[3];
-    uint32_t req_id;
-};
+typedef struct {
+    int64_t time;
+    float mag[3];
+    float gyro[3];
+    float accel[3];
+    float temp;
+    float pressure;
+    float humidity;
+} sensor_data_t;
 
 ssize_t write_all(int fd, const void *buf, size_t count) {
     size_t written = 0;
     while (written < count) {
         ssize_t n = write(fd, buf + written, count - written);
-        if (n < 0) {
-            return n;
-        }
         written += n;
     }
     return written;
@@ -54,42 +50,29 @@ int main() {
         return 1;
     }
 
-    struct PacketHeader vtable_header = {
-        .len = vtable_bin_len + 8,
-        .ty = PACKET_MSG,
-        .packet_id = {224, 0, 0},
-        .req_id = 0
+    sensor_data_t sensor_data = {
+        .time = 0,
+        .mag = {0.0, 0.0, 0.0},
+        .gyro = {0.0, 0.0, 0.0},
+        .accel = {0.0, 0.0, 0.0},
+        .temp = 1.0,
+        .pressure = 2.0,
+        .humidity = 3.0
     };
 
-    // Send vtable header and data
-    if (write_all(sock, &vtable_header, sizeof(vtable_header)) != sizeof(vtable_header) ||
-        write_all(sock, vtable_bin, vtable_bin_len) != vtable_bin_len) {
-        perror("failed to send vtable");
-        return 1;
-    }
-
+    // Send initialization message (vtable + component metadata)
+    write_all(sock, init_msg, init_msg_len);
 
     // Send sin wave data continuously
-    double val = 1.0;
+    assert(sizeof(sensor_data_t) == SENSOR_DATA_LEN);
     while (1) {
-        double sin_val = sin(val);
+        write_all(sock, &sensor_data_header, sensor_data_header_len);
+        write_all(sock, &sensor_data, SENSOR_DATA_LEN);
 
-        struct PacketHeader table_header = {
-            .len = 8 + 8,
-            .ty = PACKET_TABLE,
-            .packet_id = {1, 0, 0},
-            .req_id = 0
-        };
-
-        if (write_all(sock, &table_header, sizeof(table_header)) != sizeof(table_header) ||
-            write_all(sock, &sin_val, sizeof(sin_val)) != sizeof(sin_val)) {
-            perror("failed to send data");
-            return 1;
-        }
-
-        val += 0.000001;
+        double sin_val = sin((double)sensor_data.time / 100000.0);
+        sensor_data.time += 1;
+        sensor_data.temp = sin_val;
     }
-
     close(sock);
     return 0;
 }
