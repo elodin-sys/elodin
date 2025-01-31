@@ -16,7 +16,4 @@ cobs = "0.2"
 zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 
-# rand
-fastrand = "2.2.0"
-
 libc = "0.2"

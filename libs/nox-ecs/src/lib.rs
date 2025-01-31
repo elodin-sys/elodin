@@ -22,12 +22,11 @@ mod assets;
 mod component;
 mod dyn_array;
 mod globals;
-pub mod utils;
-//mod impeller_exec;
 mod integrator;
 mod profile;
 mod query;
 mod system;
+pub mod utils;
 
 pub mod arrow;
 pub mod graph;
