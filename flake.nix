@@ -20,7 +20,6 @@
   };
 
   outputs = inputs @ {
-    self,
     nixpkgs,
     flake-parts,
     rust-overlay,
@@ -30,9 +29,6 @@
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = import systems;
       perSystem = {
-        config,
-        self',
-        inputs',
         pkgs,
         system,
         ...
