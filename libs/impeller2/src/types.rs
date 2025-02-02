@@ -445,16 +445,14 @@ pub enum PacketTy {
 }
 
 pub type PacketId = [u8; 3];
-pub type RequestId = [u8; 4];
 
-pub const PACKET_HEADER_LEN: usize = 8;
+pub const PACKET_HEADER_LEN: usize = 4;
 
 #[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct Packet {
     pub packet_ty: PacketTy,
     pub id: PacketId,
-    pub request_id: RequestId,
     pub body: [u8],
 }
 
@@ -469,11 +467,10 @@ pub struct LenPacket {
 
 impl LenPacket {
     pub fn new(ty: PacketTy, id: PacketId, cap: usize) -> Self {
-        let mut inner = Vec::with_capacity(cap + 16);
-        inner.extend_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
+        let mut inner = Vec::with_capacity(cap + 8);
+        inner.extend_from_slice(&(PACKET_HEADER_LEN as u32).to_le_bytes());
         inner.push(ty as u8);
         inner.extend_from_slice(&id);
-        inner.extend_from_slice(&[0; 4]);
         Self { inner }
     }
 
@@ -489,9 +486,9 @@ impl LenPacket {
         Self::new(PacketTy::TimeSeries, id, cap)
     }
 
-    fn pkt_len(&self) -> u64 {
-        let len = &self.inner[..8];
-        u64::from_le_bytes(len.try_into().expect("len wrong size"))
+    fn pkt_len(&self) -> u32 {
+        let len = &self.inner[..4];
+        u32::from_le_bytes(len.try_into().expect("len wrong size"))
     }
 
     pub fn pad_for_type(&mut self, ty: PrimType) {
@@ -503,38 +500,38 @@ impl LenPacket {
     pub fn push(&mut self, elem: u8) {
         let len = self.pkt_len() + 1;
         self.inner.push(elem);
-        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+        self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
     pub fn extend_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: &[V]) {
         let old_len = self.inner.len();
         let _ = self.inner.extend_aligned(val);
         let new_len = self.inner.len();
-        let len = self.pkt_len() + (new_len - old_len) as u64;
-        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+        let len = self.pkt_len() + (new_len - old_len) as u32;
+        self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
     pub fn extend_from_slice(&mut self, buf: &[u8]) {
-        let len = self.pkt_len() + buf.len() as u64;
+        let len = self.pkt_len() + buf.len() as u32;
         self.inner.extend_from_slice(buf);
-        self.inner[..8].copy_from_slice(&len.to_le_bytes());
+        self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
     pub fn as_packet(&self) -> &Packet {
         let len = self.pkt_len() as usize;
-        Packet::try_ref_from_bytes_with_elems(&self.inner[8..], len)
+        Packet::try_ref_from_bytes_with_elems(&self.inner[4..], len)
             .expect("len packet was not a valid `Packet`")
     }
 
     pub fn as_mut_packet(&mut self) -> &mut Packet {
         let len = self.pkt_len() as usize;
-        Packet::try_mut_from_bytes_with_elems(&mut self.inner[8..], len)
+        Packet::try_mut_from_bytes_with_elems(&mut self.inner[4..], len)
             .expect("len packet was not a valid `Packet`")
     }
 
     pub fn clear(&mut self) {
-        self.inner[..8].copy_from_slice(&(PACKET_HEADER_LEN as u64).to_le_bytes());
-        self.inner.truncate(PACKET_HEADER_LEN + 8);
+        self.inner[..4].copy_from_slice(&(PACKET_HEADER_LEN as u32).to_le_bytes());
+        self.inner.truncate(PACKET_HEADER_LEN + 4);
     }
 }
 

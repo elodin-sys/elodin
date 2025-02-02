@@ -254,7 +254,7 @@ mod tests {
         });
         test!(async move {
             println!("waiting wait cell");
-            a.wait().await;
+            a.wait().await.unwrap();
         })
     }
 }
