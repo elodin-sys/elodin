@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, future::Future};
+use std::{collections::VecDeque, future::Future, marker::PhantomData};
 
 use crate::{
     buf::{self, IoBuf, IoBufMut, Slice},
@@ -52,16 +52,18 @@ pub trait AsyncWrite {
     }
 }
 
-pub struct LengthDelReader<A: AsyncRead> {
+pub struct LengthDelReader<A: AsyncRead, L = u32> {
     reader: A,
     scratch: VecDeque<u8>,
+    phantom_data: PhantomData<L>,
 }
 
-impl<A: AsyncRead> LengthDelReader<A> {
+impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
     pub fn new(reader: A) -> Self {
         Self {
             reader,
             scratch: VecDeque::default(),
+            phantom_data: PhantomData,
         }
     }
 
@@ -83,7 +85,7 @@ impl<A: AsyncRead> LengthDelReader<A> {
 
     pub async fn recv<B: IoBufMut>(&mut self, mut buf: B) -> Result<Slice<B>, Error> {
         let mut total_read = 0;
-        while total_read < 8 {
+        while total_read < size_of::<L>() {
             let mut slice = buf
                 .try_slice(total_read..)
                 .ok_or(Error::BufferOverflow)
@@ -95,10 +97,14 @@ impl<A: AsyncRead> LengthDelReader<A> {
             total_read += len;
             buf = slice.into_inner();
         }
-        let len_buf = &buf::deref(&buf)[..8];
-        let len: [u8; 8] = len_buf[..8].try_into().expect("slice wasn't 8 long");
-        let len = u64::from_le_bytes(len) as usize;
-        let required_len = len.checked_add(8).ok_or(Error::IntegerOverflow)?;
+        let len_buf = &buf::deref(&buf)[..L::SIZE];
+        let len: L::Buf = len_buf[..L::SIZE]
+            .try_into()
+            .map_err(|_| ())
+            .expect("slice wasn't L::SIZE long");
+        let len = L::from_le_bytes(len);
+        let len = len.as_usize();
+        let required_len = len.checked_add(L::SIZE).ok_or(Error::IntegerOverflow)?;
         while total_read < required_len {
             let mut slice = buf.try_slice(total_read..).ok_or(Error::BufferOverflow)?;
             let read_len = rent!(self.read(slice).await, slice)?;
@@ -114,9 +120,40 @@ impl<A: AsyncRead> LengthDelReader<A> {
             self.scratch.extend(extra);
         }
         let buf = buf
-            .try_slice(8..required_len)
+            .try_slice(L::SIZE..required_len)
             .ok_or(Error::BufferOverflow)?;
         Ok(buf)
+    }
+}
+
+pub trait Length {
+    const SIZE: usize;
+    type Buf: for<'a> TryFrom<&'a [u8]>;
+    fn as_usize(&self) -> usize;
+    fn from_le_bytes(buf: Self::Buf) -> Self;
+}
+
+impl Length for u64 {
+    const SIZE: usize = 8;
+    type Buf = [u8; 8];
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+
+    fn from_le_bytes(buf: Self::Buf) -> Self {
+        Self::from_le_bytes(buf)
+    }
+}
+
+impl Length for u32 {
+    const SIZE: usize = 4;
+    type Buf = [u8; 4];
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+
+    fn from_le_bytes(buf: Self::Buf) -> Self {
+        Self::from_le_bytes(buf)
     }
 }
 
@@ -170,6 +207,35 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             let handle = crate::spawn(async move {
                 let stream = listener.accept().await.unwrap();
+                stream.write(&[4, 0, 0, 0, 1, 2, 3, 4][..]).await.0.unwrap();
+                stream.write(&[3, 0, 0, 0, 5][..]).await.0.unwrap();
+                stream.write(&[6, 7, 1, 0][..]).await.0.unwrap();
+                stream.write(&[0, 0, 0xff][..]).await.0.unwrap();
+            });
+            let stream = TcpStream::connect(addr).await.unwrap();
+            let mut stream = LengthDelReader::<_, u32>::new(stream);
+
+            let buf = vec![0u8; 64];
+            let out = stream.recv(buf).await.unwrap();
+            assert_eq!(&out[..], &[1, 2, 3, 4]);
+            let buf = out.into_inner();
+            let out = stream.recv(buf).await.unwrap();
+            assert_eq!(&out[..], &[5, 6, 7]);
+            let buf = out.into_inner();
+            let out = stream.recv(buf).await.unwrap();
+            assert_eq!(&out[..], &[0xff]);
+
+            handle.await.unwrap();
+        })
+    }
+
+    #[test]
+    fn test_length_del_tcp_u64() {
+        crate::test!(async {
+            let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handle = crate::spawn(async move {
+                let stream = listener.accept().await.unwrap();
                 stream
                     .write(&[4, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4][..])
                     .await
@@ -184,7 +250,7 @@ mod tests {
                 stream.write(&[0, 0, 0, 0, 0, 0xff][..]).await.0.unwrap();
             });
             let stream = TcpStream::connect(addr).await.unwrap();
-            let mut stream = LengthDelReader::new(stream);
+            let mut stream = LengthDelReader::<_, u64>::new(stream);
 
             let buf = vec![0u8; 64];
             let out = stream.recv(buf).await.unwrap();
