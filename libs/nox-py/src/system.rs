@@ -91,7 +91,7 @@ impl nox_ecs::System for PyFnSystem {
                     name: col.metadata.name.to_string(),
                     ty: Some(col.schema.clone().into()),
                     asset: col.metadata.asset,
-                    metadata: col.metadata.metadata.metadata.clone(),
+                    metadata: col.metadata.metadata.clone(),
                 },
             };
             py_builder.arg_map.insert(id, (arg_metadata, index));

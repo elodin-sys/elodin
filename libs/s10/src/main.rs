@@ -10,6 +10,9 @@ async fn main() -> miette::Result<()> {
                 .with_default_directive("info".parse().expect("invalid filter"))
                 .from_env_lossy(),
         )
+        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+        ))
         .try_init();
 
     let args = Cli::parse();

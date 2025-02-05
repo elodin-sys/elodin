@@ -6,12 +6,23 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <errno.h>
 #include <assert.h>
 
-#include "./vtable.h"
+enum PacketType {
+    MSG = 0,
+    TABLE = 1,
+    TIME_SERIES = 2
+};
 
-typedef struct {
+typedef struct packet_header_t packet_header_t;
+struct packet_header_t {
+    uint32_t len;
+    uint8_t ty;
+    uint8_t packet_id[3];
+};
+
+typedef struct sensor_data_t sensor_data_t;
+struct sensor_data_t {
     int64_t time;
     float mag[3];
     float gyro[3];
@@ -19,7 +30,7 @@ typedef struct {
     float temp;
     float pressure;
     float humidity;
-} sensor_data_t;
+};
 
 ssize_t write_all(int fd, const void *buf, size_t count) {
     size_t written = 0;
@@ -59,19 +70,19 @@ int main() {
         .pressure = 2.0,
         .humidity = 3.0
     };
-
-    // Send initialization message (vtable + component metadata)
-    write_all(sock, init_msg, init_msg_len);
+    packet_header_t sensor_data_header = {
+        .len = 4 + sizeof(sensor_data),
+        .ty = TABLE,
+        .packet_id = {1, 0, 0},
+    };
 
     // Send sin wave data continuously
-    assert(sizeof(sensor_data_t) == SENSOR_DATA_LEN);
     while (1) {
-        write_all(sock, &sensor_data_header, sensor_data_header_len);
-        write_all(sock, &sensor_data, SENSOR_DATA_LEN);
+        write_all(sock, &sensor_data_header, sizeof(sensor_data_header));
+        write_all(sock, &sensor_data, sizeof(sensor_data));
 
-        double sin_val = sin((double)sensor_data.time / 100000.0);
         sensor_data.time += 1;
-        sensor_data.temp = sin_val;
+        sensor_data.temp = sin((double)sensor_data.time / 100000.0);
     }
     close(sock);
     return 0;

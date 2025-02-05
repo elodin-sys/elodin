@@ -17,23 +17,19 @@ Alternatively, you can download the latest portable binary for your platform:
 ### Run the database
 
 ```sh
-# Run elodin-db in the foreground, listening on port 2240 and storing data in the default user data directory
-elodin-db run [::]:2240 $HOME/.local/share/elodin/db
+# Run elodin-db in the foreground:
+# - Listening on port 2240
+# - Storing data in the default user data directory ($HOME/.local/share/elodin/db)
+# - Using the ./examples/db-config.lua config
+elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua
 ```
 
 ### Stream data to the database
 
-See [./examples/c](./examples/c) for an example C client that streams fake sensor data to the database. Build and run the client:
+See [./examples/client.c](./examples/client.c) for an example C client that streams fake sensor data to the database. Build and run the client:
 
 ```sh
-cc examples/c/main.c -lm -o examples/c/db-client
-./examples/c/db-client
-```
-
-To populate the database with the necessary metadata, the C client first needs to send an initial message that describes the components it will be streaming as well as the on-wire format of the data (vtable). This message can be generated ahead of time and embedded into a C header file by running the following command:
-
-```sh
-cargo run --example vtable-gen > examples/c/vtable.h
+cc examples/client.c -lm -o /tmp/client; /tmp/client
 ```
 
 ### Connect to the database using the CLI

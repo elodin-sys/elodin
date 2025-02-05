@@ -95,10 +95,8 @@ impl WorldBuilder {
                         let component_id = ComponentId::new(&component.name);
                         let metadata = ComponentMetadata {
                             component_id,
-                            name: component.name.clone().into(),
-                            metadata: impeller2_wkt::Metadata {
-                                metadata: component.metadata.clone(),
-                            },
+                            name: component.name.clone(),
+                            metadata: component.metadata.clone(),
                             asset: component.asset,
                         };
 
@@ -125,10 +123,8 @@ impl WorldBuilder {
                 let component_id = ComponentId::new(&name);
                 let metadata = ComponentMetadata {
                     component_id,
-                    name: name.into(),
-                    metadata: impeller2_wkt::Metadata {
-                        metadata: Default::default(),
-                    },
+                    name,
+                    metadata: Default::default(),
                     asset: true,
                 };
 
@@ -191,10 +187,13 @@ impl WorldBuilder {
     ) -> Result<Option<String>, Error> {
         let _ = tracing_subscriber::fmt::fmt()
             .with_env_filter(
-                EnvFilter::builder()
+                tracing_subscriber::EnvFilter::builder()
                     .with_default_directive("info".parse().expect("invalid filter"))
                     .from_env_lossy(),
             )
+            .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+            ))
             .try_init();
 
         let args = py

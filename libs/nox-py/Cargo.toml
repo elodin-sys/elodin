@@ -50,7 +50,7 @@ tokio.features = ["full"]
 # logs
 tracing = "0.1"
 tracing-subscriber.version = "0.3"
-tracing-subscriber.features = ["std", "env-filter"]
+tracing-subscriber.features = ["std", "env-filter", "chrono"]
 
 # errors
 thiserror = { version = "2.0", default-features = false }

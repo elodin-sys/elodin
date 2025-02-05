@@ -6,7 +6,6 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include "./vtable.h"
 
 enum class PacketType : uint8_t {
     MSG = 0,
@@ -15,10 +14,19 @@ enum class PacketType : uint8_t {
 };
 
 struct PacketHeader {
-    uint64_t len;
+    uint32_t len;
     PacketType ty;
     std::array<uint8_t, 3> packet_id;
-    uint32_t req_id = 0;
+};
+
+struct SensorData {
+    int64_t time;
+    float mag[3];
+    float gyro[3];
+    float accel[3];
+    float temp;
+    float pressure;
+    float humidity;
 };
 
 class Socket {
@@ -66,29 +74,29 @@ private:
 int main() try {
     auto sock = Socket("127.0.0.1", 2240);
 
-    // send vtable header and data
-    PacketHeader vtable_header = {
-        .len = vtable_bin_len + 8,
-        .ty = PacketType::MSG,
-        .packet_id = {224, 0, 0},
-    };
-
-    sock.write_all(&vtable_header, sizeof(vtable_header));
-    sock.write_all(vtable_bin, vtable_bin_len);
-
-    // send sin wave data continuously  
+    // send sin wave data continuously
     double val = 1.0;
+    auto sensor_data = SensorData {
+        .time = 0,
+        .mag = {0.0, 0.0, 0.0},
+        .gyro = {0.0, 0.0, 0.0},
+        .accel = {0.0, 0.0, 0.0},
+        .temp = 1.0,
+        .pressure = 2.0,
+        .humidity = 3.0
+    };
     auto table_header = PacketHeader {
-      .len = 8 + 8,
+      .len = 4 + sizeof(sensor_data),
       .ty = PacketType::TABLE,
       .packet_id = {1, 0, 0},
     };
 
     while (true) {
-        auto sin_val = std::sin(val);
         sock.write_all(&table_header, sizeof(table_header));
-        sock.write_all(&sin_val, sizeof(sin_val));
-        val += 0.000001;
+        sock.write_all(&sensor_data, sizeof(sensor_data));
+
+        sensor_data.time += 1;
+        sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 100000.0);
     }
 
     return 0;

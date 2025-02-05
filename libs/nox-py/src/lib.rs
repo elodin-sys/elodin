@@ -12,7 +12,6 @@ use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use tracing_subscriber::EnvFilter;
 
 mod archetype;
 mod asset;
