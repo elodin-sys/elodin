@@ -35,6 +35,7 @@ impeller2-stella.path = "../../impeller2/stella"
 impeller2.path = "../../impeller2"
 impeller2.features = ["std", "mlua"]
 impeller2-wkt.path = "../../impeller2/wkt"
+impeller2-wkt.features = ["std", "mlua"]
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.0"

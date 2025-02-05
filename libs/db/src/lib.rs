@@ -15,9 +15,8 @@ use impeller2_stella::PacketSink;
 use impeller2_wkt::{
     Asset, ComponentMetadata, DbSettings, DumpAssets, DumpMetadata, DumpMetadataResp,
     EntityMetadata, GetAsset, GetComponentMetadata, GetDbSettings, GetEntityMetadata, GetSchema,
-    GetTimeSeries, Metadata, MetadataValue, SchemaMsg, SetAsset, SetComponentMetadata,
-    SetDbSettings, SetEntityMetadata, SetStreamState, Stream, StreamFilter, StreamId,
-    SubscribeMaxTick, VTableMsg,
+    GetTimeSeries, MetadataValue, SchemaMsg, SetAsset, SetComponentMetadata, SetDbSettings,
+    SetEntityMetadata, SetStreamState, Stream, StreamFilter, StreamId, SubscribeMaxTick, VTableMsg,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -112,22 +111,20 @@ impl DB {
         })?;
         self.set_component_metadata(ComponentMetadata {
             component_id: impeller2_wkt::Tick::COMPONENT_ID,
-            name: Cow::Owned("Tick".to_string()),
-            metadata: Metadata {
-                metadata: [(
-                    "element_names".to_string(),
-                    MetadataValue::String("tick".to_string()),
-                )]
-                .into_iter()
-                .collect(),
-            },
+            name: "Tick".to_string(),
+            metadata: [(
+                "element_names".to_string(),
+                MetadataValue::String("tick".to_string()),
+            )]
+            .into_iter()
+            .collect(),
             asset: false,
         })?;
         Ok(())
     }
 
     fn set_entity_metadata(&self, metadata: EntityMetadata) -> Result<(), Error> {
-        debug!(?metadata, entity.id = ?metadata.entity_id, "set entity metadata");
+        info!(entity.name = ?metadata.name, entity.id = ?metadata.entity_id.0, "setting entity metadata");
         let entity_metadata_path = self.path.join("entity_metadata");
         std::fs::create_dir_all(&entity_metadata_path)?;
         metadata.write(entity_metadata_path.join(metadata.entity_id.to_string()))?;
@@ -141,7 +138,7 @@ impl DB {
             warn!(component.id = ?component_id, "component not found");
             return Ok(());
         };
-        debug!(?metadata, component.id = ?component_id, "set component metadata");
+        info!(component.name= ?metadata.name, component.id = ?component_id.0, "setting component metadata");
         let component_metadata_path = self.path.join(component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         metadata.write(component_metadata_path.join("metadata"))?;
@@ -291,7 +288,7 @@ impl Component {
         schema.write(schema_path)?;
         let metadata = ComponentMetadata {
             component_id,
-            name: Cow::Owned(component_id.to_string()),
+            name: component_id.to_string(),
             metadata: Default::default(),
             asset: false,
         };
@@ -592,6 +589,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(path: impl AsRef<Path>, addr: SocketAddr) -> Result<Server, Error> {
+        info!(?addr, "listening");
         let listener = TcpListener::bind(addr)?;
         let path = path.as_ref().to_path_buf();
         let db = if path.exists() && path.join("entity_metadata").exists() {
@@ -692,8 +690,14 @@ async fn handle_packet(
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
-            debug!(id = ?vtable.id, "inserting vtable");
+            info!(id = ?vtable.id, "inserting vtable");
             let mut registry = db.vtable_registry.write().await;
+            for (component_id, prim_ty, shape) in vtable.vtable.component_iter() {
+                db.components.entry(component_id).or_try_insert_with(|| {
+                    Component::try_create(component_id, prim_ty, shape, &db.path)
+                })?;
+                db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+            }
             registry.map.insert(vtable.id, vtable.vtable);
         }
         Packet::Msg(m) if m.id == Stream::ID => {
@@ -773,18 +777,7 @@ async fn handle_packet(
             });
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
-            let SetComponentMetadata {
-                component_id,
-                metadata,
-                name,
-                asset,
-            } = m.parse::<SetComponentMetadata>()?;
-            let metadata = ComponentMetadata {
-                component_id,
-                name: name.into(),
-                metadata,
-                asset,
-            };
+            let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.set_component_metadata(metadata)?;
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
@@ -800,12 +793,7 @@ async fn handle_packet(
         }
 
         Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
-            let set_entity_metadata = m.parse::<SetEntityMetadata>()?;
-            let metadata = EntityMetadata {
-                entity_id: set_entity_metadata.entity_id,
-                name: set_entity_metadata.name,
-                metadata: set_entity_metadata.metadata,
-            };
+            let SetEntityMetadata(metadata) = m.parse::<SetEntityMetadata>()?;
             db.set_entity_metadata(metadata)?;
         }
 

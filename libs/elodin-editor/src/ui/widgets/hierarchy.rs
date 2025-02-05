@@ -4,7 +4,7 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use impeller2_wkt::EntityMetadata;
+use impeller2_wkt::{EntityMetadata, MetadataExt};
 
 use crate::ui::{
     colors::{self, EColor},
@@ -257,7 +257,7 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         ui.painter().rect(
             icon_rect,
             egui::Rounding::same(2.0),
-            metadata.metadata.color().into_color32(),
+            metadata.color().into_color32(),
             egui::Stroke::NONE,
         );
 

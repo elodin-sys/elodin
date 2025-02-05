@@ -46,7 +46,7 @@ miette.features = ["fancy"]
 
 # logs
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono"] }
 
 # rand
 fastrand = "2.2.0"
