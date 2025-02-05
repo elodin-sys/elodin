@@ -15,6 +15,11 @@ order = 1
 
 ## v0.11
 
+### v0.11.2
+- **(breaking)** Replace message-specific `elodin-db` Lua methods with generic `send_msg()` and `send_msgs()`.
+- **(breaking)** Reduce `impeller` packet header size from 16 bytes to 8 bytes. The `len` field is now a `u32` instead of a `u64`. The `req_id` field has also been removed.
+- Add a `--config` argument to `elodin-db run` to provide a custom Lua config file that can pre-configure the database with necessary vtables and metadata.
+
 ### v0.11.1
 - **(fix)** Fix bug where live reload would fail with an "Address already in use" error.
 - **(fix)** Fix bug where duplicate panels would be created on live reload.
