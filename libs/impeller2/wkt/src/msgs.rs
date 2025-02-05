@@ -1,7 +1,7 @@
 use impeller2::{
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, Msg, PacketId},
+    types::{ComponentId, EntityId, Msg, MsgExt, PacketId},
 };
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
@@ -12,7 +12,7 @@ use crate::{
     MaxTick,
 };
 
-use crate::{AssetId, Metadata};
+use crate::AssetId;
 
 #[derive(Serialize, Deserialize)]
 pub struct VTableMsg {
@@ -116,23 +116,16 @@ impl Msg for GetEntityMetadata {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct SetComponentMetadata {
-    pub component_id: ComponentId,
-    pub name: String,
-    pub metadata: Metadata,
-    pub asset: bool,
-}
+#[serde(transparent)]
+pub struct SetComponentMetadata(pub ComponentMetadata);
 
 impl Msg for SetComponentMetadata {
     const ID: PacketId = [224, 0, 8];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct SetEntityMetadata {
-    pub entity_id: EntityId,
-    pub name: String,
-    pub metadata: Metadata,
-}
+#[serde(transparent)]
+pub struct SetEntityMetadata(pub EntityMetadata);
 
 impl Msg for SetEntityMetadata {
     const ID: PacketId = [224, 0, 9];
@@ -225,4 +218,58 @@ pub struct NewConnection;
 
 impl Msg for NewConnection {
     const ID: PacketId = [224, 255, 1];
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for SetStreamState {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for SetAsset<'_> {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for SetComponentMetadata {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::FromLua for SetComponentMetadata {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        mlua::LuaSerdeExt::from_value(lua, value)
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for SetEntityMetadata {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::FromLua for SetEntityMetadata {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        mlua::LuaSerdeExt::from_value(lua, value)
+    }
 }

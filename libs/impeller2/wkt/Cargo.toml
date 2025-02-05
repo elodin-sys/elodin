@@ -8,6 +8,7 @@ bevy = ["dep:bevy", "std", "gui"]
 nox = ["dep:nox"]
 gui = ["nox"]
 std = ["impeller2/std"]
+mlua = ["dep:mlua"]
 
 [dependencies]
 impeller2.path = ".."
@@ -23,3 +24,8 @@ bevy.optional = true
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard.version = "1.0.8"
+
+# lua
+mlua.version = "0.10"
+mlua.features = ["serialize"]
+mlua.optional = true

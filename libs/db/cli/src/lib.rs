@@ -6,7 +6,6 @@ use impeller2::{
 
 use impeller2::types::{LenPacket, MsgExt};
 use impeller2_wkt::*;
-use mlua::prelude::LuaError;
 use mlua::{Error, Lua, LuaSerdeExt, MultiValue, UserData, Value};
 use nu_ansi_term::Color;
 use rustyline::{
@@ -49,11 +48,6 @@ impl Client {
         let tx = impeller2_stella::PacketSink::new(tx);
         let rx = impeller2_stella::PacketStream::new(rx);
         Ok(Client { tx, rx })
-    }
-
-    pub async fn send_msg(&self, msg: impl Msg) -> anyhow::Result<()> {
-        self.tx.send(msg.to_len_packet()).await.0?;
-        Ok(())
     }
 
     pub async fn send_req_reply<R: Msg + DeserializeOwned>(
@@ -232,13 +226,31 @@ impl Client {
 impl UserData for Client {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method(
-            "send",
+            "send_table",
             |lua, this, (component_id, entity_id, ty, shape, buf): (_, _, _, Vec<u64>, _)| async move {
                 let ty: PrimType = lua.from_value(ty)?;
                 this.send(&lua, component_id, entity_id, ty, shape, buf).await?;
                 Ok(())
             },
         );
+        methods.add_async_method("send_msg", |_lua, this, msg: Vec<u8>| async move {
+            this.tx
+                .send(LenPacket { inner: msg })
+                .await
+                .0
+                .map_err(anyhow::Error::from)?;
+            Ok(())
+        });
+        methods.add_async_method("send_msgs", |_lua, this, msgs: Vec<Vec<u8>>| async move {
+            for msg in msgs {
+                this.tx
+                    .send(LenPacket { inner: msg })
+                    .await
+                    .0
+                    .map_err(anyhow::Error::from)?;
+            }
+            Ok(())
+        });
         methods.add_async_method_mut(
             "get_time_series",
             |_, mut this, (c_id, e_id, start, stop)| async move {
@@ -252,15 +264,6 @@ impl UserData for Client {
             Ok(())
         });
 
-        macro_rules! add_send_method {
-            ($name:tt, $ty:tt) => {
-                methods.add_async_method(stringify!($name), |lua, this, value| async move {
-                    let msg: $ty = lua.from_value(value)?;
-                    this.send_msg(msg).await?;
-                    Ok::<_, LuaError>(())
-                });
-            };
-        }
         macro_rules! add_req_reply_method {
             ($name:tt, $ty:tt, $req:tt) => {
                 methods.add_async_method_mut(
@@ -273,10 +276,6 @@ impl UserData for Client {
                 );
             };
         }
-        add_send_method!(set_stream_state, SetStreamState);
-        add_send_method!(set_component_metadata, SetComponentMetadata);
-        add_send_method!(set_entity_metadata, SetEntityMetadata);
-        add_send_method!(set_asset, SetAsset);
         add_req_reply_method!(get_asset, GetAsset, Asset);
         add_req_reply_method!(
             get_component_metadata,
@@ -316,6 +315,14 @@ impl UserData for LuaVTableBuilder {
                 Ok(())
             },
         );
+        methods.add_method("msg", |_, this, ()| {
+            let vtable_msg = VTableMsg {
+                id: this.id,
+                vtable: this.vtable.clone().build(),
+            };
+            let vtable_msg = vtable_msg.to_len_packet().inner;
+            Ok(vtable_msg)
+        });
         methods.add_method("build", |_, this, ()| Ok(this.build()));
         methods.add_method("build_bin", |_, this, ()| {
             let stdout = stdout();
@@ -396,6 +403,17 @@ pub struct Args {
     pub path: Option<PathBuf>,
 }
 
+struct LuaMsg<M: Msg>(M);
+
+impl<M: Msg> UserData for LuaMsg<M> {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.0.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = Lua::new();
     let client = lua.create_async_function(|_lua, addr: String| async move {
@@ -415,6 +433,14 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     lua.globals().set(
         "ComponentId",
         lua.create_function(|lua, name: String| lua.create_ser_userdata(ComponentId::new(&name)))?,
+    )?;
+    lua.globals().set(
+        "SetComponentMetadata",
+        lua.create_function(|lua, m: SetComponentMetadata| lua.create_ser_userdata(m))?,
+    )?;
+    lua.globals().set(
+        "SetEntityMetadata",
+        lua.create_function(|lua, m: SetEntityMetadata| lua.create_ser_userdata(m))?,
     )?;
     if let Some(path) = args.path {
         let script = std::fs::read_to_string(path)?;
@@ -457,32 +483,23 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 if line == ":help" || line == ":h" {
                     println!("{}", Color::Yellow.bold().paint("Impeller Lua REPL"));
                     print_usage_line(
-                        "connect(addr)",
+                        "connect(addr) -> Client",
                         "Connects to a new database and returns a client",
                     );
                     print_usage_line(
-                        "Client:send(component_id, entity_id, ty, shape, data)",
+                        "Client:send_table(component_id, entity_id, ty, shape, data)",
                         "Sends a new ComponentValue to the db",
                     );
+                    print_usage_line("Client:send_msg(msg)", "Sends a raw message to the db");
                     print_usage_line(
-                        "Client:set_stream_state(SetStreamState)",
-                        format!(
-                            "Sets the stream state using {} {{ id, playing, tick }}",
-                            Color::Blue.bold().paint("SetStreamState")
-                        ),
+                        "Client:send_msgs(msgs)",
+                        "Sends a list of raw messages to the db",
                     );
                     print_usage_line(
                         "Client:get_component_metadata(GetComponentMetadata)",
                         format!(
                             "Gets a component's metadata using {} {{ id }}",
                             Color::Blue.bold().paint("GetComponentMetadata")
-                        ),
-                    );
-                    print_usage_line(
-                        "Client:set_component_metadata(SetComponentMetadata)",
-                        format!(
-                            "Sets a component's metadata using {} {{ id, name, metadata, asset }}",
-                            Color::Blue.bold().paint("SetComponentMetadata")
                         ),
                     );
                     print_usage_line(
@@ -493,24 +510,10 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                         ),
                     );
                     print_usage_line(
-                        "Client:set_entity_metadata(SetEntityMetadata)",
-                        format!(
-                            "Sets a entity's metadata using {} {{ id, name, metadata, asset }}",
-                            Color::Blue.bold().paint("SetEntityMetadata")
-                        ),
-                    );
-                    print_usage_line(
                         "Client:get_asset(GetAsset)",
                         format!(
                             "Gets a entity's metadata using {} {{ id }}",
                             Color::Blue.bold().paint("GetAsset")
-                        ),
-                    );
-                    print_usage_line(
-                        "Client:set_asset(SetAsset)",
-                        format!(
-                            "Sets an asset {} {{ id, buf }}",
-                            Color::Blue.bold().paint("SetAsset")
                         ),
                     );
                     print_usage_line("Client:dump_metadata()", "Dumps all metadata from the db ");
@@ -521,6 +524,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                             Color::Blue.bold().paint("GetSchema")
                         ),
                     );
+                    println!("{}", Color::Yellow.bold().paint("Messages"));
+                    print_message("SetComponentMetadata { component_id, name, metadata, asset }");
+                    print_message("SetEntityMetadata { entity_id, name, metadata }");
+                    print_message("SetStreamState { id, playing, tick, time_step }");
+                    print_message("SetAsset { id, buf }");
                     break;
                 }
                 editor.save_history(&history_path)?;
@@ -574,6 +582,11 @@ fn print_usage_line(name: impl Display, desc: impl Display) {
     let name = Color::Green.bold().paint(format!("- `{name}`")).to_string();
     println!("{name}");
     println!("   {desc}",);
+}
+
+fn print_message(msg: impl Display) {
+    let msg = Color::Green.bold().paint(format!("- `{msg}`")).to_string();
+    println!("{msg}");
 }
 
 struct DebugSink;

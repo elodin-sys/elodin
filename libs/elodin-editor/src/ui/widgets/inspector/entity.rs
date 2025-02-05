@@ -7,6 +7,7 @@ use bevy::ecs::{
 use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, ElementValueMut};
+use impeller2_wkt::MetadataExt;
 use smallvec::SmallVec;
 
 use crate::{
@@ -99,7 +100,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             .keys()
             .filter_map(|id| {
                 let metadata = metadata_store.get_metadata(id)?;
-                let priority = metadata.metadata.priority();
+                let priority = metadata.priority();
                 Some((*id, priority, metadata))
             })
             .filter_map(|(id, priority, metadata)| {

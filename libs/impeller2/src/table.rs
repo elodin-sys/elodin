@@ -252,6 +252,17 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTable<EntryBuf, DataBuf> {
             });
         columns.chain(entities)
     }
+
+    pub fn component_iter(&self) -> impl Iterator<Item = (ComponentId, PrimType, &[usize])> + '_ {
+        self.entries.iter().filter_map(|entry| match entry {
+            Entry::Column(e) => Some((
+                e.component_id,
+                e.shape_entry.prim_type,
+                e.shape_entry.parse_shape(self.data.as_slice()).unwrap(),
+            )),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Default)]
