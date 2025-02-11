@@ -2,14 +2,12 @@ use impeller2::types::{ComponentId, EntityId, Msg, PacketId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::Color;
-
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct ComponentMetadata {
     pub component_id: ComponentId,
     pub name: String,
     #[serde(default)]
-    pub metadata: HashMap<String, MetadataValue>,
+    pub metadata: HashMap<String, String>,
     #[serde(default)]
     pub asset: bool,
 }
@@ -18,7 +16,7 @@ impl ComponentMetadata {
     pub fn element_names(&self) -> &str {
         self.metadata
             .get("element_names")
-            .and_then(MetadataValue::as_str)
+            .map(|v| v.as_str())
             .unwrap_or_default()
     }
 }
@@ -33,7 +31,7 @@ pub struct EntityMetadata {
     pub entity_id: EntityId,
     pub name: String,
     #[serde(default)]
-    pub metadata: HashMap<String, MetadataValue>,
+    pub metadata: HashMap<String, String>,
 }
 
 impl Msg for EntityMetadata {
@@ -41,73 +39,40 @@ impl Msg for EntityMetadata {
 }
 
 pub trait MetadataExt {
-    fn metadata_mut(&mut self) -> &mut HashMap<String, MetadataValue>;
-    fn metadata(&self) -> &HashMap<String, MetadataValue>;
+    fn metadata_mut(&mut self) -> &mut HashMap<String, String>;
+    fn metadata(&self) -> &HashMap<String, String>;
     fn priority(&self) -> i64 {
         self.metadata()
             .get("priority")
-            .and_then(|v| match &v {
-                MetadataValue::I64(v) => Some(*v),
-                _ => None,
-            })
+            .and_then(|v| v.parse().ok())
             .unwrap_or(10)
     }
-    fn color(&self) -> Color {
-        self.metadata()
-            .get("color")
-            .and_then(|v| match &v {
-                MetadataValue::Bytes(b) => postcard::from_bytes(b).ok(),
-                _ => None,
-            })
-            .unwrap_or(Color::YOLK)
-    }
     fn set_priority(&mut self, priority: i64) {
-        self.metadata_mut()
-            .insert("priority".to_string(), MetadataValue::I64(priority));
+        self.set("priority", &priority.to_string());
     }
-    fn set_color(&mut self, color: Color) {
-        self.metadata_mut().insert(
-            "color".to_string(),
-            MetadataValue::Bytes(postcard::to_allocvec(&color).unwrap()),
-        );
+    fn set(&mut self, key: &str, value: &str) {
+        self.metadata_mut()
+            .insert(key.to_string(), value.to_string());
+    }
+    fn get(&self, key: &str) -> Option<&str> {
+        self.metadata().get(key).map(|v| v.as_str())
     }
 }
 
 impl MetadataExt for ComponentMetadata {
-    fn metadata_mut(&mut self) -> &mut HashMap<String, MetadataValue> {
+    fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
         &mut self.metadata
     }
-    fn metadata(&self) -> &HashMap<String, MetadataValue> {
+    fn metadata(&self) -> &HashMap<String, String> {
         &self.metadata
     }
 }
 
 impl MetadataExt for EntityMetadata {
-    fn metadata_mut(&mut self) -> &mut HashMap<String, MetadataValue> {
+    fn metadata_mut(&mut self) -> &mut HashMap<String, String> {
         &mut self.metadata
     }
-    fn metadata(&self) -> &HashMap<String, MetadataValue> {
+    fn metadata(&self) -> &HashMap<String, String> {
         &self.metadata
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-pub enum MetadataValue {
-    Unit,
-    Bool(bool),
-    String(String),
-    Bytes(Vec<u8>),
-    U64(u64),
-    I64(i64),
-    F64(f64),
-}
-
-impl MetadataValue {
-    pub fn as_str(&self) -> Option<&str> {
-        if let Self::String(v) = self {
-            Some(v)
-        } else {
-            None
-        }
     }
 }

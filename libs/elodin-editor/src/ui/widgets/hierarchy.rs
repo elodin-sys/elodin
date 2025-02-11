@@ -4,11 +4,10 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use impeller2_wkt::{EntityMetadata, MetadataExt};
+use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{
-    colors::{self, EColor},
-    utils, EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
+    colors, utils, EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
 };
 
 use super::{WidgetSystem, WidgetSystemExt};
@@ -257,7 +256,7 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         ui.painter().rect(
             icon_rect,
             egui::Rounding::same(2.0),
-            metadata.color().into_color32(),
+            colors::YOLK_DEFAULT,
             egui::Stroke::NONE,
         );
 
