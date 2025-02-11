@@ -2,7 +2,6 @@ use crate::*;
 
 use std::collections::HashMap;
 
-use impeller2_wkt::MetadataValue;
 use pyo3::types::PyList;
 use pyo3::{intern, types::PySequence};
 
@@ -15,7 +14,7 @@ pub struct Component {
     pub ty: Option<ComponentType>,
     #[pyo3(get, set)]
     pub asset: bool,
-    pub metadata: HashMap<String, MetadataValue>,
+    pub metadata: HashMap<String, String>,
 }
 
 impl Component {
@@ -52,13 +51,13 @@ impl Component {
             .into_iter()
             .map(|(k, v)| {
                 let value = if let Ok(s) = v.extract::<String>(py) {
-                    MetadataValue::String(s)
-                } else if let Ok(f) = v.extract::<bool>(py) {
-                    MetadataValue::Bool(f)
+                    s
+                } else if let Ok(f) = v.extract::<f64>(py) {
+                    f.to_string()
                 } else if let Ok(v) = v.extract::<i64>(py) {
-                    MetadataValue::I64(v)
+                    v.to_string()
                 } else {
-                    MetadataValue::Unit
+                    "".to_string()
                 };
                 (k, value)
             })
