@@ -15,8 +15,8 @@ use impeller2_stella::PacketSink;
 use impeller2_wkt::{
     Asset, ComponentMetadata, DbSettings, DumpAssets, DumpMetadata, DumpMetadataResp,
     EntityMetadata, GetAsset, GetComponentMetadata, GetDbSettings, GetEntityMetadata, GetSchema,
-    GetTimeSeries, MetadataValue, SchemaMsg, SetAsset, SetComponentMetadata, SetDbSettings,
-    SetEntityMetadata, SetStreamState, Stream, StreamFilter, StreamId, SubscribeMaxTick, VTableMsg,
+    GetTimeSeries, SchemaMsg, SetAsset, SetComponentMetadata, SetDbSettings, SetEntityMetadata,
+    SetStreamState, Stream, StreamFilter, StreamId, SubscribeMaxTick, VTableMsg,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -112,12 +112,9 @@ impl DB {
         self.set_component_metadata(ComponentMetadata {
             component_id: impeller2_wkt::Tick::COMPONENT_ID,
             name: "Tick".to_string(),
-            metadata: [(
-                "element_names".to_string(),
-                MetadataValue::String("tick".to_string()),
-            )]
-            .into_iter()
-            .collect(),
+            metadata: [("element_names".to_string(), "tick".to_string())]
+                .into_iter()
+                .collect(),
             asset: false,
         })?;
         Ok(())

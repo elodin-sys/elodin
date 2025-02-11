@@ -1,6 +1,10 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Fix bug where it wasn't possible to set entity or component metadata from Lua config. The following should now work:
+  ```lua
+  SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }):msg()
+  ```
 
 ## v0.11
 
