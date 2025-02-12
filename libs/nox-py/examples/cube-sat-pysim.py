@@ -714,7 +714,7 @@ for index in range(0, 500):
 att_est = np.array(att_est)
 plt.figure(figsize=(10, 6))
 for i in range(4):
-    plt.plot(att_est[:, i].flatten(), label=f"Element {i+1}")
+    plt.plot(att_est[:, i].flatten(), label=f"Element {i + 1}")
 
 plt.title("att_est")
 plt.show()
