@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Fix an issue where a panic could be caused when a stellarator executor was dropped from a thread local. Now the executor is manually dropped when `stellarator::run` finished.
 - **(fix)** Fix bug where it wasn't possible to set entity or component metadata from Lua config. The following should now work:
   ```lua
   SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }):msg()
