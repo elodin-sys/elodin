@@ -16,6 +16,7 @@ dependencies = [
     "typing-extensions",
     "polars",
     "pytest",
+    "matplotlib",
 ]
 dynamic = ["version"]
 
