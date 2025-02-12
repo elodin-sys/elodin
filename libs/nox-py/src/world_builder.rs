@@ -5,7 +5,10 @@ use impeller2::types::PrimType;
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
 use nox_ecs::{increment_sim_tick, nox, ComponentSchema, IntoSystem, System as _, TimeStep, World};
+use numpy::{ndarray::IntoDimension, PyArray, PyArrayMethods};
+use pyo3::types::PyDict;
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
+use zerocopy::{FromBytes, TryFromBytes};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -249,7 +252,7 @@ impl WorldBuilder {
                             .unwrap();
                     });
                 }
-                let exec = exec.compile(client)?;
+                let exec = exec.compile(client.clone())?;
                 py.allow_threads(|| {
                     stellarator::run(|| {
                         if let Some(port) = liveness_port {
@@ -343,6 +346,65 @@ impl WorldBuilder {
             db: elodin_db::DB::create(db_dir.join("db"))?,
         })
     }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
+    #[pyo3(signature = (
+        system,
+        sim_time_step = 1.0 / 120.0,
+        run_time_step = None,
+        default_playback_speed = 1.0,
+        max_ticks = None,
+    ))]
+    pub fn to_jax_func(
+        &mut self,
+        py: Python<'_>,
+        system: System,
+        sim_time_step: f64,
+        run_time_step: Option<f64>,
+        default_playback_speed: f64,
+        max_ticks: Option<u64>,
+    ) -> Result<
+        (
+            PyObject,
+            Vec<u64>,
+            Vec<u64>,
+            Vec<Py<PyAny>>,
+            PyObject,
+            PyObject,
+            PyObject,
+        ),
+        Error,
+    > {
+        let (python, in_id, out_id, state, dict, entity_dict, component_entity_dict) = self
+            .build_jited(
+                py,
+                system,
+                sim_time_step,
+                run_time_step,
+                default_playback_speed,
+                max_ticks,
+            )?;
+        Ok((
+            python,
+            in_id,
+            out_id,
+            state,
+            dict,
+            entity_dict,
+            component_entity_dict,
+        ))
+    }
+
+    pub fn get_dict(&mut self, py: Python<'_>) -> Result<PyObject, Error> {
+        let dict = PyDict::new_bound(py);
+        for id in self.world.host.keys() {
+            let component = self.world.column_by_id(*id).unwrap();
+            let comp_name = component.metadata.name.clone();
+            dict.set_item(comp_name, id.0)?;
+        }
+        Ok(dict.to_object(py))
+    }
 }
 
 impl WorldBuilder {
@@ -377,5 +439,184 @@ impl WorldBuilder {
         let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);
         Ok(exec)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn build_jited(
+        &mut self,
+        py: Python<'_>,
+        sys: System,
+        sim_time_step: f64,
+        run_time_step: Option<f64>,
+        default_playback_speed: f64,
+        max_ticks: Option<u64>,
+    ) -> Result<
+        (
+            PyObject,
+            Vec<u64>,
+            Vec<u64>,
+            Vec<Py<PyAny>>,
+            PyObject,
+            PyObject,
+            PyObject,
+        ),
+        Error,
+    > {
+        let ts = time::Duration::from_secs_f64(sim_time_step);
+        self.world.metadata.sim_time_step = TimeStep(ts);
+        self.world.metadata.run_time_step = TimeStep(ts);
+        self.world.metadata.default_playback_speed = default_playback_speed;
+        if let Some(ts) = run_time_step {
+            let ts = time::Duration::from_secs_f64(ts);
+            self.world.metadata.run_time_step = TimeStep(ts);
+        }
+        if let Some(max_ticks) = max_ticks {
+            self.world.metadata.max_tick = max_ticks;
+        }
+
+        let mut input_id = Vec::<u64>::new();
+        let mut output_id = Vec::<u64>::new();
+        let mut state = Vec::<Py<PyAny>>::new();
+        let dict = PyDict::new_bound(py);
+        let entity_dict = PyDict::new_bound(py);
+        let component_entity_dict = PyDict::new_bound(py);
+        self.world.set_globals();
+
+        let world = std::mem::take(&mut self.world);
+        let xla_exec = sys.compile(&world)?;
+
+        for out_id in xla_exec.outputs.iter() {
+            output_id.push(out_id.0);
+        }
+
+        let world_meta = world.entity_metadata();
+        for (id, meta) in world_meta {
+            entity_dict.set_item(&meta.name, id.0)?;
+        }
+
+        for id in xla_exec.inputs.iter() {
+            input_id.push(id.0);
+            let component = world.column_by_id(*id).unwrap();
+            let schema = component.schema;
+            let data = component.column;
+            let mut dim = schema.dim.clone();
+            dim.insert(0, component.entities.len() / 8);
+
+            let comp_name = component.metadata.name.clone();
+            dict.set_item(id.0, &comp_name)?;
+
+            let mut entity_vec = Vec::<u64>::new();
+            for entity_id in component.entity_ids() {
+                entity_vec.push(entity_id.0);
+            }
+
+            component_entity_dict.set_item(&comp_name, entity_vec)?;
+
+            match schema.prim_type {
+                PrimType::U8 => {
+                    let slice = <[u8]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::U16 => {
+                    let slice = <[u16]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::U32 => {
+                    let slice = <[u32]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::U64 => {
+                    let slice = <[u64]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::I8 => {
+                    let slice = <[i8]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::I16 => {
+                    let slice = <[i16]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::I32 => {
+                    let slice = <[i32]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::I64 => {
+                    let slice = <[i64]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::F32 => {
+                    let slice = <[f32]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::F64 => {
+                    let slice = <[f64]>::ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+                PrimType::Bool => {
+                    let slice = <[bool]>::try_ref_from_bytes(data).unwrap();
+                    let py_array = PyArray::from_slice_bound(py, slice)
+                        .reshape(dim.into_dimension())
+                        .unwrap();
+
+                    state.push(py_array.to_object(py));
+                }
+            };
+        }
+
+        let jax_exec = xla_exec.compile_jax_module(py)?;
+        let dictionary = dict.to_object(py);
+        let entity_dict = entity_dict.to_object(py);
+        let component_entity_dict = component_entity_dict.to_object(py);
+
+        Ok((
+            jax_exec,
+            input_id,
+            output_id,
+            state,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
+        ))
     }
 }

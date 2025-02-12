@@ -80,6 +80,14 @@ class WorldBuilder:
         default_playback_speed: float = 1.0,
         optimize: bool = False,
     ) -> Exec: ...
+    def to_jax_func(
+        self,
+        system: System,
+        sim_time_step: float = 1 / 120.0,
+        run_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
+        max_ticks: Optional[int] = None,
+    ) -> (object, list, list, object, dict, dict, dict): ...
 
 class EntityId:
     def __init__(self, id: int): ...

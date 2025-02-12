@@ -132,6 +132,7 @@ impl nox_ecs::System for PyFnSystem {
 pub trait CompiledSystemExt {
     fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<PyObject>, Error>;
     fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<Exec, Error>;
+    fn compile_jax_module(&self, py: Python<'_>) -> Result<PyObject, Error>;
 }
 
 impl CompiledSystemExt for CompiledSystem {
@@ -163,9 +164,6 @@ impl CompiledSystemExt for CompiledSystem {
 
     fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<Exec, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
-        // let NoxprNode::Jax(func) = dbg!(&*self.computation.func.inner.node) else {
-        //     todo!()
-        // };
         let input_arrays = self.arg_arrays(py, world)?;
         let py_code = "import jax
 def build_expr(jit, args):
@@ -194,6 +192,24 @@ def build_expr(jit, args):
         );
 
         Ok(exec)
+    }
+
+    fn compile_jax_module(&self, py: Python<'_>) -> Result<PyObject, Error> {
+        let func = noxpr_to_callable(self.computation.func.clone());
+
+        let py_code = "
+import jax
+def build_expr(func):
+    res = jax.jit(func)
+    return res";
+
+        let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
+            .getattr("build_expr")?
+            .into();
+
+        let comp = fun.call1(py, (func,))?;
+
+        Ok(comp)
     }
 }
 

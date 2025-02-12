@@ -1,6 +1,5 @@
 # ruff: noqa: F403
 # ruff: noqa: F405
-
 import code
 import inspect
 import re
@@ -456,8 +455,21 @@ class World(WorldBuilder):
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
 
+    def to_jax(
+        self,
+        system: System,
+        sim_time_step: float = 1 / 120.0,
+        run_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
+        max_ticks: Optional[int] = None,
+    ) -> object:
+        obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
+            system, sim_time_step, run_time_step, default_playback_speed, max_ticks
+        )
+        sim_object = jaxsim.JaxSim(
+            obj, ins, outs, state, dictionary, entity_dict, component_entity_dict
+        )
+        return sim_object
+
     def glb(self, url: str) -> Scene:
         return Scene(self.insert_asset(Glb(url)))  # type: ignore
-
-    def shape(self, mesh: Mesh, material: Material) -> Shape:
-        return Shape(self.insert_asset(mesh), self.insert_asset(material))  # type: ignore

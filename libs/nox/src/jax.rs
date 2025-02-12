@@ -379,6 +379,7 @@ impl JaxNoxprFn {
             .tracer
             .visit(&self.inner.inner)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
+        self.tracer.cache.clear();
         Ok(out)
     }
 
