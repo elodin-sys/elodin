@@ -71,4 +71,6 @@ directories = "5.0.1"
 # temp adcs
 roci-adcs.path = "../roci/adcs"
 
-s10.path=  "../s10"
+s10.path = "../s10"
+
+zerocopy.version = "0.8.2"

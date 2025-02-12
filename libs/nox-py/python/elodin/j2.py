@@ -1,5 +1,5 @@
-import numpy as np
-from numpy import linalg as la
+import jax.numpy as np
+from jax.numpy import linalg as la
 
 
 class J2:
