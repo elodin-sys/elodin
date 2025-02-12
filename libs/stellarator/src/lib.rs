@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{RefCell, UnsafeCell},
     future::Future,
     pin::pin,
     task::{Context, Poll, Waker},
@@ -36,7 +36,7 @@ pub(crate) use uring as reactor;
 pub use maitake::sync;
 
 thread_local! {
-    static EXEC: Executor = Executor::default();
+    static EXEC: UnsafeCell<Option<Executor>> = UnsafeCell::new(Some(Executor::default()));
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -103,13 +103,13 @@ impl<R: Reactor> Executor<R> {
         let mut main_task = pin!(main_task);
         let waker = self.reactor.borrow_mut().waker();
         let mut cx = Context::from_waker(&waker);
-        loop {
+        let out = loop {
             self.timer.try_turn();
             self.reactor.borrow_mut().process_io()?;
             let tick = self.scheduler.tick();
             if let Poll::Ready(output) = main_task.as_mut().poll(&mut cx) {
                 self.reactor.borrow_mut().finalize_io()?;
-                return Ok(output.unwrap());
+                break Ok(output.unwrap());
             }
             let turn = self.timer.try_turn();
             if !tick.has_remaining && turn.as_ref().map(|t| t.expired == 0).unwrap_or(true) {
@@ -117,7 +117,14 @@ impl<R: Reactor> Executor<R> {
                     .borrow_mut()
                     .wait_for_io(turn.and_then(|turn| turn.time_to_next_deadline()))?;
             }
+        };
+        unsafe {
+            EXEC.with(|exec| {
+                let exec = &mut *exec.get();
+                drop(exec.take().expect("missing reactor"));
+            })
         }
+        out
     }
 }
 
@@ -139,11 +146,16 @@ where
 
 impl Executor<DefaultReactor> {
     pub(crate) fn with<R>(f: impl for<'a> FnOnce(&'a Self) -> R) -> R {
-        EXEC.with(|exec| f(exec))
+        EXEC.with(|exec| {
+            // safety: We only ever gain mutable access to the executor when `run` is complete,
+            // and we are removing the executor so this is safe
+            let exec = unsafe { &*exec.get() };
+            f(exec.as_ref().expect("missing executor"))
+        })
     }
 
     pub(crate) fn with_reactor<R>(f: impl for<'a> FnOnce(&'a mut DefaultReactor) -> R) -> R {
-        EXEC.with(|exec| {
+        Self::with(|exec| {
             let mut reactor = exec
                 .reactor
                 .try_borrow_mut()
