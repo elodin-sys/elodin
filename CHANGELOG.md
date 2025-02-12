@@ -1,13 +1,15 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Fix an issue where a panic could be caused when a stellarator executor was dropped from a thread local. Now the executor is manually dropped when `stellarator::run` finished.
+
+## v0.11
+
+### v0.11.3
 - **(fix)** Fix bug where it wasn't possible to set entity or component metadata from Lua config. The following should now work:
   ```lua
   SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }):msg()
   ```
-
-## v0.11
+- **(fix)** Fix an issue where a panic could be caused when a stellarator executor was dropped from a thread local. Now the executor is manually dropped when `stellarator::run` finished.
 
 ### v0.11.2
 - **(breaking)** Replace message-specific `elodin-db` Lua methods with generic `send_msg()` and `send_msgs()`.
