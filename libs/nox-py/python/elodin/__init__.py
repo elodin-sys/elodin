@@ -26,6 +26,8 @@ import numpy
 from jax.tree_util import tree_flatten, tree_unflatten
 from typing_extensions import TypeVarTuple, Unpack
 
+import elodin.jaxsim
+
 from .elodin import *
 
 __doc__ = elodin.__doc__

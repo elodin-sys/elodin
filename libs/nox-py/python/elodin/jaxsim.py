@@ -134,5 +134,61 @@ class JaxSim:
                     if name == component_name:
                         return self.state[d_p][entity_index]
 
-    def get_dictionary(self):
-        return self.dictionary
+    def set_state(self, component_name, entity_name, value):
+        """
+        Sets the state of a specific component by name.
+
+        Parameters:
+        component_name : str
+            The name of the component to set the state for.
+        entity_name : str
+            The name of the entity whose state is to be set.
+        value : object
+            The value to set the state to.
+
+        Returns:
+        object
+            The state of the specified component for the specified entity.
+        """
+        if component_name is None:
+            raise Exception("Component name must be provided")
+        else:
+            if entity_name is None:
+                raise Exception("Entity name must be provided")
+            else:
+                try:
+                    entity_id = self.entity_dict[entity_name]
+                except KeyError:
+                    raise Exception(f"Entity {entity_name} not found in world")
+                try:
+                    component_entity_map = self.component_entity_dict[component_name]
+                except KeyError:
+                    raise Exception(f"Component {component_name} not found in world")
+                try:
+                    entity_index = component_entity_map.index(entity_id)
+                except ValueError:
+                    raise Exception(f"Entity {entity_name} not found in component {component_name}")
+                for c_p, d_p, name in self.map:
+                    if name == component_name:
+                        if self.state[d_p][entity_index].shape == value.shape:
+                            self.state[d_p][entity_index] = value
+                        else:
+                            raise Exception(
+                                f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {self.state[d_p][entity_index].shape}"
+                            )
+
+    def print_dictionary(self):
+        """
+        Prints a dictionary of component names to entity names in the world. and the shape of the state.
+        """
+        for component_name, entity_ids in self.component_entity_dict.items():
+            entity_names_shapes = []
+            for name, id in self.entity_dict.items():
+                if id in entity_ids:
+                    # Find the corresponding state shape
+                    for c_p, d_p, comp_name in self.map:
+                        if comp_name == component_name:
+                            entity_index = self.component_entity_dict[component_name].index(id)
+                            shape = self.state[d_p][entity_index].shape
+                            entity_names_shapes.append(f"{name} (shape: {shape})")
+            print(f"{component_name}: {', '.join(entity_names_shapes)}")
