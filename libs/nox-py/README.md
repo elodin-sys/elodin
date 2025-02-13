@@ -25,4 +25,14 @@ sim.step(500)
 
 # Retrieve the state of a specific component
 state = sim.get_state(component_name="att_est", entity_name="OreSat")
+
+print(state)
+
+# Set the state of a specific component
+sim.set_state(component_name="att_est", entity_name="OreSat", value=np.array([1.0, 0.0, 0.0, 0.0]))
+
+# Print the component dictionary with entity shapes
+sim.print_dictionary()
+```
+
 print(state)
