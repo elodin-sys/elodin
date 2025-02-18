@@ -1,7 +1,7 @@
 use impeller2::{
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, Msg, MsgExt, PacketId},
+    types::{ComponentId, EntityId, Msg, MsgExt, PacketId, Timestamp},
 };
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
@@ -9,7 +9,7 @@ use std::{borrow::Cow, time::Duration};
 
 use crate::{
     metadata::{ComponentMetadata, EntityMetadata},
-    MaxTick,
+    LastUpdated,
 };
 
 use crate::AssetId;
@@ -28,11 +28,31 @@ impl Msg for VTableMsg {
 pub struct Stream {
     #[serde(default)]
     pub filter: StreamFilter,
-    pub time_step: Option<Duration>,
     #[serde(default)]
-    pub start_tick: Option<u64>,
+    pub behavior: StreamBehavior,
     #[serde(default)]
     pub id: StreamId,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct FixedRateBehavior {
+    pub initial_timestamp: InitialTimestamp,
+    pub timestep: Option<Duration>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub enum InitialTimestamp {
+    #[default]
+    Earliest,
+    Latest,
+    Manual(Timestamp),
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub enum StreamBehavior {
+    #[default]
+    RealTime,
+    FixedRate(FixedRateBehavior),
 }
 
 pub type StreamId = u64;
@@ -51,16 +71,16 @@ impl Msg for Stream {
 pub struct SetStreamState {
     pub id: StreamId,
     pub playing: Option<bool>,
-    pub tick: Option<u64>,
+    pub timestamp: Option<Timestamp>,
     pub time_step: Option<Duration>,
 }
 
 impl SetStreamState {
-    pub fn rewind(id: StreamId, tick: u64) -> Self {
+    pub fn rewind(id: StreamId, tick: Timestamp) -> Self {
         Self {
             id,
             playing: None,
-            tick: Some(tick),
+            timestamp: Some(tick),
             time_step: None,
         }
     }
@@ -73,9 +93,10 @@ impl Msg for SetStreamState {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetTimeSeries {
     pub id: PacketId,
-    pub range: Range<u64>,
+    pub range: Range<Timestamp>,
     pub entity_id: EntityId,
     pub component_id: ComponentId,
+    pub limit: Option<usize>,
 }
 
 impl Msg for GetTimeSeries {
@@ -175,13 +196,13 @@ impl Msg for DumpAssets {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SubscribeMaxTick;
+pub struct SubscribeLastUpdated;
 
-impl Msg for SubscribeMaxTick {
+impl Msg for SubscribeLastUpdated {
     const ID: PacketId = [224, 0, 17];
 }
 
-impl Msg for MaxTick {
+impl Msg for LastUpdated {
     const ID: PacketId = [224, 0, 18];
 }
 
@@ -272,4 +293,36 @@ impl mlua::FromLua for SetEntityMetadata {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         mlua::LuaSerdeExt::from_value(lua, value)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetEarliestTimestamp;
+
+impl Msg for GetEarliestTimestamp {
+    const ID: PacketId = [224, 0, 22];
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct EarliestTimestamp(pub Timestamp);
+
+impl Msg for EarliestTimestamp {
+    const ID: PacketId = [224, 0, 23];
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct DumpSchema;
+
+impl Msg for DumpSchema {
+    const ID: PacketId = [224, 0, 24];
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct DumpSchemaResp {
+    pub schemas: Vec<Schema<Vec<u64>>>,
+}
+
+impl Msg for DumpSchemaResp {
+    const ID: PacketId = [224, 0, 25];
 }

@@ -59,7 +59,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                self.#ident.apply_value(component_id, entity_id, value.clone());
+                self.#ident.apply_value(component_id, entity_id, value.clone(), timestamp.clone());
             }
         }
     });
@@ -68,7 +68,8 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             fn apply_value(&mut self,
                             component_id: #impeller::types::ComponentId,
                             entity_id: #impeller::types::EntityId,
-                            view: #impeller::types::ComponentView<'_>
+                            view: #impeller::types::ComponentView<'_>,
+                            timestamp: Option<#impeller::types::Timestamp>
             ) {
                 #(#if_arms)*
             }

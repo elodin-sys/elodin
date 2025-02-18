@@ -22,7 +22,7 @@ pub enum Args {
         addr: SocketAddr,
         #[arg(long, default_value = "false")]
         no_s10: bool,
-        #[arg(long, default_value = "false")]
+        #[arg(long, default_value = None)]
         liveness_port: Option<u16>,
     },
     Plan {

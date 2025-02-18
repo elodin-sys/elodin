@@ -87,3 +87,9 @@ impl<A, B: ?Sized + zerocopy::TryFromBytes> From<zerocopy::TryCastError<A, B>> f
         }
     }
 }
+
+impl<A, B: ?Sized + zerocopy::FromBytes> From<zerocopy::SizeError<A, B>> for Error {
+    fn from(_value: zerocopy::SizeError<A, B>) -> Self {
+        Error::OffsetOverflow
+    }
+}

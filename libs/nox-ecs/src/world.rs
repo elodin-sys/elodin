@@ -4,13 +4,12 @@ use std::time::Duration;
 use crate::utils::SchemaExt;
 use assets::Handle;
 use bytemuck::Pod;
-use elodin_db::{ComponentSchema, MetadataExt, DB};
+use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
 use impeller2::{
     component::{Asset, Component},
     types::{ComponentView, EntityId},
 };
-use impeller2_server::init_db;
 use impeller2_wkt::{ComponentMetadata, Material, Mesh};
 //use impeller::{well_known, Asset, AssetStore, Component, ComponentValue, ComponentMetadata, ValueRepr};
 
@@ -241,8 +240,6 @@ impl World {
     }
 
     pub fn write_to_dir(&mut self, world_dir: &Path) -> Result<(), Error> {
-        let db = DB::create(world_dir.join("db"))?;
-        init_db(&db, self)?;
         self.write(world_dir.join("world"))?;
         Ok(())
     }

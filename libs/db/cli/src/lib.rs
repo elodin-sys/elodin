@@ -1,7 +1,8 @@
 use impeller2::{
     com_de::Decomponentize,
+    schema::Schema,
     table::{Entry, VTableBuilder},
-    types::{ComponentId, EntityId, Msg, PacketId, PrimType},
+    types::{ComponentId, EntityId, Msg, OwnedTimeSeries, PacketId, PrimType, Timestamp},
 };
 
 use impeller2::types::{LenPacket, MsgExt};
@@ -32,7 +33,7 @@ use stellarator::{
     io::{OwnedReader, OwnedWriter, SplitExt},
     net::TcpStream,
 };
-use zerocopy::IntoBytes;
+use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
 struct Client {
     rx: impeller2_stella::PacketStream<OwnedReader<TcpStream>>,
@@ -70,29 +71,95 @@ impl Client {
         &mut self,
         component_id: u64,
         entity_id: u64,
-        start: u64,
-        stop: u64,
+        start: Option<i64>,
+        stop: Option<i64>,
     ) -> anyhow::Result<()> {
+        let start = start.unwrap_or(i64::MIN);
+        let stop = stop.unwrap_or(i64::MAX);
         let id = fastrand::u64(..).to_le_bytes()[..3]
             .try_into()
             .expect("id wrong size");
 
+        let component_id = ComponentId(component_id);
+        self.tx
+            .send(GetSchema { component_id }.to_len_packet())
+            .await
+            .0?;
+
+        let buf = vec![0u8; 8 * 1024];
+        let pkt = self.rx.next(buf).await?;
+        let schema = match &pkt {
+            impeller2::types::OwnedPacket::Msg(m) if m.id == SchemaMsg::ID => {
+                m.parse::<SchemaMsg>()?
+            }
+            _ => return Err(anyhow::anyhow!("wrong msg type")),
+        };
+
+        let start = Timestamp(start);
+        let stop = Timestamp(stop);
         let msg = GetTimeSeries {
             id,
             range: start..stop,
             entity_id: EntityId(entity_id),
-            component_id: ComponentId(component_id),
+            component_id,
+            limit: Some(100),
         };
 
         self.tx.send(msg.to_len_packet()).await.0?;
         let buf = vec![0u8; 8 * 1024];
-        let pkt = self.rx.next(buf).await.unwrap();
-        match &pkt {
-            impeller2::types::OwnedPacket::TimeSeries(time_series) => {
-                println!("time series {:?}", &time_series.buf[..]);
-                Ok(())
+        let pkt = self.rx.next(buf).await?;
+        let time_series = match &pkt {
+            impeller2::types::OwnedPacket::TimeSeries(time_series) => time_series,
+            _ => return Err(anyhow::anyhow!("wrong msg type")),
+        };
+
+        fn print_time_series_as_table<
+            T: Immutable + TryFromBytes + Copy + std::fmt::Display + Default + 'static,
+        >(
+            time_series: &OwnedTimeSeries<Vec<u8>>,
+            schema: Schema<Vec<u64>>,
+        ) -> Result<(), anyhow::Error> {
+            let len = schema.shape().iter().product();
+            let data = time_series
+                .data()
+                .map_err(|err| anyhow::anyhow!("{err:?} failed to get data"))?;
+            let buf = <[T]>::try_ref_from_bytes(data)
+                .map_err(|_| anyhow::anyhow!("failed to get data"))?;
+            let mut builder = tabled::builder::Builder::default();
+            builder.push_record(["TIME".to_string(), "DATA".to_string()]);
+            for (chunk, timestamp) in buf
+                .chunks(len)
+                .zip(time_series.timestamps().unwrap().iter())
+            {
+                let view = nox::ArrayView::from_buf_shape_unchecked(chunk, schema.shape());
+                let epoch = hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0);
+                builder.push_record([epoch.to_string(), view.to_string()])
             }
-            _ => Err(anyhow::anyhow!("wrong msg type")),
+            println!(
+                "{}",
+                builder
+                    .build()
+                    .with(tabled::settings::Style::modern_rounded())
+                    .with(tabled::settings::style::BorderColor::filled(
+                        tabled::settings::Color::FG_BLUE
+                    ))
+            );
+            Ok(())
+        }
+
+        let schema = schema.0;
+        match schema.prim_type() {
+            PrimType::U8 => print_time_series_as_table::<u8>(time_series, schema),
+            PrimType::U16 => print_time_series_as_table::<u16>(time_series, schema),
+            PrimType::U32 => print_time_series_as_table::<u32>(time_series, schema),
+            PrimType::U64 => print_time_series_as_table::<u64>(time_series, schema),
+            PrimType::I8 => print_time_series_as_table::<i8>(time_series, schema),
+            PrimType::I16 => print_time_series_as_table::<i16>(time_series, schema),
+            PrimType::I32 => print_time_series_as_table::<i32>(time_series, schema),
+            PrimType::I64 => print_time_series_as_table::<i64>(time_series, schema),
+            PrimType::Bool => print_time_series_as_table::<bool>(time_series, schema),
+            PrimType::F32 => print_time_series_as_table::<f32>(time_series, schema),
+            PrimType::F64 => print_time_series_as_table::<f64>(time_series, schema),
         }
     }
 
@@ -597,7 +664,10 @@ impl Decomponentize for DebugSink {
         component_id: ComponentId,
         entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
+        timestamp: Option<Timestamp>,
     ) {
-        println!("({component_id:?},{entity_id:?}) = {value:?}");
+        let epoch = timestamp
+            .map(|timestamp| hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0));
+        println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value}");
     }
 }

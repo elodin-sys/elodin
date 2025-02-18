@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::*;
 
+use impeller2::types::Timestamp;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use nox_ecs::Compiled;
 
@@ -31,10 +32,12 @@ impl Exec {
             .with_style(
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
-        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world)?;
+        let mut timestamp = Timestamp::now();
+        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
-            nox_ecs::impeller2_server::commit_world_head(&self.db, &mut self.exec);
+            nox_ecs::impeller2_server::commit_world_head(&self.db, &mut self.exec, timestamp)?;
+            timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;
             progress_bar.inc(1);
         }
@@ -71,7 +74,11 @@ impl Exec {
         let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
         let path = temp_file.path().to_owned();
         nox_ecs::arrow::write_ipc(
-            entity.time_series.get(..).expect("failed to get data"),
+            entity
+                .time_series
+                .get_range(Timestamp(i64::MIN)..Timestamp(i64::MAX))
+                .expect("failed to get data")
+                .1,
             &entity.schema,
             &component.metadata.load(),
             path.clone(),

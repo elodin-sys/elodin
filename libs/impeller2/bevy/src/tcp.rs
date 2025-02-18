@@ -19,8 +19,8 @@ impl TcpImpellerPlugin {
 impl Plugin for TcpImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         let addr = self.addr;
-        let (mut incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(512, FilledRecycle);
-        let (outgoing_packet_tx, mut outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(512);
+        let (mut incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(4096, FilledRecycle);
+        let (outgoing_packet_tx, mut outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
         let stream_id = fastrand::u64(..);
         std::thread::spawn(move || {
             let res: Result<(), miette::Error> = stellarator::run(|| async move {

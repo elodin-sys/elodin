@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    types::{ComponentId, ComponentView, EntityId},
+    types::{ComponentId, ComponentView, EntityId, Timestamp},
 };
 
 pub trait Componentize {
@@ -56,6 +56,7 @@ pub trait Decomponentize {
         component_id: ComponentId,
         entity_id: EntityId,
         value: ComponentView<'_>,
+        timestamp: Option<Timestamp>,
     );
 }
 
@@ -65,21 +66,23 @@ impl Decomponentize for () {
         _component_id: ComponentId,
         _entity_id: EntityId,
         _value: ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
     }
 }
 
 impl<F> Decomponentize for F
 where
-    F: for<'a> FnMut(ComponentId, EntityId, ComponentView<'_>),
+    F: for<'a> FnMut(ComponentId, EntityId, ComponentView<'_>, Option<Timestamp>),
 {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: EntityId,
         value: ComponentView<'_>,
+        timestamp: Option<Timestamp>,
     ) {
-        (self)(component_id, entity_id, value)
+        (self)(component_id, entity_id, value, timestamp)
     }
 }
 
@@ -95,10 +98,11 @@ macro_rules! impl_decomponentize {
                 component_id: ComponentId,
                 entity_id: EntityId,
                 value: ComponentView<'_>,
+                timestamp: Option<Timestamp>
             ) {
                 let ($($ty,)*) = self;
                 $(
-                    $ty.apply_value(component_id, entity_id, value.clone());
+                    $ty.apply_value(component_id, entity_id, value.clone(), timestamp);
                 )*
             }
         }

@@ -44,6 +44,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
                     #component_id,
                     #impeller::types::EntityId(#id),
                     self.#ident.as_component_view(),
+                    None
                 );
             }
         } else {

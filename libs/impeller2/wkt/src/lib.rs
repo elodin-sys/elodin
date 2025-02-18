@@ -1,5 +1,6 @@
 #[cfg(feature = "nox")]
 use impeller2::component::Component;
+use impeller2::types::Timestamp;
 use serde::{Deserialize, Serialize};
 
 mod assets;
@@ -39,6 +40,7 @@ impl Color {
         Self { r, g, b }
     }
 }
+
 #[derive(Clone, Serialize, Deserialize, Default, Copy)]
 #[cfg_attr(
     feature = "bevy",
@@ -53,6 +55,7 @@ impl impeller2::com_de::Decomponentize for Tick {
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
         if component_id != Tick::COMPONENT_ID {
             return;
@@ -85,6 +88,12 @@ impl impeller2::component::Component for Tick {
 )]
 pub struct SimulationTimeStep(pub f64);
 
+impl SimulationTimeStep {
+    pub fn as_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.0)
+    }
+}
+
 impl impeller2::component::Component for SimulationTimeStep {
     const NAME: &'static str = "simulation_time_step";
     const ASSET: bool = false;
@@ -106,6 +115,7 @@ impl impeller2::com_de::Decomponentize for SimulationTimeStep {
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
         if component_id != SimulationTimeStep::COMPONENT_ID {
             return;
@@ -120,7 +130,7 @@ impl impeller2::com_de::Decomponentize for SimulationTimeStep {
 
 #[derive(Clone, Serialize, Deserialize, Copy)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
-pub struct MaxTick(pub u64);
+pub struct LastUpdated(pub Timestamp);
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
@@ -157,6 +167,7 @@ impl impeller2::com_de::Decomponentize for WorldPos {
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
         if component_id != WorldPos::COMPONENT_ID {
             return;
@@ -169,5 +180,51 @@ impl impeller2::com_de::Decomponentize for WorldPos {
         self.att = nox::Quaternion(nox::Tensor::from_buf(att));
         let pos: [f64; 3] = buf[4..].try_into().expect("slice size wrong");
         self.pos = nox::Tensor::from_buf(pos);
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Copy)]
+#[cfg_attr(
+    feature = "bevy",
+    derive(bevy::prelude::Resource, bevy::prelude::Component)
+)]
+pub struct CurrentTimestamp(pub Timestamp);
+
+impl Default for CurrentTimestamp {
+    fn default() -> Self {
+        Self(Timestamp::EPOCH)
+    }
+}
+
+impl impeller2::component::Component for CurrentTimestamp {
+    const NAME: &'static str = "current_timestamp";
+
+    fn schema() -> impeller2::schema::Schema<Vec<u64>> {
+        impeller2::schema::Schema::new(
+            Self::COMPONENT_ID,
+            impeller2::types::PrimType::I64,
+            [1usize],
+        )
+        .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller2::com_de::Decomponentize for CurrentTimestamp {
+    fn apply_value(
+        &mut self,
+        component_id: impeller2::types::ComponentId,
+        _entity_id: impeller2::types::EntityId,
+        value: impeller2::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) {
+        if component_id != CurrentTimestamp::COMPONENT_ID {
+            return;
+        }
+        let impeller2::types::ComponentView::I64(view) = value else {
+            return;
+        };
+        let buf = view.buf();
+        self.0 = Timestamp(buf[0]);
     }
 }

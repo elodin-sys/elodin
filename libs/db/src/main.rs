@@ -22,8 +22,9 @@ enum Commands {
 
 #[derive(clap::Args, Clone, Debug)]
 struct RunArgs {
+    #[clap(default_value = "[::]:2240")]
     addr: SocketAddr,
-    path: PathBuf,
+    path: Option<PathBuf>,
     #[clap(long)]
     pub config: Option<PathBuf>,
 }
@@ -46,6 +47,11 @@ fn main() -> miette::Result<()> {
     stellarator::run(|| async {
         match args.command {
             Commands::Run(RunArgs { addr, path, config }) => {
+                let path = path.unwrap_or_else(|| {
+                    let dirs =
+                        directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+                    dirs.data_dir().join("data")
+                });
                 let server = Server::new(path, addr).into_diagnostic()?;
                 let db = stellarator::spawn(server.run());
                 if let Some(lua_config) = config {

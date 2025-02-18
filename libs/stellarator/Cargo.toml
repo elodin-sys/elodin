@@ -47,7 +47,7 @@ tokio.optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7.1"
-spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex"] }
+spin = { version = "0.9.8", default-features = false, features = ["use_ticket_mutex", "rwlock"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 polling = "3.7"

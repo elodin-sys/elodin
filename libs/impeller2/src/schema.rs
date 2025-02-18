@@ -7,7 +7,7 @@ use crate::{
     types::{ComponentId, PrimType},
 };
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Schema<S: Buf<u64>> {
     component_id: ComponentId,
     prim_type: PrimType,

@@ -11,6 +11,7 @@ alloc = []
 bevy = ["dep:bevy"]
 mlua = ["dep:mlua"]
 thingbuf = ["dep:thingbuf", "replace_with"]
+hifitime = ["dep:hifitime"]
 
 [dependencies]
 # ser-des
@@ -52,3 +53,7 @@ thingbuf.version = "0.1.6"
 thingbuf.optional = true
 replace_with.version = "0.1.7"
 replace_with.optional = true
+
+# integrations
+hifitime.version = "4.0.2"
+hifitime.optional = true

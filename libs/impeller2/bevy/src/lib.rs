@@ -9,9 +9,6 @@ use bevy::{
     ecs::system::SystemState,
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
-use impeller2::types::{
-    ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt,
-};
 use impeller2::types::{FilledRecycle, MaybeFilledPacket};
 use impeller2::util::concat_str;
 use impeller2::{
@@ -20,10 +17,18 @@ use impeller2::{
     registry::HashMapRegistry,
     types::{OwnedPacket, PacketId, PrimType},
 };
+use impeller2::{
+    schema::Schema,
+    types::{
+        ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt, Timestamp,
+    },
+};
 use impeller2_wkt::{
-    AssetId, BodyAxes, ComponentMetadata, DbSettings, DumpAssets, DumpMetadata, DumpMetadataResp,
-    EntityMetadata, GetDbSettings, Glb, IsRecording, Line3d, Material, MaxTick, Mesh, Panel,
-    Stream, StreamFilter, StreamId, SubscribeMaxTick, Tick, VTableMsg, VectorArrow, WorldPos,
+    AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
+    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata,
+    FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, SubscribeLastUpdated,
+    VTableMsg, VectorArrow, WorldPos,
 };
 use nox::{Array, ArrayBuf, Dyn};
 use serde::de::DeserializeOwned;
@@ -31,7 +36,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
     ops::Deref,
-    time::Duration,
 };
 use thingbuf::mpsc;
 
@@ -59,7 +63,6 @@ fn sink_inner(
     world: &mut World,
     packet_rx: &mut PacketRx,
     vtable_registry: &mut HashMapRegistry,
-    packet_id_handlers: &mut PacketIdHandlers,
     packet_handlers: &mut PacketHandlers,
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
@@ -72,7 +75,10 @@ fn sink_inner(
             OwnedPacket::Table(table) => table.id,
             OwnedPacket::TimeSeries(time_series) => time_series.id,
         };
-        if let Some(handler) = packet_id_handlers.remove(&pkt_id) {
+        let handler = world
+            .get_resource_mut::<PacketIdHandlers>()
+            .and_then(|mut handlers| handlers.remove(&pkt_id));
+        if let Some(handler) = handler {
             if let Err(err) = world.run_system_with_input(handler, pkt) {
                 bevy::log::error!(?err, "packet id handler error");
             }
@@ -118,13 +124,22 @@ fn sink_inner(
                     e.insert(metadata.clone());
                 }
             }
-            OwnedPacket::Msg(m) if m.id == MaxTick::ID => {
-                let m = m.parse::<MaxTick>()?;
+            OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
+                let m = m.parse::<LastUpdated>()?;
                 *world_sink.max_tick = m;
             }
             OwnedPacket::Msg(m) if m.id == DbSettings::ID => {
                 let settings = m.parse::<DbSettings>()?;
                 world_sink.recording.0 = settings.recording;
+            }
+            OwnedPacket::Msg(m) if m.id == DumpSchemaResp::ID => {
+                let dump_schema = m.parse::<DumpSchemaResp>()?;
+                for schema in dump_schema.schemas {
+                    world_sink
+                        .schema_reg
+                        .0
+                        .insert(schema.component_id(), schema);
+                }
             }
             OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
                 table.sink(&*vtable_registry, &mut world_sink)?;
@@ -133,6 +148,10 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == impeller2_wkt::Asset::ID => {
                 let asset = m.parse::<impeller2_wkt::Asset>()?;
                 world_sink.asset_store.insert(asset.id, asset.buf.to_vec());
+            }
+            OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
+                let earliest_timestamp = m.parse::<EarliestTimestamp>()?;
+                world_sink.commands.insert_resource(earliest_timestamp);
             }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
@@ -145,19 +164,16 @@ fn sink_inner(
 pub fn sink(world: &mut World, world_sink_state: &mut SystemState<WorldSink>) {
     world.resource_scope(|world, mut packet_rx: Mut<PacketRx>| {
         world.resource_scope(|world, mut vtable_reg: Mut<HashMapRegistry>| {
-            world.resource_scope(|world, mut packet_id_handlers: Mut<PacketIdHandlers>| {
-                world.resource_scope(|world, mut packet_handlers: Mut<PacketHandlers>| {
-                    if let Err(err) = sink_inner(
-                        world,
-                        &mut packet_rx,
-                        &mut vtable_reg,
-                        &mut packet_id_handlers,
-                        &mut packet_handlers,
-                        world_sink_state,
-                    ) {
-                        bevy::log::error!(?err, "sink failed")
-                    }
-                })
+            world.resource_scope(|world, mut packet_handlers: Mut<PacketHandlers>| {
+                if let Err(err) = sink_inner(
+                    world,
+                    &mut packet_rx,
+                    &mut vtable_reg,
+                    &mut packet_handlers,
+                    world_sink_state,
+                ) {
+                    bevy::log::error!(?err, "sink failed")
+                }
             })
         })
     })
@@ -203,6 +219,9 @@ impl ComponentMetadataRegistry {
     }
 }
 
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct ComponentSchemaRegistry(pub HashMap<ComponentId, Schema<Vec<u64>>>);
+
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
     query: Query<'w, 's, &'static mut ComponentValueMap>,
@@ -212,9 +231,11 @@ pub struct WorldSink<'w, 's> {
     metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
     asset_adapters: ResMut<'w, AssetAdapters>,
     component_adapters: ResMut<'w, ComponentAdapters>,
-    max_tick: ResMut<'w, MaxTick>,
+    max_tick: ResMut<'w, LastUpdated>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
     recording: ResMut<'w, IsRecording>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
+    schema_reg: ResMut<'w, ComponentSchemaRegistry>,
 }
 
 impl Decomponentize for WorldSink<'_, '_> {
@@ -223,6 +244,7 @@ impl Decomponentize for WorldSink<'_, '_> {
         component_id: ComponentId,
         entity_id: impeller2::types::EntityId,
         view: ComponentView<'_>,
+        timestamp: Option<Timestamp>,
     ) {
         let e = if let Some(entity) = self.entity_map.get(&entity_id) {
             let Some(e) = self.commands.get_entity(*entity) else {
@@ -282,6 +304,9 @@ impl Decomponentize for WorldSink<'_, '_> {
                 return;
             };
             adapter.insert(&mut self.commands, &mut self.entity_map, entity_id, view);
+        }
+        if let Some(timestamp) = timestamp {
+            self.current_timestamp.0 = timestamp;
         }
     }
 }
@@ -598,7 +623,7 @@ where
         value: ComponentView<'_>,
     ) {
         let mut val = C::default();
-        val.apply_value(C::COMPONENT_ID, entity_id, value);
+        val.apply_value(C::COMPONENT_ID, entity_id, value, None);
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
             let Some(e) = commands.get_entity(*entity) else {
                 return;
@@ -755,7 +780,7 @@ impl Plugin for DefaultAdaptersPlugin {
         app.add_impeller_asset::<Line3d>();
 
         app.add_impeller_component::<WorldPos>();
-        app.add_impeller_component::<Tick>();
+        app.add_impeller_component::<CurrentTimestamp>();
         app.add_impeller_component::<impeller2_wkt::SimulationTimeStep>();
     }
 }
@@ -766,11 +791,13 @@ impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(DefaultAdaptersPlugin)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
-            .insert_resource(impeller2_wkt::Tick(0))
-            .insert_resource(impeller2_wkt::MaxTick(0))
+            .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
+            .insert_resource(impeller2_wkt::LastUpdated(Timestamp::now()))
+            .insert_resource(impeller2_wkt::EarliestTimestamp(Timestamp::now()))
             .init_resource::<IsRecording>()
             .init_resource::<EntityMap>()
             .init_resource::<ComponentMetadataRegistry>()
+            .init_resource::<ComponentSchemaRegistry>()
             .init_resource::<AssetStore>()
             .init_resource::<HashMapRegistry>()
             .init_resource::<PacketIdHandlers>()
@@ -835,25 +862,25 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
                 component_id: None,
                 entity_id: None,
             },
-            time_step: None,
-            start_tick: Some(0),
+            behavior: StreamBehavior::FixedRate(FixedRateBehavior {
+                initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
+                timestep: None,
+            }),
             id: stream_id,
         }
         .to_len_packet(),
         Stream {
-            filter: StreamFilter {
-                component_id: None,
-                entity_id: None,
-            },
-            time_step: Some(Duration::ZERO),
-            start_tick: None,
+            filter: StreamFilter::default(),
+            behavior: StreamBehavior::RealTime,
             id: fastrand::u64(..),
         }
         .to_len_packet(),
+        GetEarliestTimestamp.to_len_packet(),
         DumpAssets.to_len_packet(),
         DumpMetadata.to_len_packet(),
         GetDbSettings.to_len_packet(),
-        SubscribeMaxTick.to_len_packet(),
+        SubscribeLastUpdated.to_len_packet(),
+        DumpSchema.to_len_packet(),
     ]
     .into_iter()
 }
