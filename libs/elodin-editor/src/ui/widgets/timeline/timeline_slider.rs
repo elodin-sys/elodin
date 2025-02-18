@@ -1,5 +1,3 @@
-use std::ops::RangeInclusive;
-
 use bevy::{
     ecs::{
         change_detection::DetectChangesMut,
@@ -9,13 +7,18 @@ use bevy::{
     prelude::{Deref, DerefMut, Res, Resource},
 };
 use bevy_egui::egui;
+use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{SetStreamState, Tick};
+use impeller2_wkt::{CurrentTimestamp, SetStreamState};
+use std::ops::RangeInclusive;
 
-use crate::ui::{colors, utils, widgets::WidgetSystem};
+use crate::ui::{
+    colors,
+    widgets::{time_label::PrettyDuration, WidgetSystem},
+};
 
 use super::{
-    get_position_range, get_segment_size, position_from_value, value_from_position, TimelineArgs,
+    get_position_range, position_from_value, value_from_position, DurationExt, TimelineArgs,
     TimelineIcons,
 };
 
@@ -38,8 +41,7 @@ fn set(get_set_value: &mut GetSetValue<'_>, value: f64) {
 pub struct Timeline<'a> {
     get_set_value: GetSetValue<'a>,
     active_range: RangeInclusive<f64>,
-    clamp_to_range: bool,
-    step: Option<f64>,
+    full_range: RangeInclusive<f64>,
     fps: f64,
     handle_image_id: Option<egui::TextureId>,
     handle_image_tint: egui::Color32,
@@ -73,9 +75,9 @@ impl<'a> Timeline<'a> {
     /// ```
     pub fn new<Num: egui::emath::Numeric>(
         value: &'a mut Num,
-        active_range: RangeInclusive<Num>,
+        active_range: RangeInclusive<i64>,
     ) -> Self {
-        let range_f64 = active_range.start().to_f64()..=active_range.end().to_f64();
+        let range_f64 = (*active_range.start() as f64)..=(*active_range.end() as f64);
         let timeline = Self::from_get_set(range_f64, move |v: Option<f64>| {
             if let Some(v) = v {
                 *value = Num::from_f64(v);
@@ -92,9 +94,8 @@ impl<'a> Timeline<'a> {
     ) -> Self {
         Self {
             get_set_value: Box::new(get_set_value),
+            full_range: active_range.clone(),
             active_range,
-            clamp_to_range: true,
-            step: Some(1.0),
             handle_image_id: None,
             handle_image_tint: colors::MINT_DEFAULT,
             handle_aspect_ratio: 0.5,
@@ -139,25 +140,10 @@ impl<'a> Timeline<'a> {
     }
 
     fn get_value(&mut self) -> f64 {
-        let value = get(&mut self.get_set_value);
-        if self.clamp_to_range {
-            let start = *self.active_range.start();
-            let end = *self.active_range.end();
-            value.clamp(start.min(end), start.max(end))
-        } else {
-            value
-        }
+        get(&mut self.get_set_value)
     }
 
-    fn set_value(&mut self, mut value: f64) {
-        if self.clamp_to_range {
-            let start = *self.active_range.start();
-            let end = *self.active_range.end();
-            value = value.clamp(start.min(end), start.max(end));
-        }
-        if let Some(step) = self.step {
-            value = (value / step).round() * step;
-        }
+    fn set_value(&mut self, value: f64) {
         set(&mut self.get_set_value, value);
     }
 
@@ -175,19 +161,25 @@ impl Timeline<'_> {
     }
 
     fn render(&mut self, ui: &mut egui::Ui, response: &egui::Response) {
-        let rect = response.rect;
+        let rect = response.rect.shrink2(egui::vec2(25.0, 0.0));
 
         let active_range_start = self.active_range.start();
         let active_range_end = self.active_range.end();
         let visual_segments = self.segments + 1;
-        let segment_size = get_segment_size(self.fps, self.segments as f64, *active_range_end);
+        let active_duration = hifitime::Duration::from_microseconds(
+            self.active_range.end() - self.active_range.start(),
+        );
+        let full_duration = active_duration.segment_round();
+        let segment_size = (full_duration / self.segments as f64).segment_round();
+        self.segments =
+            (full_duration.total_nanoseconds() / segment_size.total_nanoseconds()) as u8;
+        let segment_size = (segment_size.total_nanoseconds() / 1000) as f64;
+
+        let full_duration_float = (full_duration.total_nanoseconds() / 1000) as f64;
         let position_range = get_position_range(
             rect.x_range(),
-            self.fps,
-            self.segments as f64,
-            segment_size as f64,
-            *active_range_start,
-            *active_range_end,
+            active_range_end - active_range_start,
+            full_duration_float,
         );
 
         let value = self.get_value();
@@ -203,6 +195,8 @@ impl Timeline<'_> {
             self.set_value(new_value);
             response.changed();
         }
+        self.full_range =
+            *self.active_range.start()..=self.active_range.start() + full_duration_float;
 
         // Paint the UI
         if ui.is_rect_visible(response.rect) {
@@ -214,14 +208,17 @@ impl Timeline<'_> {
 
             // Trailing fill
 
-            let max_value = self.active_range.end();
-            let max_position_1d = position_from_value(*max_value, self.range(), position_range);
+            // let max_value =
+            //     self.active_range.start() + (full_duration.total_nanoseconds() / 1000) as f64;
+            let max_value = *self.active_range.end();
+
+            let max_position_1d = position_from_value(max_value, self.range(), position_range);
             let max_center = Timeline::pointer_center(max_position_1d, &rect);
 
             if self.trailing_fill {
                 ui.painter().rect_filled(
                     rect.with_max_x(max_center.x),
-                    widget_visuals.inactive.rounding,
+                    widget_visuals.inactive.corner_radius,
                     colors::PRIMARY_ONYX,
                 );
             }
@@ -231,7 +228,7 @@ impl Timeline<'_> {
             if self.empty_bg {
                 ui.painter().rect_filled(
                     rect,
-                    widget_visuals.inactive.rounding,
+                    widget_visuals.inactive.corner_radius,
                     widget_visuals.inactive.bg_fill,
                 );
             } else {
@@ -272,9 +269,10 @@ impl Timeline<'_> {
             } else {
                 ui.painter().rect(
                     handle_rect,
-                    visuals.rounding,
+                    visuals.corner_radius,
                     visuals.bg_fill,
                     visuals.fg_stroke,
+                    egui::StrokeKind::Inside,
                 );
             }
         }
@@ -284,39 +282,47 @@ impl Timeline<'_> {
         egui::emath::pos2(position_1d, rail_rect.center().y)
     }
 
-    fn rail_ui(&self, segments: usize, segment_size: usize, font_size: f32) -> impl egui::Widget {
+    fn rail_ui(&self, segments: usize, segment_size: f64, font_size: f32) -> impl egui::Widget {
+        let full_duration = self.full_range.end() - self.full_range.start();
         move |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.columns(segments, |columns| {
-                    for (i, column) in columns.iter_mut().enumerate().take(segments) {
-                        let column_rect = column.max_rect();
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let x_span = ui.max_rect().x_range().span() as f64;
+                let x_space = segment_size * x_span / full_duration;
+                for i in 0..segments {
+                    ui.add_space(-15.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(30.0, ui.max_rect().height()),
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                        |ui| {
+                            // label
 
-                        // label
+                            let offset = PrettyDuration(hifitime::Duration::from_microseconds(
+                                segment_size * i as f64,
+                            ));
+                            let segment_label = format!("{offset}");
+                            let label_text = egui::RichText::new(segment_label)
+                                .color(colors::PRIMARY_CREAME_6)
+                                .size(font_size);
+                            ui.add(egui::Label::new(label_text).selectable(false));
+                            let column_rect = ui.max_rect();
+                            let col_center_btm = column_rect.center_bottom();
+                            let col_center_top = column_rect.center_top();
 
-                        let segment_label = utils::time_label(segment_size * i, false);
-                        let label_text = egui::RichText::new(segment_label)
-                            .color(colors::PRIMARY_CREAME_6)
-                            .size(font_size);
+                            let top_point = egui::emath::pos2(
+                                col_center_btm.x,
+                                col_center_btm.y - ((col_center_btm.y - col_center_top.y) / 5.0),
+                            );
 
-                        column.put(column_rect, egui::Label::new(label_text).selectable(false));
-
-                        // center line
-
-                        let col_center_btm = column_rect.center_bottom();
-                        let col_center_top = column_rect.center_top();
-
-                        let top_point = egui::emath::pos2(
-                            col_center_btm.x,
-                            col_center_btm.y - ((col_center_btm.y - col_center_top.y) / 5.0),
-                        );
-
-                        column.painter().line_segment(
-                            [col_center_btm, top_point],
-                            egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
-                        );
-                    }
-                });
+                            ui.painter().line_segment(
+                                [col_center_btm, top_point],
+                                egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
+                            );
+                        },
+                    );
+                    ui.add_space(x_space as f32);
+                }
             })
             .response
         }
@@ -337,7 +343,9 @@ impl Timeline<'_> {
         self.render(ui, &response);
 
         let value = self.get_value();
-        response.changed = value != old_value;
+        if value != old_value {
+            response.mark_changed();
+        }
 
         response
     }
@@ -351,7 +359,7 @@ impl egui::Widget for Timeline<'_> {
 }
 
 #[derive(Resource, Deref, DerefMut, Clone, Debug, Default)]
-pub struct UITick(pub u64);
+pub struct UITick(pub i64);
 
 #[derive(SystemParam)]
 pub struct TimelineSlider<'w> {
@@ -396,12 +404,15 @@ impl WidgetSystem for TimelineSlider<'_> {
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
 
             if response.changed() {
-                event.send_msg(SetStreamState::rewind(**current_stream_id, tick.0))
+                event.send_msg(SetStreamState::rewind(
+                    **current_stream_id,
+                    Timestamp(tick.0),
+                ))
             }
         });
     }
 }
 
-pub fn sync_ui_tick(tick: Res<Tick>, mut ui_tick: ResMut<UITick>) {
-    ui_tick.0 = tick.0;
+pub fn sync_ui_tick(tick: Res<CurrentTimestamp>, mut ui_tick: ResMut<UITick>) {
+    ui_tick.0 = tick.0 .0;
 }

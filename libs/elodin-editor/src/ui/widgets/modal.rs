@@ -18,7 +18,7 @@ use crate::{
         colors::{self, with_opacity},
         images, theme, tiles,
         utils::MarginSides,
-        EntityData, InspectorAnchor, SettingModal, SettingModalState, ViewportRange,
+        EntityData, InspectorAnchor, SettingModal, SettingModalState,
     },
 };
 
@@ -26,7 +26,6 @@ use super::{
     button::EButton,
     label::{self, EImageLabel, ELabel},
     plot::{default_component_values, GraphBundle, GraphState},
-    timeline::timeline_ranges::TimelineRanges,
     RootWidgetSystem, WidgetSystem, WidgetSystemExt,
 };
 
@@ -84,8 +83,8 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 .frame(egui::Frame {
                     fill: colors::PRIMARY_SMOKE,
                     stroke: egui::Stroke::NONE,
-                    inner_margin: egui::Margin::same(16.0),
-                    outer_margin: egui::Margin::symmetric(4.0, 0.0),
+                    inner_margin: egui::Margin::same(16),
+                    outer_margin: egui::Margin::symmetric(4, 0),
                     ..Default::default()
                 })
                 .fixed_rect(modal_rect)
@@ -148,7 +147,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             return;
         };
 
-        let title_margin = egui::Margin::same(8.0).bottom(16.0);
+        let title_margin = egui::Margin::same(8).bottom(16.0);
         let [close_clicked] = label::label_with_buttons(
             ui,
             [close_icon],
@@ -166,7 +165,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
         ui.add(
             ELabel::new("ENTITY")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
         let selected_entity = entities_meta
@@ -202,7 +201,7 @@ impl WidgetSystem for ModalUpdateGraph<'_, '_> {
             ui.add(
                 ELabel::new("COMPONENT")
                     .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                    .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                    .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
             );
 
             let selected_component = components
@@ -294,20 +293,20 @@ impl WidgetSystem for ModalNewTile<'_> {
             .frame(egui::Frame {
                 fill: colors::PRIMARY_ONYX,
                 stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
-                inner_margin: egui::Margin::same(16.0),
-                rounding: egui::Rounding::same(4.0),
+                inner_margin: egui::Margin::same(16),
+                corner_radius: egui::CornerRadius::same(4),
                 shadow: egui::epaint::Shadow {
                     color: colors::PRIMARY_SMOKE,
-                    blur: 16.0,
-                    offset: egui::vec2(3.0, 3.0),
-                    spread: 3.0,
+                    blur: 16,
+                    offset: [3, 3],
+                    spread: 3,
                 },
                 ..Default::default()
             })
             .fixed_rect(rect)
             .show(ui.ctx(), |ui| {
                 ui.vertical(|ui| match new_tile_state {
-                    tiles::NewTileState::Viewport(_, _) => {
+                    tiles::NewTileState::Viewport(_) => {
                         ui.add_widget_with::<ModalNewViewportTile>(
                             world,
                             "modal_new_viewport_tile",
@@ -340,7 +339,6 @@ impl WidgetSystem for ModalNewTile<'_> {
 pub struct ModalNewGraphTile<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
-    timeline_ranges: Res<'w, TimelineRanges>,
     new_tile_state: ResMut<'w, tiles::NewTileState>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     tile_state: ResMut<'w, tiles::TileState>,
@@ -360,7 +358,6 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
         let icons = args;
 
         let mut new_tile_state = state_mut.new_tile_state;
-        let timeline_ranges = state_mut.timeline_ranges;
         let entities_meta = state_mut.entities_meta;
         let metadata_store = state_mut.metadata_store;
         let mut render_layer_alloc = state_mut.render_layer_alloc;
@@ -369,7 +366,6 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
         let tiles::NewTileState::Graph {
             entity_id: m_entity_id,
             component_id: m_component_id,
-            range_id: m_range_id,
             parent_id,
         } = new_tile_state.as_mut()
         else {
@@ -386,13 +382,13 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
             EImageLabel::new(icons.tile_graph)
                 .image_tint(colors::MINT_DEFAULT)
                 .bg_color(with_opacity(colors::MINT_DEFAULT, 0.01))
-                .margin(egui::Margin::same(1.0)),
+                .margin(egui::Margin::same(1)),
         );
 
         ui.add(
             ELabel::new("Create new point graph")
                 .text_color(colors::PRIMARY_CREAME)
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
         // ENTITY
@@ -400,7 +396,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
         ui.add(
             ELabel::new("ENTITY")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
         let selected_entity = entities_meta
@@ -444,7 +440,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
         ui.add(
             ELabel::new("COMPONENT")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
         let components = if let Some((_, _, components, _)) = selected_entity {
@@ -485,37 +481,6 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
                             Some(*component_id),
                             metadata.name.clone(),
                         );
-                    }
-                });
-        });
-
-        // RANGE
-
-        ui.add(
-            ELabel::new("RANGE")
-                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
-        );
-
-        let ro_tagged_ranges = timeline_ranges.0.clone();
-        let selected_range_label = m_range_id
-            .as_ref()
-            .and_then(|rid| timeline_ranges.0.get(rid))
-            .map_or("Default", |r| &r.label)
-            .to_owned();
-
-        ui.scope(|ui| {
-            theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_salt("RANGE")
-                .width(width)
-                .selected_text(selected_range_label)
-                .show_ui(ui, |ui| {
-                    theme::configure_combo_item(ui.style_mut());
-
-                    ui.selectable_value(m_range_id, None, "Default");
-
-                    for (range_id, range) in ro_tagged_ranges {
-                        ui.selectable_value(m_range_id, Some(range_id), range.label);
                     }
                 });
         });
@@ -564,7 +529,7 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
                     entity_id.to_owned(),
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
-                let bundle = GraphBundle::new(&mut render_layer_alloc, entities, *m_range_id);
+                let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
                 tile_state.create_graph_tile(*parent_id, bundle);
 
                 close_modal = true;
@@ -580,10 +545,8 @@ impl WidgetSystem for ModalNewGraphTile<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalNewViewportTile<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
-    timeline_ranges: Res<'w, TimelineRanges>,
     new_tile_state: ResMut<'w, tiles::NewTileState>,
     tile_state: ResMut<'w, tiles::TileState>,
-    viewport_range: ResMut<'w, ViewportRange>,
 }
 
 impl WidgetSystem for ModalNewViewportTile<'_, '_> {
@@ -600,12 +563,10 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
         let icons = args;
 
         let mut new_tile_state = state_mut.new_tile_state;
-        let timeline_ranges = state_mut.timeline_ranges;
         let entities_meta = state_mut.entities_meta;
         let mut tile_state = state_mut.tile_state;
-        let mut viewport_range = state_mut.viewport_range;
 
-        let tiles::NewTileState::Viewport(m_entity_id, m_range_id) = new_tile_state.as_mut() else {
+        let tiles::NewTileState::Viewport(m_entity_id) = new_tile_state.as_mut() else {
             *new_tile_state = tiles::NewTileState::None;
             return;
         };
@@ -618,13 +579,13 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
             EImageLabel::new(icons.tile_3d_viewer)
                 .image_tint(colors::PUMPKIN_DEFAULT)
                 .bg_color(with_opacity(colors::PUMPKIN_DEFAULT, 0.01))
-                .margin(egui::Margin::same(1.0)),
+                .margin(egui::Margin::same(1)),
         );
 
         ui.add(
             ELabel::new("Create new 3D viewer")
                 .text_color(colors::PRIMARY_CREAME)
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.).bottom(8.)),
         );
 
         // ENTITY
@@ -632,7 +593,7 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
         ui.add(
             ELabel::new("ENTITY")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.).bottom(8.)),
         );
 
         let selected_entity = entities_meta
@@ -671,37 +632,6 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
                 });
         });
 
-        // RANGE
-
-        ui.add(
-            ELabel::new("RANGE")
-                .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
-        );
-
-        let ro_tagged_ranges = timeline_ranges.0.clone();
-        let selected_range_label = m_range_id
-            .as_ref()
-            .and_then(|rid| timeline_ranges.0.get(rid))
-            .map_or("Default", |r| &r.label)
-            .to_owned();
-
-        ui.scope(|ui| {
-            theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_salt("RANGE")
-                .width(width)
-                .selected_text(selected_range_label)
-                .show_ui(ui, |ui| {
-                    theme::configure_combo_item(ui.style_mut());
-
-                    ui.selectable_value(m_range_id, None, "Default");
-
-                    for (range_id, range) in ro_tagged_ranges {
-                        ui.selectable_value(m_range_id, Some(range_id), range.label);
-                    }
-                });
-        });
-
         // BUTTONS
 
         ui.add_space(16.0);
@@ -735,7 +665,6 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
                 let focused_entity = m_entity_id.to_owned();
 
                 tile_state.create_viewport_tile(focused_entity);
-                viewport_range.0 = *m_range_id;
 
                 close_modal = true;
             }
@@ -791,20 +720,20 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
             EImageLabel::new(icons.tile_graph) // Todo: create and add tile icon for data monitor
                 .image_tint(colors::PEACH_DEFAULT)
                 .bg_color(with_opacity(colors::PEACH_DEFAULT, 0.01))
-                .margin(egui::Margin::same(1.0)),
+                .margin(egui::Margin::same(1)),
         );
 
         ui.add(
             ELabel::new("Create new component monitor")
                 .text_color(colors::PRIMARY_CREAME)
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.).bottom(8.)),
         );
 
         // Entity selection
         ui.add(
             ELabel::new("ENTITY")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.).bottom(8.)),
         );
 
         let selected_entity = entities_meta
@@ -847,7 +776,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
         ui.add(
             ELabel::new("COMPONENT")
                 .text_color(colors::with_opacity(colors::PRIMARY_CREAME, 0.6))
-                .padding(egui::Margin::same(0.0).top(16.0).bottom(8.0)),
+                .padding(egui::Margin::same(0).top(16.0).bottom(8.0)),
         );
 
         let components = if let Some((_, _, components, _)) = selected_entity {

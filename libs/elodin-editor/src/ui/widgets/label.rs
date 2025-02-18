@@ -26,8 +26,8 @@ impl ELabel {
     pub fn new(label: impl ToString) -> Self {
         Self {
             label: label.to_string(),
-            padding: egui::Margin::same(8.0),
-            margin: egui::Margin::same(0.0),
+            padding: egui::Margin::same(8),
+            margin: egui::Margin::same(0),
             text_color: colors::PRIMARY_CREAME,
             bottom_stroke: None,
             height: None,
@@ -121,7 +121,7 @@ pub fn label_with_buttons<const N: usize>(
 ) -> [bool; N] {
     let mut clicked = [false; N];
 
-    egui::Frame::none().inner_margin(margin).show(ui, |ui| {
+    egui::Frame::NONE.inner_margin(margin).show(ui, |ui| {
         ui.horizontal(|ui| {
             let (label_rect, btn_rect) = utils::get_rects_from_relative_width(
                 ui.max_rect(),
@@ -165,7 +165,7 @@ pub struct EImageLabel {
     bg_color: egui::Color32,
     frame_size: egui::Vec2,
     margin: egui::Margin,
-    rounding: egui::Rounding,
+    corner_radius: egui::CornerRadius,
 }
 
 impl EImageLabel {
@@ -175,8 +175,8 @@ impl EImageLabel {
             image_tint: colors::WHITE,
             bg_color: colors::PRIMARY_SMOKE,
             frame_size: egui::vec2(40.0, 40.0),
-            margin: egui::Margin::same(2.0),
-            rounding: egui::Rounding::same(4.0),
+            margin: egui::Margin::same(2),
+            corner_radius: egui::CornerRadius::same(4),
         }
     }
 
@@ -207,8 +207,13 @@ impl EImageLabel {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             // Background
-            ui.painter()
-                .rect(rect, self.rounding, self.bg_color, egui::Stroke::NONE);
+            ui.painter().rect(
+                rect,
+                self.corner_radius,
+                self.bg_color,
+                egui::Stroke::NONE,
+                egui::StrokeKind::Middle,
+            );
 
             // Icon
             let default_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));

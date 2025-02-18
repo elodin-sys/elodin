@@ -182,7 +182,7 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
                                     values.clone(),
                                 ))),
                             )));
-                            let bundle = GraphBundle::new(&mut render_layer_alloc, entities, None);
+                            let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
                             tile_state.create_graph_tile(None, bundle);
                             PaletteEvent::Exit
                         },
@@ -295,7 +295,7 @@ fn set_playback_speed() -> PaletteItem {
                             packet_tx.send_msg(SetStreamState {
                                 id: stream_id.0,
                                 playing: None,
-                                tick: None,
+                                timestamp: None,
                                 time_step: Some(Duration::from_secs_f64(time_step.0 / speed)),
                             });
                             PaletteEvent::Exit

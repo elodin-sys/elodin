@@ -1,11 +1,17 @@
-use core::{fmt::Display, mem};
+use core::{
+    fmt::Display,
+    mem,
+    ops::{Add, AddAssign},
+    sync::atomic::AtomicI64,
+    time::Duration,
+};
 
 use nox::ArrayView;
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 use crate::{buf::ByteBufExt, error::Error};
-use stellarator_buf::{IoBuf, Slice};
+use stellarator_buf::{AtomicValue, IoBuf, Slice};
 
 #[derive(
     Serialize,
@@ -103,6 +109,7 @@ impl mlua::UserData for ComponentId {}
     IntoBytes,
 )]
 #[repr(u64)]
+#[serde(rename_all = "kebab-case")]
 pub enum PrimType {
     U8 = 0,
     U16,
@@ -230,6 +237,57 @@ impl<'a> From<ComponentView<'a>> for [f32; 3] {
         match value {
             ComponentView::F32(view) => view.buf().try_into().unwrap(),
             _ => panic!("invalid component type"),
+        }
+    }
+}
+
+impl core::fmt::Display for ComponentView<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ComponentView::U8(array) => {
+                f.write_str("u8")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::U16(array) => {
+                f.write_str("u16")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::U32(array) => {
+                f.write_str("u32")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::U64(array) => {
+                f.write_str("u64")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::I8(array) => {
+                f.write_str("i8")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::I16(array) => {
+                f.write_str("i16")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::I32(array) => {
+                f.write_str("i32")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::I64(array) => {
+                f.write_str("i64")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::Bool(array) => {
+                f.write_str("bool")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::F32(array) => {
+                f.write_str("f32")?;
+                core::fmt::Display::fmt(array, f)
+            }
+            ComponentView::F64(array) => {
+                f.write_str("f64")?;
+                core::fmt::Display::fmt(array, f)
+            }
         }
     }
 }
@@ -436,7 +494,9 @@ impl ElementValue {
     }
 }
 
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug, Clone, Copy)]
+#[derive(
+    TryFromBytes, Unaligned, Immutable, KnownLayout, PartialEq, Debug, Clone, Copy, IntoBytes,
+)]
 #[repr(u8)]
 pub enum PacketTy {
     Msg = 0,
@@ -454,6 +514,21 @@ pub struct Packet {
     pub packet_ty: PacketTy,
     pub id: PacketId,
     pub body: [u8],
+}
+
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
+#[repr(C)]
+pub struct TimeSeries {
+    pub len: [u8; 8],
+    pub body: [u8],
+}
+
+impl TimeSeries {
+    fn len(&self) -> Result<usize, Error> {
+        u64::from_le_bytes(self.len)
+            .try_into()
+            .map_err(|_| Error::OffsetOverflow)
+    }
 }
 
 pub trait Msg: Serialize {
@@ -500,6 +575,14 @@ impl LenPacket {
     pub fn push(&mut self, elem: u8) {
         let len = self.pkt_len() + 1;
         self.inner.push(elem);
+        self.inner[..4].copy_from_slice(&len.to_le_bytes());
+    }
+
+    pub fn push_aligned<V: zerocopy::IntoBytes + zerocopy::Immutable>(&mut self, val: V) {
+        let old_len = self.inner.len();
+        let _ = self.inner.push_aligned(val);
+        let new_len = self.inner.len();
+        let len = self.pkt_len() + (new_len - old_len) as u32;
         self.inner[..4].copy_from_slice(&len.to_le_bytes());
     }
 
@@ -561,7 +644,7 @@ impl<M: Msg> MsgExt for M {}
 pub enum OwnedPacket<B: IoBuf> {
     Msg(MsgBuf<B>),
     Table(OwnedTable<B>),
-    TimeSeries(TimeSeries<B>),
+    TimeSeries(OwnedTimeSeries<B>),
 }
 
 impl<B: IoBuf> OwnedPacket<B> {
@@ -575,7 +658,11 @@ impl<B: IoBuf> OwnedPacket<B> {
         Ok(match packet_ty {
             PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, buf }),
             PacketTy::Table => OwnedPacket::Table(OwnedTable { id, buf }),
-            PacketTy::TimeSeries => OwnedPacket::TimeSeries(TimeSeries { id, buf }),
+            PacketTy::TimeSeries => {
+                let time_series = TimeSeries::try_ref_from_bytes(&buf)?;
+                let len = time_series.len()?;
+                OwnedPacket::TimeSeries(OwnedTimeSeries { id, buf, len })
+            }
         })
     }
 }
@@ -618,9 +705,29 @@ impl<B: IoBuf> MsgBuf<B> {
 }
 
 #[derive(Debug)]
-pub struct TimeSeries<B: IoBuf> {
+pub struct OwnedTimeSeries<B: IoBuf> {
     pub id: PacketId,
+    pub len: usize,
     pub buf: Slice<B>,
+}
+
+impl<B: IoBuf> OwnedTimeSeries<B> {
+    pub fn timestamps(&self) -> Result<&[Timestamp], Error> {
+        let start = size_of::<u64>();
+        let end = start + self.len * size_of::<i64>();
+        let timestamps = stellarator_buf::deref(&self.buf)
+            .get(start..end)
+            .ok_or(Error::BufferUnderflow)?;
+        Ok(<[Timestamp]>::ref_from_bytes(timestamps)?)
+    }
+
+    pub fn data(&self) -> Result<&[u8], Error> {
+        let start = size_of::<u64>();
+        let end = start + self.len * size_of::<i64>();
+        stellarator_buf::deref(&self.buf)
+            .get(end..)
+            .ok_or(Error::BufferUnderflow)
+    }
 }
 
 impl<B: IoBuf> OwnedPacket<B> {
@@ -644,12 +751,12 @@ impl MaybeFilledPacket {
     fn recycle(&mut self) {
         replace_with::replace_with_or_abort(self, |this| match this {
             MaybeFilledPacket::Unfilled(mut vec) => {
-                vec.resize(512 * 1024, 0);
+                vec.resize(1024 * 1024, 0);
                 MaybeFilledPacket::Unfilled(vec)
             }
             MaybeFilledPacket::Packet(packet) => {
                 let mut vec = packet.into_buf();
-                vec.resize(512 * 1024, 0);
+                vec.resize(1024 * 1024, 0);
                 MaybeFilledPacket::Unfilled(vec)
             }
             MaybeFilledPacket::Taken => MaybeFilledPacket::default(),
@@ -667,7 +774,7 @@ impl MaybeFilledPacket {
 
 impl Default for MaybeFilledPacket {
     fn default() -> Self {
-        Self::Unfilled(vec![0u8; 512 * 1024])
+        Self::Unfilled(vec![0u8; 1024 * 1024])
     }
 }
 
@@ -682,6 +789,99 @@ impl thingbuf::Recycle<MaybeFilledPacket> for FilledRecycle {
 
     fn recycle(&self, element: &mut MaybeFilledPacket) {
         element.recycle();
+    }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    IntoBytes,
+    Immutable,
+    FromBytes,
+    Serialize,
+    Deserialize,
+    Default,
+)]
+#[repr(transparent)]
+pub struct Timestamp(pub i64);
+
+#[cfg(feature = "hifitime")]
+impl From<Timestamp> for hifitime::Epoch {
+    fn from(val: Timestamp) -> Self {
+        hifitime::Epoch::from_unix_milliseconds((val.0 as f64) / 1000.0)
+    }
+}
+
+impl Timestamp {
+    pub const EPOCH: Timestamp = Timestamp(0);
+
+    #[cfg(feature = "std")]
+    pub fn now() -> Self {
+        std::time::SystemTime::now().into()
+    }
+
+    #[inline]
+    pub const fn from_le_bytes(bytes: [u8; 8]) -> Self {
+        Self(i64::from_le_bytes(bytes))
+    }
+
+    pub const fn to_le_bytes(self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
+}
+
+impl Add<Duration> for Timestamp {
+    type Output = Timestamp;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        Timestamp(self.0 + rhs.as_micros() as i64)
+    }
+}
+
+impl AddAssign<Duration> for Timestamp {
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs.as_micros() as i64;
+    }
+}
+
+impl AtomicValue for Timestamp {
+    type Atomic = AtomicI64;
+    type Value = i64;
+
+    fn atomic(self) -> Self::Atomic {
+        AtomicI64::new(self.0)
+    }
+
+    fn load(atomic: &Self::Atomic, order: core::sync::atomic::Ordering) -> Self {
+        Timestamp(atomic.load(order))
+    }
+
+    fn store(atomic: &Self::Atomic, val: Self, order: core::sync::atomic::Ordering) {
+        atomic.store(val.0, order);
+    }
+
+    fn swap(atomic: &Self::Atomic, val: Self, order: core::sync::atomic::Ordering) -> Self {
+        Timestamp(atomic.swap(val.0, order))
+    }
+
+    fn from_value(val: Self::Value) -> Self {
+        Timestamp(val)
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<std::time::SystemTime> for Timestamp {
+    fn from(value: std::time::SystemTime) -> Self {
+        match value.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+            Ok(dur) => Self(dur.as_micros() as i64),
+            Err(err) => Self(-(err.duration().as_micros() as i64)),
+        }
     }
 }
 

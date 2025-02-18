@@ -125,7 +125,7 @@ impl WidgetSystem for InspectorContent<'_> {
         };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(colors::PRIMARY_SMOKE)
                 .inner_margin(16.0)
                 .show(ui, |ui| {

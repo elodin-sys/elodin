@@ -12,11 +12,8 @@ use std::collections::HashMap;
 
 use crate::set_floating_origin;
 
-//use self::entity_data::collect_entity_data;
-
 pub mod button;
 pub mod command_palette;
-pub mod entity_data;
 pub mod hierarchy;
 pub mod inspector;
 pub mod label;
@@ -24,6 +21,7 @@ pub mod modal;
 pub mod plot;
 pub mod plot_3d;
 pub mod status_bar;
+pub mod time_label;
 pub mod timeline;
 
 pub trait RootWidgetSystemExt {

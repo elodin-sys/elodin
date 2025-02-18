@@ -130,12 +130,12 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .frame(egui::Frame {
                 fill: colors::PRIMARY_ONYX,
                 stroke: egui::Stroke::new(1.0, with_opacity(colors::PRIMARY_CREAME, 0.005)),
-                rounding: theme::rounding_xs(),
+                corner_radius: theme::corner_radius_xs(),
                 shadow: Shadow {
                     color: colors::PRIMARY_SMOKE,
-                    blur: 16.0,
-                    offset: egui::vec2(3.0, 3.0),
-                    spread: 3.0,
+                    blur: 16,
+                    offset: [3, 3],
+                    spread: 3,
                 },
                 ..Default::default()
             })
@@ -182,8 +182,8 @@ impl WidgetSystem for PaletteSearch<'_> {
 
         let mut has_focus = false;
 
-        egui::Frame::none()
-            .inner_margin(egui::Margin::same(16.0))
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::same(16))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let style = ui.style_mut();
@@ -194,11 +194,11 @@ impl WidgetSystem for PaletteSearch<'_> {
                     for page in command_palette_state.page_stack[..len].iter() {
                         ui.style_mut().interaction.selectable_labels = false;
                         if let Some(label) = &page.label {
-                            egui::Frame::none()
+                            egui::Frame::NONE
                                 .fill(colors::BONE_DEFAULT)
-                                .inner_margin(Margin::symmetric(8.0, 1.0))
+                                .inner_margin(Margin::symmetric(8, 1))
                                 .outer_margin(Margin::ZERO.right(6.0))
-                                .rounding(3.0)
+                                .corner_radius(3.0)
                                 .show(ui, |ui| {
                                     let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                                     font_id.size = 11.0;
@@ -211,11 +211,11 @@ impl WidgetSystem for PaletteSearch<'_> {
                         } else {
                             let mut font_id = egui::TextStyle::Button.resolve(ui.style());
                             font_id.size = 16.0;
-                            egui::Frame::none()
+                            egui::Frame::NONE
                                 .fill(colors::BONE_DEFAULT)
                                 .outer_margin(Margin::ZERO.right(6.0))
-                                .inner_margin(Margin::symmetric(5.5, 0.0))
-                                .rounding(3.0)
+                                .inner_margin(Margin::symmetric(5, 0))
+                                .corner_radius(3.0)
                                 .show(ui, |ui| {
                                     ui.label(
                                         egui::RichText::new("←")
@@ -308,7 +308,7 @@ impl WidgetSystem for PaletteItems<'_> {
         let mut page = command_palette_state.page_stack.pop().unwrap();
         page.initialize(world);
         let mut palette_items_filtered = page.filter(&filter);
-        let row_margin = egui::Margin::symmetric(16.0, 12.0);
+        let row_margin = egui::Margin::symmetric(10, 12);
         let row_height = ui.spacing().interact_size.y + row_margin.sum().y;
         let max_visible_rows = palette_items_filtered.len().clamp(0, 10);
         if down_pressed {
@@ -334,7 +334,7 @@ impl WidgetSystem for PaletteItems<'_> {
                     ) in palette_items_filtered.drain(row_range).enumerate()
                     {
                         if Some(&item.header) != current_heading.as_ref() {
-                            egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
+                            egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new(item.header.clone())
                                         .monospace()
@@ -391,7 +391,7 @@ impl WidgetSystem for PaletteItems<'_> {
         } else {
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.page_stack.push(page);
-            egui::Frame::none().inner_margin(row_margin).show(ui, |ui| {
+            egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
                 ui.label(
                     egui::RichText::new("Couldn't find anything...")
                         .color(colors::PRIMARY_CREAME_6),
@@ -427,7 +427,7 @@ impl PaletteItemWidget {
             icon: None,
             shortcut_label: None,
 
-            margin: egui::Margin::symmetric(16.0, 8.0),
+            margin: egui::Margin::symmetric(16, 8),
 
             inactive_bg_color: colors::PRIMARY_ONYX,
             active_bg_color: with_opacity(colors::PRIMARY_CREAME, 0.05),
@@ -501,7 +501,7 @@ impl PaletteItemWidget {
             // Background
 
             ui.painter()
-                .rect_filled(rect, egui::Rounding::ZERO, visuals.bg_fill);
+                .rect_filled(rect, egui::CornerRadius::ZERO, visuals.bg_fill);
 
             // Label
 

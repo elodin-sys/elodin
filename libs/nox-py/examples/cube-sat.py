@@ -1,4 +1,5 @@
 import os
+import pathlib
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Annotated
@@ -23,9 +24,9 @@ velocity = np.sqrt(G * M / radius)
 SIM_TIME_STEP = 1.0 / 20.0
 
 cache_directory = el._get_cache_dir()
+pathlib.Path(cache_directory).mkdir(parents=True, exist_ok=True)
 c_bar_file_name = "C_normal.npy"
 c_full_path = os.path.join(cache_directory, c_bar_file_name)
-
 if not os.path.isfile(c_full_path):
     c_bar_file_path = urllib.request.urlretrieve(
         "https://storage.googleapis.com/elodin-assets/C_normal.npy",

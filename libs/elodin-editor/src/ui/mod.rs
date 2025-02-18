@@ -14,22 +14,21 @@ use bevy_egui::{
 
 use big_space::GridCell;
 
-use egui::Rounding;
+use egui::CornerRadius;
 use egui_tiles::TileId;
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::EntityMetadata;
+use widgets::status_bar::StatusBar;
 use widgets::{
     command_palette::CommandPaletteState,
     timeline::{self, timeline_slider},
 };
-use widgets::{status_bar::StatusBar, timeline::timeline_ranges};
 
 use crate::{plugins::LogicalKeyState, GridHandle, MainCamera};
 
 use self::widgets::inspector::{entity::ComponentFilter, Inspector};
 use self::widgets::modal::ModalWithSettings;
-use self::widgets::timeline::timeline_ranges::TimelineRangeId;
 
 use self::widgets::{
     command_palette::{self, CommandPalette},
@@ -53,9 +52,6 @@ pub struct HdrEnabled(pub bool);
 
 #[derive(Resource, Default)]
 pub struct Paused(pub bool);
-
-#[derive(Resource, Default)]
-pub struct ViewportRange(pub Option<TimelineRangeId>);
 
 #[derive(Resource, Default, Debug, Clone)]
 pub enum SelectedObject {
@@ -112,11 +108,10 @@ pub struct EntityPair {
 
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
-    timeline_ranges_focused: Res<timeline_ranges::TimelineRangesFocused>,
     command_palette_state: Res<CommandPaletteState>,
     key_state: Res<LogicalKeyState>,
 ) {
-    let input_has_focus = timeline_ranges_focused.0 || command_palette_state.show;
+    let input_has_focus = command_palette_state.show;
 
     if !input_has_focus && key_state.just_pressed(&Key::Space) {
         paused.0 = !paused.0;
@@ -165,11 +160,8 @@ impl Plugin for UiPlugin {
             .init_resource::<tiles::NewTileState>()
             .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
-            .init_resource::<timeline_ranges::TimelineRanges>()
-            .init_resource::<timeline_ranges::TimelineRangesFocused>()
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
-            .init_resource::<ViewportRange>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
@@ -263,20 +255,16 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
         } else {
             34.0
         };
-        let traffic_light_offset = if cfg!(target_os = "macos") { 72.0 } else { 0.0 };
+        let traffic_light_offset = if cfg!(target_os = "macos") { 72. } else { 0. };
         let titlebar_scale = if cfg!(target_os = "macos") { 1.4 } else { 1.3 };
         let titlebar_margin = if cfg!(target_os = "macos") {
-            8.0
+            8
         } else if cfg!(target_os = "windows") {
-            0.0
+            0
         } else {
-            4.0
+            4
         };
-        let titlebar_right_margin = if cfg!(target_os = "windows") {
-            0.0
-        } else {
-            16.0
-        };
+        let titlebar_right_margin = if cfg!(target_os = "windows") { 0. } else { 10. };
 
         theme::set_theme(ctx);
         egui::TopBottomPanel::top("title_bar")
@@ -326,12 +314,13 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
                                     egui::Color32::from_hex("#E81123").expect("invalid red color");
 
-                                ui.style_mut().visuals.widgets.hovered.rounding = Rounding {
-                                    nw: 0.0,
-                                    ne: 4.0,
-                                    sw: 0.0,
-                                    se: 0.0,
-                                };
+                                ui.style_mut().visuals.widgets.hovered.corner_radius =
+                                    CornerRadius {
+                                        nw: 0,
+                                        ne: 4,
+                                        sw: 0,
+                                        se: 0,
+                                    };
 
                                 if ui
                                     .add_sized(
@@ -357,7 +346,8 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
                             ui.scope(|ui| {
                                 ui.style_mut().visuals.widgets.hovered.weak_bg_fill =
                                     egui::Color32::from_hex("#4E4D53").expect("invalid red color");
-                                ui.style_mut().visuals.widgets.hovered.rounding = Rounding::ZERO;
+                                ui.style_mut().visuals.widgets.hovered.corner_radius =
+                                    CornerRadius::ZERO;
                                 if ui
                                     .add_sized(
                                         egui::vec2(45.0, 40.0),
@@ -483,7 +473,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         world.add_root_widget::<StatusBar>("status_bar");
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 if landscape_layout {
                     ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
@@ -580,7 +570,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .frame(egui::Frame {
                         fill: colors::with_opacity(colors::PRIMARY_SMOKE, 0.5),
                         stroke: egui::Stroke::new(1.0, colors::with_opacity(colors::WHITE, 0.5)),
-                        inner_margin: egui::Margin::symmetric(16.0, 8.0),
+                        inner_margin: egui::Margin::symmetric(16, 8),
                         ..Default::default()
                     })
                     .fixed_pos(window_pos)
@@ -612,7 +602,7 @@ struct CameraViewportQuery {
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiSettings)>,
+    window: Query<(&Window, &bevy_egui::EguiContextSettings)>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
     for CameraViewportQueryItem {

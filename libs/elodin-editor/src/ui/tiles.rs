@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    time::Duration,
-};
+use std::collections::{BTreeMap, HashMap};
 
 use bevy::{
     ecs::system::{SystemParam, SystemState},
@@ -10,7 +7,7 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion};
 use bevy_egui::{
-    egui::{self, vec2, Color32, Frame, RichText, Rounding, Stroke, Ui, Visuals},
+    egui::{self, vec2, Color32, CornerRadius, Frame, RichText, Stroke, Ui, Visuals},
     EguiContexts,
 };
 use big_space::propagation::NoPropagateRot;
@@ -18,8 +15,12 @@ use big_space::GridCell;
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::{ComponentId, EntityId};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentValueMap, EntityMap};
-use impeller2_wkt::{EntityMetadata, Graph, MaxTick, Panel, SimulationTimeStep, Tick, Viewport};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentSchemaRegistry, ComponentValueMap, EntityMap,
+};
+use impeller2_wkt::{
+    CurrentTimestamp, EarliestTimestamp, EntityMetadata, Graph, Panel, SimulationTimeStep, Viewport,
+};
 use nox::Tensor;
 
 use super::{
@@ -28,7 +29,6 @@ use super::{
         button::{EImageButton, ETileButton},
         modal::ModalNewTile,
         plot::{self, gpu::LineHandle, GraphBundle, GraphState, Line, Plot},
-        timeline::timeline_ranges::{TimelineRangeId, TimelineRanges},
         WidgetSystem, WidgetSystemExt,
     },
     HdrEnabled, SelectedObject, ViewportRect,
@@ -37,7 +37,7 @@ use crate::{
     plugins::{navigation_gizmo::RenderLayerAlloc, LogicalKeyState},
     spawn_main_camera,
     ui::widgets::plot::{CollectedGraphData, GraphStateEntity},
-    MainCamera,
+    MainCamera, SelectedTimeRange,
 };
 
 #[derive(Clone)]
@@ -179,20 +179,8 @@ impl Pane {
     fn ui(
         &mut self,
         ui: &mut Ui,
-        time_step: std::time::Duration,
-        current_tick: u64,
-        collected_graph_data: &mut CollectedGraphData,
-        graphs_state: &mut Query<&mut GraphState>,
-        timeline_ranges: &TimelineRanges,
-        lines: &mut Assets<Line>,
-        lines_query: &Query<&LineHandle>,
-        commands: &mut Commands,
+        state: &mut TileLayout<'_, '_>,
         icons: &TileIcons,
-        entity_map: &EntityMap,
-        entity_metadata: &Query<&EntityMetadata>,
-        metadata_store: &ComponentMetadataRegistry,
-        component_value_query: &Query<&ComponentValueMap>,
-        max_tick: MaxTick,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -204,39 +192,33 @@ impl Pane {
                 // ui.painter()
                 //     .rect_filled(content_rect, 0.0, colors::PRIMARY_SMOKE);
 
-                let Ok(mut graph_state) = graphs_state.get_mut(pane.id) else {
+                let Ok(mut graph_state) = state.graphs_state.get_mut(pane.id) else {
                     return egui_tiles::UiResponse::None;
                 };
 
-                let timeline_range = graph_state
-                    .range_id
-                    .as_ref()
-                    .and_then(|rid| timeline_ranges.0.get(rid));
-
-                Plot::new()
-                    .time_step(time_step)
-                    .current_tick(current_tick)
-                    .calculate_lines(
-                        ui,
-                        collected_graph_data,
-                        graph_state.as_mut(),
-                        timeline_range,
-                        lines,
-                        commands,
-                        pane.id,
-                        entity_map,
-                        entity_metadata,
-                        metadata_store,
-                        max_tick,
-                    )
-                    .render(
-                        ui,
-                        lines,
-                        lines_query,
-                        collected_graph_data,
-                        graph_state.as_mut(),
-                        &icons.scrub,
-                    );
+                Plot::from_state(
+                    ui,
+                    &mut state.collected_graph_data,
+                    &mut graph_state,
+                    &mut state.lines,
+                    &mut state.commands,
+                    pane.id,
+                    &state.entity_map,
+                    &state.entity_metadata,
+                    &state.metadata_store,
+                    state.selected_time_range.clone(),
+                    state.earliest_timestamp.0,
+                )
+                .time_step(state.time_step.as_duration())
+                .current_timestamp(state.current_timestamp.0)
+                .render(
+                    ui,
+                    &state.lines,
+                    &state.line_query,
+                    &state.collected_graph_data,
+                    &graph_state,
+                    &icons.scrub,
+                );
 
                 egui_tiles::UiResponse::None
             }
@@ -245,13 +227,13 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::ComponentMonitor(pane) => {
-                let Some(entity) = entity_map.get(&pane.entity_id) else {
+                let Some(entity) = state.entity_map.get(&pane.entity_id) else {
                     return egui_tiles::UiResponse::None;
                 };
-                let Ok(component_value_map) = component_value_query.get(*entity) else {
+                let Ok(component_value_map) = state.component_value_query.get(*entity) else {
                     return egui_tiles::UiResponse::None;
                 };
-                let Some(metadata) = metadata_store.get_metadata(&pane.component_id) else {
+                let Some(metadata) = state.metadata_store.get_metadata(&pane.component_id) else {
                     return egui_tiles::UiResponse::None;
                 };
 
@@ -344,24 +326,10 @@ impl Default for TileState {
     }
 }
 
-struct TreeBehavior<'a, 'w, 's> {
+struct TreeBehavior<'w, 's> {
     icons: TileIcons,
     tree_actions: Vec<TreeAction>,
-    selected_object: &'a mut SelectedObject,
-    timeline_ranges: &'a TimelineRanges,
-    collected_graph_data: &'a mut CollectedGraphData,
-    lines: &'a mut Assets<Line>,
-    line_query: &'a Query<'w, 's, &'static LineHandle>,
-    graph_state_query: &'a mut Query<'w, 's, &'static mut GraphState>,
-    time_step: std::time::Duration,
-    current_tick: u64,
-    commands: &'a mut Commands<'w, 's>,
-    entity_map: &'a EntityMap,
-    entity_metadata: &'a Query<'w, 's, &'static EntityMetadata>,
-    metadata_store: &'a ComponentMetadataRegistry,
-    new_tile_state: ResMut<'w, NewTileState>,
-    component_value_query: &'a Query<'w, 's, &'static ComponentValueMap>,
-    max_tick: MaxTick,
+    layout: TileLayout<'w, 's>,
 }
 
 pub enum TreeAction {
@@ -378,11 +346,11 @@ enum TabState {
     Inactive,
 }
 
-impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
+impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_> {
     fn on_edit(&mut self, edit_action: egui_tiles::EditAction) {
         // NOTE: Override accidental selection onDrag
         if edit_action == egui_tiles::EditAction::TabSelected {
-            if let Some(tile_id) = self.selected_object.tile_id() {
+            if let Some(tile_id) = self.layout.selected_object.tile_id() {
                 self.tree_actions.push(TreeAction::SelectTile(tile_id));
             }
         }
@@ -398,23 +366,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(
-            ui,
-            self.time_step,
-            self.current_tick,
-            self.collected_graph_data,
-            self.graph_state_query,
-            self.timeline_ranges,
-            self.lines,
-            self.line_query,
-            self.commands,
-            &self.icons,
-            self.entity_map,
-            self.entity_metadata,
-            self.metadata_store,
-            self.component_value_query,
-            self.max_tick,
-        )
+        pane.ui(ui, &mut self.layout, &self.icons)
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -426,7 +378,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
-        let is_selected = self.selected_object.is_tile_selected(tile_id);
+        let is_selected = self.layout.selected_object.is_tile_selected(tile_id);
         let tab_state = if is_selected {
             TabState::Selected
         } else if state.active {
@@ -520,7 +472,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
             };
             match tile {
                 Tile::Pane(Pane::Graph(graph)) => {
-                    *self.selected_object = SelectedObject::Graph {
+                    *self.layout.selected_object = SelectedObject::Graph {
                         tile_id,
                         label: graph.label.to_owned(),
                         graph_id: graph.id,
@@ -530,10 +482,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
                     let Some(camera) = viewport.camera else {
                         return button_response;
                     };
-                    *self.selected_object = SelectedObject::Viewport { tile_id, camera };
+                    *self.layout.selected_object = SelectedObject::Viewport { tile_id, camera };
                 }
                 _ => {
-                    *self.selected_object = SelectedObject::None;
+                    *self.layout.selected_object = SelectedObject::None;
                 }
             }
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
@@ -568,7 +520,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
     fn drag_ui(&mut self, tiles: &Tiles<Pane>, ui: &mut Ui, tile_id: TileId) {
         let mut frame = egui::Frame::popup(ui.style());
         frame.fill = colors::PRIMARY_CREAME;
-        frame.rounding = Rounding::ZERO;
+        frame.corner_radius = CornerRadius::ZERO;
         frame.stroke = Stroke::NONE;
         frame.shadow = egui::epaint::Shadow::NONE;
         frame.show(ui, |ui| {
@@ -598,8 +550,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
         ui.add_space(5.0);
         let mut resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
-            resp.long_touched = true;
-            //resp.clicked = [false, true, false, false, false];
+            resp.flags.set(egui::response::Flags::LONG_TOUCHED, true);
         }
         resp.context_menu(|ui| {
             ui.style_mut().spacing.item_spacing = vec2(16.0, 8.0);
@@ -610,17 +561,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_, '_, '_> {
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                *self.new_tile_state = NewTileState::Graph {
+                *self.layout.new_tile_state = NewTileState::Graph {
                     entity_id: None,
                     component_id: None,
-                    range_id: None,
                     parent_id: Some(tile_id),
                 };
                 ui.close_menu();
             }
             ui.separator();
             if ui.button("COMPONENT MONITOR").clicked() {
-                *self.new_tile_state = NewTileState::ComponentMonitor {
+                *self.layout.new_tile_state = NewTileState::ComponentMonitor {
                     entity_id: None,
                     component_id: None,
                     parent_id: None,
@@ -699,11 +649,10 @@ impl WidgetSystem for TileSystem<'_, '_> {
 pub enum NewTileState {
     #[default]
     None,
-    Viewport(Option<EntityId>, Option<TimelineRangeId>),
+    Viewport(Option<EntityId>),
     Graph {
         entity_id: Option<EntityId>,
         component_id: Option<ComponentId>,
-        range_id: Option<TimelineRangeId>,
         parent_id: Option<TileId>,
     },
     ComponentMonitor {
@@ -757,7 +706,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_viewport_btn.clicked() {
-                        *new_tile_state = NewTileState::Viewport(None, None);
+                        *new_tile_state = NewTileState::Viewport(None);
                     }
 
                     let create_graph_btn = ui.add(
@@ -771,7 +720,6 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                         *new_tile_state = NewTileState::Graph {
                             entity_id: None,
                             component_id: None,
-                            range_id: None,
                             parent_id: None,
                         };
                     }
@@ -799,28 +747,28 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
 #[derive(SystemParam)]
 pub struct TileLayout<'w, 's> {
     commands: Commands<'w, 's>,
-    timeline_ranges: Res<'w, TimelineRanges>,
     selected_object: ResMut<'w, SelectedObject>,
-    ui_state: ResMut<'w, TileState>,
+    ui_state: Option<ResMut<'w, TileState>>,
     asset_server: Res<'w, AssetServer>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     collected_graph_data: ResMut<'w, CollectedGraphData>,
     time_step: Res<'w, SimulationTimeStep>,
-    tick: Res<'w, Tick>,
+    current_timestamp: Res<'w, CurrentTimestamp>,
     lines: ResMut<'w, Assets<Line>>,
     line_query: Query<'w, 's, &'static LineHandle>,
-    graph_state_query: Query<'w, 's, &'static mut GraphState>,
+    graphs_state: Query<'w, 's, &'static mut GraphState>,
     entity_map: Res<'w, EntityMap>,
     entity_metadata: Query<'w, 's, &'static EntityMetadata>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
-    editor_cam_query: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
+    editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
     component_value_query: Query<'w, 's, &'static ComponentValueMap>,
     new_tile_state: ResMut<'w, NewTileState>,
-    max_tick: Res<'w, MaxTick>,
+    selected_time_range: Res<'w, SelectedTimeRange>,
+    earliest_timestamp: Res<'w, EarliestTimestamp>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -833,43 +781,18 @@ impl WidgetSystem for TileLayout<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
-
-        let TileLayout {
-            mut commands,
-            mut graph_state_query,
-            timeline_ranges,
-            mut selected_object,
-            mut ui_state,
-            asset_server,
-            mut meshes,
-            mut materials,
-            mut render_layer_alloc,
-            mut collected_graph_data,
-            time_step,
-            tick,
-            mut lines,
-            line_query,
-            entity_map,
-            entity_metadata,
-            metadata_store,
-            mut viewport_contains_pointer,
-            mut editor_cam_query,
-            grid_cell,
-            new_tile_state,
-            component_value_query,
-            max_tick,
-        } = state_mut;
+        let mut state_mut = state.get_mut(world);
+        let mut ui_state = state_mut.ui_state.take().expect("TileState missing");
 
         let icons = args;
 
-        viewport_contains_pointer.0 = ui.ui_contains_pointer();
+        state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
-        for mut editor_cam in editor_cam_query.iter_mut() {
+        for mut editor_cam in state_mut.editor_cam.iter_mut() {
             editor_cam.enabled_motion = EnabledMotion {
-                pan: viewport_contains_pointer.0,
-                orbit: viewport_contains_pointer.0,
-                zoom: viewport_contains_pointer.0,
+                pan: state_mut.viewport_contains_pointer.0,
+                orbit: state_mut.viewport_contains_pointer.0,
+                zoom: state_mut.viewport_contains_pointer.0,
             }
         }
 
@@ -877,24 +800,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
         let mut behavior = TreeBehavior {
             icons,
             tree_actions: tab_diffs,
-            selected_object: selected_object.as_mut(),
-            timeline_ranges: timeline_ranges.as_ref(),
-            collected_graph_data: collected_graph_data.as_mut(),
-            time_step: Duration::from_secs_f64(time_step.0),
-            current_tick: tick.0,
-            lines: lines.as_mut(),
-            commands: &mut commands,
-            line_query: &line_query,
-            graph_state_query: &mut graph_state_query,
-            entity_map: &entity_map,
-            entity_metadata: &entity_metadata,
-            metadata_store: &metadata_store,
-            component_value_query: &component_value_query,
-            new_tile_state,
-            max_tick: *max_tick,
+            layout: state_mut,
         };
         ui_state.tree.ui(&mut behavior, ui);
-        for diff in behavior.tree_actions.drain(..) {
+        let TreeBehavior {
+            mut tree_actions,
+            layout: mut state_mut,
+            ..
+        } = behavior;
+        for diff in tree_actions.drain(..) {
             match diff {
                 TreeAction::DeleteTab(tile_id) => {
                     let Some(tile) = ui_state.tree.tiles.get(tile_id) else {
@@ -903,26 +817,26 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                     if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
                         if let Some(camera) = viewport.camera {
-                            commands.entity(camera).despawn();
+                            state_mut.commands.entity(camera).despawn();
                         }
                         if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
-                            commands.entity(nav_gizmo_camera).despawn();
+                            state_mut.commands.entity(nav_gizmo_camera).despawn();
                         }
                         if let Some(nav_gizmo) = viewport.nav_gizmo {
-                            commands.entity(nav_gizmo).despawn();
+                            state_mut.commands.entity(nav_gizmo).despawn();
                         }
                     };
 
                     if let egui_tiles::Tile::Pane(Pane::Graph(graph)) = tile {
-                        commands.entity(graph.id).despawn();
+                        state_mut.commands.entity(graph.id).despawn();
                     };
                     ui_state.tree.remove_recursively(tile_id);
 
                     if let Some(graph_id) = ui_state.graphs.get(&tile_id) {
-                        commands.entity(*graph_id).despawn();
+                        state_mut.commands.entity(*graph_id).despawn();
                         ui_state.graphs.remove(&tile_id);
-                        if selected_object.is_tile_selected(tile_id) {
-                            *selected_object = SelectedObject::None;
+                        if state_mut.selected_object.is_tile_selected(tile_id) {
+                            *state_mut.selected_object = SelectedObject::None;
                         }
                     }
                 }
@@ -931,21 +845,25 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         track_entity,
                         ..Viewport::default()
                     };
-                    let label = viewport_label(&viewport, &entity_map, &entity_metadata);
+                    let label = viewport_label(
+                        &viewport,
+                        &state_mut.entity_map,
+                        &state_mut.entity_metadata,
+                    );
                     let viewport_pane = ViewportPane::spawn(
-                        &mut commands,
-                        &asset_server,
-                        &mut meshes,
-                        &mut materials,
-                        &mut render_layer_alloc,
+                        &mut state_mut.commands,
+                        &state_mut.asset_server,
+                        &mut state_mut.meshes,
+                        &mut state_mut.materials,
+                        &mut state_mut.render_layer_alloc,
                         &viewport,
                         label,
                     );
                     if let Some(camera) = viewport_pane.camera {
-                        let mut camera = commands.entity(camera);
+                        let mut camera = state_mut.commands.entity(camera);
                         if let Some(parent) = viewport.track_entity {
-                            if let Some(parent) = entity_map.0.get(&parent) {
-                                if let Ok(grid_cell) = grid_cell.get(*parent) {
+                            if let Some(parent) = state_mut.entity_map.0.get(&parent) {
+                                if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
                                     camera.insert(*grid_cell);
                                 }
                                 camera.set_parent(*parent);
@@ -965,15 +883,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     let graph_bundle = if let Some(graph_bundle) = graph_bundle {
                         graph_bundle
                     } else {
-                        GraphBundle::new(&mut render_layer_alloc, BTreeMap::default(), None)
+                        GraphBundle::new(&mut state_mut.render_layer_alloc, BTreeMap::default())
                     };
-                    let graph_id = commands.spawn(graph_bundle).id();
+                    let graph_id = state_mut.commands.spawn(graph_bundle).id();
 
                     let graph_label = graph_label(
                         &Graph::default(),
-                        &entity_map,
-                        &entity_metadata,
-                        &metadata_store,
+                        &state_mut.entity_map,
+                        &state_mut.entity_metadata,
+                        &state_mut.metadata_store,
                     );
                     let graph = GraphPane::new(graph_id, graph_label.clone());
                     let pane = Pane::Graph(graph);
@@ -981,7 +899,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     if let Some(tile_id) =
                         ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                     {
-                        *selected_object = SelectedObject::Graph {
+                        *state_mut.selected_object = SelectedObject::Graph {
                             tile_id,
                             label: graph_label,
                             graph_id,
@@ -1020,19 +938,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 Pane::Viewport(viewport) => {
                     let Some(cam) = viewport.camera else { continue };
                     if active_tiles.contains(tile_id) {
-                        if let Some(mut cam) = commands.get_entity(cam) {
+                        if let Some(mut cam) = state_mut.commands.get_entity(cam) {
                             cam.insert(ViewportRect(viewport.rect));
                         }
-                    } else if let Some(mut cam) = commands.get_entity(cam) {
+                    } else if let Some(mut cam) = state_mut.commands.get_entity(cam) {
                         cam.insert(ViewportRect(None));
                     }
                 }
                 Pane::Graph(graph) => {
                     if active_tiles.contains(tile_id) {
-                        if let Some(mut cam) = commands.get_entity(graph.id) {
+                        if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
                             cam.insert(ViewportRect(graph.rect));
                         }
-                    } else if let Some(mut cam) = commands.get_entity(graph.id) {
+                    } else if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
                         cam.insert(ViewportRect(None));
                     }
                 }
@@ -1059,7 +977,7 @@ pub struct SyncViewportParams<'w, 's> {
     grid_cell: Query<'w, 's, &'static GridCell<i128>>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     hdr_enabled: ResMut<'w, HdrEnabled>,
-    component_values: Query<'w, 's, &'static ComponentValueMap>,
+    schema_reg: Res<'w, ComponentSchemaRegistry>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -1076,7 +994,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
         grid_cell,
         metadata_store,
         mut hdr_enabled,
-        component_values,
+        schema_reg,
     } = params;
     for (entity, panel) in panels.iter() {
         spawn_panel(
@@ -1093,7 +1011,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &grid_cell,
             &metadata_store,
             &mut hdr_enabled,
-            &component_values,
+            &schema_reg,
         );
 
         commands.entity(entity).insert(SyncedViewport);
@@ -1115,7 +1033,7 @@ fn spawn_panel(
     grid_cell: &Query<&GridCell<i128>>,
     metadata_store: &Res<ComponentMetadataRegistry>,
     hdr_enabled: &mut ResMut<HdrEnabled>,
-    component_values: &Query<&ComponentValueMap>,
+    schema_reg: &Res<ComponentSchemaRegistry>,
 ) -> Option<TileId> {
     match panel {
         Panel::Viewport(viewport) => {
@@ -1179,7 +1097,7 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
-                    component_values,
+                    schema_reg,
                 );
             });
             tile_id
@@ -1208,25 +1126,18 @@ fn spawn_panel(
                     grid_cell,
                     metadata_store,
                     hdr_enabled,
-                    component_values,
+                    schema_reg,
                 );
             });
             tile_id
         }
         Panel::Graph(graph) => {
             let mut entities = BTreeMap::<EntityId, GraphStateEntity>::default();
-            // TODO
             for entity in graph.entities.iter() {
                 let mut components: BTreeMap<ComponentId, Vec<(bool, Color32)>> = BTreeMap::new();
-                let Some(bevy_entity) = entity_map.get(&entity.entity_id) else {
-                    continue;
-                };
-                let Ok(component_values) = component_values.get(*bevy_entity) else {
-                    continue;
-                };
                 for component in entity.components.iter() {
-                    if let Some(value) = component_values.get(&component.component_id) {
-                        let len = value.shape().iter().product::<usize>();
+                    if let Some(schema) = schema_reg.get(&component.component_id) {
+                        let len = schema.shape().iter().product::<usize>();
                         let values =
                             components.entry(component.component_id).or_insert_with(|| {
                                 (0..len)
@@ -1247,7 +1158,7 @@ fn spawn_panel(
             }
 
             let graph_id = commands
-                .spawn(GraphBundle::new(render_layer_alloc, entities, None))
+                .spawn(GraphBundle::new(render_layer_alloc, entities))
                 .id();
             let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
             let graph = GraphPane::new(graph_id, graph_label);

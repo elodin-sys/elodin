@@ -3,21 +3,20 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::{egui, EguiContexts};
-use egui::emath::Numeric;
-use impeller2_wkt::{MaxTick, SimulationTimeStep, Tick};
+use impeller2_wkt::SimulationTimeStep;
 use timeline_controls::TimelineControls;
-use timeline_ranges::{TimelineRanges, TimelineRangesPanel};
 
 use std::ops::RangeInclusive;
 use timeline_slider::TimelineSlider;
 
-use crate::ui::{colors, images};
+use crate::{
+    ui::{colors, images},
+    SelectedTimeRange,
+};
 
 use super::{WidgetSystem, WidgetSystemExt};
 
 pub mod timeline_controls;
-mod timeline_range_list;
-pub mod timeline_ranges;
 pub mod timeline_slider;
 
 #[derive(Clone)]
@@ -26,7 +25,7 @@ pub struct TimelineArgs {
     pub line_height: f32,
     pub segment_count: u8,
     pub frames_per_second: f64,
-    pub active_range: RangeInclusive<u64>,
+    pub active_range: RangeInclusive<i64>,
 }
 
 /// Returns a `value` based on the `position` in the timeline
@@ -61,39 +60,105 @@ pub fn position_from_value(
     egui::emath::lerp(position_range, normalized as f32)
 }
 
-pub fn get_segment_size(fps: f64, segments: f64, active_range_end: f64) -> usize {
-    let min_offset = 0.1;
-    let min_end = fps * segments;
-
-    let visual_end = if active_range_end > min_end {
-        active_range_end + (active_range_end * min_offset)
-    } else {
-        min_end + (min_end * min_offset)
-    };
-    let total_time_sec = (visual_end / fps).ceil();
-
-    (total_time_sec / segments).ceil() as usize
-}
-
 pub fn get_position_range(
     x_range: egui::Rangef,
-    fps: f64,
-    segments: f64,
-    segment_size: f64,
-    active_range_start: f64,
-    active_range_end: f64,
+    active_duration: f64,
+    full_duration: f64,
 ) -> egui::Rangef {
-    let total_timeline_frames = segment_size * segments * fps;
-    let not_sim_offset =
-        (total_timeline_frames - active_range_end) / (total_timeline_frames - active_range_start);
-
-    // NOTE: Active zone starts in a center of the first segment and ends in a the center of the last one
-    let offset = (x_range.span() / (segments as f32 + 1.0)) / 2.0;
-    let full_range = x_range.shrink(offset);
-
+    let active_range = (x_range.span() as f64 / full_duration) * active_duration;
     egui::Rangef {
-        min: full_range.min,
-        max: full_range.max - ((full_range.max - full_range.min) * (not_sim_offset as f32)),
+        min: x_range.min,
+        max: x_range.min + active_range as f32,
+    }
+}
+
+pub trait DurationExt {
+    fn ceil_approx(&self) -> hifitime::Duration;
+    fn segment_round(&self) -> hifitime::Duration;
+}
+
+impl DurationExt for hifitime::Duration {
+    fn ceil_approx(&self) -> hifitime::Duration {
+        use hifitime::Unit;
+        let (_, days, hours, minutes, seconds, milli, us, _) = self.decompose();
+
+        let round_to = if days > 0 {
+            1 * Unit::Day
+        } else if hours > 0 {
+            1 * Unit::Hour
+        } else if minutes > 0 {
+            1 * Unit::Minute
+        } else if seconds > 0 {
+            1 * Unit::Second
+        } else if milli > 0 {
+            1 * Unit::Millisecond
+        } else if us > 0 {
+            1 * Unit::Microsecond
+        } else {
+            1 * Unit::Nanosecond
+        };
+
+        self.ceil(round_to)
+    }
+    #[allow(clippy::match_overlapping_arm)]
+    fn segment_round(&self) -> hifitime::Duration {
+        use hifitime::{TimeUnits, Unit};
+        let (_, days, hours, minutes, seconds, milli, us, _) = self.decompose();
+        let round_to = if days > 0 {
+            match days {
+                ..=2 => 1,
+                ..=5 => 5,
+                ..=15 => 15,
+                ..=30 => 30,
+                _ => 50,
+            }
+            .days()
+        } else if hours > 0 {
+            match hours {
+                ..=2 => 2,
+                ..=6 => 6,
+                ..=12 => 12,
+                _ => 24,
+            }
+            .hours()
+        } else if minutes > 0 {
+            match minutes {
+                ..=2 => 2,
+                ..=5 => 5,
+                ..=15 => 15,
+                ..=30 => 30,
+                _ => 60,
+            }
+            .minutes()
+        } else if seconds > 0 {
+            match seconds {
+                ..=2 => 1,
+                ..=5 => 5,
+                ..=15 => 15,
+                ..=30 => 30,
+                _ => 60,
+            }
+            .seconds()
+        } else if milli > 0 {
+            match milli {
+                ..=2 => 1,
+                ..=5 => 5,
+                ..=10 => 10,
+                ..=25 => 25,
+                ..=50 => 50,
+                ..=100 => 100,
+                ..=250 => 250,
+                ..=500 => 500,
+                _ => 1000,
+            }
+            .milliseconds()
+        } else if us > 0 {
+            1 * Unit::Microsecond
+        } else {
+            1 * Unit::Nanosecond
+        };
+
+        self.ceil(round_to)
     }
 }
 
@@ -115,10 +180,8 @@ pub struct TimelineIcons {
 pub struct TimelinePanel<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
-    tick: Res<'w, Tick>,
-    max_tick: Res<'w, MaxTick>,
     tick_time: Res<'w, SimulationTimeStep>,
-    timeline_ranges: Res<'w, TimelineRanges>,
+    selected_time_range: Res<'w, SelectedTimeRange>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -134,13 +197,10 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         let state_mut = state.get_mut(world);
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
-        let tick = state_mut.tick;
-        let max_tick = state_mut.max_tick;
         let tick_time = state_mut.tick_time;
+        let active_range =
+            state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0;
 
-        let ranges_not_empty = state_mut.timeline_ranges.is_not_empty();
-
-        let active_range = 0..=max_tick.0;
         let frames_per_second = 1.0 / tick_time.0;
 
         let timeline_icons = TimelineIcons {
@@ -156,8 +216,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
             range_loop: contexts.add_image(images.icon_loop.clone_weak()),
         };
 
-        let tick_value = tick.0 as f64;
-
         egui::TopBottomPanel::bottom("timeline_panel")
             .frame(egui::Frame {
                 fill: colors::PRIMARY_SMOKE,
@@ -172,9 +230,8 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
 
                 ui.add(egui::Separator::default().spacing(0.0));
 
-                let range_list_width = 200.0;
                 let timeline_args = TimelineArgs {
-                    available_width: available_width - range_list_width,
+                    available_width,
                     line_height: 40.0,
                     segment_count: (available_width / 100.0) as u8,
                     frames_per_second,
@@ -183,75 +240,11 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
 
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        let line_size = egui::vec2(range_list_width, timeline_args.line_height);
-
-                        ui.add_widget_with::<timeline_range_list::TimelineRangeListHeader>(
-                            world,
-                            "range_list_header",
-                            (timeline_icons, line_size),
-                        );
-
-                        ui.add_widget_with::<timeline_range_list::TimelineRangeList>(
-                            world,
-                            "range_list_items",
-                            (timeline_icons, line_size),
-                        );
-                    });
-
-                    ui.vertical(|ui| {
-                        let segments = timeline_args.segment_count as f64;
-                        let active_range_start = timeline_args.active_range.start().to_f64();
-                        let active_range_end = timeline_args.active_range.end().to_f64();
-                        let full_range = active_range_start..=active_range_end;
-                        // NOTE: Replicate same calculation done in timeline widget to be in sync
-                        let position_range = get_position_range(
-                            ui.available_rect_before_wrap().x_range(),
-                            frames_per_second,
-                            segments,
-                            get_segment_size(frames_per_second, segments, active_range_end) as f64,
-                            active_range_start,
-                            active_range_end,
-                        );
-
                         ui.add_widget_with::<TimelineSlider>(
                             world,
                             "timeline_slider",
                             (timeline_icons, timeline_args.clone()),
                         );
-
-                        if ranges_not_empty {
-                            let timeline_ranges_rect = ui.add_widget_with::<TimelineRangesPanel>(
-                                world,
-                                "timeline_ranges_panel",
-                                (
-                                    timeline_args.line_height,
-                                    full_range.clone(),
-                                    position_range,
-                                ),
-                            );
-
-                            let y_range = timeline_ranges_rect.y_range();
-
-                            let handle_size = egui::vec2(12.0, 30.0);
-                            let stroke_width =
-                                ((timeline_args.line_height / handle_size.y) * handle_size.x) / 6.0;
-
-                            // Max Tick
-
-                            let x_pos = position_from_value(
-                                active_range_end,
-                                full_range.clone(),
-                                position_range,
-                            );
-                            let line_stroke = egui::Stroke::new(stroke_width, colors::WHITE);
-                            ui.painter().vline(x_pos, y_range, line_stroke);
-
-                            // Current Tick
-
-                            let x_pos = position_from_value(tick_value, full_range, position_range);
-                            let line_stroke = egui::Stroke::new(stroke_width, colors::MINT_DEFAULT);
-                            ui.painter().vline(x_pos, y_range, line_stroke);
-                        }
                     });
                 });
             });

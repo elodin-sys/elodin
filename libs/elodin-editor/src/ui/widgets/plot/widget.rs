@@ -12,15 +12,15 @@ use bevy::{
         ButtonInput,
     },
     math::{DVec2, Rect, Vec2},
+    prelude::Component,
     render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, Layout};
-use egui::{vec2, Color32, Frame, Margin, Pos2, RichText, Rounding, Stroke};
-use impeller2::types::{ComponentId, EntityId};
-use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
-use impeller2_wkt::{EntityMetadata, GetTimeSeries, MaxTick};
-use itertools::{Itertools, MinMaxResult};
+use egui::{Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
+use impeller2::types::{ComponentId, EntityId, Timestamp};
+use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
+use impeller2_wkt::EntityMetadata;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -31,35 +31,37 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{self, with_opacity, ColorExt},
-        utils::{self, format_num, MarginSides},
+        utils::format_num,
         widgets::{
             plot::{
                 gpu::{LineBundle, LineConfig, LineUniform},
                 CollectedGraphData, GraphState, Line,
             },
-            timeline::timeline_ranges::TimelineRange,
+            time_label::{time_label, PrettyDuration},
+            timeline::DurationExt,
         },
     },
+    SelectedTimeRange,
 };
 
-use super::{gpu::LineHandle, PlotDataComponent, PlotDataEntity};
+use super::{
+    gpu::{LineHandle, LineVisibleRange},
+    PlotDataComponent, PlotDataEntity,
+};
 
 #[derive(Debug)]
 pub struct Plot {
-    tick_range: Range<u64>,
-    current_tick: u64,
+    tick_range: Range<Timestamp>,
+    current_timestamp: Timestamp,
+    earliest_timestamp: Timestamp,
     time_step: std::time::Duration,
     bounds: PlotBounds,
     rect: egui::Rect,
     inner_rect: egui::Rect,
 
-    invert_x: bool,
-    invert_y: bool,
     steps_x: usize,
     steps_y: usize,
 
-    padding: egui::Margin,
-    margin: egui::Margin,
     notch_length: f32,
     axis_label_margin: f32,
 
@@ -67,109 +69,65 @@ pub struct Plot {
     border_stroke: egui::Stroke,
 
     show_modal: bool,
-    show_legend: bool,
-
-    zoom_offset: DVec2,
 }
 
-fn range_x_from_rect(rect: &egui::Rect, invert: bool) -> RangeInclusive<f32> {
-    if invert {
-        rect.max.x..=rect.min.x
-    } else {
-        rect.min.x..=rect.max.x
-    }
+fn range_x_from_rect(rect: &egui::Rect) -> RangeInclusive<f32> {
+    rect.max.x..=rect.min.x
 }
 
-fn range_y_from_rect(rect: &egui::Rect, invert: bool) -> RangeInclusive<f32> {
-    if invert {
-        rect.max.y..=rect.min.y
-    } else {
-        rect.min.y..=rect.max.y
-    }
+fn range_y_from_rect(rect: &egui::Rect) -> RangeInclusive<f32> {
+    rect.max.y..=rect.min.y
 }
+
+pub const MARGIN: egui::Margin = egui::Margin {
+    left: 60,
+    right: 0,
+    top: 30,
+    bottom: 40,
+};
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
-    let adding: egui::Margin = egui::Margin::same(0.0).left(0.0).bottom(0.0);
-    let margin: egui::Margin = egui::Margin::same(30.0).right(0.0).left(60.0).bottom(40.0);
     egui::Rect {
         min: egui::pos2(
-            rect.min.x + (margin.left + adding.left),
-            rect.min.y + (margin.top + adding.top),
+            rect.min.x + (MARGIN.left as f32),
+            rect.min.y + (MARGIN.top as f32),
         ),
         max: egui::pos2(
-            rect.max.x - (margin.right + adding.right),
-            rect.max.y - (margin.bottom + adding.bottom),
+            rect.max.x - (MARGIN.right as f32),
+            rect.max.y - (MARGIN.bottom as f32),
         ),
-    }
-}
-
-impl Default for Plot {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl Plot {
-    pub fn new() -> Self {
-        Self {
-            tick_range: Range::default(),
-            current_tick: 0,
-            time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
-            bounds: PlotBounds::default(),
-            rect: egui::Rect::ZERO,
-            inner_rect: egui::Rect::ZERO,
-
-            invert_x: false,
-            invert_y: true,
-            steps_x: 6,
-            steps_y: 6,
-            padding: egui::Margin::same(0.0).left(0.0).bottom(0.0),
-            margin: egui::Margin::same(30.0).left(60.0).bottom(40.0).right(0.0),
-
-            notch_length: 10.0,
-            axis_label_margin: 5.0,
-
-            text_color: colors::PRIMARY_CREAME,
-            border_stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
-
-            show_modal: true,
-            show_legend: false,
-            zoom_offset: DVec2::ZERO,
-        }
-    }
-
     /// Calculate bounds and point positions based on the current UI allocation
     /// Should be run last, right before render
     #[allow(clippy::too_many_arguments)]
-    pub fn calculate_lines(
-        mut self,
+    pub fn from_state(
         ui: &egui::Ui,
         collected_graph_data: &mut CollectedGraphData,
         graph_state: &mut GraphState,
-        timeline_range: Option<&TimelineRange>,
         lines: &mut Assets<Line>,
         commands: &mut Commands,
         graph_id: Entity,
         entity_map: &EntityMap,
         entity_metadata: &Query<&EntityMetadata>,
         metadata_store: &ComponentMetadataRegistry,
-        max_tick: MaxTick,
+        selected_range: SelectedTimeRange,
+        earliest_timestamp: Timestamp,
     ) -> Self {
-        self.rect = ui.max_rect();
-        self.inner_rect = get_inner_rect(self.rect);
+        let rect = ui.max_rect();
+        let inner_rect = get_inner_rect(rect);
 
-        // calc max_length
-
-        if let Some(timeline_range) = timeline_range {
-            let (a, b) = timeline_range.values;
-            self.tick_range = if a > b { b..a } else { a..b };
-        } else {
-            self.tick_range = collected_graph_data.tick_range.clone();
+        let mut tick_range = selected_range.0.clone();
+        if tick_range.start == tick_range.end {
+            tick_range.end += Duration::from_secs(10);
         }
 
         // calc bounds
 
-        let mut minmax_lines = vec![];
+        let mut y_max: Option<f32> = None;
+        let mut y_min: Option<f32> = None;
 
         for (entity_id, components) in &graph_state.entities {
             if let Some(entity) = collected_graph_data.entities.get(entity_id) {
@@ -182,7 +140,21 @@ impl Plot {
                                     .get(&value_index)
                                     .and_then(|handle| lines.get_mut(handle))
                                 {
-                                    minmax_lines.push(vec![line.min, line.max]);
+                                    let summary = line.data.range_summary(selected_range.0.clone());
+                                    if let Some(min) = summary.min {
+                                        if let Some(y_min) = &mut y_min {
+                                            *y_min = y_min.min(min);
+                                        } else {
+                                            y_min = Some(min)
+                                        }
+                                    }
+                                    if let Some(max) = summary.max {
+                                        if let Some(y_max) = &mut y_max {
+                                            *y_max = y_max.max(max);
+                                        } else {
+                                            y_max = Some(max)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -190,56 +162,68 @@ impl Plot {
                 }
             }
         }
-        self.steps_y = ((self.inner_rect.height() / 50.0) as usize).max(1);
-        if self.steps_y % 2 != 0 {
-            self.steps_y += 1;
+        let mut steps_y = ((inner_rect.height() / 50.0) as usize).max(1);
+        if steps_y % 2 != 0 {
+            steps_y += 1;
         }
-        self.steps_x = ((self.inner_rect.width() / 50.0) as usize).max(1);
+        let steps_x = ((inner_rect.width() / 75.0) as usize).max(1);
 
-        let original_bounds = PlotBounds::from_lines(&self.tick_range, &minmax_lines);
+        let original_bounds = PlotBounds::from_lines(
+            &tick_range,
+            earliest_timestamp,
+            y_min.unwrap_or_default() as f64,
+            y_max.unwrap_or_default() as f64,
+        );
         let bounds_size = DVec2::new(original_bounds.width(), original_bounds.height());
-        let outer_ratio = self.rect.size() / self.inner_rect.size();
+        let outer_ratio = rect.size() / inner_rect.size();
         let outer_ratio = Vec2::new(outer_ratio.x, outer_ratio.y).as_dvec2();
         let pan_offset = graph_state.pan_offset.as_dvec2() * bounds_size * DVec2::new(-1.0, 1.0);
-        self.bounds = original_bounds.clone().offset(pan_offset * outer_ratio);
+        let mut bounds = original_bounds.clone().offset(pan_offset * outer_ratio);
         let new_bounds = bounds_size * graph_state.zoom_factor.as_dvec2();
         let offset = new_bounds - bounds_size;
-        self.bounds.min_x -= offset.x / 2.0;
-        self.bounds.max_x += offset.x / 2.0;
-        self.bounds.min_y -= offset.y / 2.0;
-        self.bounds.max_y += offset.y / 2.0;
-
-        let y_range = self.bounds.max_y - self.bounds.min_y;
-        let full_y_range = (self.rect.height() / self.inner_rect.height()) as f64 * y_range;
+        bounds.min_x -= offset.x / 2.0;
+        bounds.max_x += offset.x / 2.0;
+        bounds.min_y -= offset.y / 2.0;
+        bounds.max_y += offset.y / 2.0;
+        let y_range = bounds.max_y - bounds.min_y;
+        let full_y_range = (rect.height() / inner_rect.height()) as f64 * y_range;
         let y_delta = full_y_range - y_range;
-        let mut new_bounds = self.bounds.clone();
+        let mut new_bounds = bounds.clone();
         new_bounds.min_y -= y_delta / 2.0;
         new_bounds.max_y -= y_delta / 2.0;
-        let x_range = 1.0 / (self.bounds.max_x - self.bounds.min_x);
+        let x_range = 1.0 / (bounds.max_x - bounds.min_x);
         let viewport_origin = DVec2::new(
             (offset.x / 2.0 - pan_offset.x) * x_range,
             -(new_bounds.min_y / full_y_range),
         );
-        self.zoom_offset = viewport_origin;
         let viewport_origin = viewport_origin.as_vec2();
+        let width = (new_bounds.max_x - new_bounds.min_x) as f32;
+        let orthographic_projection = OrthographicProjection {
+            near: 0.0,
+            far: 1000.0,
+            viewport_origin,
+            scaling_mode: ScalingMode::Fixed {
+                width,
+                height: full_y_range as f32,
+            },
+            scale: 1.0,
+            area: Rect::new(
+                new_bounds.min_x as f32,
+                new_bounds.min_y as f32,
+                new_bounds.max_x as f32,
+                new_bounds.max_y as f32,
+            ),
+        };
         commands
             .entity(graph_id)
-            .insert(Projection::Orthographic(OrthographicProjection {
-                near: 0.0,
-                far: 1000.0,
-                viewport_origin,
-                scaling_mode: ScalingMode::Fixed {
-                    width: (new_bounds.max_x - new_bounds.min_x) as f32,
-                    height: full_y_range as f32,
-                },
-                scale: 1.0,
-                area: Rect::new(
-                    new_bounds.min_x as f32,
-                    new_bounds.min_y as f32,
-                    new_bounds.max_x as f32,
-                    new_bounds.max_y as f32,
-                ),
-            }));
+            .insert(Projection::Orthographic(orthographic_projection));
+
+        let min_x = -viewport_origin.x * width;
+        let max_x = width + min_x;
+
+        let line_visible_range = Timestamp(min_x as i64 + earliest_timestamp.0)
+            ..Timestamp(max_x as i64 + earliest_timestamp.0);
+        let bounds = PlotBounds::new(min_x as f64, bounds.min_y, max_x as f64, bounds.max_y);
 
         // calc lines
 
@@ -286,53 +270,6 @@ impl Plot {
                     let Some(line) = component.lines.get(&value_index) else {
                         continue;
                     };
-                    if *enabled {
-                        if let Some(values) = lines.get_mut(line) {
-                            values.data.current_range =
-                                (self.tick_range.start as usize)..(self.tick_range.end as usize);
-                            for chunk in values.data.range() {
-                                chunk
-                                    .unfetched
-                                    .remove_range(max_tick.0 as u32..chunk.range.end as u32);
-                                if !chunk.unfetched.is_empty() {
-                                    let start =
-                                        chunk.unfetched.min().expect("unexpected empty chunk")
-                                            as u64;
-                                    let mut end =
-                                        chunk.unfetched.max().expect("unexpected empty chunk")
-                                            as u64;
-                                    if start == end {
-                                        end += 1;
-                                    }
-                                    let start = start.max(self.tick_range.start);
-                                    let end = end.min(self.tick_range.end);
-                                    let time_range = start..end;
-
-                                    if end.saturating_sub(start) > 0 {
-                                        chunk.unfetched.remove_range(start as u32..end as u32);
-                                        let packet_id = fastrand::u64(..).to_le_bytes()[..3]
-                                            .try_into()
-                                            .expect("id wrong size");
-
-                                        commands.send_req_with_handler(
-                                            GetTimeSeries {
-                                                id: packet_id,
-                                                range: time_range.clone(),
-                                                entity_id: *entity_id,
-                                                component_id: *component_id,
-                                            },
-                                            packet_id,
-                                            super::time_series_handler(
-                                                *entity_id,
-                                                *component_id,
-                                                time_range,
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     match (entity, enabled) {
                         (None, true) => {
@@ -346,6 +283,9 @@ impl Plot {
                                     config: LineConfig {
                                         render_layers: graph_state.render_layers.clone(),
                                     },
+                                    line_visible_range: LineVisibleRange(
+                                        line_visible_range.clone(),
+                                    ),
                                 })
                                 .id();
                             graph_state
@@ -361,10 +301,10 @@ impl Plot {
                             ));
                         }
                         (Some((entity, _)), true) => {
-                            commands.entity(*entity).insert(LineUniform::new(
-                                graph_state.line_width,
-                                color.into_bevy(),
-                            ));
+                            commands
+                                .entity(*entity)
+                                .insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                                .insert(LineVisibleRange(line_visible_range.clone()));
                         }
                         (None, false) => {}
                     }
@@ -382,7 +322,23 @@ impl Plot {
                     .is_some()
             });
 
-        self
+        Self {
+            tick_range,
+            current_timestamp: Timestamp::EPOCH,
+            time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
+            bounds,
+            rect,
+            inner_rect,
+            steps_x,
+            steps_y,
+            notch_length: 10.0,
+            axis_label_margin: 5.0,
+            text_color: colors::PRIMARY_CREAME,
+            border_stroke: egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+
+            show_modal: true,
+            earliest_timestamp,
+        }
     }
 
     pub fn time_step(mut self, step: std::time::Duration) -> Self {
@@ -390,73 +346,45 @@ impl Plot {
         self
     }
 
-    pub fn current_tick(mut self, tick: u64) -> Self {
-        self.current_tick = tick;
-        self
-    }
-
-    pub fn invert(mut self, x: bool, y: bool) -> Self {
-        self.invert_x = x;
-        self.invert_y = y;
-        self
-    }
-
-    pub fn padding(mut self, padding: egui::Margin) -> Self {
-        self.padding = padding;
-        self
-    }
-
-    pub fn margin(mut self, margin: egui::Margin) -> Self {
-        self.margin = margin;
-        self
-    }
-
-    pub fn text_color(mut self, color: egui::Color32) -> Self {
-        self.text_color = color;
-        self
-    }
-
-    pub fn border_stroke(mut self, stroke: egui::Stroke) -> Self {
-        self.border_stroke = stroke;
+    pub fn current_timestamp(mut self, tick: Timestamp) -> Self {
+        self.current_timestamp = tick;
         self
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        let step_size = self.bounds.width() / self.steps_x as f64;
-        let min_step_size = 1.0 / self.time_step.as_secs_f64();
-        let step_size = (step_size / min_step_size).ceil() * min_step_size;
-        let steps_x = (0..=self.steps_x)
-            .map(|i| self.bounds.min_x + (i as f64) * step_size)
-            .filter(|x| *x <= self.bounds.max_x)
-            .collect::<Vec<f64>>();
-
-        if !self.bounds.min_y.is_finite() || !self.bounds.max_y.is_finite() {
+        let step_size =
+            hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
+                .segment_round();
+        let step_size_micro = step_size.total_nanoseconds() / 1000;
+        let step_size_float = step_size_micro as f64;
+        if step_size_micro <= 0 {
             return;
         }
+        let visible_time_range = self.visible_time_range();
+        let start = self.tick_range.start;
+        let end = self.tick_range.end.max(visible_time_range.end);
+        let step_count = (end.0 - start.0) / step_size_micro as i64 + 1;
 
-        for x_step in steps_x {
-            let x_position = PlotPoint::from_plot_point(self, x_step, self.bounds.min_y).pos2;
+        for i in 0..=step_count {
+            let offset_float = step_size_float * i as f64;
+            let offset = hifitime::Duration::from_microseconds(offset_float);
+            let x_pos = self.x_pos_from_timestamp(start + offset.into());
 
             ui.painter().line_segment(
                 [
-                    egui::pos2(x_position.x, x_position.y + self.padding.bottom),
-                    egui::pos2(
-                        x_position.x,
-                        x_position.y + (self.padding.bottom + self.notch_length),
-                    ),
+                    egui::pos2(x_pos, self.inner_rect.max.y),
+                    egui::pos2(x_pos, self.inner_rect.max.y + (self.notch_length)),
                 ],
                 self.border_stroke,
             );
 
-            let time = (self.time_step.as_secs_f64() * x_step).round() as usize;
             ui.painter().text(
                 egui::pos2(
-                    x_position.x,
-                    x_position.y
-                        + (self.padding.bottom + self.notch_length + self.axis_label_margin),
+                    x_pos,
+                    self.inner_rect.max.y + (self.notch_length + self.axis_label_margin),
                 ),
                 egui::Align2::CENTER_TOP,
-                utils::time_label(time, false),
+                PrettyDuration(offset).to_string(),
                 font_id.clone(),
                 self.text_color,
             );
@@ -465,21 +393,19 @@ impl Plot {
 
     fn draw_y_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
         let draw_tick = |tick| {
-            let y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, tick).pos2;
+            let mut y_position = PlotPoint::from_plot_point(self, self.bounds.min_x, tick).pos2;
+            y_position.x = self.inner_rect.min.x;
             ui.painter().line_segment(
                 [
-                    egui::pos2(y_position.x - self.padding.left, y_position.y),
-                    egui::pos2(
-                        y_position.x - (self.padding.left + self.notch_length),
-                        y_position.y,
-                    ),
+                    egui::pos2(y_position.x, y_position.y),
+                    egui::pos2(y_position.x - self.notch_length, y_position.y),
                 ],
                 self.border_stroke,
             );
 
             ui.painter().text(
                 egui::pos2(
-                    y_position.x - (self.padding.left + self.notch_length + self.axis_label_margin),
+                    y_position.x - (self.notch_length + self.axis_label_margin),
                     y_position.y,
                 ),
                 egui::Align2::RIGHT_CENTER,
@@ -540,9 +466,10 @@ impl Plot {
 
         ui.painter().rect(
             pointer_rect,
-            egui::Rounding::same(2.0),
+            egui::CornerRadius::same(2),
             colors::MINT_DEFAULT,
             egui::Stroke::NONE,
+            egui::StrokeKind::Middle,
         );
 
         ui.painter().text(
@@ -563,13 +490,12 @@ impl Plot {
     ) {
         ui.painter().vline(
             x_offset + border_rect.min.x,
-            0.0..=self.inner_rect.max.y + self.padding.bottom,
+            0.0..=self.inner_rect.max.y,
             egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
 
-        // NOTE: HLine is not attached to points
         ui.painter().hline(
-            border_rect.min.x - self.padding.left..=border_rect.max.x,
+            border_rect.min.x..=border_rect.max.x,
             pointer_pos.y,
             egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
         );
@@ -584,9 +510,9 @@ impl Plot {
         graph_state: &GraphState,
         collected_graph_data: &CollectedGraphData,
         pointer_pos: egui::Pos2,
-        tick: usize,
+        timestamp: Timestamp,
     ) {
-        let modal_width = 200.0;
+        let modal_width = 250.0;
         let margin = 20.0;
 
         let anchor_left = pointer_pos.x + modal_width + margin < self.rect.right(); // NOTE: might want to replace pointer_pos with x_offset from `render`
@@ -611,22 +537,25 @@ impl Plot {
             .fixed_size(egui::vec2(modal_width, self.inner_rect.height() / 2.))
             .frame(
                 Frame::default()
-                    .inner_margin(Margin::same(16.0))
+                    .inner_margin(Margin::same(16))
                     .stroke(Stroke::new(1.0, colors::BORDER_GREY))
-                    .rounding(Rounding::same(4.0))
+                    .corner_radius(CornerRadius::same(4))
                     .fill(colors::PRIMARY_SMOKE)
                     .shadow(egui::epaint::Shadow {
-                        offset: vec2(0., 5.0),
-                        blur: 8.0,
-                        spread: -2.0,
+                        offset: [0, 5],
+                        blur: 8,
+                        spread: 2,
                         color: Color32::from_black_alpha(191),
                     }),
             )
             .show(ui.ctx(), |ui| {
-                let time = self.time_step * tick as u32;
-                let time_text = utils::time_label_ms(time.as_secs_f64());
+                let time: hifitime::Epoch = timestamp.into();
 
-                ui.label(time_text);
+                ui.add(time_label(time));
+                let offset = hifitime::Duration::from_microseconds(
+                    (timestamp.0 - self.tick_range.start.0) as f64,
+                );
+                ui.label(PrettyDuration(offset).to_string());
                 let mut current_entity_id: Option<EntityId> = None;
                 let mut current_component_id: Option<ComponentId> = None;
                 for ((entity_id, component_id, line_index), (entity, color)) in
@@ -682,9 +611,10 @@ impl Plot {
                                 );
                                 ui.painter().rect(
                                     rect,
-                                    egui::Rounding::same(2.0),
+                                    egui::CornerRadius::same(2),
                                     *color,
                                     egui::Stroke::NONE,
+                                    egui::StrokeKind::Middle,
                                 );
                                 ui.add_space(6.);
                                 ui.label(RichText::new(line_data.label.clone()).size(11.0));
@@ -692,8 +622,8 @@ impl Plot {
                         });
                         let value = line
                             .data
-                            .get(tick)
-                            .map(|x| format!("{:.2}", x))
+                            .get_nearest(timestamp)
+                            .map(|(_time, x)| format!("{:.2}", x))
                             .unwrap_or_else(|| "N/A".to_string());
                         ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                             ui.add_space(3.0);
@@ -705,40 +635,18 @@ impl Plot {
             });
     }
 
-    fn draw_legend(&self, ui: &mut egui::Ui) {
-        let legend_size = egui::vec2(200.0, 50.0);
-        let legend_margin = 10.0;
-
-        let modal_rect = egui::Rect::from_min_max(
-            egui::pos2(
-                self.inner_rect.max.x - (legend_size.x + legend_margin),
-                self.inner_rect.max.y - (legend_size.y + legend_margin),
-            ),
-            egui::pos2(
-                self.inner_rect.max.x - legend_margin,
-                self.inner_rect.max.y - legend_margin,
-            ),
-        );
-
-        ui.painter().rect(
-            modal_rect,
-            egui::Rounding::same(2.0),
-            colors::with_opacity(colors::PRIMARY_SMOKE, 0.9),
-            egui::Stroke::new(0.4, colors::PRIMARY_CREAME),
-        );
-    }
-
     fn get_border_rect(&self, rect: egui::Rect) -> egui::Rect {
         egui::Rect {
-            min: egui::pos2(rect.min.x + self.margin.left, rect.min.y + self.margin.top),
+            min: egui::pos2(
+                rect.min.x + MARGIN.left as f32,
+                rect.min.y + MARGIN.top as f32,
+            ),
             max: egui::pos2(
-                rect.max.x - self.margin.right,
-                rect.max.y - self.margin.bottom,
+                rect.max.x - MARGIN.right as f32,
+                rect.max.y - MARGIN.bottom as f32,
             ),
         }
     }
-
-    pub fn get_x_tick(&self) {}
 
     pub fn render(
         &self,
@@ -796,14 +704,11 @@ impl Plot {
                 self.draw_y_axis_flag(ui, pointer_plot_point, border_rect, font_id);
 
                 let inner_point_pos = pointer_pos - self.inner_rect.min;
-                let unscaled_tick_range = (self.tick_range.end - self.tick_range.start) as f64;
-                let tick_range = unscaled_tick_range * graph_state.zoom_factor.x as f64;
-                let total_offset = self.zoom_offset.x as f32;
-                let total_offset_pixels = total_offset * self.inner_rect.width();
-                let x_pos = (inner_point_pos.x - total_offset_pixels) * tick_range as f32
-                    / self.inner_rect.width();
-                let x_tick = x_pos as usize;
-                let x_index = x_tick - self.tick_range.start as usize;
+                let timestamp = Timestamp(
+                    (((inner_point_pos.x / self.inner_rect.width()) as f64 * self.bounds.width()
+                        + self.bounds.min_x) as i64)
+                        + self.earliest_timestamp.0,
+                );
 
                 self.draw_cursor(ui, pointer_pos, inner_point_pos.x, self.inner_rect);
 
@@ -818,14 +723,15 @@ impl Plot {
                     let Some(line) = lines.get(&line_handle.0) else {
                         continue;
                     };
-                    let Some(y) = line.data.get(x_index) else {
+                    let Some((timestamp, y)) = line.data.get_nearest(timestamp) else {
                         continue;
                     };
+                    let x = self.x_pos_from_timestamp(timestamp);
                     let y_offset = *y as f64 - self.bounds.min_y;
                     let y_range = self.bounds.max_y - self.bounds.min_y;
                     let y_pos = y_offset as f32 * (self.inner_rect.height() / y_range as f32);
                     let y_pos = self.inner_rect.max.y - y_pos;
-                    let pos = Pos2::new(pointer_pos.x, y_pos);
+                    let pos = Pos2::new(x, y_pos);
                     ui.painter().circle(
                         pos,
                         6.0,
@@ -842,29 +748,28 @@ impl Plot {
                         graph_state,
                         collected_graph_data,
                         pointer_pos,
-                        x_index,
+                        timestamp,
                     );
                 }
             }
         }
 
         // Draw a line for the current_tick
-        if self.tick_range.contains(&self.current_tick) {
+        if self.tick_range.contains(&self.current_timestamp) {
             let line_width = 1.0;
             let aspect_ratio = 12.0 / 30.0;
 
             let scrub_height = 12.0 * line_width;
             let scrub_width = scrub_height * aspect_ratio;
 
-            let tick_pos =
-                PlotPoint::from_plot_point(self, self.current_tick as f64, self.bounds.min_y).pos2;
+            let tick_pos = self.x_pos_from_timestamp(self.current_timestamp);
             ui.painter().vline(
-                tick_pos.x,
+                tick_pos,
                 self.rect.min.y..=border_rect.max.y,
                 egui::Stroke::new(line_width, colors::WHITE),
             );
 
-            let scrub_center = egui::pos2(tick_pos.x, self.rect.min.y + (scrub_height * 0.5));
+            let scrub_center = egui::pos2(tick_pos, self.rect.min.y + (scrub_height * 0.5));
             let scrub_rect =
                 egui::Rect::from_center_size(scrub_center, egui::vec2(scrub_width, scrub_height));
 
@@ -875,12 +780,17 @@ impl Plot {
                 colors::WHITE,
             );
         }
+    }
 
-        // Draw legend
+    fn x_pos_from_timestamp(&self, timestamp: Timestamp) -> f32 {
+        (self.inner_rect.width() as f64 / self.bounds.width()
+            * ((timestamp.0 - self.earliest_timestamp.0) as f64 - self.bounds.min_x)) as f32
+            + self.inner_rect.min.x
+    }
 
-        if self.show_legend {
-            self.draw_legend(ui);
-        }
+    fn visible_time_range(&self) -> Range<Timestamp> {
+        Timestamp(self.bounds.min_x as i64 + self.earliest_timestamp.0)
+            ..Timestamp(self.bounds.max_x as i64 + self.earliest_timestamp.0)
     }
 }
 
@@ -902,16 +812,17 @@ impl PlotBounds {
         }
     }
 
-    pub fn from_lines(baseline: &Range<u64>, lines: &[Vec<f32>]) -> Self {
-        let (min_x, max_x) = (baseline.start as f64, baseline.end as f64);
+    pub fn from_lines(
+        baseline: &Range<Timestamp>,
+        earliest_timestamp: Timestamp,
+        min_y: f64,
+        max_y: f64,
+    ) -> Self {
+        let (min_x, max_x) = (
+            (baseline.start.0 - earliest_timestamp.0) as f64,
+            (baseline.end.0 - earliest_timestamp.0) as f64,
+        );
 
-        let minmax_y = lines.iter().flatten().minmax();
-
-        let (min_y, max_y) = match minmax_y {
-            MinMaxResult::MinMax(min_y, max_y) => (*min_y as f64, *max_y as f64),
-            MinMaxResult::OneElement(y) => (*y as f64, *y as f64),
-            _ => (0.0, 0.0),
-        };
         let min_y = sigfig_round(min_y, 2);
         let max_y = sigfig_round(max_y, 2);
         Self::new(min_x, min_y, max_x, max_y)
@@ -939,6 +850,12 @@ impl PlotBounds {
         self.min_y += offset.y;
         self.max_y += offset.y;
         self
+    }
+
+    pub fn timestamp_range(&self, earliest_timestamp: Timestamp) -> Range<Timestamp> {
+        let min_x = (self.min_x as i64) + earliest_timestamp.0;
+        let max_x = (self.max_x as i64) + earliest_timestamp.0;
+        Timestamp(min_x)..Timestamp(max_x)
     }
 }
 
@@ -969,12 +886,12 @@ impl PlotPoint {
         Self::new(
             egui::remap(
                 pos.x,
-                range_x_from_rect(&plot.inner_rect, plot.invert_x),
+                range_x_from_rect(&plot.inner_rect),
                 plot.bounds.range_x_f32(),
             ) as f64,
             egui::remap(
                 pos.y,
-                range_y_from_rect(&plot.inner_rect, plot.invert_y),
+                range_y_from_rect(&plot.inner_rect),
                 plot.bounds.range_y_f32(),
             ) as f64,
             pos,
@@ -990,12 +907,12 @@ impl PlotPoint {
             egui::remap(
                 x as f32,
                 plot.bounds.range_x_f32(),
-                range_x_from_rect(&plot.inner_rect, plot.invert_x),
+                range_x_from_rect(&plot.inner_rect),
             ),
             egui::remap(
                 y as f32,
                 plot.bounds.range_y_f32(),
-                range_y_from_rect(&plot.inner_rect, plot.invert_y),
+                range_y_from_rect(&plot.inner_rect),
             ),
         )
     }
@@ -1065,28 +982,25 @@ pub fn zoom_graph(
     }
 }
 
+#[derive(Component)]
+pub struct LastPos(Option<Vec2>);
+
 pub fn pan_graph(
-    mut query: Query<(&mut GraphState, &Camera)>,
+    mut query: Query<(Entity, &mut GraphState, &Camera, Option<&LastPos>)>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
-    mut last_pos: Local<Option<Vec2>>,
     key_state: Res<LogicalKeyState>,
+    mut commands: Commands,
 ) {
     let Ok(window) = primary_window.get_single() else {
         return;
     };
 
     let cursor_pos = window.physical_cursor_position();
-
-    if !mouse_buttons.pressed(MouseButton::Left) || mouse_buttons.just_pressed(MouseButton::Left) {
-        *last_pos = None;
-        return;
-    }
     let Some(cursor_pos) = cursor_pos else { return };
 
-    let delta_device_pixels = cursor_pos - last_pos.unwrap_or(cursor_pos);
-
-    for (mut graph_state, camera) in &mut query {
+    for (entity, mut graph_state, camera, last_pos) in &mut query {
+        let last_pos = last_pos.and_then(|p| p.0);
         let Some(viewport) = &camera.viewport else {
             continue;
         };
@@ -1098,8 +1012,25 @@ pub fn pan_graph(
             viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
         );
         if !viewport_rect.contains(cursor_pos) {
+            commands.entity(entity).insert(LastPos(None));
             continue;
         }
+
+        if mouse_buttons.just_pressed(MouseButton::Left) {
+            commands.entity(entity).insert(LastPos(Some(cursor_pos)));
+            continue;
+        }
+
+        if !mouse_buttons.pressed(MouseButton::Left) {
+            commands.entity(entity).insert(LastPos(None));
+            continue;
+        }
+
+        let Some(last_pos) = last_pos else {
+            continue;
+        };
+
+        let delta_device_pixels = cursor_pos - last_pos;
 
         let offset_mask = if key_state.pressed(&Key::Control) {
             Vec2::new(1.0, 0.0)
@@ -1112,9 +1043,8 @@ pub fn pan_graph(
         let delta =
             delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
         graph_state.pan_offset += delta;
+        commands.entity(entity).insert(LastPos(Some(cursor_pos)));
     }
-
-    *last_pos = Some(cursor_pos);
 }
 
 pub fn reset_graph(

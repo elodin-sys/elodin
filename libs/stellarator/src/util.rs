@@ -8,6 +8,7 @@ use std::{
 };
 
 use maitake::sync::WaitQueue;
+pub use stellarator_buf::AtomicValue;
 
 pub struct CancelTokenInner {
     cancelled: AtomicBool,
@@ -145,6 +146,100 @@ pub fn oneshot<T>() -> (OneshotTx<T>, OneshotRx<T>) {
         wait_cell: WaitQueue::new(),
     });
     (OneshotTx(inner.clone()), OneshotRx(inner))
+}
+
+pub struct AtomicCell<A: AtomicValue> {
+    pub value: A::Atomic,
+    pub wait_queue: WaitQueue,
+}
+
+macro_rules! impl_atomic_numeric_ops {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl AtomicCell<$t> {
+                pub fn fetch_add(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_add(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_sub(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_sub(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_and(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_and(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_nand(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_nand(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_or(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_or(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_xor(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_xor(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_max(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_max(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+
+                pub fn fetch_min(&self, val: $t, order: Ordering) -> $t {
+                    let prev = self.value.fetch_min(val, order);
+                    self.wait_queue.wake_all();
+                    prev
+                }
+            }
+        )+
+    };
+}
+
+impl_atomic_numeric_ops! {i8, i16, i32, i64, isize, u8, u16, u32, u64, usize}
+
+impl<A: AtomicValue> AtomicCell<A> {
+    pub fn new(val: A) -> Self {
+        AtomicCell {
+            value: val.atomic(),
+            wait_queue: WaitQueue::new(),
+        }
+    }
+
+    pub fn store(&self, val: A) {
+        A::store(&self.value, val, Ordering::Release);
+        self.wait_queue.wake_all();
+    }
+
+    pub fn latest(&self) -> A {
+        A::load(&self.value, Ordering::Acquire)
+    }
+
+    pub async fn wait(&self) {
+        let _ = self.wait_queue.wait().await;
+    }
+
+    pub async fn wait_for(&self, f: impl Fn(A) -> bool) {
+        let _ = self.wait_queue.wait_for(|| f(self.latest())).await;
+    }
+
+    pub async fn next(&self) -> A {
+        let _ = self.wait().await;
+        self.latest()
+    }
 }
 
 #[cfg(test)]

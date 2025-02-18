@@ -24,6 +24,8 @@ pub enum Error {
     InvalidComponentId,
     #[error("invalid asset id")]
     InvalidAssetId,
+    #[error("time travel - you tried to push a time stamp in the past")]
+    TimeTravel,
 }
 
 impl From<impeller2_stella::Error> for Error {

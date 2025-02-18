@@ -106,4 +106,4 @@ w.spawn(el.VectorArrow(a, "world_vel", offset=3, body_frame=False, scale=1.0))
 w.spawn(el.Line3d(b, "world_pos", index=[4, 5, 6], line_width=10.0))
 
 sys = el.six_dof(sys=gravity)
-sim = w.run(sys, SIM_TIME_STEP)
+sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 500.0)

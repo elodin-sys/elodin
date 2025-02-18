@@ -42,12 +42,21 @@ use bevy::{
 };
 use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
-use std::mem;
+use binding_types::storage_buffer_read_only_sized;
+use impeller2::types::Timestamp;
+use std::num::NonZeroU64;
+use std::ops::Range;
 
-use crate::ui::widgets::plot::Line;
+use crate::ui::widgets::plot::{Line, CHUNK_COUNT, CHUNK_LEN};
 
 const LINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(175745314079092880743018103868034362817);
+
+pub const VALUE_BUFFER_SIZE: NonZeroU64 =
+    NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
+pub const INDEX_BUFFER_LEN: usize = 1024 * 16;
+pub const INDEX_BUFFER_SIZE: NonZeroU64 =
+    NonZeroU64::new((INDEX_BUFFER_LEN * size_of::<u32>()) as u64).unwrap();
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -59,10 +68,6 @@ pub struct PlotGpuPlugin;
 impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
-            //.add_plugins(ExtractComponentPlugin::<LineHandle>::default())
-            //.add_plugins(ExtractComponentPlugin::<LineUniform>::default())
-            //.add_plugins(ExtractComponentPlugin::<LineConfig>::default())
-            //.add_plugins(RenderAssetPlugin::<LineData>)
             .init_asset::<Line>();
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
@@ -102,10 +107,24 @@ impl Plugin for PlotGpuPlugin {
             ShaderStages::VERTEX,
             uniform_buffer::<LineUniform>(true),
         );
-        let line_layout = render_device.create_bind_group_layout("LineUniform layout", &single);
+        let uniform_layout = render_device.create_bind_group_layout("LineUniform layout", &single);
 
+        let layout_entries = BindGroupLayoutEntries::sequential(
+            ShaderStages::VERTEX,
+            (
+                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+            ),
+        );
+        let values_layout =
+            render_device.create_bind_group_layout("LineValues layout", &layout_entries);
+
+        render_app.insert_resource(LineValuesLayout {
+            layout: values_layout,
+        });
         render_app.insert_resource(UniformLayout {
-            layout: line_layout,
+            layout: uniform_layout,
         });
         render_app.init_resource::<LinePipeline>();
     }
@@ -115,11 +134,16 @@ impl Plugin for PlotGpuPlugin {
 #[require(SyncToRenderWorld)]
 pub struct LineHandle(pub Handle<Line>);
 
+#[derive(Component, Deref, Debug, Clone, ExtractComponent)]
+#[require(SyncToRenderWorld)]
+pub struct LineVisibleRange(pub Range<Timestamp>);
+
 #[derive(Bundle)]
 pub struct LineBundle {
     pub line: LineHandle,
     pub uniform: LineUniform,
     pub config: LineConfig,
+    pub line_visible_range: LineVisibleRange,
 }
 
 #[derive(Component, ShaderType, Clone, Copy, ExtractComponent)]
@@ -141,6 +165,11 @@ impl LineUniform {
             _padding: Default::default(),
         }
     }
+}
+
+#[derive(Resource)]
+struct LineValuesLayout {
+    layout: BindGroupLayout,
 }
 
 #[derive(Resource)]
@@ -174,6 +203,7 @@ fn prepare_uniform_bind_group(
 pub struct LinePipeline {
     mesh_pipeline: Mesh2dPipeline,
     uniform_layout: BindGroupLayout,
+    storage_layout: BindGroupLayout,
 }
 
 impl FromWorld for LinePipeline {
@@ -181,6 +211,7 @@ impl FromWorld for LinePipeline {
         Self {
             mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
             uniform_layout: world.resource::<UniformLayout>().layout.clone(),
+            storage_layout: world.resource::<LineValuesLayout>().layout.clone(),
         }
     }
 }
@@ -204,7 +235,11 @@ impl SpecializedRenderPipeline for LinePipeline {
 
         let view_layout = self.mesh_pipeline.view_layout.clone();
 
-        let layout = vec![view_layout, self.uniform_layout.clone()];
+        let layout = vec![
+            view_layout,
+            self.uniform_layout.clone(),
+            self.storage_layout.clone(),
+        ];
 
         let format = if key.view_key.contains(Mesh2dPipelineKey::HDR) {
             ViewTarget::TEXTURE_FORMAT_HDR
@@ -232,6 +267,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             layout,
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleStrip,
+                strip_index_format: Some(IndexFormat::Uint32),
                 ..Default::default()
             },
             depth_stencil: Some(DepthStencilState {
@@ -263,26 +299,7 @@ impl SpecializedRenderPipeline for LinePipeline {
 }
 
 fn line_vertex_buffer_layouts() -> Vec<VertexBufferLayout> {
-    let pos_a_layout = VertexBufferLayout {
-        array_stride: VertexFormat::Float32.size(),
-        step_mode: VertexStepMode::Instance,
-        attributes: vec![VertexAttribute {
-            format: VertexFormat::Float32,
-            offset: 0,
-            shader_location: 0,
-        }],
-    };
-    let pos_b_layout = VertexBufferLayout {
-        array_stride: VertexFormat::Float32.size(),
-        step_mode: VertexStepMode::Instance,
-        attributes: vec![VertexAttribute {
-            format: VertexFormat::Float32,
-            offset: 0,
-            shader_location: 1,
-        }],
-    };
-
-    vec![pos_a_layout, pos_b_layout]
+    vec![]
 }
 
 #[derive(Component, Clone, ExtractComponent)]
@@ -292,8 +309,9 @@ pub struct LineConfig {
 
 #[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
-    position_buffer: Buffer,
-    position_count: u32,
+    values_bind_group: BindGroup,
+    index_buffer: Buffer,
+    count: u32,
 }
 
 pub struct SetLineBindGroup;
@@ -342,9 +360,8 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
             println!("no gpu line");
             return RenderCommandResult::Failure("no gpu line");
         };
-        pass.set_vertex_buffer(0, gpu_line.position_buffer.slice(..));
-        pass.set_vertex_buffer(1, gpu_line.position_buffer.slice(4..));
-        let instances = u32::max(gpu_line.position_count, 1) - 1;
+        pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
+        let instances = gpu_line.count.saturating_sub(1);
         pass.draw(0..4, 0..instances);
         RenderCommandResult::Success
     }
@@ -362,6 +379,7 @@ type LineQueryMut = (
     &'static LineHandle,
     &'static LineConfig,
     &'static mut LineUniform,
+    &'static mut LineVisibleRange,
     Option<&'static mut GpuLine>,
 );
 
@@ -370,70 +388,92 @@ fn extract_lines(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    values_layout: Res<LineValuesLayout>,
 ) {
     let mut state = SystemState::<(
         Query<'static, 'static, LineQueryMut>,
         ResMut<'static, Assets<Line>>,
-        Commands<'static, 'static>,
     )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut main_commands) = state.get_mut(&mut main_world);
-    for (entity, line_handle, config, mut uniform, gpu_line) in lines.iter_mut() {
+    let (mut lines, mut line_assets) = state.get_mut(&mut main_world);
+    for (entity, line_handle, config, uniform, line_visible_range, gpu_line) in lines.iter_mut() {
         let Some(line) = line_assets.get_mut(&line_handle.0) else {
             continue;
         };
         let line = &mut line.data;
-        let (range, uniform, gpu_line) = if let Some(mut gpu_line) = gpu_line {
-            gpu_line.position_count = line.current_range.len() as u32;
-            let range = line
-                .invalidated_range
-                .take()
-                .unwrap_or_else(|| line.current_range.clone());
-            uniform.chunk_size = 1.0;
-            (range, *uniform, gpu_line.clone())
+        line.queue_load_range(line_visible_range.0.clone(), &render_queue, &render_device);
+        let index_buffer = if let Some(ref gpu_line) = gpu_line {
+            gpu_line.index_buffer.clone()
         } else {
-            let buffer_descriptor = BufferDescriptor {
-                label: Some("Line Vertex Buffer"),
-                size: (mem::size_of::<f32>() * 2_000_000) as u64,
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            };
-            let buffer = render_device.create_buffer(&buffer_descriptor);
-            let gpu_line = GpuLine {
-                position_buffer: buffer,
-                position_count: line.current_range.len() as u32,
-            };
-            let mut uniform = *uniform;
-            uniform.chunk_size = 1.0;
-            main_commands.entity(entity).insert(gpu_line.clone());
-            (line.current_range.clone(), uniform, gpu_line)
+            render_device.create_buffer(
+                &(BufferDescriptor {
+                    label: Some("Line index Buffer"),
+                    size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            )
         };
 
-        let buffer = gpu_line.position_buffer.clone();
+        let values_bind_group = if let Some(ref gpu_line) = gpu_line {
+            gpu_line.values_bind_group.clone()
+        } else {
+            let size = Some(VALUE_BUFFER_SIZE);
+            render_device.create_bind_group(
+                "line values",
+                &values_layout.layout,
+                &[
+                    BindGroupEntry {
+                        binding: 0,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: line
+                                .timestamp_buffer_shard_alloc()
+                                .expect("no timestamp buf")
+                                .buffer(),
+                            offset: 0,
+                            size,
+                        }),
+                    },
+                    BindGroupEntry {
+                        binding: 1,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: line
+                                .data_buffer_shard_alloc()
+                                .expect("no data buf")
+                                .buffer(),
+                            offset: 0,
+                            size,
+                        }),
+                    },
+                    BindGroupEntry {
+                        binding: 2,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: &index_buffer,
+                            offset: 0,
+                            size: Some(INDEX_BUFFER_SIZE),
+                        }),
+                    },
+                ],
+            )
+        };
+        let count =
+            line.write_to_index_buffer(&index_buffer, &render_queue, line_visible_range.0.clone());
+        let gpu_line = GpuLine {
+            values_bind_group,
+            index_buffer,
+            count,
+        };
+
         commands.spawn((
             MainEntity::from(entity),
             LineBundle {
                 line: line_handle.clone(),
                 config: config.clone(),
-                uniform,
+                uniform: *uniform,
+                line_visible_range: line_visible_range.clone(),
             },
             gpu_line,
             TemporaryRenderEntity,
         ));
-
-        for chunk in line.data.chunks_range(range.clone()) {
-            let data_index = range.start.saturating_sub(chunk.range.start);
-            let buffer_index = if range.start > chunk.range.start {
-                range.start
-            } else {
-                chunk.range.start
-            } - line.current_range.start;
-            let buffer_index = buffer_index * size_of::<f32>();
-            let len = (range.end.saturating_sub(chunk.range.start)).min(chunk.data.len());
-            let data = bytemuck::cast_slice(&chunk.data[data_index..len]);
-            render_queue
-                .0
-                .write_buffer(&buffer, buffer_index as u64, data);
-        }
     }
 }
 

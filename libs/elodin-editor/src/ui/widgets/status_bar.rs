@@ -5,7 +5,8 @@ use bevy::{
         world::World,
     },
 };
-use impeller2_wkt::{MaxTick, SimulationTimeStep, Tick};
+use impeller2::types::Timestamp;
+use impeller2_wkt::{IsRecording, LastUpdated, SimulationTimeStep};
 
 use crate::ui::colors;
 
@@ -14,9 +15,9 @@ use super::RootWidgetSystem;
 #[derive(SystemParam)]
 pub struct StatusBar<'w> {
     tick_time: Res<'w, SimulationTimeStep>,
-    current_tick: Res<'w, Tick>,
-    max_tick: Res<'w, MaxTick>,
+    max_tick: Res<'w, LastUpdated>,
     diagnostics: Res<'w, DiagnosticsStore>,
+    is_recording: Res<'w, IsRecording>,
 }
 
 impl RootWidgetSystem for StatusBar<'_> {
@@ -32,14 +33,13 @@ impl RootWidgetSystem for StatusBar<'_> {
         let state_mut = state.get_mut(world);
 
         let tick_time = state_mut.tick_time;
-        let current_tick = state_mut.current_tick;
         let max_tick = state_mut.max_tick;
         let diagnostics = state_mut.diagnostics;
 
         egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame {
                 fill: colors::PRIMARY_ONYX,
-                inner_margin: egui::Margin::symmetric(16.0, 4.0),
+                inner_margin: egui::Margin::symmetric(16, 4),
                 ..Default::default()
             })
             .show(ctx, |ui| {
@@ -49,7 +49,7 @@ impl RootWidgetSystem for StatusBar<'_> {
 
                     // Status
 
-                    ui.add(editor_status_label(tick_time.0, current_tick.0, max_tick.0));
+                    ui.add(editor_status_label(state_mut.is_recording.0, max_tick.0));
 
                     // Editor FPS
 
@@ -84,18 +84,17 @@ impl RootWidgetSystem for StatusBar<'_> {
 
 fn editor_status_label_ui(
     ui: &mut egui::Ui,
-    tick_time: f64,
-    current_tick: u64,
-    max_tick: u64,
+    is_recording: bool,
+    latest_timestamp: Timestamp,
 ) -> egui::Response {
     let style = ui.style_mut();
     let font_id = egui::TextStyle::Small.resolve(style);
 
     let text_color = colors::PRIMARY_CREAME_6;
 
-    let (status_label, status_color) = if tick_time > 0.0 {
-        if current_tick == max_tick {
-            (String::from("SIMULATING"), colors::HYPERBLUE_DEFAULT)
+    let (status_label, status_color) = if latest_timestamp > Timestamp::EPOCH {
+        if is_recording {
+            (String::from("RECORDING"), colors::HYPERBLUE_DEFAULT)
         } else {
             (String::from("CONNECTED"), colors::MINT_DEFAULT)
         }
@@ -141,6 +140,6 @@ fn editor_status_label_ui(
     response
 }
 
-pub fn editor_status_label(tick_time: f64, current_tick: u64, max_tick: u64) -> impl egui::Widget {
-    move |ui: &mut egui::Ui| editor_status_label_ui(ui, tick_time, current_tick, max_tick)
+pub fn editor_status_label(is_recording: bool, latest_timestamp: Timestamp) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| editor_status_label_ui(ui, is_recording, latest_timestamp)
 }
