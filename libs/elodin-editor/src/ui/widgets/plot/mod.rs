@@ -15,7 +15,8 @@ impl Plugin for PlotPlugin {
             .add_systems(Update, zoom_graph)
             .add_systems(Update, pan_graph)
             .add_systems(Update, reset_graph)
-            .add_systems(Update, collect_entity_data)
+            .add_systems(Update, queue_timestamp_read)
+            //.add_systems(Update, collect_entity_data)
             .add_plugins(gpu::PlotGpuPlugin);
     }
 }

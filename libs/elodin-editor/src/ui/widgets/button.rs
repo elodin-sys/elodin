@@ -76,8 +76,13 @@ impl EImageButton {
             };
 
             // Background
-            ui.painter()
-                .rect(rect, egui::Rounding::same(3.0), bg_color, Stroke::NONE);
+            ui.painter().rect(
+                rect,
+                egui::CornerRadius::same(3),
+                bg_color,
+                Stroke::NONE,
+                egui::StrokeKind::Middle,
+            );
 
             // Icon
             let default_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -106,7 +111,7 @@ pub struct ECheckboxButton {
     margin: egui::Margin,
     is_on: bool,
     label: String,
-    rounding: egui::Rounding,
+    corner_radius: egui::CornerRadius,
 }
 
 impl ECheckboxButton {
@@ -115,10 +120,10 @@ impl ECheckboxButton {
             on_color: colors::PRIMARY_CREAME,
             off_color: colors::PRIMARY_SMOKE,
             text_color: colors::PRIMARY_CREAME,
-            margin: egui::Margin::same(8.0),
+            margin: egui::Margin::same(8),
             is_on,
             label,
-            rounding: egui::Rounding::same(2.0),
+            corner_radius: egui::CornerRadius::same(2),
         }
     }
 
@@ -166,8 +171,13 @@ impl ECheckboxButton {
                 self.off_color
             };
 
-            ui.painter()
-                .rect(checkbox_rect, self.rounding, fill_color, visuals.bg_stroke);
+            ui.painter().rect(
+                checkbox_rect,
+                self.corner_radius,
+                fill_color,
+                visuals.bg_stroke,
+                egui::StrokeKind::Middle,
+            );
 
             // Label
 
@@ -203,7 +213,7 @@ pub struct EButton {
     color: egui::Color32,
     bg_color: egui::Color32,
     margin: egui::Margin,
-    rounding: egui::Rounding,
+    corner_radius: egui::CornerRadius,
     stroke: egui::Stroke,
     width: Option<f32>,
 }
@@ -216,8 +226,8 @@ impl EButton {
             color: colors::WHITE,
             bg_color: colors::PRIMARY_SMOKE,
             stroke: egui::Stroke::new(1.0, colors::WHITE),
-            rounding: egui::Rounding::same(2.0),
-            margin: egui::Margin::same(8.0),
+            corner_radius: egui::CornerRadius::same(2),
+            margin: egui::Margin::same(8),
             width: None,
         }
     }
@@ -281,8 +291,13 @@ impl EButton {
 
             // Background
 
-            ui.painter()
-                .rect(rect, self.rounding, visuals.bg_fill, self.stroke);
+            ui.painter().rect(
+                rect,
+                self.corner_radius,
+                visuals.bg_fill,
+                self.stroke,
+                egui::StrokeKind::Middle,
+            );
 
             // Label
 
@@ -367,9 +382,10 @@ impl ETileButton {
 
             ui.painter().rect(
                 rect,
-                egui::Rounding::same(1.0),
+                egui::CornerRadius::same(1),
                 visuals.bg_fill,
                 egui::Stroke::new(1.0, colors::PRIMARY_ONYX_9),
+                egui::StrokeKind::Middle,
             );
 
             // Label

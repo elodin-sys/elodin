@@ -36,8 +36,8 @@ pub const SLATE_40: Color32 = Color32::from_rgb(0x41, 0x3A, 0x73);
 pub const PUMPKIN_40: Color32 = Color32::from_rgb(0x74, 0x3A, 0x1A);
 pub const YOLK_40: Color32 = Color32::from_rgb(0x73, 0x5C, 0x0D);
 pub const PEACH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
-pub const REDDISH_40: Color32 = Color32::from_rgb(0x74, 0x63, 0x54);
-pub const HYPERBLUE_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
+pub const REDDISH_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
+pub const HYPERBLUE_40: Color32 = Color32::from_rgb(0x16, 0x33, 0x60);
 pub const MINT_40: Color32 = Color32::from_rgb(0x43, 0x66, 0x4C);
 
 pub fn get_color_by_index_solid(index: usize) -> Color32 {
@@ -55,25 +55,59 @@ pub fn get_color_by_index_solid(index: usize) -> Color32 {
 }
 
 pub fn get_color_by_index_all(index: usize) -> Color32 {
-    let colors = [
-        TURQUOISE_DEFAULT,
-        SLATE_DEFAULT,
-        PUMPKIN_DEFAULT,
-        YOLK_DEFAULT,
-        PEACH_DEFAULT,
-        REDDISH_DEFAULT,
-        HYPERBLUE_DEFAULT,
-        MINT_DEFAULT,
-        TURQUOISE_40,
-        SLATE_40,
-        PUMPKIN_40,
-        YOLK_40,
-        PEACH_40,
-        REDDISH_40,
-        HYPERBLUE_40,
-        MINT_40,
+    let colors_dark = [
+        Color32::from_rgb(0x6A, 0x9B, 0xA5),
+        Color32::from_rgb(0x72, 0x57, 0xB3),
+        Color32::from_rgb(0xC6, 0x6B, 0x42),
+        Color32::from_rgb(0xD6, 0xA4, 0x36),
+        Color32::from_rgb(0xB6, 0x52, 0x2D),
+        Color32::from_rgb(0x42, 0x69, 0xA8),
+        Color32::from_rgb(0x7E, 0xBF, 0x7F),
+        Color32::from_rgb(0x5A, 0x82, 0x90),
+        Color32::from_rgb(0x64, 0x48, 0xA8),
+        Color32::from_rgb(0xB0, 0x62, 0x3E),
+        Color32::from_rgb(0xC9, 0x93, 0x36),
+        Color32::from_rgb(0x9D, 0x4B, 0x2A),
+        Color32::from_rgb(0x34, 0x5C, 0x91),
+        Color32::from_rgb(0x6A, 0x9C, 0x6A),
+        Color32::from_rgb(0x50, 0x6A, 0x7A),
+        Color32::from_rgb(0x5C, 0x3C, 0xA5),
+        Color32::from_rgb(0x9C, 0x58, 0x3A),
+        Color32::from_rgb(0xB6, 0x88, 0x30),
+        Color32::from_rgb(0x82, 0x36, 0x21),
+        Color32::from_rgb(0x2C, 0x4B, 0x7B),
+        Color32::from_rgb(0x5F, 0x8A, 0x5F),
+        Color32::from_rgb(0x43, 0x5B, 0x70),
+        Color32::from_rgb(0x4A, 0x31, 0x92),
+        Color32::from_rgb(0x85, 0x48, 0x2F),
+        Color32::from_rgb(0x9B, 0x71, 0x30),
+        Color32::from_rgb(0x6B, 0x27, 0x17),
+        Color32::from_rgb(0x24, 0x3C, 0x66),
+        Color32::from_rgb(0x48, 0x6D, 0x48),
+        Color32::from_rgb(0x37, 0x48, 0x5A),
+        Color32::from_rgb(0x3A, 0x25, 0x86),
+        Color32::from_rgb(0x6C, 0x3C, 0x28),
+        Color32::from_rgb(0x84, 0x5D, 0x28),
+        Color32::from_rgb(0x52, 0x1F, 0x14),
+        Color32::from_rgb(0x1C, 0x2A, 0x58),
+        Color32::from_rgb(0x3D, 0x68, 0x3D),
+        Color32::from_rgb(0x2C, 0x3A, 0x48),
+        Color32::from_rgb(0x33, 0x23, 0x7A),
+        Color32::from_rgb(0x53, 0x2D, 0x1C),
+        Color32::from_rgb(0x63, 0x46, 0x22),
+        Color32::from_rgb(0x39, 0x19, 0x0E),
+        Color32::from_rgb(0x14, 0x1A, 0x3A),
+        Color32::from_rgb(0x2A, 0x4B, 0x2A),
+        Color32::from_rgb(0x1E, 0x29, 0x36),
+        Color32::from_rgb(0x25, 0x18, 0x64),
+        Color32::from_rgb(0x45, 0x24, 0x1A),
+        Color32::from_rgb(0x57, 0x35, 0x1E),
+        Color32::from_rgb(0x2C, 0x11, 0x0A),
+        Color32::from_rgb(0x10, 0x16, 0x2E),
+        Color32::from_rgb(0x22, 0x3C, 0x22),
+        Color32::from_rgb(0x16, 0x20, 0x2C),
     ];
-    colors[index % colors.len()]
+    colors_dark[index % colors_dark.len()]
 }
 
 pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {

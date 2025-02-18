@@ -4,7 +4,7 @@ use impeller2::{
     table::{Entry, VTableBuilder},
     types::{
         ComponentView, FilledRecycle, LenPacket, MaybeFilledPacket, Msg, MsgExt, OwnedPacket,
-        PacketId,
+        PacketId, Timestamp,
     },
 };
 use impeller2_stella::thingbuf::tcp_connect;
@@ -44,7 +44,7 @@ where
         let buf = send_ref.get_or_insert_with(|| {
             LenPacket::new(impeller2::types::PacketTy::Table, self.vtable_id, 1024)
         });
-        world.sink_columns(&mut |_, _, value: ComponentView<'_>| match value {
+        world.sink_columns(&mut |_, _, value: ComponentView<'_>, _| match value {
             ComponentView::U8(view) => buf.extend_aligned(view.buf()),
             ComponentView::U16(view) => buf.extend_aligned(view.buf()),
             ComponentView::U32(view) => buf.extend_aligned(view.buf()),
@@ -77,6 +77,7 @@ impl Decomponentize for VTableSink {
         component_id: impeller2::types::ComponentId,
         entity_id: impeller2::types::EntityId,
         value: ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
         let prim_ty = value.prim_type();
         let shape = value.shape();
@@ -155,9 +156,8 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
                         component_id: Some(component_id),
                         entity_id: Some(entity_id),
                     },
-                    time_step: None,
-                    start_tick: None,
                     id: fastrand::u64(..),
+                    behavior: impeller2_wkt::StreamBehavior::RealTime,
                 }
                 .to_len_packet()
             })

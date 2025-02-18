@@ -25,6 +25,7 @@ syntastica-parsers.features = ["lua"]
 syntastica-parsers.optional = true
 syntastica-themes.version = "0.4.1"
 syntastica-themes.optional = true
+tabled = "0.17.0"
 
 # async
 stellarator.path = "../../stellarator"
@@ -50,3 +51,9 @@ anyhow = "1"
 # args
 clap.version = "4.5"
 clap.features = ["derive"]
+
+# math
+nox.path = "../../nox"
+
+# time
+hifitime.version = "3.9"

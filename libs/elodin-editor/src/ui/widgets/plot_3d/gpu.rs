@@ -1,5 +1,12 @@
 use std::mem;
 
+use crate::{
+    ui::widgets::plot::{
+        gpu::{LineHandle, INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, VALUE_BUFFER_SIZE},
+        Line,
+    },
+    SelectedTimeRange,
+};
 use bevy::{
     app::{Plugin, PostUpdate},
     asset::{load_internal_asset, AssetApp, Assets, Handle},
@@ -37,10 +44,12 @@ use bevy::{
     },
     transform::components::{GlobalTransform, Transform},
 };
-use bevy_render::sync_world::{MainEntity, TemporaryRenderEntity};
+use bevy_render::{
+    extract_component::ExtractComponent,
+    sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
+};
 use big_space::GridCell;
-
-use crate::ui::widgets::plot_3d::data::LineData;
+use binding_types::storage_buffer_read_only_sized;
 
 const LINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(267882706676311365151377673216596804695);
@@ -56,7 +65,7 @@ impl Plugin for Plot3dGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<CachedSystemState>()
-            .init_asset::<LineData>()
+            .init_asset::<Line>()
             .add_systems(PostUpdate, update_uniform_model);
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
@@ -96,11 +105,43 @@ impl Plugin for Plot3dGpuPlugin {
             ShaderStages::VERTEX,
             uniform_buffer::<LineUniform>(true),
         );
-        let line_layout = render_device.create_bind_group_layout("LineUniform layout", &single);
+
+        let layout_entries = BindGroupLayoutEntries::sequential(
+            ShaderStages::VERTEX,
+            (
+                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+            ),
+        );
+        let values_layout =
+            render_device.create_bind_group_layout("LineValues layout", &layout_entries);
+
+        let index_layout_entries = BindGroupLayoutEntries::sequential(
+            ShaderStages::VERTEX,
+            (
+                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+            ),
+        );
+        let index_layout =
+            render_device.create_bind_group_layout("LineIndex layout", &index_layout_entries);
+
+        let line_layout = render_device.create_bind_group_layout("LineUniform Layout", &single);
 
         render_app.insert_resource(UniformLayout {
             layout: line_layout,
         });
+
+        render_app.insert_resource(LineValuesLayout {
+            layout: values_layout,
+        });
+
+        render_app.insert_resource(LineIndexLayout {
+            layout: index_layout,
+        });
+
         render_app.init_resource::<LinePipeline>();
     }
 }
@@ -110,13 +151,13 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
         uniform.model = transform.compute_matrix();
     }
 }
-
-#[derive(Component, Debug, Deref, Clone)]
-pub struct LineDataHandle(pub Handle<LineData>);
+#[derive(Component, Debug, Clone, ExtractComponent)]
+#[require(SyncToRenderWorld)]
+pub struct LineHandles(pub [Handle<Line>; 3]);
 
 #[derive(Bundle)]
 pub struct LineBundle {
-    pub line: LineDataHandle,
+    pub line: LineHandles,
     pub uniform: LineUniform,
     pub config: LineConfig,
     pub global_transform: GlobalTransform,
@@ -150,6 +191,16 @@ impl LineUniform {
 }
 
 #[derive(Resource)]
+struct LineValuesLayout {
+    layout: BindGroupLayout,
+}
+
+#[derive(Resource)]
+struct LineIndexLayout {
+    layout: BindGroupLayout,
+}
+
+#[derive(Resource)]
 struct UniformLayout {
     layout: BindGroupLayout,
 }
@@ -180,6 +231,8 @@ fn prepare_uniform_bind_group(
 pub struct LinePipeline {
     mesh_pipeline: MeshPipeline,
     uniform_layout: BindGroupLayout,
+    index_layout: BindGroupLayout,
+    values_layout: BindGroupLayout,
 }
 
 impl FromWorld for LinePipeline {
@@ -187,6 +240,8 @@ impl FromWorld for LinePipeline {
         Self {
             mesh_pipeline: world.resource::<MeshPipeline>().clone(),
             uniform_layout: world.resource::<UniformLayout>().layout.clone(),
+            index_layout: world.resource::<LineIndexLayout>().layout.clone(),
+            values_layout: world.resource::<LineValuesLayout>().layout.clone(),
         }
     }
 }
@@ -213,7 +268,12 @@ impl SpecializedRenderPipeline for LinePipeline {
             .get_view_layout(key.view_key.into())
             .clone();
 
-        let layout = vec![view_layout, self.uniform_layout.clone()];
+        let layout = vec![
+            view_layout,
+            self.uniform_layout.clone(),
+            self.values_layout.clone(),
+            self.index_layout.clone(),
+        ];
 
         let format = if key.view_key.contains(MeshPipelineKey::HDR) {
             ViewTarget::TEXTURE_FORMAT_HDR
@@ -260,26 +320,7 @@ impl SpecializedRenderPipeline for LinePipeline {
 }
 
 fn line_vertex_buffer_layouts() -> Vec<VertexBufferLayout> {
-    vec![
-        VertexBufferLayout {
-            array_stride: VertexFormat::Float32x3.size(),
-            step_mode: VertexStepMode::Instance,
-            attributes: vec![VertexAttribute {
-                format: VertexFormat::Float32x3,
-                offset: 0,
-                shader_location: 0,
-            }],
-        },
-        VertexBufferLayout {
-            array_stride: VertexFormat::Float32x3.size(),
-            step_mode: VertexStepMode::Instance,
-            attributes: vec![VertexAttribute {
-                format: VertexFormat::Float32x3,
-                offset: 0,
-                shader_location: 1,
-            }],
-        },
-    ]
+    vec![]
 }
 
 #[derive(Component, Clone)]
@@ -289,9 +330,10 @@ pub struct LineConfig {
 
 #[derive(Clone, Component)]
 pub struct GpuLine {
-    position_buffer: Buffer,
-    position_count: u32,
-    buffer_len: usize,
+    values_bind_group: BindGroup,
+    index_bind_group: BindGroup,
+    index_buffers: [Buffer; 3],
+    count: u32,
 }
 
 pub struct SetLineBindGroup;
@@ -339,9 +381,9 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         let Some(gpu_line) = handle else {
             return RenderCommandResult::Failure("no gpu line");
         };
-        pass.set_vertex_buffer(0, gpu_line.position_buffer.slice(..));
-        pass.set_vertex_buffer(1, gpu_line.position_buffer.slice(12..));
-        let instances = u32::max(gpu_line.position_count, 1) - 1;
+        pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
+        pass.set_bind_group(3, &gpu_line.index_bind_group, &[]);
+        let instances = gpu_line.count.saturating_sub(1);
         pass.draw(0..6, 0..instances);
         RenderCommandResult::Success
     }
@@ -358,8 +400,9 @@ type DrawLineData = (
 struct CachedSystemState {
     state: SystemState<(
         Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<LineData>>,
+        ResMut<'static, Assets<Line>>,
         Commands<'static, 'static>,
+        Res<'static, SelectedTimeRange>,
     )>,
 }
 
@@ -373,7 +416,7 @@ impl FromWorld for CachedSystemState {
 
 type LineQueryMut = (
     Entity,
-    &'static LineDataHandle,
+    &'static LineHandles,
     &'static LineConfig,
     &'static mut LineUniform,
     Option<&'static mut GpuLine>,
@@ -384,50 +427,101 @@ fn extract_lines(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    values_layout: Res<LineValuesLayout>,
+    index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, mut line_assets, mut main_commands) = cached_state.state.get_mut(world);
-        for (entity, line_handle, config, uniform, gpu_line) in lines.iter_mut() {
-            let Some(line) = line_assets.get_mut(&line_handle.0) else {
-                continue;
-            };
-            let buffer_len = 1024 * 1024 * 8;
-            let mut new_buffer = |buffer_len: usize| {
-                let buffer_descriptor = BufferDescriptor {
-                    label: Some("Line 3d Vertex Buffer"),
-                    size: (mem::size_of::<f64>() * 3 * buffer_len) as u64,
-                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
+        let (mut lines, mut line_assets, mut main_commands, selected_time_range) =
+            cached_state.state.get_mut(world);
+        'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
+            for line in &line_handles.0 {
+                let Some(line) = line_assets.get_mut(line) else {
+                    continue 'outer;
                 };
-                let buffer = render_device.create_buffer(&buffer_descriptor);
-                let gpu_line = GpuLine {
-                    position_buffer: buffer,
-                    position_count: line.processed_data.len() as u32,
-                    buffer_len,
-                };
-                main_commands.entity(entity).insert(gpu_line.clone());
-                (0..line.processed_data.len(), gpu_line)
-            };
-            let (range, gpu_line) = if let Some(mut gpu_line) = gpu_line {
-                if buffer_len != gpu_line.buffer_len {
-                    new_buffer(buffer_len)
-                } else {
-                    gpu_line.position_count = line.processed_data.len() as u32;
-                    let range = line
-                        .invalidated_range
-                        .take()
-                        .unwrap_or_else(|| 0..line.processed_data.len());
-                    (range, gpu_line.clone())
-                }
+                line.data.queue_load_range(
+                    selected_time_range.0.clone(),
+                    &render_queue,
+                    &render_device,
+                );
+            }
+
+            let index_buffers = if let Some(ref gpu_line) = gpu_line {
+                gpu_line.index_buffers.clone()
             } else {
-                new_buffer(buffer_len)
+                ['x', 'y', 'z'].map(|axis| {
+                    render_device.create_buffer(
+                        &(BufferDescriptor {
+                            label: Some(&format!("Line {} Index Buffer", axis)),
+                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    )
+                })
             };
 
-            let buffer = gpu_line.position_buffer.clone();
+            let values_bind_group = if let Some(ref gpu_line) = gpu_line {
+                gpu_line.values_bind_group.clone()
+            } else {
+                let entries = [0, 1, 2].map(|i| {
+                    let line = &line_handles.0[i];
+                    let line = line_assets.get(line).expect("line missing");
+                    BindGroupEntry {
+                        binding: i as u32,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: line
+                                .data
+                                .data_buffer_shard_alloc()
+                                .expect("no data buf")
+                                .buffer(),
+                            offset: 0,
+                            size: Some(VALUE_BUFFER_SIZE),
+                        }),
+                    }
+                });
+                render_device.create_bind_group("line values", &values_layout.layout, &entries)
+            };
+
+            let index_bind_group = if let Some(ref gpu_line) = gpu_line {
+                gpu_line.index_bind_group.clone()
+            } else {
+                let entries = [0, 1, 2].map(|i| {
+                    let buffer = &index_buffers[i];
+                    let entry = BindGroupEntry {
+                        binding: i as u32,
+                        resource: BindingResource::Buffer(BufferBinding {
+                            buffer: &buffer,
+                            offset: 0,
+                            size: Some(INDEX_BUFFER_SIZE),
+                        }),
+                    };
+
+                    entry
+                });
+                render_device.create_bind_group("line indexes", &index_layout.layout, &entries)
+            };
+            let counts = [0, 1, 2].map(|i| {
+                let line = &line_handles.0[i];
+                let line = line_assets.get(line).expect("line missing");
+                let index_buffer = &index_buffers[i];
+                line.data.write_to_index_buffer(
+                    index_buffer,
+                    &render_queue,
+                    selected_time_range.0.clone(),
+                )
+            });
+            let count = counts.into_iter().min().unwrap_or_default();
+            let gpu_line = GpuLine {
+                values_bind_group,
+                index_bind_group,
+                index_buffers,
+                count,
+            };
+
             commands.spawn((
                 MainEntity::from(entity),
                 LineBundle {
-                    line: line_handle.clone(),
+                    line: line_handles.clone(),
                     config: config.clone(),
                     uniform: *uniform,
                     global_transform: GlobalTransform::default(),
@@ -437,11 +531,6 @@ fn extract_lines(
                 gpu_line,
                 TemporaryRenderEntity,
             ));
-            let index = (range.start * std::mem::size_of::<f64>() * 3) as u64;
-            let data = &line.processed_data.buf()[range];
-            let data = &data[..(data.len().min(buffer_len))];
-            let data = bytemuck::cast_slice(data);
-            render_queue.0.write_buffer(&buffer, index, data);
         }
         cached_state.state.apply(world)
     })
@@ -466,7 +555,7 @@ fn queue_line(
     pipeline: Res<LinePipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
-    lines: Query<(Entity, &MainEntity, &LineDataHandle, &LineConfig)>,
+    lines: Query<(Entity, &MainEntity, &LineHandles, &LineConfig)>,
     mut views: Query<ViewQuery>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {

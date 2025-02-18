@@ -9,16 +9,11 @@ use smallvec::SmallVec;
 use egui::Align;
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentMetadataRegistry;
-use impeller2_wkt::MaxTick;
 
 use crate::ui::{
     colors::{self, with_opacity},
-    theme,
     utils::MarginSides,
-    widgets::{
-        button::ECheckboxButton, label::label_with_buttons, plot::GraphState,
-        timeline::timeline_ranges::TimelineRanges, WidgetSystem,
-    },
+    widgets::{button::ECheckboxButton, label::label_with_buttons, plot::GraphState, WidgetSystem},
     EntityData, SettingModal, SettingModalState,
 };
 
@@ -28,8 +23,6 @@ use super::InspectorIcons;
 pub struct InspectorGraph<'w, 's> {
     entities: Query<'w, 's, EntityData<'static>>,
     setting_modal_state: ResMut<'w, SettingModalState>,
-    timeline_ranges: ResMut<'w, TimelineRanges>,
-    max_tick: Res<'w, MaxTick>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
 }
@@ -51,13 +44,11 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let InspectorGraph {
             entities,
             mut setting_modal_state,
-            mut timeline_ranges,
-            max_tick,
             metadata_store,
             mut graph_states,
         } = state_mut;
 
-        let graph_label_margin = egui::Margin::same(0.0).top(10.0).bottom(14.0);
+        let graph_label_margin = egui::Margin::same(0).top(10.0).bottom(14.0);
         let [add_clicked] = label_with_buttons(
             ui,
             [icons.add],
@@ -74,45 +65,9 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         let Ok(mut graph_state) = graph_states.get_mut(graph_id) else {
             return;
         };
-        let selected_range_label = graph_state
-            .range_id
-            .as_ref()
-            .and_then(|rid| timeline_ranges.0.get(rid))
-            .map_or("Default", |r| &r.label)
-            .to_owned();
 
-        let ro_tagged_ranges = timeline_ranges.0.clone();
-
-        let [add_clicked] = label_with_buttons(
-            ui,
-            [icons.add],
-            "RANGE",
-            colors::PRIMARY_CREAME,
-            egui::Margin::same(0.0).top(18.0).bottom(4.0),
-        );
-
-        if add_clicked {
-            graph_state.range_id = Some(timeline_ranges.create_range(max_tick.0));
-        }
-
-        ui.scope(|ui| {
-            theme::configure_combo_box(ui.style_mut());
-            egui::ComboBox::from_id_salt("RANGE")
-                .width(ui.available_width())
-                .selected_text(selected_range_label)
-                .show_ui(ui, |ui| {
-                    theme::configure_combo_item(ui.style_mut());
-
-                    ui.selectable_value(&mut graph_state.range_id, None, "Default");
-
-                    for (range_id, range) in ro_tagged_ranges {
-                        ui.selectable_value(&mut graph_state.range_id, Some(range_id), range.label);
-                    }
-                });
-        });
-
-        egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -135,7 +90,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             let entity = entities.iter().find(|(eid, _, _, _)| *eid == entity_id);
 
             if let Some((_, _, _, entity_metadata)) = entity {
-                let entity_label_margin = egui::Margin::same(0.0).top(18.0).bottom(4.0);
+                let entity_label_margin = egui::Margin::same(0).top(18.0).bottom(4.0);
                 let [add_clicked] = label_with_buttons(
                     ui,
                     [icons.add],
@@ -155,7 +110,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     let component_label = metadata.name.clone();
                     let element_names = metadata.element_names();
 
-                    let component_label_margin = egui::Margin::symmetric(0.0, 18.0);
+                    let component_label_margin = egui::Margin::symmetric(0, 18);
                     let [subtract_clicked] = label_with_buttons(
                         ui,
                         [icons.subtract],

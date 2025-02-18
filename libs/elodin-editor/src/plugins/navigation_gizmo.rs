@@ -341,7 +341,7 @@ pub fn sync_nav_camera(
 }
 
 pub fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiSettings)>,
+    window: Query<(&Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,

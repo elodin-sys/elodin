@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, ops::Range, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
@@ -24,14 +24,14 @@ use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
 use bevy_egui::EguiPlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
-use impeller2::types::Msg;
 use impeller2::types::OwnedPacket;
+use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     AssetHandle, ComponentValueMap, CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers,
     PacketTx,
 };
-use impeller2_wkt::Glb;
-use impeller2_wkt::{NewConnection, SetStreamState, Tick, Viewport, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
+use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
 use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
@@ -169,19 +169,21 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_clear_state)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
-            .add_systems(PreUpdate, sync_res::<Tick>)
+            .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(PreUpdate, sync_pos)
             .add_systems(PreUpdate, sync_mesh_to_bevy)
             .add_systems(PreUpdate, sync_material_to_bevy)
             .add_systems(PreUpdate, sync_glb_to_bevy)
             .add_systems(Update, sync_paused)
+            .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
             })
-            .insert_resource(ClearColor(Color::NONE));
+            .insert_resource(ClearColor(Color::NONE))
+            .insert_resource(SelectedTimeRange(Timestamp::EPOCH..Timestamp::EPOCH));
         if cfg!(target_os = "windows") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -689,7 +691,7 @@ pub fn sync_paused(
         event.send_msg(SetStreamState {
             id: stream_id.0,
             playing: Some(!paused.0),
-            tick: None,
+            timestamp: None,
             time_step: None,
         })
     }
@@ -823,7 +825,6 @@ fn clear_state_new_connection(
     mut ui_state: ResMut<TileState>,
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
-    mut graph_data_3d: ResMut<ui::widgets::plot_3d::data::CollectedGraphData>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut commands: Commands,
 ) {
@@ -842,5 +843,20 @@ fn clear_state_new_connection(
     });
     ui_state.clear(&mut commands, &mut selected_object);
     render_layer_alloc.free_all();
-    *graph_data_3d = Default::default();
+}
+
+#[derive(Resource, Clone)]
+pub struct SelectedTimeRange(Range<Timestamp>);
+impl Default for SelectedTimeRange {
+    fn default() -> Self {
+        Self(Timestamp(i64::MIN)..Timestamp(i64::MAX))
+    }
+}
+
+pub fn set_selected_range(
+    mut selected_range: ResMut<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    latest: Res<LastUpdated>,
+) {
+    selected_range.0 = earliest.0..latest.0;
 }

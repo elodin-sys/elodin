@@ -38,7 +38,7 @@ impl WidgetSystem for Hierarchy<'_> {
                 .frame(egui::Frame {
                     fill: colors::PRIMARY_SMOKE,
                     stroke: egui::Stroke::new(1.0, colors::BORDER_GREY),
-                    inner_margin: egui::Margin::same(4.0),
+                    inner_margin: egui::Margin::same(4),
                     ..Default::default()
                 })
                 .min_width(width * 0.25)
@@ -58,7 +58,7 @@ impl WidgetSystem for Hierarchy<'_> {
                 .resizable(true)
                 .frame(egui::Frame {
                     fill: colors::PRIMARY_SMOKE,
-                    inner_margin: egui::Margin::same(4.0),
+                    inner_margin: egui::Margin::same(4),
                     ..Default::default()
                 })
                 .min_width(width.min(1280.) * 0.15)
@@ -114,11 +114,11 @@ pub fn header(
     compact: bool,
 ) -> egui::Response {
     ui.vertical(|ui| {
-        egui::Frame::none()
-            .outer_margin(egui::Margin::same(16.0))
+        egui::Frame::NONE
+            .outer_margin(egui::Margin::same(16))
             .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
-            .rounding(egui::Rounding::same(3.0))
-            .inner_margin(egui::Margin::same(8.0))
+            .corner_radius(egui::CornerRadius::same(3))
+            .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
@@ -138,8 +138,8 @@ pub fn header(
         if !compact {
             ui.separator();
 
-            egui::Frame::none()
-                .inner_margin(egui::Margin::symmetric(16.0, 16.0))
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(16, 16))
                 .show(ui, |ui| {
                     ui.add(egui::Label::new(
                         egui::RichText::new("ENTITIES")
@@ -242,8 +242,13 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         let visuals = ui.style().interact(&response);
 
         // Background
-        ui.painter()
-            .rect(rect, visuals.rounding, background_color, visuals.bg_stroke);
+        ui.painter().rect(
+            rect,
+            visuals.corner_radius,
+            background_color,
+            visuals.bg_stroke,
+            egui::StrokeKind::Middle,
+        );
 
         // Icon
         let left_center_pos = rect.left_center();
@@ -255,9 +260,10 @@ fn list_item_ui(ui: &mut egui::Ui, on: bool, metadata: &EntityMetadata) -> egui:
         );
         ui.painter().rect(
             icon_rect,
-            egui::Rounding::same(2.0),
+            egui::CornerRadius::same(2),
             colors::YOLK_DEFAULT,
             egui::Stroke::NONE,
+            egui::StrokeKind::Middle,
         );
 
         // Label

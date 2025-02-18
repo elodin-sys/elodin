@@ -18,17 +18,6 @@ pub fn get_galley_layout_job(
     layout_job
 }
 
-pub fn time_label(time_in_seconds: usize, with_hours: bool) -> String {
-    let seconds = time_in_seconds % 60;
-    let minutes = (time_in_seconds / 60) % 60;
-    if with_hours {
-        let hours = (time_in_seconds / (60 * 60)) % 60;
-        format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}")
-    } else {
-        format!("{minutes:0>2}:{seconds:0>2}")
-    }
-}
-
 pub fn time_label_ms(time: f64) -> String {
     let time_in_seconds = time.floor() as usize;
     let milliseconds = (time - time_in_seconds as f64) * 1000.0;
@@ -62,8 +51,14 @@ pub trait Shrink4 {
 impl Shrink4 for egui::Rect {
     fn shrink4(self, margin: egui::Margin) -> Self {
         egui::Rect::from_min_max(
-            egui::pos2(self.min.x + margin.left, self.min.y + margin.top),
-            egui::pos2(self.max.x - margin.right, self.max.y - margin.bottom),
+            egui::pos2(
+                self.min.x + margin.left as f32,
+                self.min.y + margin.top as f32,
+            ),
+            egui::pos2(
+                self.max.x - margin.right as f32,
+                self.max.y - margin.bottom as f32,
+            ),
         )
     }
 }
@@ -77,22 +72,22 @@ pub trait MarginSides {
 
 impl MarginSides for egui::Margin {
     fn left(mut self, left: f32) -> Self {
-        self.left = left;
+        self.left = left as i8;
         self
     }
 
     fn right(mut self, right: f32) -> Self {
-        self.right = right;
+        self.right = right as i8;
         self
     }
 
     fn top(mut self, top: f32) -> Self {
-        self.top = top;
+        self.top = top as i8;
         self
     }
 
     fn bottom(mut self, bottom: f32) -> Self {
-        self.bottom = bottom;
+        self.bottom = bottom as i8;
         self
     }
 }

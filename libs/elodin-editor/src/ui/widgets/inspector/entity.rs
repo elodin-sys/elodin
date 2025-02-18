@@ -64,15 +64,15 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
         let entity_id = *entity_id;
 
         let mono_font = egui::TextStyle::Monospace.resolve(ui.style_mut());
-        egui::Frame::none()
+        egui::Frame::NONE
             .inner_margin(egui::Margin::ZERO.top(8.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
                         label::ELabel::new(&metadata.name)
-                            .padding(egui::Margin::same(0.0).bottom(24.0))
+                            .padding(egui::Margin::same(0).bottom(24.))
                             .bottom_stroke(label::ELabel::DEFAULT_STROKE)
-                            .margin(egui::Margin::same(0.0).bottom(26.0)),
+                            .margin(egui::Margin::same(0).bottom(26.)),
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -158,7 +158,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
                     entity_id,
                     BTreeMap::from_iter(std::iter::once((component_id, values.clone()))),
                 )));
-                let bundle = GraphBundle::new(&mut render_layer_alloc, entities, None);
+                let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
                 tile_state.create_graph_tile(None, bundle);
             }
         }
@@ -174,10 +174,10 @@ pub fn search(
     search_icon: egui::TextureId,
 ) -> egui::Response {
     ui.vertical(|ui| {
-        egui::Frame::none()
-            .stroke(egui::Stroke::new(1.0, colors::BORDER_GREY))
-            .rounding(egui::Rounding::same(3.0))
-            .inner_margin(egui::Margin::same(8.0))
+        egui::Frame::NONE
+            .stroke(egui::Stroke::new(1., colors::BORDER_GREY))
+            .corner_radius(egui::CornerRadius::same(3))
+            .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 0.0);
@@ -273,7 +273,7 @@ fn inspector_item_multi(
             [icon_chart],
             label,
             colors::PRIMARY_CREAME,
-            egui::Margin::symmetric(0.0, 4.0).bottom(12.0),
+            egui::Margin::symmetric(0, 4).bottom(12.0),
         );
         *create_graph = graph_clicked;
 

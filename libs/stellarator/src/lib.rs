@@ -33,6 +33,7 @@ pub(crate) use poll as reactor;
 #[cfg(target_os = "linux")]
 pub(crate) use uring as reactor;
 
+pub use maitake::future::yield_now;
 pub use maitake::sync;
 
 thread_local! {

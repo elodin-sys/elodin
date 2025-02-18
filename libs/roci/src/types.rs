@@ -1,7 +1,7 @@
 use heapless::FnvIndexMap;
 use impeller2::com_de::{AsComponentView, FromComponentView};
 use impeller2::component::Component;
-use impeller2::types::{ComponentId, ComponentView, EntityId};
+use impeller2::types::{ComponentId, ComponentView, EntityId, Timestamp};
 use tracing::warn;
 
 use crate::{Componentize, Decomponentize};
@@ -30,6 +30,7 @@ impl<V: Component + FromComponentView, const N: usize> Decomponentize for Column
         component_id: ComponentId,
         entity_id: EntityId,
         value: ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
     ) {
         if component_id != ComponentId::new(V::NAME) {
             return;
@@ -45,7 +46,12 @@ impl<V: Component + FromComponentView, const N: usize> Decomponentize for Column
 impl<V: Component + AsComponentView, const N: usize> Componentize for Column<V, N> {
     fn sink_columns(&self, output: &mut impl Decomponentize) {
         self.map.iter().for_each(|(id, value)| {
-            output.apply_value(ComponentId::new(V::NAME), *id, value.as_component_view());
+            output.apply_value(
+                ComponentId::new(V::NAME),
+                *id,
+                value.as_component_view(),
+                None,
+            );
         });
     }
 }

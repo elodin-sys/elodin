@@ -2,6 +2,10 @@ use std::{
     mem::MaybeUninit,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
+    sync::atomic::{
+        self, AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16,
+        AtomicU32, AtomicU64, AtomicU8, AtomicUsize,
+    },
 };
 
 /// A buffer that is safe to pass to io_uring
@@ -255,4 +259,62 @@ impl<T: IoBufMut> DerefMut for Slice<T> {
         let slice = deref_mut(&mut self.inner);
         &mut slice[self.range.clone()]
     }
+}
+
+pub trait AtomicValue {
+    type Atomic;
+    type Value;
+    fn atomic(self) -> Self::Atomic;
+    fn load(atomic: &Self::Atomic, order: atomic::Ordering) -> Self;
+    fn store(atomic: &Self::Atomic, val: Self, order: atomic::Ordering);
+    fn swap(atomic: &Self::Atomic, val: Self, order: atomic::Ordering) -> Self;
+    fn from_value(val: Self::Value) -> Self;
+}
+
+macro_rules! impl_atomic_value {
+    ($($t:ty => $v:ty),+ $(,)?) => {
+        $(
+            impl AtomicValue for $v {
+                type Atomic = $t;
+                type Value = $v;
+
+                fn from_value(val: Self::Value) -> Self {
+                    val
+                }
+
+                fn atomic(self) -> Self::Atomic {
+                    <$t>::new(self)
+                }
+
+                fn load(atomic: &Self::Atomic, order: atomic::Ordering) -> Self {
+                    atomic.load(order)
+                }
+
+                fn store(atomic: &Self::Atomic, val: Self, order: atomic::Ordering) {
+                    atomic.store(val, order)
+                }
+
+
+                fn swap(atomic: &Self::Atomic, val: Self, order: atomic::Ordering) -> Self {
+                    atomic.swap(val, order)
+                }
+
+
+            }
+        )+
+    };
+}
+
+impl_atomic_value! {
+    AtomicBool => bool,
+    AtomicI8 => i8,
+    AtomicI16 => i16,
+    AtomicI32 => i32,
+    AtomicI64 => i64,
+    AtomicIsize => isize,
+    AtomicU8 => u8,
+    AtomicU16 => u16,
+    AtomicU32 => u32,
+    AtomicU64 => u64,
+    AtomicUsize => usize,
 }

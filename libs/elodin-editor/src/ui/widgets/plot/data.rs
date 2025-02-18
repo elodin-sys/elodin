@@ -7,20 +7,34 @@ use bevy::{
     ecs::system::{Commands, Query},
     prelude::Resource,
 };
-use impeller2::types::{ComponentId, ComponentView, EntityId, OwnedPacket, PrimType};
-use impeller2_bevy::{ComponentValueMap, EntityMap, PacketHandlerInput, PacketHandlers};
-use impeller2_wkt::{MaxTick, Tick};
-use zerocopy::{Immutable, TryFromBytes};
+use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
+use bevy_render::renderer::{RenderDevice, RenderQueue};
+use impeller2::types::{ComponentId, ComponentView, EntityId, OwnedPacket, PrimType, Timestamp};
+use impeller2_bevy::{
+    CommandsExt, ComponentSchemaRegistry, ComponentValueMap, CurrentStreamId, EntityMap,
+    PacketHandlerInput, PacketHandlers,
+};
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
+use nodit::interval::ii;
+use nodit::NoditMap;
+use roaring::bitmap::RoaringBitmap;
+use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
+use std::any::type_name;
+use std::num::NonZeroU64;
+use std::ops::RangeInclusive;
+use std::sync::atomic::{self, AtomicBool};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
-use crate::chunks::{Chunk, Chunks};
+use crate::ui::widgets::plot::gpu::INDEX_BUFFER_LEN;
+use crate::SelectedTimeRange;
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
-    pub next_tick: u64,
     pub lines: BTreeMap<usize, Handle<Line>>,
 }
 
@@ -29,43 +43,43 @@ impl PlotDataComponent {
         Self {
             label: component_label.to_string(),
             element_names,
-            next_tick: 0,
             lines: BTreeMap::new(),
         }
     }
 
-    pub fn add_values(
+    pub fn push_value(
         &mut self,
-        component_value: ComponentView<'_>,
+        component_view: ComponentView<'_>,
         assets: &mut Assets<Line>,
-        tick: u64,
+        timestamp: Timestamp,
+        earliest_timestamp: Timestamp,
     ) {
-        self.next_tick += 1;
         let element_names = self
             .element_names
             .iter()
             .filter(|s| !s.is_empty())
             .map(|s| Some(s.as_str()))
             .chain(std::iter::repeat(None));
-        for (i, (new_value, name)) in component_value.iter().zip(element_names).enumerate() {
+        for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
             let new_value = new_value.as_f32();
-            let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
             let line = self.lines.entry(i).or_insert_with(|| {
+                let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
                 assets.add(Line {
                     label,
-                    min: new_value,
-                    max: new_value,
                     ..Default::default()
                 })
             });
             let line = assets.get_mut(line.id()).expect("missing line asset");
-            line.data.push(tick as usize, new_value);
-            if line.min > new_value {
-                line.min = new_value;
+            if let Some(last) = line.data.last() {
+                if last.timestamps.cpu().len() < CHUNK_LEN {
+                    line.data.update_last(|c| {
+                        c.push(timestamp, earliest_timestamp, new_value);
+                    });
+                    continue;
+                }
             }
-            if line.max < new_value {
-                line.max = new_value;
-            }
+            let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
+            line.data.insert(new_chunk);
         }
     }
 }
@@ -76,9 +90,8 @@ pub struct PlotDataEntity {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
 }
 
-#[derive(Resource, Default, Clone)]
+#[derive(Resource, Clone, Default)]
 pub struct CollectedGraphData {
-    pub tick_range: Range<u64>,
     pub entities: BTreeMap<EntityId, PlotDataEntity>,
 }
 
@@ -118,33 +131,36 @@ impl CollectedGraphData {
     }
 }
 
-pub fn collect_entity_data(
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    max_tick: Res<MaxTick>,
-) {
-    collected_graph_data.tick_range = 0..max_tick.0;
-}
-
 pub fn pkt_handler(
     PacketHandlerInput { packet, registry }: PacketHandlerInput,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
-    tick: Res<Tick>,
+    tick: Res<CurrentTimestamp>,
+    earliest_timestamp: Res<EarliestTimestamp>,
+    current_stream_id: Res<CurrentStreamId>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
+        if table.id == current_stream_id.packet_id() {
+            return;
+        }
         if let Err(err) = table.sink(registry, &mut tick) {
             warn!(?err, "tick sick failed");
         }
         if let Err(err) = table.sink(
             registry,
-            &mut |component_id, entity_id, view: ComponentView<'_>| {
+            &mut |component_id,
+                  entity_id,
+                  view: ComponentView<'_>,
+                  timestamp: Option<Timestamp>| {
                 let Some(plot_data) =
                     collected_graph_data.get_component_mut(&entity_id, &component_id)
                 else {
                     return;
                 };
-                plot_data.add_values(view, &mut lines, tick.0);
+                if let Some(timestamp) = timestamp {
+                    plot_data.push_value(view, &mut lines, timestamp, earliest_timestamp.0);
+                }
             },
         ) {
             warn!(?err, "graph sink failed");
@@ -159,152 +175,321 @@ pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 
 fn process_time_series<T>(
     time_series_buf: &[u8],
+    timestamps: &[Timestamp],
     len: usize,
-    time_range: &Range<u64>,
     plot_data: &mut PlotDataComponent,
     lines: &mut Assets<Line>,
+    earliest_timestamp: Timestamp,
 ) where
     T: AsF32 + TryFromBytes + Immutable,
 {
     let Ok(data) = <[T]>::try_ref_from_bytes(time_series_buf) else {
         return;
     };
-    let mut tick = time_range.start;
-    for chunk in data.chunks(len) {
-        for (i, val) in chunk.iter().enumerate() {
-            let val = val.as_f32();
-            if let Some(line) = plot_data.lines.get(&i) {
-                let line = lines.get_mut(line.id()).expect("missing line asset");
-                line.data.push(tick as usize, val);
-                line.min = line.min.min(val);
-                line.max = line.max.max(val);
-            }
-        }
-        tick += 1;
+    for i in 0..len {
+        let line = plot_data.lines.entry(i).or_insert_with(|| {
+            let label = format!("[{i}]");
+            lines.add(Line {
+                label,
+                ..Default::default()
+            })
+        });
+        let values = data.iter().skip(i).step_by(len).map(|v| v.as_f32());
+        let Some(line) = lines.get_mut(line) else {
+            continue;
+        };
+        let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) else {
+            continue;
+        };
+        line.data.insert(chunk);
     }
 }
-#[allow(clippy::type_complexity)]
-pub fn time_series_handler(
+
+#[allow(clippy::too_many_arguments)]
+pub fn handle_time_series(
+    InRef(pkt): InRef<OwnedPacket<Vec<u8>>>,
+    mut collected_graph_data: ResMut<CollectedGraphData>,
+    entity_map: Res<EntityMap>,
+    component_values: Query<&ComponentValueMap>,
+    mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
+    mut range: Range<Timestamp>,
     entity_id: EntityId,
     component_id: ComponentId,
-    time_range: Range<u64>,
-) -> impl Fn(
-    InRef<OwnedPacket<Vec<u8>>>,
-    ResMut<CollectedGraphData>,
-    Res<EntityMap>,
-    Query<&ComponentValueMap>,
-
-    ResMut<Assets<Line>>,
+    earliest_timestamp: Res<EarliestTimestamp>,
+    schema_reg: Res<ComponentSchemaRegistry>,
 ) {
-    move |InRef(pkt),
-          mut collected_graph_data: ResMut<CollectedGraphData>,
-          entity_map: Res<EntityMap>,
-          component_values,
-          mut lines| match pkt {
+    match pkt {
         OwnedPacket::Msg(_) => {}
         OwnedPacket::Table(_) => {}
         OwnedPacket::TimeSeries(time_series) => {
-            let Some(entity) = entity_map.get(&entity_id) else {
+            let Some((len, prim_type)) = entity_map
+                .get(&entity_id)
+                .and_then(|entity| component_values.get(*entity).ok())
+                .and_then(|component_value_map| component_value_map.get(&component_id))
+                .map(|current_value| {
+                    (
+                        current_value.shape().iter().fold(1usize, |xs, &x| x * xs),
+                        current_value.prim_type(),
+                    )
+                })
+                .or_else(|| {
+                    let schema = schema_reg.0.get(&component_id)?;
+                    Some((
+                        schema.shape().iter().fold(1usize, |xs, &x| x * xs),
+                        schema.prim_type(),
+                    ))
+                })
+            else {
                 return;
             };
-            let Ok(component_value_map) = component_values.get(*entity) else {
+            let Ok(timestamps) = time_series.timestamps() else {
                 return;
             };
-            let Some(current_value) = component_value_map.get(&component_id) else {
+            let Ok(buf) = time_series.data() else {
                 return;
             };
             let Some(plot_data) = collected_graph_data.get_component_mut(&entity_id, &component_id)
             else {
                 return;
             };
-            let len = current_value.shape().iter().fold(1usize, |xs, &x| x * xs);
-            let buf = &time_series.buf;
-            match current_value.prim_type() {
-                PrimType::U8 => {
-                    process_time_series::<u8>(buf, len, &time_range, plot_data, &mut lines)
+            match prim_type {
+                PrimType::U8 => process_time_series::<u8>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::U16 => process_time_series::<u16>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::U32 => process_time_series::<u32>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::U64 => process_time_series::<u64>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::I8 => process_time_series::<i8>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::I16 => process_time_series::<i16>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::I32 => process_time_series::<i32>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::I64 => process_time_series::<i64>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::Bool => process_time_series::<bool>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::F32 => process_time_series::<f32>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+                PrimType::F64 => process_time_series::<f64>(
+                    buf,
+                    timestamps,
+                    len,
+                    plot_data,
+                    &mut lines,
+                    earliest_timestamp.0,
+                ),
+            }
+            let Some(last_timestamp) = timestamps.last() else {
+                return;
+            };
+            range.start = *last_timestamp;
+
+            if range.start >= range.end {
+                return;
+            }
+            let range = next_range(range, plot_data, &lines);
+            let packet_id = fastrand::u64(..).to_le_bytes()[..3]
+                .try_into()
+                .expect("id wrong size");
+            let start = range.start;
+            let end = range.end;
+            let msg = GetTimeSeries {
+                id: packet_id,
+                range,
+                entity_id,
+                component_id,
+                limit: Some(CHUNK_LEN),
+            };
+            commands.send_req_with_handler(
+                msg,
+                packet_id,
+                move |pkt: InRef<OwnedPacket<Vec<u8>>>,
+                      collected_graph_data: ResMut<CollectedGraphData>,
+                      entity_map: Res<EntityMap>,
+                      component_values: Query<&ComponentValueMap>,
+                      lines: ResMut<Assets<Line>>,
+                      earliest_timestamp: Res<EarliestTimestamp>,
+                      schema_reg: Res<ComponentSchemaRegistry>,
+                      commands: Commands| {
+                    handle_time_series(
+                        pkt,
+                        collected_graph_data,
+                        entity_map,
+                        component_values,
+                        lines,
+                        commands,
+                        start..end,
+                        entity_id,
+                        component_id,
+                        earliest_timestamp,
+                        schema_reg,
+                    );
+                },
+            );
+        }
+    }
+}
+
+pub fn queue_timestamp_read(
+    selected_range: Res<SelectedTimeRange>,
+    mut commands: Commands,
+    graph_data: ResMut<CollectedGraphData>,
+    mut lines: ResMut<Assets<Line>>,
+) {
+    for (&entity_id, entity) in graph_data.entities.iter() {
+        for (&component_id, component) in entity.components.iter() {
+            let mut line = component
+                .lines
+                .first_key_value()
+                .and_then(|(_k, v)| lines.get_mut(v));
+
+            if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref()) {
+                if last_queried.elapsed() <= Duration::from_secs(2) {
+                    return;
                 }
-                PrimType::U16 => {
-                    process_time_series::<u16>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::U32 => {
-                    process_time_series::<u32>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::U64 => {
-                    process_time_series::<u64>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::I8 => {
-                    process_time_series::<i8>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::I16 => {
-                    process_time_series::<i16>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::I32 => {
-                    process_time_series::<i32>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::I64 => {
-                    process_time_series::<i64>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::Bool => {
-                    process_time_series::<bool>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::F32 => {
-                    process_time_series::<f32>(buf, len, &time_range, plot_data, &mut lines)
-                }
-                PrimType::F64 => {
-                    process_time_series::<f64>(buf, len, &time_range, plot_data, &mut lines)
+            }
+
+            let mut process_range = |range: Range<Timestamp>| {
+                let packet_id = fastrand::u64(..).to_le_bytes()[..3]
+                    .try_into()
+                    .expect("id wrong size");
+
+                let start = range.start;
+                let end = range.end;
+                let msg = GetTimeSeries {
+                    id: packet_id,
+                    range: range.clone(),
+                    entity_id,
+                    component_id,
+                    limit: Some(CHUNK_LEN),
+                };
+                commands.send_req_with_handler(
+                    msg,
+                    packet_id,
+                    move |pkt: InRef<OwnedPacket<Vec<u8>>>,
+                          collected_graph_data: ResMut<CollectedGraphData>,
+                          entity_map: Res<EntityMap>,
+                          component_values: Query<&ComponentValueMap>,
+                          lines: ResMut<Assets<Line>>,
+                          earliest_timestamp: Res<EarliestTimestamp>,
+                          schema_reg: Res<ComponentSchemaRegistry>,
+                          commands: Commands| {
+                        handle_time_series(
+                            pkt,
+                            collected_graph_data,
+                            entity_map,
+                            component_values,
+                            lines,
+                            commands,
+                            start..end,
+                            entity_id,
+                            component_id,
+                            earliest_timestamp,
+                            schema_reg,
+                        );
+                    },
+                );
+            };
+            if let Some(line) = line.as_mut() {
+                line.last_queried = Some(Instant::now());
+                line.data
+                    .tree
+                    .gaps_trimmed(ii(selected_range.0.start.0, selected_range.0.end.0))
+                    .map(|i| Timestamp(i.start())..Timestamp(i.end()))
+                    .for_each(process_range)
+            } else {
+                process_range(selected_range.0.clone())
+            };
+        }
+    }
+}
+
+fn next_range(
+    mut current_range: Range<Timestamp>,
+    component: &PlotDataComponent,
+    lines: &Assets<Line>,
+) -> Range<Timestamp> {
+    if let Some((_, line)) = component.lines.first_key_value() {
+        if let Some(line) = lines.get(line) {
+            if let Some(chunk) = line.data.range_iter(current_range.clone()).next() {
+                if chunk.summary.start_timestamp <= current_range.start {
+                    current_range.start = chunk.summary.end_timestamp;
                 }
             }
         }
     }
+    current_range
 }
 
-#[derive(Debug, Asset, Clone, TypePath, Default)]
+#[derive(Asset, TypePath, Default)]
 pub struct Line {
     pub label: String,
-    pub min: f32,
-    pub max: f32,
-    pub data: LineData,
-}
-
-#[derive(Debug, Clone)]
-pub struct LineData {
-    pub data: Chunks<f32>,
-    pub invalidated_range: Option<Range<usize>>,
-    pub current_range: Range<usize>,
-}
-
-impl Default for LineData {
-    fn default() -> Self {
-        Self {
-            data: Default::default(),
-            current_range: 0..0,
-            invalidated_range: None,
-        }
-    }
-}
-
-impl LineData {
-    pub fn push(&mut self, tick: usize, value: f32) {
-        self.data.push(tick, value);
-        self.expand_invalidation_range(tick..tick + 1);
-    }
-
-    pub fn expand_invalidation_range(&mut self, new_range: Range<usize>) {
-        if let Some(ref mut range) = &mut self.invalidated_range {
-            self.invalidated_range =
-                Some(range.start.min(new_range.start)..range.end.max(new_range.end))
-        } else {
-            self.invalidated_range = Some(new_range)
-        }
-    }
-
-    pub fn get(&self, tick: usize) -> Option<&f32> {
-        self.data.get(tick)
-    }
-
-    pub fn range(&mut self) -> impl Iterator<Item = &mut Chunk<f32>> {
-        self.data.chunks_range(self.current_range.clone())
-    }
+    pub data: LineTree<f32>,
+    pub last_queried: Option<Instant>,
 }
 
 pub trait AsF32 {
@@ -335,5 +520,549 @@ impl AsF32 for bool {
         } else {
             0.0
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SharedBuffer<T, const N: usize> {
+    cpu: heapless::Vec<T, N>,
+    gpu: Arc<spin::Mutex<Option<BufferShard>>>,
+    gpu_dirty: Arc<AtomicBool>,
+}
+
+impl<T, const N: usize> Default for SharedBuffer<T, N> {
+    fn default() -> Self {
+        Self {
+            cpu: Default::default(),
+            gpu: Default::default(),
+            gpu_dirty: Arc::new(AtomicBool::new(true)),
+        }
+    }
+}
+
+impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N> {
+    pub fn queue_load(&self, render_queue: &RenderQueue, buffer_alloc: &mut BufferShardAlloc) {
+        if !self.gpu_dirty.load(atomic::Ordering::SeqCst) {
+            return;
+        }
+        let mut gpu = self.gpu.lock();
+        let gpu = gpu.get_or_insert_with(|| buffer_alloc.alloc().expect("full buffer"));
+        render_queue.write_buffer_shard(gpu, self.cpu.as_bytes());
+        self.gpu_dirty.store(false, atomic::Ordering::SeqCst);
+    }
+
+    pub fn push(&mut self, value: T) -> Option<()> {
+        self.cpu.push(value).ok()?;
+        self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+        Some(())
+    }
+
+    pub fn slice(&self, slice: Range<usize>) -> Option<Self> {
+        let cpu = &self.cpu.get(slice)?;
+        let cpu = heapless::Vec::from_slice(cpu).ok()?;
+        Some(Self {
+            cpu,
+            gpu: Arc::new(spin::Mutex::new(None)),
+            gpu_dirty: Arc::new(AtomicBool::new(true)),
+        })
+    }
+}
+
+impl<T, const N: usize> SharedBuffer<T, N> {
+    fn cpu(&self) -> &[T] {
+        &self.cpu
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Chunk<D> {
+    timestamps: SharedBuffer<Timestamp, CHUNK_LEN>,
+    timestamps_float: SharedBuffer<f32, CHUNK_LEN>,
+    data: SharedBuffer<D, CHUNK_LEN>,
+    summary: ChunkSummary<D>,
+}
+
+impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
+    pub fn from_iter(
+        timestamps: &'_ [Timestamp],
+        earliest_timestamp: Timestamp,
+        values: impl Iterator<Item = D>,
+    ) -> Option<Self> {
+        let data = SharedBuffer {
+            cpu: heapless::Vec::from_iter(values),
+            gpu: Default::default(),
+            gpu_dirty: Arc::new(AtomicBool::new(true)),
+        };
+        let min = data.cpu().iter().fold(None, |xs: Option<D>, x| {
+            if let Some(xs) = xs.clone() {
+                Some(xs.min(x.clone()))
+            } else {
+                Some(x.clone())
+            }
+        });
+        let max = data.cpu().iter().fold(None, |xs: Option<D>, x| {
+            if let Some(xs) = xs.clone() {
+                Some(xs.max(x.clone()))
+            } else {
+                Some(x.clone())
+            }
+        });
+
+        let summary = ChunkSummary {
+            len: timestamps.len(),
+            start_timestamp: *timestamps.first()?,
+            end_timestamp: *timestamps.last()?,
+            min,
+            max,
+        };
+        let timestamps_float = SharedBuffer {
+            cpu: heapless::Vec::from_iter(
+                timestamps
+                    .iter()
+                    .map(|&x| (x.0 - earliest_timestamp.0) as f32),
+            ),
+            gpu: Default::default(),
+            gpu_dirty: Arc::new(AtomicBool::new(true)),
+        };
+
+        let timestamps = SharedBuffer {
+            cpu: heapless::Vec::from_slice(timestamps).unwrap(),
+            gpu: Default::default(),
+            gpu_dirty: Arc::new(AtomicBool::new(true)),
+        };
+        Some(Chunk {
+            timestamps,
+            timestamps_float,
+            data,
+            summary,
+        })
+    }
+
+    pub fn from_initial_value(
+        timestamp: Timestamp,
+        earliest_timestamp: Timestamp,
+        value: D,
+    ) -> Self {
+        let mut chunk = Chunk {
+            timestamps: SharedBuffer::default(),
+            timestamps_float: SharedBuffer::default(),
+            data: SharedBuffer::default(),
+            summary: ChunkSummary {
+                len: 0,
+                start_timestamp: timestamp,
+                end_timestamp: timestamp,
+                min: Some(value.clone()),
+                max: Some(value.clone()),
+            },
+        };
+        chunk.push(timestamp, earliest_timestamp, value);
+        chunk
+    }
+
+    pub fn queue_load(
+        &self,
+        render_queue: &RenderQueue,
+        data_buffer_alloc: &mut BufferShardAlloc,
+        timestamp_buffer_alloc: &mut BufferShardAlloc,
+    ) {
+        self.timestamps_float
+            .queue_load(render_queue, timestamp_buffer_alloc);
+        self.data.queue_load(render_queue, data_buffer_alloc);
+    }
+
+    pub fn push(
+        &mut self,
+        timestamp: Timestamp,
+        earliest_timestamp: Timestamp,
+        value: D,
+    ) -> Option<()> {
+        self.timestamps.push(timestamp)?;
+        self.timestamps_float
+            .push((timestamp.0 - earliest_timestamp.0) as f32)?;
+        self.data.push(value.clone())?;
+        self.summary.len += 1;
+        self.summary.start_timestamp = self.summary.start_timestamp.min(timestamp);
+        self.summary.end_timestamp = self.summary.end_timestamp.max(timestamp);
+        let min = self.summary.min.get_or_insert_with(|| value.clone());
+        *min = min.clone().min(value.clone());
+        let max = self.summary.max.get_or_insert_with(|| value.clone());
+        *max = max.clone().max(value.clone());
+
+        Some(())
+    }
+
+    pub fn slice(&self, range: Range<Timestamp>) -> Option<Self> {
+        let start_ix = match self.timestamps.cpu.binary_search(&range.start) {
+            Ok(i) => i.saturating_sub(1),
+            Err(i) => i.saturating_sub(1),
+        };
+        let end_ix = match self.timestamps.cpu.binary_search(&range.end) {
+            Ok(i) => i + 1,
+            Err(i) => i,
+        };
+        let timestamps = self.timestamps.slice(start_ix..end_ix)?;
+        let timestamps_float = self.timestamps_float.slice(start_ix..end_ix)?;
+        let data = self.data.slice(start_ix..end_ix)?;
+        let summary = ChunkSummary::from_data(timestamps.cpu(), data.cpu())?;
+        Some(Self {
+            timestamps,
+            timestamps_float,
+            data,
+            summary,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChunkSummary<D> {
+    pub len: usize,
+    pub start_timestamp: Timestamp,
+    pub end_timestamp: Timestamp,
+    pub min: Option<D>,
+    pub max: Option<D>,
+}
+
+impl<D> Default for ChunkSummary<D> {
+    fn default() -> Self {
+        ChunkSummary {
+            len: 0,
+            start_timestamp: Timestamp(i64::MAX),
+            end_timestamp: Timestamp(i64::MIN),
+            min: None,
+            max: None,
+        }
+    }
+}
+
+impl<D: Clone + BoundOrd> ChunkSummary<D> {
+    fn from_data(timestamps: &[Timestamp], data: &[D]) -> Option<Self> {
+        let start_timestamp = *timestamps.first()?;
+        let end_timestamp = *timestamps.last()?;
+        let min = data.iter().fold(None, |xs: Option<D>, x| {
+            if let Some(xs) = xs.clone() {
+                Some(xs.min(x.clone()))
+            } else {
+                Some(x.clone())
+            }
+        });
+        let max = data.iter().fold(None, |xs: Option<D>, x| {
+            if let Some(xs) = xs.clone() {
+                Some(xs.max(x.clone()))
+            } else {
+                Some(x.clone())
+            }
+        });
+        Some(ChunkSummary {
+            len: timestamps.len(),
+            start_timestamp,
+            end_timestamp,
+            min,
+            max,
+        })
+    }
+
+    pub fn range(&self) -> RangeInclusive<Timestamp> {
+        self.start_timestamp..=self.end_timestamp
+    }
+}
+
+impl<D: Clone + BoundOrd> ChunkSummary<D> {
+    fn add_summary(&mut self, summary: &Self) {
+        self.start_timestamp = self.start_timestamp.min(summary.start_timestamp);
+        self.end_timestamp = self.end_timestamp.max(summary.end_timestamp);
+        self.len += summary.len;
+        self.min = match (self.min.clone(), summary.min.clone()) {
+            (None, None) => None,
+            (None, Some(m)) | (Some(m), None) => Some(m),
+            (Some(a), Some(b)) => Some(a.min(b)),
+        };
+        self.max = match (self.max.clone(), summary.max.clone()) {
+            (None, None) => None,
+            (None, Some(m)) | (Some(m), None) => Some(m),
+            (Some(a), Some(b)) => Some(a.max(b)),
+        };
+    }
+}
+
+pub struct LineTree<D: Clone + BoundOrd> {
+    tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
+    data_buffer_shard_alloc: Option<BufferShardAlloc>,
+    timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
+}
+
+impl<D: Clone + BoundOrd> Default for LineTree<D> {
+    fn default() -> Self {
+        Self {
+            tree: Default::default(),
+            data_buffer_shard_alloc: None,
+            timestamp_buffer_shard_alloc: None,
+        }
+    }
+}
+
+pub const CHUNK_COUNT: usize = 0x4000;
+pub const CHUNK_LEN: usize = 0xC00;
+
+impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
+    pub fn range_iter(&self, range: Range<Timestamp>) -> impl Iterator<Item = &Chunk<D>> {
+        self.tree
+            .overlapping(ii(range.start.0, range.end.0))
+            .map(|(_, v)| v)
+    }
+
+    pub fn update_last(&mut self, f: impl FnOnce(&mut Chunk<D>)) {
+        if let Some((_, last)) = self.tree.last_key_value() {
+            let mut last = last.clone();
+            f(&mut last);
+            self.insert(last);
+        }
+    }
+
+    pub fn insert(&mut self, chunk: Chunk<D>) {
+        let _ = self.tree.insert_overwrite(
+            ii(
+                chunk.summary.start_timestamp.0,
+                chunk.summary.end_timestamp.0,
+            ),
+            chunk,
+        );
+    }
+
+    pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
+        self.range_iter(range)
+            .fold(ChunkSummary::default(), |mut xs, x| {
+                xs.add_summary(&x.summary);
+                xs
+            })
+    }
+
+    pub fn last(&self) -> Option<&Chunk<D>> {
+        self.tree.last_key_value().map(|(_k, v)| v)
+    }
+
+    pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &D)> {
+        let (_, chunk) = self.tree.overlapping(ii(timestamp.0, timestamp.0)).next()?;
+        let index = match chunk.timestamps.cpu.binary_search(&timestamp) {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        Some((
+            *chunk.timestamps.cpu.get(index)?,
+            chunk.data.cpu().get(index)?,
+        ))
+    }
+
+    pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
+        self.data_buffer_shard_alloc.as_ref()
+    }
+
+    pub fn timestamp_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
+        self.timestamp_buffer_shard_alloc.as_ref()
+    }
+
+    pub fn queue_load_range(
+        &mut self,
+        range: Range<Timestamp>,
+        render_queue: &RenderQueue,
+        render_device: &RenderDevice,
+    ) {
+        let data_buffer_alloc = self.data_buffer_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        let timestamp_buffer_alloc = self.timestamp_buffer_shard_alloc.get_or_insert_with(|| {
+            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
+        });
+        for (_, chunk) in self.tree.overlapping_mut(ii(range.start.0, range.end.0)) {
+            chunk.queue_load(render_queue, data_buffer_alloc, timestamp_buffer_alloc);
+        }
+    }
+
+    pub fn draw_index_count(&self, range: Range<Timestamp>) -> usize {
+        self.draw_index_chunk_iter(range)
+            .flat_map(|chunk| chunk.into_index_iter())
+            .count()
+    }
+
+    pub fn draw_index_chunk_iter(
+        &self,
+        range: Range<Timestamp>,
+    ) -> impl Iterator<Item = IndexChunk> + '_ {
+        self.range_iter(range).filter_map(|c| {
+            let gpu = c.data.gpu.lock();
+            let gpu = gpu.as_ref()?;
+            Some(gpu.as_index_chunk::<f32>(c.summary.len))
+        })
+    }
+
+    pub fn write_to_index_buffer(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+    ) -> u32 {
+        let mut view = render_queue
+            .write_buffer_with(
+                index_buffer,
+                0,
+                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+            )
+            .expect("no write buf");
+        let index_total_count = self.draw_index_count(line_visible_range.clone());
+        let step = (index_total_count / INDEX_BUFFER_LEN) + 1;
+        fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
+            if view.len() < 4 {
+                return view;
+            }
+            view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
+            &mut view[size_of::<u32>()..]
+        }
+        let mut view = &mut view[..];
+        let mut count = 0;
+        for chunk in self.draw_index_chunk_iter(line_visible_range) {
+            view = append_u32(view, 0);
+            let end = chunk.clone().into_index_iter().last();
+            let mut index_iter = chunk.into_index_iter();
+            if let Some(index) = index_iter.next() {
+                count += 1;
+                view = append_u32(view, index);
+            }
+            for index in index_iter.step_by(step) {
+                count += 1;
+                view = append_u32(view, index);
+            }
+            if let Some(end) = end {
+                count += 1;
+                view = append_u32(view, end);
+            }
+            view = append_u32(view, 0);
+            count += 2;
+        }
+        count
+    }
+}
+
+#[derive(Clone)]
+pub struct IndexChunk {
+    range: Range<u32>,
+    len: usize,
+}
+
+impl IndexChunk {
+    pub fn into_index_iter(self) -> impl Iterator<Item = u32> {
+        self.range.take(self.len)
+    }
+}
+
+pub trait BoundOrd {
+    fn min(self, val: Self) -> Self;
+    fn max(self, val: Self) -> Self;
+}
+
+impl BoundOrd for f32 {
+    fn min(self, val: f32) -> Self {
+        self.min(val)
+    }
+
+    fn max(self, val: f32) -> Self {
+        self.max(val)
+    }
+}
+
+pub struct BufferShardAlloc {
+    buffer: Buffer,
+    chunk_size: usize,
+    free_map: RoaringBitmap,
+}
+
+impl BufferShardAlloc {
+    pub fn with_nan_chunk(
+        chunks: usize,
+        chunk_len: usize,
+        render_device: &RenderDevice,
+        render_queue: &RenderQueue,
+    ) -> Self {
+        let mut this = Self::new::<f32>(chunks + 1, chunk_len, render_device);
+        let shard = this.alloc().expect("couldn't alloc nan");
+        render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
+        this
+    }
+
+    pub fn new<T: Sized>(chunks: usize, chunk_len: usize, render_device: &RenderDevice) -> Self {
+        let chunk_size = size_of::<T>() * chunk_len;
+        let buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some(&format!("Buffer<{}, {}>", type_name::<T>(), chunks)),
+            size: (chunk_size * chunks) as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut free_map = RoaringBitmap::new();
+        for i in 0..chunks {
+            free_map.insert(i as u32);
+        }
+        Self {
+            buffer,
+            free_map,
+            chunk_size,
+        }
+    }
+
+    pub fn alloc(&mut self) -> Option<BufferShard> {
+        let i = self.free_map.iter().next()?;
+        self.free_map.remove(i);
+        let i = i as usize;
+        let start = (i * self.chunk_size) as u64;
+        let end = ((i + 1) * self.chunk_size) as u64;
+        Some(BufferShard {
+            buffer: self.buffer.clone(),
+            range: start..end,
+        })
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn dealloc(&mut self, shard: BufferShard) {
+        if self.buffer.id() == shard.buffer.id() {
+            return;
+        }
+        let i = shard.range.start as usize / self.chunk_size;
+        self.free_map.insert(i as u32);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BufferShard {
+    buffer: Buffer,
+    range: Range<u64>,
+}
+
+impl BufferShard {
+    pub fn as_slice(&self) -> BufferSlice<'_> {
+        self.buffer.slice(self.range.clone())
+    }
+
+    pub fn as_index_chunk<D>(&self, len: usize) -> IndexChunk {
+        let start = (self.range.start / size_of::<D>() as u64) as u32;
+        let end = (self.range.end / size_of::<D>() as u64) as u32;
+
+        IndexChunk {
+            range: start..end,
+            len,
+        }
+    }
+}
+
+pub trait RenderQueueExt {
+    fn write_buffer_shard(&self, buffer_shard: &BufferShard, data: &[u8]);
+}
+
+impl RenderQueueExt for RenderQueue {
+    fn write_buffer_shard(&self, buffer_shard: &BufferShard, data: &[u8]) {
+        let len = data
+            .len()
+            .min((buffer_shard.range.end - buffer_shard.range.start) as usize);
+        let data = &data[..len];
+        self.write_buffer(&buffer_shard.buffer, buffer_shard.range.start, data);
     }
 }

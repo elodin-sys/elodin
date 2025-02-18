@@ -34,7 +34,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, TryFromBytes};
 use crate::{
     com_de::Decomponentize,
     error::Error,
-    types::{ComponentId, ComponentView, EntityId, PrimType},
+    types::{ComponentId, ComponentView, EntityId, PrimType, Timestamp},
 };
 
 /// An entry that points to a series of arrays that are all associated with a single component
@@ -45,6 +45,7 @@ pub struct ColumnEntry {
     entity_ids_entry: BufEntry<EntityId>,
     data_col_offset: u64,
     shape_entry: ShapeEntry,
+    timestamp_offset: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -108,17 +109,28 @@ impl ColumnEntry {
         table: &[u8],
         sink: &mut impl Decomponentize,
     ) -> Result<(), Error> {
-        let shape = self.shape_entry.parse_shape(data).unwrap();
-        let arr_len = arr_len(shape).unwrap();
+        let shape = self.shape_entry.parse_shape(data)?;
+        let arr_len = arr_len(shape)?;
         let arr_size = arr_len * self.shape_entry.prim_type.size();
         let len = self.len as usize;
-        let entity_ids = self.entity_ids_entry.parse(data, len).unwrap();
+        let entity_ids = self.entity_ids_entry.parse(data, len)?;
+        let timestamp = if let Some(offset) = self.timestamp_offset {
+            let offset: usize = offset.try_into().map_err(|_| Error::OffsetOverflow)?;
+            let end = offset
+                .checked_add(size_of::<Timestamp>())
+                .ok_or(Error::OffsetOverflow)?;
+            let timestamp = table.get(offset..end).ok_or(Error::BufferUnderflow)?;
+            let timestamp = Timestamp::read_from_bytes(timestamp)?;
+            Some(timestamp)
+        } else {
+            None
+        };
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let arr_offset = i * arr_size + self.data_col_offset as usize;
             let arr_data = table.get(arr_offset..).ok_or(Error::BufferUnderflow)?;
             let view =
                 ComponentView::try_from_bytes_shape(arr_data, shape, self.shape_entry.prim_type)?;
-            sink.apply_value(self.component_id, *entity_id, view);
+            sink.apply_value(self.component_id, *entity_id, view, timestamp);
         }
         Ok(())
     }
@@ -132,6 +144,7 @@ pub struct RowEntry {
     component_ids_entry: BufEntry<ComponentId>,
     shapes_entry: BufEntry<ShapeEntry>,
     data_col_offset: u64,
+    timestamp_offset: Option<u64>,
 }
 
 impl RowEntry {
@@ -145,13 +158,24 @@ impl RowEntry {
         let component_ids = self.component_ids_entry.parse(vdata, len)?;
         let shapes = self.shapes_entry.parse(vdata, len)?;
         let mut arr_offset = self.data_col_offset as usize; // NOTE(sphw): we are assuming packed values here, but we might want to eventually allow for a list of offsets instead
+        let timestamp = if let Some(offset) = self.timestamp_offset {
+            let offset: usize = offset.try_into().map_err(|_| Error::OffsetOverflow)?;
+            let end = offset
+                .checked_add(size_of::<Timestamp>())
+                .ok_or(Error::OffsetOverflow)?;
+            let timestamp = table.get(offset..end).ok_or(Error::BufferUnderflow)?;
+            let timestamp = Timestamp::read_from_bytes(timestamp)?;
+            Some(timestamp)
+        } else {
+            None
+        };
         for (component_id, shape_entry) in component_ids.iter().zip(shapes.iter()) {
             let shape = shape_entry.parse_shape(vdata)?;
             let arr_len = arr_len(shape)?;
             let arr_size = arr_len * shape_entry.prim_type.size();
             let arr_data = table.get(arr_offset..).ok_or(Error::BufferUnderflow)?;
             let view = ComponentView::try_from_bytes_shape(arr_data, shape, shape_entry.prim_type)?;
-            sink.apply_value(*component_id, self.entity_id, view);
+            sink.apply_value(*component_id, self.entity_id, view, timestamp);
             arr_offset += arr_size;
         }
         Ok(())
@@ -285,12 +309,33 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         self.vtable
     }
 
+    pub fn timestamp(&mut self) -> Result<u64, Error> {
+        self.data_len += PrimType::I64.padding(self.data_len);
+        let offset = self.data_len;
+        self.data_len += size_of::<i64>();
+        Ok(offset as u64)
+    }
+
     pub fn column<I: IntoIterator<Item = EntityId>, S: IntoIterator<Item = u64>>(
         &mut self,
         component_id: impl Into<ComponentId>,
         prim_type: PrimType,
         shape: S,
         entity_ids: I,
+    ) -> Result<&mut Self, Error>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        self.column_with_timestamp(component_id, prim_type, shape, entity_ids, None)
+    }
+
+    pub fn column_with_timestamp<I: IntoIterator<Item = EntityId>, S: IntoIterator<Item = u64>>(
+        &mut self,
+        component_id: impl Into<ComponentId>,
+        prim_type: PrimType,
+        shape: S,
+        entity_ids: I,
+        timestamp_offset: Option<u64>,
     ) -> Result<&mut Self, Error>
     where
         I::IntoIter: ExactSizeIterator,
@@ -331,6 +376,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
                 phantom_data: PhantomData,
             },
             data_col_offset,
+            timestamp_offset,
         };
         self.vtable.entries.push(Entry::Column(entry))?;
         Ok(self)
@@ -340,6 +386,15 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         &mut self,
         entity_id: EntityId,
         components: &[(ComponentId, PrimType, &[u64])],
+    ) -> Result<&mut Self, Error> {
+        self.entity_with_timestamp(entity_id, components, None)
+    }
+
+    pub fn entity_with_timestamp(
+        &mut self,
+        entity_id: EntityId,
+        components: &[(ComponentId, PrimType, &[u64])],
+        timestamp_offset: Option<u64>,
     ) -> Result<&mut Self, Error> {
         let len = components.len() as u64;
         let component_ids = components.iter().map(|(id, _, _)| *id);
@@ -387,6 +442,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
                 phantom_data: PhantomData,
             },
             data_col_offset,
+            timestamp_offset,
         };
         self.vtable.entries.push(Entry::Entity(entry))?;
         Ok(self)
@@ -419,6 +475,7 @@ mod tests {
             component_id: ComponentId,
             entity_id: EntityId,
             value: ComponentView<'_>,
+            _timestamp: Option<Timestamp>,
         ) {
             match value {
                 ComponentView::F32(view) => {

@@ -1,5 +1,6 @@
 use elodin_db::MetadataExt;
 use elodin_db::{handle_conn, DB};
+use impeller2::types::Timestamp;
 use nox_ecs::Error;
 use smallvec::SmallVec;
 use std::{
@@ -32,7 +33,8 @@ impl Server {
     ) -> Result<(), Error> {
         let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
-        init_db(&db, &mut world.world)?;
+        let start_time = Timestamp::now();
+        init_db(&db, &mut world.world, start_time)?;
         let tick_db = db.clone();
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
@@ -42,7 +44,7 @@ impl Server {
                     handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
                 }
             });
-        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled));
+        let tick = stellarator::spawn(tick(tick_db, world, is_cancelled, start_time));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
                 .map_err(|_| stellarator::Error::JoinFailed)
@@ -52,7 +54,11 @@ impl Server {
     }
 }
 
-pub fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
+pub fn init_db(
+    db: &elodin_db::DB,
+    world: &mut World,
+    start_timestamp: Timestamp,
+) -> Result<(), elodin_db::Error> {
     for (id, asset) in world.assets.iter().enumerate() {
         db.assets.insert(id as u64, &asset.inner)?;
     }
@@ -74,12 +80,11 @@ pub fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::E
                 .path
                 .join(component_id.to_string())
                 .join(entity_id.to_string());
-            let start_tick = db.latest_tick.load(atomic::Ordering::SeqCst);
             let entity = match elodin_db::Entity::create(
                 path,
-                start_tick,
                 entity_id,
                 db_component.schema.clone(),
+                start_timestamp,
             ) {
                 Ok(entity) => entity,
                 Err(elodin_db::Error::Io(err)) if err.kind() == io::ErrorKind::AlreadyExists => {
@@ -88,10 +93,11 @@ pub fn init_db(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::E
                 Err(err) => return Err(err),
             };
             {
+                let buf = &column.buffer[offset..offset + size];
                 let mut writer = entity.writer.lock().unwrap();
-                writer
-                    .head_mut(size)?
-                    .copy_from_slice(&column.buffer[offset..offset + size]);
+                writer.push_with_buf(start_timestamp, buf.len(), |dest| {
+                    dest.copy_from_slice(buf);
+                })?;
             }
             db_component.entities.insert(entity_id, entity);
         }
@@ -153,14 +159,17 @@ pub fn copy_db_to_world(db: &DB, world: &mut WorldExec<Compiled>) {
             else {
                 continue;
             };
-            let writer = db_buf.writer.lock().unwrap();
-            let head = writer.head().unwrap();
+            let (_, head) = db_buf.time_series.latest().unwrap();
             column.buffer[offset..offset + size].copy_from_slice(head);
         }
     }
 }
 
-pub fn commit_world_head(db: &DB, world: &mut WorldExec<Compiled>) {
+pub fn commit_world_head(
+    db: &DB,
+    world: &mut WorldExec<Compiled>,
+    timestamp: Timestamp,
+) -> Result<(), Error> {
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
         let Some(component) = db
             .components
@@ -184,17 +193,19 @@ pub fn commit_world_head(db: &DB, world: &mut WorldExec<Compiled>) {
             };
             let buf = &column.buffer[offset..offset + size];
             let mut writer = db_buf.writer.lock().unwrap();
-            if let Err(err) = writer.commit_head(buf) {
-                warn!(?err, "error committing head");
-            }
+            writer.push_with_buf(timestamp, buf.len(), |head| {
+                head.copy_from_slice(buf);
+            })?;
         }
     }
+    Ok(())
 }
 
 async fn tick(
     db: Arc<DB>,
     mut world: WorldExec<Compiled>,
     is_cancelled: impl Fn() -> bool + 'static,
+    mut timestamp: Timestamp,
 ) {
     let mut start = Instant::now();
     let mut tick = 0;
@@ -207,9 +218,10 @@ async fn tick(
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
-        commit_world_head(&db, &mut world);
-        db.latest_tick.fetch_add(1, atomic::Ordering::Release);
-        db.tick_waker.wake_all();
+        if let Err(err) = commit_world_head(&db, &mut world, timestamp) {
+            warn!(?err, "error committing head");
+        }
+        db.last_updated.store(timestamp);
         let time_step = db.time_step().max(Duration::from_micros(100));
         let sleep_time = time_step.saturating_sub(start.elapsed());
         if is_cancelled() {
@@ -221,5 +233,6 @@ async fn tick(
             start += time_step;
         }
         tick += 1;
+        timestamp += world.world.sim_time_step().0;
     }
 }

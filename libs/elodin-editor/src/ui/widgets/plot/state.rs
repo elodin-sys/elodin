@@ -12,7 +12,6 @@ use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValue;
 
 use crate::plugins::navigation_gizmo::RenderLayerAlloc;
-use crate::ui::widgets::timeline::timeline_ranges::TimelineRangeId;
 use crate::ui::{colors, ViewportRect};
 use crate::MainCamera;
 
@@ -34,7 +33,6 @@ pub struct GraphBundle {
 #[derive(Clone, Debug, Component)]
 pub struct GraphState {
     pub entities: BTreeMap<EntityId, GraphStateEntity>,
-    pub range_id: Option<TimelineRangeId>,
     pub enabled_lines: BTreeMap<(EntityId, ComponentId, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
@@ -47,7 +45,6 @@ impl GraphBundle {
         //commands: &mut Commands,
         render_layer_alloc: &mut RenderLayerAlloc,
         entities: BTreeMap<EntityId, GraphStateEntity>,
-        range_id: Option<TimelineRangeId>,
     ) -> Self {
         let Some(layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
@@ -55,7 +52,6 @@ impl GraphBundle {
         let render_layers = RenderLayers::layer(layer);
         let graph_state = GraphState {
             entities,
-            range_id,
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,

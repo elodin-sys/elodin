@@ -18,14 +18,14 @@ bevy.version = "0.15"
 bevy.features = ["wayland"]
 bevy_render.version = "0.15"
 bevy_color.version = "0.15"
-bevy_egui.version = "0.31"
-egui.version = "0.29"
+bevy_egui.version = "0.33"
+egui.version = "0.31"
 egui.features = ["rayon"]
-egui_tiles = "0.10"
+egui_tiles = "0.12"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "=0.14.0" # the released version of infinite grid has a bug with hdr this commit is just before that release
+bevy_infinite_grid = "=0.14.0"                                # the released version of infinite grid has a bug with hdr this commit is just before that release
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot_v0.15"
 #big_space.path = "../../../big_space"
@@ -35,6 +35,12 @@ bevy_framepace = "0.18"
 # rand
 fastrand.version = "2"
 
+# lock
+spin = { version = "0.9.8", default-features = false, features = [
+    "use_ticket_mutex",
+    "rwlock",
+] }
+
 # protocols
 postcard.version = "1.0.8"
 reqwest = { version = "0.12", features = [
@@ -42,6 +48,7 @@ reqwest = { version = "0.12", features = [
     "gzip",
 ], default-features = false }
 impeller2.path = "../../libs/impeller2"
+impeller2.features = ["hifitime"]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.default-features = false
 impeller2-wkt.path = "../../libs/impeller2/wkt"
@@ -56,6 +63,8 @@ fuzzy-matcher = "0.3.7"
 roaring = "0.10.4"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
+nodit = "0.9"
+heapless.version = "0.8"
 
 # helpers
 itertools = "0.12.1"
@@ -66,6 +75,7 @@ hex = "0.4.3"
 web-time = "1.1.0"
 const-fnv1a-hash = "1.1.0"
 zerocopy = "0.8.14"
+hifitime.version = "4.0.2"
 
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

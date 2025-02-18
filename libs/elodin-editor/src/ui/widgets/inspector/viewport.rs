@@ -69,9 +69,9 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         ui.add(
             ELabel::new("Viewport")
-                .padding(egui::Margin::same(8.0).bottom(24.0))
+                .padding(egui::Margin::same(8).bottom(24.0))
                 .bottom_stroke(ELabel::DEFAULT_STROKE)
-                .margin(egui::Margin::same(0.0).bottom(16.0)),
+                .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
         let before_parent = cam.parent.map(|p| p.get());
@@ -83,8 +83,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         let mut reset_focus = false;
 
-        egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
                 ui.style_mut().spacing.combo_width = ui.available_size().x;
 
@@ -93,7 +93,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     [icons.search],
                     "TRACK ENTITY",
                     colors::PRIMARY_CREAME,
-                    egui::Margin::same(0.0).bottom(8.0),
+                    egui::Margin::same(0).bottom(8.0),
                 )[0];
 
                 theme::configure_combo_box(ui.style_mut());
@@ -136,8 +136,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if selected_parent.is_some() {
-            egui::Frame::none()
-                .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
@@ -162,8 +162,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
-            egui::Frame::none()
-                .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     let mut fov = persp.fov.to_degrees();
                     ui.horizontal(|ui| {
@@ -190,8 +190,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         }
 
         if let Some(&GridHandle { grid }) = cam.grid_handle {
-            egui::Frame::none()
-                .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(

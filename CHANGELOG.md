@@ -2,6 +2,10 @@
 
 ## unreleased
 
+- **(feat)** Add support for recording data at timestamps to elodin-db.
+elodin-db now no longer operates on the concept of "ticks". Instead each new value is recorded as a pair of timestamp and value. This essentially makes elodin-db into a timer series database. It also fixes the problem where elodin-db would record a new entry, even when the value is unchanged.
+- **(fix)** Fix plotting x axis tick marks placed in the wrong position
+
 ## v0.11
 
 ### v0.11.3
