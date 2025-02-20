@@ -38,7 +38,7 @@ pub unsafe trait IoBuf: Unpin + 'static + Send {
             Bound::Unbounded => 0,
         };
 
-        if begin >= self.init_len() {
+        if begin > self.init_len() {
             return None;
         }
 

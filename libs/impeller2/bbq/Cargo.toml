@@ -1,0 +1,11 @@
+[package]
+name = "impeller2-bbq"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stellarator-buf.path = "../../stellarator/buf"
+impeller2.path = ".."
+impeller2.features = ["std"]
+bbq2.git = "https://github.com/elodin-sys/bbq2.git"
+bbq2.rev = "b6e36706a5549d770ebf2dc122b39cef1368b06d"

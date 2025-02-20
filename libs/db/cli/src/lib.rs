@@ -30,6 +30,7 @@ use std::{
     },
 };
 use stellarator::{
+    buf::Slice,
     io::{OwnedReader, OwnedWriter, SplitExt},
     net::TcpStream,
 };
@@ -116,7 +117,7 @@ impl Client {
         fn print_time_series_as_table<
             T: Immutable + TryFromBytes + Copy + std::fmt::Display + Default + 'static,
         >(
-            time_series: &OwnedTimeSeries<Vec<u8>>,
+            time_series: &OwnedTimeSeries<Slice<Vec<u8>>>,
             schema: Schema<Vec<u64>>,
         ) -> Result<(), anyhow::Error> {
             let len = schema.shape().iter().product();
@@ -284,7 +285,7 @@ impl Client {
                 }
                 impeller2::types::OwnedPacket::TimeSeries(_) => {}
             }
-            buf = pkt.into_buf();
+            buf = pkt.into_buf().into_inner();
         }
         Ok(())
     }

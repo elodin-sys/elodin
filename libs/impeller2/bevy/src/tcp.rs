@@ -1,8 +1,10 @@
 use crate::*;
+use bbq2::queue::ArcBBQueue;
+use bbq2::traits::storage::BoxedSlice;
 use bevy::app::{Plugin, Update};
-use impeller2::types::FilledRecycle;
 use impeller2::types::LenPacket;
-use impeller2_stella::thingbuf::tcp_connect;
+use impeller2_bbq::*;
+use impeller2_stella::queue::tcp_connect;
 use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
@@ -39,9 +41,10 @@ pub fn channels() -> (
     PacketTx,
     PacketRx,
     mpsc::Receiver<Option<LenPacket>>,
-    mpsc::Sender<MaybeFilledPacket, FilledRecycle>,
+    AsyncArcQueueTx,
 ) {
-    let (incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(4096, FilledRecycle);
+    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
+    let (incoming_packet_rx, incoming_packet_tx) = queue.framed_split();
     let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
     (
         PacketTx(outgoing_packet_tx),
@@ -54,7 +57,7 @@ pub fn channels() -> (
 pub fn spawn_tcp_connect(
     addr: SocketAddr,
     mut outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
-    mut incoming_packet_tx: mpsc::Sender<MaybeFilledPacket, FilledRecycle>,
+    mut incoming_packet_tx: AsyncArcQueueTx,
     stream_id: StreamId,
 ) -> ThreadConnectionStatus {
     let connection_status = ThreadConnectionStatus(Arc::new(AtomicU64::new(0)));
@@ -75,6 +78,7 @@ pub fn spawn_tcp_connect(
                 )
                 .await
                 {
+                    println!("{:?}", err);
                     bevy::log::trace!(?err, "connection ended with error");
                     connection_status.set_status(ConnectionStatus::Error);
                     stellarator::sleep(Duration::from_millis(250)).await;

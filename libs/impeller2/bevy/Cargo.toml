@@ -17,16 +17,19 @@ nox.path = "../../nox"
 # bevy
 bevy.version = "0.15"
 bevy.default-features = false
-
 # channels
 thingbuf = "0.1.6"
+impeller2-bbq.path = "../bbq"
+bbq2.git = "https://github.com/elodin-sys/bbq2.git"
+bbq2.rev = "b6e36706a5549d770ebf2dc122b39cef1368b06d"
+stellarator-buf.path = "../../stellarator/buf"
 
 # async
 stellarator.path = "../../stellarator"
 stellarator.optional = true
 stellarator.features = ["miette"]
 impeller2-stella.path = "../stella"
-impeller2-stella.features = ["thingbuf"]
+impeller2-stella.features = ["queue"]
 impeller2-stella.optional = true
 futures-lite = "2.5.0"
 

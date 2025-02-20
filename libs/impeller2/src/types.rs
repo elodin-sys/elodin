@@ -133,33 +133,33 @@ impl PrimType {
 
     pub const fn alignment(&self) -> usize {
         match self {
-            PrimType::U8 => core::mem::align_of::<u8>(),
-            PrimType::U16 => core::mem::align_of::<u16>(),
-            PrimType::U32 => core::mem::align_of::<u32>(),
-            PrimType::U64 => core::mem::align_of::<u64>(),
-            PrimType::I8 => core::mem::align_of::<i8>(),
-            PrimType::I16 => core::mem::align_of::<i16>(),
-            PrimType::I32 => core::mem::align_of::<i32>(),
-            PrimType::I64 => core::mem::align_of::<i64>(),
-            PrimType::Bool => core::mem::align_of::<bool>(),
-            PrimType::F32 => core::mem::align_of::<f32>(),
-            PrimType::F64 => core::mem::align_of::<f64>(),
+            PrimType::U8 => mem::align_of::<u8>(),
+            PrimType::U16 => mem::align_of::<u16>(),
+            PrimType::U32 => mem::align_of::<u32>(),
+            PrimType::U64 => mem::align_of::<u64>(),
+            PrimType::I8 => mem::align_of::<i8>(),
+            PrimType::I16 => mem::align_of::<i16>(),
+            PrimType::I32 => mem::align_of::<i32>(),
+            PrimType::I64 => mem::align_of::<i64>(),
+            PrimType::Bool => mem::align_of::<bool>(),
+            PrimType::F32 => mem::align_of::<f32>(),
+            PrimType::F64 => mem::align_of::<f64>(),
         }
     }
 
     pub const fn size(&self) -> usize {
         match self {
-            PrimType::U8 => core::mem::size_of::<u8>(),
-            PrimType::U16 => core::mem::size_of::<u16>(),
-            PrimType::U32 => core::mem::size_of::<u32>(),
-            PrimType::U64 => core::mem::size_of::<u64>(),
-            PrimType::I8 => core::mem::size_of::<i8>(),
-            PrimType::I16 => core::mem::size_of::<i16>(),
-            PrimType::I32 => core::mem::size_of::<i32>(),
-            PrimType::I64 => core::mem::size_of::<i64>(),
-            PrimType::Bool => core::mem::size_of::<bool>(),
-            PrimType::F32 => core::mem::size_of::<f32>(),
-            PrimType::F64 => core::mem::size_of::<f64>(),
+            PrimType::U8 => mem::size_of::<u8>(),
+            PrimType::U16 => mem::size_of::<u16>(),
+            PrimType::U32 => mem::size_of::<u32>(),
+            PrimType::U64 => mem::size_of::<u64>(),
+            PrimType::I8 => mem::size_of::<i8>(),
+            PrimType::I16 => mem::size_of::<i16>(),
+            PrimType::I32 => mem::size_of::<i32>(),
+            PrimType::I64 => mem::size_of::<i64>(),
+            PrimType::Bool => mem::size_of::<bool>(),
+            PrimType::F32 => mem::size_of::<f32>(),
+            PrimType::F64 => mem::size_of::<f64>(),
         }
     }
 
@@ -508,7 +508,7 @@ pub type PacketId = [u8; 3];
 
 pub const PACKET_HEADER_LEN: usize = 4;
 
-#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout)]
+#[derive(TryFromBytes, Unaligned, Immutable, KnownLayout, Debug)]
 #[repr(C)]
 pub struct Packet {
     pub packet_ty: PacketTy,
@@ -648,12 +648,13 @@ pub enum OwnedPacket<B: IoBuf> {
 }
 
 impl<B: IoBuf> OwnedPacket<B> {
-    pub fn parse(packet_buf: Slice<B>) -> Result<Self, Error> {
-        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(&packet_buf)?;
+    pub fn parse_with_offset(packet_buf: B, offset: usize) -> Result<Self, Error> {
+        let buf = &stellarator_buf::deref(&packet_buf)[offset..];
+        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(buf)?;
         let packet_ty = *packet_ty;
         let id = *id;
         let buf = packet_buf
-            .try_sub_slice(PACKET_HEADER_LEN..)
+            .try_slice(PACKET_HEADER_LEN + offset..)
             .ok_or(Error::InvalidPacket)?;
         Ok(match packet_ty {
             PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, buf }),
@@ -664,6 +665,9 @@ impl<B: IoBuf> OwnedPacket<B> {
                 OwnedPacket::TimeSeries(OwnedTimeSeries { id, buf, len })
             }
         })
+    }
+    pub fn parse(packet_buf: B) -> Result<Self, Error> {
+        Self::parse_with_offset(packet_buf, 0)
     }
 }
 
@@ -737,58 +741,6 @@ impl<B: IoBuf> OwnedPacket<B> {
             Self::Table(table) => table.buf.into_inner(),
             Self::TimeSeries(time_series) => time_series.buf.into_inner(),
         }
-    }
-}
-
-pub enum MaybeFilledPacket {
-    Taken,
-    Unfilled(Vec<u8>),
-    Packet(OwnedPacket<Vec<u8>>),
-}
-
-impl MaybeFilledPacket {
-    #[cfg(feature = "thingbuf")]
-    fn recycle(&mut self) {
-        replace_with::replace_with_or_abort(self, |this| match this {
-            MaybeFilledPacket::Unfilled(mut vec) => {
-                vec.resize(1024 * 1024, 0);
-                MaybeFilledPacket::Unfilled(vec)
-            }
-            MaybeFilledPacket::Packet(packet) => {
-                let mut vec = packet.into_buf();
-                vec.resize(1024 * 1024, 0);
-                MaybeFilledPacket::Unfilled(vec)
-            }
-            MaybeFilledPacket::Taken => MaybeFilledPacket::default(),
-        })
-    }
-
-    pub fn take_buf(&mut self) -> Option<Vec<u8>> {
-        match mem::replace(self, MaybeFilledPacket::Taken) {
-            MaybeFilledPacket::Taken => None,
-            MaybeFilledPacket::Unfilled(buf) => Some(buf),
-            MaybeFilledPacket::Packet(pkt) => Some(pkt.into_buf()),
-        }
-    }
-}
-
-impl Default for MaybeFilledPacket {
-    fn default() -> Self {
-        Self::Unfilled(vec![0u8; 1024 * 1024])
-    }
-}
-
-#[cfg(feature = "thingbuf")]
-pub struct FilledRecycle;
-
-#[cfg(feature = "thingbuf")]
-impl thingbuf::Recycle<MaybeFilledPacket> for FilledRecycle {
-    fn new_element(&self) -> MaybeFilledPacket {
-        MaybeFilledPacket::default()
-    }
-
-    fn recycle(&self, element: &mut MaybeFilledPacket) {
-        element.recycle();
     }
 }
 

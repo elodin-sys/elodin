@@ -1,15 +1,14 @@
+use bbq2::{queue::ArcBBQueue, traits::storage::BoxedSlice};
 use impeller2::{
     com_de::{Componentize, Decomponentize},
     registry::HashMapRegistry,
     table::{Entry, VTableBuilder},
-    types::{
-        ComponentView, FilledRecycle, LenPacket, MaybeFilledPacket, Msg, MsgExt, OwnedPacket,
-        PacketId, Timestamp,
-    },
+    types::{ComponentView, LenPacket, Msg, MsgExt, OwnedPacket, PacketId, Timestamp},
 };
-use impeller2_stella::thingbuf::tcp_connect;
+use impeller2_bbq::{AsyncArcQueueRx, RxExt};
+use impeller2_stella::queue::tcp_connect;
 use impeller2_wkt::{Stream, StreamFilter, VTableMsg};
-use std::{marker::PhantomData, net::SocketAddr, ops::Deref, time::Duration};
+use std::{marker::PhantomData, net::SocketAddr, time::Duration};
 use thingbuf::mpsc;
 
 use crate::{drivers::DriverMode, System};
@@ -22,7 +21,7 @@ pub struct TcpSink<W, D> {
 }
 
 pub struct TcpSource<W, D> {
-    rx: mpsc::Receiver<MaybeFilledPacket, FilledRecycle>,
+    rx: AsyncArcQueueRx,
     world: PhantomData<W>,
     driver: PhantomData<D>,
     vtable: HashMapRegistry,
@@ -100,10 +99,7 @@ where
     type Driver = D;
 
     fn update(&mut self, world: &mut Self::World) {
-        while let Ok(pkt) = self.rx.try_recv_ref() {
-            let MaybeFilledPacket::Packet(ref pkt) = pkt.deref() else {
-                continue;
-            };
+        while let Some(pkt) = self.rx.try_recv_pkt() {
             match pkt {
                 OwnedPacket::Table(table) => {
                     if let Err(err) = table.sink(&self.vtable, world) {
@@ -127,7 +123,8 @@ where
 pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
     addr: SocketAddr,
 ) -> (TcpSink<W, D>, TcpSource<W, D>) {
-    let (mut incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(512, FilledRecycle);
+    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(1024 * 1024));
+    let (incoming_packet_rx, mut incoming_packet_tx) = queue.framed_split();
     let (outgoing_packet_tx, mut outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(512);
     let vtable_id: PacketId = fastrand::u64(..).to_le_bytes()[..3].try_into().unwrap();
     let sink = TcpSink {
