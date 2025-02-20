@@ -13,6 +13,7 @@
 "datatime" = "datatime"
 "struc" = "struc"
 "LICENS" = "LICENS"
+"aks" = "aks"
 
 [files]
 extend-exclude = [
