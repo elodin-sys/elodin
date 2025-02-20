@@ -1,12 +1,12 @@
 use impeller2::types::{LenPacket, OwnedPacket};
 use stellarator::{
-    buf::IoBufMut,
+    buf::{IoBufMut, Slice},
     io::{AsyncRead, AsyncWrite, LengthDelReader},
     BufResult,
 };
 
-#[cfg(feature = "thingbuf")]
-pub mod thingbuf;
+#[cfg(feature = "queue")]
+pub mod queue;
 
 pub struct PacketStream<R: AsyncRead> {
     reader: LengthDelReader<R>,
@@ -21,7 +21,7 @@ impl<R: AsyncRead> PacketStream<R> {
         Self { reader }
     }
 
-    pub async fn next<B: IoBufMut>(&mut self, buf: B) -> Result<OwnedPacket<B>, Error> {
+    pub async fn next<B: IoBufMut>(&mut self, buf: B) -> Result<OwnedPacket<Slice<B>>, Error> {
         let packet_buf = self.reader.recv(buf).await?;
         OwnedPacket::parse(packet_buf).map_err(Error::from)
     }

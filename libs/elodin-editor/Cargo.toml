@@ -49,8 +49,6 @@ reqwest = { version = "0.12", features = [
 ], default-features = false }
 impeller2.path = "../../libs/impeller2"
 impeller2.features = ["hifitime"]
-impeller2-bevy.path = "../../libs/impeller2/bevy"
-impeller2-bevy.default-features = false
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
 toml.version = "0.8"
@@ -63,7 +61,8 @@ fuzzy-matcher = "0.3.7"
 roaring = "0.10.4"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
-nodit = "0.9"
+nodit.git = "https://github.com/elodin-sys/nodit.git"
+nodit.rev = "cd284cd0f16d475786dae8629cebda4e14177ee1"
 heapless.version = "0.8"
 
 # helpers
@@ -77,6 +76,9 @@ zerocopy = "0.8.14"
 hifitime.version = "4.0.2"
 
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+impeller2-bevy.path = "../../libs/impeller2/bevy"
+impeller2-bevy.default-features = false
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
@@ -84,14 +86,16 @@ tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 directories = "5.0"
 rfd = "0.15.2"
 s10.path = "../s10"
-
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
-
 # errors
 miette.version = "7.2"
 miette.features = ["fancy"]
+# impeller
+impeller2-bevy.path = "../../libs/impeller2/bevy"
+impeller2-bevy.features = ["tcp"]
+impeller2-bevy.default-features = false
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

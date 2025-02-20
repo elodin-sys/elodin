@@ -1150,6 +1150,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bbq2"
+version = "0.1.0"
+source = "git+https://github.com/elodin-sys/bbq2.git?rev=b6e36706a5549d770ebf2dc122b39cef1368b06d#b6e36706a5549d770ebf2dc122b39cef1368b06d"
+dependencies = [
+ "critical-section",
+ "maitake-sync 0.2.1",
+]
+
+[[package]]
 name = "bevy"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3670,12 +3679,14 @@ name = "editor-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bbq2",
  "bevy",
  "console_error_panic_hook",
  "elodin-editor",
  "fastrand 2.2.0",
  "flume",
  "impeller2",
+ "impeller2-bbq",
  "impeller2-bevy",
  "impeller2-wkt",
  "js-sys",
@@ -5627,13 +5638,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "impeller2-bbq"
+version = "0.1.0"
+dependencies = [
+ "bbq2",
+ "impeller2",
+ "stellarator-buf",
+]
+
+[[package]]
 name = "impeller2-bevy"
 version = "0.1.0"
 dependencies = [
+ "bbq2",
  "bevy",
  "fastrand 2.2.0",
  "futures-lite 2.5.0",
  "impeller2",
+ "impeller2-bbq",
  "impeller2-stella",
  "impeller2-wkt",
  "miette",
@@ -5642,6 +5664,7 @@ dependencies = [
  "serde",
  "smallvec",
  "stellarator",
+ "stellarator-buf",
  "thingbuf",
 ]
 
@@ -5675,9 +5698,11 @@ dependencies = [
 name = "impeller2-stella"
 version = "0.1.0"
 dependencies = [
+ "bbq2",
  "futures-concurrency",
  "futures-lite 2.5.0",
  "impeller2",
+ "impeller2-bbq",
  "impeller2-wkt",
  "miette",
  "postcard",
@@ -6418,7 +6443,7 @@ dependencies = [
  "futures",
  "futures-util",
  "loom 0.7.2",
- "maitake-sync",
+ "maitake-sync 0.1.2",
  "mycelium-bitfield",
  "mycelium-util",
  "pin-project",
@@ -6449,6 +6474,21 @@ dependencies = [
  "tokio-test",
  "tracing 0.1.40",
  "tracing-subscriber 0.3.18",
+]
+
+[[package]]
+name = "maitake-sync"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e2643eb7d41ee3e0f17e4cb6ffaf925eb468337e99f6e180530259bc124177e"
+dependencies = [
+ "cordyceps",
+ "loom 0.7.2",
+ "mutex-traits",
+ "mycelium-bitfield",
+ "pin-project",
+ "portable-atomic",
+ "tracing 0.1.40",
 ]
 
 [[package]]
@@ -6693,7 +6733,7 @@ version = "0.1.0"
 dependencies = [
  "cordyceps",
  "loom 0.7.2",
- "maitake-sync",
+ "maitake-sync 0.1.2",
  "mycelium-bitfield",
  "proptest",
  "tracing 0.1.40",
@@ -6956,8 +6996,7 @@ dependencies = [
 [[package]]
 name = "nodit"
 version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f74369f80df24efd2266602fdcd8fcd56a17c2e2c94ab48d2f7a15eaa137bf49"
+source = "git+https://github.com/elodin-sys/nodit.git?rev=cd284cd0f16d475786dae8629cebda4e14177ee1#cd284cd0f16d475786dae8629cebda4e14177ee1"
 dependencies = [
  "btree_monstrousity",
  "itertools 0.13.0",
@@ -9091,10 +9130,12 @@ dependencies = [
 name = "roci"
 version = "0.11.4"
 dependencies = [
+ "bbq2",
  "csv",
  "fastrand 2.2.0",
  "heapless 0.8.0",
  "impeller2",
+ "impeller2-bbq",
  "impeller2-stella",
  "impeller2-wkt",
  "nix 0.29.0",

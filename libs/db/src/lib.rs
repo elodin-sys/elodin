@@ -29,6 +29,7 @@ use std::{
 };
 use std::{sync::Mutex as SyncMutex, time::Duration};
 use stellarator::{
+    buf::Slice,
     io::{AsyncWrite, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream},
     rent,
@@ -607,12 +608,12 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
                 warn!(?err, "error handling packet");
             }
         }
-        buf = pkt.into_buf();
+        buf = pkt.into_buf().into_inner();
     }
 }
 
 async fn handle_packet(
-    pkt: &Packet<Vec<u8>>,
+    pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &Arc<Mutex<impeller2_stella::PacketSink<OwnedWriter<TcpStream>>>>,
 ) -> Result<(), Error> {

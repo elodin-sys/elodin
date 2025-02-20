@@ -24,6 +24,7 @@ members = [
     "libs/impeller2/stella",
     "libs/impeller2/bevy",
     "libs/impeller2/wkt",
+    "libs/impeller2/bbq",
     "libs/db",
     "libs/db/cli",
     "libs/stellarator",

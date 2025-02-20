@@ -1,12 +1,9 @@
-use impeller2::types::FilledRecycle;
 use impeller2::types::LenPacket;
-use impeller2::types::MaybeFilledPacket;
-use impeller2::types::OwnedPacket;
+use impeller2_bbq::*;
 use impeller2_bevy::new_connection_packets;
 use impeller2_wkt::StreamId;
-use stellarator_buf::IoBuf;
 use thingbuf::mpsc;
-use tracing::{debug, error};
+use tracing::debug;
 use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, ErrorEvent};
 
@@ -22,7 +19,7 @@ macro_rules! console_error {
 pub(crate) fn spawn_wasm(
     url: String,
     outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
-    incoming_packet_tx: mpsc::Sender<MaybeFilledPacket, FilledRecycle>,
+    incoming_packet_tx: AsyncArcQueueTx,
     stream_id: StreamId,
 ) -> anyhow::Result<()> {
     use wasm_bindgen::JsCast as _;
@@ -42,20 +39,13 @@ pub(crate) fn spawn_wasm(
         if let Ok(abuf) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
             let array = js_sys::Uint8Array::new(&abuf);
             let len = array.length() as usize;
-            let Ok(mut send_ref) = incoming_packet_tx.try_send_ref() else {
+
+            let Ok(grant_r) = incoming_packet_tx.grant(len) else {
                 return;
             };
-            let mut buf = send_ref.take_buf().expect("buffer already taken");
-            array.copy_to(&mut buf);
-            let buf = buf.try_slice(..len).expect("buffer overflow");
-            let packet = match OwnedPacket::parse(buf) {
-                Ok(p) => p,
-                Err(err) => {
-                    error!(?err, "error parsing packet");
-                    return;
-                }
-            };
-            *send_ref = MaybeFilledPacket::Packet(packet);
+            let mut grant_r = PacketGrantW::new(grant_r);
+            array.copy_to(&mut grant_r);
+            grant_r.commit(len);
         } else {
             debug!("Unknown websocket message received: {:?}", e.data());
         }

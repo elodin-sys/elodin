@@ -811,13 +811,16 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
 #[derive(Default)]
 struct SyncedGlbs(HashMap<AssetHandle<Glb>, Handle<Scene>>);
 
+#[derive(Component)]
+struct SyncedGlb;
+
 fn sync_glb_to_bevy(
     mut commands: Commands,
     mut cache: Local<SyncedGlbs>,
-    glb: Query<(Entity, &Glb, &AssetHandle<Glb>)>,
+    glb: Query<(Entity, &Glb, &AssetHandle<Glb>, Option<&SyncedGlb>)>,
     assets: Res<AssetServer>,
 ) {
-    for (entity, glb, handle) in glb.iter() {
+    for (entity, glb, handle, synced_glb) in glb.iter() {
         let Glb(u) = glb;
         let mut entity = commands.entity(entity);
         let scene = if let Some(glb) = cache.0.get(handle) {
@@ -828,7 +831,9 @@ fn sync_glb_to_bevy(
             cache.0.insert(handle.clone(), scene.clone());
             scene
         };
-        entity.insert(SceneRoot(scene));
+        if synced_glb.is_none() {
+            entity.insert((SceneRoot(scene), SyncedGlb));
+        }
     }
 }
 

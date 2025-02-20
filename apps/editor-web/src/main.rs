@@ -1,12 +1,13 @@
 use anyhow::anyhow;
+use bbq2::{queue::ArcBBQueue, traits::storage::BoxedSlice};
 use bevy::app::Update;
 use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::{schedule::IntoSystemConfigs, system::Res};
 use bevy::prelude::{App, In, IntoSystem, PostStartup};
 use elodin_editor::ui::FullscreenState;
 use elodin_editor::EditorPlugin;
-use impeller2::types::{FilledRecycle, LenPacket};
-use impeller2_bevy::CurrentStreamId;
+use impeller2::types::LenPacket;
+use impeller2_bevy::{CurrentStreamId, QUEUE_LEN};
 use impeller2_bevy::{PacketRx, PacketTx};
 use thingbuf::mpsc;
 use tracing::error;
@@ -17,7 +18,8 @@ fn main() {
     //tracing_wasm::set_as_global_default();
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let url = get_url().unwrap();
-    let (incoming_packet_tx, incoming_packet_rx) = mpsc::with_recycle(512, FilledRecycle);
+    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
+    let (incoming_packet_rx, incoming_packet_tx) = queue.framed_split();
     let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(512);
     let stream_id = fastrand::u64(..);
     web_sock::spawn_wasm(url, outgoing_packet_rx, incoming_packet_tx, stream_id).unwrap();
@@ -30,7 +32,7 @@ fn main() {
         )
         .add_systems(Update, fullscreen.pipe(handle_error))
         .insert_resource(PacketTx(outgoing_packet_tx))
-        .insert_resource(PacketRx(incoming_packet_rx))
+        .insert_resource(PacketRx::from(incoming_packet_rx))
         .insert_resource(CurrentStreamId(stream_id))
         .add_systems(Update, impeller2_bevy::sink)
         .run();
