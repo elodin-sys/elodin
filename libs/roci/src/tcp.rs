@@ -179,6 +179,7 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
                 &mut incoming_packet_tx,
                 0,
                 &initial_msgs,
+                || {},
             )
             .await
             {

@@ -1,7 +1,7 @@
 use bevy::{
     app::{App, Plugin, PreUpdate},
     ecs::{
-        query::With,
+        query::{QueryFilter, With},
         system::{Resource, SystemParam, SystemState},
         world::{Mut, World},
     },
@@ -20,31 +20,37 @@ pub mod label;
 pub mod modal;
 pub mod plot;
 pub mod plot_3d;
-pub mod status_bar;
 pub mod time_label;
 pub mod timeline;
 
+#[cfg(not(target_family = "wasm"))]
+pub mod status_bar;
+
 pub trait RootWidgetSystemExt {
     fn add_root_widget<S: RootWidgetSystem<Args = ()> + 'static>(&mut self, id: &str) -> S::Output {
-        self.add_root_widget_with::<S>(id, ())
+        self.add_root_widget_with::<S, With<PrimaryWindow>>(id, ())
+            .expect("missing window")
     }
 
-    fn add_root_widget_with<S: RootWidgetSystem + 'static>(
+    fn add_root_widget_with<S: RootWidgetSystem + 'static, F: QueryFilter>(
         &mut self,
         id: &str,
         args: S::Args,
-    ) -> S::Output;
+    ) -> Option<S::Output>;
 
-    fn egui_context_scope<R>(&mut self, f: impl FnOnce(&mut Self, egui::Context) -> R) -> R;
+    fn egui_context_scope<R, F: QueryFilter>(
+        &mut self,
+        f: impl FnOnce(&mut Self, egui::Context) -> R,
+    ) -> Option<R>;
 }
 
 impl RootWidgetSystemExt for World {
-    fn add_root_widget_with<S: RootWidgetSystem + 'static>(
+    fn add_root_widget_with<S: RootWidgetSystem + 'static, F: QueryFilter>(
         &mut self,
         id: &str,
         args: S::Args,
-    ) -> S::Output {
-        self.egui_context_scope(|world, mut ctx| {
+    ) -> Option<S::Output> {
+        self.egui_context_scope::<_, F>(|world, mut ctx| {
             let id = WidgetId::new(id);
 
             if !world.contains_resource::<StateInstances<S>>() {
@@ -65,12 +71,16 @@ impl RootWidgetSystemExt for World {
         })
     }
 
-    fn egui_context_scope<R>(&mut self, f: impl FnOnce(&mut Self, egui::Context) -> R) -> R {
-        let mut state =
-            self.query_filtered::<&mut EguiContext, (With<EguiContext>, With<PrimaryWindow>)>();
-        let mut egui_ctx = state.single_mut(self);
+    fn egui_context_scope<R, F: QueryFilter>(
+        &mut self,
+        f: impl FnOnce(&mut Self, egui::Context) -> R,
+    ) -> Option<R> {
+        let mut state = self.query_filtered::<&mut EguiContext, (With<EguiContext>, F)>();
+        let Ok(mut egui_ctx) = state.get_single_mut(self) else {
+            return None;
+        };
         let ctx = egui_ctx.get_mut().clone();
-        f(self, ctx)
+        Some(f(self, ctx))
     }
 }
 

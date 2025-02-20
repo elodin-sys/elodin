@@ -6,6 +6,7 @@ use bevy::{
     input::keyboard::Key,
     prelude::*,
     render::camera::Viewport,
+    window::PrimaryWindow,
 };
 use bevy_egui::{
     egui::{self, Color32, Label, Margin, RichText},
@@ -19,7 +20,6 @@ use egui_tiles::TileId;
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValueMap;
 use impeller2_wkt::EntityMetadata;
-use widgets::status_bar::StatusBar;
 use widgets::{
     command_palette::CommandPaletteState,
     timeline::{self, timeline_slider},
@@ -46,6 +46,9 @@ mod theme;
 pub mod tiles;
 pub mod utils;
 pub mod widgets;
+
+#[cfg(not(target_family = "wasm"))]
+pub mod startup_window;
 
 #[derive(Resource, Default)]
 pub struct HdrEnabled(pub bool);
@@ -421,7 +424,7 @@ impl RootWidgetSystem for Titlebar<'_, '_> {
 #[derive(SystemParam)]
 pub struct MainLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
-    window: Query<'w, 's, &'static Window>,
+    window: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     images: Local<'s, images::Images>,
 }
 
@@ -466,11 +469,12 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
             icon_exit_fullscreen: contexts.add_image(images.icon_exit_fullscreen.clone_weak()),
         };
 
-        world.add_root_widget_with::<Titlebar>("titlebar", titlebar_icons);
+        world.add_root_widget_with::<Titlebar, With<PrimaryWindow>>("titlebar", titlebar_icons);
 
         let landscape_layout = width * 0.75 > height;
 
-        world.add_root_widget::<StatusBar>("status_bar");
+        #[cfg(not(target_family = "wasm"))]
+        world.add_root_widget::<widgets::status_bar::StatusBar>("status_bar");
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -602,7 +606,7 @@ struct CameraViewportQuery {
 }
 
 fn set_camera_viewport(
-    window: Query<(&Window, &bevy_egui::EguiContextSettings)>,
+    window: Query<(&Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
     mut main_camera_query: Query<CameraViewportQuery, With<MainCamera>>,
 ) {
     for CameraViewportQueryItem {

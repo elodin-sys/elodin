@@ -43,6 +43,11 @@ pub mod chunks;
 mod plugins;
 pub mod ui;
 
+#[cfg(not(target_family = "wasm"))]
+pub mod run;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 struct EmbeddedAssetPlugin;
 
 impl Plugin for EmbeddedAssetPlugin {
@@ -70,6 +75,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/loop.png");
         embedded_asset!(app, "assets/icons/tile_3d_viewer.png");
         embedded_asset!(app, "assets/icons/tile_graph.png");
+        embedded_asset!(app, "assets/icons/ip-addr.png");
+        embedded_asset!(app, "assets/icons/folder.png");
+        embedded_asset!(app, "assets/logo-full.png");
+        embedded_asset!(app, "assets/icons/chevron_right.png");
     }
 }
 
@@ -88,11 +97,6 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        let present_mode = if cfg!(target_os = "macos") {
-            PresentMode::AutoNoVsync
-        } else {
-            PresentMode::AutoVsync
-        };
         let composite_alpha_mode = if cfg!(target_os = "macos") {
             bevy::window::CompositeAlphaMode::PostMultiplied
         } else {
@@ -125,7 +129,7 @@ impl Plugin for EditorPlugin {
                         primary_window: Some(Window {
                             window_theme: Some(WindowTheme::Dark),
                             title: "Elodin".into(),
-                            present_mode,
+                            present_mode: PresentMode::AutoVsync,
                             canvas: Some("#editor".to_string()),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
@@ -136,6 +140,7 @@ impl Plugin for EditorPlugin {
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
                             decorations: !cfg!(target_os = "windows"),
+                            visible: false,
                             ..default()
                         }),
                         ..default()
@@ -188,8 +193,11 @@ impl Plugin for EditorPlugin {
             app.add_systems(Update, handle_drag_resize);
         }
 
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(crate::ui::startup_window::StartupPlugin);
+
         #[cfg(target_os = "macos")]
-        app.add_systems(Startup, setup_titlebar);
+        app.add_systems(Update, setup_titlebar);
 
         //app.insert_resource(Msaa::default());
 
@@ -354,9 +362,14 @@ fn set_floating_origin(
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Component)]
+struct SetupTitlebar;
+
+#[cfg(target_os = "macos")]
 fn setup_titlebar(
-    windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    windows: Query<Entity, Without<SetupTitlebar>>,
     winit_windows: NonSend<bevy::winit::WinitWindows>,
+    mut commands: Commands,
 ) {
     use cocoa::{
         appkit::{
@@ -373,8 +386,10 @@ fn setup_titlebar(
         sel, sel_impl,
     };
 
-    for (id, _) in &windows {
-        let window = winit_windows.get_window(id).unwrap();
+    for id in &windows {
+        let Some(window) = winit_windows.get_window(id) else {
+            continue;
+        };
         window.set_blur(true);
         use raw_window_handle::HasRawWindowHandle;
         let handle = window.raw_window_handle();
@@ -385,14 +400,17 @@ fn setup_titlebar(
         let window = handle.ns_window;
         let window: cocoa::base::id = unsafe { std::mem::transmute(window) };
         if window.is_null() {
-            panic!("null window");
+            continue;
         }
         unsafe {
             // define an objective class for NSToolbar's delegate,
             // because NSToolbar will complain if we do not
             let toolbar_delegate_class = {
                 let superclass = class!(NSObject);
-                let mut decl = ClassDecl::new("ToolbarDel", superclass).unwrap();
+                let Some(mut decl) = ClassDecl::new(&format!("ToolbarDel{}", id), superclass)
+                else {
+                    continue;
+                };
                 extern "C" fn toolbar(_: &Object, _: Sel, _: id, _: id, _: BOOL) -> *const Object {
                     nil
                 }
@@ -419,7 +437,7 @@ fn setup_titlebar(
             let toolbar = toolbar.init_();
             toolbar.setDelegate_(del);
             if toolbar.is_null() {
-                panic!("null toolbar");
+                continue;
             }
             window.setTitlebarAppearsTransparent_(true);
             let color = NSColor::clearColor(nil);
@@ -441,6 +459,7 @@ fn setup_titlebar(
             window.setToolbarStyle_(NSWindowToolbarStyle::NSWindowToolbarStyleUnified);
             window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
             window.setToolbar_(toolbar);
+            commands.entity(id).insert(SetupTitlebar);
         }
     }
 }

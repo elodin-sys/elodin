@@ -40,6 +40,8 @@ pub const REDDISH_40: Color32 = Color32::from_rgb(0x6B, 0x2B, 0x15);
 pub const HYPERBLUE_40: Color32 = Color32::from_rgb(0x16, 0x33, 0x60);
 pub const MINT_40: Color32 = Color32::from_rgb(0x43, 0x66, 0x4C);
 
+pub const SURFACE_SECONDARY: Color32 = Color32::from_rgb(0x16, 0x16, 0x16);
+
 pub fn get_color_by_index_solid(index: usize) -> Color32 {
     let colors = [
         TURQUOISE_DEFAULT,
@@ -132,12 +134,17 @@ impl EColor for Color {
 
 pub trait ColorExt {
     fn into_bevy(self) -> ::bevy::prelude::Color;
+    fn opacity(self, opacity: f32) -> Self;
 }
 
 impl ColorExt for Color32 {
     fn into_bevy(self) -> ::bevy::prelude::Color {
         let [r, g, b, a] = self.to_srgba_unmultiplied().map(|c| c as f32 / 255.0);
         ::bevy::prelude::Color::srgba(r, g, b, a)
+    }
+
+    fn opacity(self, opacity: f32) -> Self {
+        with_opacity(self, opacity)
     }
 }
 

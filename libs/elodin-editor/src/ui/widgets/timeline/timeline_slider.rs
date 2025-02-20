@@ -172,7 +172,7 @@ impl Timeline<'_> {
         let full_duration = active_duration.segment_round();
         let segment_size = (full_duration / self.segments as f64).segment_round();
         self.segments =
-            (full_duration.total_nanoseconds() / segment_size.total_nanoseconds()) as u8;
+            (full_duration.total_nanoseconds() / segment_size.total_nanoseconds().max(1)) as u8;
         let segment_size = (segment_size.total_nanoseconds() / 1000) as f64;
 
         let full_duration_float = (full_duration.total_nanoseconds() / 1000) as f64;

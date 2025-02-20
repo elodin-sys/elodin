@@ -1,10 +1,10 @@
-use bevy::window::WindowResized;
+use bevy::window::{PrimaryWindow, WindowResized};
 use bevy::{prelude::*, utils::tracing};
 use core::fmt;
 use elodin_editor::EditorPlugin;
-use miette::{miette, Context, IntoDiagnostic};
+use miette::{miette, IntoDiagnostic};
 use std::io::{Read, Seek, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 use stellarator::util::CancelToken;
@@ -12,8 +12,7 @@ use tokio::runtime::Runtime;
 
 use super::Cli;
 
-const DEFAULT_SIM: Simulator =
-    Simulator::Addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 2240)));
+const DEFAULT_SIM: Simulator = Simulator::None;
 
 #[derive(clap::Args, Clone, Default)]
 pub struct Args {
@@ -23,6 +22,7 @@ pub struct Args {
 
 #[derive(Clone)]
 enum Simulator {
+    None,
     Addr(SocketAddr),
     File(PathBuf),
     ReplayDir(PathBuf),
@@ -40,6 +40,7 @@ impl Default for Simulator {
 impl fmt::Display for Simulator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::None => write!(f, ""),
             Self::Addr(addr) => write!(f, "{}", addr),
             Self::File(path) => write!(f, "{}", path.display()),
             Self::ReplayDir(path) => write!(f, "{}", path.display()),
@@ -50,6 +51,9 @@ impl fmt::Display for Simulator {
 impl std::str::FromStr for Simulator {
     type Err = miette::Error;
     fn from_str(s: &str) -> miette::Result<Self> {
+        if s.is_empty() {
+            return Ok(Self::None);
+        }
         if let Ok(addr) = s.parse() {
             Ok(Self::Addr(addr))
         } else {
@@ -61,65 +65,6 @@ impl std::str::FromStr for Simulator {
             }
         }
     }
-}
-
-#[cfg(not(target_os = "windows"))]
-async fn run_recipe(
-    cache_dir: PathBuf,
-    path: PathBuf,
-    cancel_token: CancelToken,
-) -> miette::Result<()> {
-    let mut path = if path.is_dir() {
-        let toml = path.join("s10.toml");
-        let py = path.join("main.py");
-        if path.join("s10.toml").exists() {
-            toml
-        } else if py.exists() {
-            py
-        } else {
-            return Err(miette!("couldn't find a elodin config, please add either a main.py or s10.toml file to the directory"));
-        }
-    } else {
-        path.clone()
-    };
-
-    // If python file, generate s10.toml
-    if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        let date_time = chrono::Local::now().to_rfc3339();
-        let out_dir = cache_dir.join(date_time);
-        std::fs::create_dir_all(&out_dir).into_diagnostic()?;
-        let output = s10::python_command()?
-            .arg(path.clone())
-            .arg("plan")
-            .arg(&out_dir)
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .output()
-            .into_diagnostic()?;
-        if output.status.code() != Some(0) {
-            return Err(miette!("error generating s10 plan from python file"));
-        }
-        path = out_dir.join("s10.toml");
-        tracing::debug!("Generated s10 plan: {}", path.display());
-    }
-
-    // If not a s10 plan file, bail out
-    if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
-        return Err(miette!(
-            "invalid file type, must be a s10 plan or python file"
-        ));
-    }
-
-    let contents = std::fs::read_to_string(&path).into_diagnostic()?;
-    let recipe: s10::Recipe = toml::from_str(&contents)
-        .into_diagnostic()
-        .with_context(|| format!("failed to parse s10 recipe from file: {}", path.display()))?;
-
-    recipe
-        .watch("sim".to_string(), false, cancel_token.clone())
-        .await?;
-    cancel_token.cancel();
-    Ok(())
 }
 
 impl Cli {
@@ -142,7 +87,12 @@ impl Cli {
                     tracing::info!("Received Ctrl-C, shutting down");
                 });
                 if let Simulator::File(path) = &sim {
-                    let res = run_recipe(cache_dir, path.clone(), cancel_token.clone()).await;
+                    let res = elodin_editor::run::run_recipe(
+                        cache_dir,
+                        path.clone(),
+                        cancel_token.clone(),
+                    )
+                    .await;
                     cancel_token.cancel();
                     res
                 } else {
@@ -176,13 +126,15 @@ impl Cli {
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
         match args.sim {
+            Simulator::None => {
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(None));
+            }
             Simulator::Addr(addr) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(addr));
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(addr)));
             }
             Simulator::File(_) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(SocketAddr::new(
-                    [127, 0, 0, 1].into(),
-                    2240,
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(
+                    SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
                 )));
             }
             Simulator::ReplayDir(_) => {
@@ -252,8 +204,12 @@ fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: EventWriter<AppExit
 fn on_window_resize(
     mut window_state_file: ResMut<WindowStateFile>,
     mut resize_reader: EventReader<WindowResized>,
+    query: Query<Entity, With<PrimaryWindow>>,
 ) {
     if let Some(e) = resize_reader.read().last() {
+        if query.get(e.window).is_err() {
+            return;
+        }
         let window_state = format!("{:.1} {:.1}\n", e.width, e.height);
         if let Err(err) = window_state_file.0.rewind() {
             tracing::warn!(?err, "failed to rewind window state file");

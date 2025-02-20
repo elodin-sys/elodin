@@ -64,7 +64,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                 modal_size,
             )
         } else {
-            let window = window.single();
+            let window = window.iter().next().unwrap();
             egui::Rect::from_center_size(
                 egui::pos2(
                     window.resolution.width() / 2.0,

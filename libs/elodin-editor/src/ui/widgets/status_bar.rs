@@ -5,8 +5,8 @@ use bevy::{
         world::World,
     },
 };
-use impeller2::types::Timestamp;
-use impeller2_wkt::{IsRecording, LastUpdated, SimulationTimeStep};
+use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
+use impeller2_wkt::SimulationTimeStep;
 
 use crate::ui::colors;
 
@@ -15,9 +15,8 @@ use super::RootWidgetSystem;
 #[derive(SystemParam)]
 pub struct StatusBar<'w> {
     tick_time: Res<'w, SimulationTimeStep>,
-    max_tick: Res<'w, LastUpdated>,
     diagnostics: Res<'w, DiagnosticsStore>,
-    is_recording: Res<'w, IsRecording>,
+    connection_status: Res<'w, ThreadConnectionStatus>,
 }
 
 impl RootWidgetSystem for StatusBar<'_> {
@@ -33,7 +32,6 @@ impl RootWidgetSystem for StatusBar<'_> {
         let state_mut = state.get_mut(world);
 
         let tick_time = state_mut.tick_time;
-        let max_tick = state_mut.max_tick;
         let diagnostics = state_mut.diagnostics;
 
         egui::TopBottomPanel::bottom("status_bar")
@@ -49,7 +47,7 @@ impl RootWidgetSystem for StatusBar<'_> {
 
                     // Status
 
-                    ui.add(editor_status_label(state_mut.is_recording.0, max_tick.0));
+                    ui.add(editor_status_label(state_mut.connection_status.status()));
 
                     // Editor FPS
 
@@ -82,31 +80,24 @@ impl RootWidgetSystem for StatusBar<'_> {
     }
 }
 
-fn editor_status_label_ui(
-    ui: &mut egui::Ui,
-    is_recording: bool,
-    latest_timestamp: Timestamp,
-) -> egui::Response {
+fn editor_status_label_ui(ui: &mut egui::Ui, status: ConnectionStatus) -> egui::Response {
     let style = ui.style_mut();
     let font_id = egui::TextStyle::Small.resolve(style);
 
     let text_color = colors::PRIMARY_CREAME_6;
 
-    let (status_label, status_color) = if latest_timestamp > Timestamp::EPOCH {
-        if is_recording {
-            (String::from("RECORDING"), colors::HYPERBLUE_DEFAULT)
-        } else {
-            (String::from("CONNECTED"), colors::MINT_DEFAULT)
-        }
-    } else {
-        (String::from("DISCONNECTED"), colors::PEACH_DEFAULT)
+    let (status_label, status_color) = match status {
+        ConnectionStatus::NoConnection => ("DISCONNECTED", colors::REDDISH_DEFAULT),
+        ConnectionStatus::Success => ("CONNECTED", colors::MINT_DEFAULT),
+        ConnectionStatus::Connecting => ("CONNECTING", colors::HYPERBLUE_DEFAULT),
+        ConnectionStatus::Error => ("CONNECTION ERROR", colors::REDDISH_DEFAULT),
     };
 
     // Set widget size and allocate space
 
     let galley = ui
         .painter()
-        .layout_no_wrap(status_label.clone(), font_id.clone(), text_color);
+        .layout_no_wrap(status_label.to_string(), font_id.clone(), text_color);
     let circle_diameter = galley.size().y / 2.0;
     let spacing = circle_diameter * 1.5;
 
@@ -140,6 +131,6 @@ fn editor_status_label_ui(
     response
 }
 
-pub fn editor_status_label(is_recording: bool, latest_timestamp: Timestamp) -> impl egui::Widget {
-    move |ui: &mut egui::Ui| editor_status_label_ui(ui, is_recording, latest_timestamp)
+pub fn editor_status_label(status: ConnectionStatus) -> impl egui::Widget {
+    move |ui: &mut egui::Ui| editor_status_label_ui(ui, status)
 }
