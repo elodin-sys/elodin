@@ -36,6 +36,7 @@ re-tag-images-current new_tag:
   just re-tag-images $(git rev-parse HEAD) {{new_tag}}
 
 clean-dev-branch branch_codename:
+  az login --identity
   az aks get-credentials --resource-group {project} --name {cluster} --overwrite-existing
   kubectl get namespace elodin-app-{{branch_codename}} &> /dev/null && kubectl delete ns elodin-app-{{branch_codename}} || echo "elodin-app-{{branch_codename}} already deleted"
 
