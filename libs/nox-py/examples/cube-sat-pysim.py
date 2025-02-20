@@ -1,5 +1,3 @@
-import os
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Annotated
 
@@ -24,25 +22,8 @@ velocity = np.sqrt(G * M / radius)
 SIM_TIME_STEP = 1.0 / 20.0
 
 cache_directory = el._get_cache_dir()
-c_bar_file_name = "C_normal.npy"
-c_full_path = os.path.join(cache_directory, c_bar_file_name)
 
-if not os.path.isfile(c_full_path):
-    c_bar_file_path = urllib.request.urlretrieve(
-        "https://storage.googleapis.com/elodin-assets/C_normal.npy",
-        c_full_path,
-    )
-
-s_bar_file_name = "S_normal.npy"
-s_full_path = os.path.join(cache_directory, s_bar_file_name)
-
-if not os.path.isfile(s_full_path):
-    s_bar_file_path = urllib.request.urlretrieve(
-        "https://storage.googleapis.com/elodin-assets/S_normal.npy",
-        s_full_path,
-    )
-
-gravity_model = egm08.EGM08(10, c_bar_path=c_full_path, s_bar_path=s_full_path)
+gravity_model = egm08.EGM08(10, cache_directory=cache_directory)
 
 
 # sensors
