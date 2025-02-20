@@ -1,5 +1,8 @@
 # ignore ambiguous variable names since they are based on math literature
 # ruff: noqa: E741
+import os
+import urllib.request
+
 import jax
 from jax import numpy as jnp
 
@@ -14,9 +17,27 @@ class EGM08:
     def __init__(
         self,
         max_degree,
-        c_bar_path="",
-        s_bar_path="",
+        cache_directory="",
     ):
+        self.c_bar_file_name = "C_normal.npy"
+        self.c_full_path = os.path.join(cache_directory, self.c_bar_file_name)
+
+        if not os.path.isfile(self.c_full_path):
+            os.makedirs(cache_directory, exist_ok=True)
+            self.c_bar_file_path = urllib.request.urlretrieve(
+                "https://storage.googleapis.com/elodin-assets/C_normal.npy",
+                self.c_full_path,
+            )
+        self.s_bar_file_name = "S_normal.npy"
+        self.s_full_path = os.path.join(cache_directory, self.s_bar_file_name)
+
+        if not os.path.isfile(self.s_full_path):
+            os.makedirs(cache_directory, exist_ok=True)
+            self.s_bar_file_path = urllib.request.urlretrieve(
+                "https://storage.googleapis.com/elodin-assets/S_normal.npy",
+                self.s_full_path,
+            )
+
         self.r_ref = 6.378e6  # Earth's equatorial radius in meters
         self.mu_earth = 3.986004418e14  # Earth's gravitational parameter in m^3/s^2
 
@@ -26,8 +47,12 @@ class EGM08:
         self.r_0 = 1.0
         self.i_0 = 0.0
 
-        self.c_bar = jnp.load(c_bar_path)[: max_degree + 1, : max_degree + 1].astype(jnp.float64)
-        self.s_bar = jnp.load(s_bar_path)[: max_degree + 1, : max_degree + 1].astype(jnp.float64)
+        self.c_bar = jnp.load(self.c_full_path)[: max_degree + 1, : max_degree + 1].astype(
+            jnp.float64
+        )
+        self.s_bar = jnp.load(self.s_full_path)[: max_degree + 1, : max_degree + 1].astype(
+            jnp.float64
+        )
 
         self.l = jnp.arange(max_degree + 1)
         self.m = jnp.arange(max_degree + 1)
