@@ -12,7 +12,7 @@ use bevy_render::renderer::{RenderDevice, RenderQueue};
 use impeller2::types::{ComponentId, ComponentView, EntityId, OwnedPacket, PrimType, Timestamp};
 use impeller2_bevy::{
     CommandsExt, ComponentSchemaRegistry, ComponentValueMap, CurrentStreamId, EntityMap,
-    PacketHandlerInput, PacketHandlers,
+    PacketGrantR, PacketHandlerInput, PacketHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
 use nodit::interval::ii;
@@ -207,7 +207,7 @@ fn process_time_series<T>(
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_time_series(
-    InRef(pkt): InRef<OwnedPacket<Vec<u8>>>,
+    InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     entity_map: Res<EntityMap>,
     component_values: Query<&ComponentValueMap>,
@@ -367,7 +367,7 @@ pub fn handle_time_series(
             commands.send_req_with_handler(
                 msg,
                 packet_id,
-                move |pkt: InRef<OwnedPacket<Vec<u8>>>,
+                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
                       collected_graph_data: ResMut<CollectedGraphData>,
                       entity_map: Res<EntityMap>,
                       component_values: Query<&ComponentValueMap>,
@@ -430,7 +430,7 @@ pub fn queue_timestamp_read(
                 commands.send_req_with_handler(
                     msg,
                     packet_id,
-                    move |pkt: InRef<OwnedPacket<Vec<u8>>>,
+                    move |pkt: InRef<OwnedPacket<PacketGrantR>>,
                           collected_graph_data: ResMut<CollectedGraphData>,
                           entity_map: Res<EntityMap>,
                           component_values: Query<&ComponentValueMap>,
@@ -546,7 +546,14 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
             return;
         }
         let mut gpu = self.gpu.lock();
-        let gpu = gpu.get_or_insert_with(|| buffer_alloc.alloc().expect("full buffer"));
+        let gpu = if let Some(gpu) = &mut *gpu {
+            gpu
+        } else {
+            let Some(buffer) = buffer_alloc.alloc() else {
+                return;
+            };
+            gpu.insert(buffer)
+        };
         render_queue.write_buffer_shard(gpu, self.cpu.as_bytes());
         self.gpu_dirty.store(false, atomic::Ordering::SeqCst);
     }
@@ -800,7 +807,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
     }
 }
 
-pub const CHUNK_COUNT: usize = 0x4000;
+pub const CHUNK_COUNT: usize = 0x300;
 pub const CHUNK_LEN: usize = 0xC00;
 
 impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
@@ -811,8 +818,8 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn update_last(&mut self, f: impl FnOnce(&mut Chunk<D>)) {
-        if let Some((_, last)) = self.tree.last_key_value() {
-            let mut last = last.clone();
+        if let Some(last) = self.tree.last_entry() {
+            let (_, mut last) = last.remove_entry();
             f(&mut last);
             self.insert(last);
         }

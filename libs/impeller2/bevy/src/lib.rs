@@ -9,7 +9,6 @@ use bevy::{
     ecs::system::SystemState,
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
-use impeller2::types::{FilledRecycle, MaybeFilledPacket};
 use impeller2::util::concat_str;
 use impeller2::{
     com_de::Decomponentize,
@@ -23,6 +22,7 @@ use impeller2::{
         ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt, Timestamp,
     },
 };
+use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata,
@@ -35,20 +35,35 @@ use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
-    ops::Deref,
 };
-use thingbuf::mpsc;
+
+pub use impeller2_bbq::PacketGrantR;
 
 #[cfg(feature = "tcp")]
 mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
 
+pub const QUEUE_LEN: usize = 64 * 1024 * 1024;
+
 #[derive(Resource)]
-pub struct PacketRx(pub mpsc::Receiver<MaybeFilledPacket, FilledRecycle>);
+pub struct PacketRx(AsyncArcQueueRx);
+
+impl From<AsyncArcQueueRx> for PacketRx {
+    fn from(rx: AsyncArcQueueRx) -> Self {
+        Self(rx)
+    }
+}
+
+impl PacketRx {
+    #[inline]
+    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
+        self.0.try_recv_pkt()
+    }
+}
 
 #[derive(Resource, DerefMut, Deref)]
-pub struct PacketTx(pub mpsc::Sender<Option<LenPacket>>);
+pub struct PacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
 
 impl PacketTx {
     pub fn send_msg(&self, msg: impl Msg) {
@@ -66,10 +81,12 @@ fn sink_inner(
     packet_handlers: &mut PacketHandlers,
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
-    while let Ok(pkt) = packet_rx.0.try_recv_ref() {
-        let MaybeFilledPacket::Packet(ref pkt) = pkt.deref() else {
-            continue;
-        };
+    let mut count = 0;
+    while let Some(pkt) = packet_rx.try_recv_pkt() {
+        if count > 2048 {
+            return Ok(());
+        }
+        count += 1;
         let pkt_id = match &pkt {
             OwnedPacket::Msg(m) => m.id,
             OwnedPacket::Table(table) => table.id,
@@ -79,12 +96,12 @@ fn sink_inner(
             .get_resource_mut::<PacketIdHandlers>()
             .and_then(|mut handlers| handlers.remove(&pkt_id));
         if let Some(handler) = handler {
-            if let Err(err) = world.run_system_with_input(handler, pkt) {
+            if let Err(err) = world.run_system_with_input(handler, &pkt) {
                 bevy::log::error!(?err, "packet id handler error");
             }
         }
         for handler in packet_handlers.0.iter() {
-            if let Err(err) = world.run_system_with_input(*handler, (pkt, vtable_registry)) {
+            if let Err(err) = world.run_system_with_input(*handler, (&pkt, vtable_registry)) {
                 bevy::log::error!(?err, "packet handler error");
             }
         }
@@ -182,21 +199,21 @@ pub fn sink(world: &mut World, world_sink_state: &mut SystemState<WorldSink>) {
 #[allow(clippy::type_complexity)]
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct PacketIdHandlers(
-    pub HashMap<PacketId, SystemId<InRef<'static, OwnedPacket<Vec<u8>>>, ()>>,
+    pub HashMap<PacketId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, ()>>,
 );
 
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct PacketHandlers(pub Vec<SystemId<PacketHandlerInput<'static>, ()>>);
 
 pub struct PacketHandlerInput<'a> {
-    pub packet: &'a OwnedPacket<Vec<u8>>,
+    pub packet: &'a OwnedPacket<PacketGrantR>,
     pub registry: &'a HashMapRegistry,
 }
 
 impl bevy::prelude::SystemInput for PacketHandlerInput<'_> {
     type Param<'i> = PacketHandlerInput<'i>;
 
-    type Inner<'i> = (&'i OwnedPacket<Vec<u8>>, &'i HashMapRegistry);
+    type Inner<'i> = (&'i OwnedPacket<PacketGrantR>, &'i HashMapRegistry);
 
     fn wrap((packet, registry): Self::Inner<'_>) -> Self::Param<'_> {
         PacketHandlerInput { packet, registry }
@@ -805,7 +822,7 @@ impl Plugin for Impeller2Plugin {
     }
 }
 
-pub struct ReqHandlerCommand<S: System<In = InRef<'static, OwnedPacket<Vec<u8>>>, Out = ()>> {
+pub struct ReqHandlerCommand<S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>> {
     request: LenPacket,
     packet_id: PacketId,
     system: S,
@@ -813,7 +830,7 @@ pub struct ReqHandlerCommand<S: System<In = InRef<'static, OwnedPacket<Vec<u8>>>
 
 impl<S> Command for ReqHandlerCommand<S>
 where
-    S: System<In = InRef<'static, OwnedPacket<Vec<u8>>>, Out = ()>,
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>,
 {
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
@@ -837,13 +854,13 @@ where
 pub trait CommandsExt {
     fn send_req_with_handler<S, M>(&mut self, msg: impl Msg, packet_id: PacketId, handler: S)
     where
-        S: IntoSystem<InRef<'static, OwnedPacket<Vec<u8>>>, (), M>;
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, (), M>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
     fn send_req_with_handler<S, M>(&mut self, msg: impl Msg, packet_id: PacketId, handler: S)
     where
-        S: IntoSystem<InRef<'static, OwnedPacket<Vec<u8>>>, (), M>,
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, (), M>,
     {
         let system = S::into_system(handler);
         let cmd = ReqHandlerCommand {

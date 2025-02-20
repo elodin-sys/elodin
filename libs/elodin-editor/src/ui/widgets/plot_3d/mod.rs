@@ -71,24 +71,26 @@ pub fn sync_line_plot_3d(
             continue;
         };
 
-        commands.entity(entity).insert(LineBundle {
-            line: gpu::LineHandles([x, y, z]),
-            uniform: LineUniform {
-                line_width: line_plot.line_width,
-                color: Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0),
-                depth_bias: 0.0,
-                model: Mat4::IDENTITY,
-                perspective: if line_plot.perspective { 1 } else { 0 },
-                #[cfg(target_arch = "wasm32")]
-                _padding: Default::default(),
-            },
-            config: LineConfig {
-                render_layers: RenderLayers::default(),
-            },
-            global_transform: Default::default(),
-            transform: Default::default(),
-            grid_cell: GridCell::default(),
-        });
+        if let Some(mut entity) = commands.get_entity(entity) {
+            entity.insert(LineBundle {
+                line: gpu::LineHandles([x, y, z]),
+                uniform: LineUniform {
+                    line_width: line_plot.line_width,
+                    color: Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0),
+                    depth_bias: 0.0,
+                    model: Mat4::IDENTITY,
+                    perspective: if line_plot.perspective { 1 } else { 0 },
+                    #[cfg(target_arch = "wasm32")]
+                    _padding: Default::default(),
+                },
+                config: LineConfig {
+                    render_layers: RenderLayers::default(),
+                },
+                global_transform: Default::default(),
+                transform: Default::default(),
+                grid_cell: GridCell::default(),
+            });
+        }
     }
     for (line_plot, mut uniform) in uniforms.iter_mut() {
         uniform.color = Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0);

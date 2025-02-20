@@ -185,6 +185,16 @@ impl Plot {
         bounds.max_x += offset.x / 2.0;
         bounds.min_y -= offset.y / 2.0;
         bounds.max_y += offset.y / 2.0;
+
+        if bounds.min_x >= bounds.max_x {
+            bounds.min_x = bounds.max_x.min(bounds.min_x);
+            bounds.max_x = bounds.min_x + 1.0;
+        }
+        if bounds.min_y >= bounds.max_y {
+            bounds.min_y = bounds.max_y.min(bounds.min_y);
+            bounds.max_y = bounds.min_y + 1.0;
+        }
+
         let y_range = bounds.max_y - bounds.min_y;
         let full_y_range = (rect.height() / inner_rect.height()) as f64 * y_range;
         let y_delta = full_y_range - y_range;
