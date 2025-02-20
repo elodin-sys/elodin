@@ -6,6 +6,7 @@ use bevy::{
 
 pub struct Images {
     pub logo: Handle<Image>,
+    pub logo_full: Handle<Image>,
     pub icon_play: Handle<Image>,
     pub icon_pause: Handle<Image>,
     pub icon_scrub: Handle<Image>,
@@ -28,6 +29,9 @@ pub struct Images {
     pub icon_loop: Handle<Image>,
     pub icon_tile_3d_viewer: Handle<Image>,
     pub icon_tile_graph: Handle<Image>,
+    pub icon_ip_addr: Handle<Image>,
+    pub icon_folder: Handle<Image>,
+    pub icon_chevron_right: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -35,6 +39,7 @@ impl FromWorld for Images {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         Self {
             logo: asset_server.load("embedded://elodin_editor/assets/logo.png"),
+            logo_full: asset_server.load("embedded://elodin_editor/assets/logo-full.png"),
             icon_play: asset_server.load("embedded://elodin_editor/assets/icons/play.png"),
             icon_pause: asset_server.load("embedded://elodin_editor/assets/icons/pause.png"),
             icon_scrub: asset_server.load("embedded://elodin_editor/assets/icons/scrub.png"),
@@ -68,6 +73,10 @@ impl FromWorld for Images {
                 .load("embedded://elodin_editor/assets/icons/tile_3d_viewer.png"),
             icon_tile_graph: asset_server
                 .load("embedded://elodin_editor/assets/icons/tile_graph.png"),
+            icon_ip_addr: asset_server.load("embedded://elodin_editor/assets/icons/ip-addr.png"),
+            icon_folder: asset_server.load("embedded://elodin_editor/assets/icons/folder.png"),
+            icon_chevron_right: asset_server
+                .load("embedded://elodin_editor/assets/icons/chevron_right.png"),
         }
     }
 }

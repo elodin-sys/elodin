@@ -1012,17 +1012,23 @@ pub fn pan_graph(
             viewport.physical_size.y as f32 + viewport.physical_position.y as f32,
         );
         if !viewport_rect.contains(cursor_pos) {
-            commands.entity(entity).insert(LastPos(None));
+            if let Some(mut e) = commands.get_entity(entity) {
+                e.insert(LastPos(None));
+            }
             continue;
         }
 
         if mouse_buttons.just_pressed(MouseButton::Left) {
-            commands.entity(entity).insert(LastPos(Some(cursor_pos)));
+            if let Some(mut e) = commands.get_entity(entity) {
+                e.insert(LastPos(Some(cursor_pos)));
+            }
             continue;
         }
 
         if !mouse_buttons.pressed(MouseButton::Left) {
-            commands.entity(entity).insert(LastPos(None));
+            if let Some(mut e) = commands.get_entity(entity) {
+                e.insert(LastPos(None));
+            }
             continue;
         }
 
@@ -1043,7 +1049,10 @@ pub fn pan_graph(
         let delta =
             delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor * offset_mask;
         graph_state.pan_offset += delta;
-        commands.entity(entity).insert(LastPos(Some(cursor_pos)));
+
+        if let Some(mut e) = commands.get_entity(entity) {
+            e.insert(LastPos(Some(cursor_pos)));
+        }
     }
 }
 

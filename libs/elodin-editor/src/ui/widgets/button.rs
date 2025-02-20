@@ -1,7 +1,8 @@
 use bevy_egui::egui::{self, Stroke};
+use egui::Color32;
 
 use crate::ui::{
-    colors::{self, with_opacity},
+    colors::{self, with_opacity, ColorExt},
     utils::Shrink4,
 };
 
@@ -230,6 +231,20 @@ impl EButton {
             margin: egui::Margin::same(8),
             width: None,
         }
+    }
+
+    pub fn green(label: impl ToString) -> Self {
+        EButton::new(label)
+            .color(colors::MINT_DEFAULT)
+            .bg_color(colors::MINT_DEFAULT.opacity(0.04))
+            .stroke(Stroke::new(1.0, colors::MINT_40))
+    }
+
+    pub fn gray(label: impl ToString) -> Self {
+        EButton::new(label)
+            .color(colors::PRIMARY_CREAME)
+            .bg_color(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0, colors::PRIMARY_ONYX_5))
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {

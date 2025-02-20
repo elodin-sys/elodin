@@ -1,7 +1,7 @@
 [package]
 name = "elodin-editor"
 description = "Elodin Editor"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
@@ -53,8 +53,8 @@ impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.default-features = false
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
-# impeller.path = "../../libs/impeller"
-# impeller.features = ["bevy"]
+toml.version = "0.8"
+serde = { version = "1.0.196", features = ["derive"] }
 
 # search
 fuzzy-matcher = "0.3.7"
@@ -70,7 +70,6 @@ heapless.version = "0.8"
 itertools = "0.12.1"
 bytemuck = "1.16.1"
 opener = "0.7.1"
-directories = "5.0"
 hex = "0.4.3"
 web-time = "1.1.0"
 const-fnv1a-hash = "1.1.0"
@@ -78,8 +77,21 @@ zerocopy = "0.8.14"
 hifitime.version = "4.0.2"
 
 
+
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
+# os
+directories = "5.0"
+rfd = "0.15.2"
+s10.path = "../s10"
+
+# async
+stellarator.path = "../../libs/stellarator"
+stellarator.features = ["miette"]
+
+# errors
+miette.version = "7.2"
+miette.features = ["fancy"]
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

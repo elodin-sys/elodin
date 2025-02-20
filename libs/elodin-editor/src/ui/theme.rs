@@ -54,6 +54,10 @@ pub fn corner_radius_xs() -> CornerRadius {
     CornerRadius::same(2)
 }
 
+pub fn corner_radius_sm() -> CornerRadius {
+    CornerRadius::same(4)
+}
+
 fn configure_default_fonts(ctx: &egui::Context) {
     ctx.add_font(FontInsert::new(
         "ibm_plex_mono_medium",

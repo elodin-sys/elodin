@@ -18,7 +18,7 @@ pub enum Args {
         dir: PathBuf,
     },
     Run {
-        #[arg(default_value = "0.0.0.0:2240")]
+        #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
         #[arg(long, default_value = "false")]
         no_s10: bool,
@@ -27,7 +27,7 @@ pub enum Args {
     },
     Plan {
         out_dir: PathBuf,
-        #[arg(default_value = "0.0.0.0:2240")]
+        #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
     },
     #[clap(hide = true)]
