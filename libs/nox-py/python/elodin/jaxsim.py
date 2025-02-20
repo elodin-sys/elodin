@@ -1,3 +1,6 @@
+from jax import numpy as np
+
+
 class JaxSim:
     """
     A class to simulate a system within a given world context.
@@ -47,7 +50,7 @@ class JaxSim:
         self.py_sim = sim_obj
         self.inputs = inputs
         self.outputs = outputs
-        self.state = state
+        self.state = [np.array(a) for a in state]
         self.dictionary = dictionary
         self.entity_dict = entity_dict
         self.component_entity_dict = component_entity_dict
@@ -171,7 +174,7 @@ class JaxSim:
                 for c_p, d_p, name in self.map:
                     if name == component_name:
                         if self.state[d_p][entity_index].shape == value.shape:
-                            self.state[d_p][entity_index] = value
+                            self.state[d_p].at[entity_index].set(value)
                         else:
                             raise Exception(
                                 f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {self.state[d_p][entity_index].shape}"
