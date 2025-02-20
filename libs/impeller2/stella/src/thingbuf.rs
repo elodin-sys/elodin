@@ -16,6 +16,7 @@ pub async fn tcp_connect<I>(
     incoming_packet_tx: &mut mpsc::Sender<MaybeFilledPacket, FilledRecycle>,
     stream_id: StreamId,
     new_connection_packets: &impl Fn(StreamId) -> I,
+    success: impl FnOnce(),
 ) -> Result<(), miette::Error>
 where
     I: Iterator<Item = LenPacket>,
@@ -35,6 +36,7 @@ where
     for packet in new_connection_packets(stream_id) {
         tx.send(packet).await.0?;
     }
+    success();
     let rx = async move {
         loop {
             let mut send_ref = incoming_packet_tx.send_ref().await.into_diagnostic()?;

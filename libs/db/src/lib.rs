@@ -931,7 +931,6 @@ impl FixedRateStreamState {
     }
 
     fn set_timestamp(&self, timestamp: Timestamp) {
-        println!("set timestamp");
         self.is_scrubbed.store(true, atomic::Ordering::SeqCst);
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
