@@ -9,13 +9,13 @@ local pressure_id = ComponentId("pressure")
 local humidity_id = ComponentId("humidity")
 
 local sensor_vt = VTableBuilder(1)
-sensor_vt:column(time_id, "I64", {}, entity_ids)
-sensor_vt:column(mag_id, "F32", { 3 }, entity_ids)
-sensor_vt:column(gyro_id, "F32", { 3 }, entity_ids)
-sensor_vt:column(accel_id, "F32", { 3 }, entity_ids)
-sensor_vt:column(temp_id, "F32", {}, entity_ids)
-sensor_vt:column(pressure_id, "F32", {}, entity_ids)
-sensor_vt:column(humidity_id, "F32", {}, entity_ids)
+sensor_vt:column(time_id, "i64", {}, entity_ids)
+sensor_vt:column(mag_id, "f32", { 3 }, entity_ids)
+sensor_vt:column(gyro_id, "f32", { 3 }, entity_ids)
+sensor_vt:column(accel_id, "f32", { 3 }, entity_ids)
+sensor_vt:column(temp_id, "f32", {}, entity_ids)
+sensor_vt:column(pressure_id, "f32", {}, entity_ids)
+sensor_vt:column(humidity_id, "f32", {}, entity_ids)
 
 msgs = {
 	sensor_vt:msg(),
