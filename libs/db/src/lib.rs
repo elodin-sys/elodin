@@ -992,11 +992,12 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             let waiter = entity.time_series.waiter();
             let db = db.clone();
             stellarator::spawn(async move {
-                if let Err(err) =
-                    handle_real_time_entity(stream, component_id, entity_id, waiter, vtable, db)
-                        .await
+                match handle_real_time_entity(stream, component_id, entity_id, waiter, vtable, db)
+                    .await
                 {
-                    warn!(?err, "failed to handle real time stream")
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => warn!(?err, "failed to handle real time stream"),
                 }
             });
             Ok(())
@@ -1027,16 +1028,18 @@ async fn handle_real_time_entity<A: AsyncWrite>(
             .await
             .0?;
     }
-    let component = db
-        .components
-        .get(&component_id)
-        .ok_or(Error::ComponentNotFound(component_id))?;
-    let entity = component
-        .value()
-        .entities
-        .get(&entity_id)
-        .ok_or(Error::EntityNotFound(entity_id))?;
-    let time_series = entity.time_series.clone();
+    let (time_series, prim_type) = {
+        let component = db
+            .components
+            .get(&component_id)
+            .ok_or(Error::ComponentNotFound(component_id))?;
+        let entity = component
+            .value()
+            .entities
+            .get(&entity_id)
+            .ok_or(Error::EntityNotFound(entity_id))?;
+        (entity.time_series.clone(), component.schema.prim_type)
+    };
 
     let mut table = LenPacket::table(vtable_id, 2048 - 16);
     loop {
@@ -1045,7 +1048,7 @@ async fn handle_real_time_entity<A: AsyncWrite>(
             continue;
         };
         table.push_aligned(timestamp);
-        table.pad_for_type(component.schema.prim_type);
+        table.pad_for_type(prim_type);
         table.extend_from_slice(buf);
         {
             let stream = stream.lock().await;
@@ -1073,7 +1076,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             return Ok(());
         }
         let start = Instant::now();
-        let tick = state.current_timestamp();
+        let current_timestamp = state.current_timestamp();
         let gen = db.vtable_gen.latest();
         if gen != current_gen {
             let stream = stream.lock().await;
@@ -1085,14 +1088,26 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             current_gen = gen;
         }
         table.clear();
-        if let Err(err) = state.filter.populate_table(&db, &mut table, tick) {
+        if let Err(err) = state
+            .filter
+            .populate_table(&db, &mut table, current_timestamp)
+        {
             warn!(?err, "failed to populate table");
         }
         {
             let stream = stream.lock().await;
+            stream
+                .send(
+                    StreamTimestamp {
+                        timestamp: current_timestamp,
+                        stream_id: state.stream_id,
+                    }
+                    .to_len_packet(),
+                )
+                .await
+                .0?;
             rent!(stream.send(table).await, table)?;
         }
-
         let time_step = state.time_step();
         let sleep_time = time_step.saturating_sub(start.elapsed());
         futures_lite::future::race(
@@ -1102,7 +1117,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             stellarator::sleep(sleep_time),
         )
         .await;
-        state.try_increment_tick(tick);
+        state.try_increment_tick(current_timestamp);
     }
 }
 
@@ -1232,5 +1247,6 @@ pub trait AtomicTimestampExt {
 impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_max(&self, val: Timestamp) {
         self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
+        self.wait_queue.wake_all();
     }
 }

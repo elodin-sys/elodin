@@ -83,6 +83,7 @@ int main() {
 
         sensor_data.time += 1;
         sensor_data.temp = sin((double)sensor_data.time / 100000.0);
+        usleep(100);
     }
     close(sock);
     return 0;

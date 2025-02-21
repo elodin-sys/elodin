@@ -21,6 +21,7 @@ use roaring::bitmap::RoaringBitmap;
 use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
 use std::any::type_name;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
 use std::sync::atomic::{self, AtomicBool};
@@ -36,6 +37,13 @@ pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
     pub lines: BTreeMap<usize, Handle<Line>>,
+    request_states: HashMap<Timestamp, RequestState>,
+}
+
+#[derive(Clone, Debug)]
+enum RequestState {
+    Requested(Instant),
+    Returned,
 }
 
 impl PlotDataComponent {
@@ -44,6 +52,7 @@ impl PlotDataComponent {
             label: component_label.to_string(),
             element_names,
             lines: BTreeMap::new(),
+            request_states: HashMap::new(),
         }
     }
 
@@ -253,6 +262,9 @@ pub fn handle_time_series(
             else {
                 return;
             };
+            plot_data
+                .request_states
+                .insert(range.start, RequestState::Returned);
             match prim_type {
                 PrimType::U8 => process_time_series::<u8>(
                     buf,
@@ -397,18 +409,18 @@ pub fn handle_time_series(
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
     mut commands: Commands,
-    graph_data: ResMut<CollectedGraphData>,
+    mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
 ) {
-    for (&entity_id, entity) in graph_data.entities.iter() {
-        for (&component_id, component) in entity.components.iter() {
+    for (&entity_id, entity) in graph_data.entities.iter_mut() {
+        for (&component_id, component) in entity.components.iter_mut() {
             let mut line = component
                 .lines
                 .first_key_value()
                 .and_then(|(_k, v)| lines.get_mut(v));
 
             if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref()) {
-                if last_queried.elapsed() <= Duration::from_secs(2) {
+                if last_queried.elapsed() <= Duration::from_millis(250) {
                     return;
                 }
             }
@@ -417,6 +429,19 @@ pub fn queue_timestamp_read(
                 let packet_id = fastrand::u64(..).to_le_bytes()[..3]
                     .try_into()
                     .expect("id wrong size");
+
+                match component.request_states.get(&range.start) {
+                    Some(RequestState::Requested(time))
+                        if time.elapsed() > Duration::from_secs(10) => {}
+                    Some(RequestState::Returned) | Some(RequestState::Requested(_)) => {
+                        return;
+                    }
+                    None => {}
+                }
+
+                component
+                    .request_states
+                    .insert(range.start, RequestState::Requested(Instant::now()));
 
                 let start = range.start;
                 let end = range.end;
@@ -807,7 +832,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
     }
 }
 
-pub const CHUNK_COUNT: usize = 0x300;
+pub const CHUNK_COUNT: usize = 0x400;
 pub const CHUNK_LEN: usize = 0xC00;
 
 impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
