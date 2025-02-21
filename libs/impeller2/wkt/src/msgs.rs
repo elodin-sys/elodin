@@ -24,7 +24,7 @@ impl Msg for VTableMsg {
     const ID: PacketId = [224, 0, 0];
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Stream {
     #[serde(default)]
     pub filter: StreamFilter,
@@ -57,7 +57,7 @@ pub enum StreamBehavior {
 
 pub type StreamId = u64;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct StreamFilter {
     pub component_id: Option<ComponentId>,
     pub entity_id: Option<EntityId>,
@@ -325,4 +325,14 @@ pub struct DumpSchemaResp {
 
 impl Msg for DumpSchemaResp {
     const ID: PacketId = [224, 0, 25];
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StreamTimestamp {
+    pub timestamp: Timestamp,
+    pub stream_id: StreamId,
+}
+
+impl Msg for StreamTimestamp {
+    const ID: PacketId = [224, 0, 26];
 }

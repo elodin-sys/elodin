@@ -27,8 +27,8 @@ use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, SubscribeLastUpdated,
-    VTableMsg, VectorArrow, WorldPos,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, StreamTimestamp,
+    SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
 };
 use nox::{Array, ArrayBuf, Dyn};
 use serde::de::DeserializeOwned;
@@ -170,6 +170,12 @@ fn sink_inner(
                 let earliest_timestamp = m.parse::<EarliestTimestamp>()?;
                 world_sink.commands.insert_resource(earliest_timestamp);
             }
+            OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
+                let stream_timestamp = m.parse::<StreamTimestamp>()?;
+                if stream_timestamp.stream_id == world_sink.current_stream_id.0 {
+                    world_sink.current_timestamp.0 = stream_timestamp.timestamp;
+                }
+            }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
         }
@@ -261,7 +267,7 @@ impl Decomponentize for WorldSink<'_, '_> {
         component_id: ComponentId,
         entity_id: impeller2::types::EntityId,
         view: ComponentView<'_>,
-        timestamp: Option<Timestamp>,
+        _timestamp: Option<Timestamp>,
     ) {
         let e = if let Some(entity) = self.entity_map.get(&entity_id) {
             let Some(e) = self.commands.get_entity(*entity) else {
@@ -321,9 +327,6 @@ impl Decomponentize for WorldSink<'_, '_> {
                 return;
             };
             adapter.insert(&mut self.commands, &mut self.entity_map, entity_id, view);
-        }
-        if let Some(timestamp) = timestamp {
-            self.current_timestamp.0 = timestamp;
         }
     }
 }

@@ -66,7 +66,7 @@ pub fn spawn_tcp_connect(
         let res: Result<(), miette::Error> = stellarator::run(|| async move {
             loop {
                 connection_status.set_status(ConnectionStatus::Connecting);
-                if let Err(err) = tcp_connect(
+                match tcp_connect(
                     addr,
                     &mut outgoing_packet_rx,
                     &mut incoming_packet_tx,
@@ -78,10 +78,12 @@ pub fn spawn_tcp_connect(
                 )
                 .await
                 {
-                    println!("{:?}", err);
-                    bevy::log::trace!(?err, "connection ended with error");
-                    connection_status.set_status(ConnectionStatus::Error);
-                    stellarator::sleep(Duration::from_millis(250)).await;
+                    Err(err) => {
+                        bevy::log::trace!(?err, "connection ended with error");
+                        connection_status.set_status(ConnectionStatus::Error);
+                        stellarator::sleep(Duration::from_millis(250)).await;
+                    }
+                    Ok(_) => return Ok(()),
                 }
             }
         });
