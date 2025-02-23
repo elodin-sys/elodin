@@ -1,7 +1,7 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{prelude::*, TimeDelta};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::{TimeDelta, prelude::*};
 use miette::Diagnostic;
-use miette::{diagnostic, Context, IntoDiagnostic};
+use miette::{Context, IntoDiagnostic, diagnostic};
 use thiserror::Error;
 use tonic::{metadata, service};
 
@@ -157,7 +157,9 @@ impl Cli {
 
         let expires_in_mins = expires_in / 60;
         println!("Login via the browser: {verification_uri_complete}.");
-        println!("You should see the following code: {user_code}, which expires in {expires_in_mins} minutes.");
+        println!(
+            "You should see the following code: {user_code}, which expires in {expires_in_mins} minutes."
+        );
         // Open browser if possible
         let _ = opener::open_browser(verification_uri_complete);
 

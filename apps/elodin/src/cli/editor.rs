@@ -2,7 +2,7 @@ use bevy::window::{PrimaryWindow, WindowResized};
 use bevy::{prelude::*, utils::tracing};
 use core::fmt;
 use elodin_editor::EditorPlugin;
-use miette::{miette, IntoDiagnostic};
+use miette::{IntoDiagnostic, miette};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;

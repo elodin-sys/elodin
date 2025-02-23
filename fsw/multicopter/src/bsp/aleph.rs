@@ -123,7 +123,7 @@ impl Pins {
     }
 
     unsafe fn steal() -> Self {
-        PINS_TAKEN = true;
+        unsafe { PINS_TAKEN = true };
         let mut pins = Self {
             pb6: Pin::new(Port::B, 6, PinMode::Alt(4)),
             pb7: Pin::new(Port::B, 7, PinMode::Alt(4)),

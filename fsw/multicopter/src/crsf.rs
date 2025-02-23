@@ -236,7 +236,7 @@ impl CrsfReceiver {
         if self.frame_pos != 0
             && now
                 .checked_duration_since(self.frame_start_time)
-                .map_or(true, |d| d > CRSF_TIME_NEEDED_PER_FRAME)
+                .is_none_or(|d| d > CRSF_TIME_NEEDED_PER_FRAME)
         {
             defmt::warn!("Resetting frame due to CRSF timeout");
             self.frame_pos = 0;

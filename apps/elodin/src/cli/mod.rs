@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
-use miette::miette;
 use miette::Context;
 use miette::IntoDiagnostic;
+use miette::miette;
 use stellarator::util::CancelToken;
 use tracing_subscriber::EnvFilter;
 
@@ -106,7 +106,9 @@ impl Cli {
             println!("You can log in using this command:");
             println!("    elodin login\n");
 
-            println!("Ensure the Elodin Python SDK is installed in your preferred Python virtual environment:");
+            println!(
+                "Ensure the Elodin Python SDK is installed in your preferred Python virtual environment:"
+            );
             println!("    pip install -U elodin\n");
 
             println!("Check out our docs (at https://docs.elodin.systems) for more information.");

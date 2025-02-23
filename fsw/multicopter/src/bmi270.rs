@@ -20,13 +20,13 @@ const POWER_CTRL_REG_VAL: u8 = 0b1110; // temp on, acc on, gyr on, aux off
 const START_INITIALIZATION: u8 = 0x00;
 const STOP_INITIALIZATION: u8 = 0x01;
 const ACC_CONF_REG_VAL: u8 = 0b10101100; // acc_filter perf = high performance mode
-                                         // acc_bwp = filter in normal mode, avberage 8 samples
-                                         // acc_odr = 1.6 kHz
+// acc_bwp = filter in normal mode, avberage 8 samples
+// acc_odr = 1.6 kHz
 const ACC_RANGE_REG_VAL: u8 = 0x02; // acc_range = ±8g
 const GYR_CONF_REG_VAL: u8 = 0b11101101; // gyr_filter_perf = high performance mode
-                                         // gyr_noise_perf = high performance mdode
-                                         // gyr_bwp = normal mode
-                                         // gyr_odr = 6.4 kHz
+// gyr_noise_perf = high performance mdode
+// gyr_bwp = normal mode
+// gyr_odr = 6.4 kHz
 const GYR_RANGE_REG_VAL: u8 = 0x00; // gyr_range = ±2000 dps
 const GYR_OFFSET_XYZ_VAL: u8 = 0x40;
 

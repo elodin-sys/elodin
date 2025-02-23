@@ -36,7 +36,7 @@ pub fn init_heap() {
     {
         use core::mem::MaybeUninit;
         const HEAP_SIZE: usize = 128 * 1024;
-        #[link_section = ".axisram.buffers"]
+        #[unsafe(link_section = ".axisram.buffers")]
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(addr_of_mut!(HEAP_MEM) as usize, HEAP_SIZE) };
         defmt::info!("Configured heap with {} bytes", HEAP_SIZE);

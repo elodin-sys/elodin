@@ -656,7 +656,9 @@ fn parse_args() -> (String, String, LogLevel) {
                         "warn" => LogLevel::Warn,
                         "error" => LogLevel::Error,
                         _ => {
-                            eprintln!("Error: Invalid log level. Valid levels are: trace, debug, info, warn, error");
+                            eprintln!(
+                                "Error: Invalid log level. Valid levels are: trace, debug, info, warn, error"
+                            );
                             process::exit(1);
                         }
                     };
