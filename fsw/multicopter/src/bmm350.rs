@@ -645,7 +645,7 @@ impl Calibration {
         // Parse magnetometer offsets
         let mag_off_msb = [
             otp[OTP_MAG_OFFSET_X] & 0x0F00,
-            otp[OTP_MAG_OFFSET_X] & 0xF000 >> 4,
+            (otp[OTP_MAG_OFFSET_X] & 0xF000) >> 4,
             otp[OTP_MAG_OFFSET_Y] & 0x0F00,
         ];
         let mag_off_lsb = [
@@ -661,13 +661,13 @@ impl Calibration {
 
         // Parse magnetometer sensitivities
         let mag_sen = [
-            otp[OTP_MAG_SENS_X] & 0xFF00 >> 8,
+            (otp[OTP_MAG_SENS_X] & 0xFF00) >> 8,
             otp[OTP_MAG_SENS_Y] & 0x00FF,
-            otp[OTP_MAG_SENS_Z] & 0xFF00 >> 8,
+            (otp[OTP_MAG_SENS_Z] & 0xFF00) >> 8,
         ];
 
         // Parse temperature offset and sensitivity
-        let temp_sen = otp[OTP_TEMP_OFF_SENS] & 0xFF00 >> 8;
+        let temp_sen = (otp[OTP_TEMP_OFF_SENS] & 0xFF00) >> 8;
         let temp_off = otp[OTP_TEMP_OFF_SENS] & 0x00FF;
 
         // Parse TCO
@@ -679,9 +679,9 @@ impl Calibration {
 
         // Parse TCS
         let tcs = [
-            otp[OTP_MAG_TCS_X] & 0xFF00 >> 8,
-            otp[OTP_MAG_TCS_Y] & 0xFF00 >> 8,
-            otp[OTP_MAG_TCS_Z] & 0xFF00 >> 8,
+            (otp[OTP_MAG_TCS_X] & 0xFF00) >> 8,
+            (otp[OTP_MAG_TCS_Y] & 0xFF00) >> 8,
+            (otp[OTP_MAG_TCS_Z] & 0xFF00) >> 8,
         ];
 
         // Parse DUT T0
@@ -690,9 +690,9 @@ impl Calibration {
         // Parse cross-axis coefficients
         let cross_axis = [
             otp[OTP_CROSS_X_Y] & 0x00FF,
-            otp[OTP_CROSS_Y_X] & 0xFF00 >> 8,
+            (otp[OTP_CROSS_Y_X] & 0xFF00) >> 8,
             otp[OTP_CROSS_Z_X] & 0x00FF,
-            otp[OTP_CROSS_Z_Y] & 0xFF00 >> 8,
+            (otp[OTP_CROSS_Z_Y] & 0xFF00) >> 8,
         ];
 
         let mut comp = Calibration {

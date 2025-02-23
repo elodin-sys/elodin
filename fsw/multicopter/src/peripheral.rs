@@ -148,15 +148,17 @@ macro_rules! impl_hal_timer {
                 ds_32_bits: bool,
                 dma_periph: dma::DmaPeriph,
             ) {
-                self.write_dma_burst(
-                    buf,
-                    base_address,
-                    burst_len,
-                    dma_channel,
-                    channel_cfg,
-                    ds_32_bits,
-                    dma_periph,
-                );
+                unsafe {
+                    self.write_dma_burst(
+                        buf,
+                        base_address,
+                        burst_len,
+                        dma_channel,
+                        channel_cfg,
+                        ds_32_bits,
+                        dma_periph,
+                    );
+                }
             }
         }
         }

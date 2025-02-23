@@ -1,6 +1,6 @@
 [package]
 name = "aleph-serial-bridge"
-edition = "2021"
+edition = "2024"
 version.workspace = true
 repository.workspace = true
 publish = false
@@ -11,7 +11,7 @@ anyhow = "1"
 serialport.version = "4.6.1"
 serialport.default-features = false
 
-# async 
+# async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
 impeller2-stella.path = "../../libs/impeller2/stella"
