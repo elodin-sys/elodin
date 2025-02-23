@@ -3,10 +3,11 @@ use core::ops::Deref;
 use fugit::{ExtU32, RateExtU32 as _};
 use hal::{clocks, pac};
 use sdio_host::{
+    Cmd,
     common_cmd::{self, ResponseLen},
-    emmc::{CardCapacity, CardStatus, CurrentState, CID, CSD, OCR, RCA},
-    sd::{BusWidth, SDStatus, CIC, SCR, SD},
-    sd_cmd, Cmd,
+    emmc::{CID, CSD, CardCapacity, CardStatus, CurrentState, OCR, RCA},
+    sd::{BusWidth, CIC, SCR, SD, SDStatus},
+    sd_cmd,
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 

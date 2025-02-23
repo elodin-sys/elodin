@@ -2,7 +2,7 @@
 name = "elodin"
 version.workspace = true
 repository.workspace = true
-edition = "2021"
+edition = "2024"
 license = "BSL"
 authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
 

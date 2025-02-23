@@ -1,11 +1,14 @@
 use impeller2::{
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, Msg, MsgExt, PacketId, Timestamp},
+    types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
 };
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use std::{borrow::Cow, time::Duration};
+
+#[cfg(feature = "mlua")]
+use impeller2::types::MsgExt;
 
 use crate::{
     metadata::{ComponentMetadata, EntityMetadata},

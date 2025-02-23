@@ -174,7 +174,9 @@ pub enum LicenseKeyError {
     WrongMachine,
     #[error("Your license key has an invalid signature")]
     InvalidSignature,
-    #[error("Your license key is expired, and we couldn't pull a new one. Your computer may be offline.")]
+    #[error(
+        "Your license key is expired, and we couldn't pull a new one. Your computer may be offline."
+    )]
     Expired,
     #[error("Your license key file could not be found")]
     KeyFileNotFound,
