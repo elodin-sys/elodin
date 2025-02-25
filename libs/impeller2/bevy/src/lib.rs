@@ -35,6 +35,7 @@ use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
+    time::Duration,
 };
 
 pub use impeller2_bbq::PacketGrantR;
@@ -884,7 +885,8 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
             },
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: None,
+                timestep: Some(Duration::from_secs_f64(1.0 / 60.0)),
+                frequency: Some(60),
             }),
             id: stream_id,
         }

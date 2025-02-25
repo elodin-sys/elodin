@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use dashmap::{mapref::one::Ref, DashMap};
+use dashmap::{DashMap, mapref::one::Ref};
 use impeller2_wkt::AssetId;
 use memmap2::Mmap;
 

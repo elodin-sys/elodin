@@ -31,6 +31,7 @@ tabled = "0.17.0"
 stellarator.path = "../../stellarator"
 stellarator.features = ["miette"]
 impeller2-stella.path = "../../impeller2/stella"
+futures-lite = "2.5.0"
 
 # ser-de
 impeller2.path = "../../impeller2"
@@ -57,3 +58,8 @@ nox.path = "../../nox"
 
 # time
 hifitime.version = "3.9"
+
+# arrow
+arrow.version = "54.2.0"
+#arrow.features = ["ipc"]
+#arrow.default-features = false

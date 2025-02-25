@@ -192,7 +192,7 @@ pub struct JoinHandleDropGuard<T>(crate::JoinHandle<T>);
 
 impl<T> Drop for JoinHandleDropGuard<T> {
     fn drop(&mut self) {
-        self.0 .0.cancel();
+        self.0.0.cancel();
     }
 }
 

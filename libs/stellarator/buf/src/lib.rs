@@ -156,6 +156,14 @@ pub struct Slice<T: IoBuf> {
 }
 
 impl<T: IoBuf> Slice<T> {
+    /// Creates a new slice from a range and inner
+    ///
+    /// # Safety
+    /// The user must ensure that range does not exceed the bounds of `inner`
+    pub unsafe fn new_unchecked(inner: T, range: Range<usize>) -> Self {
+        Self { inner, range }
+    }
+
     /// The range of the data in the slice
     pub fn range(&self) -> Range<usize> {
         self.range.clone()

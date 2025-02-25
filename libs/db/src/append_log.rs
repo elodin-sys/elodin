@@ -1,3 +1,4 @@
+use memmap2::MmapRaw;
 use zerocopy::{Immutable, IntoBytes};
 
 use crate::Error;
@@ -9,8 +10,8 @@ use std::{
     path::Path,
     slice::{self, SliceIndex},
     sync::{
-        atomic::{self, AtomicU64},
         Arc,
+        atomic::{self, AtomicU64},
     },
 };
 
@@ -86,9 +87,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
 
     /// Returns a slice of data offset into the committed data region of the [`AppendLog`]
     pub fn get(&self, range: impl SliceIndex<[u8], Output = [u8]>) -> Option<&'_ [u8]> {
-        let slice: &[u8] = unsafe { slice::from_raw_parts(self.map.as_mut_ptr(), self.map.len()) };
-        let end = self.committed_len().load(atomic::Ordering::Acquire) as usize;
-        slice.get(size_of::<Header<E>>()..end)?.get(range)
+        self.data().get(range)
     }
 
     fn header(&self) -> &Header<E> {
@@ -123,6 +122,16 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn data(&self) -> &[u8] {
+        let slice: &[u8] = unsafe { slice::from_raw_parts(self.map.as_mut_ptr(), self.map.len()) };
+        let end = self.committed_len().load(atomic::Ordering::Acquire) as usize;
+        &slice[size_of::<Header<E>>()..end]
+    }
+
+    pub(crate) fn raw_mmap(&self) -> &Arc<MmapRaw> {
+        &self.map
     }
 }
 

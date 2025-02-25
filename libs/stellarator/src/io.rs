@@ -1,8 +1,9 @@
 use std::{collections::VecDeque, future::Future, marker::PhantomData};
 
 use crate::{
+    BufResult, Error,
     buf::{self, IoBuf, IoBufMut, Slice},
-    rent, BufResult, Error,
+    rent,
 };
 use std::sync::Arc;
 
@@ -83,7 +84,17 @@ impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
         }
     }
 
-    pub async fn recv<B: IoBufMut>(&mut self, mut buf: B) -> Result<Slice<B>, Error> {
+    pub async fn recv<B: IoBufMut>(&mut self, buf: B) -> Result<Slice<B>, Error> {
+        let slice = self.recv_growable(GrowableBufWrapper(buf)).await?;
+        let range = slice.range();
+        let GrowableBufWrapper(inner) = slice.into_inner();
+        Ok(unsafe { Slice::new_unchecked(inner, range) })
+    }
+
+    pub async fn recv_growable<B: IoBufMut + GrowableBuf>(
+        &mut self,
+        mut buf: B,
+    ) -> Result<Slice<B>, Error> {
         let mut total_read = 0;
         while total_read < size_of::<L>() {
             let mut slice = buf
@@ -105,6 +116,7 @@ impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
         let len = L::from_le_bytes(len);
         let len = len.as_usize();
         let required_len = len.checked_add(L::SIZE).ok_or(Error::IntegerOverflow)?;
+        buf.grow(required_len);
         while total_read < required_len {
             let mut slice = buf.try_slice(total_read..).ok_or(Error::BufferOverflow)?;
             let read_len = rent!(self.read(slice).await, slice)?;
@@ -124,6 +136,51 @@ impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
             .ok_or(Error::BufferOverflow)?;
         Ok(buf)
     }
+}
+
+pub trait GrowableBuf {
+    fn grow(&mut self, new_len: usize);
+}
+
+impl GrowableBuf for Vec<u8> {
+    fn grow(&mut self, new_len: usize) {
+        if new_len > self.len() {
+            self.resize(new_len, 0);
+        }
+    }
+}
+
+struct GrowableBufWrapper<B>(B);
+
+unsafe impl<B: IoBuf> IoBuf for GrowableBufWrapper<B> {
+    fn stable_init_ptr(&self) -> *const u8 {
+        self.0.stable_init_ptr()
+    }
+
+    fn init_len(&self) -> usize {
+        self.0.init_len()
+    }
+
+    fn total_len(&self) -> usize {
+        self.0.total_len()
+    }
+}
+
+unsafe impl<B: IoBufMut> IoBufMut for GrowableBufWrapper<B> {
+    fn stable_mut_ptr(&mut self) -> std::ptr::NonNull<std::mem::MaybeUninit<u8>> {
+        self.0.stable_mut_ptr()
+    }
+
+    unsafe fn set_init(&mut self, len: usize) {
+        // safety: same safety guarantees as the wrapped buffer
+        unsafe {
+            self.0.set_init(len);
+        }
+    }
+}
+
+impl<B> GrowableBuf for GrowableBufWrapper<B> {
+    fn grow(&mut self, _new_len: usize) {}
 }
 
 pub trait Length {

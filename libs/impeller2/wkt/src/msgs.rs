@@ -3,7 +3,7 @@ use impeller2::{
     table::{Entry, VTable},
     types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::ops::Range;
 use std::{borrow::Cow, time::Duration};
 
@@ -41,6 +41,7 @@ pub struct Stream {
 pub struct FixedRateBehavior {
     pub initial_timestamp: InitialTimestamp,
     pub timestep: Option<Duration>,
+    pub frequency: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -76,6 +77,7 @@ pub struct SetStreamState {
     pub playing: Option<bool>,
     pub timestamp: Option<Timestamp>,
     pub time_step: Option<Duration>,
+    pub frequency: Option<u64>,
 }
 
 impl SetStreamState {
@@ -85,6 +87,7 @@ impl SetStreamState {
             playing: None,
             timestamp: Some(tick),
             time_step: None,
+            frequency: None,
         }
     }
 }
@@ -121,6 +124,10 @@ impl Msg for GetSchema {
     const ID: PacketId = [224, 0, 5];
 }
 
+impl Request for GetSchema {
+    type Reply = SchemaMsg;
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GetComponentMetadata {
     pub component_id: ComponentId,
@@ -130,6 +137,10 @@ impl Msg for GetComponentMetadata {
     const ID: PacketId = [224, 0, 6];
 }
 
+impl Request for GetComponentMetadata {
+    type Reply = crate::ComponentMetadata;
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GetEntityMetadata {
     pub entity_id: EntityId,
@@ -137,6 +148,10 @@ pub struct GetEntityMetadata {
 
 impl Msg for GetEntityMetadata {
     const ID: PacketId = [224, 0, 7];
+}
+
+impl Request for GetEntityMetadata {
+    type Reply = crate::EntityMetadata;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -174,11 +189,19 @@ impl Msg for GetAsset {
     const ID: PacketId = [224, 0, 13];
 }
 
+impl Request for GetAsset {
+    type Reply = crate::Asset<'static>;
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DumpMetadata;
 
 impl Msg for DumpMetadata {
     const ID: PacketId = [224, 0, 14];
+}
+
+impl Request for DumpMetadata {
+    type Reply = DumpMetadataResp;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -338,4 +361,56 @@ pub struct StreamTimestamp {
 
 impl Msg for StreamTimestamp {
     const ID: PacketId = [224, 0, 26];
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[repr(transparent)]
+pub struct SQLQuery(pub String);
+
+impl Msg for SQLQuery {
+    const ID: PacketId = [224, 0, 27];
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::FromLua for SQLQuery {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        mlua::LuaSerdeExt::from_value(lua, value)
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::UserData for SQLQuery {
+    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+        methods.add_method("msg", |_, this, ()| {
+            let msg = this.to_len_packet().inner;
+            Ok(msg)
+        });
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[repr(transparent)]
+pub struct ArrowIPC<'a> {
+    pub batches: Vec<Cow<'a, [u8]>>,
+}
+
+impl Msg for ArrowIPC<'_> {
+    const ID: PacketId = [224, 0, 28];
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ErrorResponse {
+    pub description: String,
+}
+
+impl Msg for ErrorResponse {
+    const ID: PacketId = [224, 0, 29];
+}
+
+pub trait Request {
+    type Reply: Msg + DeserializeOwned;
+}
+
+impl Request for SQLQuery {
+    type Reply = ArrowIPC<'static>;
 }

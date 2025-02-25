@@ -1,7 +1,7 @@
 use impeller2::types::{LenPacket, OwnedPacket};
 use stellarator::{
     buf::{IoBufMut, Slice},
-    io::{AsyncRead, AsyncWrite, LengthDelReader},
+    io::{AsyncRead, AsyncWrite, GrowableBuf, LengthDelReader},
     BufResult,
 };
 
@@ -23,6 +23,14 @@ impl<R: AsyncRead> PacketStream<R> {
 
     pub async fn next<B: IoBufMut>(&mut self, buf: B) -> Result<OwnedPacket<Slice<B>>, Error> {
         let packet_buf = self.reader.recv(buf).await?;
+        OwnedPacket::parse(packet_buf).map_err(Error::from)
+    }
+
+    pub async fn next_grow<B: IoBufMut + GrowableBuf>(
+        &mut self,
+        buf: B,
+    ) -> Result<OwnedPacket<Slice<B>>, Error> {
+        let packet_buf = self.reader.recv_growable(buf).await?;
         OwnedPacket::parse(packet_buf).map_err(Error::from)
     }
 }

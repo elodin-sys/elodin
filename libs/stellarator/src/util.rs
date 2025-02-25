@@ -2,8 +2,8 @@ use std::{
     cell::UnsafeCell,
     mem::MaybeUninit,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Weak,
+        atomic::{AtomicBool, Ordering},
     },
 };
 

@@ -1,6 +1,7 @@
 use std::io;
 
 use impeller2::types::{ComponentId, EntityId};
+use impeller2_wkt::{AssetId, ErrorResponse, StreamId};
 use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
@@ -26,6 +27,16 @@ pub enum Error {
     InvalidAssetId,
     #[error("time travel - you tried to push a time stamp in the past")]
     TimeTravel,
+    #[error("datafusion {0}")]
+    DataFusion(#[from] datafusion::error::DataFusionError),
+    #[error("arrow  {0}")]
+    Arrow(#[from] arrow::error::ArrowError),
+    #[error("stream not found {0}")]
+    StreamNotFound(StreamId),
+    #[error("asset not found {0}")]
+    AssetNotFound(AssetId),
+    #[error("time range out of bounds")]
+    TimeRangeOutOfBounds,
 }
 
 impl From<impeller2_stella::Error> for Error {
@@ -57,6 +68,14 @@ impl Error {
                 true
             }
             _ => false,
+        }
+    }
+}
+
+impl From<Error> for ErrorResponse {
+    fn from(val: Error) -> Self {
+        ErrorResponse {
+            description: val.to_string(),
         }
     }
 }
