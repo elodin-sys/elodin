@@ -1,7 +1,7 @@
 use core::{
     fmt::Display,
     mem,
-    ops::{Add, AddAssign},
+    ops::{Add, AddAssign, Sub},
     sync::atomic::AtomicI64,
     time::Duration,
 };
@@ -793,6 +793,14 @@ impl Add<Duration> for Timestamp {
 
     fn add(self, rhs: Duration) -> Self::Output {
         Timestamp(self.0 + rhs.as_micros() as i64)
+    }
+}
+
+impl Sub<Duration> for Timestamp {
+    type Output = Timestamp;
+
+    fn sub(self, rhs: Duration) -> Self::Output {
+        Timestamp(self.0 - rhs.as_micros() as i64)
     }
 }
 
