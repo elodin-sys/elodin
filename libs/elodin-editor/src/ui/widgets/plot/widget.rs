@@ -21,11 +21,11 @@ use egui::{Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::EntityMetadata;
+use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
-use web_time::{Duration, Instant};
 
 use crate::{
     plugins::LogicalKeyState,
@@ -116,6 +116,7 @@ impl Plot {
         selected_range: SelectedTimeRange,
         earliest_timestamp: Timestamp,
     ) -> Self {
+        //let earliest_timestamp = selected_range.0.start;
         let rect = ui.max_rect();
         let inner_rect = get_inner_rect(rect);
 
@@ -202,18 +203,19 @@ impl Plot {
         new_bounds.min_y -= y_delta / 2.0;
         new_bounds.max_y -= y_delta / 2.0;
         let x_range = 1.0 / (bounds.max_x - bounds.min_x);
+        let width = new_bounds.max_x - new_bounds.min_x;
         let viewport_origin = DVec2::new(
-            (offset.x / 2.0 - pan_offset.x) * x_range,
+            (offset.x / 2.0 - pan_offset.x) * x_range
+                - (selected_range.0.start.0 - earliest_timestamp.0) as f64 / width,
             -(new_bounds.min_y / full_y_range),
         );
         let viewport_origin = viewport_origin.as_vec2();
-        let width = (new_bounds.max_x - new_bounds.min_x) as f32;
         let orthographic_projection = OrthographicProjection {
             near: 0.0,
             far: 1000.0,
             viewport_origin,
             scaling_mode: ScalingMode::Fixed {
-                width,
+                width: width as f32,
                 height: full_y_range as f32,
             },
             scale: 1.0,
@@ -228,7 +230,7 @@ impl Plot {
             .entity(graph_id)
             .try_insert(Projection::Orthographic(orthographic_projection));
 
-        let min_x = -viewport_origin.x * width;
+        let min_x = -viewport_origin.x as f64 * width;
         let max_x = width + min_x;
 
         let line_visible_range = Timestamp(min_x as i64 + earliest_timestamp.0)
@@ -431,24 +433,27 @@ impl Plot {
             return;
         }
         if self.bounds.min_y <= 0.0 {
-            let step_size = (self.bounds.max_y - self.bounds.min_y) / self.steps_y as f64;
+            let step_size =
+                pretty_round((self.bounds.max_y - self.bounds.min_y) / self.steps_y as f64);
             if !step_size.is_normal() {
                 return;
             }
             let mut i = 0.0;
 
-            while i <= self.bounds.max_y {
+            while i < self.bounds.max_y {
                 draw_tick(i);
                 i += step_size;
             }
+            draw_tick(i);
 
             let mut i = 0.0;
-            while i >= self.bounds.min_y {
+            while i > self.bounds.min_y {
                 draw_tick(i);
                 i -= step_size;
             }
+            draw_tick(i);
         } else {
-            let step_size = self.bounds.height() / self.steps_y as f64;
+            let step_size = pretty_round(self.bounds.height() / self.steps_y as f64);
             let steps_y = (0..=self.steps_y)
                 .map(|i| self.bounds.min_y + (i as f64) * step_size)
                 .collect::<Vec<f64>>();
@@ -879,7 +884,36 @@ fn sigfig_round(x: f64, mut digits: i32) -> f64 {
 
     digits -= x.abs().log10().ceil() as i32;
     let y = (10.0f64).powi(digits);
-    (y * x).ceil() / y
+    if x.is_sign_positive() {
+        (y * x).ceil() / y
+    } else {
+        (y * x).floor() / y
+    }
+}
+
+fn pretty_round(num: f64) -> f64 {
+    let mut multiplier = 1.0;
+    let mut n = num;
+
+    // Handle negative numbers
+    let is_negative = n < 0.0;
+    n = n.abs();
+
+    // Find the appropriate multiplier for the decimal places
+    while n < 1.0 {
+        n *= 10.0;
+        multiplier *= 10.0;
+    }
+
+    // Round to nearest 5
+    let rounded = (n * 2.0).round() / 2.0;
+    let result = rounded / multiplier;
+
+    if is_negative {
+        -result
+    } else {
+        result
+    }
 }
 
 #[derive(Debug, Clone)]

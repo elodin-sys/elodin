@@ -80,6 +80,7 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/folder.png");
         embedded_asset!(app, "assets/logo-full.png");
         embedded_asset!(app, "assets/icons/chevron_right.png");
+        embedded_asset!(app, "assets/icons/vertical-chevrons.png");
     }
 }
 
@@ -184,11 +185,13 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
+            .add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
             })
             .insert_resource(ClearColor(Color::NONE))
+            .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp::EPOCH..Timestamp::EPOCH));
         if cfg!(target_os = "windows") {
             app.add_systems(Update, handle_drag_resize);
@@ -885,6 +888,141 @@ pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
+    behavior: Res<TimeRangeBehavior>,
 ) {
-    selected_range.0 = earliest.0..latest.0;
+    selected_range.0 = behavior.calculate_selected_range(earliest.0, latest.0);
+}
+
+#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+pub struct TimeRangeBehavior {
+    start: Offset,
+    end: Offset,
+}
+
+#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+enum Offset {
+    Earliest(Duration),
+    Latest(Duration),
+    #[allow(unused)]
+    Fixed(Timestamp),
+}
+
+impl std::fmt::Display for Offset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Offset::Earliest(duration) => {
+                let d = hifitime::Duration::from(*duration)
+                    .to_string()
+                    .to_uppercase();
+                write!(f, "+{d}")
+            }
+            Offset::Latest(duration) => {
+                let d = hifitime::Duration::from(*duration)
+                    .to_string()
+                    .to_uppercase();
+                write!(f, "-{d}")
+            }
+            Offset::Fixed(timestamp) => {
+                let timestamp: hifitime::Epoch = (*timestamp).into();
+                write!(f, "{timestamp}")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for TimeRangeBehavior {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.start, self.end) {
+            (Offset::Earliest(start), Offset::Latest(end)) if end.is_zero() && start.is_zero() => {
+                write!(f, "FULL RANGE")
+            }
+            (Offset::Latest(start), Offset::Latest(end)) if end.is_zero() => {
+                let start = hifitime::Duration::from(start).to_string().to_uppercase();
+                write!(f, "LAST {start}")
+            }
+            (start, end) => {
+                write!(f, "{start}..{end}")
+            }
+        }
+    }
+}
+
+impl Default for TimeRangeBehavior {
+    fn default() -> Self {
+        Self::FULL
+    }
+}
+
+impl TimeRangeBehavior {
+    const FULL: Self = TimeRangeBehavior {
+        start: Offset::Earliest(Duration::ZERO),
+        end: Offset::Latest(Duration::ZERO),
+    };
+    const LAST_30S: Self = Self::last(Duration::from_secs(30));
+    const LAST_1M: Self = Self::last(Duration::from_secs(60));
+    const LAST_5M: Self = Self::last(Duration::from_secs(60 * 5));
+    const LAST_15M: Self = Self::last(Duration::from_secs(60 * 15));
+    const LAST_30M: Self = Self::last(Duration::from_secs(60 * 30));
+    const LAST_1H: Self = Self::last(Duration::from_secs(60 * 60));
+    const LAST_6H: Self = Self::last(Duration::from_secs(60 * 60 * 6));
+    const LAST_12H: Self = Self::last(Duration::from_secs(60 * 60 * 12));
+    const LAST_24H: Self = Self::last(Duration::from_secs(60 * 60 * 24));
+
+    pub const fn last(duration: Duration) -> Self {
+        TimeRangeBehavior {
+            start: Offset::Latest(duration),
+            end: Offset::Latest(Duration::ZERO),
+        }
+    }
+
+    fn calculate_selected_range(&self, earliest: Timestamp, latest: Timestamp) -> Range<Timestamp> {
+        let start = match self.start {
+            Offset::Earliest(duration) => earliest + duration,
+            Offset::Latest(duration) => latest - duration,
+            Offset::Fixed(timestamp) => timestamp,
+        };
+        let end = match self.end {
+            Offset::Earliest(duration) => earliest + duration,
+            Offset::Latest(duration) => latest - duration,
+            Offset::Fixed(timestamp) => timestamp,
+        };
+
+        clamp_range(earliest..latest, start..end)
+    }
+
+    pub fn is_subset(&self, earliest: Timestamp, latest: Timestamp) -> bool {
+        let start = match self.start {
+            Offset::Earliest(duration) => earliest + duration,
+            Offset::Latest(duration) => latest - duration,
+            Offset::Fixed(timestamp) => timestamp,
+        };
+        let end = match self.end {
+            Offset::Earliest(duration) => earliest + duration,
+            Offset::Latest(duration) => latest - duration,
+            Offset::Fixed(timestamp) => timestamp,
+        };
+        let full_range = earliest..=latest;
+        full_range.contains(&start) && full_range.contains(&end)
+    }
+}
+
+fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Timestamp> {
+    let start = total_range.start.max(b.start);
+    let end = total_range.end.min(b.end);
+    start..end
+}
+
+pub fn clamp_current_time(
+    range: Res<SelectedTimeRange>,
+    current_timestamp: ResMut<CurrentTimestamp>,
+    packet_tx: Res<PacketTx>,
+    current_stream_id: Res<CurrentStreamId>,
+) {
+    if range.0.start > range.0.end {
+        return;
+    }
+    let new_timestamp = current_timestamp.0.clamp(range.0.start, range.0.end);
+    if new_timestamp != current_timestamp.0 {
+        packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
+    }
 }

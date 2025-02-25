@@ -32,6 +32,7 @@ pub struct Images {
     pub icon_ip_addr: Handle<Image>,
     pub icon_folder: Handle<Image>,
     pub icon_chevron_right: Handle<Image>,
+    pub icon_vertical_chevrons: Handle<Image>,
 }
 
 impl FromWorld for Images {
@@ -77,6 +78,8 @@ impl FromWorld for Images {
             icon_folder: asset_server.load("embedded://elodin_editor/assets/icons/folder.png"),
             icon_chevron_right: asset_server
                 .load("embedded://elodin_editor/assets/icons/chevron_right.png"),
+            icon_vertical_chevrons: asset_server
+                .load("embedded://elodin_editor/assets/icons/vertical-chevrons.png"),
         }
     }
 }

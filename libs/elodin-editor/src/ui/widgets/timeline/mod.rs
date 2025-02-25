@@ -56,7 +56,7 @@ pub fn position_from_value(
     value_range: RangeInclusive<f64>,
     position_range: egui::Rangef,
 ) -> f32 {
-    let normalized = egui::emath::remap_clamp(value, value_range, 0.0..=1.0);
+    let normalized = egui::emath::remap(value, value_range, 0.0..=1.0);
     egui::emath::lerp(position_range, normalized as f32)
 }
 
@@ -115,7 +115,7 @@ impl DurationExt for hifitime::Duration {
             .days()
         } else if hours > 0 {
             match hours {
-                ..=2 => 2,
+                ..=2 => 1,
                 ..=6 => 6,
                 ..=12 => 12,
                 _ => 24,
@@ -123,7 +123,7 @@ impl DurationExt for hifitime::Duration {
             .hours()
         } else if minutes > 0 {
             match minutes {
-                ..=2 => 2,
+                ..=2 => 1,
                 ..=5 => 5,
                 ..=15 => 15,
                 ..=30 => 30,
@@ -174,6 +174,7 @@ pub struct TimelineIcons {
     pub add: egui::TextureId,
     pub remove: egui::TextureId,
     pub range_loop: egui::TextureId,
+    pub vertical_chevrons: egui::TextureId,
 }
 
 #[derive(SystemParam)]
@@ -214,6 +215,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
             add: contexts.add_image(images.icon_add.clone_weak()),
             remove: contexts.add_image(images.icon_subtract.clone_weak()),
             range_loop: contexts.add_image(images.icon_loop.clone_weak()),
+            vertical_chevrons: contexts.add_image(images.icon_vertical_chevrons.clone_weak()),
         };
 
         egui::TopBottomPanel::bottom("timeline_panel")
@@ -233,7 +235,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                 let timeline_args = TimelineArgs {
                     available_width,
                     line_height: 40.0,
-                    segment_count: (available_width / 100.0) as u8,
+                    segment_count: (available_width / 90.0) as u8,
                     frames_per_second,
                     active_range,
                 };
