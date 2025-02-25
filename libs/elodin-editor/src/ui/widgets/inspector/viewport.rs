@@ -153,7 +153,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                                 if track_rotation {
                                     cam_entity.remove::<NoPropagateRot>();
                                 } else {
-                                    cam_entity.insert(NoPropagateRot);
+                                    cam_entity.try_insert(NoPropagateRot);
                                 }
                             }
                         });

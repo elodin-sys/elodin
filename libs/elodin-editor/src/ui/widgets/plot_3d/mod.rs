@@ -72,7 +72,7 @@ pub fn sync_line_plot_3d(
         };
 
         if let Some(mut entity) = commands.get_entity(entity) {
-            entity.insert(LineBundle {
+            entity.try_insert(LineBundle {
                 line: gpu::LineHandles([x, y, z]),
                 uniform: LineUniform {
                     line_width: line_plot.line_width,

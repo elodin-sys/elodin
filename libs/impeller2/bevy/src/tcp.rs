@@ -25,7 +25,13 @@ impl Plugin for TcpImpellerPlugin {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
-            spawn_tcp_connect(addr, outgoing_packet_rx, incoming_packet_tx, stream_id)
+            spawn_tcp_connect(
+                addr,
+                outgoing_packet_rx,
+                incoming_packet_tx,
+                stream_id,
+                true,
+            )
         } else {
             ThreadConnectionStatus::new(ConnectionStatus::NoConnection)
         };
@@ -59,6 +65,7 @@ pub fn spawn_tcp_connect(
     mut outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
     mut incoming_packet_tx: AsyncArcQueueTx,
     stream_id: StreamId,
+    mut reconnect: bool,
 ) -> ThreadConnectionStatus {
     let connection_status = ThreadConnectionStatus(Arc::new(AtomicU64::new(0)));
     let ret_connection_status = connection_status.clone();
@@ -73,6 +80,7 @@ pub fn spawn_tcp_connect(
                     stream_id,
                     &new_connection_packets,
                     || {
+                        reconnect = true;
                         connection_status.set_status(ConnectionStatus::Success);
                     },
                 )
@@ -81,6 +89,9 @@ pub fn spawn_tcp_connect(
                     Err(err) => {
                         bevy::log::trace!(?err, "connection ended with error");
                         connection_status.set_status(ConnectionStatus::Error);
+                        if !reconnect {
+                            return Ok(());
+                        }
                         stellarator::sleep(Duration::from_millis(250)).await;
                     }
                     Ok(_) => return Ok(()),

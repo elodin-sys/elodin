@@ -3,8 +3,8 @@ use std::{future::Future, marker::PhantomData, pin::Pin, task::Poll};
 use futures_lite::future;
 
 use crate::{
-    util::{oneshot, CancelToken, OneshotRx},
     Error,
+    util::{CancelToken, OneshotRx, oneshot},
 };
 
 pub trait Joinable<T> {

@@ -43,7 +43,10 @@ pub struct PlotDataComponent {
 #[derive(Clone, Debug)]
 enum RequestState {
     Requested(Instant),
-    Returned,
+    Returned {
+        len: usize,
+        last_timestamp: Option<Timestamp>,
+    },
 }
 
 impl PlotDataComponent {
@@ -262,9 +265,13 @@ pub fn handle_time_series(
             else {
                 return;
             };
-            plot_data
-                .request_states
-                .insert(range.start, RequestState::Returned);
+            plot_data.request_states.insert(
+                range.start,
+                RequestState::Returned {
+                    len: timestamps.len(),
+                    last_timestamp: timestamps.last().copied(),
+                },
+            );
             match prim_type {
                 PrimType::U8 => process_time_series::<u8>(
                     buf,
@@ -431,9 +438,23 @@ pub fn queue_timestamp_read(
                     .expect("id wrong size");
 
                 match component.request_states.get(&range.start) {
+                    // Rerequest chunks if we have not received a response for 10 seconds
                     Some(RequestState::Requested(time))
                         if time.elapsed() > Duration::from_secs(10) => {}
-                    Some(RequestState::Returned) | Some(RequestState::Requested(_)) => {
+
+                    // Recheck if we have a potentially incomplete chunk.
+                    // We first check if the chunk is not full, indicating that it existed at the end of available data
+                    // or at the end of the previously requested time range. We check if it was the chunk at the end of the previously requested
+                    // range by checking if the last time stamp is less than the end of the range
+                    Some(RequestState::Returned {
+                        len,
+                        last_timestamp,
+                    }) if *len < CHUNK_LEN
+                        && last_timestamp
+                            .map(|t| t < selected_range.0.end)
+                            .unwrap_or_default() => {}
+                    // Skip the chunk if it was already requested
+                    Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
                         return;
                     }
                     None => {}

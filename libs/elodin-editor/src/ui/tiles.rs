@@ -864,7 +864,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(parent) = viewport.track_entity {
                             if let Some(parent) = state_mut.entity_map.0.get(&parent) {
                                 if let Ok(grid_cell) = state_mut.grid_cell.get(*parent) {
-                                    camera.insert(*grid_cell);
+                                    camera.try_insert(*grid_cell);
                                 }
                                 camera.set_parent(*parent);
                             }
@@ -939,19 +939,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     let Some(cam) = viewport.camera else { continue };
                     if active_tiles.contains(tile_id) {
                         if let Some(mut cam) = state_mut.commands.get_entity(cam) {
-                            cam.insert(ViewportRect(viewport.rect));
+                            cam.try_insert(ViewportRect(viewport.rect));
                         }
                     } else if let Some(mut cam) = state_mut.commands.get_entity(cam) {
-                        cam.insert(ViewportRect(None));
+                        cam.try_insert(ViewportRect(None));
                     }
                 }
                 Pane::Graph(graph) => {
                     if active_tiles.contains(tile_id) {
                         if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
-                            cam.insert(ViewportRect(graph.rect));
+                            cam.try_insert(ViewportRect(graph.rect));
                         }
                     } else if let Some(mut cam) = state_mut.commands.get_entity(graph.id) {
-                        cam.insert(ViewportRect(None));
+                        cam.try_insert(ViewportRect(None));
                     }
                 }
                 Pane::ComponentMonitor(_componentmonitorpane) => {}
@@ -1014,7 +1014,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
             &schema_reg,
         );
 
-        commands.entity(entity).insert(SyncedViewport);
+        commands.entity(entity).try_insert(SyncedViewport);
     }
 }
 
@@ -1052,7 +1052,7 @@ fn spawn_panel(
             if let Some(parent) = viewport.track_entity {
                 if let Some(parent) = entity_map.0.get(&parent) {
                     if let Ok(grid_cell) = grid_cell.get(*parent) {
-                        camera.insert(*grid_cell);
+                        camera.try_insert(*grid_cell);
                     }
                     camera.set_parent(*parent);
                 }
@@ -1060,13 +1060,13 @@ fn spawn_panel(
             // Convert from Z-up to Y-up
             let pos = [viewport.pos.x(), viewport.pos.z(), -viewport.pos.y()].map(Tensor::into_buf);
             let [i, j, k, w] = viewport.rotation.parts().map(Tensor::into_buf);
-            camera.insert(Transform {
+            camera.try_insert(Transform {
                 translation: Vec3::from_array(pos),
                 rotation: Quat::from_xyzw(i, j, k, w),
                 ..Default::default()
             });
             if !viewport.track_rotation {
-                camera.insert(NoPropagateRot);
+                camera.try_insert(NoPropagateRot);
             } else {
                 camera.remove::<NoPropagateRot>();
             }

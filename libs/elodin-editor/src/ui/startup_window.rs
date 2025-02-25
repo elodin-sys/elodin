@@ -144,11 +144,17 @@ impl std::fmt::Display for ConnectError {
 }
 
 impl StartupLayout<'_, '_> {
-    fn connect(&mut self, addr: SocketAddr) -> ThreadConnectionStatus {
+    fn connect(&mut self, addr: SocketAddr, reconnect: bool) -> ThreadConnectionStatus {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
             impeller2_bevy::channels();
         let stream_id = fastrand::u64(..);
-        let status = spawn_tcp_connect(addr, outgoing_packet_rx, incoming_packet_tx, stream_id);
+        let status = spawn_tcp_connect(
+            addr,
+            outgoing_packet_rx,
+            incoming_packet_tx,
+            stream_id,
+            reconnect,
+        );
         *self.current_stream_id = CurrentStreamId(stream_id);
         *self.packet_tx = packet_tx;
         *self.packet_rx = packet_rx;
@@ -178,7 +184,7 @@ impl StartupLayout<'_, '_> {
             ))
             .unwrap();
         });
-        self.connect(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240));
+        self.connect(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240), true);
         self.switch_to_main();
     }
 }
@@ -410,7 +416,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                             return;
                                         }
                                     };
-                                    let status = state.connect(socket_addr);
+                                    let status = state.connect(socket_addr, false);
                                     *state.modal_state = ModalState::ConnectToIp {
                                         addr,
                                         error: None,

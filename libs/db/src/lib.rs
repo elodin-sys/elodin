@@ -14,7 +14,7 @@ use impeller2::{
 };
 use impeller2_stella::PacketSink;
 use impeller2_wkt::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
 use std::{borrow::Cow, collections::HashSet, ffi::OsStr, sync::atomic::AtomicI64};
 use std::{
@@ -22,12 +22,13 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        atomic::{self, AtomicBool, AtomicU64},
         Arc,
+        atomic::{self, AtomicBool, AtomicU64},
     },
     time::Instant,
 };
 use std::{sync::Mutex as SyncMutex, time::Duration};
+use stellarator::struc_con::Joinable;
 use stellarator::{
     buf::Slice,
     io::{AsyncWrite, OwnedWriter, SplitExt},
@@ -43,6 +44,7 @@ use zerocopy::IntoBytes;
 pub use error::Error;
 
 pub mod append_log;
+mod arrow;
 mod assets;
 mod error;
 pub(crate) mod time_series;
@@ -605,7 +607,20 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
-                warn!(?err, "error handling packet");
+                let tx = tx.lock().await;
+                if let Err(err) = tx
+                    .send(
+                        ErrorResponse {
+                            description: err.to_string(),
+                        }
+                        .to_len_packet(),
+                    )
+                    .await
+                    .0
+                {
+                    warn!(?err, "error sending err resp");
+                }
+                trace!(?err, "error handling packet");
             }
         }
         buf = pkt.into_buf().into_inner();
@@ -662,6 +677,7 @@ async fn handle_packet(
                             InitialTimestamp::Manual(timestamp) => timestamp,
                         },
                         stream.filter,
+                        fixed_rate.frequency.unwrap_or(60),
                     ));
                     debug!(stream.id = ?stream_id, "inserting stream");
                     db.streams.insert(stream_id, state.clone());
@@ -683,8 +699,7 @@ async fn handle_packet(
             let set_stream_state = m.parse::<SetStreamState>()?;
             let stream_id = set_stream_state.id;
             let Some(state) = db.streams.get(&stream_id) else {
-                warn!(stream.id = stream_id, "stream not found");
-                return Ok(());
+                return Err(Error::StreamNotFound(stream_id));
             };
             debug!(msg = ?set_stream_state, "set_stream_state received");
             if let Some(playing) = set_stream_state.playing {
@@ -696,13 +711,16 @@ async fn handle_packet(
             if let Some(time_step) = set_stream_state.time_step {
                 state.set_time_step(time_step);
             }
+            if let Some(frequency) = set_stream_state.frequency {
+                state.set_frequency(frequency);
+            }
         }
         Packet::Msg(m) if m.id == GetSchema::ID => {
             let get_schema = m.parse::<GetSchema>()?;
             let schema = if let Some(component) = db.components.get(&get_schema.component_id) {
                 component.schema.to_schema()
             } else {
-                todo!("send error here")
+                return Err(Error::ComponentNotFound(get_schema.component_id));
             };
             let tx = tx.lock().await;
             tx.send(SchemaMsg(schema).to_len_packet()).await.0?;
@@ -714,15 +732,15 @@ async fn handle_packet(
             let tx = tx.clone();
             let db = db.clone();
             stellarator::spawn(async move {
-                let pkt = {
+                let result = (|| {
                     let Some(component) = db.components.get(&get_time_series.component_id) else {
-                        return Ok(());
+                        return Err(Error::ComponentNotFound(get_time_series.component_id));
                     };
                     let Some(entity) = component.entities.get(&get_time_series.entity_id) else {
-                        return Ok(());
+                        return Err(Error::EntityNotFound(get_time_series.entity_id));
                     };
                     let Some((timestamps, data)) = entity.get_range(get_time_series.range) else {
-                        return Ok(());
+                        return Err(Error::TimeRangeOutOfBounds);
                     };
                     let size = component.schema.size();
                     let (timestamps, data) = if let Some(limit) = get_time_series.limit {
@@ -738,10 +756,15 @@ async fn handle_packet(
                     pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
                     pkt.extend_from_slice(timestamps.as_bytes());
                     pkt.extend_from_slice(data);
-                    pkt
-                };
+                    Ok(pkt)
+                })();
                 let tx = tx.lock().await;
-                tx.send(pkt).await.0?;
+                match result {
+                    Ok(pkt) => {
+                        tx.send(pkt).await.0?;
+                    }
+                    Err(err) => tx.send(ErrorResponse::from(err).to_len_packet()).await.0?,
+                }
                 Ok::<_, Error>(())
             });
         }
@@ -753,7 +776,7 @@ async fn handle_packet(
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
             let metadata = {
                 let Some(component) = db.components.get(&component_id) else {
-                    return Ok(());
+                    return Err(Error::ComponentNotFound(component_id));
                 };
                 component.metadata.load()
             };
@@ -770,7 +793,7 @@ async fn handle_packet(
             let GetEntityMetadata { entity_id } = m.parse::<GetEntityMetadata>()?;
             let msg = {
                 let Some(metadata) = db.entity_metadata.get(&entity_id) else {
-                    return Ok(());
+                    return Err(Error::EntityNotFound(entity_id));
                 };
                 metadata.to_len_packet()
             };
@@ -785,8 +808,7 @@ async fn handle_packet(
         Packet::Msg(m) if m.id == GetAsset::ID => {
             let GetAsset { id } = m.parse::<GetAsset>()?;
             let Some(mmap) = db.assets.get(id) else {
-                warn!(?id, "asset not found");
-                return Ok(());
+                return Err(Error::AssetNotFound(id));
             };
             let asset = Asset {
                 id,
@@ -896,6 +918,38 @@ async fn handle_packet(
             let mut sink = DBSink(db);
             table.sink(&*registry, &mut sink)?;
         }
+
+        Packet::Msg(m) if m.id == GetDbSettings::ID => {
+            let tx = tx.lock().await;
+            let settings = db.db_settings();
+            tx.send(settings.to_len_packet()).await.0?;
+        }
+        Packet::Msg(m) if m.id == SQLQuery::ID => {
+            let SQLQuery(query) = m.parse::<SQLQuery>()?;
+            let inner_tx = tx.clone();
+            let db = db.clone();
+            stellarator::struc_con::tokio(move |_| async move {
+                let mut ctx = db.as_session_context()?;
+                db.insert_views(&mut ctx).await?;
+                let df = ctx.sql(&query).await?;
+                let results = df.collect().await?;
+                let mut batches = vec![];
+                for batch in results.into_iter() {
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, batch.schema_ref())?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+                    batches.push(Cow::Owned(buf));
+                }
+                let msg = ArrowIPC { batches };
+                let tx = inner_tx.lock().await;
+                tx.send(msg.to_len_packet()).await.0?;
+                Ok::<_, Error>(())
+            })
+            .join()
+            .await??;
+        }
         _ => {}
     }
     Ok(())
@@ -904,6 +958,7 @@ async fn handle_packet(
 pub struct FixedRateStreamState {
     stream_id: StreamId,
     time_step: AtomicU64,
+    frequency: AtomicU64,
     is_scrubbed: AtomicBool,
     current_tick: AtomicI64,
     playing_cell: PlayingCell,
@@ -916,6 +971,7 @@ impl FixedRateStreamState {
         time_step: Duration,
         current_tick: Timestamp,
         filter: StreamFilter,
+        frequency: u64,
     ) -> FixedRateStreamState {
         FixedRateStreamState {
             stream_id,
@@ -924,6 +980,7 @@ impl FixedRateStreamState {
             current_tick: AtomicI64::new(current_tick.0),
             playing_cell: PlayingCell::new(true),
             filter,
+            frequency: AtomicU64::new(frequency),
         }
     }
 
@@ -943,8 +1000,16 @@ impl FixedRateStreamState {
             .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
+    fn set_frequency(&self, frequency: u64) {
+        self.frequency.store(frequency, atomic::Ordering::SeqCst);
+    }
+
     fn time_step(&self) -> Duration {
         Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
+    }
+
+    fn sleep_time(&self) -> Duration {
+        Duration::from_micros(1_000_000 / self.frequency.load(atomic::Ordering::Relaxed))
     }
 
     fn current_timestamp(&self) -> Timestamp {
@@ -1077,15 +1142,15 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         }
         let start = Instant::now();
         let current_timestamp = state.current_timestamp();
-        let gen = db.vtable_gen.latest();
-        if gen != current_gen {
+        let vtable_gen = db.vtable_gen.latest();
+        if vtable_gen != current_gen {
             let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..3].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
             let vtable = state.filter.vtable(&db)?;
             let msg = VTableMsg { id, vtable };
             stream.send(msg.to_len_packet()).await.0?;
-            current_gen = gen;
+            current_gen = vtable_gen;
         }
         table.clear();
         if let Err(err) = state
@@ -1108,8 +1173,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 .0?;
             rent!(stream.send(table).await, table)?;
         }
-        let time_step = state.time_step();
-        let sleep_time = time_step.saturating_sub(start.elapsed());
+        let sleep_time = state.sleep_time().saturating_sub(start.elapsed());
         futures_lite::future::race(
             async {
                 state.playing_cell.wait_for_change().await;

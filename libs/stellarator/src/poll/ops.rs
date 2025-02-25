@@ -1,11 +1,11 @@
 use super::{OpCode, OpState};
-use crate::os::{BorrowedHandle, OwnedHandle};
 use crate::BufResult;
+use crate::os::{BorrowedHandle, OwnedHandle};
 use crate::{
-    buf::{deref, deref_mut, IoBuf, IoBufMut},
+    Error, Executor,
+    buf::{IoBuf, IoBufMut, deref, deref_mut},
     net::SockAddrRaw,
     os::AsRawOsHandle,
-    Error, Executor,
 };
 use blocking::Task;
 use pin_project::pin_project;

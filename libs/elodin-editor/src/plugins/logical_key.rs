@@ -54,6 +54,6 @@ fn update_logical_key_state(
 impl Plugin for LogicalKeyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LogicalKeyState>()
-            .add_systems(Update, update_logical_key_state);
+            .add_systems(PreUpdate, update_logical_key_state);
     }
 }

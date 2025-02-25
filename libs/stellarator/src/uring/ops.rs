@@ -1,10 +1,10 @@
 use super::OpCode;
+use crate::BufResult;
+use crate::Error;
 use crate::buf::IoBuf;
 use crate::buf::IoBufMut;
 use crate::net::SockAddrRaw;
 use crate::os::{BorrowedHandle, OwnedHandle};
-use crate::BufResult;
-use crate::Error;
 use io_uring::types::{TimeoutFlags, Timespec};
 use io_uring::{cqueue, opcode, squeue, types};
 use socket2::Socket;

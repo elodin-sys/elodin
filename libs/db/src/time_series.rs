@@ -6,8 +6,8 @@ use tracing::warn;
 use zerocopy::FromBytes;
 
 use crate::{
-    append_log::{AppendLog, AppendLogWriter},
     Error,
+    append_log::{AppendLog, AppendLogWriter},
 };
 
 #[derive(Clone)]
@@ -138,6 +138,14 @@ impl TimeSeries {
         let data = self.data.get(i..i + element_size)?;
         let timestamp = self.timestamps().get(index)?;
         Some((timestamp, data))
+    }
+
+    pub(crate) fn data(&self) -> &AppendLog<u64> {
+        &self.data
+    }
+
+    pub(crate) fn index(&self) -> &AppendLog<Timestamp> {
+        &self.index
     }
 }
 

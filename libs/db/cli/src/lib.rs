@@ -1,13 +1,20 @@
+use arrow::{
+    array::RecordBatch,
+    error::ArrowError,
+    util::display::{ArrayFormatter, FormatOptions},
+};
 use impeller2::{
     com_de::Decomponentize,
     schema::Schema,
     table::{Entry, VTableBuilder},
-    types::{ComponentId, EntityId, Msg, OwnedTimeSeries, PacketId, PrimType, Timestamp},
+    types::{
+        ComponentId, EntityId, Msg, OwnedPacket, OwnedTimeSeries, PacketId, PrimType, Timestamp,
+    },
 };
 
 use impeller2::types::{LenPacket, MsgExt};
 use impeller2_wkt::*;
-use mlua::{Error, Lua, LuaSerdeExt, MultiValue, UserData, Value};
+use mlua::{AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, Value};
 use nu_ansi_term::Color;
 use rustyline::{
     completion::FilenameCompleter,
@@ -28,6 +35,7 @@ use std::{
         atomic::{self, AtomicBool},
         Arc,
     },
+    time::Duration,
 };
 use stellarator::{
     buf::Slice,
@@ -52,25 +60,43 @@ impl Client {
         Ok(Client { tx, rx })
     }
 
-    pub async fn send_req_reply<R: Msg + DeserializeOwned>(
+    pub async fn send_req<M: Msg + DeserializeOwned + Request>(
         &mut self,
-        msg: impl Msg,
-    ) -> anyhow::Result<R> {
+        msg: M,
+    ) -> anyhow::Result<M::Reply> {
         self.tx.send(msg.to_len_packet()).await.0?;
-        let buf = vec![0u8; 8 * 1024];
-        let pkt = self.rx.next(buf).await?;
-        match &pkt {
-            impeller2::types::OwnedPacket::Msg(m) if m.id == R::ID => {
-                let m = m.parse::<R>()?;
+        match self.read_with_error().await? {
+            impeller2::types::OwnedPacket::Msg(m) if m.id == M::Reply::ID => {
+                let m = m.parse::<M::Reply>()?;
                 Ok(m)
             }
             _ => Err(anyhow::anyhow!("wrong msg type")),
         }
     }
 
+    pub async fn read_with_error(&mut self) -> anyhow::Result<OwnedPacket<Slice<Vec<u8>>>> {
+        let resp = async {
+            let buf = vec![0u8; 1024];
+            let pkt = self.rx.next_grow(buf).await?;
+            match pkt {
+                impeller2::types::OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
+                    let m = m.parse::<ErrorResponse>()?;
+                    Err(anyhow::anyhow!(m.description))
+                }
+                pkt => Ok(pkt),
+            }
+        };
+        let timeout = async {
+            stellarator::sleep(Duration::from_secs(25)).await;
+            Err(anyhow::anyhow!("request timed out"))
+        };
+        futures_lite::future::race(timeout, resp).await
+    }
+
     pub async fn get_time_series(
         &mut self,
-        component_id: u64,
+        lua: &Lua,
+        component_id: Value,
         entity_id: u64,
         start: Option<i64>,
         stop: Option<i64>,
@@ -81,21 +107,8 @@ impl Client {
             .try_into()
             .expect("id wrong size");
 
-        let component_id = ComponentId(component_id);
-        self.tx
-            .send(GetSchema { component_id }.to_len_packet())
-            .await
-            .0?;
-
-        let buf = vec![0u8; 8 * 1024];
-        let pkt = self.rx.next(buf).await?;
-        let schema = match &pkt {
-            impeller2::types::OwnedPacket::Msg(m) if m.id == SchemaMsg::ID => {
-                m.parse::<SchemaMsg>()?
-            }
-            _ => return Err(anyhow::anyhow!("wrong msg type")),
-        };
-
+        let component_id: ComponentId = lua.from_value(component_id)?;
+        let schema = self.send_req(GetSchema { component_id }).await?;
         let start = Timestamp(start);
         let stop = Timestamp(stop);
         let msg = GetTimeSeries {
@@ -103,12 +116,11 @@ impl Client {
             range: start..stop,
             entity_id: EntityId(entity_id),
             component_id,
-            limit: Some(100),
+            limit: Some(256),
         };
 
         self.tx.send(msg.to_len_packet()).await.0?;
-        let buf = vec![0u8; 8 * 1024];
-        let pkt = self.rx.next(buf).await?;
+        let pkt = self.read_with_error().await?;
         let time_series = match &pkt {
             impeller2::types::OwnedPacket::TimeSeries(time_series) => time_series,
             _ => return Err(anyhow::anyhow!("wrong msg type")),
@@ -140,7 +152,7 @@ impl Client {
                 "{}",
                 builder
                     .build()
-                    .with(tabled::settings::Style::modern_rounded())
+                    .with(tabled::settings::Style::rounded())
                     .with(tabled::settings::style::BorderColor::filled(
                         tabled::settings::Color::FG_BLUE
                     ))
@@ -162,6 +174,27 @@ impl Client {
             PrimType::F32 => print_time_series_as_table::<f32>(time_series, schema),
             PrimType::F64 => print_time_series_as_table::<f64>(time_series, schema),
         }
+    }
+
+    pub async fn sql(&mut self, sql: &str) -> anyhow::Result<()> {
+        let resp = self.send_req(SQLQuery(sql.to_string())).await?;
+        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+        let batches = resp
+            .batches
+            .into_iter()
+            .filter_map(|batch| {
+                let mut buffer = arrow::buffer::Buffer::from(batch.into_owned());
+                decoder.decode(&mut buffer).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut table = create_table(&batches, &FormatOptions::default())?;
+        println!(
+            "{}",
+            table.with(tabled::settings::Style::rounded()).with(
+                tabled::settings::style::BorderColor::filled(tabled::settings::Color::FG_BLUE)
+            )
+        );
+        Ok(())
     }
 
     pub async fn send(
@@ -291,6 +324,43 @@ impl Client {
     }
 }
 
+fn create_table(
+    results: &[RecordBatch],
+    options: &FormatOptions,
+) -> anyhow::Result<tabled::Table, anyhow::Error> {
+    let mut builder = tabled::builder::Builder::default();
+
+    if results.is_empty() {
+        return Ok(builder.build());
+    }
+
+    let schema = results[0].schema();
+
+    let mut header = Vec::new();
+    for field in schema.fields() {
+        header.push(field.name());
+    }
+    builder.push_record(header);
+
+    for batch in results {
+        let formatters = batch
+            .columns()
+            .iter()
+            .map(|c| ArrayFormatter::try_new(c.as_ref(), options))
+            .collect::<Result<Vec<_>, ArrowError>>()?;
+
+        for row in 0..batch.num_rows() {
+            let mut cells = Vec::new();
+            for formatter in &formatters {
+                cells.push(formatter.value(row).to_string());
+            }
+            builder.push_record(cells);
+        }
+    }
+
+    Ok(builder.build())
+}
+
 impl UserData for Client {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method(
@@ -301,7 +371,8 @@ impl UserData for Client {
                 Ok(())
             },
         );
-        methods.add_async_method("send_msg", |_lua, this, msg: Vec<u8>| async move {
+        methods.add_async_method("send_msg", |_lua, this, msg: AnyUserData| async move {
+            let msg = msg.call_method::<Vec<u8>>("msg", ())?;
             this.tx
                 .send(LenPacket { inner: msg })
                 .await
@@ -309,20 +380,30 @@ impl UserData for Client {
                 .map_err(anyhow::Error::from)?;
             Ok(())
         });
-        methods.add_async_method("send_msgs", |_lua, this, msgs: Vec<Vec<u8>>| async move {
-            for msg in msgs {
-                this.tx
-                    .send(LenPacket { inner: msg })
-                    .await
-                    .0
-                    .map_err(anyhow::Error::from)?;
-            }
+
+        methods.add_async_method(
+            "send_msgs",
+            |_lua, this, msgs: Vec<AnyUserData>| async move {
+                for msg in msgs {
+                    let msg = msg.call_method::<Vec<u8>>("msg", ())?;
+                    this.tx
+                        .send(LenPacket { inner: msg })
+                        .await
+                        .0
+                        .map_err(anyhow::Error::from)?;
+                }
+                Ok(())
+            },
+        );
+
+        methods.add_async_method_mut("sql", |_lua, mut this, sql: String| async move {
+            this.sql(&sql).await?;
             Ok(())
         });
         methods.add_async_method_mut(
             "get_time_series",
-            |_, mut this, (c_id, e_id, start, stop)| async move {
-                this.get_time_series(c_id, e_id, start, stop).await?;
+            |lua, mut this, (c_id, e_id, start, stop)| async move {
+                this.get_time_series(&lua, c_id, e_id, start, stop).await?;
                 Ok(())
             },
         );
@@ -338,7 +419,7 @@ impl UserData for Client {
                     stringify!($name),
                     |lua, mut this, value| async move {
                         let msg: $ty = lua.from_value(value)?;
-                        let res = this.send_req_reply::<$req>(msg).await?;
+                        let res = this.send_req(msg).await?;
                         lua.to_value(&res)
                     },
                 );
@@ -435,7 +516,7 @@ impl Highlighter for CliHelper {
         default: bool,
     ) -> Cow<'b, str> {
         if default {
-            Owned(Color::Blue.bold().paint("db ❯❯ ").to_string())
+            Owned(Color::Blue.bold().paint(prompt).to_string())
         } else {
             Borrowed(prompt)
         }
@@ -510,6 +591,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         "SetEntityMetadata",
         lua.create_function(|lua, m: SetEntityMetadata| lua.create_ser_userdata(m))?,
     )?;
+
+    lua.globals().set(
+        "SQLQuery",
+        lua.create_function(|lua, m: SQLQuery| lua.create_ser_userdata(m))?,
+    )?;
     if let Some(path) = args.path {
         let script = std::fs::read_to_string(path)?;
         lua.load(&script).eval_async::<MultiValue>().await?;
@@ -536,8 +622,12 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         let mut editor: Editor<_, _> = Editor::with_history(config, history)?;
         editor.set_helper(Some(h));
 
+        let mut mode = Mode::Lua;
         loop {
-            let mut prompt = "db ❯❯ ";
+            let mut prompt = match &mode {
+                Mode::Lua => "db ❯❯ ",
+                Mode::Sql(..) => "sql ❯❯ ",
+            };
             let mut line = String::new();
             loop {
                 match editor.readline(prompt) {
@@ -546,13 +636,40 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 }
 
                 if line == ":exit" {
+                    if matches!(mode, Mode::Sql(_)) {
+                        mode = Mode::Lua;
+                        break;
+                    }
                     std::process::exit(0);
+                }
+                if line.starts_with(":sql ") {
+                    let addr = &line.strip_prefix(":sql ").unwrap_or_default();
+                    let addr: SocketAddr = match addr.parse() {
+                        Ok(addr) => addr,
+                        Err(err) => {
+                            println!("{err}");
+                            continue;
+                        }
+                    };
+                    let client = match Client::connect(addr).await {
+                        Ok(c) => c,
+                        Err(err) => {
+                            println!("{err}");
+                            continue;
+                        }
+                    };
+                    mode = Mode::Sql(client);
+                    break;
                 }
                 if line == ":help" || line == ":h" {
                     println!("{}", Color::Yellow.bold().paint("Impeller Lua REPL"));
                     print_usage_line(
+                        ":sql addr",
+                        "Connects to a database and drops you into a sql repl",
+                    );
+                    print_usage_line(
                         "connect(addr) -> Client",
-                        "Connects to a new database and returns a client",
+                        "Connects to a database and returns a client",
                     );
                     print_usage_line(
                         "Client:send_table(component_id, entity_id, ty, shape, data)",
@@ -601,49 +718,66 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                 }
                 editor.save_history(&history_path)?;
                 editor.add_history_entry(line.clone())?;
-                match lua.load(&line).eval_async::<MultiValue>().await {
-                    Ok(values) => {
-                        println!(
-                            "{}",
-                            values
-                                .iter()
-                                .map(|value| {
-                                    #[cfg(not(feature = "highlight"))]
-                                    let out = format!("{:#?}", value);
-                                    #[cfg(feature = "highlight")]
-                                    let out = syntastica::highlight(
-                                        format!("{:#?}", value),
-                                        syntastica_parsers::Lang::Lua,
-                                        &syntastica_parsers::LanguageSetImpl::new(),
-                                        &mut syntastica::renderer::TerminalRenderer::new(None),
-                                        syntastica_themes::catppuccin::mocha(),
-                                    )
-                                    .unwrap()
-                                    .to_string();
-                                    out
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\t")
-                        );
-                        break;
+                match &mut mode {
+                    Mode::Sql(client) => {
+                        if line.is_empty() {
+                            continue;
+                        }
+                        if let Err(err) = client.sql(&line).await {
+                            let err = err.to_string();
+                            println!("{}", Color::Red.paint(&err));
+                        }
+                        line.clear();
                     }
-                    Err(Error::SyntaxError {
-                        incomplete_input: true,
-                        ..
-                    }) => {
-                        line.push('\n');
-                        prompt = ">> ";
-                    }
-                    Err(e) => {
-                        let err = e.to_string();
-                        let err = Color::Red.paint(&err);
-                        eprintln!("{}", err);
-                        break;
-                    }
+                    Mode::Lua => match lua.load(&line).eval_async::<MultiValue>().await {
+                        Ok(values) => {
+                            println!(
+                                "{}",
+                                values
+                                    .iter()
+                                    .map(|value| {
+                                        #[cfg(not(feature = "highlight"))]
+                                        let out = format!("{:#?}", value);
+                                        #[cfg(feature = "highlight")]
+                                        let out = syntastica::highlight(
+                                            format!("{:#?}", value),
+                                            syntastica_parsers::Lang::Lua,
+                                            &syntastica_parsers::LanguageSetImpl::new(),
+                                            &mut syntastica::renderer::TerminalRenderer::new(None),
+                                            syntastica_themes::catppuccin::mocha(),
+                                        )
+                                        .unwrap()
+                                        .to_string();
+                                        out
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\t")
+                            );
+                            break;
+                        }
+                        Err(Error::SyntaxError {
+                            incomplete_input: true,
+                            ..
+                        }) => {
+                            line.push('\n');
+                            prompt = ">> ";
+                        }
+                        Err(e) => {
+                            let err = e.to_string();
+                            let err = Color::Red.paint(&err);
+                            eprintln!("{}", err);
+                            break;
+                        }
+                    },
                 }
             }
         }
     }
+}
+
+enum Mode {
+    Lua,
+    Sql(Client),
 }
 
 fn print_usage_line(name: impl Display, desc: impl Display) {
