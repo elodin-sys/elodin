@@ -99,7 +99,7 @@ impl<'a> Timeline<'a> {
             handle_image_id: None,
             handle_image_tint: colors::MINT_DEFAULT,
             handle_aspect_ratio: 0.5,
-            segments: 8,
+            segments: 12,
             label_font_size: 10.0,
             fps: 60.0,
             height: 40.0,
@@ -165,14 +165,14 @@ impl Timeline<'_> {
 
         let active_range_start = self.active_range.start();
         let active_range_end = self.active_range.end();
-        let visual_segments = self.segments + 1;
         let active_duration = hifitime::Duration::from_microseconds(
             self.active_range.end() - self.active_range.start(),
         );
         let full_duration = active_duration.segment_round();
-        let segment_size = (full_duration / self.segments as f64).segment_round();
+        let segment_size = (full_duration / (self.segments) as f64).segment_round();
         self.segments =
             (full_duration.total_nanoseconds() / segment_size.total_nanoseconds().max(1)) as u8;
+        let visual_segments = self.segments + 1;
         let segment_size = (segment_size.total_nanoseconds() / 1000) as f64;
 
         let full_duration_float = (full_duration.total_nanoseconds() / 1000) as f64;
@@ -212,7 +212,8 @@ impl Timeline<'_> {
             //     self.active_range.start() + (full_duration.total_nanoseconds() / 1000) as f64;
             let max_value = *self.active_range.end();
 
-            let max_position_1d = position_from_value(max_value, self.range(), position_range);
+            let max_position_1d =
+                position_from_value(max_value, self.active_range.clone(), position_range);
             let max_center = Timeline::pointer_center(max_position_1d, &rect);
 
             if self.trailing_fill {
@@ -234,7 +235,12 @@ impl Timeline<'_> {
             } else {
                 ui.put(
                     rect,
-                    self.rail_ui(visual_segments.into(), segment_size, self.label_font_size),
+                    self.rail_ui(
+                        visual_segments.into(),
+                        segment_size,
+                        self.label_font_size,
+                        position_range,
+                    ),
                 );
             }
 
@@ -282,46 +288,48 @@ impl Timeline<'_> {
         egui::emath::pos2(position_1d, rail_rect.center().y)
     }
 
-    fn rail_ui(&self, segments: usize, segment_size: f64, font_size: f32) -> impl egui::Widget {
-        let full_duration = self.full_range.end() - self.full_range.start();
+    fn rail_ui(
+        &self,
+        segments: usize,
+        segment_size: f64,
+        font_size: f32,
+        position_range: egui::Rangef,
+    ) -> impl egui::Widget + '_ {
         move |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let x_span = ui.max_rect().x_range().span() as f64;
-                let x_space = segment_size * x_span / full_duration;
+                ui.add_space(-15.0);
+                let mut font_id = egui::TextStyle::Button.resolve(ui.style());
+                font_id.size = font_size;
                 for i in 0..segments {
-                    ui.add_space(-15.0);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(30.0, ui.max_rect().height()),
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            // label
-
-                            let offset = PrettyDuration(hifitime::Duration::from_microseconds(
-                                segment_size * i as f64,
-                            ));
-                            let segment_label = format!("{offset}");
-                            let label_text = egui::RichText::new(segment_label)
-                                .color(colors::PRIMARY_CREAME_6)
-                                .size(font_size);
-                            ui.add(egui::Label::new(label_text).selectable(false));
-                            let column_rect = ui.max_rect();
-                            let col_center_btm = column_rect.center_bottom();
-                            let col_center_top = column_rect.center_top();
-
-                            let top_point = egui::emath::pos2(
-                                col_center_btm.x,
-                                col_center_btm.y - ((col_center_btm.y - col_center_top.y) / 5.0),
-                            );
-
-                            ui.painter().line_segment(
-                                [col_center_btm, top_point],
-                                egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
-                            );
-                        },
+                    let offset_f64 = segment_size * i as f64;
+                    let offset = PrettyDuration(hifitime::Duration::from_microseconds(offset_f64));
+                    let position_1d = position_from_value(
+                        offset_f64 + self.active_range.start(),
+                        self.active_range.clone(),
+                        position_range,
                     );
-                    ui.add_space(x_space as f32);
+                    let segment_label = format!("{offset}");
+                    let col_center_btm = egui::pos2(position_1d, ui.max_rect().bottom());
+                    let col_center_top = egui::pos2(position_1d, ui.max_rect().top());
+                    ui.painter().text(
+                        egui::pos2(position_1d, ui.max_rect().center().y),
+                        egui::Align2::CENTER_CENTER,
+                        segment_label,
+                        font_id.clone(),
+                        colors::PRIMARY_CREAME_6,
+                    );
+
+                    let top_point = egui::emath::pos2(
+                        col_center_btm.x,
+                        col_center_btm.y - ((col_center_btm.y - col_center_top.y) / 5.0),
+                    );
+
+                    ui.painter().line_segment(
+                        [col_center_btm, top_point],
+                        egui::Stroke::new(1.0, colors::PRIMARY_ONYX_6),
+                    );
                 }
             })
             .response

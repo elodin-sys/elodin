@@ -3,16 +3,20 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
+use egui::{load::SizedTexture, Ui};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{
     CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
 };
 
-use crate::ui::{
-    colors::{self, with_opacity},
-    widgets::{button::EImageButton, time_label::time_label, WidgetSystem},
-    Paused,
+use crate::{
+    ui::{
+        colors::{self, with_opacity, ColorExt},
+        widgets::{button::EImageButton, time_label::time_label, WidgetSystem},
+        Paused,
+    },
+    TimeRangeBehavior,
 };
 
 use super::TimelineIcons;
@@ -26,6 +30,7 @@ pub struct TimelineControls<'w> {
     tick_time: Res<'w, SimulationTimeStep>,
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
+    behavior: ResMut<'w, TimeRangeBehavior>,
 }
 
 impl WidgetSystem for TimelineControls<'_> {
@@ -47,6 +52,7 @@ impl WidgetSystem for TimelineControls<'_> {
             tick_time,
             stream_id,
             earliest_timestamp,
+            mut behavior,
         } = state.get_mut(world);
 
         let mut tick_changed = false;
@@ -123,15 +129,37 @@ impl WidgetSystem for TimelineControls<'_> {
                                 .inner_margin(egui::Margin::symmetric(8, 0))
                                 .show(col_ui, |ui| {
                                     ui.spacing_mut().item_spacing.x = 12.0;
+                                    let popup_id = ui.make_persistent_id("time_selector");
+                                    let res = ui.add(time_range_selector_button(
+                                        icons.vertical_chevrons,
+                                        &mut behavior,
+                                    ));
+
+                                    if res.clicked() {
+                                        ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                                    }
+                                    ui.style_mut().visuals.window_fill = colors::SURFACE_SECONDARY;
+                                    ui.style_mut().visuals.window_stroke =
+                                        egui::Stroke::new(1., colors::PRIMARY_CREAME_5);
+                                    ui.style_mut().spacing.menu_margin =
+                                        egui::Margin::symmetric(0, 0);
+                                    egui::popup::popup_above_or_below_widget(
+                                        ui,
+                                        popup_id,
+                                        &res,
+                                        egui::containers::AboveOrBelow::Above,
+                                        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+                                        time_range_window(
+                                            &mut behavior,
+                                            earliest_timestamp.0,
+                                            max_tick.0,
+                                        ),
+                                    );
 
                                     // TIME
 
                                     let time: hifitime::Epoch = tick.0.into();
                                     ui.add(time_label(time));
-                                    // let time_value = egui::RichText::new(time.to_string())
-                                    //     .color(colors::PRIMARY_CREAME);
-
-                                    // ui.add(egui::Label::new(time_value).selectable(false));
 
                                     let time_label = egui::RichText::new("TIME")
                                         .color(with_opacity(colors::PRIMARY_CREAME, 0.4));
@@ -148,5 +176,111 @@ impl WidgetSystem for TimelineControls<'_> {
         if tick_changed {
             event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
         }
+    }
+}
+
+fn time_range_selector_button(
+    icon: egui::TextureId,
+    behavior: &mut TimeRangeBehavior,
+) -> impl FnOnce(&mut Ui) -> egui::Response + '_ {
+    move |ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(215.0, 34.0),
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                let font_id = egui::TextStyle::Button.resolve(ui.style());
+                let response =
+                    ui.allocate_rect(ui.max_rect(), egui::Sense::CLICK | egui::Sense::HOVER);
+                ui.painter().rect_filled(
+                    ui.max_rect(),
+                    egui::CornerRadius::ZERO,
+                    if response.is_pointer_button_down_on() {
+                        colors::SURFACE_SECONDARY.opacity(0.5)
+                    } else if response.hovered() {
+                        colors::SURFACE_SECONDARY.opacity(0.75)
+                    } else {
+                        colors::SURFACE_SECONDARY
+                    },
+                );
+
+                ui.painter().text(
+                    ui.max_rect().left_center() + egui::vec2(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    behavior.to_string(),
+                    font_id,
+                    colors::PRIMARY_CREAME,
+                );
+                egui::Image::new(SizedTexture::new(icon, egui::vec2(18., 18.))).paint_at(
+                    ui,
+                    egui::Rect::from_center_size(
+                        egui::Pos2::new(ui.max_rect().max.x - 17., ui.max_rect().center().y),
+                        egui::vec2(18., 18.),
+                    ),
+                );
+                response
+            },
+        )
+        .inner
+    }
+}
+
+fn time_range_window(
+    behavior: &mut TimeRangeBehavior,
+    earliest: Timestamp,
+    latest: Timestamp,
+) -> impl FnOnce(&mut egui::Ui) + '_ {
+    const VISIBLE_RANGES: &[TimeRangeBehavior] = &[
+        TimeRangeBehavior::FULL,
+        TimeRangeBehavior::LAST_30S,
+        TimeRangeBehavior::LAST_1M,
+        TimeRangeBehavior::LAST_5M,
+        TimeRangeBehavior::LAST_15M,
+        TimeRangeBehavior::LAST_30M,
+        TimeRangeBehavior::LAST_1H,
+        TimeRangeBehavior::LAST_6H,
+        TimeRangeBehavior::LAST_12H,
+        TimeRangeBehavior::LAST_24H,
+    ];
+    move |ui| {
+        let size = egui::vec2(225., 370.);
+        ui.allocate_ui_with_layout(
+            size,
+            egui::Layout::default().with_cross_justify(true),
+            |ui| {
+                let font_id = egui::TextStyle::Button.resolve(ui.style());
+                ui.add_space(16.0);
+                for range in VISIBLE_RANGES
+                    .iter()
+                    .filter(|b| b.is_subset(earliest, latest))
+                {
+                    let (response, painter) = ui.allocate_painter(
+                        egui::vec2(215., 34.),
+                        egui::Sense::HOVER | egui::Sense::CLICK,
+                    );
+
+                    painter.rect_filled(
+                        response.rect,
+                        egui::CornerRadius::ZERO,
+                        if response.hovered() {
+                            colors::PRIMARY_SMOKE.opacity(0.75)
+                        } else {
+                            colors::TRANSPARENT
+                        },
+                    );
+                    painter.text(
+                        egui::Pos2::new(response.rect.min.x + 24.0, response.rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        range.to_string(),
+                        font_id.clone(),
+                        colors::BONE_DEFAULT,
+                    );
+
+                    if response.clicked() {
+                        *behavior = *range;
+                    }
+                }
+                ui.add_space(16.0);
+            },
+        );
     }
 }
