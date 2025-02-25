@@ -14,9 +14,7 @@ use bevy_infinite_grid::InfiniteGrid;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
-use impeller2_wkt::{
-    BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState, SimulationTimeStep,
-};
+use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
 
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
@@ -280,7 +278,8 @@ fn create_viewport() -> PaletteItem {
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, || {
         let speeds = [
-            0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
+            0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
+            50.0, 100.0,
         ];
         let next_page = PalettePage::new(
             speeds
@@ -289,14 +288,13 @@ fn set_playback_speed() -> PaletteItem {
                     PaletteItem::new(
                         speed.to_string(),
                         "SPEED".to_string(),
-                        move |packet_tx: Res<PacketTx>,
-                              time_step: Res<SimulationTimeStep>,
-                              stream_id: Res<CurrentStreamId>| {
+                        move |packet_tx: Res<PacketTx>, stream_id: Res<CurrentStreamId>| {
                             packet_tx.send_msg(SetStreamState {
                                 id: stream_id.0,
                                 playing: None,
                                 timestamp: None,
-                                time_step: Some(Duration::from_secs_f64(time_step.0 / speed)),
+                                time_step: Some(Duration::from_secs_f64(speed / 60.0)),
+                                frequency: None,
                             });
                             PaletteEvent::Exit
                         },

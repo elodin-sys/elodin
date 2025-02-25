@@ -36,6 +36,7 @@ use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     tiles::{self, TileState},
+    widgets::plot::CollectedGraphData,
     SelectedObject,
 };
 
@@ -712,6 +713,7 @@ pub fn sync_paused(
             playing: Some(!paused.0),
             timestamp: None,
             time_step: None,
+            frequency: None,
         })
     }
 }
@@ -850,6 +852,7 @@ fn clear_state_new_connection(
     mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
+    mut graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
     match packet {
@@ -866,6 +869,7 @@ fn clear_state_new_connection(
         map.0.clear();
     });
     ui_state.clear(&mut commands, &mut selected_object);
+    *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
 }
 

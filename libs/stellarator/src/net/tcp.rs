@@ -1,7 +1,7 @@
 use crate::buf::{IoBuf, IoBufMut};
 use crate::io::{AsyncRead, AsyncWrite};
 use crate::os::BorrowedHandle;
-use crate::reactor::{ops, Completion};
+use crate::reactor::{Completion, ops};
 use crate::{BufResult, Error};
 use socket2::{SockAddr, Socket};
 use std::io::{self};

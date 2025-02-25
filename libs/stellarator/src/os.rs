@@ -19,7 +19,8 @@ impl OwnedHandle {
     /// The user must ensure that no one else holds `RawFd`,
     /// because `OwnedHandle` will close the file-descriptor on drop
     pub unsafe fn from_raw_fd(raw_fd: RawFd) -> Self {
-        OwnedHandle::Fd(std::os::fd::OwnedFd::from_raw_fd(raw_fd))
+        // safety: simple wrapper around already unsafe code
+        unsafe { OwnedHandle::Fd(std::os::fd::OwnedFd::from_raw_fd(raw_fd)) }
     }
 
     #[cfg(target_os = "windows")]

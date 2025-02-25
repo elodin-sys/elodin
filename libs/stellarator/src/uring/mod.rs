@@ -101,7 +101,9 @@ fn take_completion_op_code<O: OpCode>(completion: CompletionProj<'_, O>) -> O {
     // we can now move that buffer safely.
     let op_code = unsafe { completion.op_code.get_unchecked_mut().take() };
     let Some(op_code) = op_code else {
-        unreachable!("op code already taken - this should never happen as we only take the op_code when we are returning `Poll::Ready`")
+        unreachable!(
+            "op code already taken - this should never happen as we only take the op_code when we are returning `Poll::Ready`"
+        )
     };
     op_code
 }

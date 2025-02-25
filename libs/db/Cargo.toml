@@ -2,7 +2,7 @@
 name = "elodin-db"
 version.workspace = true
 repository.workspace = true
-edition = "2021"
+edition = "2024"
 publish = true
 description = "Elodin Database"
 authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
@@ -19,7 +19,6 @@ impeller2.path = "../impeller2"
 impeller2.features = ["std"]
 impeller2-wkt.path = "../impeller2/wkt"
 impeller2-cli.path = "cli"
-impeller2-cli.default-features = false
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.0"
@@ -28,7 +27,7 @@ nox.default-features = false
 
 # async
 stellarator.path = "../stellarator"
-stellarator.features = ["miette"]
+stellarator.features = ["miette", "tokio"]
 impeller2-stella.path = "../impeller2/stella"
 futures-lite = "2.5.0"
 
@@ -56,3 +55,14 @@ fastrand = "2.2.0"
 clap.version = "4.4.18"
 clap.features = ["derive"]
 directories = "5.0.1"
+
+
+# arrow
+arrow.version = "54.2.0"
+arrow.features = ["canonical_extension_types"]
+arrow-schema.version = "54.2.0"
+arrow-schema.features = ["canonical_extension_types"]
+#arrow.features = ["arrow-ipc"]
+#arrow.default-features = false
+datafusion.version = "45.0.0"
+convert_case = "0.6.0"

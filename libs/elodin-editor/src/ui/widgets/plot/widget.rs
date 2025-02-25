@@ -226,7 +226,7 @@ impl Plot {
         };
         commands
             .entity(graph_id)
-            .insert(Projection::Orthographic(orthographic_projection));
+            .try_insert(Projection::Orthographic(orthographic_projection));
 
         let min_x = -viewport_origin.x * width;
         let max_x = width + min_x;
@@ -313,8 +313,11 @@ impl Plot {
                         (Some((entity, _)), true) => {
                             commands
                                 .entity(*entity)
-                                .insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
-                                .insert(LineVisibleRange(line_visible_range.clone()));
+                                .try_insert(LineUniform::new(
+                                    graph_state.line_width,
+                                    color.into_bevy(),
+                                ))
+                                .try_insert(LineVisibleRange(line_visible_range.clone()));
                         }
                         (None, false) => {}
                     }
@@ -1023,21 +1026,21 @@ pub fn pan_graph(
         );
         if !viewport_rect.contains(cursor_pos) {
             if let Some(mut e) = commands.get_entity(entity) {
-                e.insert(LastPos(None));
+                e.try_insert(LastPos(None));
             }
             continue;
         }
 
         if mouse_buttons.just_pressed(MouseButton::Left) {
             if let Some(mut e) = commands.get_entity(entity) {
-                e.insert(LastPos(Some(cursor_pos)));
+                e.try_insert(LastPos(Some(cursor_pos)));
             }
             continue;
         }
 
         if !mouse_buttons.pressed(MouseButton::Left) {
             if let Some(mut e) = commands.get_entity(entity) {
-                e.insert(LastPos(None));
+                e.try_insert(LastPos(None));
             }
             continue;
         }
@@ -1061,7 +1064,7 @@ pub fn pan_graph(
         graph_state.pan_offset += delta;
 
         if let Some(mut e) = commands.get_entity(entity) {
-            e.insert(LastPos(Some(cursor_pos)));
+            e.try_insert(LastPos(Some(cursor_pos)));
         }
     }
 }
