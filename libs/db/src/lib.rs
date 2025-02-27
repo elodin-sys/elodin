@@ -1,5 +1,4 @@
-use arc_swap::ArcSwap;
-use assets::Assets;
+use assets::open_assets;
 use dashmap::DashMap;
 use impeller2::{
     com_de::Decomponentize,
@@ -16,7 +15,12 @@ use impeller2_stella::PacketSink;
 use impeller2_wkt::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
-use std::{borrow::Cow, collections::HashSet, ffi::OsStr, sync::atomic::AtomicI64};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet, hash_map},
+    ffi::OsStr,
+    sync::atomic::AtomicI64,
+};
 use std::{
     net::SocketAddr,
     ops::Range,
@@ -27,17 +31,17 @@ use std::{
     },
     time::Instant,
 };
-use std::{sync::Mutex as SyncMutex, time::Duration};
-use stellarator::struc_con::Joinable;
+use std::{sync::RwLock, time::Duration};
 use stellarator::{
     buf::Slice,
     io::{AsyncWrite, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream},
     rent,
-    sync::{Mutex, RwLock, WaitQueue},
+    struc_con::Joinable,
+    sync::{Mutex, WaitQueue},
     util::AtomicCell,
 };
-use time_series::{TimeSeries, TimeSeriesWriter};
+use time_series::TimeSeries;
 use tracing::{debug, info, trace, warn};
 use zerocopy::IntoBytes;
 
@@ -50,15 +54,8 @@ mod error;
 pub(crate) mod time_series;
 
 pub struct DB {
-    // storage
-    pub components: DashMap<ComponentId, Component>,
-    pub entity_metadata: DashMap<EntityId, EntityMetadata>,
     pub vtable_gen: AtomicCell<u64>,
-    pub assets: Assets,
-
-    // state
-    pub vtable_registry: RwLock<registry::HashMapRegistry>,
-    pub streams: DashMap<StreamId, Arc<FixedRateStreamState>>,
+    state: RwLock<State>,
     pub recording_cell: PlayingCell,
 
     // metadata
@@ -69,47 +66,89 @@ pub struct DB {
     pub earliest_timestamp: Timestamp,
 }
 
+#[derive(Default)]
+pub struct State {
+    pub components: HashMap<ComponentId, Component>,
+    pub entity_metadata: HashMap<EntityId, EntityMetadata>,
+    pub assets: HashMap<AssetId, memmap2::Mmap>,
+    pub vtable_registry: registry::HashMapRegistry,
+    pub streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
+}
+
 impl DB {
     pub fn create(path: PathBuf) -> Result<Self, Error> {
         Self::with_time_step(path, Duration::from_secs_f64(1.0 / 120.0))
     }
 
+    pub fn components(&self) -> HashMap<ComponentId, Component> {
+        self.with_state(|state| state.components.clone())
+    }
+
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
         info!(?path, "created db");
 
-        let assets = Assets::open(path.join("assets"))?;
         std::fs::create_dir_all(path.join("entity_metadata"))?;
-
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
         let time_step = AtomicU64::new(time_step.as_nanos() as u64);
-        let db = DB {
-            path,
-            vtable_registry: Default::default(),
-            components: Default::default(),
-            vtable_gen: AtomicCell::new(0),
-            streams: Default::default(),
-            entity_metadata: Default::default(),
+        let state = State {
+            assets: open_assets(&path)?,
+            ..Default::default()
+        };
+        let mut db = DB {
+            state: RwLock::new(state),
             recording_cell: PlayingCell::new(true),
-            assets,
+            path,
+            vtable_gen: AtomicCell::new(0),
             time_step,
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: Timestamp::now(),
         };
         db.init_globals()?;
-
         db.save_db_state()?;
         Ok(db)
     }
 
-    fn init_globals(&self) -> Result<(), Error> {
-        let mut sink = DBSink(self);
+    pub fn with_state<O, F: FnOnce(&State) -> O>(&self, f: F) -> O {
+        let state = self.state.read().unwrap();
+        f(&state)
+    }
+
+    pub fn with_state_mut<O, F: FnOnce(&mut State) -> O>(&self, f: F) -> O {
+        let mut state = self.state.write().unwrap();
+        f(&mut state)
+    }
+
+    fn init_globals(&mut self) -> Result<(), Error> {
         let arr = nox::array![0u64];
         let globals_id = EntityId(0);
+        let state = self.state.get_mut().unwrap();
+        let tick_component_view = ComponentView::U64(arr.view());
+        let tick_component = Component::try_create(
+            impeller2_wkt::Tick::COMPONENT_ID,
+            tick_component_view.prim_type(),
+            tick_component_view.shape(),
+            &self.path,
+        )?;
+        let component = state
+            .components
+            .entry(impeller2_wkt::Tick::COMPONENT_ID)
+            .or_insert(tick_component);
+        let component_dir = self
+            .path
+            .join(impeller2_wkt::Tick::COMPONENT_ID.to_string());
+        let path = component_dir.join(globals_id.to_string());
+        let entity = Entity::create(path, globals_id, component.schema.clone(), Timestamp::now())?;
+        component.entities.insert(globals_id, entity);
+
+        let mut sink = DBSink {
+            components: &state.components,
+            last_updated: &self.last_updated,
+        };
         sink.apply_value(
             impeller2_wkt::Tick::COMPONENT_ID,
             globals_id,
-            ComponentView::U64(arr.view()),
+            tick_component_view,
             None,
         );
         self.set_entity_metadata(EntityMetadata {
@@ -133,21 +172,25 @@ impl DB {
         let entity_metadata_path = self.path.join("entity_metadata");
         std::fs::create_dir_all(&entity_metadata_path)?;
         metadata.write(entity_metadata_path.join(metadata.entity_id.to_string()))?;
-        self.entity_metadata.insert(metadata.entity_id, metadata);
+        self.with_state_mut(|state| {
+            state.entity_metadata.insert(metadata.entity_id, metadata);
+        });
         Ok(())
     }
 
     fn set_component_metadata(&self, metadata: ComponentMetadata) -> Result<(), Error> {
         let component_id = metadata.component_id;
-        let Some(component) = self.components.get(&component_id) else {
-            warn!(component.id = ?component_id, "component not found");
-            return Ok(());
-        };
         info!(component.name= ?metadata.name, component.id = ?component_id.0, "setting component metadata");
         let component_metadata_path = self.path.join(component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         metadata.write(component_metadata_path.join("metadata"))?;
-        component.metadata.store(Arc::new(metadata));
+        self.with_state_mut(|state| {
+            if let Some(component) = state.components.get_mut(&component_id) {
+                component.metadata = metadata;
+            } else {
+                warn!(component.id = ?component_id, "component not found when setting metadata");
+            }
+        });
         Ok(())
     }
 
@@ -191,10 +234,10 @@ impl DB {
             let schema = ComponentSchema::read(path.join("schema"))?;
             let metadata = ComponentMetadata::read(path.join("metadata"))?;
 
-            let component = Component {
+            let mut component = Component {
                 schema,
-                entities: DashMap::default(),
-                metadata: arc_swap::ArcSwap::new(Arc::new(metadata)),
+                entities: Default::default(),
+                metadata,
             };
 
             for elem in std::fs::read_dir(path)? {
@@ -243,15 +286,15 @@ impl DB {
             entity_metadata.insert(entity_id, metadata);
         }
         info!(db.path = ?path, "opened db");
-        let assets = Assets::open(path.join("assets"))?;
         let db_state = DbSettings::read(path.join("db_state"))?;
+        let state = State {
+            assets: open_assets(&path)?,
+            ..Default::default()
+        };
         Ok(DB {
+            state: RwLock::new(state),
             path,
             vtable_gen: AtomicCell::new(0),
-            components,
-            streams: Default::default(),
-            entity_metadata,
-            assets,
             recording_cell: PlayingCell::new(db_state.recording),
             time_step: AtomicU64::new(db_state.time_step.as_nanos() as u64),
             default_stream_time_step: AtomicU64::new(
@@ -259,7 +302,6 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: Timestamp(start_timestamp),
-            vtable_registry: Default::default(),
         })
     }
 
@@ -267,15 +309,55 @@ impl DB {
         Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
     }
 
-    pub fn vtable_registry(&self) -> &RwLock<registry::HashMapRegistry> {
-        &self.vtable_registry
+    pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
+        info!(id = ?vtable.id, "inserting vtable");
+        self.with_state_mut(|state| {
+            for (entity_id, component_id, prim_ty, shape) in vtable.vtable.id_pair_iter() {
+                info!(entity.id = ?entity_id, component.id = ?component_id, "inserting entity");
+                let component = match state.components.entry(component_id) {
+                    hash_map::Entry::Vacant(entry) => {
+                        let component =
+                            Component::try_create(component_id, prim_ty, shape, &self.path)?;
+                        entry.insert(component)
+                    }
+                    hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                };
+                let schema = component.schema.clone();
+                let _ = match component.entities.entry(entity_id) {
+                    hash_map::Entry::Vacant(entry) => {
+                        let component_dir = self.path.join(component_id.to_string());
+                        let path = component_dir.join(entity_id.to_string());
+                        let entity = Entity::create(path, entity_id, schema, Timestamp::now())?;
+                        entry.insert(entity)
+                    }
+                    hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                };
+                let _ = state
+                    .entity_metadata
+                    .entry(entity_id)
+                    .or_insert_with(|| EntityMetadata {
+                        entity_id,
+                        name: entity_id.to_string(),
+                        metadata: Default::default(),
+                    });
+                self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+            state.vtable_registry.map.insert(vtable.id, vtable.vtable);
+            Ok::<_, Error>(())
+        })?;
+        Ok(())
+    }
+
+    pub fn insert_asset(&self, id: AssetId, buf: &[u8]) -> Result<(), Error> {
+        self.with_state_mut(|state| assets::insert_asset(&self.path, &mut state.assets, id, buf))
     }
 }
 
+#[derive(Clone)]
 pub struct Component {
     pub schema: ComponentSchema,
-    pub metadata: arc_swap::ArcSwap<ComponentMetadata>,
-    pub entities: DashMap<EntityId, Entity>,
+    pub metadata: ComponentMetadata,
+    pub entities: HashMap<EntityId, Entity>,
 }
 
 impl Component {
@@ -305,7 +387,7 @@ impl Component {
         Ok(Component {
             schema,
             entities: Default::default(),
-            metadata: ArcSwap::new(Arc::new(metadata)),
+            metadata,
         })
     }
 }
@@ -423,10 +505,10 @@ pub trait MetadataExt: Sized + Serialize + DeserializeOwned {
 impl MetadataExt for EntityMetadata {}
 impl MetadataExt for ComponentMetadata {}
 
+#[derive(Clone)]
 pub struct Entity {
     pub entity_id: EntityId,
     pub time_series: TimeSeries,
-    pub writer: SyncMutex<TimeSeriesWriter>,
     pub schema: ComponentSchema,
 }
 
@@ -437,13 +519,10 @@ impl Entity {
         schema: ComponentSchema,
         start_timestamp: Timestamp,
     ) -> Result<Self, Error> {
-        let (time_series, writer) =
-            TimeSeries::create(path, start_timestamp, schema.size() as u64)?;
-        let writer = SyncMutex::new(writer);
+        let time_series = TimeSeries::create(path, start_timestamp, schema.size() as u64)?;
         Ok(Entity {
             entity_id,
             time_series,
-            writer,
             schema,
         })
     }
@@ -453,12 +532,10 @@ impl Entity {
         entity_id: EntityId,
         schema: ComponentSchema,
     ) -> Result<Self, Error> {
-        let (time_series, writer) = TimeSeries::open(path)?;
-        let writer = SyncMutex::new(writer);
+        let time_series = TimeSeries::open(path)?;
         Ok(Entity {
             entity_id,
             time_series,
-            writer,
             schema,
         })
     }
@@ -489,7 +566,10 @@ impl Entity {
     }
 }
 
-struct DBSink<'a>(&'a DB);
+struct DBSink<'a> {
+    components: &'a HashMap<ComponentId, Component>,
+    last_updated: &'a AtomicCell<Timestamp>,
+}
 
 impl Decomponentize for DBSink<'_> {
     fn apply_value(
@@ -500,58 +580,21 @@ impl Decomponentize for DBSink<'_> {
         timestamp: Option<Timestamp>,
     ) {
         let timestamp = timestamp.unwrap_or_else(Timestamp::now);
-        let component = match self
-            .0
-            .components
-            .entry(component_id)
-            .or_try_insert_with(|| {
-                self.0.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
-                Component::try_create(component_id, value.prim_type(), value.shape(), &self.0.path)
-            }) {
-            Ok(entity) => entity,
-            Err(err) => {
-                warn!(
-                    component.id = ?component_id,
-                    ?err,
-                    "failed to create new component db"
-                );
-                return;
-            }
-        };
-        let entity = match component.entities.entry(entity_id).or_try_insert_with(|| {
-            self.0.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
-            let component_dir = self.0.path.join(component_id.to_string());
-            let path = component_dir.join(entity_id.to_string());
-            Entity::create(path, entity_id, component.schema.clone(), timestamp)
-        }) {
-            Ok(entity) => entity,
-            Err(err) => {
-                warn!(
-                    entity.id = ?entity_id,
-                    component.id = ?component_id,
-                    ?err,
-                    "failed to create new entity db"
-                );
-                return;
-            }
-        };
-        let _ = self
-            .0
-            .entity_metadata
-            .entry(entity_id)
-            .or_insert_with(|| EntityMetadata {
-                entity_id,
-                name: entity_id.to_string(),
-                metadata: Default::default(),
-            });
         let value_buf = value.as_bytes();
-        let mut writer = entity.writer.lock().expect("poisoned lock");
-        if let Err(err) = writer.push_with_buf(timestamp, value_buf.len(), |buf| {
-            buf.copy_from_slice(value_buf);
-        }) {
+        let Some(component) = self.components.get(&component_id) else {
+            warn!(component.id = ?component_id, "component not found when sinking");
+            return;
+        };
+        let Some(entity) = component.entities.get(&entity_id) else {
+            warn!(component.id = ?component_id, entity.id = ?entity_id, "entity not found");
+            return;
+        };
+
+        if let Err(err) = entity.time_series.push_buf(timestamp, value_buf) {
             warn!(?err, "failed to write head value");
+            return;
         }
-        self.0.last_updated.update_max(timestamp);
+        self.last_updated.update_max(timestamp);
     }
 }
 
@@ -638,15 +681,7 @@ async fn handle_packet(
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
-            info!(id = ?vtable.id, "inserting vtable");
-            let mut registry = db.vtable_registry.write().await;
-            for (component_id, prim_ty, shape) in vtable.vtable.component_iter() {
-                db.components.entry(component_id).or_try_insert_with(|| {
-                    Component::try_create(component_id, prim_ty, shape, &db.path)
-                })?;
-                db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
-            }
-            registry.map.insert(vtable.id, vtable.vtable);
+            db.insert_vtable(vtable)?;
         }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
@@ -682,7 +717,7 @@ async fn handle_packet(
                         fixed_rate.frequency.unwrap_or(60),
                     ));
                     debug!(stream.id = ?stream_id, "inserting stream");
-                    db.streams.insert(stream_id, state.clone());
+                    db.with_state_mut(|s| s.streams.insert(stream_id, state.clone()));
                     let db = db.clone();
                     let tx = tx.clone();
                     stellarator::spawn(async move {
@@ -700,30 +735,34 @@ async fn handle_packet(
         Packet::Msg(m) if m.id == SetStreamState::ID => {
             let set_stream_state = m.parse::<SetStreamState>()?;
             let stream_id = set_stream_state.id;
-            let Some(state) = db.streams.get(&stream_id) else {
-                return Err(Error::StreamNotFound(stream_id));
-            };
-            debug!(msg = ?set_stream_state, "set_stream_state received");
-            if let Some(playing) = set_stream_state.playing {
-                state.set_playing(playing);
-            }
-            if let Some(timestamp) = set_stream_state.timestamp {
-                state.set_timestamp(timestamp);
-            }
-            if let Some(time_step) = set_stream_state.time_step {
-                state.set_time_step(time_step);
-            }
-            if let Some(frequency) = set_stream_state.frequency {
-                state.set_frequency(frequency);
-            }
+            db.with_state(|s| {
+                let Some(state) = s.streams.get(&stream_id) else {
+                    return Err(Error::StreamNotFound(stream_id));
+                };
+                debug!(msg = ?set_stream_state, "set_stream_state received");
+                if let Some(playing) = set_stream_state.playing {
+                    state.set_playing(playing);
+                }
+                if let Some(timestamp) = set_stream_state.timestamp {
+                    state.set_timestamp(timestamp);
+                }
+                if let Some(time_step) = set_stream_state.time_step {
+                    state.set_time_step(time_step);
+                }
+                if let Some(frequency) = set_stream_state.frequency {
+                    state.set_frequency(frequency);
+                }
+                Ok(())
+            })?;
         }
         Packet::Msg(m) if m.id == GetSchema::ID => {
             let get_schema = m.parse::<GetSchema>()?;
-            let schema = if let Some(component) = db.components.get(&get_schema.component_id) {
-                component.schema.to_schema()
-            } else {
-                return Err(Error::ComponentNotFound(get_schema.component_id));
-            };
+            let schema = db.with_state(|state| {
+                let Some(component) = state.components.get(&get_schema.component_id) else {
+                    return Err(Error::ComponentNotFound(get_schema.component_id));
+                };
+                Ok(component.schema.to_schema())
+            })?;
             let tx = tx.lock().await;
             tx.send(SchemaMsg(schema).to_len_packet()).await.0?;
         }
@@ -733,33 +772,37 @@ async fn handle_packet(
 
             let tx = tx.clone();
             let db = db.clone();
-            stellarator::spawn(async move {
-                let result = (|| {
-                    let Some(component) = db.components.get(&get_time_series.component_id) else {
+            let result = (|| {
+                let entity = db.with_state(|state| {
+                    let Some(component) = state.components.get(&get_time_series.component_id)
+                    else {
                         return Err(Error::ComponentNotFound(get_time_series.component_id));
                     };
                     let Some(entity) = component.entities.get(&get_time_series.entity_id) else {
                         return Err(Error::EntityNotFound(get_time_series.entity_id));
                     };
-                    let Some((timestamps, data)) = entity.get_range(get_time_series.range) else {
-                        return Err(Error::TimeRangeOutOfBounds);
-                    };
-                    let size = component.schema.size();
-                    let (timestamps, data) = if let Some(limit) = get_time_series.limit {
-                        let len = timestamps.len().min(limit);
-                        (&timestamps[..len], &data[..len * size])
-                    } else {
-                        (timestamps, data)
-                    };
-                    let mut pkt = LenPacket::time_series(
-                        get_time_series.id,
-                        data.len() + timestamps.as_bytes().len() + 8,
-                    );
-                    pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
-                    pkt.extend_from_slice(timestamps.as_bytes());
-                    pkt.extend_from_slice(data);
-                    Ok(pkt)
-                })();
+                    Ok(entity.clone())
+                })?;
+                let Some((timestamps, data)) = entity.get_range(get_time_series.range) else {
+                    return Err(Error::TimeRangeOutOfBounds);
+                };
+                let size = entity.schema.size();
+                let (timestamps, data) = if let Some(limit) = get_time_series.limit {
+                    let len = timestamps.len().min(limit);
+                    (&timestamps[..len], &data[..len * size])
+                } else {
+                    (timestamps, data)
+                };
+                let mut pkt = LenPacket::time_series(
+                    get_time_series.id,
+                    data.len() + timestamps.as_bytes().len() + 8,
+                );
+                pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
+                pkt.extend_from_slice(timestamps.as_bytes());
+                pkt.extend_from_slice(data);
+                Ok(pkt)
+            })();
+            stellarator::spawn(async move {
                 let tx = tx.lock().await;
                 match result {
                     Ok(pkt) => {
@@ -776,14 +819,14 @@ async fn handle_packet(
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
-            let metadata = {
-                let Some(component) = db.components.get(&component_id) else {
+            let metadata = db.with_state(|state| {
+                let Some(component) = state.components.get(&component_id) else {
                     return Err(Error::ComponentNotFound(component_id));
                 };
-                component.metadata.load()
-            };
+                Ok(component.metadata.to_len_packet())
+            })?;
             let tx = tx.lock().await;
-            tx.send(metadata.to_len_packet()).await.0?;
+            tx.send(metadata).await.0?;
         }
 
         Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
@@ -793,72 +836,81 @@ async fn handle_packet(
 
         Packet::Msg(m) if m.id == GetEntityMetadata::ID => {
             let GetEntityMetadata { entity_id } = m.parse::<GetEntityMetadata>()?;
-            let msg = {
-                let Some(metadata) = db.entity_metadata.get(&entity_id) else {
+            let msg = db.with_state(|state| {
+                let Some(metadata) = state.entity_metadata.get(&entity_id) else {
                     return Err(Error::EntityNotFound(entity_id));
                 };
-                metadata.to_len_packet()
-            };
+                Ok(metadata.to_len_packet())
+            })?;
             let tx = tx.lock().await;
             tx.send(msg).await.0?;
         }
 
         Packet::Msg(m) if m.id == SetAsset::ID => {
             let set_asset = m.parse::<SetAsset<'_>>()?;
-            db.assets.insert(set_asset.id, &set_asset.buf)?;
+            db.insert_asset(set_asset.id, &set_asset.buf)?;
         }
         Packet::Msg(m) if m.id == GetAsset::ID => {
             let GetAsset { id } = m.parse::<GetAsset>()?;
-            let Some(mmap) = db.assets.get(id) else {
-                return Err(Error::AssetNotFound(id));
-            };
-            let asset = Asset {
-                id,
-                buf: Cow::Borrowed(&mmap[..]),
-            };
+            let packet = db.with_state(|state| {
+                let Some(mmap) = state.assets.get(&id) else {
+                    return Err(Error::AssetNotFound(id));
+                };
+                let asset = Asset {
+                    id,
+                    buf: Cow::Borrowed(&mmap[..]),
+                };
+                Ok(asset.to_len_packet())
+            })?;
             let tx = tx.lock().await;
-            tx.send(asset.to_len_packet()).await.0?;
+            tx.send(packet).await.0?;
         }
         Packet::Msg(m) if m.id == DumpMetadata::ID => {
-            let entity_metadata: Vec<_> = db
-                .entity_metadata
-                .iter()
-                .map(|kv| kv.value().clone())
-                .collect();
-            let component_metadata: Vec<_> = db
-                .components
-                .iter()
-                .map(|kv| kv.value().metadata.load().as_ref().clone())
-                .collect();
-            let msg = DumpMetadataResp {
-                component_metadata,
-                entity_metadata,
-            };
+            let msg = db.with_state(|state| {
+                let component_metadata: Vec<_> = state
+                    .components
+                    .values()
+                    .map(|component| component.metadata.clone())
+                    .collect();
+                let entity_metadata: Vec<_> = state.entity_metadata.values().cloned().collect();
+                DumpMetadataResp {
+                    component_metadata,
+                    entity_metadata,
+                }
+            });
             let tx = tx.lock().await;
             tx.send(msg.to_len_packet()).await.0?;
         }
         Packet::Msg(m) if m.id == DumpSchema::ID => {
-            let schemas = db
-                .components
-                .iter()
-                .map(|c| c.schema.to_schema())
-                .collect::<Vec<_>>();
-            let msg = DumpSchemaResp { schemas };
+            let msg = db.with_state(|state| {
+                let schemas = state
+                    .components
+                    .values()
+                    .map(|c| c.schema.to_schema())
+                    .collect::<Vec<_>>();
+                DumpSchemaResp { schemas }
+            });
 
             let tx = tx.lock().await;
             tx.send(msg.to_len_packet()).await.0?;
         }
 
         Packet::Msg(m) if m.id == DumpAssets::ID => {
-            let tx = tx.lock().await;
-            for kv in db.assets.items.iter() {
-                let (id, mmap) = kv.pair();
+            let packets = db.with_state(|state| {
+                state
+                    .assets
+                    .iter()
+                    .map(|(id, mmap)| Asset {
+                        id: *id,
+                        buf: Cow::Borrowed(&mmap[..]),
+                    })
+                    .map(|asset| asset.to_len_packet())
+                    .collect::<Vec<_>>()
+            });
 
-                let asset = Asset {
-                    id: *id,
-                    buf: Cow::Borrowed(&mmap[..]),
-                };
-                tx.send(asset.to_len_packet()).await.0?;
+            let tx = tx.lock().await;
+            for packet in packets {
+                tx.send(packet).await.0?;
             }
         }
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
@@ -916,9 +968,13 @@ async fn handle_packet(
         }
         Packet::Table(table) => {
             debug!(table.len = table.buf.len(), "sinking table");
-            let registry = db.vtable_registry.read().await;
-            let mut sink = DBSink(db);
-            table.sink(&*registry, &mut sink)?;
+            db.with_state(|state| {
+                let mut sink = DBSink {
+                    components: &state.components,
+                    last_updated: &db.last_updated,
+                };
+                table.sink(&state.vtable_registry, &mut sink)
+            })?;
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
@@ -1048,29 +1104,28 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {
-        filter.visit(&db, |component_id, _, entity| {
-            if visited_ids.contains(&(component_id, entity.entity_id)) {
-                return Ok(());
-            }
-            visited_ids.insert((component_id, entity.entity_id));
-            let stream = stream.clone();
-            let entity_id = entity.entity_id;
-
-            let mut vtable = VTableBuilder::default();
-            entity.add_to_vtable(&mut vtable)?;
-            let vtable = vtable.build();
-            let waiter = entity.time_series.waiter();
-            let db = db.clone();
-            stellarator::spawn(async move {
-                match handle_real_time_entity(stream, component_id, entity_id, waiter, vtable, db)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(err) if err.is_stream_closed() => {}
-                    Err(err) => warn!(?err, "failed to handle real time stream"),
+        db.with_state(|state| {
+            filter.visit(&state.components, |component_id, _, entity| {
+                if visited_ids.contains(&(component_id, entity.entity_id)) {
+                    return Ok(());
                 }
-            });
-            Ok(())
+                visited_ids.insert((component_id, entity.entity_id));
+                let stream = stream.clone();
+
+                let mut vtable = VTableBuilder::default();
+                entity.add_to_vtable(&mut vtable)?;
+                let vtable = vtable.build();
+                let waiter = entity.time_series.waiter();
+                let entity = entity.clone();
+                stellarator::spawn(async move {
+                    match handle_real_time_entity(stream, entity, waiter, vtable).await {
+                        Ok(_) => {}
+                        Err(err) if err.is_stream_closed() => {}
+                        Err(err) => warn!(?err, "failed to handle real time stream"),
+                    }
+                });
+                Ok(())
+            })
         })?;
         db.vtable_gen.wait().await;
     }
@@ -1078,11 +1133,9 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 
 async fn handle_real_time_entity<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
-    component_id: ComponentId,
-    entity_id: EntityId,
+    entity: Entity,
     waiter: Arc<WaitQueue>,
     vtable: VTable<Vec<Entry>, Vec<u8>>,
-    db: Arc<DB>,
 ) -> Result<(), Error> {
     let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     {
@@ -1098,23 +1151,12 @@ async fn handle_real_time_entity<A: AsyncWrite>(
             .await
             .0?;
     }
-    let (time_series, prim_type) = {
-        let component = db
-            .components
-            .get(&component_id)
-            .ok_or(Error::ComponentNotFound(component_id))?;
-        let entity = component
-            .value()
-            .entities
-            .get(&entity_id)
-            .ok_or(Error::EntityNotFound(entity_id))?;
-        (entity.time_series.clone(), component.schema.prim_type)
-    };
 
+    let prim_type = entity.schema.prim_type;
     let mut table = LenPacket::table(vtable_id, 2048 - 16);
     loop {
         let _ = waiter.wait().await;
-        let Some((&timestamp, buf)) = time_series.latest() else {
+        let Some((&timestamp, buf)) = entity.time_series.latest() else {
             continue;
         };
         table.push_aligned(timestamp);
@@ -1135,6 +1177,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
+    let mut components = db.components();
     loop {
         if state
             .playing_cell
@@ -1149,10 +1192,11 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         let current_timestamp = state.current_timestamp();
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
+            components = db.components();
             let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
-            let vtable = state.filter.vtable(&db)?;
+            let vtable = state.filter.vtable(&components)?;
             let msg = VTableMsg { id, vtable };
             stream.send(msg.to_len_packet()).await.0?;
             current_gen = vtable_gen;
@@ -1160,7 +1204,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         table.clear();
         if let Err(err) = state
             .filter
-            .populate_table(&db, &mut table, current_timestamp)
+            .populate_table(&components, &mut table, current_timestamp)
         {
             warn!(?err, "failed to populate table");
         }
@@ -1193,17 +1237,28 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 pub trait StreamFilterExt {
     fn visit(
         &self,
-        db: &DB,
+        components: &HashMap<ComponentId, Component>,
         f: impl for<'a> FnMut(ComponentId, &'a Component, &'a Entity) -> Result<(), Error>,
     ) -> Result<(), Error>;
-    fn vtable(&self, db: &DB) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error>;
-    fn populate_table(&self, db: &DB, table: &mut LenPacket, tick: Timestamp) -> Result<(), Error>;
+    fn vtable(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+    ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error>;
+    fn populate_table(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+        table: &mut LenPacket,
+        tick: Timestamp,
+    ) -> Result<(), Error>;
 }
 
 impl StreamFilterExt for StreamFilter {
-    fn vtable(&self, db: &DB) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {
+    fn vtable(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+    ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {
         let mut vtable = VTableBuilder::default();
-        self.visit(db, |_, _, entity| {
+        self.visit(components, |_, _, entity| {
             entity.add_to_vtable(&mut vtable)?;
             Ok(())
         })?;
@@ -1212,11 +1267,11 @@ impl StreamFilterExt for StreamFilter {
 
     fn populate_table(
         &self,
-        db: &DB,
+        components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
-        self.visit(db, |_, component, entity| {
+        self.visit(components, |_, component, entity| {
             let tick = entity.time_series.start_timestamp().max(timestamp);
             let Some((timestamp, buf)) = entity.get_nearest(tick) else {
                 return Ok(());
@@ -1230,47 +1285,44 @@ impl StreamFilterExt for StreamFilter {
 
     fn visit(
         &self,
-        db: &DB,
+        components: &HashMap<ComponentId, Component>,
         mut f: impl for<'a> FnMut(ComponentId, &'a Component, &'a Entity) -> Result<(), Error>,
     ) -> Result<(), Error> {
         match (self.component_id, self.entity_id) {
             (None, None) => {
-                for kv in &db.components {
-                    for entity_kv in &kv.value().entities {
-                        let entity = entity_kv.value();
-                        f(*kv.key(), kv.value(), entity)?;
+                for (component_id, component) in components {
+                    for entity in component.entities.values() {
+                        f(*component_id, component, entity)?;
                     }
                 }
                 Ok(())
             }
             (None, Some(id)) => {
-                for kv in &db.components {
-                    let component = kv.value();
+                for (component_id, component) in components {
                     let Some(entity) = component.entities.get(&id) else {
                         continue;
                     };
-                    f(*kv.key(), component, entity.value())?;
+                    f(*component_id, component, entity)?;
                 }
                 Ok(())
             }
             (Some(id), None) => {
-                let component = db.components.get(&id).ok_or(Error::ComponentNotFound(id))?;
-                for entity in &component.entities {
-                    f(id, component.value(), entity.value())?;
+                let component = components.get(&id).ok_or(Error::ComponentNotFound(id))?;
+                for entity in component.entities.values() {
+                    f(id, component, entity)?;
                 }
                 Ok(())
             }
 
             (Some(component_id), Some(entity_id)) => {
-                let component = db
-                    .components
+                let component = components
                     .get(&component_id)
                     .ok_or(Error::ComponentNotFound(component_id))?;
                 let entity = component
                     .entities
                     .get(&entity_id)
                     .ok_or(Error::EntityNotFound(entity_id))?;
-                f(component_id, component.value(), entity.value())
+                f(component_id, component, entity)
             }
         }
     }
