@@ -18,7 +18,7 @@ use crate::MainCamera;
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
 pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
 
-#[derive(Bundle)]
+#[derive(Bundle, Clone)]
 pub struct GraphBundle {
     pub graph_state: GraphState,
     pub camera: Camera,
