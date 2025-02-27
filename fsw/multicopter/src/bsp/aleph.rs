@@ -66,6 +66,10 @@ pub struct Pins {
     // USART6, AF: 7
     pub pg14: Pin, // TX
 
+    // UART8, AF: 8
+    pub pe0: Pin, // RX
+    pub pe1: Pin, // TX
+
     // SPI 1, AF: 5
     pub pg11: Pin, // SCK
     pub pd7: Pin,  // MOSI
@@ -169,6 +173,9 @@ impl Pins {
             pb4: Pin::new(Port::B, 4, PinMode::Alt(11)),
 
             pg14: Pin::new(Port::G, 14, PinMode::Alt(7)),
+
+            pe0: Pin::new(Port::E, 0, PinMode::Alt(8)),
+            pe1: Pin::new(Port::E, 1, PinMode::Alt(8)),
 
             pg11: Pin::new(Port::G, 11, PinMode::Alt(5)),
             pd7: Pin::new(Port::D, 7, PinMode::Alt(5)),

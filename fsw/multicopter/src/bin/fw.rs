@@ -7,6 +7,7 @@ use alloc::boxed::Box;
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
+use embedded_io::Write;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 use zerocopy::IntoBytes;
@@ -20,7 +21,7 @@ const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
 const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
 
-const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(100);
+const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(50);
 const USB_LOG_PERIOD: fugit::MicrosDuration<u64> = USB_LOG_RATE.into_duration();
 
 #[cortex_m_rt::entry]
@@ -34,8 +35,6 @@ fn main() -> ! {
         pd10: led_sg0,
         pb15: mut _led_sb0,
         pb14: mut led_sa0,
-        pa11: usb_dm,
-        pa12: usb_dp,
         ..
     } = pins;
     defmt::info!("Configured peripherals");
@@ -67,6 +66,14 @@ fn main() -> ! {
     )));
     defmt::info!("Configured ELRS UART");
     let mut crsf = crsf::CrsfReceiver::new(elrs_uart);
+
+    let mut uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
+        dp.UART8,
+        115200,
+        usart::UsartConfig::default(),
+        &clock_cfg,
+    )));
+    defmt::info!("Configured UART bridge");
 
     // Generate a 600kHz PWM signal on TIM3
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
@@ -117,17 +124,6 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
-    let usb_bus = usb_serial::usb_bus(
-        dp.OTG2_HS_GLOBAL,
-        dp.OTG2_HS_DEVICE,
-        dp.OTG2_HS_PWRCLK,
-        &clock_cfg,
-        usb_dm,
-        usb_dp,
-    );
-    let mut usb_serial = usb_serial::UsbSerial::new(&usb_bus);
-    defmt::info!("Configured usb_serial");
-
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
@@ -135,7 +131,7 @@ fn main() -> ! {
 
     led_sa0.set_low();
     loop {
-        usb_serial.poll();
+        // usb_serial.poll();
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
 
@@ -173,8 +169,8 @@ fn main() -> ! {
             };
             let mut cobs = [0u8; 128];
             let len = cobs::encode(record.as_bytes(), &mut cobs[1..]);
-            let _ = usb_serial.write(&cobs[0..=len]);
-            let _ = usb_serial.flush();
+            let _ = uart_bridge.write_all(&cobs[0..=len]);
+            let _ = uart_bridge.flush();
         }
 
         running_led.update(now);
