@@ -568,11 +568,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
     })?;
     lua.globals().set(
         "VTableBuilder",
-        lua.create_function(|_, id: u32| {
-            Ok(LuaVTableBuilder::new(
-                id.to_le_bytes()[..3].try_into().expect("unreachable"),
-            ))
-        })?,
+        lua.create_function(|_, id: u16| Ok(LuaVTableBuilder::new(id.to_le_bytes())))?,
     )?;
     lua.globals().set("connect", client)?;
     lua.globals().set(

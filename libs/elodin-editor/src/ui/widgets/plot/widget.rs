@@ -1,3 +1,4 @@
+use crate::editor_cam_touch::*;
 use bevy::{
     asset::Assets,
     ecs::{
@@ -1016,6 +1017,68 @@ impl PlotPoint {
     }
 }
 
+pub fn graph_touch(
+    mut query: Query<(&mut GraphState, &Camera)>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    touch_tracker: Res<TouchTracker>,
+) {
+    let Ok(window) = primary_window.get_single() else {
+        return;
+    };
+
+    let touch_gestures = touch_tracker.get_touch_gestures();
+
+    let midpoint = match touch_gestures {
+        TouchGestures::OneFinger(one_finger) => one_finger.midpoint,
+        TouchGestures::TwoFinger(two_finger) => two_finger.midpoint,
+        _ => return,
+    };
+
+    for (mut graph_state, cam) in query.iter_mut() {
+        let Some(viewport_rect) = cam.logical_viewport_rect() else {
+            continue;
+        };
+
+        let Some(viewport) = &cam.viewport else {
+            continue;
+        };
+
+        if !viewport_rect.contains(midpoint) {
+            continue;
+        }
+        let area = (viewport_rect.height() * viewport_rect.width()).sqrt();
+
+        match touch_gestures {
+            // orbit
+            TouchGestures::OneFinger(gesture) => {
+                let delta_device_pixels = gesture.motion;
+                let delta = delta_device_pixels / viewport_rect.size() * graph_state.zoom_factor;
+                graph_state.pan_offset += delta;
+            }
+            TouchGestures::TwoFinger(gesture) => {
+                let cursor_pos = midpoint * window.scale_factor();
+                let scroll_offset = gesture.pinch / area * window.scale_factor();
+                let old_scale = graph_state.zoom_factor;
+                graph_state.zoom_factor *= 1. - scroll_offset;
+                graph_state.zoom_factor = graph_state.zoom_factor.clamp(Vec2::ZERO, Vec2::ONE);
+
+                let cursor_pos = (cursor_pos - viewport.physical_position.as_vec2())
+                    - viewport.physical_size.as_vec2() / 2.;
+                let cursor_normalized_screen_pos = cursor_pos / viewport.physical_size.as_vec2();
+                let cursor_normalized_screen_pos = Vec2::new(
+                    cursor_normalized_screen_pos.x,
+                    cursor_normalized_screen_pos.y,
+                );
+
+                let delta = (old_scale - graph_state.zoom_factor) * cursor_normalized_screen_pos;
+
+                graph_state.pan_offset -= delta;
+            }
+            TouchGestures::None => {}
+        }
+    }
+}
+
 pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
     scroll_events: EventReader<MouseWheel>,
@@ -1033,7 +1096,7 @@ pub fn zoom_graph(
         return;
     };
 
-    let cursor_pos = window.physical_cursor_position();
+    let cursor_pos = dbg!(window.physical_cursor_position());
 
     for (mut graph_state, camera) in &mut query {
         let Some(cursor_pos) = cursor_pos else {
