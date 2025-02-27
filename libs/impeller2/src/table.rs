@@ -237,42 +237,56 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTable<EntryBuf, DataBuf> {
         })
     }
 
-    pub fn id_pair_iter(&self) -> impl Iterator<Item = (EntityId, ComponentId)> + '_ {
+    pub fn id_pair_iter(
+        &self,
+    ) -> impl Iterator<Item = (EntityId, ComponentId, PrimType, &[usize])> + '_ {
         let columns = self
             .entries
             .iter()
             .filter_map(|e| match e {
                 Entry::Column(e) => {
+                    let prim_type = e.shape_entry.prim_type;
+                    let shape = e.shape_entry.parse_shape(self.data.as_slice()).ok()?;
                     let ids = e
                         .entity_ids_entry
                         .parse(self.data.as_slice(), e.len as usize)
                         .ok()?;
-                    Some((e.component_id, ids))
+                    Some((e.component_id, prim_type, shape, ids))
                 }
                 _ => None,
             })
-            .flat_map(|(component_id, ids)| {
+            .flat_map(|(component_id, prim_type, shape, ids)| {
                 ids.iter()
                     .copied()
-                    .map(move |entity_id| (entity_id, component_id))
+                    .map(move |entity_id| (entity_id, component_id, prim_type, shape))
             });
         let entities = self
             .entries
             .iter()
             .filter_map(|e| match e {
                 Entry::Entity(e) => {
+                    let shape_entries = e
+                        .shapes_entry
+                        .parse(self.data.as_slice(), e.len as usize)
+                        .ok()?;
                     let ids = e
                         .component_ids_entry
                         .parse(self.data.as_slice(), e.len as usize)
                         .ok()?;
-                    Some((e.entity_id, ids))
+                    Some((e.entity_id, ids, shape_entries))
                 }
                 _ => None,
             })
-            .flat_map(|(entity_id, ids)| {
-                ids.iter()
-                    .copied()
-                    .map(move |component_id| (entity_id, component_id))
+            .flat_map(|(entity_id, ids, shape_entries)| {
+                let prim_types = shape_entries.iter().map(|s| s.prim_type);
+                let shapes = shape_entries
+                    .iter()
+                    .map(|s| s.parse_shape(self.data.as_slice()).ok().unwrap());
+                ids.iter().copied().zip(prim_types).zip(shapes).map(
+                    move |((component_id, prim_type), shape)| {
+                        (entity_id, component_id, prim_type, shape)
+                    },
+                )
             });
         columns.chain(entities)
     }

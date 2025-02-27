@@ -10,8 +10,8 @@ use std::{
     path::Path,
     slice::{self, SliceIndex},
     sync::{
-        Arc,
-        atomic::{self, AtomicU64},
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -24,11 +24,11 @@ use std::{
 /// ```
 ///
 /// When a `AppendLog` is created or opened you get access to both a [`TimeSeries`] and an associated [`TimeSeriesWriter`]. [`TimeSeries`] is a read only view into the time series,
-/// giving you access to only the committed data. [`AppendLogWriter`] provides write access to the `head` of the [`TimeSeries`] with [`TimeSeriesWriter::write_head`]. It also provides the ability to commit the current head using
-/// [`AppendLogWriter::commit_head_copy`]
+/// giving you access to only the committed data. [`AppendLogWriter`] provides write access to the `head` of the [`TimeSeries`] with [`TimeSeriesWriter::write_head`].
 pub struct AppendLog<E> {
     map: Arc<memmap2::MmapRaw>,
     header_extra: PhantomData<E>,
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl<E> Clone for AppendLog<E> {
@@ -36,6 +36,7 @@ impl<E> Clone for AppendLog<E> {
         Self {
             map: self.map.clone(),
             header_extra: PhantomData,
+            write_lock: self.write_lock.clone(),
         }
     }
 }
@@ -48,7 +49,7 @@ struct Header<E> {
 }
 
 impl<E: IntoBytes + Immutable> AppendLog<E> {
-    pub fn create(path: impl AsRef<Path>, extra: E) -> Result<(Self, AppendLogWriter<E>), Error> {
+    pub fn create(path: impl AsRef<Path>, extra: E) -> Result<Self, Error> {
         const FILE_SIZE: u64 = 1024 * 1024 * 1024 * 8; // 8gb
         let mut file = OpenOptions::new()
             .create_new(true)
@@ -61,6 +62,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
         let map = Self {
             map,
             header_extra: PhantomData,
+            write_lock: Arc::new(Mutex::new(())),
         };
         unsafe {
             let map = map.map.as_mut_ptr().add(size_of::<AtomicU64>() * 2);
@@ -68,21 +70,20 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
             extra_buf.copy_from_slice(extra.as_bytes());
         }
         map.committed_len()
-            .store(size_of::<Header<E>>() as u64, atomic::Ordering::SeqCst);
-        map.head_len().store(0, atomic::Ordering::SeqCst);
-        let writer = AppendLogWriter { inner: map.clone() };
-        Ok((map, writer))
+            .store(size_of::<Header<E>>() as u64, Ordering::SeqCst);
+        map.head_len().store(0, Ordering::SeqCst);
+        Ok(map)
     }
 
-    pub fn open(path: impl AsRef<Path>) -> Result<(Self, AppendLogWriter<E>), Error> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let file = OpenOptions::new().write(true).read(true).open(path)?;
         let map = Arc::new(memmap2::MmapRaw::map_raw(file.as_raw_fd())?);
         let map = Self {
             map,
             header_extra: PhantomData,
+            write_lock: Arc::new(Mutex::new(())),
         };
-        let writer = AppendLogWriter { inner: map.clone() };
-        Ok((map, writer))
+        Ok(map)
     }
 
     /// Returns a slice of data offset into the committed data region of the [`AppendLog`]
@@ -117,7 +118,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
 
     /// The current committed length, excluding the `HEADER_SIZE`
     pub fn len(&self) -> u64 {
-        self.committed_len().load(atomic::Ordering::Acquire) - size_of::<Header<E>>() as u64
+        self.committed_len().load(Ordering::Acquire) - size_of::<Header<E>>() as u64
     }
 
     pub fn is_empty(&self) -> bool {
@@ -126,92 +127,36 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
 
     pub fn data(&self) -> &[u8] {
         let slice: &[u8] = unsafe { slice::from_raw_parts(self.map.as_mut_ptr(), self.map.len()) };
-        let end = self.committed_len().load(atomic::Ordering::Acquire) as usize;
+        let end = self.committed_len().load(Ordering::Acquire) as usize;
         &slice[size_of::<Header<E>>()..end]
     }
 
     pub(crate) fn raw_mmap(&self) -> &Arc<MmapRaw> {
         &self.map
     }
-}
 
-pub struct AppendLogWriter<E> {
-    pub inner: AppendLog<E>,
-}
-
-impl<E: IntoBytes + Immutable> AppendLogWriter<E> {
-    /// Grant's access to a mutable buffer of `AppendLog` that can be written into
-    pub fn head_mut(&mut self, len: usize) -> Result<&mut [u8], Error> {
+    pub fn write(&self, buf: &[u8]) -> Result<(), Error> {
+        let guard = self.write_lock.lock().unwrap();
         let slice: &mut [u8] =
-            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
+            unsafe { slice::from_raw_parts_mut(self.map.as_mut_ptr(), self.map.len()) };
 
-        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
-        let head_end = end.checked_add(len).ok_or(Error::MapOverflow)?;
+        let end = self.committed_len().load(Ordering::Acquire) as usize;
+        let head_end = end.checked_add(buf.len()).ok_or(Error::MapOverflow)?;
         if head_end > slice.len() {
             return Err(Error::MapOverflow);
         }
         let slice = slice.get_mut(end..head_end).ok_or(Error::MapOverflow)?;
-        self.inner
-            .head_len()
-            .store(len as u64, atomic::Ordering::Release);
-        Ok(slice)
-    }
+        self.head_len().store(buf.len() as u64, Ordering::Release);
 
-    pub fn head(&self) -> Result<&[u8], Error> {
-        let len = self.inner.head_len().load(atomic::Ordering::Acquire) as usize;
+        slice.copy_from_slice(buf);
 
-        let slice: &mut [u8] =
-            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
-
-        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
-        let head_end = end.checked_add(len).ok_or(Error::MapOverflow)?;
-        if head_end > slice.len() {
-            return Err(Error::MapOverflow);
-        }
-        let slice = slice.get_mut(end..head_end).ok_or(Error::MapOverflow)?;
-        Ok(slice)
-    }
-
-    /// Commits the existing head into the committed data region, by advancing the `committed_len` value.
-    /// The current head value is also copied into the new head region.
-    pub fn commit_head_copy(&mut self) -> Result<(), Error> {
-        let slice: &mut [u8] =
-            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
-        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
-        let head_len = self.inner.head_len().load(atomic::Ordering::Acquire) as usize;
+        let end = self.committed_len().load(Ordering::Acquire) as usize;
+        let head_len = self.head_len().load(Ordering::Acquire) as usize;
         let head_end = end.checked_add(head_len).ok_or(Error::MapOverflow)?;
-
-        let new_head_end = head_end.checked_add(head_len).ok_or(Error::MapOverflow)?;
-        let heads = slice.get_mut(end..new_head_end).ok_or(Error::MapOverflow)?;
-        let (head, new_head) = heads.split_at_mut(head_len);
-        new_head.copy_from_slice(head);
-        self.inner
-            .committed_len()
-            .store(head_end as u64, atomic::Ordering::Release);
-
-        Ok(())
-    }
-
-    /// Commits the existing head into the committed data region, by advancing the `committed_len` value.
-    /// The current head value is also copied into the new head region.
-    pub fn commit_head(&mut self, head: &[u8]) -> Result<(), Error> {
-        let slice: &mut [u8] =
-            unsafe { slice::from_raw_parts_mut(self.inner.map.as_mut_ptr(), self.inner.map.len()) };
-        let end = self.inner.committed_len().load(atomic::Ordering::Acquire) as usize;
-        let head_len = self.inner.head_len().load(atomic::Ordering::Acquire) as usize;
-        let head_end = end.checked_add(head_len).ok_or(Error::MapOverflow)?;
-
-        let new_head_end = head_end.checked_add(head.len()).ok_or(Error::MapOverflow)?;
-        let heads = slice.get_mut(end..new_head_end).ok_or(Error::MapOverflow)?;
-        let (_, new_head) = heads.split_at_mut(head_len);
-        new_head.copy_from_slice(head);
-        self.inner
-            .head_len()
-            .store(head.len() as u64, atomic::Ordering::Release);
-        self.inner
-            .committed_len()
-            .store(head_end as u64, atomic::Ordering::Release);
-
+        self.head_len().store(0, Ordering::Release);
+        self.committed_len()
+            .store(head_end as u64, Ordering::Release);
+        drop(guard);
         Ok(())
     }
 }

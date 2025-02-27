@@ -36,7 +36,13 @@ impl Exec {
         nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
-            nox_ecs::impeller2_server::commit_world_head(&self.db, &mut self.exec, timestamp)?;
+            self.db.with_state(|state| {
+                nox_ecs::impeller2_server::commit_world_head(
+                    &state.components,
+                    &mut self.exec,
+                    timestamp,
+                )
+            })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;
             progress_bar.inc(1);
@@ -60,11 +66,13 @@ impl Exec {
         entity_id: EntityId,
     ) -> Result<Bound<'a, PyAny>, Error> {
         let id = ComponentId::new(&component_name);
-        let component = self
-            .db
-            .components
-            .get(&id)
-            .ok_or(elodin_db::Error::ComponentNotFound(id))?;
+        let component = self.db.with_state(|state| {
+            state
+                .components
+                .get(&id)
+                .cloned()
+                .ok_or(elodin_db::Error::ComponentNotFound(id))
+        })?;
         let entity_id = entity_id.inner;
         let entity = component
             .entities
@@ -80,7 +88,7 @@ impl Exec {
                 .expect("failed to get data")
                 .1,
             &entity.schema,
-            &component.metadata.load(),
+            &component.metadata,
             path.clone(),
         )?;
 

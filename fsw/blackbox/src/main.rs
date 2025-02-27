@@ -24,7 +24,7 @@ fn main() {
     let mut input = input.as_slice();
 
     println!(
-        "ts,mag_x,mag_y,mag_z,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,mag_temp,mag_sample"
+        "ts,mag_x,mag_y,mag_z,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,mag_temp,mag_sample,baro,baro_temp"
     );
     while let Ok((record, remaining)) = Record::read_from_prefix(input) {
         println!(

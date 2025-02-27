@@ -5,10 +5,7 @@ use stellarator::sync::WaitQueue;
 use tracing::warn;
 use zerocopy::FromBytes;
 
-use crate::{
-    Error,
-    append_log::{AppendLog, AppendLogWriter},
-};
+use crate::{Error, append_log::AppendLog};
 
 #[derive(Clone)]
 pub struct TimeSeries {
@@ -17,52 +14,36 @@ pub struct TimeSeries {
     data_waker: Arc<WaitQueue>,
 }
 
-pub struct TimeSeriesWriter {
-    index_writer: AppendLogWriter<Timestamp>,
-    data_writer: AppendLogWriter<u64>,
-    data_waker: Arc<WaitQueue>,
-}
-
 impl TimeSeries {
     pub fn create(
         path: impl AsRef<Path>,
         start_timestamp: Timestamp,
         element_size: u64,
-    ) -> Result<(Self, TimeSeriesWriter), Error> {
+    ) -> Result<Self, Error> {
         let path = path.as_ref();
         std::fs::create_dir_all(path)?;
-        let (index, index_writer) = AppendLog::create(path.join("index"), start_timestamp)?;
-        let (data, data_writer) = AppendLog::create(path.join("data"), element_size)?;
+        let index = AppendLog::create(path.join("index"), start_timestamp)?;
+        let data = AppendLog::create(path.join("data"), element_size)?;
         let data_waker = Arc::new(WaitQueue::new());
         let time_series = Self {
             index,
             data,
             data_waker: data_waker.clone(),
         };
-        let writer = TimeSeriesWriter {
-            index_writer,
-            data_writer,
-            data_waker,
-        };
-        Ok((time_series, writer))
+        Ok(time_series)
     }
 
-    pub fn open(path: impl AsRef<Path>) -> Result<(Self, TimeSeriesWriter), Error> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let (index, index_writer) = AppendLog::open(path.join("index"))?;
-        let (data, data_writer) = AppendLog::open(path.join("data"))?;
+        let index = AppendLog::open(path.join("index"))?;
+        let data = AppendLog::open(path.join("data"))?;
         let data_waker = Arc::new(WaitQueue::new());
         let time_series = Self {
             index,
             data,
             data_waker: data_waker.clone(),
         };
-        let writer = TimeSeriesWriter {
-            index_writer,
-            data_writer,
-            data_waker,
-        };
-        Ok((time_series, writer))
+        Ok(time_series)
     }
 
     pub fn start_timestamp(&self) -> Timestamp {
@@ -147,23 +128,15 @@ impl TimeSeries {
     pub(crate) fn index(&self) -> &AppendLog<Timestamp> {
         &self.index
     }
-}
 
-impl TimeSeriesWriter {
-    pub fn push_with_buf(
-        &mut self,
-        timestamp: Timestamp,
-        buf_len: usize,
-        f: impl FnOnce(&mut [u8]),
-    ) -> Result<(), Error> {
-        let len = self.index_writer.inner.len() as usize;
+    pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
+        let len = self.index.len() as usize;
 
         // check if timestamp is greater than the last timestamp
         // to ensure index is ordered
         if len > 0 {
             let last_timestamp = self
-                .index_writer
-                .inner
+                .index
                 .get(len - size_of::<i64>()..len)
                 .expect("couldn't find last timestamp");
             let last_timestamp = Timestamp::from_le_bytes(
@@ -178,17 +151,12 @@ impl TimeSeriesWriter {
         }
 
         // write new data to head of data writer
-        f(self.data_writer.head_mut(buf_len)?);
-        self.data_writer.commit_head(&[])?;
+        self.data.write(buf)?;
 
         // always write index last so we get consistent reads
-        self.index_writer
-            .head_mut(8)?
-            .copy_from_slice(&timestamp.to_le_bytes());
-        self.index_writer.commit_head(&[])?;
+        self.index.write(&timestamp.to_le_bytes())?;
 
         self.data_waker.wake_all();
-
         Ok(())
     }
 }
