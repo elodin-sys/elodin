@@ -13,6 +13,7 @@ impl Plugin for PlotPlugin {
         app.init_resource::<CollectedGraphData>()
             .add_systems(Startup, setup_pkt_handler)
             .add_systems(Update, zoom_graph)
+            .add_systems(Update, graph_touch)
             .add_systems(Update, pan_graph)
             .add_systems(Update, reset_graph)
             .add_systems(Update, queue_timestamp_read)
