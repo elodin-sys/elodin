@@ -18,7 +18,8 @@ typedef struct packet_header_t packet_header_t;
 struct packet_header_t {
     uint32_t len;
     uint8_t ty;
-    uint8_t packet_id[3];
+    uint8_t packet_id[2];
+    uint8_t request_id;
 };
 
 typedef struct sensor_data_t sensor_data_t;
@@ -73,7 +74,8 @@ int main() {
     packet_header_t sensor_data_header = {
         .len = 4 + sizeof(sensor_data),
         .ty = TABLE,
-        .packet_id = {1, 0, 0},
+        .packet_id = {1, 0},
+        .request_id = 0,
     };
 
     // Send sin wave data continuously

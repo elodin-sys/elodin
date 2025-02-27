@@ -18,15 +18,15 @@ sensor_vt:column(pressure_id, "f32", {}, entity_ids)
 sensor_vt:column(humidity_id, "f32", {}, entity_ids)
 
 msgs = {
-	sensor_vt:msg(),
-	SetEntityMetadata({ entity_id = entity_ids[1], name = "Vehicle" }):msg(),
-	SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }):msg(),
-	SetComponentMetadata({ component_id = mag_id, name = "mag", metadata = { priority = "99" } }):msg(),
-	SetComponentMetadata({ component_id = gyro_id, name = "gyro", metadata = { priority = "98" } }):msg(),
-	SetComponentMetadata({ component_id = accel_id, name = "accel", metadata = { priority = "97" } }):msg(),
-	SetComponentMetadata({ component_id = temp_id, name = "temp", metadata = { priority = "96" } }):msg(),
-	SetComponentMetadata({ component_id = pressure_id, name = "pressure", metadata = { priority = "95" } }):msg(),
-	SetComponentMetadata({ component_id = humidity_id, name = "humidity", metadata = { priority = "94" } }):msg(),
+	sensor_vt,
+	SetEntityMetadata({ entity_id = entity_ids[1], name = "Vehicle" }),
+	SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }),
+	SetComponentMetadata({ component_id = mag_id, name = "mag", metadata = { priority = "99" } }),
+	SetComponentMetadata({ component_id = gyro_id, name = "gyro", metadata = { priority = "98" } }),
+	SetComponentMetadata({ component_id = accel_id, name = "accel", metadata = { priority = "97" } }),
+	SetComponentMetadata({ component_id = temp_id, name = "temp", metadata = { priority = "96" } }),
+	SetComponentMetadata({ component_id = pressure_id, name = "pressure", metadata = { priority = "95" } }),
+	SetComponentMetadata({ component_id = humidity_id, name = "humidity", metadata = { priority = "94" } }),
 }
 
 client = connect("127.0.0.1:2240")

@@ -16,7 +16,8 @@ enum class PacketType : uint8_t {
 struct PacketHeader {
     uint32_t len;
     PacketType ty;
-    std::array<uint8_t, 3> packet_id;
+    std::array<uint8_t, 2> packet_id;
+    uint8_t request_id;
 };
 
 struct SensorData {
@@ -88,7 +89,8 @@ int main() try {
     auto table_header = PacketHeader {
       .len = 4 + sizeof(sensor_data),
       .ty = PacketType::TABLE,
-      .packet_id = {1, 0, 0},
+      .packet_id = {1, 0},
+      .request_id = 0,
     };
 
     while (true) {
