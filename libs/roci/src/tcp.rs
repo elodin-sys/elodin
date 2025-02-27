@@ -147,7 +147,7 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
     let initial_msgs = move |_| {
         vtable
             .id_pair_iter()
-            .map(|(entity_id, component_id)| {
+            .map(|(entity_id, component_id, _, _)| {
                 Stream {
                     filter: StreamFilter {
                         component_id: Some(component_id),

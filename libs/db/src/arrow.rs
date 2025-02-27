@@ -125,59 +125,64 @@ impl DB {
         use datafusion::prelude::*;
         let config = SessionConfig::new().set_bool("datafusion.catalog.information_schema", true);
         let ctx = SessionContext::new_with_config(config);
-        for component in &self.components {
-            let metadata = component.metadata.load();
-            for entity_kv in component.entities.iter() {
-                let (entity_id, entity) = entity_kv.pair();
-                let Some(entity_metadata) = self.entity_metadata.get(entity_id) else {
-                    continue;
-                };
-                let entity_name = entity_metadata.name.to_case(convert_case::Case::Snake);
-                let component_name = metadata.name.to_case(convert_case::Case::Snake);
-                let name = format!("{entity_name}_{component_name}");
-                let mem_table = entity.as_mem_table(component_name);
-                ctx.register_table(name, Arc::new(mem_table))?;
+        self.with_state(|state| {
+            for component in state.components.values() {
+                for (entity_id, entity) in &component.entities {
+                    let Some(entity_metadata) = state.entity_metadata.get(entity_id) else {
+                        continue;
+                    };
+                    let entity_name = entity_metadata.name.to_case(convert_case::Case::Snake);
+                    let component_name = component.metadata.name.to_case(convert_case::Case::Snake);
+                    let name = format!("{entity_name}_{component_name}");
+                    let mem_table = entity.as_mem_table(component_name);
+                    ctx.register_table(name, Arc::new(mem_table))?;
+                }
             }
-        }
+            Ok::<_, datafusion::error::DataFusionError>(())
+        })?;
         Ok(ctx)
     }
     pub async fn insert_views(
         &self,
         ctx: &mut SessionContext,
     ) -> Result<(), datafusion::error::DataFusionError> {
-        for kv in self.entity_metadata.iter() {
-            let entity_id = kv.key();
-            let entity_name = kv.value().name.to_case(Case::Snake);
-            let mut view_query_end = "".to_string();
-            let mut selects = vec![];
-            let mut first_table = None;
-            for kv in &self.components {
-                let component = kv.value();
-                let metadata = component.metadata.load();
-                let component_name = metadata.name.to_case(Case::Snake);
-                if component.entities.contains_key(entity_id) {
-                    let table = format!("{entity_name}_{component_name}");
-                    selects.push(format!("{table:?}.{component_name:?}"));
-                    if let Some(first_table) = &first_table {
-                        view_query_end = format!(
-                            "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
-                        );
-                    } else {
-                        first_table = Some(table);
+        let queries = self.with_state(|state| {
+            let mut queries = vec![];
+            for (entity_id, entity_metadata) in state.entity_metadata.iter() {
+                let entity_name = entity_metadata.name.to_case(Case::Snake);
+                let mut view_query_end = "".to_string();
+                let mut selects = vec![];
+                let mut first_table = None;
+                for component in state.components.values() {
+                    let component_name = component.metadata.name.to_case(Case::Snake);
+                    if component.entities.contains_key(entity_id) {
+                        let table = format!("{entity_name}_{component_name}");
+                        selects.push(format!("{table:?}.{component_name:?}"));
+                        if let Some(first_table) = &first_table {
+                            view_query_end = format!(
+                                "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
+                            );
+                        } else {
+                            first_table = Some(table);
+                        }
                     }
                 }
+                let Some(first_table) = first_table else {
+                    continue;
+                };
+                if selects.is_empty() {
+                    continue;
+                }
+                selects.push(format!("{first_table:?}.time"));
+                let selects = selects.join(",");
+                let view_query = dbg!(format!(
+                    "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table:?} {view_query_end}"
+                ));
+                queries.push(view_query);
             }
-            let Some(first_table) = first_table else {
-                continue;
-            };
-            if selects.is_empty() {
-                continue;
-            }
-            selects.push(format!("{first_table:?}.time"));
-            let selects = selects.join(",");
-            let view_query = dbg!(format!(
-                "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table:?} {view_query_end}"
-            ));
+            queries
+        });
+        for view_query in queries {
             ctx.sql(&view_query).await?.collect().await?;
         }
         Ok(())

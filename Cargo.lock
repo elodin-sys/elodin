@@ -4384,6 +4384,7 @@ dependencies = [
  "memmap2",
  "miette",
  "nox",
+ "parking_lot",
  "postcard",
  "serde",
  "smallvec",
