@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, time::Duration};
 
-use impeller2::types::{LenPacket, MsgExt};
+use impeller2::types::{LenPacket, MsgExt, PacketId};
 use impeller2::{
     table::VTableBuilder,
     types::{EntityId, PrimType},
@@ -38,9 +38,7 @@ async fn connect() -> anyhow::Result<()> {
     vtable.column("baro", PrimType::F32, [], [EntityId(0)])?;
 
     let vtable = vtable.build();
-    let id: [u8; 3] = fastrand::u64(..).to_le_bytes()[..3]
-        .try_into()
-        .expect("id wrong size");
+    let id: PacketId = fastrand::u16(..).to_le_bytes();
     let msg = VTableMsg { id, vtable };
     tx.send(msg.to_len_packet()).await.0?;
     let mut port = serialport::new("/dev/ttyACM0", 115200)

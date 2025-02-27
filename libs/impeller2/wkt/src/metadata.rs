@@ -22,7 +22,7 @@ impl ComponentMetadata {
 }
 
 impl Msg for ComponentMetadata {
-    const ID: PacketId = [224, 0, 11];
+    const ID: PacketId = [224, 11];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -35,7 +35,7 @@ pub struct EntityMetadata {
 }
 
 impl Msg for EntityMetadata {
-    const ID: PacketId = [224, 0, 11];
+    const ID: PacketId = [224, 30];
 }
 
 pub trait MetadataExt {

@@ -24,7 +24,7 @@ pub struct VTableMsg {
 }
 
 impl Msg for VTableMsg {
-    const ID: PacketId = [224, 0, 0];
+    const ID: PacketId = [224, 0];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -68,7 +68,7 @@ pub struct StreamFilter {
 }
 
 impl Msg for Stream {
-    const ID: PacketId = [224, 0, 1];
+    const ID: PacketId = [224, 1];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -93,7 +93,7 @@ impl SetStreamState {
 }
 
 impl Msg for SetStreamState {
-    const ID: PacketId = [224, 0, 2];
+    const ID: PacketId = [224, 2];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -106,13 +106,13 @@ pub struct GetTimeSeries {
 }
 
 impl Msg for GetTimeSeries {
-    const ID: PacketId = [224, 0, 3];
+    const ID: PacketId = [224, 3];
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct SchemaMsg(pub Schema<Vec<u64>>);
 impl Msg for SchemaMsg {
-    const ID: PacketId = [224, 0, 4];
+    const ID: PacketId = [224, 4];
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,7 +121,7 @@ pub struct GetSchema {
 }
 
 impl Msg for GetSchema {
-    const ID: PacketId = [224, 0, 5];
+    const ID: PacketId = [224, 5];
 }
 
 impl Request for GetSchema {
@@ -134,7 +134,7 @@ pub struct GetComponentMetadata {
 }
 
 impl Msg for GetComponentMetadata {
-    const ID: PacketId = [224, 0, 6];
+    const ID: PacketId = [224, 6];
 }
 
 impl Request for GetComponentMetadata {
@@ -147,7 +147,7 @@ pub struct GetEntityMetadata {
 }
 
 impl Msg for GetEntityMetadata {
-    const ID: PacketId = [224, 0, 7];
+    const ID: PacketId = [224, 7];
 }
 
 impl Request for GetEntityMetadata {
@@ -159,7 +159,7 @@ impl Request for GetEntityMetadata {
 pub struct SetComponentMetadata(pub ComponentMetadata);
 
 impl Msg for SetComponentMetadata {
-    const ID: PacketId = [224, 0, 8];
+    const ID: PacketId = [224, 8];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -167,7 +167,7 @@ impl Msg for SetComponentMetadata {
 pub struct SetEntityMetadata(pub EntityMetadata);
 
 impl Msg for SetEntityMetadata {
-    const ID: PacketId = [224, 0, 9];
+    const ID: PacketId = [224, 9];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -177,7 +177,7 @@ pub struct SetAsset<'a> {
 }
 
 impl Msg for SetAsset<'_> {
-    const ID: PacketId = [224, 0, 12];
+    const ID: PacketId = [224, 12];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -186,7 +186,7 @@ pub struct GetAsset {
 }
 
 impl Msg for GetAsset {
-    const ID: PacketId = [224, 0, 13];
+    const ID: PacketId = [224, 13];
 }
 
 impl Request for GetAsset {
@@ -197,7 +197,7 @@ impl Request for GetAsset {
 pub struct DumpMetadata;
 
 impl Msg for DumpMetadata {
-    const ID: PacketId = [224, 0, 14];
+    const ID: PacketId = [224, 14];
 }
 
 impl Request for DumpMetadata {
@@ -211,25 +211,25 @@ pub struct DumpMetadataResp {
 }
 
 impl Msg for DumpMetadataResp {
-    const ID: PacketId = [224, 0, 15];
+    const ID: PacketId = [224, 15];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DumpAssets;
 
 impl Msg for DumpAssets {
-    const ID: PacketId = [224, 0, 16];
+    const ID: PacketId = [224, 16];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SubscribeLastUpdated;
 
 impl Msg for SubscribeLastUpdated {
-    const ID: PacketId = [224, 0, 17];
+    const ID: PacketId = [224, 17];
 }
 
 impl Msg for LastUpdated {
-    const ID: PacketId = [224, 0, 18];
+    const ID: PacketId = [224, 18];
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -239,7 +239,7 @@ pub struct SetDbSettings {
 }
 
 impl Msg for SetDbSettings {
-    const ID: PacketId = [224, 0, 19];
+    const ID: PacketId = [224, 19];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -250,21 +250,21 @@ pub struct DbSettings {
 }
 
 impl Msg for DbSettings {
-    const ID: PacketId = [224, 0, 20];
+    const ID: PacketId = [224, 20];
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetDbSettings;
 
 impl Msg for GetDbSettings {
-    const ID: PacketId = [224, 0, 21];
+    const ID: PacketId = [224, 21];
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct NewConnection;
 
 impl Msg for NewConnection {
-    const ID: PacketId = [224, 255, 1];
+    const ID: PacketId = [225, 1];
 }
 
 #[cfg(feature = "mlua")]
@@ -325,7 +325,7 @@ impl mlua::FromLua for SetEntityMetadata {
 pub struct GetEarliestTimestamp;
 
 impl Msg for GetEarliestTimestamp {
-    const ID: PacketId = [224, 0, 22];
+    const ID: PacketId = [224, 22];
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -333,7 +333,7 @@ impl Msg for GetEarliestTimestamp {
 pub struct EarliestTimestamp(pub Timestamp);
 
 impl Msg for EarliestTimestamp {
-    const ID: PacketId = [224, 0, 23];
+    const ID: PacketId = [224, 23];
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -341,7 +341,7 @@ impl Msg for EarliestTimestamp {
 pub struct DumpSchema;
 
 impl Msg for DumpSchema {
-    const ID: PacketId = [224, 0, 24];
+    const ID: PacketId = [224, 24];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -350,7 +350,7 @@ pub struct DumpSchemaResp {
 }
 
 impl Msg for DumpSchemaResp {
-    const ID: PacketId = [224, 0, 25];
+    const ID: PacketId = [224, 25];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -360,7 +360,7 @@ pub struct StreamTimestamp {
 }
 
 impl Msg for StreamTimestamp {
-    const ID: PacketId = [224, 0, 26];
+    const ID: PacketId = [224, 26];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -368,7 +368,7 @@ impl Msg for StreamTimestamp {
 pub struct SQLQuery(pub String);
 
 impl Msg for SQLQuery {
-    const ID: PacketId = [224, 0, 27];
+    const ID: PacketId = [224, 27];
 }
 
 #[cfg(feature = "mlua")]
@@ -395,7 +395,7 @@ pub struct ArrowIPC<'a> {
 }
 
 impl Msg for ArrowIPC<'_> {
-    const ID: PacketId = [224, 0, 28];
+    const ID: PacketId = [224, 28];
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -404,7 +404,7 @@ pub struct ErrorResponse {
 }
 
 impl Msg for ErrorResponse {
-    const ID: PacketId = [224, 0, 29];
+    const ID: PacketId = [224, 29];
 }
 
 pub trait Request {

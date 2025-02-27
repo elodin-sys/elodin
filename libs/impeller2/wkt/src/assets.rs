@@ -11,5 +11,5 @@ pub struct Asset<'a> {
 }
 
 impl Msg for Asset<'_> {
-    const ID: PacketId = [224, 0, 14];
+    const ID: PacketId = [224, 14];
 }

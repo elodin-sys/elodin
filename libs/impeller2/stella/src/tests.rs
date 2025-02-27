@@ -12,7 +12,7 @@ struct Foo {
 }
 
 impl Msg for Foo {
-    const ID: PacketId = [0x1, 0x2, 0x3];
+    const ID: PacketId = [0x1, 0x2];
 }
 
 #[test]

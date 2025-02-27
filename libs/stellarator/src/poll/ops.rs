@@ -315,28 +315,18 @@ impl Open {
 
 pub struct Connect<'fd> {
     fd: &'fd Socket,
+    addr: Box<SockAddrRaw>,
+    connect_called: bool,
 }
 
 impl<'fd> Connect<'fd> {
     #[allow(clippy::boxed_local)]
     pub fn new(fd: &'fd Socket, addr: Box<SockAddrRaw>) -> Result<Self, Error> {
-        if unsafe {
-            libc::connect(
-                fd.as_raw_os_handle() as _,
-                &raw const addr.storage as *const _,
-                addr.len,
-            )
-        } == -1
-        {
-            let err = io::Error::last_os_error();
-            if err.raw_os_error() != Some(libc::EINPROGRESS)
-                && err.kind() != io::ErrorKind::WouldBlock
-            {
-                return Err(Error::Io(err));
-            }
-        }
-
-        Ok(Self { fd })
+        Ok(Self {
+            fd,
+            connect_called: false,
+            addr,
+        })
     }
 }
 
@@ -348,14 +338,36 @@ impl OpCode for Connect<'_> {
     }
 
     fn poll(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let socket = self.fd;
-        if let Ok(Some(err)) | Err(err) = socket.take_error() {
-            return Poll::Ready(Err(Error::Io(err)));
+        if !self.connect_called {
+            self.connect_called = true;
+            if unsafe {
+                libc::connect(
+                    socket.as_raw_os_handle() as _,
+                    &raw const self.addr.storage as *const _,
+                    self.addr.len,
+                )
+            } < 0
+            {
+                let err = io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINPROGRESS)
+                    || err.kind() == io::ErrorKind::WouldBlock
+                {
+                    return Poll::Pending;
+                }
+                return Poll::Ready(Err(Error::Io(err)));
+            }
         }
 
+        if let Ok(Some(err)) | Err(err) = socket.take_error() {
+            match err {
+                err if err.kind() == io::ErrorKind::WouldBlock => return Poll::Pending,
+                err => return Poll::Ready(Err(Error::Io(err))),
+            }
+        }
         match socket.peer_addr() {
             Ok(_) => Poll::Ready(Ok(())),
             Err(err)

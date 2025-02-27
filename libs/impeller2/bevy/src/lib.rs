@@ -2,14 +2,13 @@ use bevy::{
     app::Plugin,
     ecs::system::SystemId,
     log::warn,
-    prelude::{Command, InRef, IntoSystem, Mut, System},
+    prelude::{Command, In, InRef, IntoSystem, Mut, System},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
-use impeller2::util::concat_str;
 use impeller2::{
     com_de::Decomponentize,
     component::Asset,
@@ -22,13 +21,14 @@ use impeller2::{
         ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt, Timestamp,
     },
 };
+use impeller2::{types::RequestId, util::concat_str};
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
-    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata,
+    DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
+    Material, Mesh, Panel, Request, Stream, StreamBehavior, StreamFilter, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
 };
 use nox::{Array, ArrayBuf, Dyn};
 use serde::de::DeserializeOwned;
@@ -63,15 +63,13 @@ impl PacketRx {
     }
 }
 
-#[derive(Resource, DerefMut, Deref)]
+#[derive(Resource)]
 pub struct PacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
 
 impl PacketTx {
     pub fn send_msg(&self, msg: impl Msg) {
         let pkt = msg.to_len_packet();
-        if self.0.try_send(Some(pkt)).is_err() {
-            bevy::log::warn!("packet tx full");
-        }
+        let _ = self.0.try_send(Some(pkt));
     }
 }
 
@@ -88,19 +86,39 @@ fn sink_inner(
             return Ok(());
         }
         count += 1;
-        let pkt_id = match &pkt {
-            OwnedPacket::Msg(m) => m.id,
-            OwnedPacket::Table(table) => table.id,
-            OwnedPacket::TimeSeries(time_series) => time_series.id,
-        };
-        let handler = world
-            .get_resource_mut::<PacketIdHandlers>()
-            .and_then(|mut handlers| handlers.remove(&pkt_id));
-        if let Some(handler) = handler {
-            if let Err(err) = world.run_system_with_input(handler, &pkt) {
-                bevy::log::error!(?err, "packet id handler error");
+        {
+            let pkt_id = match &pkt {
+                OwnedPacket::Msg(m) => m.id,
+                OwnedPacket::Table(table) => table.id,
+                OwnedPacket::TimeSeries(time_series) => time_series.id,
+            };
+            let handler = world
+                .get_resource_mut::<PacketIdHandlers>()
+                .and_then(|mut handlers| handlers.remove(&pkt_id));
+            if let Some(handler) = handler {
+                if let Err(err) = world.run_system_with_input(handler, &pkt) {
+                    bevy::log::error!(?err, "packet id handler error");
+                }
             }
         }
+
+        {
+            let req_id = match &pkt {
+                OwnedPacket::Msg(m) => m.req_id,
+                OwnedPacket::Table(table) => table.req_id,
+                OwnedPacket::TimeSeries(time_series) => time_series.req_id,
+            };
+
+            let handler = world
+                .get_resource_mut::<RequestIdHandlers>()
+                .and_then(|mut handlers| handlers.remove(&req_id));
+            if let Some(handler) = handler {
+                if let Err(err) = world.run_system_with_input(handler, &pkt) {
+                    bevy::log::error!(?err, "packet id handler error");
+                }
+            }
+        }
+
         for handler in packet_handlers.0.iter() {
             if let Err(err) = world.run_system_with_input(*handler, (&pkt, vtable_registry)) {
                 bevy::log::error!(?err, "packet handler error");
@@ -226,6 +244,12 @@ impl bevy::prelude::SystemInput for PacketHandlerInput<'_> {
         PacketHandlerInput { packet, registry }
     }
 }
+
+#[allow(clippy::type_complexity)]
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct RequestIdHandlers(
+    pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, ()>>,
+);
 
 #[derive(Component, Default, DerefMut, Deref)]
 pub struct ComponentValueMap(pub BTreeMap<ComponentId, ComponentValue>);
@@ -592,7 +616,7 @@ impl CurrentStreamId {
     }
 
     pub fn packet_id(&self) -> PacketId {
-        self.0.to_le_bytes()[..3].try_into().unwrap()
+        self.0.to_le_bytes()[..2].try_into().unwrap()
     }
 }
 
@@ -789,6 +813,16 @@ impl AppExt for bevy::app::App {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct RequestIdAlloc(RequestId);
+
+impl RequestIdAlloc {
+    pub fn alloc_next_id(&mut self) -> RequestId {
+        self.0 = self.0.wrapping_add(1);
+        self.0
+    }
+}
+
 pub struct DefaultAdaptersPlugin;
 
 impl Plugin for DefaultAdaptersPlugin {
@@ -823,7 +857,9 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<AssetStore>()
             .init_resource::<HashMapRegistry>()
             .init_resource::<PacketIdHandlers>()
-            .init_resource::<PacketHandlers>();
+            .init_resource::<PacketHandlers>()
+            .init_resource::<RequestIdHandlers>()
+            .init_resource::<RequestIdAlloc>();
     }
 }
 
@@ -846,7 +882,7 @@ where
         let tx = world
             .get_resource_mut::<PacketTx>()
             .expect("missing packet handlers");
-        if let Err(err) = tx.try_send(Some(self.request)) {
+        if let Err(err) = tx.0.try_send(Some(self.request)) {
             let mut handlers = world
                 .get_resource_mut::<PacketIdHandlers>()
                 .expect("missing packet handlers");
@@ -856,10 +892,49 @@ where
     }
 }
 
+pub struct ReplyHandlerCommand<S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>>
+{
+    request: LenPacket,
+    system: S,
+}
+
+impl<S> Command for ReplyHandlerCommand<S>
+where
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>,
+{
+    fn apply(self, world: &mut World) {
+        let system_id = world.register_system(self.system);
+        let mut alloc = world
+            .get_resource_mut::<RequestIdAlloc>()
+            .expect("missing packet handlers");
+        let req_id = alloc.alloc_next_id();
+
+        let mut handlers = world
+            .get_resource_mut::<RequestIdHandlers>()
+            .expect("missing packet handlers");
+        handlers.insert(req_id, system_id);
+        let tx = world
+            .get_resource_mut::<PacketTx>()
+            .expect("missing packet handlers");
+        if let Err(err) = tx.0.try_send(Some(self.request.with_request_id(req_id))) {
+            let mut handlers = world
+                .get_resource_mut::<RequestIdHandlers>()
+                .expect("missing packet handlers");
+            handlers.remove(&req_id);
+            bevy::log::warn!(?err, "failed to send msg");
+        }
+    }
+}
+
 pub trait CommandsExt {
     fn send_req_with_handler<S, M>(&mut self, msg: impl Msg, packet_id: PacketId, handler: S)
     where
         S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, (), M>;
+
+    fn send_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        M::Reply: 'static,
+        S: IntoSystem<In<Result<M::Reply, ErrorResponse>>, (), Marker>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
@@ -871,6 +946,46 @@ impl CommandsExt for Commands<'_, '_> {
         let cmd = ReqHandlerCommand {
             request: msg.to_len_packet(),
             packet_id,
+            system,
+        };
+        self.queue(cmd);
+    }
+
+    fn send_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        M::Reply: 'static,
+        S: IntoSystem<In<Result<M::Reply, ErrorResponse>>, (), Marker>,
+    {
+        fn adapter<R: Msg + DeserializeOwned>(
+            msg: InRef<OwnedPacket<PacketGrantR>>,
+        ) -> Result<R, ErrorResponse> {
+            match &*msg {
+                OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
+                    let Ok(m) = m.parse::<ErrorResponse>() else {
+                        return Err(ErrorResponse {
+                            description: "parse failed".to_string(),
+                        });
+                    };
+                    Err(m)
+                }
+                OwnedPacket::Msg(m) if m.id == R::ID => {
+                    let Ok(m) = m.parse::<R>() else {
+                        return Err(ErrorResponse {
+                            description: "parse failed".to_string(),
+                        });
+                    };
+                    Ok(m)
+                }
+                _ => Err(ErrorResponse {
+                    description: "wrong msg type".to_string(),
+                }),
+            }
+        }
+        let system = adapter::<M::Reply>.pipe(handler);
+        let system = IntoSystem::into_system(system);
+
+        let cmd = ReplyHandlerCommand {
+            request: msg.to_len_packet(),
             system,
         };
         self.queue(cmd);
