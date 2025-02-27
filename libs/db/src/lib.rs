@@ -603,6 +603,7 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
     let mut buf = vec![0u8; 1024 * 64];
     loop {
         let pkt = rx.next(buf).await?;
+        let req_id = pkt.req_id();
         match handle_packet(&pkt, &db, &tx).await {
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
@@ -613,7 +614,8 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
                         ErrorResponse {
                             description: err.to_string(),
                         }
-                        .to_len_packet(),
+                        .to_len_packet()
+                        .with_request_id(req_id),
                     )
                     .await
                     .0
@@ -928,6 +930,7 @@ async fn handle_packet(
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let inner_tx = tx.clone();
             let db = db.clone();
+            let req_id = m.req_id;
             stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
@@ -944,7 +947,9 @@ async fn handle_packet(
                 }
                 let msg = ArrowIPC { batches };
                 let tx = inner_tx.lock().await;
-                tx.send(msg.to_len_packet()).await.0?;
+                tx.send(msg.to_len_packet().with_request_id(req_id))
+                    .await
+                    .0?;
                 Ok::<_, Error>(())
             })
             .join()
@@ -1079,7 +1084,7 @@ async fn handle_real_time_entity<A: AsyncWrite>(
     vtable: VTable<Vec<Entry>, Vec<u8>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
-    let vtable_id: PacketId = fastrand::u64(..).to_le_bytes()[..3].try_into().unwrap();
+    let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     {
         let stream = stream.lock().await;
         stream
@@ -1129,7 +1134,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     db: Arc<DB>,
 ) -> Result<(), Error> {
     let mut current_gen = u64::MAX;
-    let mut table = LenPacket::table([0; 3], 2048 - 16);
+    let mut table = LenPacket::table([0; 2], 2048 - 16);
     loop {
         if state
             .playing_cell
@@ -1145,7 +1150,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             let stream = stream.lock().await;
-            let id: PacketId = state.stream_id.to_le_bytes()[..3].try_into().unwrap();
+            let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
             let vtable = state.filter.vtable(&db)?;
             let msg = VTableMsg { id, vtable };

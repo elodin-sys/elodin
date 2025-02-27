@@ -371,9 +371,7 @@ pub fn handle_time_series(
                 return;
             }
             let range = next_range(range, plot_data, &lines);
-            let packet_id = fastrand::u64(..).to_le_bytes()[..3]
-                .try_into()
-                .expect("id wrong size");
+            let packet_id = fastrand::u16(..).to_le_bytes();
             let start = range.start;
             let end = range.end;
             let msg = GetTimeSeries {
@@ -433,9 +431,7 @@ pub fn queue_timestamp_read(
             }
 
             let mut process_range = |range: Range<Timestamp>| {
-                let packet_id = fastrand::u64(..).to_le_bytes()[..3]
-                    .try_into()
-                    .expect("id wrong size");
+                let packet_id = fastrand::u16(..).to_le_bytes();
 
                 match component.request_states.get(&range.start) {
                     // Rerequest chunks if we have not received a response for 10 seconds
@@ -571,7 +567,7 @@ impl AsF32 for bool {
 
 #[derive(Debug, Clone)]
 struct SharedBuffer<T, const N: usize> {
-    cpu: heapless::Vec<T, N>,
+    cpu: Vec<T>,
     gpu: Arc<spin::Mutex<Option<BufferShard>>>,
     gpu_dirty: Arc<AtomicBool>,
 }
@@ -579,7 +575,7 @@ struct SharedBuffer<T, const N: usize> {
 impl<T, const N: usize> Default for SharedBuffer<T, N> {
     fn default() -> Self {
         Self {
-            cpu: Default::default(),
+            cpu: Vec::with_capacity(N),
             gpu: Default::default(),
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         }
@@ -605,14 +601,14 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
     }
 
     pub fn push(&mut self, value: T) -> Option<()> {
-        self.cpu.push(value).ok()?;
+        self.cpu.push(value);
         self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
         Some(())
     }
 
     pub fn slice(&self, slice: Range<usize>) -> Option<Self> {
         let cpu = &self.cpu.get(slice)?;
-        let cpu = heapless::Vec::from_slice(cpu).ok()?;
+        let cpu = cpu.to_vec();
         Some(Self {
             cpu,
             gpu: Arc::new(spin::Mutex::new(None)),
@@ -642,7 +638,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
         values: impl Iterator<Item = D>,
     ) -> Option<Self> {
         let data = SharedBuffer {
-            cpu: heapless::Vec::from_iter(values),
+            cpu: values.collect(),
             gpu: Default::default(),
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         };
@@ -669,7 +665,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
             max,
         };
         let timestamps_float = SharedBuffer {
-            cpu: heapless::Vec::from_iter(
+            cpu: Vec::from_iter(
                 timestamps
                     .iter()
                     .map(|&x| (x.0 - earliest_timestamp.0) as f32),
@@ -679,7 +675,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
         };
 
         let timestamps = SharedBuffer {
-            cpu: heapless::Vec::from_slice(timestamps).unwrap(),
+            cpu: timestamps.to_vec(),
             gpu: Default::default(),
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         };

@@ -157,8 +157,8 @@ impl DB {
                 let component_name = metadata.name.to_case(Case::Snake);
                 if component.entities.contains_key(entity_id) {
                     let table = format!("{entity_name}_{component_name}");
+                    selects.push(format!("{table:?}.{component_name:?}"));
                     if let Some(first_table) = &first_table {
-                        selects.push(format!("{table:?}.{component_name:?}"));
                         view_query_end = format!(
                             "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
                         );
@@ -175,9 +175,9 @@ impl DB {
             }
             selects.push(format!("{first_table:?}.time"));
             let selects = selects.join(",");
-            let view_query = format!(
-                "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table} {view_query_end}"
-            );
+            let view_query = dbg!(format!(
+                "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table:?} {view_query_end}"
+            ));
             ctx.sql(&view_query).await?.collect().await?;
         }
         Ok(())

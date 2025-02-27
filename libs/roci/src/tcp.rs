@@ -126,7 +126,7 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
     let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(1024 * 1024));
     let (incoming_packet_rx, mut incoming_packet_tx) = queue.framed_split();
     let (outgoing_packet_tx, mut outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(512);
-    let vtable_id: PacketId = fastrand::u64(..).to_le_bytes()[..3].try_into().unwrap();
+    let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     let sink = TcpSink {
         tx: outgoing_packet_tx,
         world: PhantomData,

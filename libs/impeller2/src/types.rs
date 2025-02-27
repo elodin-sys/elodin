@@ -504,7 +504,9 @@ pub enum PacketTy {
     TimeSeries = 2,
 }
 
-pub type PacketId = [u8; 3];
+pub type PacketId = [u8; 2];
+
+pub type RequestId = u8;
 
 pub const PACKET_HEADER_LEN: usize = 4;
 
@@ -513,6 +515,7 @@ pub const PACKET_HEADER_LEN: usize = 4;
 pub struct Packet {
     pub packet_ty: PacketTy,
     pub id: PacketId,
+    pub req_id: RequestId,
     pub body: [u8],
 }
 
@@ -546,6 +549,7 @@ impl LenPacket {
         inner.extend_from_slice(&(PACKET_HEADER_LEN as u32).to_le_bytes());
         inner.push(ty as u8);
         inner.extend_from_slice(&id);
+        inner.push(0);
         Self { inner }
     }
 
@@ -559,6 +563,15 @@ impl LenPacket {
 
     pub fn time_series(id: PacketId, cap: usize) -> Self {
         Self::new(PacketTy::TimeSeries, id, cap)
+    }
+
+    pub fn set_request_id(&mut self, request_id: u8) {
+        self.inner[core::mem::offset_of!(Packet, req_id) + 4] = request_id;
+    }
+
+    pub fn with_request_id(mut self, request_id: u8) -> Self {
+        self.inner[core::mem::offset_of!(Packet, req_id) + 4] = request_id;
+        self
     }
 
     fn pkt_len(&self) -> u32 {
@@ -650,30 +663,50 @@ pub enum OwnedPacket<B: IoBuf> {
 impl<B: IoBuf> OwnedPacket<B> {
     pub fn parse_with_offset(packet_buf: B, offset: usize) -> Result<Self, Error> {
         let buf = &stellarator_buf::deref(&packet_buf)[offset..];
-        let Packet { packet_ty, id, .. } = Packet::try_ref_from_bytes(buf)?;
+        let Packet {
+            packet_ty,
+            req_id,
+            id,
+            ..
+        } = Packet::try_ref_from_bytes(buf)?;
         let packet_ty = *packet_ty;
         let id = *id;
+        let req_id = *req_id;
         let buf = packet_buf
             .try_slice(PACKET_HEADER_LEN + offset..)
             .ok_or(Error::InvalidPacket)?;
         Ok(match packet_ty {
-            PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, buf }),
-            PacketTy::Table => OwnedPacket::Table(OwnedTable { id, buf }),
+            PacketTy::Msg => OwnedPacket::Msg(MsgBuf { id, req_id, buf }),
+            PacketTy::Table => OwnedPacket::Table(OwnedTable { id, req_id, buf }),
             PacketTy::TimeSeries => {
                 let time_series = TimeSeries::try_ref_from_bytes(&buf)?;
                 let len = time_series.len()?;
-                OwnedPacket::TimeSeries(OwnedTimeSeries { id, buf, len })
+                OwnedPacket::TimeSeries(OwnedTimeSeries {
+                    id,
+                    req_id,
+                    buf,
+                    len,
+                })
             }
         })
     }
     pub fn parse(packet_buf: B) -> Result<Self, Error> {
         Self::parse_with_offset(packet_buf, 0)
     }
+
+    pub fn req_id(&self) -> RequestId {
+        match self {
+            OwnedPacket::Msg(msg_buf) => msg_buf.req_id,
+            OwnedPacket::Table(table) => table.req_id,
+            OwnedPacket::TimeSeries(time_series) => time_series.req_id,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct OwnedTable<B: IoBuf> {
     pub id: PacketId,
+    pub req_id: RequestId,
     pub buf: Slice<B>,
 }
 
@@ -691,6 +724,7 @@ impl<B: IoBuf> OwnedTable<B> {
 #[derive(Debug)]
 pub struct MsgBuf<B: IoBuf> {
     pub id: PacketId,
+    pub req_id: RequestId,
     pub buf: Slice<B>,
 }
 
@@ -711,6 +745,7 @@ impl<B: IoBuf> MsgBuf<B> {
 #[derive(Debug)]
 pub struct OwnedTimeSeries<B: IoBuf> {
     pub id: PacketId,
+    pub req_id: RequestId,
     pub len: usize,
     pub buf: Slice<B>,
 }
