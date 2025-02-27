@@ -4,7 +4,7 @@ use bevy::{
         entity::Entity,
         event::EventReader,
         query::With,
-        system::{Commands, Local, Query, Res},
+        system::{Commands, Local, Query, Res, SystemParam},
     },
     input::{
         keyboard::Key,
@@ -12,7 +12,7 @@ use bevy::{
         ButtonInput,
     },
     math::{DVec2, Rect, Vec2},
-    prelude::Component,
+    prelude::{Component, ResMut},
     render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
@@ -20,7 +20,7 @@ use bevy_egui::egui::{self, Align, Layout};
 use egui::{Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke};
 use impeller2::types::{ComponentId, EntityId, Timestamp};
 use impeller2_bevy::{ComponentMetadataRegistry, EntityMap};
-use impeller2_wkt::EntityMetadata;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, EntityMetadata};
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
@@ -39,6 +39,7 @@ use crate::{
             },
             time_label::{time_label, PrettyDuration},
             timeline::DurationExt,
+            WidgetSystem,
         },
     },
     SelectedTimeRange,
@@ -49,12 +50,68 @@ use super::{
     PlotDataComponent, PlotDataEntity,
 };
 
+#[derive(SystemParam)]
+pub struct PlotWidget<'w, 's> {
+    collected_graph_data: ResMut<'w, CollectedGraphData>,
+    graphs_state: Query<'w, 's, &'static mut GraphState>,
+    lines: ResMut<'w, Assets<Line>>,
+    commands: Commands<'w, 's>,
+    entity_map: Res<'w, EntityMap>,
+    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
+    metadata_store: Res<'w, ComponentMetadataRegistry>,
+    selected_time_range: Res<'w, SelectedTimeRange>,
+    earliest_timestamp: Res<'w, EarliestTimestamp>,
+    current_timestamp: Res<'w, CurrentTimestamp>,
+    line_query: Query<'w, 's, &'static LineHandle>,
+}
+
+impl WidgetSystem for PlotWidget<'_, '_> {
+    type Args = (Entity, egui::TextureId);
+
+    type Output = ();
+
+    fn ui_system(
+        world: &mut bevy::prelude::World,
+        state: &mut bevy::ecs::system::SystemState<Self>,
+        ui: &mut egui::Ui,
+        (id, scrub_icon): Self::Args,
+    ) -> Self::Output {
+        let mut state = state.get_mut(world);
+
+        let Ok(mut graph_state) = state.graphs_state.get_mut(id) else {
+            return;
+        };
+
+        Plot::from_state(
+            ui,
+            &mut state.collected_graph_data,
+            &mut graph_state,
+            &mut state.lines,
+            &mut state.commands,
+            id,
+            &state.entity_map,
+            &state.entity_metadata,
+            &state.metadata_store,
+            state.selected_time_range.clone(),
+            state.earliest_timestamp.0,
+        )
+        .current_timestamp(state.current_timestamp.0)
+        .render(
+            ui,
+            &state.lines,
+            &state.line_query,
+            &state.collected_graph_data,
+            &graph_state,
+            &scrub_icon,
+        );
+    }
+}
+
 #[derive(Debug)]
 pub struct Plot {
     tick_range: Range<Timestamp>,
     current_timestamp: Timestamp,
     earliest_timestamp: Timestamp,
-    time_step: std::time::Duration,
     bounds: PlotBounds,
     rect: egui::Rect,
     inner_rect: egui::Rect,
@@ -340,7 +397,6 @@ impl Plot {
         Self {
             tick_range,
             current_timestamp: Timestamp::EPOCH,
-            time_step: std::time::Duration::from_secs_f64(1.0 / 60.0),
             bounds,
             rect,
             inner_rect,
@@ -354,11 +410,6 @@ impl Plot {
             show_modal: true,
             earliest_timestamp,
         }
-    }
-
-    pub fn time_step(mut self, step: std::time::Duration) -> Self {
-        self.time_step = step;
-        self
     }
 
     pub fn current_timestamp(mut self, tick: Timestamp) -> Self {

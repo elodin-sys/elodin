@@ -568,6 +568,7 @@ impl ComponentValue {
     }
 }
 
+#[derive(Debug)]
 pub enum ElementValueMut<'a> {
     U8(&'a mut u8),
     U16(&'a mut u16),

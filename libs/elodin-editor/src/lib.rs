@@ -214,7 +214,7 @@ impl Plugin for EditorPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct MainCamera;
 
 #[derive(Component)]

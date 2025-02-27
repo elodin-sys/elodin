@@ -320,10 +320,10 @@ impl WidgetSystem for ModalNewTile<'_> {
                             icons,
                         );
                     }
-                    tiles::NewTileState::ComponentMonitor { .. } => {
-                        ui.add_widget_with::<ModalNewComponentMonitorTile>(
+                    tiles::NewTileState::Monitor { .. } => {
+                        ui.add_widget_with::<ModalNewMonitorTile>(
                             world,
-                            "modal_new_component_monitor_tile",
+                            "modal_new_monitor_tile",
                             icons,
                         );
                     }
@@ -677,14 +677,14 @@ impl WidgetSystem for ModalNewViewportTile<'_, '_> {
 }
 
 #[derive(SystemParam)]
-pub struct ModalNewComponentMonitorTile<'w, 's> {
+pub struct ModalNewMonitorTile<'w, 's> {
     entities_meta: Query<'w, 's, EntityData<'static>>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     new_tile_state: ResMut<'w, tiles::NewTileState>,
     tile_state: ResMut<'w, tiles::TileState>,
 }
 
-impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
+impl WidgetSystem for ModalNewMonitorTile<'_, '_> {
     type Args = tiles::TileIcons;
     type Output = ();
 
@@ -702,7 +702,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
         let metadata_store = state_mut.metadata_store;
         let mut tile_state = state_mut.tile_state;
 
-        let tiles::NewTileState::ComponentMonitor {
+        let tiles::NewTileState::Monitor {
             entity_id: m_entity_id,
             component_id: m_component_id,
             parent_id: _m_parent_id,
@@ -724,7 +724,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
         );
 
         ui.add(
-            ELabel::new("Create new component monitor")
+            ELabel::new("Create New Monitor")
                 .text_color(colors::PRIMARY_CREAME)
                 .padding(egui::Margin::same(0).top(16.).bottom(8.)),
         );
@@ -858,7 +858,7 @@ impl WidgetSystem for ModalNewComponentMonitorTile<'_, '_> {
                 let Some((entity_id, _, _, _)) = selected_entity else {
                     return;
                 };
-                tile_state.create_component_monitor_tile(*entity_id, component_id);
+                tile_state.create_monitor_tile(*entity_id, component_id);
                 close_modal = true;
             }
         });

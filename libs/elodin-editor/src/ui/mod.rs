@@ -42,6 +42,7 @@ use self::{
 
 pub mod colors;
 pub mod images;
+pub mod monitor;
 mod theme;
 pub mod tiles;
 pub mod utils;
@@ -100,7 +101,7 @@ pub struct EntityFilter(pub String);
 #[derive(Resource, Default)]
 pub struct InspectorAnchor(pub Option<egui::Pos2>);
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct ViewportRect(pub Option<egui::Rect>);
 
 #[derive(Clone, Copy, Debug)]
@@ -634,6 +635,16 @@ fn set_camera_viewport(
         let viewport_size = available_rect.size() * scale_factor;
         if available_rect.size().x > window.width() || available_rect.size().y > window.height() {
             return;
+        }
+        if viewport_size.x < 10.0 || viewport_size.y < 10.0 {
+            camera.is_active = false;
+            camera.viewport = Some(Viewport {
+                physical_position: UVec2::new(0, 0),
+                physical_size: UVec2::new(1, 1),
+                depth: 0.0..1.0,
+            });
+
+            continue;
         }
         camera.viewport = Some(Viewport {
             physical_position: UVec2::new(viewport_pos.x as u32, viewport_pos.y as u32),
