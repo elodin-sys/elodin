@@ -35,6 +35,8 @@ fastrand.version = "2.2.0"
 fastrand.optional = true
 bbq2.git = "https://github.com/elodin-sys/bbq2.git"
 bbq2.rev = "b6e36706a5549d770ebf2dc122b39cef1368b06d"
+bbq2.features = ["std", "maitake-sync-0_2"]
+bbq2.default-features = false
 bbq2.optional = true
 
 

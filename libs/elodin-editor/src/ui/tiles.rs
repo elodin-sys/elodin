@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::{
     colors, images,
     monitor::{MonitorPane, MonitorWidget},
+    sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
     widgets::{
         button::{EImageButton, ETileButton},
         modal::ModalNewTile,
@@ -154,6 +155,7 @@ enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
+    SQLTable(SQLTablePane),
 }
 
 impl Pane {
@@ -162,6 +164,7 @@ impl Pane {
             Pane::Graph(pane) => &pane.label,
             Pane::Viewport(viewport) => &viewport.label,
             Pane::Monitor(monitor) => &monitor.label,
+            Pane::SQLTable(..) => "SQL",
         }
     }
 
@@ -191,6 +194,10 @@ impl Pane {
             }
             Pane::Monitor(pane) => {
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
+                egui_tiles::UiResponse::None
+            }
+            Pane::SQLTable(pane) => {
+                ui.add_widget_with::<SqlTableWidget>(world, "sql", pane.clone());
                 egui_tiles::UiResponse::None
             }
         }
@@ -272,6 +279,7 @@ pub enum TreeAction {
     AddViewport(Option<TileId>, Option<EntityId>),
     AddGraph(Option<TileId>, Option<GraphBundle>),
     AddMonitor(Option<TileId>, EntityId, ComponentId),
+    AddSQLTable(Option<TileId>),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -522,6 +530,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     component_id: None,
                     parent_id: None,
                 };
+                ui.close_menu();
+            }
+
+            ui.separator();
+            if ui.button("SQL").clicked() {
+                self.tree_actions
+                    .push(TreeAction::AddSQLTable(Some(tile_id)));
                 ui.close_menu();
             }
         });
@@ -859,6 +874,15 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
+                    TreeAction::AddSQLTable(parent_tile_id) => {
+                        let entity = state_mut.commands.spawn(SqlTable::default()).id();
+                        let pane = Pane::SQLTable(SQLTablePane { entity });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                 }
             }
             let tiles = ui_state.tree.tiles.iter();
@@ -888,6 +912,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
+                    Pane::SQLTable(_) => {}
                 }
             }
         })

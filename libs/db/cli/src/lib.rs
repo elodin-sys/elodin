@@ -103,16 +103,14 @@ impl Client {
     ) -> anyhow::Result<()> {
         let start = start.unwrap_or(i64::MIN);
         let stop = stop.unwrap_or(i64::MAX);
-        let id = fastrand::u64(..).to_le_bytes()[..3]
-            .try_into()
-            .expect("id wrong size");
+        let id = fastrand::u16(..);
 
         let component_id: ComponentId = lua.from_value(component_id)?;
         let schema = self.send_req(GetSchema { component_id }).await?;
         let start = Timestamp(start);
         let stop = Timestamp(stop);
         let msg = GetTimeSeries {
-            id,
+            id: id.to_le_bytes(),
             range: start..stop,
             entity_id: EntityId(entity_id),
             component_id,
@@ -216,9 +214,7 @@ impl Client {
             std::iter::once(entity_id),
         )?;
         let vtable = vtable.build();
-        let id: [u8; 3] = fastrand::u64(..).to_le_bytes()[..3]
-            .try_into()
-            .expect("id wrong size");
+        let id: [u8; 2] = fastrand::u16(..).to_le_bytes();
         let msg = VTableMsg { id, vtable };
         self.tx.send(msg.to_len_packet()).await.0?;
         let mut table = LenPacket::table(id, 8);

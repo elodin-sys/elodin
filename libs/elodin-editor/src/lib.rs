@@ -36,7 +36,7 @@ use nox::Tensor;
 use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
     tiles::{self, TileState},
-    widgets::plot::CollectedGraphData,
+    widgets::plot::{gpu::LineHandle, CollectedGraphData},
     SelectedObject,
 };
 
@@ -142,7 +142,7 @@ impl Plugin for EditorPlugin {
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
                             decorations: !cfg!(target_os = "windows"),
-                            visible: false,
+                            visible: cfg!(target_os = "linux"),
                             ..default()
                         }),
                         ..default()
@@ -185,14 +185,15 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, sync_paused)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(PreUpdate, set_floating_origin.after(sync_pos))
-            .add_systems(Update, clamp_current_time)
+            //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
             })
+            .init_resource::<SyncedGlbs>()
             .insert_resource(ClearColor(Color::NONE))
             .insert_resource(TimeRangeBehavior::default())
-            .insert_resource(SelectedTimeRange(Timestamp::EPOCH..Timestamp::EPOCH));
+            .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)));
         if cfg!(target_os = "windows") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -813,7 +814,7 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 struct SyncedGlbs(HashMap<AssetHandle<Glb>, Handle<Scene>>);
 
 #[derive(Component)]
@@ -821,7 +822,7 @@ struct SyncedGlb;
 
 fn sync_glb_to_bevy(
     mut commands: Commands,
-    mut cache: Local<SyncedGlbs>,
+    mut cache: ResMut<SyncedGlbs>,
     glb: Query<(Entity, &Glb, &AssetHandle<Glb>, Option<&SyncedGlb>)>,
     assets: Res<AssetServer>,
 ) {
@@ -856,6 +857,8 @@ fn clear_state_new_connection(
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
+    lines: Query<Entity, With<LineHandle>>,
+    mut glbs: ResMut<SyncedGlbs>,
     mut commands: Commands,
 ) {
     match packet {
@@ -871,6 +874,12 @@ fn clear_state_new_connection(
     value_map.iter_mut().for_each(|mut map| {
         map.0.clear();
     });
+    for line in lines.iter() {
+        if let Some(e) = commands.get_entity(line) {
+            e.try_despawn_recursive();
+        }
+    }
+    glbs.0.clear();
     ui_state.clear(&mut commands, &mut selected_object);
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();

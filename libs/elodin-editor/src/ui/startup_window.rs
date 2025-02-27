@@ -18,7 +18,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{run::run_recipe, VERSION};
+use crate::VERSION;
 
 use super::{
     colors::{self, ColorExt},
@@ -87,7 +87,7 @@ impl Plugin for StartupPlugin {
 #[derive(SystemParam)]
 pub struct StartupLayout<'w, 's> {
     contexts: EguiContexts<'w, 's>,
-    window: Query<'w, 's, &'static mut Window, With<StartupWindow>>,
+    window: Query<'w, 's, Entity, With<StartupWindow>>,
     main_window: Query<'w, 's, &'static mut Window, (With<PrimaryWindow>, Without<StartupWindow>)>,
     images: Local<'s, images::Images>,
     modal_state: Local<'s, ModalState>,
@@ -96,6 +96,7 @@ pub struct StartupLayout<'w, 's> {
     current_stream_id: ResMut<'w, CurrentStreamId>,
     status: ResMut<'w, ThreadConnectionStatus>,
     recent_files: ResMut<'w, RecentFiles>,
+    commands: Commands<'w, 's>,
 }
 
 #[derive(Resource, Serialize, Deserialize, Default)]
@@ -163,7 +164,8 @@ impl StartupLayout<'_, '_> {
     }
 
     fn switch_to_main(&mut self) {
-        self.window.single_mut().visible = false;
+        let e = self.window.single_mut();
+        self.commands.entity(e).despawn();
         self.main_window.single_mut().visible = true;
     }
 
@@ -177,7 +179,8 @@ impl StartupLayout<'_, '_> {
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(run_recipe(
+            #[cfg(not(target_os = "windows"))]
+            rt.block_on(crate::run::run_recipe(
                 cache_dir,
                 file,
                 stellarator::util::CancelToken::default(),
@@ -238,25 +241,32 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                 .color(colors::PRIMARY_CREAME_6),
                         );
                         ui.add_space(75.0);
-                        if ui
-                            .add(startup_button("Open Existing Project", folder))
-                            .clicked()
-                        {
-                            if let Some(file) = rfd::FileDialog::new()
-                                .add_filter("python", &["py"])
-                                .add_filter("s10", &["toml"])
-                                .pick_file()
+                        if !cfg!(target_os = "windows") {
+                            if ui
+                                .add(startup_button("Open Existing Project", folder))
+                                .clicked()
                             {
-                                state.open_file(file);
+                                if let Some(file) = rfd::FileDialog::new()
+                                    .add_filter("python", &["py"])
+                                    .add_filter("s10", &["toml"])
+                                    .pick_file()
+                                {
+                                    state.open_file(file);
+                                }
                             }
+                            ui.add_space(10.0);
                         }
-                        ui.add_space(10.0);
                         if ui
                             .add(startup_button("Connect to IP Address", icon_ip_addr))
                             .clicked()
                         {
                             *state.modal_state = ModalState::ConnectToIp {
-                                addr: "[::]:2240".to_string(),
+                                addr: if cfg!(target_os = "windows") {
+                                    "127.0.0.1:2240"
+                                } else {
+                                    "[::]:2240"
+                                }
+                                .to_string(),
                                 error: None,
                                 connecting: None,
                             }

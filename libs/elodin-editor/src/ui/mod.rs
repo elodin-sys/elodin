@@ -43,6 +43,7 @@ use self::{
 pub mod colors;
 pub mod images;
 pub mod monitor;
+pub mod sql_table;
 mod theme;
 pub mod tiles;
 pub mod utils;

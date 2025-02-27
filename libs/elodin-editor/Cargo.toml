@@ -22,6 +22,7 @@ bevy_egui.version = "0.33"
 egui.version = "0.31"
 egui.features = ["rayon"]
 egui_tiles = "0.12"
+egui_extras.version = "0.31"
 winit.version = "0.30"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
@@ -74,7 +75,11 @@ web-time = "1.1.0"
 const-fnv1a-hash = "1.1.0"
 zerocopy = "0.8.14"
 hifitime.version = "4.0.2"
+stacker = "0.1.19"
 
+# arrow
+arrow.version = "54.2.0"
+arrow.features = ["canonical_extension_types"]
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
@@ -96,6 +101,8 @@ miette.features = ["fancy"]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
+
+
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
