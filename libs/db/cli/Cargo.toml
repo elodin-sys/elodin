@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [features]
-default = ["highlight"]
+default = []
 highlight = ["syntastica", "syntastica-parsers", "syntastica-themes"]
 
 [dependencies]
