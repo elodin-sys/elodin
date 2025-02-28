@@ -1,5 +1,4 @@
 use assets::open_assets;
-use dashmap::DashMap;
 use impeller2::{
     com_de::Decomponentize,
     component::Component as _,
@@ -210,7 +209,7 @@ impl DB {
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
-        let components = DashMap::new();
+        let mut components = HashMap::new();
         let mut last_updated = i64::MIN;
         let mut start_timestamp = i64::MAX;
 
@@ -271,7 +270,7 @@ impl DB {
             components.insert(component_id, component);
         }
 
-        let entity_metadata = DashMap::new();
+        let mut entity_metadata = HashMap::new();
         for elem in std::fs::read_dir(path.join("entity_metadata"))? {
             let Ok(elem) = elem else { continue };
 
@@ -288,6 +287,8 @@ impl DB {
         info!(db.path = ?path, "opened db");
         let db_state = DbSettings::read(path.join("db_state"))?;
         let state = State {
+            components,
+            entity_metadata,
             assets: open_assets(&path)?,
             ..Default::default()
         };
