@@ -987,7 +987,7 @@ async fn handle_packet(
             let inner_tx = tx.clone();
             let db = db.clone();
             let req_id = m.req_id;
-            stellarator::struc_con::tokio(move |_| async move {
+            let msg = stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
                 let df = ctx.sql(&query).await?;
@@ -1002,14 +1002,15 @@ async fn handle_packet(
                     batches.push(Cow::Owned(buf));
                 }
                 let msg = ArrowIPC { batches };
-                let tx = inner_tx.lock().await;
-                tx.send(msg.to_len_packet().with_request_id(req_id))
-                    .await
-                    .0?;
-                Ok::<_, Error>(())
+                Ok::<_, Error>(msg)
             })
             .join()
             .await??;
+
+            let tx = inner_tx.lock().await;
+            tx.send(msg.to_len_packet().with_request_id(req_id))
+                .await
+                .0?;
         }
         _ => {}
     }
