@@ -9,7 +9,7 @@ class J2:
         self.J2 = 1.08262668e-3
 
     def compute_field(self, x, y, z, mass):
-        r = np.array([z, y, z])
+        r = np.array([x, y, z])
         m = mass
         norm = la.norm(r)
         e_r = r / norm
