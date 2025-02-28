@@ -4372,7 +4372,6 @@ dependencies = [
  "arrow-schema",
  "clap 4.5.20",
  "convert_case",
- "dashmap",
  "datafusion",
  "directories",
  "fastrand 2.2.0",
