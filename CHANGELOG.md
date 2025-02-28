@@ -2,6 +2,9 @@
 
 ## unreleased
 
+## v0.12
+
+### v0.12.0
 - **(breaking)** Add a request_id field to `PacketHeader` and shorten `PacketId` to `[u8; 3]`. In order to support better request-reply semantics, a u8 request_id was added to `PacketHeader`.
 - **(breaking)** The primitive types in the lua api have been lowercased so `F64` is now `f64` and so on.
 - **(breaking)** When using `send_msg` and `send_msgs` you no longer have to call `:msg()` on every msg. See the updated `examples/db-config.lua` for the new API
