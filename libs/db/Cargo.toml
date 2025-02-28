@@ -33,7 +33,6 @@ futures-lite = "2.5.0"
 
 # data structures
 memmap2 = "0.9"
-dashmap = "6.1"
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union", "serde"]
 arc-swap = "1.7.1"
