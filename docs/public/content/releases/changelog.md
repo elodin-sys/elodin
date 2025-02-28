@@ -13,6 +13,20 @@ order = 1
 +++
 
 
+## v0.12
+
+### v0.12.0
+- **(breaking)** Add a request_id field to `PacketHeader` and shorten `PacketId` to `[u8; 3]`. In order to support better request-reply semantics, a u8 request_id was added to `PacketHeader`.
+- **(breaking)** The primitive types in the lua api have been lowercased so `F64` is now `f64` and so on.
+- **(breaking)** When using `send_msg` and `send_msgs` you no longer have to call `:msg()` on every msg. See the updated `examples/db-config.lua` for the new API
+- **(feat:db)** Add support for recording data at timestamps to elodin-db
+elodin-db now no longer operates on the concept of "ticks". Instead each new value is recorded as a pair of timestamp and value. This essentially makes elodin-db into a timer series database. It also fixes the problem where elodin-db would record a new entry, even when the value is unchanged.
+- **(feat)** Add support for SQL queries in elodin-db. These can be accessed from the CLI using the `:sql` command or through the editor using the new SQL pane. We used datafusion-sql to implement SQL support. You can find their docs here (https://datafusion.apache.org/user-guide/sql/index.html) for the syntax.
+- **(feat)** Add startup screen to editor that allows connecting to elodin-db or simulations, and running sims from files
+- **(feat:editor)** The component monitor UI has been redesigned to be easier to read
+- **(feat)** Add touch screen support to plots
+- **(fix)** Fix plotting x axis tick marks placed in the wrong position
+
 ## v0.11
 
 ### v0.11.3
