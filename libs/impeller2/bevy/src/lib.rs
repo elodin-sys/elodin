@@ -9,6 +9,7 @@ use bevy::{
     ecs::system::SystemState,
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
+use impeller2::types::IntoLenPacket;
 use impeller2::{
     com_de::Decomponentize,
     component::Asset,
@@ -17,9 +18,7 @@ use impeller2::{
 };
 use impeller2::{
     schema::Schema,
-    types::{
-        ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, MsgExt, Timestamp,
-    },
+    types::{ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, Timestamp},
 };
 use impeller2::{types::RequestId, util::concat_str};
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
@@ -68,7 +67,7 @@ pub struct PacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
 
 impl PacketTx {
     pub fn send_msg(&self, msg: impl Msg) {
-        let pkt = msg.to_len_packet();
+        let pkt = msg.into_len_packet();
         let _ = self.0.try_send(Some(pkt));
     }
 }
@@ -944,7 +943,7 @@ impl CommandsExt for Commands<'_, '_> {
     {
         let system = S::into_system(handler);
         let cmd = ReqHandlerCommand {
-            request: msg.to_len_packet(),
+            request: msg.into_len_packet(),
             packet_id,
             system,
         };
@@ -985,7 +984,7 @@ impl CommandsExt for Commands<'_, '_> {
         let system = IntoSystem::into_system(system);
 
         let cmd = ReplyHandlerCommand {
-            request: msg.to_len_packet(),
+            request: msg.into_len_packet(),
             system,
         };
         self.queue(cmd);
@@ -1006,19 +1005,19 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
             }),
             id: stream_id,
         }
-        .to_len_packet(),
+        .into_len_packet(),
         Stream {
             filter: StreamFilter::default(),
             behavior: StreamBehavior::RealTime,
             id: fastrand::u64(..),
         }
-        .to_len_packet(),
-        GetEarliestTimestamp.to_len_packet(),
-        DumpAssets.to_len_packet(),
-        DumpMetadata.to_len_packet(),
-        GetDbSettings.to_len_packet(),
-        SubscribeLastUpdated.to_len_packet(),
-        DumpSchema.to_len_packet(),
+        .into_len_packet(),
+        GetEarliestTimestamp.into_len_packet(),
+        DumpAssets.into_len_packet(),
+        DumpMetadata.into_len_packet(),
+        GetDbSettings.into_len_packet(),
+        SubscribeLastUpdated.into_len_packet(),
+        DumpSchema.into_len_packet(),
     ]
     .into_iter()
 }

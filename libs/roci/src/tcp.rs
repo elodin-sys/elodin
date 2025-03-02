@@ -1,17 +1,21 @@
 use bbq2::{queue::ArcBBQueue, traits::storage::BoxedSlice};
+use impeller2::types::IntoLenPacket;
 use impeller2::{
     com_de::{Componentize, Decomponentize},
     registry::HashMapRegistry,
     table::{Entry, VTableBuilder},
-    types::{ComponentView, LenPacket, Msg, MsgExt, OwnedPacket, PacketId, Timestamp},
+    types::{ComponentView, LenPacket, Msg, OwnedPacket, PacketId, Timestamp},
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_stella::queue::tcp_connect;
 use impeller2_wkt::{Stream, StreamFilter, VTableMsg};
+use std::future::Future;
 use std::{marker::PhantomData, net::SocketAddr, time::Duration};
+use stellarator::io::AsyncWrite;
 use thingbuf::mpsc;
 
 use crate::{drivers::DriverMode, System};
+use crate::{AsVTable, Metadatatize};
 
 pub struct TcpSink<W, D> {
     tx: mpsc::Sender<Option<LenPacket>>,
@@ -156,14 +160,14 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
                     id: fastrand::u64(..),
                     behavior: impeller2_wkt::StreamBehavior::RealTime,
                 }
-                .to_len_packet()
+                .into_len_packet()
             })
             .chain(std::iter::once(
                 VTableMsg {
                     id: vtable_id,
                     vtable: vtable.clone(),
                 }
-                .to_len_packet(),
+                .into_len_packet(),
             ))
             .collect::<Vec<_>>()
             .into_iter()
@@ -186,4 +190,44 @@ pub fn tcp_pair<W: Default + Componentize + Decomponentize, D>(
         }
     });
     (sink, source)
+}
+
+pub trait SinkExt {
+    fn send_vtable<V: AsVTable>(
+        &self,
+        id: PacketId,
+    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    fn send_metadata<V: Metadatatize>(
+        &self,
+    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    fn init_world<V: AsVTable + Metadatatize>(
+        &self,
+        vtable_id: PacketId,
+    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+}
+
+impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
+    async fn send_vtable<V: AsVTable>(&self, id: PacketId) -> Result<(), impeller2_stella::Error> {
+        let vtable = V::as_vtable();
+        self.send(&(VTableMsg { id, vtable })).await.0?;
+        Ok(())
+    }
+
+    async fn send_metadata<V: Metadatatize>(&self) -> Result<(), impeller2_stella::Error> {
+        for metadata in V::metadata() {
+            self.send(&impeller2_wkt::SetComponentMetadata(metadata))
+                .await
+                .0?;
+        }
+        Ok(())
+    }
+
+    async fn init_world<V: AsVTable + Metadatatize>(
+        &self,
+        vtable_id: PacketId,
+    ) -> Result<(), impeller2_stella::Error> {
+        self.send_vtable::<V>(vtable_id).await?;
+        self.send_metadata::<V>().await?;
+        Ok(())
+    }
 }

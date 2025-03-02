@@ -169,6 +169,7 @@ dependencies = [
  "impeller2",
  "impeller2-stella",
  "impeller2-wkt",
+ "roci",
  "serialport",
  "stellarator",
  "zerocopy 0.8.14",

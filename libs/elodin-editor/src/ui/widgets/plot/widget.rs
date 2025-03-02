@@ -1096,7 +1096,7 @@ pub fn zoom_graph(
         return;
     };
 
-    let cursor_pos = dbg!(window.physical_cursor_position());
+    let cursor_pos = window.physical_cursor_position();
 
     for (mut graph_state, camera) in &mut query {
         let Some(cursor_pos) = cursor_pos else {
