@@ -121,7 +121,7 @@ macro_rules! impl_prim_component {
             const NAME: &'static str = stringify!($ty);
 
             fn schema() -> Schema<Vec<u64>> {
-                Schema::new(Self::COMPONENT_ID, <$ty>::PRIM_TYPE, [1usize]).unwrap()
+                Schema::new(Self::COMPONENT_ID, <$ty>::PRIM_TYPE, [0u64; 0]).unwrap()
             }
         }
 

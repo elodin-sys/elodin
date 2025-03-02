@@ -1,5 +1,5 @@
 use super::*;
-use impeller2::types::MsgExt;
+use impeller2::types::IntoLenPacket;
 use impeller2::types::{Msg, PacketId};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ fn test_packet_echo() {
         let addr = listener.local_addr().unwrap();
         stellarator::spawn(async move {
             let sink = PacketSink::new(listener.accept().await.unwrap());
-            let msg = Foo { bar: 0xBB }.to_len_packet();
+            let msg = Foo { bar: 0xBB }.into_len_packet();
             sink.send(msg).await.0.unwrap();
         });
         let stream = TcpStream::connect(addr).await.unwrap();

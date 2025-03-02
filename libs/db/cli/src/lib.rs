@@ -12,7 +12,7 @@ use impeller2::{
     },
 };
 
-use impeller2::types::{LenPacket, MsgExt};
+use impeller2::types::{IntoLenPacket, LenPacket};
 use impeller2_wkt::*;
 use mlua::{AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, Value};
 use nu_ansi_term::Color;
@@ -64,7 +64,7 @@ impl Client {
         &mut self,
         msg: M,
     ) -> anyhow::Result<M::Reply> {
-        self.tx.send(msg.to_len_packet()).await.0?;
+        self.tx.send(&msg).await.0?;
         match self.read_with_error().await? {
             impeller2::types::OwnedPacket::Msg(m) if m.id == M::Reply::ID => {
                 let m = m.parse::<M::Reply>()?;
@@ -117,7 +117,7 @@ impl Client {
             limit: Some(256),
         };
 
-        self.tx.send(msg.to_len_packet()).await.0?;
+        self.tx.send(msg.into_len_packet()).await.0?;
         let pkt = self.read_with_error().await?;
         let time_series = match &pkt {
             impeller2::types::OwnedPacket::TimeSeries(time_series) => time_series,
@@ -216,7 +216,7 @@ impl Client {
         let vtable = vtable.build();
         let id: [u8; 2] = fastrand::u16(..).to_le_bytes();
         let msg = VTableMsg { id, vtable };
-        self.tx.send(msg.to_len_packet()).await.0?;
+        self.tx.send(msg.into_len_packet()).await.0?;
         let mut table = LenPacket::table(id, 8);
         match prim_type {
             PrimType::U8 => {
@@ -283,7 +283,7 @@ impl Client {
         if stream.id == 0 {
             stream.id = fastrand::u64(..);
         }
-        self.tx.send(stream.to_len_packet()).await.0?;
+        self.tx.send(stream.into_len_packet()).await.0?;
         let mut vtable = None;
         let mut buf = vec![0; 1024 * 8];
         let cancel = Arc::new(AtomicBool::new(true));
@@ -465,7 +465,7 @@ impl UserData for LuaVTableBuilder {
                 id: this.id,
                 vtable: this.vtable.clone().build(),
             };
-            let vtable_msg = vtable_msg.to_len_packet().inner;
+            let vtable_msg = vtable_msg.into_len_packet().inner;
             Ok(vtable_msg)
         });
         methods.add_method("build", |_, this, ()| Ok(this.build()));
@@ -553,7 +553,7 @@ struct LuaMsg<M: Msg>(M);
 impl<M: Msg> UserData for LuaMsg<M> {
     fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
         methods.add_method("msg", |_, this, ()| {
-            let msg = this.0.to_len_packet().inner;
+            let msg = this.0.into_len_packet().inner;
             Ok(msg)
         });
     }

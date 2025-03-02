@@ -366,7 +366,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         let data_col_offset = (self.data_len + padding) as u64;
         self.data_len += total_len;
 
-        let entry = ColumnEntry {
+        let entry = dbg!(ColumnEntry {
             len: len as u64,
             component_id,
             shape_entry: ShapeEntry {
@@ -380,7 +380,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
             },
             data_col_offset,
             timestamp_offset,
-        };
+        });
         self.vtable.entries.push(Entry::Column(entry))?;
         Ok(self)
     }

@@ -6,7 +6,7 @@ use impeller2::{
     schema::Schema,
     table::{Entry, VTable, VTableBuilder},
     types::{
-        ComponentId, ComponentView, EntityId, LenPacket, Msg, MsgExt, OwnedPacket as Packet,
+        ComponentId, ComponentView, EntityId, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
         PacketId, PrimType, Timestamp,
     },
 };
@@ -658,7 +658,6 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
                         ErrorResponse {
                             description: err.to_string(),
                         }
-                        .to_len_packet()
                         .with_request_id(req_id),
                     )
                     .await
@@ -765,7 +764,7 @@ async fn handle_packet(
                 Ok(component.schema.to_schema())
             })?;
             let tx = tx.lock().await;
-            tx.send(SchemaMsg(schema).to_len_packet()).await.0?;
+            tx.send(&SchemaMsg(schema)).await.0?;
         }
         Packet::Msg(m) if m.id == GetTimeSeries::ID => {
             let get_time_series = m.parse::<GetTimeSeries>()?;
@@ -809,7 +808,7 @@ async fn handle_packet(
                     Ok(pkt) => {
                         tx.send(pkt).await.0?;
                     }
-                    Err(err) => tx.send(ErrorResponse::from(err).to_len_packet()).await.0?,
+                    Err(err) => tx.send(&ErrorResponse::from(err)).await.0?,
                 }
                 Ok::<_, Error>(())
             });
@@ -824,7 +823,7 @@ async fn handle_packet(
                 let Some(component) = state.components.get(&component_id) else {
                     return Err(Error::ComponentNotFound(component_id));
                 };
-                Ok(component.metadata.to_len_packet())
+                Ok(component.metadata.into_len_packet())
             })?;
             let tx = tx.lock().await;
             tx.send(metadata).await.0?;
@@ -841,7 +840,7 @@ async fn handle_packet(
                 let Some(metadata) = state.entity_metadata.get(&entity_id) else {
                     return Err(Error::EntityNotFound(entity_id));
                 };
-                Ok(metadata.to_len_packet())
+                Ok(metadata.into_len_packet())
             })?;
             let tx = tx.lock().await;
             tx.send(msg).await.0?;
@@ -861,7 +860,7 @@ async fn handle_packet(
                     id,
                     buf: Cow::Borrowed(&mmap[..]),
                 };
-                Ok(asset.to_len_packet())
+                Ok(asset.into_len_packet())
             })?;
             let tx = tx.lock().await;
             tx.send(packet).await.0?;
@@ -880,7 +879,7 @@ async fn handle_packet(
                 }
             });
             let tx = tx.lock().await;
-            tx.send(msg.to_len_packet()).await.0?;
+            tx.send(&msg).await.0?;
         }
         Packet::Msg(m) if m.id == DumpSchema::ID => {
             let msg = db.with_state(|state| {
@@ -893,7 +892,7 @@ async fn handle_packet(
             });
 
             let tx = tx.lock().await;
-            tx.send(msg.to_len_packet()).await.0?;
+            tx.send(&msg).await.0?;
         }
 
         Packet::Msg(m) if m.id == DumpAssets::ID => {
@@ -905,7 +904,7 @@ async fn handle_packet(
                         id: *id,
                         buf: Cow::Borrowed(&mmap[..]),
                     })
-                    .map(|asset| asset.to_len_packet())
+                    .map(|asset| asset.into_len_packet())
                     .collect::<Vec<_>>()
             });
 
@@ -923,7 +922,7 @@ async fn handle_packet(
                     {
                         let tx = tx.lock().await;
                         match tx
-                            .send(LastUpdated(last_updated).to_len_packet())
+                            .send(&LastUpdated(last_updated))
                             .await
                             .0
                             .map_err(Error::from)
@@ -954,18 +953,16 @@ async fn handle_packet(
             }
             db.save_db_state()?;
             let tx = tx.lock().await;
-            tx.send(db.db_settings().to_len_packet()).await.0?;
+            tx.send(&db.db_settings()).await.0?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             let tx = tx.lock().await;
-            tx.send(EarliestTimestamp(db.earliest_timestamp).to_len_packet())
-                .await
-                .0?;
+            tx.send(&EarliestTimestamp(db.earliest_timestamp)).await.0?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
             let tx = tx.lock().await;
             let settings = db.db_settings();
-            tx.send(settings.to_len_packet()).await.0?;
+            tx.send(&settings).await.0?;
         }
         Packet::Table(table) => {
             debug!(table.len = table.buf.len(), "sinking table");
@@ -981,7 +978,7 @@ async fn handle_packet(
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
             let tx = tx.lock().await;
             let settings = db.db_settings();
-            tx.send(settings.to_len_packet()).await.0?;
+            tx.send(&settings).await.0?;
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
@@ -1009,9 +1006,7 @@ async fn handle_packet(
             .await??;
 
             let tx = inner_tx.lock().await;
-            tx.send(msg.to_len_packet().with_request_id(req_id))
-                .await
-                .0?;
+            tx.send(msg.with_request_id(req_id)).await.0?;
         }
         _ => {}
     }
@@ -1143,13 +1138,10 @@ async fn handle_real_time_entity<A: AsyncWrite>(
     {
         let stream = stream.lock().await;
         stream
-            .send(
-                VTableMsg {
-                    id: vtable_id,
-                    vtable,
-                }
-                .to_len_packet(),
-            )
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable,
+            })
             .await
             .0?;
     }
@@ -1200,7 +1192,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             table = LenPacket::table(id, 2048 - 16);
             let vtable = state.filter.vtable(&components)?;
             let msg = VTableMsg { id, vtable };
-            stream.send(msg.to_len_packet()).await.0?;
+            stream.send(msg.into_len_packet()).await.0?;
             current_gen = vtable_gen;
         }
         table.clear();
@@ -1218,7 +1210,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                         timestamp: current_timestamp,
                         stream_id: state.stream_id,
                     }
-                    .to_len_packet(),
+                    .into_len_packet(),
                 )
                 .await
                 .0?;

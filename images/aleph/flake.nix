@@ -44,16 +44,20 @@
               ./modules/usb_eth.nix
               ./modules/hardware.nix
               ./modules/minimal.nix
-              # ./modules/aleph-serial-bridge.nix
               ./modules/sd_image.nix
               ./modules/systemd-boot-dtb.nix
+              ./modules/elodin-db.nix
+              ./modules/aleph-serial-bridge.nix
             ]
             ++ lib.optional (builtins.pathExists ./modules/elodin_dev.nix) ./modules/elodin_dev.nix;
 
           nixpkgs.overlays = [
             jetpack.overlays.default
             rust-overlay.overlays.default
-            (final: prev: {serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};})
+            (final: prev: {
+              serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
+              elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
+            })
           ];
           system.stateVersion = "24.05";
           i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];

@@ -1,4 +1,4 @@
-use impeller2::types::{LenPacket, OwnedPacket};
+use impeller2::types::{IntoLenPacket, LenPacket, OwnedPacket};
 use stellarator::{
     buf::{IoBufMut, Slice},
     io::{AsyncRead, AsyncWrite, GrowableBuf, LengthDelReader},
@@ -44,7 +44,8 @@ impl<W: AsyncWrite> PacketSink<W> {
         Self { writer }
     }
 
-    pub async fn send(&self, packet: LenPacket) -> BufResult<(), LenPacket> {
+    pub async fn send(&self, packet: impl IntoLenPacket) -> BufResult<(), LenPacket> {
+        let packet = packet.into_len_packet();
         let (res, inner) = self.writer.write_all(packet.inner).await;
         (res, LenPacket { inner })
     }

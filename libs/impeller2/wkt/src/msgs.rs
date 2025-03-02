@@ -7,9 +7,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::ops::Range;
 use std::{borrow::Cow, time::Duration};
 
-#[cfg(feature = "mlua")]
-use impeller2::types::MsgExt;
-
 use crate::{
     metadata::{ComponentMetadata, EntityMetadata},
     LastUpdated,
@@ -71,7 +68,7 @@ impl Msg for Stream {
     const ID: PacketId = [224, 1];
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SetStreamState {
     pub id: StreamId,
     pub playing: Option<bool>,
@@ -158,6 +155,29 @@ impl Request for GetEntityMetadata {
 #[serde(transparent)]
 pub struct SetComponentMetadata(pub ComponentMetadata);
 
+impl SetComponentMetadata {
+    pub fn new(component_id: impl Into<ComponentId>, name: impl ToString) -> Self {
+        let component_id = component_id.into();
+        let name = name.to_string();
+        Self(ComponentMetadata {
+            component_id,
+            metadata: Default::default(),
+            asset: false,
+            name,
+        })
+    }
+
+    pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
+        self.0.metadata = metadata;
+        self
+    }
+
+    pub fn asset(mut self, asset: bool) -> Self {
+        self.0.asset = asset;
+        self
+    }
+}
+
 impl Msg for SetComponentMetadata {
     const ID: PacketId = [224, 8];
 }
@@ -165,6 +185,23 @@ impl Msg for SetComponentMetadata {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(transparent)]
 pub struct SetEntityMetadata(pub EntityMetadata);
+
+impl SetEntityMetadata {
+    pub fn new(entity_id: impl Into<EntityId>, name: impl ToString) -> Self {
+        let entity_id = entity_id.into();
+        let name = name.to_string();
+        Self(EntityMetadata {
+            entity_id,
+            metadata: Default::default(),
+            name,
+        })
+    }
+
+    pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
+        self.0.metadata = metadata;
+        self
+    }
+}
 
 impl Msg for SetEntityMetadata {
     const ID: PacketId = [224, 9];
@@ -267,50 +304,30 @@ impl Msg for NewConnection {
     const ID: PacketId = [225, 1];
 }
 
-#[cfg(feature = "mlua")]
-impl mlua::UserData for SetStreamState {
-    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
-        methods.add_method("msg", |_, this, ()| {
-            let msg = this.to_len_packet().inner;
-            Ok(msg)
-        });
-    }
+macro_rules! impl_user_data_msg {
+    ($t: ty) => {
+        #[cfg(feature = "mlua")]
+        impl mlua::UserData for $t {
+            fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
+                methods.add_method("msg", |_, this, ()| {
+                    use impeller2::types::IntoLenPacket;
+                    let msg = this.into_len_packet().inner;
+                    Ok(msg)
+                });
+            }
+        }
+    };
 }
 
-#[cfg(feature = "mlua")]
-impl mlua::UserData for SetAsset<'_> {
-    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
-        methods.add_method("msg", |_, this, ()| {
-            let msg = this.to_len_packet().inner;
-            Ok(msg)
-        });
-    }
-}
-
-#[cfg(feature = "mlua")]
-impl mlua::UserData for SetComponentMetadata {
-    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
-        methods.add_method("msg", |_, this, ()| {
-            let msg = this.to_len_packet().inner;
-            Ok(msg)
-        });
-    }
-}
+impl_user_data_msg!(SetAsset<'_>);
+impl_user_data_msg!(SetStreamState);
+impl_user_data_msg!(SetComponentMetadata);
+impl_user_data_msg!(SetEntityMetadata);
 
 #[cfg(feature = "mlua")]
 impl mlua::FromLua for SetComponentMetadata {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
-
-#[cfg(feature = "mlua")]
-impl mlua::UserData for SetEntityMetadata {
-    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
-        methods.add_method("msg", |_, this, ()| {
-            let msg = this.to_len_packet().inner;
-            Ok(msg)
-        });
     }
 }
 
@@ -378,15 +395,7 @@ impl mlua::FromLua for SQLQuery {
     }
 }
 
-#[cfg(feature = "mlua")]
-impl mlua::UserData for SQLQuery {
-    fn add_methods<T: mlua::UserDataMethods<Self>>(methods: &mut T) {
-        methods.add_method("msg", |_, this, ()| {
-            let msg = this.to_len_packet().inner;
-            Ok(msg)
-        });
-    }
-}
+impl_user_data_msg!(SQLQuery);
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[repr(transparent)]

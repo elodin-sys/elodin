@@ -538,6 +538,30 @@ pub trait Msg: Serialize {
     const ID: PacketId;
 }
 
+pub trait IntoLenPacket {
+    fn into_len_packet(self) -> LenPacket;
+
+    fn with_request_id(self, request_id: RequestId) -> LenPacket
+    where
+        Self: Sized,
+    {
+        self.into_len_packet().with_request_id(request_id)
+    }
+}
+
+impl<M: Msg> IntoLenPacket for &'_ M {
+    fn into_len_packet(self) -> LenPacket {
+        let msg = LenPacket::msg(M::ID, 0);
+        postcard::serialize_with_flavor(&self, msg).expect("postcard failed")
+    }
+}
+
+impl IntoLenPacket for LenPacket {
+    fn into_len_packet(self) -> LenPacket {
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct LenPacket {
     pub inner: Vec<u8>,
@@ -643,15 +667,6 @@ impl postcard::ser_flavors::Flavor for LenPacket {
         Ok(self)
     }
 }
-
-pub trait MsgExt: Msg {
-    fn to_len_packet(&self) -> LenPacket {
-        let msg = LenPacket::msg(Self::ID, 0);
-        postcard::serialize_with_flavor(&self, msg).unwrap()
-    }
-}
-
-impl<M: Msg> MsgExt for M {}
 
 #[derive(Debug)]
 pub enum OwnedPacket<B: IoBuf> {

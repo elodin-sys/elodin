@@ -22,6 +22,7 @@ impeller2.features = ["std"]
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 cobs = "0.2"
 zerocopy.version = "0.8.2"
+roci.path = "../../libs/roci"
 
 # rand
 fastrand = "2.2.0"
