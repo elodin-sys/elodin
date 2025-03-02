@@ -5,6 +5,7 @@ use proc_macro_crate::{crate_name, FoundCrate};
 use quote::quote;
 use syn::Ident;
 
+mod as_vtable;
 mod componentize;
 mod decomponentize;
 mod metadatatize;
@@ -31,6 +32,11 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Metadatatize, attributes(roci))]
 pub fn metadatize(input: TokenStream) -> TokenStream {
     metadatatize::metadatatize(input)
+}
+
+#[proc_macro_derive(AsVTable, attributes(roci))]
+pub fn as_vtable(input: TokenStream) -> TokenStream {
+    as_vtable::as_vtable(input)
 }
 
 pub(crate) fn roci_crate_name() -> proc_macro2::TokenStream {

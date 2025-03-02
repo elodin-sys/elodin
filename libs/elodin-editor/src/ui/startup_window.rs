@@ -14,8 +14,9 @@ use impeller2_bevy::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    net::{Ipv6Addr, SocketAddr},
+    net::{Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
+    sync::Arc,
 };
 
 use crate::VERSION;
@@ -127,8 +128,9 @@ pub enum ModalState {
 
 #[derive(Clone)]
 pub enum ConnectError {
-    SocketParse(std::net::AddrParseError),
+    SocketParse(Arc<std::io::Error>),
     Connection,
+    ResolutionFailed,
 }
 
 impl std::fmt::Display for ConnectError {
@@ -139,6 +141,9 @@ impl std::fmt::Display for ConnectError {
             }
             ConnectError::Connection => {
                 write!(f, "Error connecting")
+            }
+            ConnectError::ResolutionFailed => {
+                write!(f, "Resolution failed")
             }
         }
     }
@@ -415,17 +420,29 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                 }
                                 ui.add_space(10.0);
                                 if ui.add(EButton::green("CONNECT").width(156.)).clicked() {
-                                    let socket_addr = match addr.parse() {
-                                        Ok(addr) => addr,
-                                        Err(err) => {
-                                            *state.modal_state = ModalState::ConnectToIp {
-                                                addr,
-                                                error: Some(ConnectError::SocketParse(err)),
-                                                connecting: None,
-                                            };
-                                            return;
-                                        }
-                                    };
+                                    let socket_addr =
+                                        match addr.to_socket_addrs().map(|mut x| x.next()) {
+                                            Ok(Some(addr)) => addr,
+                                            Ok(None) => {
+                                                *state.modal_state = ModalState::ConnectToIp {
+                                                    addr,
+                                                    error: Some(ConnectError::ResolutionFailed),
+                                                    connecting: None,
+                                                };
+                                                return;
+                                            }
+
+                                            Err(err) => {
+                                                *state.modal_state = ModalState::ConnectToIp {
+                                                    addr,
+                                                    error: Some(ConnectError::SocketParse(
+                                                        Arc::new(err),
+                                                    )),
+                                                    connecting: None,
+                                                };
+                                                return;
+                                            }
+                                        };
                                     let status = state.connect(socket_addr, false);
                                     *state.modal_state = ModalState::ConnectToIp {
                                         addr,

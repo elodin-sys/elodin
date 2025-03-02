@@ -5,14 +5,17 @@ mod system_fn;
 
 pub use impeller2;
 pub use impeller2::com_de::{Componentize, Decomponentize};
-pub use roci_macros::{Componentize, Decomponentize, Metadatatize};
+pub use impeller2_wkt;
+pub use roci_macros::{AsVTable, Componentize, Decomponentize, Metadatatize};
 pub use system_fn::*;
+pub use vtable::AsVTable;
 
 pub mod combinators;
 #[cfg(feature = "csv")]
 pub mod csv;
 pub mod drivers;
 pub mod types;
+mod vtable;
 
 #[cfg(feature = "stellar")]
 pub mod tcp;

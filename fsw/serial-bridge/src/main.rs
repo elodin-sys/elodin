@@ -1,13 +1,10 @@
+use impeller2::types::{EntityId, LenPacket, PacketId};
+use impeller2_wkt::SetEntityMetadata;
+use roci::{AsVTable, Metadatatize, tcp::SinkExt};
 use std::{net::SocketAddr, time::Duration};
-
-use impeller2::types::{LenPacket, MsgExt, PacketId};
-use impeller2::{
-    table::VTableBuilder,
-    types::{EntityId, PrimType},
-};
-use impeller2_wkt::VTableMsg;
 use stellarator::io::SplitExt;
 use stellarator::net::TcpStream;
+use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 fn main() -> anyhow::Result<()> {
     stellarator::run(run)
@@ -21,6 +18,20 @@ async fn run() -> anyhow::Result<()> {
     }
 }
 
+#[derive(AsVTable, Metadatatize, FromBytes, Immutable, KnownLayout, Debug)]
+#[roci(entity_id = 1)]
+#[repr(C)]
+pub struct Record {
+    pub ts: u32, // in milliseconds
+    pub mag: [f32; 3],
+    pub gyro: [f32; 3],
+    pub accel: [f32; 3],
+    pub mag_temp: f32,
+    pub mag_sample: u32,
+    pub baro: f32,
+    pub baro_temp: f32,
+}
+
 async fn connect() -> anyhow::Result<()> {
     let stream = TcpStream::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
@@ -28,20 +39,12 @@ async fn connect() -> anyhow::Result<()> {
     let (_, tx) = stream.split();
     let tx = impeller2_stella::PacketSink::new(tx);
 
-    let mut vtable: VTableBuilder<Vec<_>, Vec<_>> = VTableBuilder::default();
-    vtable.column("ts", PrimType::U32, [1], [EntityId(0)])?;
-    vtable.column("mag", PrimType::F32, [3], [EntityId(0)])?;
-    vtable.column("gyro", PrimType::F32, [3], [EntityId(0)])?;
-    vtable.column("accel", PrimType::F32, [3], [EntityId(0)])?;
-    vtable.column("mag_temp", PrimType::F32, [], [EntityId(0)])?;
-    vtable.column("mag_sample", PrimType::U32, [], [EntityId(0)])?;
-    vtable.column("baro", PrimType::F32, [], [EntityId(0)])?;
-
-    let vtable = vtable.build();
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    let msg = VTableMsg { id, vtable };
-    tx.send(msg.to_len_packet()).await.0?;
-    let mut port = serialport::new("/dev/ttyACM0", 115200)
+    tx.send(&SetEntityMetadata::new(EntityId(1), "Aleph"))
+        .await
+        .0?;
+    tx.init_world::<Record>(id).await?;
+    let mut port = serialport::new("/dev/ttyTHS0", 115200)
         .timeout(Duration::MAX)
         .open()?;
     let mut read = vec![0; 256];
@@ -55,7 +58,11 @@ async fn connect() -> anyhow::Result<()> {
                         break 'decode;
                     };
                     i += decode.len();
-                    let mut table = LenPacket::table(id, 16);
+                    let mut table = LenPacket::table(id, 64);
+                    if <Record>::ref_from_bytes(&decode).is_err() {
+                        println!("failed to decode record");
+                        continue;
+                    };
                     table.extend_from_slice(&decode);
                     tx.send(table).await.0?;
                 }
