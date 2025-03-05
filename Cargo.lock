@@ -6471,6 +6471,7 @@ dependencies = [
  "nox",
  "postcard",
  "serde",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]
@@ -7348,6 +7349,22 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest",
+]
+
+[[package]]
+name = "mekf"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "fastrand 2.2.0",
+ "impeller2",
+ "impeller2-stella",
+ "impeller2-wkt",
+ "nox",
+ "roci",
+ "roci-adcs",
+ "stellarator",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]

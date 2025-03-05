@@ -32,7 +32,7 @@ members = [
     "libs/stellarator/maitake",
     "libs/stellarator/maitake/util",
     "fsw/file-bridge",
-    "fsw/serial-bridge",
+    "fsw/serial-bridge", "fsw/mekf",
 ]
 exclude = [
     "fsw/multicopter",

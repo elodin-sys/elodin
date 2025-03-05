@@ -27,6 +27,7 @@ use rustyline::{
 use serde::de::DeserializeOwned;
 use std::{
     borrow::Cow::{self, Borrowed, Owned},
+    collections::HashMap,
     fmt::Display,
     io::{self, stdout, Read, Write},
     net::SocketAddr,
@@ -284,7 +285,7 @@ impl Client {
             stream.id = fastrand::u64(..);
         }
         self.tx.send(stream.into_len_packet()).await.0?;
-        let mut vtable = None;
+        let mut vtable = HashMap::new();
         let mut buf = vec![0; 1024 * 8];
         let cancel = Arc::new(AtomicBool::new(true));
         let canceler = cancel.clone();
@@ -300,14 +301,14 @@ impl Client {
             match &pkt {
                 impeller2::types::OwnedPacket::Msg(msg) if msg.id == VTableMsg::ID => {
                     let msg = msg.parse::<VTableMsg>()?;
-                    vtable = Some(msg);
+                    vtable.insert(msg.id, msg.vtable);
                 }
                 impeller2::types::OwnedPacket::Msg(msg) => {
                     println!("msg ({:?}) = {:?}", msg.id, &msg.buf[..]);
                 }
                 impeller2::types::OwnedPacket::Table(table) => {
-                    if let Some(vtable) = &vtable {
-                        vtable.vtable.parse_table(&table.buf[..], &mut DebugSink)?;
+                    if let Some(vtable) = vtable.get(&table.id) {
+                        vtable.parse_table(&table.buf[..], &mut DebugSink)?;
                     } else {
                         println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
                     }
@@ -795,6 +796,6 @@ impl Decomponentize for DebugSink {
     ) {
         let epoch = timestamp
             .map(|timestamp| hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0));
-        println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value}");
+        println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value:?}");
     }
 }
