@@ -129,11 +129,7 @@ impl Api {
         let service = Steer::new(
             vec![rest, grpc],
             |req: &Request<Body>, _services: &[_]| {
-                if is_grpc_request(req) {
-                    1
-                } else {
-                    0
-                }
+                if is_grpc_request(req) { 1 } else { 0 }
             },
         );
 

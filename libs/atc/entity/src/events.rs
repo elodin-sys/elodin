@@ -1,7 +1,7 @@
 use fred::prelude::*;
-use sea_orm::prelude::*;
 use sea_orm::IntoActiveModel;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sea_orm::prelude::*;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::broadcast;
 
 #[derive(Debug, thiserror::Error)]

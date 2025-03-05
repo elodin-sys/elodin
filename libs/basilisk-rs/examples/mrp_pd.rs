@@ -7,7 +7,7 @@ use basilisk::{
 };
 use nox::{ArrayRepr, Quaternion, Scalar, SpatialForce, SpatialTransform, Vector};
 use roci::{
-    drivers::{os_sleep_driver, Driver, Hz},
+    drivers::{Driver, Hz, os_sleep_driver},
     *,
 };
 use roci_macros::{Componentize, Decomponentize};

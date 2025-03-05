@@ -5,7 +5,7 @@ use crate::{
     Vector,
 };
 use core::marker::PhantomData;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use xla::{ArrayElement, NativeType};
 
 impl<T: Field + ArrayElement + NativeType, D: Dim> From<Array<T, D>> for Tensor<T, D, Op> {

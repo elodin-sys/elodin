@@ -2,7 +2,7 @@
 //! it completes.
 //!
 //! See the documentation for the [`Timeout`] type for details.
-use super::{timer::TimerError, Sleep, Timer};
+use super::{Sleep, Timer, timer::TimerError};
 use crate::util;
 use core::{
     fmt,

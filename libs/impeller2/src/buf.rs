@@ -1,5 +1,5 @@
 use core::mem::align_of;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zerocopy::{Immutable, IntoBytes};
 
 use crate::error::Error;

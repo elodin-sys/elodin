@@ -11,7 +11,7 @@ use bevy::{
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
 use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStreamState};
@@ -19,9 +19,8 @@ use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStr
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        tiles,
-        widgets::plot::{default_component_values, GraphBundle},
-        EntityData, HdrEnabled,
+        EntityData, HdrEnabled, tiles,
+        widgets::plot::{GraphBundle, default_component_values},
     },
 };
 

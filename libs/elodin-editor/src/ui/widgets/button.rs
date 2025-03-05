@@ -2,7 +2,7 @@ use bevy_egui::egui::{self, Stroke};
 use egui::Color32;
 
 use crate::ui::{
-    colors::{self, with_opacity, ColorExt},
+    colors::{self, ColorExt, with_opacity},
     utils::Shrink4,
 };
 

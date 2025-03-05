@@ -9,8 +9,8 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_egui::{
-    egui::{self, Color32, Label, Margin, RichText},
     EguiContexts,
+    egui::{self, Color32, Label, Margin, RichText},
 };
 
 use big_space::GridCell;
@@ -25,16 +25,16 @@ use widgets::{
     timeline::{self, timeline_slider},
 };
 
-use crate::{plugins::LogicalKeyState, GridHandle, MainCamera};
+use crate::{GridHandle, MainCamera, plugins::LogicalKeyState};
 
-use self::widgets::inspector::{entity::ComponentFilter, Inspector};
+use self::widgets::inspector::{Inspector, entity::ComponentFilter};
 use self::widgets::modal::ModalWithSettings;
 
+use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::widgets::{
     command_palette::{self, CommandPalette},
     hierarchy::Hierarchy,
 };
-use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 use self::{
     utils::MarginSides,
     widgets::{button::EImageButton, inspector},

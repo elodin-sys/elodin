@@ -8,9 +8,9 @@ use bevy::{
         system::{Commands, Local, Query, Res, SystemParam},
     },
     input::{
+        ButtonInput,
         keyboard::Key,
         mouse::{MouseButton, MouseScrollUnit, MouseWheel},
-        ButtonInput,
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
@@ -29,26 +29,26 @@ use std::{
 };
 
 use crate::{
+    SelectedTimeRange,
     plugins::LogicalKeyState,
     ui::{
-        colors::{self, with_opacity, ColorExt},
+        colors::{self, ColorExt, with_opacity},
         utils::format_num,
         widgets::{
-            plot::{
-                gpu::{LineBundle, LineConfig, LineUniform},
-                CollectedGraphData, GraphState, Line,
-            },
-            time_label::{time_label, PrettyDuration},
-            timeline::DurationExt,
             WidgetSystem,
+            plot::{
+                CollectedGraphData, GraphState, Line,
+                gpu::{LineBundle, LineConfig, LineUniform},
+            },
+            time_label::{PrettyDuration, time_label},
+            timeline::DurationExt,
         },
     },
-    SelectedTimeRange,
 };
 
 use super::{
-    gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
     PlotDataComponent, PlotDataEntity,
+    gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
 };
 
 #[derive(SystemParam)]
@@ -963,11 +963,7 @@ fn pretty_round(num: f64) -> f64 {
     let rounded = (n * 2.0).round() / 2.0;
     let result = rounded / multiplier;
 
-    if is_negative {
-        -result
-    } else {
-        result
-    }
+    if is_negative { -result } else { result }
 }
 
 #[derive(Debug, Clone)]

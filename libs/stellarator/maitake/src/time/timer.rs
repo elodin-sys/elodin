@@ -22,7 +22,7 @@ pub(super) mod global;
 pub(super) mod sleep;
 mod wheel;
 
-pub use self::global::{set_global_timer, AlreadyInitialized};
+pub use self::global::{AlreadyInitialized, set_global_timer};
 use self::sleep::Sleep;
 
 /// A `Timer` tracks the current time, and notifies [`Sleep`] and [`Timeout`]

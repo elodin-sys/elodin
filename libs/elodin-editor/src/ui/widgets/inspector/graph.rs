@@ -11,10 +11,10 @@ use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentMetadataRegistry;
 
 use crate::ui::{
+    EntityData, SettingModal, SettingModalState,
     colors::{self, with_opacity},
     utils::MarginSides,
-    widgets::{button::ECheckboxButton, label::label_with_buttons, plot::GraphState, WidgetSystem},
-    EntityData, SettingModal, SettingModalState,
+    widgets::{WidgetSystem, button::ECheckboxButton, label::label_with_buttons, plot::GraphState},
 };
 
 use super::InspectorIcons;

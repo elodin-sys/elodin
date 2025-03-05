@@ -7,7 +7,7 @@ use bevy::{
     },
     window::Window,
 };
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{EguiContexts, egui};
 use impeller2::component::Component;
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::WorldPos;
@@ -15,18 +15,18 @@ use impeller2_wkt::WorldPos;
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
+        EntityData, InspectorAnchor, SettingModal, SettingModalState,
         colors::{self, with_opacity},
         images, theme, tiles,
         utils::MarginSides,
-        EntityData, InspectorAnchor, SettingModal, SettingModalState,
     },
 };
 
 use super::{
+    RootWidgetSystem, WidgetSystem, WidgetSystemExt,
     button::EButton,
     label::{self, EImageLabel, ELabel},
-    plot::{default_component_values, GraphBundle, GraphState},
-    RootWidgetSystem, WidgetSystem, WidgetSystemExt,
+    plot::{GraphBundle, GraphState, default_component_values},
 };
 
 #[derive(SystemParam)]

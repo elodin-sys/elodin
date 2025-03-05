@@ -6,13 +6,13 @@ use crate::{
     },
     sync::wait_cell::WaitCell,
 };
-use cordyceps::{list, Linked};
+use cordyceps::{Linked, list};
 use core::{
     future::Future,
     marker::PhantomPinned,
     pin::Pin,
     ptr::{self, NonNull},
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 use mycelium_util::fmt;
@@ -195,15 +195,17 @@ unsafe impl Linked<list::Links<Entry>> for Entry {
     }
 
     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Entry>> {
-        // Safety: using `ptr::addr_of!` avoids creating a temporary
-        // reference, which stacked borrows dislikes.
-        let links = ptr::addr_of!((*target.as_ptr()).links);
-        (*links).with_mut(|links| {
-            // Safety: since the `target` pointer is `NonNull`, we can assume
-            // that pointers to its members are also not null, making this use
-            // of `new_unchecked` fine.
-            NonNull::new_unchecked(links)
-        })
+        unsafe {
+            // Safety: using `ptr::addr_of!` avoids creating a temporary
+            // reference, which stacked borrows dislikes.
+            let links = ptr::addr_of!((*target.as_ptr()).links);
+            (*links).with_mut(|links| {
+                // Safety: since the `target` pointer is `NonNull`, we can assume
+                // that pointers to its members are also not null, making this use
+                // of `new_unchecked` fine.
+                NonNull::new_unchecked(links)
+            })
+        }
     }
 }
 

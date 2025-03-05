@@ -1,7 +1,7 @@
-use hifitime::{Duration, Epoch, Unit, MJD_OFFSET};
+use hifitime::{Duration, Epoch, MJD_OFFSET, Unit};
 use nox::{Array, ArrayRepr, Matrix, Vector};
 
-use crate::{iers::IERS, Frame, DCM};
+use crate::{DCM, Frame, iers::IERS};
 
 /// Celestial Intermediate Reference System
 pub struct CIRS;

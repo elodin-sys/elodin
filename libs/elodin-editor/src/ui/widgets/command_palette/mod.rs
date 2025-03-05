@@ -6,7 +6,7 @@ use bevy::{
     input::keyboard::Key,
 };
 use bevy_egui::EguiContexts;
-use egui::{epaint::Shadow, Margin, Modifiers};
+use egui::{Margin, Modifiers, epaint::Shadow};
 
 use crate::{
     plugins::LogicalKeyState,

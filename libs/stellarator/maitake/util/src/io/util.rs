@@ -66,7 +66,7 @@ impl Read for Empty {
 
     #[inline]
     unsafe fn initializer(&self) -> Initializer {
-        Initializer::nop()
+        unsafe { Initializer::nop() }
     }
 }
 
@@ -114,7 +114,7 @@ impl Read for Repeat {
 
     #[inline]
     unsafe fn initializer(&self) -> Initializer {
-        Initializer::nop()
+        unsafe { Initializer::nop() }
     }
 }
 

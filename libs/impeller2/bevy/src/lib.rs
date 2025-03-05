@@ -10,6 +10,7 @@ use bevy::{
     prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
 };
 use impeller2::types::IntoLenPacket;
+use impeller2::types::RequestId;
 use impeller2::{
     com_de::Decomponentize,
     component::Asset,
@@ -20,7 +21,6 @@ use impeller2::{
     schema::Schema,
     types::{ComponentId, ComponentView, ElementValue, EntityId, LenPacket, Msg, Timestamp},
 };
-use impeller2::{types::RequestId, util::concat_str};
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
@@ -793,7 +793,7 @@ impl AppExt for bevy::app::App {
             .get_resource_or_insert_with(AssetAdapters::default);
 
         map.0.insert(
-            ComponentId::new(concat_str!("asset_handle_", R::NAME)),
+            ComponentId::new(&format!("asset_handle_{}", R::NAME)),
             adapter,
         );
         self

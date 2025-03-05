@@ -557,7 +557,7 @@ impl StaticScheduler {
     /// initialize a `StaticScheduler` in a `static` variable.
     #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
-        StaticScheduler(Core::new_with_static_stub(&stub.hdr))
+        StaticScheduler(unsafe { Core::new_with_static_stub(&stub.hdr) })
     }
 
     /// Spawn a pre-allocated task
@@ -672,7 +672,7 @@ impl LocalStaticScheduler {
     #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
         LocalStaticScheduler {
-            core: Core::new_with_static_stub(&stub.hdr),
+            core: unsafe { Core::new_with_static_stub(&stub.hdr) },
             _not_send: PhantomData,
         }
     }
@@ -839,7 +839,7 @@ impl Core {
     #[cfg(not(loom))]
     const unsafe fn new_with_static_stub(stub: &'static Header) -> Self {
         Self {
-            run_queue: MpscQueue::new_with_static_stub(stub),
+            run_queue: unsafe { MpscQueue::new_with_static_stub(stub) },
             current_task: AtomicPtr::new(ptr::null_mut()),
             queued: AtomicUsize::new(0),
             spawned: AtomicUsize::new(0),

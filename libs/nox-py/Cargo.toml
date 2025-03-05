@@ -1,7 +1,7 @@
 [package]
 name = "nox-py"
 version.workspace = true
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 publish = false
 
@@ -19,8 +19,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # python
-pyo3 = "0.21.0"
-numpy.version = "0.21"
+pyo3 = "0.23.0"
+numpy.version = "0.23"
 
 # nox
 nox-ecs.path = "../nox-ecs"

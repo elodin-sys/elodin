@@ -1,13 +1,13 @@
 use crate::{
-    xla::ElementType, ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim,
-    DotDimensionNums, Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad,
-    Tensor, TensorItem,
+    ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, Error, Noxpr,
+    NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
+    xla::ElementType,
 };
 use core::{
     iter,
     ops::{Add, Deref, Div, Mul, Neg, Sub},
 };
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 
 use super::Op;
@@ -227,8 +227,7 @@ impl BatchTracer {
                     .move_batch_axis(self.out_axis.clone())
                     .ok_or(Error::UnbatchableArgument)?,
                     BatchAxis::Mapped {
-                        size: ref batch_size,
-                        ..
+                        size: batch_size, ..
                     } => {
                         let batch_size = *batch_size;
                         let expr = expr

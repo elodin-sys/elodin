@@ -3,7 +3,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use egui::{load::SizedTexture, Ui};
+use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{CurrentStreamId, PacketTx};
 use impeller2_wkt::{
@@ -11,12 +11,12 @@ use impeller2_wkt::{
 };
 
 use crate::{
-    ui::{
-        colors::{self, with_opacity, ColorExt},
-        widgets::{button::EImageButton, time_label::time_label, WidgetSystem},
-        Paused,
-    },
     TimeRangeBehavior,
+    ui::{
+        Paused,
+        colors::{self, ColorExt, with_opacity},
+        widgets::{WidgetSystem, button::EImageButton, time_label::time_label},
+    },
 };
 
 use super::TimelineIcons;
@@ -78,7 +78,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             .add(EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale));
 
                         if frame_back_btn.clicked() && tick.0 > earliest_timestamp.0 {
-                            tick.0 .0 -= (hifitime::Duration::from_seconds(tick_time.0)
+                            tick.0.0 -= (hifitime::Duration::from_seconds(tick_time.0)
                                 .total_nanoseconds()
                                 / 1000) as i64;
                             tick_changed = true;
@@ -105,7 +105,7 @@ impl WidgetSystem for TimelineControls<'_> {
                         );
 
                         if frame_forward_btn.clicked() && tick.0 < max_tick.0 {
-                            tick.0 .0 += (hifitime::Duration::from_seconds(tick_time.0)
+                            tick.0.0 += (hifitime::Duration::from_seconds(tick_time.0)
                                 .total_nanoseconds()
                                 / 1000) as i64;
 
@@ -116,7 +116,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             .add(EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale));
 
                         if jump_to_end_btn.clicked() {
-                            tick.0 = Timestamp(max_tick.0 .0 - 1);
+                            tick.0 = Timestamp(max_tick.0.0 - 1);
                             tick_changed = true;
                         }
                     });

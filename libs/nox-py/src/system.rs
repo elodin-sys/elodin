@@ -2,23 +2,36 @@ use crate::*;
 
 use nox_ecs::utils::PrimTypeExt;
 use nox_ecs::{
-    graph::{EdgeComponent, GraphQuery, TotalEdge},
-    nox::{jax::JaxNoxprFn, NoxprComp, NoxprFn, NoxprNode, NoxprTy},
     CompiledSystem, Exec, ExecMetadata, SystemParam,
+    graph::{EdgeComponent, GraphQuery, TotalEdge},
+    nox::{NoxprComp, NoxprFn, NoxprNode, NoxprTy, jax::JaxNoxprFn},
 };
 use nox_ecs::{ComponentSchema, World};
-use pyo3::types::{IntoPyDict, PyBytes, PyTuple};
+use pyo3::IntoPyObjectExt;
+use pyo3::types::{IntoPyDict, PyBytes};
 use std::{collections::HashMap, sync::Arc};
 
 #[pyclass]
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PyFnSystem {
-    sys: PyObject,
+    sys: Py<PyAny>,
     input_ids: Vec<ComponentId>,
     output_ids: Vec<ComponentId>,
     edge_ids: Vec<ComponentId>,
     #[allow(dead_code)]
     name: String,
+}
+
+impl Clone for PyFnSystem {
+    fn clone(&self) -> Self {
+        Python::with_gil(|py| Self {
+            sys: self.sys.clone_ref(py),
+            input_ids: self.input_ids.clone(),
+            output_ids: self.output_ids.clone(),
+            edge_ids: self.edge_ids.clone(),
+            name: self.name.clone(),
+        })
+    }
 }
 
 #[pymethods]
@@ -62,7 +75,7 @@ impl nox_ecs::System for PyFnSystem {
     }
 
     fn compile(&self, world: &World) -> Result<nox_ecs::CompiledSystem, nox_ecs::Error> {
-        let sys = self.sys.clone();
+        let sys = Python::with_gil(|py| self.sys.clone_ref(py));
         let mut input_ids = self.input_ids.clone();
         let output_ids = self.output_ids.clone();
         let builder = nox_ecs::SystemBuilder::new(world);
@@ -116,9 +129,12 @@ impl nox_ecs::System for PyFnSystem {
         };
         let func = Python::with_gil(|py| {
             let func = sys.call1(py, (py_builder,))?;
-            let jax = py.import_bound("jax").unwrap();
-            let jit_args = [("keep_unused", true)].into_py_dict_bound(py);
-            Ok::<_, pyo3::PyErr>(jax.call_method("jit", (func,), Some(&jit_args))?.into())
+            let jax = py.import("jax").unwrap();
+            // Clean up unused variable warning
+            let _jit_args = [("keep_unused", true)].into_py_dict(py);
+            // Get the jit function and evaluate it directly
+            let jit_fn = jax.getattr("jit")?;
+            Ok::<_, pyo3::PyErr>(jit_fn.call1((func,))?.into())
         })?;
         let func = NoxprFn::new(vec![], Noxpr::jax(func));
         Ok(CompiledSystem {
@@ -130,32 +146,31 @@ impl nox_ecs::System for PyFnSystem {
 }
 
 pub trait CompiledSystemExt {
-    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<PyObject>, Error>;
+    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<Py<PyAny>>, Error>;
     fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<Exec, Error>;
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<PyObject, Error>;
+    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
 }
 
 impl CompiledSystemExt for CompiledSystem {
-    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<PyObject>, Error> {
+    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<Py<PyAny>>, Error> {
         let mut res = vec![];
         let mut visited_ids = HashSet::new();
         for id in self.inputs.iter().chain(self.outputs.iter()) {
             if visited_ids.contains(id) {
                 continue;
             }
-            let jnp = py.import_bound("jax.numpy")?;
+            let jnp = py.import("jax.numpy")?;
             let col = world
                 .column_by_id(*id)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
             let elem_ty = col.schema.prim_type;
             let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
-            let shape = PyTuple::new_bound(
-                py,
-                std::iter::once(col.len() as u64)
-                    .chain(col.schema.shape().iter().copied())
-                    .collect::<Vec<_>>(),
-            );
-            let arr = jnp.call_method1("zeros", (shape, dtype))?; // NOTE(sphw): this could be a huge bottleneck
+            // Build tuple shape manually instead of using PyTuple
+            let shape_vec: Vec<_> = std::iter::once(col.len() as u64)
+                .chain(col.schema.shape().iter().copied())
+                .collect();
+            // Use direct call pattern that takes standard args
+            let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?; // NOTE(sphw): this could be a huge bottleneck
             visited_ids.insert(id);
             res.push(arr.into());
         }
@@ -169,9 +184,13 @@ impl CompiledSystemExt for CompiledSystem {
 def build_expr(jit, args):
   xla = jit.lower(*args).compiler_ir('hlo')
   return xla";
-        let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
-            .getattr("build_expr")?
-            .into();
+        // We need to create a module directly and exec code in it
+        let module = PyModule::new(py, "build_expr")?;
+        let globals = module.dict();
+        // Use std::ffi::CString for the string arguments to run
+        let code_cstr = std::ffi::CString::new(py_code).unwrap();
+        py.run(code_cstr.as_ref(), Some(&globals), None)?;
+        let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
         let comp = fun
             .call1(py, (func, input_arrays))?
@@ -194,7 +213,7 @@ def build_expr(jit, args):
         Ok(exec)
     }
 
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<PyObject, Error> {
+    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
 
         let py_code = "
@@ -203,9 +222,13 @@ def build_expr(func):
     res = jax.jit(func)
     return res";
 
-        let fun: Py<PyAny> = PyModule::from_code_bound(py, py_code, "", "")?
-            .getattr("build_expr")?
-            .into();
+        // We need to create a module directly and exec code in it
+        let module = PyModule::new(py, "build_expr")?;
+        let globals = module.dict();
+        // Use std::ffi::CString for the string arguments to run
+        let code_cstr = std::ffi::CString::new(py_code).unwrap();
+        py.run(code_cstr.as_ref(), Some(&globals), None)?;
+        let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
         let comp = fun.call1(py, (func,))?;
 
@@ -274,14 +297,14 @@ impl nox_ecs::System for System {
     }
 }
 
-fn noxpr_to_callable(func: Arc<NoxprFn>) -> PyObject {
+fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
     if let NoxprNode::Jax(j) = &*func.inner.node {
-        return j.clone();
+        return Python::with_gil(|py| j.clone_ref(py));
     }
     let func = JaxNoxprFn {
         tracer: Default::default(),
         inner: func,
     };
 
-    Python::with_gil(|py| func.into_py(py))
+    Python::with_gil(|py| func.into_py_any(py).unwrap())
 }

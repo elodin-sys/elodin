@@ -1,6 +1,6 @@
 [package]
 name = "s10"
-edition = "2021"
+edition = "2024"
 version.workspace = true
 repository.workspace = true
 authors = ["sascha@elodin.systems"]

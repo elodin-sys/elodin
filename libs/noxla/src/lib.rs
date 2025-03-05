@@ -82,7 +82,7 @@ impl TfLogLevel {
 }
 
 pub fn set_tf_min_log_level(log_level: TfLogLevel) {
-    std::env::set_var("TF_CPP_MIN_LOG_LEVEL", log_level.as_env_variable_str())
+    unsafe { std::env::set_var("TF_CPP_MIN_LOG_LEVEL", log_level.as_env_variable_str()) }
 }
 
 #[cfg(test)]

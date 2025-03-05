@@ -1,9 +1,9 @@
 use crate::{
     channel::BskChannel,
     sys::{
-        mrpFeedbackConfig, mrpSteeringConfig, AttGuidMsgPayload, CmdTorqueBodyMsgPayload,
-        MrpPDConfig, RWArrayConfigMsgPayload, RWAvailabilityMsgPayload, RWSpeedMsgPayload,
-        RateCmdMsgPayload, Reset_mrpPD, Update_mrpPD, VehicleConfigMsgPayload,
+        AttGuidMsgPayload, CmdTorqueBodyMsgPayload, MrpPDConfig, RWArrayConfigMsgPayload,
+        RWAvailabilityMsgPayload, RWSpeedMsgPayload, RateCmdMsgPayload, Reset_mrpPD, Update_mrpPD,
+        VehicleConfigMsgPayload, mrpFeedbackConfig, mrpSteeringConfig,
     },
 };
 
@@ -192,7 +192,7 @@ pub struct RWAvailability {
 
 impl From<RWAvailability> for RWAvailabilityMsgPayload {
     fn from(val: RWAvailability) -> Self {
-        let mut availability = [1; 36];
+        let mut availability = [0; 36]; // 0 = AVAILABLE, 1 = UNAVAILABLE
         for (i, avail) in val.availability.into_iter().enumerate() {
             availability[i] = if avail { 0 } else { 1 };
         }

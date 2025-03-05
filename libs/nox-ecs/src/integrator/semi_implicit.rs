@@ -65,7 +65,7 @@ where
 mod tests {
     use super::*;
     use crate::{Archetype, Component, World, WorldExt};
-    use nox::{tensor, Op, OwnedRepr, Scalar, SpatialMotion, SpatialTransform};
+    use nox::{Op, OwnedRepr, Scalar, SpatialMotion, SpatialTransform, tensor};
     use nox_ecs_macros::ReprMonad;
 
     #[test]

@@ -89,7 +89,9 @@ pub enum Error {
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
 
-    #[error("cannot create literal with shape {ty:?} {dims:?} from bytes data with len {data_len_in_bytes}")]
+    #[error(
+        "cannot create literal with shape {ty:?} {dims:?} from bytes data with len {data_len_in_bytes}"
+    )]
     CannotCreateLiteralWithData {
         data_len_in_bytes: usize,
         ty: crate::PrimitiveType,

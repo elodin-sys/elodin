@@ -2,7 +2,7 @@ use bevy::ecs::{
     system::{Local, Res, SystemParam, SystemState},
     world::World,
 };
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{EguiContexts, egui};
 use impeller2_wkt::SimulationTimeStep;
 use timeline_controls::TimelineControls;
 
@@ -10,8 +10,8 @@ use std::ops::RangeInclusive;
 use timeline_slider::TimelineSlider;
 
 use crate::{
-    ui::{colors, images},
     SelectedTimeRange,
+    ui::{colors, images},
 };
 
 use super::{WidgetSystem, WidgetSystemExt};

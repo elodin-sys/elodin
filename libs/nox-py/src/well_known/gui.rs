@@ -128,7 +128,7 @@ impl GraphEntity {
                 let indexer = if let Ok(indexer) = obj.extract::<ShapeIndexer>(py) {
                     indexer
                 } else {
-                    Component::index(py, obj)?
+                    Component::index(py, obj.clone_ref(py))?
                 };
                 let component = GraphComponent {
                     component_id: ComponentId::new(&indexer.component_name),
@@ -149,6 +149,7 @@ pub struct Line3d {
 #[pymethods]
 impl Line3d {
     #[new]
+    #[pyo3(signature = (entity, component_name=None, line_width=None, color=None, index=None, perspective=None))]
     pub fn new(
         entity: EntityId,
         component_name: Option<String>,

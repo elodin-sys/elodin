@@ -53,7 +53,7 @@ use crate::util;
 pub use self::{
     clock::{Clock, Instant},
     timeout::Timeout,
-    timer::{set_global_timer, sleep::Sleep, AlreadyInitialized, Timer, TimerError, Turn},
+    timer::{AlreadyInitialized, Timer, TimerError, Turn, set_global_timer, sleep::Sleep},
 };
 pub use core::time::Duration;
 

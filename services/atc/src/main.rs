@@ -4,7 +4,7 @@ use fred::prelude::*;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::Database;
 use stripe::EventFilter;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 

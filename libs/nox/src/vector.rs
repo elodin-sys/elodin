@@ -1,7 +1,7 @@
 //! Provides functionality for handling vectors in computational tasks, supporting conversion between host and Nox-specific representations, and enabling vector operations like extension, normalization, and cross products.
 use crate::{
-    tensor, ArrayRepr, DefaultRepr, Dim, Field, Matrix, OwnedRepr, RealField, Scalar, Tensor,
-    TensorItem,
+    ArrayRepr, DefaultRepr, Dim, Field, Matrix, OwnedRepr, RealField, Scalar, Tensor, TensorItem,
+    tensor,
 };
 use crate::{Const, DimMul, ToTypenum};
 

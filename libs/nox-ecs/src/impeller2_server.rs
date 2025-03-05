@@ -1,8 +1,8 @@
-use elodin_db::{handle_conn, State, DB};
+use elodin_db::{DB, State, handle_conn};
 use impeller2::types::Timestamp;
 use nox_ecs::Error;
 use std::{
-    sync::{atomic, Arc},
+    sync::{Arc, atomic},
     time::{Duration, Instant},
 };
 use stellarator::struc_con::{Joinable, Thread};

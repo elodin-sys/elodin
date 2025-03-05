@@ -1,8 +1,8 @@
 use crate::{
     channel::BskChannel,
     sys::{
-        sunlineEKFConfig, CSSArraySensorMsgPayload, CSSConfigMsgPayload, CSSUnitConfigMsgPayload,
-        NavAttMsgPayload, SunlineFilterMsgPayload,
+        CSSArraySensorMsgPayload, CSSConfigMsgPayload, CSSUnitConfigMsgPayload, NavAttMsgPayload,
+        SunlineFilterMsgPayload, sunlineEKFConfig,
     },
 };
 

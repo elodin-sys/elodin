@@ -42,6 +42,7 @@ exclude = [
 
 [workspace.package]
 version = "0.12.0"
+edition = "2024"
 repository = "https://github.com/elodin-sys/paracosm"
 
 [profile.wasm-release]

@@ -10,6 +10,7 @@ use tokio_test::{assert_pending, assert_ready_err, assert_ready_ok};
 /// This test ensures that layout-dependent casts in the `Task` struct's
 /// vtable methods are valid.
 #[test]
+#[allow(never_type_fallback_flowing_into_unsafe)]
 fn task_is_valid_for_casts() {
     let task = Box::new(Task::<NopSchedule, _, BoxStorage>::new(async {
         unimplemented!("this task should never be polled")

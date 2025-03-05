@@ -44,10 +44,17 @@ fn main() {
     let lib_name = pyo3_build_config::get().lib_name.as_ref().unwrap();
     let shared_lib = python_lib.join(format!("lib{}.{}", lib_name, shared_lib_extension));
 
-    // copy the shared library to the output python directory:
-    let shared_lib_name = shared_lib.file_name().unwrap();
-    let shared_lib_dest = python_dir.join(shared_lib_name);
-    std::fs::copy(&shared_lib, &shared_lib_dest).unwrap();
+    // copy the shared library to the output python directory if it exists:
+    if shared_lib.exists() {
+        let shared_lib_name = shared_lib.file_name().unwrap();
+        let shared_lib_dest = python_dir.join(shared_lib_name);
+        std::fs::copy(&shared_lib, &shared_lib_dest).unwrap();
+    } else {
+        println!(
+            "cargo:warning=Python shared library not found: {}",
+            shared_lib.display()
+        );
+    }
 
     let stdlib_path = run_python_command("import sysconfig; print(sysconfig.get_path('stdlib'))");
     println!("cargo:rustc-env=PYTHON_STDLIB_PATH={}", stdlib_path);

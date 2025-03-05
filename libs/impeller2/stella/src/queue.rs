@@ -2,7 +2,7 @@ use futures_concurrency::future::Race;
 use impeller2::types::{LenPacket, Msg};
 use impeller2_bbq::*;
 use impeller2_wkt::{NewConnection, StreamId};
-use miette::{miette, IntoDiagnostic};
+use miette::{IntoDiagnostic, miette};
 use std::net::SocketAddr;
 use stellarator::{
     io::{LengthDelReader, SplitExt},

@@ -4,7 +4,7 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 
-use crate::ui::{colors, InspectorAnchor, SelectedObject, SidebarState};
+use crate::ui::{InspectorAnchor, SelectedObject, SidebarState, colors};
 
 use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorViewport};
 

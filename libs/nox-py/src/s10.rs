@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::net::AddrParseError;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
-#[pyclass]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[pyclass(eq)]
 pub enum Recipe {
     Cargo {
         name: String,
@@ -41,8 +41,8 @@ pub enum Recipe {
     },
 }
 
-#[pyclass]
-#[derive(Clone, Copy, Debug)]
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartPolicy {
     Never,
     Instant,
@@ -128,17 +128,52 @@ impl Recipe {
     }
 }
 
+// We can't implement pymethods for Recipe directly since it doesn't implement PyClass
+// Instead, we'll create a wrapper type that can be used from Python
+#[pyclass]
+#[derive(Clone)]
+pub struct PyRecipe {
+    inner: Recipe,
+}
+
 #[pymethods]
-impl Recipe {
+impl PyRecipe {
+    #[new]
+    #[pyo3(signature = (name, path=None, addr=None, optimize=None))]
+    fn new(
+        name: String,
+        path: Option<String>,
+        addr: Option<String>,
+        optimize: Option<bool>,
+    ) -> PyResult<Self> {
+        let path = path.map(PathBuf::from).unwrap_or_default();
+        let addr = addr.unwrap_or_else(|| "[::]:2240".to_string());
+        let optimize = optimize.unwrap_or(false);
+
+        let inner = Recipe::Sim {
+            name,
+            path,
+            addr,
+            optimize,
+        };
+
+        Ok(PyRecipe { inner })
+    }
+
     pub fn to_json(&self) -> PyResult<String> {
-        let recipe = self.to_rust()?;
+        let recipe = self.inner.to_rust()?;
         serde_json::to_string(&recipe).map_err(|err| PyValueError::new_err(err.to_string()))
+    }
+
+    pub fn name(&self) -> String {
+        self.inner.name()
     }
 }
 
 pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child = PyModule::new_bound(parent_module.py(), "s10")?;
-    child.add_class::<Recipe>()?;
+    let child = PyModule::new(parent_module.py(), "s10")?;
+    // Use our PyRecipe wrapper instead of the original Recipe
+    child.add_class::<PyRecipe>()?;
     child.add_class::<RestartPolicy>()?;
     parent_module.add_submodule(&child)
 }

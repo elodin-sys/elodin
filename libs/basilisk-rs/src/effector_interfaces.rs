@@ -1,9 +1,9 @@
 use crate::{
     channel::BskChannel,
     sys::{
-        rwMotorTorqueConfig, rwMotorVoltageConfig, ArrayMotorTorqueMsgPayload,
-        ArrayMotorVoltageMsgPayload, CmdTorqueBodyMsgPayload, RWArrayConfigMsgPayload,
-        RWAvailabilityMsgPayload, RWSpeedMsgPayload,
+        ArrayMotorTorqueMsgPayload, ArrayMotorVoltageMsgPayload, CmdTorqueBodyMsgPayload,
+        RWArrayConfigMsgPayload, RWAvailabilityMsgPayload, RWSpeedMsgPayload, rwMotorTorqueConfig,
+        rwMotorVoltageConfig,
     },
 };
 

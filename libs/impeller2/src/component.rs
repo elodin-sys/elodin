@@ -1,8 +1,8 @@
 use crate::types::ComponentId;
 use crate::{types::PrimType, util::concat_str};
 use nox::{ConstDim, Dim, Field, OwnedRepr, Tensor};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::schema::Schema;
 
@@ -13,6 +13,11 @@ pub trait Component {
 
     #[cfg(feature = "std")]
     fn schema() -> Schema<Vec<u64>>;
+
+    // Allow implementations to provide a custom component ID if needed
+    fn component_id() -> ComponentId {
+        Self::COMPONENT_ID
+    }
 }
 
 impl<T, D, R> Component for Tensor<T, D, R>

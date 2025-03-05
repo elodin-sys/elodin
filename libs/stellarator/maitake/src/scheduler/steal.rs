@@ -64,7 +64,7 @@ impl<S: Schedule> Injector<S> {
     #[cfg(not(loom))]
     pub const unsafe fn new_with_static_stub(stub: &'static TaskStub) -> Self {
         Self {
-            queue: MpscQueue::new_with_static_stub(&stub.hdr),
+            queue: unsafe { MpscQueue::new_with_static_stub(&stub.hdr) },
             tasks: AtomicUsize::new(0),
             _scheduler_type: PhantomData,
         }

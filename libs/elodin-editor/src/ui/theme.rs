@@ -1,4 +1,4 @@
-use bevy_egui::egui::{self, epaint::Shadow, CornerRadius, FontData, Margin, Stroke, Style};
+use bevy_egui::egui::{self, CornerRadius, FontData, Margin, Stroke, Style, epaint::Shadow};
 use egui::epaint::text::{FontInsert, InsertFontFamily};
 
 use super::colors::{self, with_opacity};

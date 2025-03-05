@@ -1,18 +1,18 @@
 use std::mem;
 
 use crate::{
-    ui::widgets::plot::{
-        gpu::{LineHandle, INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, VALUE_BUFFER_SIZE},
-        Line,
-    },
     SelectedTimeRange,
+    ui::widgets::plot::{
+        Line,
+        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
+    },
 };
 use bevy::{
     app::{Plugin, PostUpdate},
-    asset::{load_internal_asset, AssetApp, Assets, Handle},
+    asset::{AssetApp, Assets, Handle, load_internal_asset},
     color::ColorToComponents,
     core_pipeline::{
-        core_3d::{Transparent3d, CORE_3D_DEPTH_FORMAT},
+        core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
         prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
     },
     ecs::{
@@ -22,8 +22,8 @@ use bevy::{
         query::Has,
         schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet},
         system::{
-            lifetimeless::{Read, SRes},
             Commands, Query, Res, ResMut, Resource, SystemState,
+            lifetimeless::{Read, SRes},
         },
         world::{FromWorld, Mut, World},
     },
@@ -32,6 +32,7 @@ use bevy::{
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
     prelude::{Color, Deref},
     render::{
+        ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
         render_phase::{
             AddRenderCommand, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
@@ -40,7 +41,6 @@ use bevy::{
         render_resource::{binding_types::uniform_buffer, *},
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, Msaa, RenderLayers, ViewTarget},
-        ExtractSchedule, MainWorld, Render, RenderApp, RenderSet,
     },
     transform::components::{GlobalTransform, Transform},
 };

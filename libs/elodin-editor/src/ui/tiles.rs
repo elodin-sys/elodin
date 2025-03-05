@@ -5,11 +5,11 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::{EditorCam, EnabledMotion};
 use bevy_egui::{
-    egui::{self, vec2, Color32, CornerRadius, Frame, RichText, Stroke, Ui, Visuals},
     EguiContexts,
+    egui::{self, Color32, CornerRadius, Frame, RichText, Stroke, Ui, Visuals, vec2},
 };
-use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
+use big_space::propagation::NoPropagateRot;
 use egui::UiBuilder;
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2::types::{ComponentId, EntityId};
@@ -19,22 +19,21 @@ use nox::Tensor;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    colors, images,
+    HdrEnabled, SelectedObject, ViewportRect, colors, images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
     widgets::{
+        WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
         modal::ModalNewTile,
         plot::{self, GraphBundle, PlotWidget},
-        WidgetSystem, WidgetSystemExt,
     },
-    HdrEnabled, SelectedObject, ViewportRect,
 };
 use crate::{
-    plugins::{navigation_gizmo::RenderLayerAlloc, LogicalKeyState},
+    MainCamera,
+    plugins::{LogicalKeyState, navigation_gizmo::RenderLayerAlloc},
     spawn_main_camera,
     ui::widgets::plot::GraphStateEntity,
-    MainCamera,
 };
 
 #[derive(Clone)]

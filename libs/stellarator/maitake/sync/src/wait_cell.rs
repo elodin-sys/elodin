@@ -2,6 +2,7 @@
 //!
 //! See the documentation for the [`WaitCell`] type for details.
 use crate::{
+    Closed,
     loom::{
         cell::UnsafeCell,
         sync::atomic::{
@@ -9,8 +10,7 @@ use crate::{
             Ordering::{self, *},
         },
     },
-    util::{fmt, CachePadded},
-    Closed,
+    util::{CachePadded, fmt},
 };
 use core::{
     future::Future,

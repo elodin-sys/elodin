@@ -1,6 +1,6 @@
 use config::{ConfigError, Environment, File};
-use redact::serde::redact_secret;
 use redact::Secret;
+use redact::serde::redact_secret;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 

@@ -5,8 +5,8 @@ use bevy::app::{Plugin, Update};
 use impeller2::types::LenPacket;
 use impeller2_bbq::*;
 use impeller2_stella::queue::tcp_connect;
-use std::sync::atomic::{self, AtomicU64};
 use std::sync::Arc;
+use std::sync::atomic::{self, AtomicU64};
 use std::{net::SocketAddr, time::Duration};
 use thingbuf::mpsc;
 

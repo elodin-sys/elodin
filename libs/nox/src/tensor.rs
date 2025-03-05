@@ -819,13 +819,13 @@ where
 }
 
 impl<
-        const A1: usize,
-        const A2: usize,
-        const A3: usize,
-        const B1: usize,
-        const B2: usize,
-        const B3: usize,
-    > BroadcastDim<(Const<A1>, Const<A2>, Const<A3>), (Const<B1>, Const<B2>, Const<B3>)>
+    const A1: usize,
+    const A2: usize,
+    const A3: usize,
+    const B1: usize,
+    const B2: usize,
+    const B3: usize,
+> BroadcastDim<(Const<A1>, Const<A2>, Const<A3>), (Const<B1>, Const<B2>, Const<B3>)>
     for ShapeConstraint
 where
     ShapeConstraint: BroadcastDim<Const<A1>, Const<B1>>,
