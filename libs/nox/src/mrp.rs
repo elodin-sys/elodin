@@ -98,7 +98,7 @@ impl<'a, T: RealField, R: OwnedRepr> Add<&'a MRP<T, R>> for MRP<T, R> {
 mod tests {
     use approx::assert_relative_eq;
 
-    use crate::{array, tensor, ArrayRepr, Vector3};
+    use crate::{ArrayRepr, Vector3, array, tensor};
 
     use super::*;
 

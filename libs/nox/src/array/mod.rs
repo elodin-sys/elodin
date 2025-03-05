@@ -14,6 +14,7 @@ use core::{
     ops::{Add, Div, Mul, Neg, Sub},
 };
 use faer::{
+    Parallelism,
     linalg::{
         cholesky::llt::compute::{cholesky_in_place, cholesky_in_place_req},
         lu::{
@@ -21,7 +22,6 @@ use faer::{
         },
     },
     reborrow::ReborrowMut,
-    Parallelism,
 };
 use smallvec::SmallVec;
 
@@ -52,7 +52,7 @@ pub mod dims {
     };
 }
 pub mod prelude {
-    pub use super::{dims::*, Array, ArrayBuf, ArrayDim, ArrayRepr, ArrayView, Mat3, Vec3};
+    pub use super::{Array, ArrayBuf, ArrayDim, ArrayRepr, ArrayView, Mat3, Vec3, dims::*};
 }
 
 /// A struct representing an array with type-safe dimensions and element type.
@@ -1250,9 +1250,9 @@ impl<D: Dim + crate::NonTupleDim + crate::NonScalarDim> DimGet for D {
 }
 
 impl<
-        D1: Dim + crate::NonTupleDim + crate::NonScalarDim,
-        D2: crate::NonTupleDim + crate::NonScalarDim,
-    > DimGet for (D1, D2)
+    D1: Dim + crate::NonTupleDim + crate::NonScalarDim,
+    D2: crate::NonTupleDim + crate::NonScalarDim,
+> DimGet for (D1, D2)
 where
     (D1, D2): Dim,
 {
@@ -1458,13 +1458,13 @@ where
 }
 
 impl<
-        'a,
-        T,
-        S: StridesIter,
-        I: AsMut<[usize]> + AsRef<[usize]> + 'a,
-        D: AsRef<[usize]>,
-        O: AsRef<[usize]>,
-    > StrideIteratorMut<'a, T, S, I, D, O>
+    'a,
+    T,
+    S: StridesIter,
+    I: AsMut<[usize]> + AsRef<[usize]> + 'a,
+    D: AsRef<[usize]>,
+    O: AsRef<[usize]>,
+> StrideIteratorMut<'a, T, S, I, D, O>
 {
     fn enumerate(self) -> impl Iterator<Item = (&'a I, &'a mut T)> {
         EnumerateStrideIteratorMut(self)
@@ -1481,13 +1481,13 @@ pub struct EnumerateStrideIteratorMut<
 >(StrideIteratorMut<'a, T, S, I, D, O>);
 
 impl<
-        'a,
-        T,
-        S: StridesIter,
-        I: AsMut<[usize]> + AsRef<[usize]> + 'a,
-        D: AsRef<[usize]>,
-        O: AsRef<[usize]>,
-    > Iterator for EnumerateStrideIteratorMut<'a, T, S, I, D, O>
+    'a,
+    T,
+    S: StridesIter,
+    I: AsMut<[usize]> + AsRef<[usize]> + 'a,
+    D: AsRef<[usize]>,
+    O: AsRef<[usize]>,
+> Iterator for EnumerateStrideIteratorMut<'a, T, S, I, D, O>
 {
     type Item = (&'a I, &'a mut T);
 
@@ -1584,7 +1584,6 @@ impl<T: Elem + PartialEq, D: Dim> PartialEq for Array<T, D> {
 impl<T: AbsDiffEq, D: Dim> AbsDiffEq for Array<T, D>
 where
     T: Elem,
-
     T::Epsilon: Elem,
 {
     type Epsilon = T::Epsilon;

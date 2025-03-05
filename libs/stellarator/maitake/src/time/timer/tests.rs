@@ -5,7 +5,7 @@ use core::cell::RefCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::time::{timer::Ticks, Clock};
+use crate::time::{Clock, timer::Ticks};
 use std::time::Duration;
 
 crate::loom::thread_local! {

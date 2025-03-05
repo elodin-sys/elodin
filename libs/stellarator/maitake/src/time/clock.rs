@@ -2,8 +2,8 @@
 //!
 //! See the documentation for the [`Clock`] type for more details.
 use super::{
-    timer::{self, TimerError},
     Duration,
+    timer::{self, TimerError},
 };
 use core::{
     fmt,
@@ -290,7 +290,9 @@ pub(in crate::time) fn ticks_to_dur(tick_duration: Duration, ticks: Ticks) -> Du
         );
     };
     let Some(secs) = secs.checked_add(extra_secs) else {
-        panic!("ticks_to_dur({tick_duration:?}, {ticks}): extra seconds from nanos ({extra_secs}s) would overflow total seconds")
+        panic!(
+            "ticks_to_dur({tick_duration:?}, {ticks}): extra seconds from nanos ({extra_secs}s) would overflow total seconds"
+        )
     };
     debug_assert!(nanos < NANOS_PER_SEC);
     Duration::new(secs, nanos)

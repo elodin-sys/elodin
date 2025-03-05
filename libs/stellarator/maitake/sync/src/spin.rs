@@ -39,7 +39,7 @@ pub use self::once::{InitOnce, Lazy};
 use crate::{
     blocking,
     loom::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*},
-    util::{fmt, Backoff},
+    util::{Backoff, fmt},
 };
 // This import is pulled out because we want to reference it in docs, and
 // importing `use crate::blocking; use blocking::{RawMutex, RawRwLock};` makes
@@ -101,11 +101,11 @@ unsafe impl RawMutex for Spinlock {
     #[cfg_attr(test, track_caller)]
     fn lock(&self) {
         let mut boff = Backoff::default();
-        while test_dbg!(self
-            .locked
-            .compare_exchange(false, true, Acquire, Acquire)
-            .is_err())
-        {
+        while test_dbg!(
+            self.locked
+                .compare_exchange(false, true, Acquire, Acquire)
+                .is_err()
+        ) {
             while test_dbg!(self.is_locked()) {
                 boff.spin();
             }
@@ -115,10 +115,11 @@ unsafe impl RawMutex for Spinlock {
     #[cfg_attr(test, track_caller)]
     #[inline]
     fn try_lock(&self) -> bool {
-        test_dbg!(self
-            .locked
-            .compare_exchange(false, true, Acquire, Acquire)
-            .is_ok())
+        test_dbg!(
+            self.locked
+                .compare_exchange(false, true, Acquire, Acquire)
+                .is_ok()
+        )
     }
 
     #[cfg_attr(test, track_caller)]
@@ -215,9 +216,10 @@ unsafe impl RawRwLock for RwSpinlock {
         // `compare_exchange_weak`, because it will never retry, and
         // a spurious failure means we would incorrectly fail to lock the RwLock
         // when we should have successfully locked it.
-        while test_dbg!(self
-            .state
-            .compare_exchange_weak(UNLOCKED, WRITER, Acquire, Relaxed))
+        while test_dbg!(
+            self.state
+                .compare_exchange_weak(UNLOCKED, WRITER, Acquire, Relaxed)
+        )
         .is_err()
         {
             test_dbg!(backoff.spin());
@@ -227,9 +229,10 @@ unsafe impl RawRwLock for RwSpinlock {
     #[cfg_attr(test, track_caller)]
     #[inline]
     fn try_lock_exclusive(&self) -> bool {
-        test_dbg!(self
-            .state
-            .compare_exchange(UNLOCKED, WRITER, Acquire, Relaxed))
+        test_dbg!(
+            self.state
+                .compare_exchange(UNLOCKED, WRITER, Acquire, Relaxed)
+        )
         .is_ok()
     }
 

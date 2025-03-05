@@ -1,11 +1,13 @@
 use crate::*;
 
 use numpy::PyUntypedArray;
+use pyo3::types::PyAnyMethods;
+use pyo3::{FromPyObject, PyAny};
 
 #[derive(Debug)]
 pub struct Archetype<'py> {
     pub component_data: Vec<Component>,
-    pub arrays: Vec<&'py PyUntypedArray>,
+    pub arrays: Vec<Bound<'py, PyUntypedArray>>,
 }
 
 impl Archetype<'_> {
@@ -18,12 +20,12 @@ impl Archetype<'_> {
 }
 
 impl<'s> FromPyObject<'s> for Archetype<'s> {
-    fn extract(archetype: &'s PyAny) -> PyResult<Self> {
+    fn extract_bound(archetype: &Bound<'s, PyAny>) -> PyResult<Self> {
         let component_data = archetype
             .call_method0("component_data")?
             .extract::<Vec<Component>>()?;
         let arrays = archetype.call_method0("arrays")?;
-        let arrays = arrays.extract::<Vec<&numpy::PyUntypedArray>>()?;
+        let arrays = arrays.extract::<Vec<Bound<'_, numpy::PyUntypedArray>>>()?;
         Ok(Self {
             component_data,
             arrays,
@@ -37,11 +39,11 @@ pub enum Spawnable<'py> {
 }
 
 impl<'py> FromPyObject<'py> for Spawnable<'py> {
-    fn extract(ob: &'py PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
         if let Ok(archetype_seq) = ob.extract::<Vec<Archetype>>() {
             Ok(Self::Archetypes(archetype_seq))
         } else if ob.getattr("component_data").is_ok() {
-            let archetype = Archetype::extract(ob)?;
+            let archetype = Archetype::extract_bound(ob)?;
             Ok(Self::Archetypes(vec![archetype]))
         } else {
             let name = ob.call_method0("asset_name")?.extract()?;

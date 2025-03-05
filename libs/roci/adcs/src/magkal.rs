@@ -7,7 +7,7 @@
 //!
 //! It estimates scale factors, bias, and nonorthogonality corrections
 
-use nox::{tensor, ArrayRepr, Matrix, Matrix3, OwnedRepr, Vector};
+use nox::{ArrayRepr, Matrix, Matrix3, OwnedRepr, Vector, tensor};
 
 use crate::ukf::{self, MerweConfig};
 

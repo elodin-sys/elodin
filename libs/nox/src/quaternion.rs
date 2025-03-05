@@ -8,7 +8,7 @@ use crate::Matrix3;
 use crate::ReprMonad;
 use core::ops::{Add, Mul};
 
-use crate::{Field, OwnedRepr, RealField, Scalar, TensorItem, Vector, MRP};
+use crate::{Field, MRP, OwnedRepr, RealField, Scalar, TensorItem, Vector};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -330,7 +330,7 @@ mod tests {
 
     use approx::assert_relative_eq;
 
-    use crate::{tensor, ArrayRepr, Vector3};
+    use crate::{ArrayRepr, Vector3, tensor};
 
     use super::*;
 

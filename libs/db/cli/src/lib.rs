@@ -17,24 +17,24 @@ use impeller2_wkt::*;
 use mlua::{AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, Value};
 use nu_ansi_term::Color;
 use rustyline::{
+    Completer, CompletionType, Editor, Helper, Hinter, Validator,
     completion::FilenameCompleter,
     highlight::{CmdKind, Highlighter},
     hint::HistoryHinter,
     history::History,
     validate::MatchingBracketValidator,
-    Completer, CompletionType, Editor, Helper, Hinter, Validator,
 };
 use serde::de::DeserializeOwned;
 use std::{
     borrow::Cow::{self, Borrowed, Owned},
     collections::HashMap,
     fmt::Display,
-    io::{self, stdout, Read, Write},
+    io::{self, Read, Write, stdout},
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        atomic::{self, AtomicBool},
         Arc,
+        atomic::{self, AtomicBool},
     },
     time::Duration,
 };

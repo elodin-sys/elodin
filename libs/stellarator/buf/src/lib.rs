@@ -3,8 +3,8 @@ use std::{
     ops::{Bound, Deref, DerefMut, Range, RangeBounds},
     ptr::NonNull,
     sync::atomic::{
-        self, AtomicBool, AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicIsize, AtomicU16,
-        AtomicU32, AtomicU64, AtomicU8, AtomicUsize,
+        self, AtomicBool, AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicIsize, AtomicU8,
+        AtomicU16, AtomicU32, AtomicU64, AtomicUsize,
     },
 };
 
@@ -114,7 +114,9 @@ unsafe impl IoBufMut for Vec<u8> {
     }
 
     unsafe fn set_init(&mut self, len: usize) {
-        self.set_len(len);
+        unsafe {
+            self.set_len(len);
+        }
     }
 }
 
@@ -249,7 +251,7 @@ unsafe impl<T: IoBufMut> IoBufMut for Slice<T> {
     }
 
     unsafe fn set_init(&mut self, len: usize) {
-        self.inner.set_init(self.range.start + len)
+        unsafe { self.inner.set_init(self.range.start + len) }
     }
 }
 

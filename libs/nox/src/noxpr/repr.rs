@@ -7,7 +7,7 @@ use crate::{
     ShapeConstraint,
 };
 
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 /// Represents a compute operation.
 pub struct Op;

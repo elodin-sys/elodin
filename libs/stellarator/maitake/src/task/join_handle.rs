@@ -179,7 +179,7 @@ impl<T> Future for JoinHandle<T> {
                     kind,
                     id: this.id,
                     output: None,
-                }))
+                }));
             }
         };
         let poll = unsafe {

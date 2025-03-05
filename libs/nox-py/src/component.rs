@@ -2,6 +2,7 @@ use crate::*;
 
 use std::collections::HashMap;
 
+use pyo3::IntoPyObjectExt;
 use pyo3::types::PyList;
 use pyo3::{intern, types::PySequence};
 
@@ -243,7 +244,7 @@ impl From<Component> for elodin_db::ComponentSchema {
     }
 }
 
-#[pyclass]
+#[pyclass(eq, eq_int)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
     F64,
@@ -296,14 +297,27 @@ impl From<PrimitiveType> for impeller2::types::PrimType {
 }
 
 #[pyclass]
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ShapeIndexer {
     pub component_name: String,
     strides: Vec<usize>,
     shape: Vec<usize>,
     index: Vec<usize>,
-    py_list: Py<PyList>,
+    py_list: Py<PyAny>, // Changed from Py<PyList> to Py<PyAny> which has Clone
     items: Vec<ShapeIndexer>,
+}
+
+impl Clone for ShapeIndexer {
+    fn clone(&self) -> Self {
+        Self {
+            component_name: self.component_name.clone(),
+            strides: self.strides.clone(),
+            shape: self.shape.clone(),
+            index: self.index.clone(),
+            py_list: Python::with_gil(|py| self.py_list.clone_ref(py)),
+            items: self.items.clone(),
+        }
+    }
 }
 
 #[pymethods]
@@ -334,7 +348,24 @@ impl ShapeIndexer {
                 .collect()
         };
         let py_list = Python::with_gil(|py| {
-            PyList::new_bound(py, items.iter().map(|x| Py::new(py, x.clone()).unwrap())).into()
+            // Create a Python list of items
+            let items_py: Vec<PyObject> = items
+                .iter()
+                .map(|x| {
+                    // Extract what we need and create a new Python object
+                    let new_indexer = ShapeIndexer::new(
+                        x.component_name.clone(),
+                        x.shape.clone(),
+                        x.index.clone(),
+                        x.strides.clone(),
+                    );
+                    // Convert to PyObject
+                    Py::new(py, new_indexer).unwrap().into_py_any(py).unwrap()
+                })
+                .collect();
+
+            // Create a PyList from the items and convert to Py<PyAny>
+            PyList::new(py, &items_py).unwrap().into_py_any(py).unwrap()
         });
         ShapeIndexer {
             component_name,
@@ -348,12 +379,13 @@ impl ShapeIndexer {
 
     pub fn indexes(&self) -> Vec<usize> {
         if self.shape.is_empty() {
-            vec![self
-                .index
-                .iter()
-                .zip(self.strides.iter().rev())
-                .map(|(i, stride)| i * stride)
-                .sum()]
+            vec![
+                self.index
+                    .iter()
+                    .zip(self.strides.iter().rev())
+                    .map(|(i, stride)| i * stride)
+                    .sum(),
+            ]
         } else {
             self.items.iter().flat_map(|item| item.indexes()).collect()
         }

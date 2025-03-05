@@ -1,4 +1,4 @@
-use async_watcher::{notify::RecursiveMode, AsyncDebouncer};
+use async_watcher::{AsyncDebouncer, notify::RecursiveMode};
 use core::time::Duration;
 use futures::Future;
 use std::{io, path::PathBuf};

@@ -106,7 +106,7 @@ impl<T: RealField, R: OwnedRepr> Matrix3<T, R> {
 #[cfg(test)]
 mod tests {
 
-    use crate::{tensor, Client, CompFn, Vector, Vector3};
+    use crate::{Client, CompFn, Vector, Vector3, tensor};
 
     use super::*;
 

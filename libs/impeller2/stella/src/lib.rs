@@ -1,8 +1,8 @@
 use impeller2::types::{IntoLenPacket, LenPacket, OwnedPacket};
 use stellarator::{
+    BufResult,
     buf::{IoBufMut, Slice},
     io::{AsyncRead, AsyncWrite, GrowableBuf, LengthDelReader},
-    BufResult,
 };
 
 #[cfg(feature = "queue")]

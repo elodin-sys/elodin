@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::loom::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use futures::{future::poll_fn, pin_mut, select_biased, FutureExt};
+use futures::{FutureExt, future::poll_fn, pin_mut, select_biased};
 use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
 
 #[test]

@@ -3,8 +3,8 @@ use crate::*;
 use core::marker::PhantomData;
 
 use impeller2::types::ComponentId;
+use nox_ecs::{ComponentArray, join_query, update_var};
 use nox_ecs::{join_many, nox::Noxpr};
-use nox_ecs::{join_query, update_var, ComponentArray};
 
 #[pyclass]
 #[derive(Clone)]
@@ -48,7 +48,7 @@ impl QueryInner {
                 let buffer = args.get(i).ok_or(nox_ecs::Error::ComponentNotFound)?;
                 Ok::<_, Error>((
                     ComponentArray {
-                        buffer: Noxpr::jax(buffer.clone()),
+                        buffer: Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
                         len: meta.len,
                         entity_map: meta.entity_map,
                         component_id: id,
@@ -104,7 +104,7 @@ impl QueryInner {
                 let out = update_var(
                     &meta.entity_map,
                     &self.query.entity_map,
-                    &Noxpr::jax(buffer.clone()),
+                    &Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
                     expr,
                 );
                 outputs.push(out);

@@ -285,7 +285,7 @@ where
     /// Essentially, this is only okay to call when the kernel is oopsing and
     /// all code running on other cores has already been killed.
     pub unsafe fn force_unlock(&self) {
-        self.lock.unlock()
+        unsafe { self.lock.unlock() }
     }
 }
 

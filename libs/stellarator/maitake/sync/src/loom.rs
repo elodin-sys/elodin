@@ -231,7 +231,7 @@ mod inner {
     #[cfg(test)]
     pub(crate) mod thread {
 
-        pub(crate) use std::thread::{yield_now, JoinHandle};
+        pub(crate) use std::thread::{JoinHandle, yield_now};
 
         pub(crate) fn spawn<F, T>(f: F) -> JoinHandle<T>
         where
@@ -252,7 +252,7 @@ mod inner {
                 let _span = tracing::info_span!(parent: span, "thread", message = num).entered();
 
                 tracing::info!(num, "spawned child thread");
-                let _tracking = track.map(|track| track.set_default());
+                let _tracking = track.as_ref().map(|track| track.set_default());
                 let res = f();
                 tracing::info!(num, "child thread completed");
 
@@ -358,7 +358,7 @@ mod inner {
         impl<T: ?Sized> ConstPtr<T> {
             #[inline(always)]
             pub(crate) unsafe fn deref(&self) -> &T {
-                &*self.0
+                unsafe { &*self.0 }
             }
 
             #[inline(always)]
@@ -380,7 +380,7 @@ mod inner {
             #[allow(clippy::mut_from_ref)]
             #[inline(always)]
             pub(crate) unsafe fn deref(&self) -> &mut T {
-                &mut *self.0
+                unsafe { &mut *self.0 }
             }
 
             #[inline(always)]
@@ -408,8 +408,8 @@ mod inner {
             use std::{
                 cell::RefCell,
                 sync::{
-                    atomic::{AtomicBool, Ordering},
                     Arc, Mutex, Weak,
+                    atomic::{AtomicBool, Ordering},
                 },
             };
 
@@ -439,7 +439,7 @@ mod inner {
                     REGISTRY.with(|current| current.borrow().clone())
                 }
 
-                pub(in crate::loom) fn set_default(&self) -> impl Drop {
+                pub(in crate::loom) fn set_default(&self) -> impl Drop + '_ {
                     struct Unset(Option<Registry>);
                     impl Drop for Unset {
                         fn drop(&mut self) {

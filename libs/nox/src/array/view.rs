@@ -3,9 +3,9 @@ use core::marker::PhantomData;
 use smallvec::SmallVec;
 use zerocopy::{Immutable, TryFromBytes};
 
-use crate::{utils::calculate_strides, Array, ConstDim, Dim, DimGet, Dyn, Elem, Repr};
+use crate::{Array, ConstDim, Dim, DimGet, Dyn, Elem, Repr, utils::calculate_strides};
 
-use super::{dynamic::DynArray, ArrayBuf};
+use super::{ArrayBuf, dynamic::DynArray};
 
 pub struct ViewRepr<'a> {
     _phantom: PhantomData<&'a ()>,

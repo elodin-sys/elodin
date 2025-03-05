@@ -2,7 +2,7 @@ use std::{io, marker::PhantomData, path::Path};
 
 use serde::Serialize;
 
-use crate::{drivers::DriverMode, Componentize, Decomponentize, System};
+use crate::{Componentize, Decomponentize, System, drivers::DriverMode};
 
 pub struct CSVLogger<W, D> {
     writer: ::csv::Writer<std::fs::File>,

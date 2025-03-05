@@ -5,17 +5,17 @@
 #[cfg(any(test, maitake_ultraverbose))]
 use crate::util::fmt;
 use crate::{
+    WaitResult,
     blocking::{DefaultMutex, Mutex, ScopedRawMutex},
     loom::{
         cell::UnsafeCell,
         sync::atomic::{AtomicUsize, Ordering::*},
     },
     util::{CachePadded, WakeBatch},
-    WaitResult,
 };
 use cordyceps::{
-    list::{self, List},
     Linked,
+    list::{self, List},
 };
 use core::{
     future::Future,
@@ -25,7 +25,7 @@ use core::{
     ptr::{self, NonNull},
     task::{Context, Poll, Waker},
 };
-use mycelium_bitfield::{bitfield, enum_from_bits, FromBits};
+use mycelium_bitfield::{FromBits, bitfield, enum_from_bits};
 use pin_project::{pin_project, pinned_drop};
 
 #[cfg(test)]
@@ -1303,14 +1303,16 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Waiter>> {
         // Safety: using `ptr::addr_of!` avoids creating a temporary
         // reference, which stacked borrows dislikes.
-        let node = ptr::addr_of!((*target.as_ptr()).node);
-        (*node).with_mut(|node| {
-            let links = ptr::addr_of_mut!((*node).links);
-            // Safety: since the `target` pointer is `NonNull`, we can assume
-            // that pointers to its members are also not null, making this use
-            // of `new_unchecked` fine.
-            NonNull::new_unchecked(links)
-        })
+        unsafe {
+            let node = ptr::addr_of!((*target.as_ptr()).node);
+            (*node).with_mut(|node| {
+                let links = ptr::addr_of_mut!((*node).links);
+                // Safety: since the `target` pointer is `NonNull`, we can assume
+                // that pointers to its members are also not null, making this use
+                // of `new_unchecked` fine.
+                NonNull::new_unchecked(links)
+            })
+        }
     }
 }
 

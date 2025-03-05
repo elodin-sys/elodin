@@ -154,16 +154,25 @@ fn download_shared_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
-        ("macos", arch) => format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz", arch),
+        ("macos", arch) => format!(
+            "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-darwin-cpu.tar.gz",
+            arch
+        ),
         ("linux", arch) => {
             if true {
-              format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz", arch)
-            }else{
-              format!("https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz", arch)
+                format!(
+                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cuda12.tar.gz",
+                    arch
+                )
+            } else {
+                format!(
+                    "https://github.com/elixir-nx/xla/releases/download/v0.7.0/xla_extension-{}-linux-gnu-cpu.tar.gz",
+                    arch
+                )
             }
         }
 
-        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch)
+        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
     };
 
     let buf = download_file(&url)?;
@@ -180,9 +189,15 @@ fn download_xla(xla_dir: &Path) -> anyhow::Result<()> {
     let os = env::var("CARGO_CFG_TARGET_OS").expect("Unable to get TARGET_OS");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Unable to get TARGET_ARCH");
     let url = match (os.as_str(), arch.as_str()) {
-        ("macos", arch) => format!("https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-darwin-cpu.tar.gz", arch),
-        ("linux", arch) => format!("https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-linux-gnu-cpu.tar.gz", arch),
-        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch)
+        ("macos", arch) => format!(
+            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-darwin-cpu.tar.gz",
+            arch
+        ),
+        ("linux", arch) => format!(
+            "https://github.com/elodin-sys/xla/releases/download/v0.5.4/xla_extension-{}-linux-gnu-cpu.tar.gz",
+            arch
+        ),
+        (os, arch) => panic!("{}-{} is an unsupported platform", os, arch),
     };
     let buf = download_file(&url)?;
     let mut bytes = io::Cursor::new(buf);

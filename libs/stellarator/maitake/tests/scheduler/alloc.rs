@@ -1,5 +1,5 @@
 use super::*;
-use mycelium_util::sync::{blocking::Mutex, spin::Spinlock, Lazy};
+use mycelium_util::sync::{Lazy, blocking::Mutex, spin::Spinlock};
 
 #[test]
 fn basically_works() {

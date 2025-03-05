@@ -1,9 +1,10 @@
 //! This module provides utilities for converting `Noxpr` expressions to `Jax` operations in Python.
+use numpy::PyArrayMethods;
 use pyo3::{
+    IntoPyObjectExt, PyObject, PyResult, Python,
     exceptions::PyValueError,
     prelude::*,
     types::{IntoPyDict, PyDict, PyTuple},
-    PyObject, PyResult, Python,
 };
 use smallvec::SmallVec;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
@@ -21,7 +22,6 @@ impl Noxpr {
 }
 
 /// Traces `Noxpr` expressions and generates corresponding `Jax` operations.
-#[derive(Clone)]
 pub struct JaxTracer {
     lax: PyObject,
     jnp: PyObject,
@@ -29,13 +29,30 @@ pub struct JaxTracer {
     cache: HashMap<NoxprId, PyObject>,
 }
 
+// Manually implement Clone since PyObject doesn't implement Clone in pyo3 0.23
+impl Clone for JaxTracer {
+    fn clone(&self) -> Self {
+        // We need to acquire the GIL to clone PyObjects
+        Python::with_gil(|py| Self {
+            lax: self.lax.clone_ref(py),
+            jnp: self.jnp.clone_ref(py),
+            linalg: self.linalg.clone_ref(py),
+            cache: self
+                .cache
+                .iter()
+                .map(|(k, v)| (*k, v.clone_ref(py)))
+                .collect(),
+        })
+    }
+}
+
 impl JaxTracer {
     /// Initializes a new tracer with references to the Jax libraries.
     pub fn new() -> Self {
         Python::with_gil(|py| {
-            let lax = py.import_bound("jax.lax").unwrap().into();
-            let jnp = py.import_bound("jax.numpy").unwrap().into();
-            let linalg = py.import_bound("jax.numpy.linalg").unwrap().into();
+            let lax = py.import("jax.lax").unwrap().into();
+            let jnp = py.import("jax.numpy").unwrap().into();
+            let linalg = py.import("jax.numpy.linalg").unwrap().into();
             Self {
                 lax,
                 jnp,
@@ -49,7 +66,7 @@ impl JaxTracer {
     pub fn visit(&mut self, expr: &Noxpr) -> Result<PyObject, Error> {
         let id = expr.id();
         if let Some(op) = self.cache.get(&id) {
-            return Ok(op.clone());
+            return Python::with_gil(|py| Ok(op.clone_ref(py)));
         }
         let op: PyObject = match expr.deref() {
             NoxprNode::Constant(c) => match c.ty.element_type {
@@ -81,7 +98,10 @@ impl JaxTracer {
                     .iter()
                     .map(|x| self.visit(x))
                     .collect::<Result<Vec<_>, _>>()?;
-                Python::with_gil(|py| PyTuple::new_bound(py, elems).into_py(py))
+                Python::with_gil(|py| {
+                    let tuple = PyTuple::new(py, elems).unwrap();
+                    tuple.into_py_any(py).unwrap()
+                })
             }
             NoxprNode::Iota(i) => Python::with_gil(|py| {
                 let dtype = dtype(&i.shape.element_type)?;
@@ -237,7 +257,7 @@ impl JaxTracer {
                     let jax = self.visit(&g.expr)?;
                     Python::with_gil(|py| {
                         jax.call_method1(py, "__getitem__", (g.index,))
-                            .map(|x| x.into_py(py))
+                            .map(|x| x.into_py_any(py).unwrap())
                     })
                     .unwrap()
                 }
@@ -256,7 +276,7 @@ impl JaxTracer {
                         .map_err(Error::PyO3)
                 })?
             }
-            NoxprNode::Jax(o) => o.clone(),
+            NoxprNode::Jax(o) => Python::with_gil(|py| o.clone_ref(py)),
             NoxprNode::Convert(conv) => {
                 let expr = self.visit(&conv.arg)?;
                 let dtype = dtype(&conv.ty)?;
@@ -284,18 +304,18 @@ impl JaxTracer {
                     .collect::<Result<Vec<_>, _>>()?;
                 let call_fn = self.visit_comp(&c.comp);
                 Python::with_gil(|py| {
-                    let call_fn = call_fn.into_py(py);
-                    let tuple = PyTuple::new_bound(py, args.into_iter());
-                    call_fn.call1(py, tuple)
+                    let call_fn = call_fn.into_py_any(py)?;
+                    let tuple = PyTuple::new(py, args.into_iter()).unwrap();
+                    call_fn.call1(py, &tuple)
                 })?
             }
             NoxprNode::Cholesky(c) => {
                 let expr = self.visit(&c.arg)?;
                 Python::with_gil(|py| {
-                    let kwargs = PyDict::new_bound(py);
+                    let kwargs = PyDict::new(py);
                     kwargs.set_item("upper", c.upper)?;
                     self.linalg
-                        .call_method_bound(py, "cholesky", (expr,), Some(&kwargs))
+                        .call_method(py, "cholesky", (expr,), Some(&kwargs))
                 })?
             }
             NoxprNode::LuInverse(lu) => {
@@ -303,7 +323,9 @@ impl JaxTracer {
                 Python::with_gil(|py| self.linalg.call_method1(py, "inv", (expr,)))?
             }
         };
-        self.cache.insert(id, op.clone());
+        Python::with_gil(|py| {
+            self.cache.insert(id, op.clone_ref(py));
+        });
         Ok(op)
     }
 
@@ -311,14 +333,15 @@ impl JaxTracer {
         Python::with_gil(|py| {
             if let NoxprNode::Jax(obj) = &*comp.func.inner.node {
                 if obj.getattr(py, "__call__").is_ok() {
-                    return obj.clone();
+                    return obj.clone_ref(py);
                 }
             }
             JaxNoxprFn {
                 tracer: JaxTracer::default(),
                 inner: comp.func.clone(),
             }
-            .into_py(py)
+            .into_py_any(py)
+            .unwrap()
         })
     }
 
@@ -372,7 +395,7 @@ impl JaxNoxprFn {
     ) -> PyResult<PyObject> {
         for (i, arg) in self.inner.args.iter().enumerate() {
             let a = args.get_item(i)?;
-            self.tracer.cache.insert(arg.id(), a.into());
+            self.tracer.cache.insert(arg.id(), a.into_py_any(py)?);
         }
 
         let out = self
@@ -388,11 +411,11 @@ impl JaxNoxprFn {
     fn lower<'py>(
         &mut self,
         py: Python<'py>,
-        args: Bound<PyTuple>,
-        kwargs: Option<&Bound<'_, PyDict>>,
+        args: Bound<'py, PyTuple>,
+        kwargs: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let jax = py.import_bound("jax").unwrap();
-        let jit_args = [("keep_unused", true)].into_py_dict_bound(py);
+        let jax = py.import("jax").unwrap();
+        let jit_args = [("keep_unused", true)].into_py_dict(py)?;
         let jit = jax.call_method("jit", (self.clone(),), Some(&jit_args))?;
 
         jit.call_method("lower", args, kwargs)
@@ -417,8 +440,11 @@ fn literal_to_arr<T: ArrayElement + numpy::Element + Immutable + FromBytes>(
         .map(|x| *x as usize)
         .collect::<SmallVec<[usize; 4]>>();
     Python::with_gil(|py| {
-        let arr = numpy::PyArray::from_slice_bound(py, buf);
-        let arr = arr.into_gil_ref().reshape(&shape[..]).unwrap();
+        let arr = numpy::PyArray::from_slice(py, buf);
+        let arr = match arr.reshape(&shape[..]) {
+            Ok(reshaped) => reshaped.into_py_any(py)?,
+            Err(e) => return Err(Error::PyO3(e)),
+        };
         let arr = jnp.call_method1(py, "array", (&arr,))?;
         Ok(arr)
     })
@@ -454,7 +480,7 @@ pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
     let mut tracer = JaxTracer::new();
     for (py_arg, arg_expr) in args.iter().zip(func.args) {
         let arg_id = arg_expr.id();
-        tracer.cache.insert(arg_id, py_arg.clone());
+        Python::with_gil(|py| tracer.cache.insert(arg_id, py_arg.clone_ref(py)));
     }
     tracer.visit(&func.inner)
 }

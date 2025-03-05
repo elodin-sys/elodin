@@ -3,13 +3,13 @@ use impeller2::{
     table::{Entry, VTable},
     types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{borrow::Cow, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
-    metadata::{ComponentMetadata, EntityMetadata},
     LastUpdated,
+    metadata::{ComponentMetadata, EntityMetadata},
 };
 
 use crate::AssetId;

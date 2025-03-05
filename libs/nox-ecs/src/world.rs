@@ -374,7 +374,7 @@ impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {
     }
 }
 
-use nox::{xla, Client};
+use nox::{Client, xla};
 
 impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn copy_to_client(&self, client: &Client) -> Result<xla::PjRtBuffer, xla::Error> {

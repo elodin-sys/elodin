@@ -5,13 +5,14 @@ use std::{collections::BTreeMap, marker::PhantomData};
 
 use impeller2::types::ComponentId;
 use nox_ecs::{
-    nox::{self, Noxpr},
     ErasedSystem,
+    nox::{self, Noxpr},
 };
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyAnyMethods;
 
 mod archetype;
 mod asset;
@@ -47,18 +48,21 @@ trait PyUntypedArrayExt {
     unsafe fn buf(&self, elem_size: usize) -> &[u8];
 }
 
-impl PyUntypedArrayExt for PyUntypedArray {
+impl PyUntypedArrayExt for Bound<'_, PyUntypedArray> {
     unsafe fn buf(&self, elem_size: usize) -> &[u8] {
-        if !self.is_c_contiguous() {
-            panic!("array must be c-style contiguous")
+        use numpy::PyUntypedArrayMethods;
+        unsafe {
+            if !self.is_c_contiguous() {
+                panic!("array must be c-style contiguous")
+            }
+            let len = self.shape().iter().product::<usize>() * elem_size;
+            let obj = &*self.as_array_ptr();
+            std::slice::from_raw_parts(obj.data as *const u8, len)
         }
-        let len = self.shape().iter().product::<usize>() * elem_size;
-        let obj = &*self.as_array_ptr();
-        std::slice::from_raw_parts(obj.data as *const u8, len)
     }
 }
 
-#[pyclass]
+#[pyclass(eq, eq_int)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Integrator {
     Rk4,

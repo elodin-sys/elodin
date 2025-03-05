@@ -462,7 +462,7 @@ pub fn arr_len(shape: &[usize]) -> Result<usize, Error> {
 mod tests {
     use std::collections::HashMap;
 
-    use nox::{array, Array, ArrayBuf, Dyn};
+    use nox::{Array, ArrayBuf, Dyn, array};
 
     use super::*;
 

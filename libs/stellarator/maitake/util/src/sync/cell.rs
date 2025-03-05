@@ -278,7 +278,7 @@ mod unsafe_cell {
         #[inline(always)]
         #[must_use]
         pub unsafe fn deref(&self) -> &mut T {
-            &mut *self.0
+            unsafe { &mut *self.0 }
         }
 
         /// Perform an operation with the actual value of the raw pointer.
@@ -427,7 +427,7 @@ mod unsafe_cell {
         #[inline(always)]
         #[must_use]
         pub unsafe fn deref(&self) -> &T {
-            &*self.0
+            unsafe { &*self.0 }
         }
 
         /// Perform an operation with the actual value of the raw pointer.

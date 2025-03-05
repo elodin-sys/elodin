@@ -4,7 +4,7 @@ use impeller2::{
 };
 
 use bytes::Buf;
-use nox::{xla::Literal, ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
+use nox::{ArrayTy, Builder, CompFn, Const, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad, xla::Literal};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{ComponentArray, ComponentGroup, Query};
@@ -328,7 +328,7 @@ impl<E> GraphQuery<E> {
 #[cfg(test)]
 mod tests {
 
-    use nox::{tensor, Matrix, OwnedRepr, Scalar, Vector};
+    use nox::{Matrix, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::{Component, ReprMonad};
 
     use crate::IntoSystemExt;
@@ -471,7 +471,9 @@ mod tests {
         let c = world.column::<A>().unwrap();
         assert_eq!(
             c.typed_buf::<f64>().unwrap(),
-            &[111105.0, 0.0, 111015.0, 0.0, 110115.0, 0.0, 101115.0, 0.0, 11115.0, 0.0],
+            &[
+                111105.0, 0.0, 111015.0, 0.0, 110115.0, 0.0, 101115.0, 0.0, 11115.0, 0.0
+            ],
         );
     }
 

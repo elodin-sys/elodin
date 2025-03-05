@@ -3,8 +3,8 @@ use crate::scheduler::Scheduler;
 use crate::util::test::TestGuard;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use proptest::{collection::vec, proptest};
@@ -94,7 +94,7 @@ impl SleepGroupTest {
         for (
             &t_done,
             SleepGroup {
-                ref count,
+                count,
                 duration,
                 tasks,
                 t_start,
@@ -125,7 +125,7 @@ impl SleepGroupTest {
         for (
             &t_done,
             SleepGroup {
-                ref count,
+                count,
                 duration,
                 tasks,
                 t_start,
@@ -164,7 +164,7 @@ impl SleepGroupTest {
         let expected_complete: usize = self
             .groups
             .iter_mut()
-            .take_while(|(&t, _)| t <= t_1)
+            .take_while(|(t, _)| **t <= t_1)
             .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
             .sum();
 
@@ -215,7 +215,7 @@ fn turn_wakes() {
         let now = test.now();
         test.groups
             .iter_mut()
-            .take_while(|(&t, _)| t <= now)
+            .take_while(|(t, _)| **t <= now)
             .map(|(_, g)| std::mem::replace(&mut g.tasks, 0))
             .sum()
     };

@@ -1,12 +1,12 @@
 use crate::*;
-use ::s10::{cli::run_recipe, GroupRecipe, SimRecipe};
+use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe};
 use clap::Parser;
 use impeller2::types::PrimType;
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
-use nox_ecs::{increment_sim_tick, nox, ComponentSchema, IntoSystem, System as _, TimeStep, World};
-use numpy::{ndarray::IntoDimension, PyArray, PyArrayMethods};
-use pyo3::types::PyDict;
+use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
+use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
+use pyo3::{IntoPyObjectExt, types::PyDict};
 use std::{collections::HashMap, iter, net::SocketAddr, path::PathBuf, time};
 use zerocopy::{FromBytes, TryFromBytes};
 
@@ -70,7 +70,7 @@ impl WorldBuilder {
     pub fn new() -> Self {
         Self::default()
     }
-
+    #[pyo3(signature = (spawnable, name=None))]
     pub fn spawn(&mut self, spawnable: Spawnable, name: Option<String>) -> Result<EntityId, Error> {
         let entity_id = EntityId {
             inner: impeller2::types::EntityId(self.world.entity_len()),
@@ -157,13 +157,20 @@ impl WorldBuilder {
     }
 
     fn insert_asset(&mut self, py: Python<'_>, asset: PyObject) -> Result<Handle, Error> {
-        let asset = PyAsset::try_new(py, asset)?;
+        let asset = PyAsset::try_new(py, asset.clone_ref(py))?;
         let inner = self.world.assets.insert_bytes(asset.bytes()?);
         Ok(Handle { inner })
     }
 
-    fn recipe(&mut self, recipe: crate::s10::Recipe) -> PyResult<()> {
-        self.recipes.insert(recipe.name(), recipe.to_rust()?);
+    fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
+        // Extract PyRecipe instead of Recipe directly
+        let pyrecipe = recipe_obj.extract::<crate::s10::PyRecipe>(py)?;
+        let name = pyrecipe.name();
+        let rust_recipe = pyrecipe.to_json()?;
+        // Parse from JSON since we can't access the inner Recipe directly
+        let recipe: ::s10::Recipe = serde_json::from_str(&rust_recipe)
+            .map_err(|e| PyValueError::new_err(format!("Failed to parse recipe: {}", e)))?;
+        self.recipes.insert(name, recipe);
         Ok(())
     }
 
@@ -198,7 +205,7 @@ impl WorldBuilder {
             .try_init();
 
         let args = py
-            .import_bound("sys")?
+            .import("sys")?
             .getattr("argv")?
             .extract::<Vec<String>>()?;
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
@@ -364,13 +371,13 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
     ) -> Result<
         (
-            PyObject,
+            Py<PyAny>,
             Vec<u64>,
             Vec<u64>,
             Vec<Py<PyAny>>,
-            PyObject,
-            PyObject,
-            PyObject,
+            Py<PyAny>,
+            Py<PyAny>,
+            Py<PyAny>,
         ),
         Error,
     > {
@@ -394,14 +401,14 @@ impl WorldBuilder {
         ))
     }
 
-    pub fn get_dict(&mut self, py: Python<'_>) -> Result<PyObject, Error> {
-        let dict = PyDict::new_bound(py);
+    pub fn get_dict(&mut self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
+        let dict = PyDict::new(py);
         for id in self.world.host.keys() {
             let component = self.world.column_by_id(*id).unwrap();
             let comp_name = component.metadata.name.clone();
             dict.set_item(comp_name, id.0)?;
         }
-        Ok(dict.to_object(py))
+        Ok(dict.into_py_any(py)?)
     }
 }
 
@@ -450,13 +457,13 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
     ) -> Result<
         (
-            PyObject,
+            Py<PyAny>,
             Vec<u64>,
             Vec<u64>,
             Vec<Py<PyAny>>,
-            PyObject,
-            PyObject,
-            PyObject,
+            Py<PyAny>,
+            Py<PyAny>,
+            Py<PyAny>,
         ),
         Error,
     > {
@@ -475,9 +482,9 @@ impl WorldBuilder {
         let mut input_id = Vec::<u64>::new();
         let mut output_id = Vec::<u64>::new();
         let mut state = Vec::<Py<PyAny>>::new();
-        let dict = PyDict::new_bound(py);
-        let entity_dict = PyDict::new_bound(py);
-        let component_entity_dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
+        let entity_dict = PyDict::new(py);
+        let component_entity_dict = PyDict::new(py);
         self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
@@ -513,99 +520,99 @@ impl WorldBuilder {
             match schema.prim_type {
                 PrimType::U8 => {
                     let slice = <[u8]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U16 => {
                     let slice = <[u16]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U32 => {
                     let slice = <[u32]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U64 => {
                     let slice = <[u64]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::I8 => {
                     let slice = <[i8]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::I16 => {
                     let slice = <[i16]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::I32 => {
                     let slice = <[i32]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::I64 => {
                     let slice = <[i64]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::F32 => {
                     let slice = <[f32]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::F64 => {
                     let slice = <[f64]>::ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::Bool => {
                     let slice = <[bool]>::try_ref_from_bytes(data).unwrap();
-                    let py_array = PyArray::from_slice_bound(py, slice)
+                    let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
 
-                    state.push(py_array.to_object(py));
+                    state.push(py_array.into_py_any(py)?);
                 }
             };
         }
 
         let jax_exec = xla_exec.compile_jax_module(py)?;
-        let dictionary = dict.to_object(py);
-        let entity_dict = entity_dict.to_object(py);
-        let component_entity_dict = component_entity_dict.to_object(py);
+        let dictionary = dict.into_py_any(py)?;
+        let entity_dict = entity_dict.into_py_any(py)?;
+        let component_entity_dict = component_entity_dict.into_py_any(py)?;
 
         Ok((
             jax_exec,

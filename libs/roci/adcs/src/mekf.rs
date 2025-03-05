@@ -1,5 +1,5 @@
 use nox::{
-    tensor, ArrayBuf, ArrayRepr, Field, Matrix, Matrix3, Matrix3x6, Matrix6, Quaternion, Vector,
+    ArrayBuf, ArrayRepr, Field, Matrix, Matrix3, Matrix3x6, Matrix6, Quaternion, Vector, tensor,
 };
 
 pub fn calculate_covariance(

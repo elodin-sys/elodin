@@ -1,13 +1,13 @@
 use core::ops::{Add, Mul};
 use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
-use nox_ecs::{system::IntoSystem, system::System, Query, WorldPos};
 use nox_ecs::{Archetype, Component};
+use nox_ecs::{Query, WorldPos, system::IntoSystem, system::System};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 use std::sync::Arc;
 
 use crate::{
-    semi_implicit_euler, semi_implicit_euler_with_dt, ComponentArray, ErasedSystem, Integrator,
-    Rk4Ext,
+    ComponentArray, ErasedSystem, Integrator, Rk4Ext, semi_implicit_euler,
+    semi_implicit_euler_with_dt,
 };
 
 #[derive(Component, ReprMonad)]
@@ -214,11 +214,11 @@ mod tests {
     use approx::assert_relative_eq;
     use impeller2::component::Component;
     use impeller2::types::ComponentId;
-    use nox::tensor;
     use nox::ArrayRepr;
     use nox::Quaternion;
     use nox::SpatialTransform;
     use nox::Vector3;
+    use nox::tensor;
     use std::f64::consts::FRAC_PI_2;
     use std::time::Duration;
 

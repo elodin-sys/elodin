@@ -5,8 +5,8 @@ use crate::{
         self,
         alloc::{Track, TrackFuture},
         sync::{
-            atomic::{AtomicBool, Ordering},
             Arc,
+            atomic::{AtomicBool, Ordering},
         },
         thread,
     },

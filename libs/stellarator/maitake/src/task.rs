@@ -49,7 +49,7 @@ use self::{
     builder::Settings,
     state::{JoinAction, OrDrop, ScheduleAction, StartPollAction, StateCell},
 };
-use cordyceps::{mpsc_queue, Linked};
+use cordyceps::{Linked, mpsc_queue};
 use mycelium_util::{fmt, mem::CheckedMaybeUninit};
 
 /// A type-erased, reference-counted pointer to a spawned [`Task`].
@@ -581,13 +581,15 @@ where
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
-            task.tid = ptr.as_ref().id.as_u64(),
+            task.tid = unsafe { ptr.as_ref().id.as_u64() },
             "Task::poll"
         );
         let mut this = ptr.cast::<Self>();
-        test_debug!(task = ?fmt::alt(this.as_ref()));
+        unsafe {
+            test_debug!(task = ?fmt::alt(this.as_ref()));
+        }
         // try to transition the task to the polling state
-        let state = &this.as_ref().state();
+        let state = unsafe { &this.as_ref().state() };
         match test_dbg!(state.start_poll()) {
             // transitioned successfully!
             StartPollAction::Poll => {}
@@ -595,7 +597,9 @@ where
             StartPollAction::Canceled { wake_join_waker } => {
                 trace!(task.addr = ?ptr, wake_join_waker, "task canceled!");
                 if wake_join_waker {
-                    this.as_ref().wake_join_waker();
+                    unsafe {
+                        this.as_ref().wake_join_waker();
+                    }
                     return PollResult::ReadyJoined;
                 } else {
                     return PollResult::Ready;
@@ -609,13 +613,13 @@ where
         // existing task ref, rather than incrementing the task ref count. if
         // this waker is consumed during the poll, we don't want to decrement
         // its ref count when the poll ends.
-        let waker = {
+        let waker = unsafe {
             let raw = Schedulable::<S>::raw_waker(this.as_ptr().cast());
             mem::ManuallyDrop::new(Waker::from_raw(raw))
         };
 
         // actually poll the task
-        let poll = {
+        let poll = unsafe {
             let cx = Context::from_waker(&waker);
             let pin = Pin::new_unchecked(this.as_mut());
             pin.poll_inner(cx)
@@ -627,7 +631,7 @@ where
         // if the task is ready and has a `JoinHandle` to wake, wake the join
         // waker now.
         if result == PollResult::ReadyJoined {
-            this.as_ref().wake_join_waker()
+            unsafe { this.as_ref().wake_join_waker() }
         }
 
         result
@@ -644,19 +648,21 @@ where
     ///   as `Self`)
     /// - the pointed task must have zero active references.
     unsafe fn deallocate(ptr: NonNull<Header>) {
-        trace!(
-            task.addr = ?ptr,
-            task.output = %type_name::<<F>::Output>(),
-            task.tid = ptr.as_ref().id.as_u64(),
-            "Task::deallocate"
-        );
-        let this = ptr.cast::<Self>();
-        debug_assert_eq!(
-            ptr.as_ref().state.load(Ordering::Acquire).ref_count(),
-            0,
-            "a task may not be deallocated if its ref count is greater than zero!"
-        );
-        drop(STO::from_raw(this));
+        unsafe {
+            trace!(
+                task.addr = ?ptr,
+                task.output = %type_name::<<F>::Output>(),
+                task.tid = ptr.as_ref().id.as_u64(),
+                "Task::deallocate"
+            );
+            let this = ptr.cast::<Self>();
+            debug_assert_eq!(
+                ptr.as_ref().state.load(Ordering::Acquire).ref_count(),
+                0,
+                "a task may not be deallocated if its ref count is greater than zero!"
+            );
+            drop(STO::from_raw(this));
+        }
     }
 
     /// Poll to join the task pointed to by `ptr`, taking its output if it has
@@ -680,7 +686,7 @@ where
         outptr: NonNull<()>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), JoinError<()>>> {
-        let task = ptr.cast::<Self>().as_ref();
+        let task = unsafe { ptr.cast::<Self>().as_ref() };
         trace!(
             task.addr = ?ptr,
             task.output = %type_name::<<F>::Output>(),
@@ -764,11 +770,11 @@ where
     /// - The the caller must have exclusive access to `self.inner`.
     unsafe fn take_output(&self, outptr: NonNull<()>) {
         self.inner.with_mut(|cell| {
-            match mem::replace(&mut *cell, Cell::Joined) {
+            match mem::replace(unsafe {  &mut *cell}, Cell::Joined) {
                 Cell::Ready(output) => {
                     // safety: the caller is responsible for ensuring that this
                     // points to a `MaybeUninit<F::Output>`.
-                    let outptr = outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut();
+                    let outptr = unsafe { outptr.cast::<mem::MaybeUninit<F::Output>>().as_mut() };
                     // that's right, it goes in the `NonNull<()>` hole!
                     outptr.write(output)
                 },
@@ -858,27 +864,31 @@ impl<S: Schedule> Schedulable<S> {
 
     #[inline(always)]
     unsafe fn schedule(this: TaskRef) {
-        this.0.cast::<Self>().as_ref().scheduler.with(|current| {
-            (*current)
-                .as_ref()
-                .expect("cannot schedule a task that has not been bound to a scheduler!")
-                .schedule(this)
-        })
+        unsafe {
+            this.0.cast::<Self>().as_ref().scheduler.with(|current| {
+                (*current)
+                    .as_ref()
+                    .expect("cannot schedule a task that has not been bound to a scheduler!")
+                    .schedule(this)
+            })
+        }
     }
 
     #[inline]
     unsafe fn drop_ref(this: NonNull<Self>) {
-        trace!(
-            task.addr = ?this,
-            task.tid = this.as_ref().header.id.as_u64(),
-            "Schedulable::drop_ref"
-        );
-        if !this.as_ref().state().drop_ref() {
-            return;
-        }
+        unsafe {
+            trace!(
+                task.addr = ?this,
+                task.tid = this.as_ref().header.id.as_u64(),
+                "Schedulable::drop_ref"
+            );
+            if !this.as_ref().state().drop_ref() {
+                return;
+            }
 
-        let deallocate = this.as_ref().header.vtable.deallocate;
-        deallocate(this.cast::<Header>())
+            let deallocate = this.as_ref().header.vtable.deallocate;
+            deallocate(this.cast::<Header>())
+        }
     }
 
     fn raw_waker(this: *const Self) -> RawWaker {
@@ -899,51 +909,59 @@ impl<S: Schedule> Schedulable<S> {
     // === Waker vtable methods ===
 
     unsafe fn wake_by_val(ptr: *const ()) {
-        let ptr = ptr as *const Self;
-        trace_waker_op!(ptr, wake_by_val, op: wake);
+        unsafe {
+            let ptr = ptr as *const Self;
+            trace_waker_op!(ptr, wake_by_val, op: wake);
 
-        let this = non_null(ptr as *mut Self);
-        match test_dbg!(this.as_ref().state().wake_by_val()) {
-            OrDrop::Drop => Self::drop_ref(this),
-            OrDrop::Action(ScheduleAction::Enqueue) => {
-                // the task should be enqueued.
-                //
-                // in the case that the task is enqueued, the state
-                // transition does *not* decrement the reference count. this is
-                // in order to avoid dropping the task while it is being
-                // scheduled. one reference is consumed by enqueuing the task...
-                Self::schedule(TaskRef(this.cast::<Header>()));
-                // now that the task has been enqueued, decrement the reference
-                // count to drop the waker that performed the `wake_by_val`.
-                Self::drop_ref(this);
+            let this = non_null(ptr as *mut Self);
+            match test_dbg!(this.as_ref().state().wake_by_val()) {
+                OrDrop::Drop => Self::drop_ref(this),
+                OrDrop::Action(ScheduleAction::Enqueue) => {
+                    // the task should be enqueued.
+                    //
+                    // in the case that the task is enqueued, the state
+                    // transition does *not* decrement the reference count. this is
+                    // in order to avoid dropping the task while it is being
+                    // scheduled. one reference is consumed by enqueuing the task...
+                    Self::schedule(TaskRef(this.cast::<Header>()));
+                    // now that the task has been enqueued, decrement the reference
+                    // count to drop the waker that performed the `wake_by_val`.
+                    Self::drop_ref(this);
+                }
+                OrDrop::Action(ScheduleAction::None) => {}
             }
-            OrDrop::Action(ScheduleAction::None) => {}
         }
     }
 
     unsafe fn wake_by_ref(ptr: *const ()) {
-        let ptr = ptr as *const Self;
-        trace_waker_op!(ptr, wake_by_ref);
+        unsafe {
+            let ptr = ptr as *const Self;
+            trace_waker_op!(ptr, wake_by_ref);
 
-        let this = non_null(ptr as *mut ()).cast::<Self>();
-        if test_dbg!(this.as_ref().state().wake_by_ref()) == ScheduleAction::Enqueue {
-            Self::schedule(TaskRef(this.cast::<Header>()));
+            let this = non_null(ptr as *mut ()).cast::<Self>();
+            if test_dbg!(this.as_ref().state().wake_by_ref()) == ScheduleAction::Enqueue {
+                Self::schedule(TaskRef(this.cast::<Header>()));
+            }
         }
     }
 
     unsafe fn clone_waker(ptr: *const ()) -> RawWaker {
-        let this = ptr as *const Self;
-        trace_waker_op!(this, clone_waker, op: clone);
-        (*this).header.state.clone_ref();
-        Self::raw_waker(this)
+        unsafe {
+            let this = ptr as *const Self;
+            trace_waker_op!(this, clone_waker, op: clone);
+            (*this).header.state.clone_ref();
+            Self::raw_waker(this)
+        }
     }
 
     unsafe fn drop_waker(ptr: *const ()) {
-        let ptr = ptr as *const Self;
-        trace_waker_op!(ptr, drop_waker, op: drop);
+        unsafe {
+            let ptr = ptr as *const Self;
+            trace_waker_op!(ptr, drop_waker, op: drop);
 
-        let this = ptr as *mut _;
-        Self::drop_ref(non_null(this))
+            let this = ptr as *mut _;
+            Self::drop_ref(non_null(this))
+        }
     }
 }
 
@@ -1149,55 +1167,59 @@ impl TaskRef {
     }
 
     pub(crate) unsafe fn bind_scheduler<S: Schedule + 'static>(&self, scheduler: S) {
-        #[cfg(debug_assertions)]
-        {
-            if let Some(scheduler_type) = self.header().scheduler_type {
-                assert_eq!(
-                    scheduler_type,
-                    TypeId::of::<S>(),
-                    "cannot bind {self:?} to a scheduler of type {}",
-                    type_name::<S>(),
-                );
+        unsafe {
+            #[cfg(debug_assertions)]
+            {
+                if let Some(scheduler_type) = self.header().scheduler_type {
+                    assert_eq!(
+                        scheduler_type,
+                        TypeId::of::<S>(),
+                        "cannot bind {self:?} to a scheduler of type {}",
+                        type_name::<S>(),
+                    );
+                }
             }
-        }
 
-        self.0
-            .cast::<Schedulable<S>>()
-            .as_ref()
-            .scheduler
-            .with_mut(|current| *current = Some(scheduler));
+            self.0
+                .cast::<Schedulable<S>>()
+                .as_ref()
+                .scheduler
+                .with_mut(|current| *current = Some(scheduler));
+        }
     }
 
     /// # Safety
     ///
     /// `T` *must* be the task's actual output type!
     unsafe fn poll_join<T>(&self, cx: &mut Context<'_>) -> Poll<Result<T, JoinError<T>>> {
-        let poll_join_fn = self.header().vtable.poll_join;
-        // NOTE: we can't use `CheckedMaybeUninit` here, since the vtable method
-        // will cast this to a `MaybeUninit` and write to it; this would ignore
-        // the initialized tracking bit.
-        let mut slot = mem::MaybeUninit::<T>::uninit();
-        match test_dbg!(poll_join_fn(
-            self.0,
-            NonNull::from(&mut slot).cast::<()>(),
-            cx
-        )) {
-            Poll::Ready(Ok(())) => {
-                // if the poll function returned `Ok`, we get to take the
-                // output!
-                Poll::Ready(Ok(slot.assume_init_read()))
+        unsafe {
+            let poll_join_fn = self.header().vtable.poll_join;
+            // NOTE: we can't use `CheckedMaybeUninit` here, since the vtable method
+            // will cast this to a `MaybeUninit` and write to it; this would ignore
+            // the initialized tracking bit.
+            let mut slot = mem::MaybeUninit::<T>::uninit();
+            match test_dbg!(poll_join_fn(
+                self.0,
+                NonNull::from(&mut slot).cast::<()>(),
+                cx
+            )) {
+                Poll::Ready(Ok(())) => {
+                    // if the poll function returned `Ok`, we get to take the
+                    // output!
+                    Poll::Ready(Ok(slot.assume_init_read()))
+                }
+                Poll::Ready(Err(e)) => {
+                    // if the task completed before being canceled, we can still
+                    // take its output.
+                    let output = if e.is_completed() {
+                        Some(slot.assume_init_read())
+                    } else {
+                        None
+                    };
+                    Poll::Ready(Err(e.with_output(output)))
+                }
+                Poll::Pending => Poll::Pending,
             }
-            Poll::Ready(Err(e)) => {
-                // if the task completed before being canceled, we can still
-                // take its output.
-                let output = if e.is_completed() {
-                    Some(slot.assume_init_read())
-                } else {
-                    None
-                };
-                Poll::Ready(Err(e.with_output(output)))
-            }
-            Poll::Pending => Poll::Pending,
         }
     }
 
@@ -1269,9 +1291,11 @@ unsafe impl Sync for TaskRef {}
 
 // See https://github.com/rust-lang/rust/issues/97708 for why
 // this is necessary
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn _maitake_header_nop(_ptr: NonNull<Header>) -> PollResult {
-    debug_assert!(_ptr.as_ref().id.is_stub());
+    unsafe {
+        debug_assert!(_ptr.as_ref().id.is_stub());
+    }
 
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
@@ -1281,21 +1305,25 @@ unsafe fn _maitake_header_nop(_ptr: NonNull<Header>) -> PollResult {
 
 // See https://github.com/rust-lang/rust/issues/97708 for why
 // this is necessary
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn _maitake_header_nop_deallocate(ptr: NonNull<Header>) {
-    debug_assert!(ptr.as_ref().id.is_stub());
+    unsafe {
+        debug_assert!(ptr.as_ref().id.is_stub());
+    }
     unreachable!("stub task ({ptr:p}) should never be deallocated!");
 }
 
 // See https://github.com/rust-lang/rust/issues/97708 for why
 // this is necessary
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn _maitake_header_nop_poll_join(
     _ptr: NonNull<Header>,
     _: NonNull<()>,
     _: &mut Context<'_>,
 ) -> Poll<Result<(), JoinError<()>>> {
-    debug_assert!(_ptr.as_ref().id.is_stub());
+    unsafe {
+        debug_assert!(_ptr.as_ref().id.is_stub());
+    }
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be polled!");
     #[cfg(not(debug_assertions))]
@@ -1304,7 +1332,7 @@ unsafe fn _maitake_header_nop_poll_join(
 
 // See https://github.com/rust-lang/rust/issues/97708 for why
 // this is necessary
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn _maitake_header_nop_wake_by_ref(_ptr: *const ()) {
     #[cfg(debug_assertions)]
     unreachable!("stub task ({_ptr:?}) should never be woken!");
@@ -1333,18 +1361,20 @@ impl Header {
     }
 
     unsafe fn deallocate(this: NonNull<Self>) {
-        #[cfg(debug_assertions)]
-        {
-            let refs = this
-                .as_ref()
-                .state
-                .load(core::sync::atomic::Ordering::Acquire)
-                .ref_count();
-            debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
-        }
+        unsafe {
+            #[cfg(debug_assertions)]
+            {
+                let refs = this
+                    .as_ref()
+                    .state
+                    .load(core::sync::atomic::Ordering::Acquire)
+                    .ref_count();
+                debug_assert_eq!(refs, 0, "tried to deallocate a task with references!");
+            }
 
-        let deallocate = this.as_ref().vtable.deallocate;
-        deallocate(this)
+            let deallocate = this.as_ref().vtable.deallocate;
+            deallocate(this)
+        }
     }
 }
 
@@ -1387,15 +1417,17 @@ unsafe impl Linked<mpsc_queue::Links<Header>> for Header {
     ///   dangle).
     #[inline]
     unsafe fn links(target: NonNull<Self>) -> NonNull<mpsc_queue::Links<Self>> {
-        let target = target.as_ptr();
-        // Safety: using `ptr::addr_of_mut!` avoids creating a temporary
-        // reference, which stacked borrows dislikes.
-        let links = ptr::addr_of_mut!((*target).run_queue);
-        // Safety: it's fine to use `new_unchecked` here; if the pointer that we
-        // offset to the `links` field is not null (which it shouldn't be, as we
-        // received it as a `NonNull`), the offset pointer should therefore also
-        // not be null.
-        NonNull::new_unchecked(links)
+        unsafe {
+            let target = target.as_ptr();
+            // Safety: using `ptr::addr_of_mut!` avoids creating a temporary
+            // reference, which stacked borrows dislikes.
+            let links = ptr::addr_of_mut!((*target).run_queue);
+            // Safety: it's fine to use `new_unchecked` here; if the pointer that we
+            // offset to the `links` field is not null (which it shouldn't be, as we
+            // received it as a `NonNull`), the offset pointer should therefore also
+            // not be null.
+            NonNull::new_unchecked(links)
+        }
     }
 }
 

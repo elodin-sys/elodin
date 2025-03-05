@@ -1,8 +1,8 @@
-use crate::{system::SystemBuilder, Component, ComponentArray, Error, SystemParam};
+use crate::{Component, ComponentArray, Error, SystemParam, system::SystemBuilder};
 use elodin_db::ComponentSchema;
 use impeller2::types::{ComponentId, EntityId};
-use nox::{xla, ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad};
-use smallvec::{smallvec, SmallVec};
+use nox::{ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad, xla};
+use smallvec::{SmallVec, smallvec};
 use std::{collections::BTreeMap, marker::PhantomData};
 
 pub struct Query<Param> {

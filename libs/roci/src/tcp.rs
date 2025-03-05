@@ -8,8 +8,8 @@ use impeller2::{
     types::{ComponentView, LenPacket, Msg, OwnedPacket, PacketId, Timestamp},
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
-use impeller2_stella::queue::tcp_connect;
 use impeller2_stella::PacketStream;
+use impeller2_stella::queue::tcp_connect;
 use impeller2_wkt::{Stream, StreamFilter, VTableMsg};
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -18,8 +18,8 @@ use std::{marker::PhantomData, net::SocketAddr, time::Duration};
 use stellarator::io::{AsyncRead, AsyncWrite};
 use thingbuf::mpsc;
 
-use crate::{drivers::DriverMode, System};
 use crate::{AsVTable, Metadatatize};
+use crate::{System, drivers::DriverMode};
 
 pub struct TcpSink<W, D> {
     tx: mpsc::Sender<Option<LenPacket>>,

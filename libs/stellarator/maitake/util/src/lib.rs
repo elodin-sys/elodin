@@ -23,7 +23,7 @@ pub use mycelium_bitfield as bits;
 pub(crate) mod test_util {
     #[cfg(not(loom))]
     pub(crate) fn trace_init() -> impl Drop {
-        use tracing_subscriber::{prelude::*, EnvFilter};
+        use tracing_subscriber::{EnvFilter, prelude::*};
         let filter = EnvFilter::from_env("RUST_LOG");
         tracing_subscriber::fmt()
             .with_test_writer()
@@ -35,7 +35,7 @@ pub(crate) mod test_util {
 
     #[cfg(loom)]
     pub(crate) fn trace_init() -> impl Drop {
-        use tracing_subscriber_03::{prelude::*, EnvFilter};
+        use tracing_subscriber_03::{EnvFilter, prelude::*};
         let filter = EnvFilter::from_env("LOOM_LOG");
         tracing_subscriber_03::fmt()
             .with_test_writer()

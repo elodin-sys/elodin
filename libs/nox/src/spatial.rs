@@ -2,8 +2,8 @@
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::{
-    ArrayRepr, Const, DefaultRepr, Field, OwnedRepr, Quaternion, RealField, ReprMonad, Scalar,
-    Tensor, TensorItem, Vector, MRP,
+    ArrayRepr, Const, DefaultRepr, Field, MRP, OwnedRepr, Quaternion, RealField, ReprMonad, Scalar,
+    Tensor, TensorItem, Vector,
 };
 use core::ops::Div;
 use core::ops::{Add, Mul};

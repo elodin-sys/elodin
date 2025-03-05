@@ -7,11 +7,11 @@ pub struct PyBufBytes {
 }
 
 pub struct PyAsset {
-    pub object: PyObject,
+    pub object: Py<PyAny>,
 }
 
 impl PyAsset {
-    pub fn try_new(py: Python<'_>, object: PyObject) -> Result<Self, Error> {
+    pub fn try_new(py: Python<'_>, object: Py<PyAny>) -> Result<Self, Error> {
         let _ = object.getattr(py, "asset_name")?;
         let _ = object.getattr(py, "bytes")?;
         Ok(Self { object })

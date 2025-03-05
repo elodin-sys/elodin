@@ -5,6 +5,7 @@
 //!
 //! [counting semaphore]: https://en.wikipedia.org/wiki/Semaphore_(programming)
 use crate::{
+    WaitResult,
     blocking::RawMutex,
     loom::{
         cell::UnsafeCell,
@@ -14,12 +15,11 @@ use crate::{
         },
     },
     spin::Spinlock,
-    util::{fmt, CachePadded, WakeBatch},
-    WaitResult,
+    util::{CachePadded, WakeBatch, fmt},
 };
 use cordyceps::{
-    list::{self, List},
     Linked,
+    list::{self, List},
 };
 use core::{
     cmp,
@@ -610,7 +610,7 @@ impl<Lock: RawMutex> Semaphore<Lock> {
             let will_wake = node
                 .waker
                 .as_ref()
-                .map_or(false, |waker| waker.will_wake(cx.waker()));
+                .is_some_and(|waker| waker.will_wake(cx.waker()));
             if !will_wake {
                 node.waker = Some(cx.waker().clone())
             }
@@ -751,8 +751,7 @@ impl<Lock: RawMutex> Semaphore<Lock> {
                 available if available < permits => {
                     trace!(
                         permits,
-                        available,
-                        "Semaphore::try_acquire -> insufficient permits"
+                        available, "Semaphore::try_acquire -> insufficient permits"
                     );
                     return Err(TryAcquireError::InsufficientPermits);
                 }
@@ -1109,14 +1108,16 @@ unsafe impl Linked<list::Links<Waiter>> for Waiter {
     unsafe fn links(target: NonNull<Self>) -> NonNull<list::Links<Waiter>> {
         // Safety: using `ptr::addr_of!` avoids creating a temporary
         // reference, which stacked borrows dislikes.
-        let node = ptr::addr_of!((*target.as_ptr()).node);
-        (*node).with_mut(|node| {
-            let links = ptr::addr_of_mut!((*node).links);
-            // Safety: since the `target` pointer is `NonNull`, we can assume
-            // that pointers to its members are also not null, making this use
-            // of `new_unchecked` fine.
-            NonNull::new_unchecked(links)
-        })
+        unsafe {
+            let node = ptr::addr_of!((*target.as_ptr()).node);
+            (*node).with_mut(|node| {
+                let links = ptr::addr_of_mut!((*node).links);
+                // Safety: since the `target` pointer is `NonNull`, we can assume
+                // that pointers to its members are also not null, making this use
+                // of `new_unchecked` fine.
+                NonNull::new_unchecked(links)
+            })
+        }
     }
 }
 

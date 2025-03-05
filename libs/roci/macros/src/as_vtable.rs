@@ -1,8 +1,8 @@
-use darling::ast::{self};
 use darling::FromDeriveInput;
+use darling::ast::{self};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Generics, Ident};
+use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
 #[darling(attributes(roci), supports(struct_named))]

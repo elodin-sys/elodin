@@ -1,4 +1,4 @@
-use super::{sleep, Ticks};
+use super::{Ticks, sleep};
 use crate::loom::sync::atomic::Ordering::*;
 use cordyceps::List;
 use core::{pin::Pin, ptr, task::Poll};

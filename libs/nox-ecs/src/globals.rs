@@ -14,7 +14,7 @@ pub struct Tick<R: OwnedRepr = Op>(pub Scalar<u64, R>);
 impl Default for SimulationTimeStep {
     fn default() -> Self {
         SimulationTimeStep(0.01.into()) // TODO
-                                        //SimulationTimeStep(DEFAULT_TIME_STEP.as_secs_f64().into())
+        //SimulationTimeStep(DEFAULT_TIME_STEP.as_secs_f64().into())
     }
 }
 

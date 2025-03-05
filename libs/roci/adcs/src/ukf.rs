@@ -362,7 +362,7 @@ impl<const N: usize, const Z: usize, const S: usize, R: OwnedRepr + 'static> Sta
 #[cfg(test)]
 mod tests {
     use approx::assert_relative_eq;
-    use nox::{tensor, ArrayRepr, Matrix4};
+    use nox::{ArrayRepr, Matrix4, tensor};
 
     use super::*;
 

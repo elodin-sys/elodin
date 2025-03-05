@@ -86,9 +86,7 @@ impl Exec {
             path.clone(),
         )?;
 
-        let df = py
-            .import_bound("polars")?
-            .call_method1("read_ipc", (path,))?;
+        let df = py.import("polars")?.call_method1("read_ipc", (path,))?;
         Ok(df)
     }
 
@@ -114,7 +112,7 @@ impl Exec {
         )?;
 
         let series = py
-            .import_bound("polars")?
+            .import("polars")?
             .call_method1("read_ipc", (path,))?
             .get_item(component_name)?;
         Ok(series)

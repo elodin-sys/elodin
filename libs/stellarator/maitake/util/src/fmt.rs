@@ -1,6 +1,6 @@
 //! Text formatting utilities.
 pub use core::fmt::*;
-pub use tracing::field::{debug, display, DebugValue};
+pub use tracing::field::{DebugValue, debug, display};
 
 /// A wrapper type that formats the wrapped value using a provided function.
 ///

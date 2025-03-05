@@ -1,4 +1,4 @@
-use nox::{tensor, ArrayRepr, Vector3};
+use nox::{ArrayRepr, Vector3, tensor};
 
 pub fn test_mag_readings() -> [Vector3<f64, ArrayRepr>; 500] {
     // values generated using matlab tutorial:

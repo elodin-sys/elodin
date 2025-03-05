@@ -1,7 +1,7 @@
 use nox_ecs::nox;
 use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
     PyErr,
+    exceptions::{PyRuntimeError, PyValueError},
 };
 
 #[derive(Debug, thiserror::Error)]

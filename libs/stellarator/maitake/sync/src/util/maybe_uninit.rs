@@ -143,7 +143,7 @@ impl<T> CheckedMaybeUninit<T> {
     #[inline(always)]
     #[track_caller]
     pub unsafe fn assume_init(self) -> T {
-        self.assert_init_val("assume_init").assume_init()
+        unsafe { self.assert_init_val("assume_init").assume_init() }
     }
 
     /// Reads the value from the `CheckedMaybeUninit<T>` container. The resulting `T` is subject
@@ -172,7 +172,7 @@ impl<T> CheckedMaybeUninit<T> {
     #[inline(always)]
     #[track_caller]
     pub unsafe fn assume_init_read(&self) -> T {
-        self.assert_init("assume_init_read").assume_init_read()
+        unsafe { self.assert_init("assume_init_read").assume_init_read() }
     }
 
     /// Drops the contained value in place.
@@ -199,7 +199,7 @@ impl<T> CheckedMaybeUninit<T> {
     #[inline(always)]
     #[track_caller]
     pub unsafe fn assume_init_drop(&mut self) {
-        self.assert_init_mut("assume_init_drop").assume_init_drop()
+        unsafe { self.assert_init_mut("assume_init_drop").assume_init_drop() }
     }
 
     /// Gets a shared reference to the contained value.
@@ -257,7 +257,7 @@ impl<T> CheckedMaybeUninit<T> {
     #[track_caller]
     #[inline(always)]
     pub unsafe fn assume_init_ref(&self) -> &T {
-        self.assert_init("assume_init_ref").assume_init_ref()
+        unsafe { self.assert_init("assume_init_ref").assume_init_ref() }
     }
 
     /// Gets a mutable (unique) reference to the contained value.
@@ -368,7 +368,7 @@ impl<T> CheckedMaybeUninit<T> {
     #[inline(always)]
     #[track_caller]
     pub unsafe fn assume_init_mut(&mut self) -> &mut T {
-        self.assert_init_mut("assume_init_mut").assume_init_mut()
+        unsafe { self.assert_init_mut("assume_init_mut").assume_init_mut() }
     }
 
     #[inline(always)]
@@ -419,7 +419,7 @@ impl<T: fmt::Debug> fmt::Debug for CheckedMaybeUninit<T> {
         let mut s = f.debug_struct("CheckedMaybeUninit");
         #[cfg(debug_assertions)]
         if self.initialized {
-            s.field("value", unsafe { &self.assume_init_ref() });
+            s.field("value", &unsafe { self.assume_init_ref() });
         } else {
             s.field("value", &format_args!("<uninitialized>"));
         }
