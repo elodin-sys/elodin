@@ -27,17 +27,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
     let fields = data.take_struct().unwrap();
     let vtable_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        let ident = &field.ident.as_ref().expect("field must have ident");
-        let component_id = match &field.component_id {
-            Some(c) => quote! {
-                #impeller::types::ComponentId::new(#c)
-            },
-            None => {
-                quote! {
-                    #impeller::types::ComponentId::new(stringify!(#ident))
-                }
-            }
-        };
+        let component_id = field.component_id();
         if let Some(id) = field.entity_id.or(entity_id) {
             quote! {
                 {

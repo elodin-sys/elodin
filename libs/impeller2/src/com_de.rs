@@ -134,3 +134,39 @@ pub trait FromComponentView: Sized {
 pub trait AsComponentView {
     fn as_component_view(&self) -> ComponentView<'_>;
 }
+
+macro_rules! impl_component_view {
+    ($ty:tt, $prim:tt) => {
+        impl FromComponentView for $ty {
+            fn from_component_view(view: ComponentView<'_>) -> Result<Self, Error> {
+                match view {
+                    ComponentView::$prim(view) => {
+                        view.buf().first().ok_or(Error::BufferUnderflow).copied()
+                    }
+                    _ => Err(Error::InvalidComponentData),
+                }
+            }
+        }
+
+        impl AsComponentView for $ty {
+            fn as_component_view(&self) -> ComponentView<'_> {
+                ComponentView::$prim(nox::ArrayView::from_buf_shape_unchecked(
+                    std::slice::from_ref(self),
+                    &[],
+                ))
+            }
+        }
+    };
+}
+
+impl_component_view!(u64, U64);
+impl_component_view!(u32, U32);
+impl_component_view!(u16, U16);
+impl_component_view!(u8, U8);
+impl_component_view!(i64, I64);
+impl_component_view!(i32, I32);
+impl_component_view!(i16, I16);
+impl_component_view!(i8, I8);
+impl_component_view!(f64, F64);
+impl_component_view!(f32, F32);
+impl_component_view!(bool, Bool);

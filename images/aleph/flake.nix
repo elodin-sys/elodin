@@ -48,6 +48,7 @@
               ./modules/systemd-boot-dtb.nix
               ./modules/elodin-db.nix
               ./modules/aleph-serial-bridge.nix
+              ./modules/mekf.nix
             ]
             ++ lib.optional (builtins.pathExists ./modules/elodin_dev.nix) ./modules/elodin_dev.nix;
 
@@ -57,6 +58,7 @@
             (final: prev: {
               serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
               elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
+              mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
             })
           ];
           system.stateVersion = "24.05";

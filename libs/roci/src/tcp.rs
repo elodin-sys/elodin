@@ -1,5 +1,6 @@
 use bbq2::{queue::ArcBBQueue, traits::storage::BoxedSlice};
-use impeller2::types::IntoLenPacket;
+use impeller2::table::VTable;
+use impeller2::types::{ComponentId, EntityId, IntoLenPacket};
 use impeller2::{
     com_de::{Componentize, Decomponentize},
     registry::HashMapRegistry,
@@ -8,10 +9,13 @@ use impeller2::{
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_stella::queue::tcp_connect;
+use impeller2_stella::PacketStream;
 use impeller2_wkt::{Stream, StreamFilter, VTableMsg};
+use std::collections::HashSet;
+use std::fmt::Debug;
 use std::future::Future;
 use std::{marker::PhantomData, net::SocketAddr, time::Duration};
-use stellarator::io::AsyncWrite;
+use stellarator::io::{AsyncRead, AsyncWrite};
 use thingbuf::mpsc;
 
 use crate::{drivers::DriverMode, System};
@@ -229,5 +233,70 @@ impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
         self.send_vtable::<V>(vtable_id).await?;
         self.send_metadata::<V>().await?;
         Ok(())
+    }
+}
+
+pub struct Subscriber<A: AsyncRead, W> {
+    vtables: HashMapRegistry,
+    stream: PacketStream<A>,
+    result: W,
+    vtable: VTable<Vec<Entry>, Vec<u8>>,
+    visited_pairs: HashSet<(EntityId, ComponentId)>,
+}
+
+impl<A: AsyncRead, W: Decomponentize + Debug> Subscriber<A, W> {
+    pub async fn next(
+        &mut self,
+        buffer: Vec<u8>,
+    ) -> Result<(Option<&W>, Vec<u8>), impeller2_stella::Error> {
+        let pkt = self.stream.next(buffer).await?;
+        match &pkt {
+            impeller2::types::OwnedPacket::Msg(msg) if msg.id == VTableMsg::ID => {
+                let msg = msg.parse::<VTableMsg>()?;
+                self.vtables.map.insert(msg.id, msg.vtable);
+            }
+            impeller2::types::OwnedPacket::Table(table) => {
+                if let Some(vtable) = self.vtables.map.get(&table.id) {
+                    vtable.parse_table(
+                        &table.buf[..],
+                        &mut |component_id, entity_id, view: ComponentView<'_>, time| {
+                            //println!("{:?} {:?} view {:?}", component_id, entity_id, view);
+                            self.visited_pairs.insert((entity_id, component_id));
+                            self.result.apply_value(component_id, entity_id, view, time);
+                            //dbg!(&self.result);
+                        },
+                    )?;
+                }
+            }
+            _ => {}
+        }
+        let res = if self
+            .vtable
+            .column_iter()
+            .all(|(entity_id, component_id, _, _)| {
+                self.visited_pairs.contains(&(entity_id, component_id))
+            }) {
+            self.visited_pairs.clear();
+            Some(&self.result)
+        } else {
+            None
+        };
+        Ok((res, pkt.into_buf().into_inner()))
+    }
+}
+
+pub trait StreamExt<A: AsyncRead> {
+    fn subscribe<C: Decomponentize + AsVTable + Default>(self) -> Subscriber<A, C>;
+}
+
+impl<A: AsyncRead> StreamExt<A> for PacketStream<A> {
+    fn subscribe<C: Decomponentize + AsVTable + Default>(self) -> Subscriber<A, C> {
+        Subscriber {
+            stream: self,
+            vtables: HashMapRegistry::default(),
+            visited_pairs: HashSet::default(),
+            result: C::default(),
+            vtable: C::as_vtable(),
+        }
     }
 }

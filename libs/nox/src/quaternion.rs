@@ -12,6 +12,8 @@ use crate::{Field, OwnedRepr, RealField, Scalar, TensorItem, Vector, MRP};
 
 /// Represents a quaternion for spatial orientation or rotation in 3D space.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[repr(transparent)]
 pub struct Quaternion<T: TensorItem, P: OwnedRepr = DefaultRepr>(
     #[cfg_attr(
         feature = "serde",

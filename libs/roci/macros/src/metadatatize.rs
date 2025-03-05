@@ -47,12 +47,13 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                     }
                 }
             };
+            let asset = field.asset.unwrap_or_default();
             quote! {
                 .chain(std::iter::once(#impeller_wkt::ComponentMetadata {
                     component_id: #component_id,
                     name: #name.to_string(),
                     metadata: Default::default(),
-                    asset: false,
+                    asset: #asset,
                 }))
             }
         } else {

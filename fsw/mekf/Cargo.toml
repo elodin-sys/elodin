@@ -1,0 +1,30 @@
+[package]
+name = "mekf"
+edition = "2024"
+version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# async
+stellarator.path = "../../libs/stellarator"
+stellarator.features = ["miette"]
+impeller2-stella.path = "../../libs/impeller2/stella"
+
+# ser-de
+impeller2.path = "../../libs/impeller2"
+impeller2.features = ["std"]
+impeller2-wkt.path = "../../libs/impeller2/wkt"
+impeller2-wkt.features = ["gui", "std"]
+zerocopy.version = "0.8.2"
+roci.path = "../../libs/roci"
+roci-adcs.path = "../../libs/roci/adcs"
+
+anyhow = "1"
+
+# math
+nox.path = "../../libs/nox"
+
+# rand
+fastrand = "2.2.0"
+

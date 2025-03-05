@@ -213,6 +213,16 @@ pub struct SetAsset<'a> {
     pub buf: Cow<'a, [u8]>,
 }
 
+impl SetAsset<'static> {
+    pub fn new(id: AssetId, asset: impl Serialize) -> Result<Self, postcard::Error> {
+        let buf = postcard::to_allocvec(&asset)?;
+        Ok(Self {
+            id,
+            buf: buf.into(),
+        })
+    }
+}
+
 impl Msg for SetAsset<'_> {
     const ID: PacketId = [224, 12];
 }

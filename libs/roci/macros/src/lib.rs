@@ -17,6 +17,24 @@ struct Field {
     ty: syn::Type,
     entity_id: Option<u64>,
     component_id: Option<String>,
+    asset: Option<bool>,
+}
+
+impl Field {
+    pub fn component_id(&self) -> proc_macro2::TokenStream {
+        let crate_name = crate::roci_crate_name();
+        match &self.component_id {
+            Some(c) => quote! {
+                #crate_name::impeller2::types::ComponentId::new(#c)
+            },
+            None => {
+                let ident = self.ident.as_ref().expect("field must have ident");
+                quote! {
+                    #crate_name::impeller2::types::ComponentId::new(stringify!(#ident))
+                }
+            }
+        }
+    }
 }
 
 #[proc_macro_derive(Componentize, attributes(roci))]

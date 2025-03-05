@@ -39,6 +39,12 @@ pub type Matrix<T, const R: usize, const C: usize> = crate::matrix::Matrix<T, R,
 pub type Matrix3<T> = Matrix<T, 3, 3>;
 pub type Mat3<T> = Matrix3<T>;
 
+pub type Quaternion<T> = crate::Quaternion<T, ArrayRepr>;
+pub type Quat<T> = Quaternion<T>;
+pub type SpatialTransform<T> = crate::SpatialTransform<T, ArrayRepr>;
+pub type SpatialMotion<T> = crate::SpatialMotion<T, ArrayRepr>;
+pub type SpatialForce<T> = crate::SpatialForce<T, ArrayRepr>;
+
 pub mod dims {
     pub use super::{
         ArrayDim, ConcatDim, DimGet, DimRow, MappableDim, RowDim, SquareDim, TransposeDim,
@@ -51,6 +57,8 @@ pub mod prelude {
 
 /// A struct representing an array with type-safe dimensions and element type.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[repr(transparent)]
 pub struct Array<T: Elem, D: ArrayDim> {
     #[cfg_attr(
         feature = "serde",
