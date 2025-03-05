@@ -68,7 +68,6 @@ heapless.version = "0.8"
 
 # helpers
 itertools = "0.12.1"
-bytemuck = "1.16.1"
 opener = "0.7.1"
 hex = "0.4.3"
 web-time = "1.1.0"

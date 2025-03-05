@@ -24,7 +24,7 @@ where
     const NAME: &'static str = concat_str!("tensor_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, D::DIM).unwrap()
+        Schema::new(T::PRIM_TYPE, D::DIM).unwrap()
     }
 }
 
@@ -36,7 +36,7 @@ where
     const NAME: &'static str = concat_str!("spatial_transform_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, [7usize]).unwrap()
+        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
     }
 }
 
@@ -48,7 +48,7 @@ where
     const NAME: &'static str = concat_str!("spatial_motion_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, [6usize]).unwrap()
+        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
     }
 }
 
@@ -60,7 +60,7 @@ where
     const NAME: &'static str = concat_str!("spatial_force_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, [6usize]).unwrap()
+        Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
     }
 }
 
@@ -72,7 +72,7 @@ where
     const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, [7usize]).unwrap()
+        Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
     }
 }
 
@@ -84,7 +84,7 @@ where
     const NAME: &'static str = concat_str!("quaternion_", T::PRIM_TYPE.as_str());
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(Self::COMPONENT_ID, T::PRIM_TYPE, [4usize]).unwrap()
+        Schema::new(T::PRIM_TYPE, [4usize]).unwrap()
     }
 }
 
@@ -121,7 +121,7 @@ macro_rules! impl_prim_component {
             const NAME: &'static str = stringify!($ty);
 
             fn schema() -> Schema<Vec<u64>> {
-                Schema::new(Self::COMPONENT_ID, <$ty>::PRIM_TYPE, [0u64; 0]).unwrap()
+                Schema::new(<$ty>::PRIM_TYPE, [0u64; 0]).unwrap()
             }
         }
 
@@ -130,7 +130,7 @@ macro_rules! impl_prim_component {
                 concat_str!(concat_str!(stringify!($ty), "x"), stringify!(N));
 
             fn schema() -> Schema<Vec<u64>> {
-                Schema::new(Self::COMPONENT_ID, <$ty>::PRIM_TYPE, [N]).unwrap()
+                Schema::new(<$ty>::PRIM_TYPE, [N]).unwrap()
             }
         }
     };

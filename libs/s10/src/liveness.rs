@@ -46,25 +46,23 @@ pub async fn serve_tokio() -> std::io::Result<u16> {
     .copied()
 }
 
-pub fn monitor(port: u16) {
-    stellarator::spawn(async move {
-        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-        tracing::info!("Monitoring liveness on {}", addr);
-        let stream = match net::TcpStream::connect(addr).await {
-            Ok(stream) => stream,
-            Err(err) => {
-                tracing::error!("Error connecting to liveness server: {}", err);
-                std::process::exit(1);
-            }
-        };
-        let mut buf = vec![0u8; 8];
-        loop {
-            if stellarator::rent!(stream.read_exact(buf).await, buf).is_err() {
-                tracing::info!("Liveness server disconnected, terminating");
-                std::process::exit(0);
-            }
-            let i = u64::from_be_bytes(buf.as_slice().try_into().unwrap());
-            tracing::trace!("Received {}", i);
+pub async fn monitor(port: u16) {
+    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
+    tracing::info!("Monitoring liveness on {}", addr);
+    let stream = match net::TcpStream::connect(addr).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::error!("Error connecting to liveness server: {}", err);
+            std::process::exit(1);
         }
-    });
+    };
+    let mut buf = vec![0u8; 8];
+    loop {
+        if stellarator::rent!(stream.read_exact(buf).await, buf).is_err() {
+            tracing::info!("Liveness server disconnected, terminating");
+            std::process::exit(0);
+        }
+        let i = u64::from_be_bytes(buf.as_slice().try_into().unwrap());
+        tracing::trace!("Received {}", i);
+    }
 }

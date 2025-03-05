@@ -72,12 +72,8 @@ impl impeller2::component::Component for Tick {
     const NAME: &'static str = "tick";
 
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::U64,
-            [1usize],
-        )
-        .expect("failed to create schema")
+        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [1usize])
+            .expect("failed to create schema")
     }
 }
 
@@ -99,12 +95,8 @@ impl impeller2::component::Component for SimulationTimeStep {
     const ASSET: bool = false;
 
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::F64,
-            [0usize; 0],
-        )
-        .expect("failed to create schema")
+        impeller2::schema::Schema::new(impeller2::types::PrimType::F64, [0usize; 0])
+            .expect("failed to create schema")
     }
 }
 
@@ -151,12 +143,8 @@ impl Component for WorldPos {
 
     #[cfg(feature = "std")]
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::F64,
-            [7usize],
-        )
-        .expect("failed to create schema")
+        impeller2::schema::Schema::new(impeller2::types::PrimType::F64, [7usize])
+            .expect("failed to create schema")
     }
 }
 
@@ -200,12 +188,8 @@ impl impeller2::component::Component for CurrentTimestamp {
     const NAME: &'static str = "current_timestamp";
 
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::I64,
-            [1usize],
-        )
-        .expect("failed to create schema")
+        impeller2::schema::Schema::new(impeller2::types::PrimType::I64, [1usize])
+            .expect("failed to create schema")
     }
 }
 

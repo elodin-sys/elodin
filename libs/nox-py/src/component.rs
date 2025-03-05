@@ -228,7 +228,7 @@ impl From<elodin_db::ComponentSchema> for ComponentType {
     fn from(val: elodin_db::ComponentSchema) -> Self {
         ComponentType {
             ty: val.prim_type.into(),
-            shape: val.shape.to_vec(),
+            shape: val.shape().to_vec(),
         }
     }
 }
@@ -237,10 +237,8 @@ impl From<Component> for elodin_db::ComponentSchema {
     fn from(val: Component) -> Self {
         let ty = val.ty.unwrap();
         elodin_db::ComponentSchema {
-            component_id: ComponentId::new(&val.name),
             prim_type: ty.ty.into(),
-            shape: ty.shape.iter().copied().collect(),
-            dim: ty.shape.iter().map(|x| *x as usize).collect(),
+            dim: ty.shape.into_iter().map(|x| x as usize).collect(),
         }
     }
 }

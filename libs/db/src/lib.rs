@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet, hash_map},
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     sync::atomic::AtomicI64,
 };
@@ -67,20 +67,17 @@ pub struct DB {
 
 #[derive(Default)]
 pub struct State {
-    pub components: HashMap<ComponentId, Component>,
-    pub entity_metadata: HashMap<EntityId, EntityMetadata>,
-    pub assets: HashMap<AssetId, memmap2::Mmap>,
-    pub vtable_registry: registry::HashMapRegistry,
-    pub streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
+    components: HashMap<(EntityId, ComponentId), Component>,
+    component_metadata: HashMap<ComponentId, ComponentMetadata>,
+    entity_metadata: HashMap<EntityId, EntityMetadata>,
+    assets: HashMap<AssetId, memmap2::Mmap>,
+    vtable_registry: registry::HashMapRegistry,
+    streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
 }
 
 impl DB {
     pub fn create(path: PathBuf) -> Result<Self, Error> {
         Self::with_time_step(path, Duration::from_secs_f64(1.0 / 120.0))
-    }
-
-    pub fn components(&self) -> HashMap<ComponentId, Component> {
-        self.with_state(|state| state.components.clone())
     }
 
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
@@ -121,76 +118,40 @@ impl DB {
     fn init_globals(&mut self) -> Result<(), Error> {
         let arr = nox::array![0u64];
         let globals_id = EntityId(0);
-        let state = self.state.get_mut().unwrap();
-        let tick_component_view = ComponentView::U64(arr.view());
-        let tick_component = Component::try_create(
-            impeller2_wkt::Tick::COMPONENT_ID,
-            tick_component_view.prim_type(),
-            tick_component_view.shape(),
-            &self.path,
-        )?;
-        let component = state
-            .components
-            .entry(impeller2_wkt::Tick::COMPONENT_ID)
-            .or_insert(tick_component);
-        let component_dir = self
-            .path
-            .join(impeller2_wkt::Tick::COMPONENT_ID.to_string());
-        let path = component_dir.join(globals_id.to_string());
-        let entity = Entity::create(path, globals_id, component.schema.clone(), Timestamp::now())?;
-        component.entities.insert(globals_id, entity);
-
-        let mut sink = DBSink {
-            components: &state.components,
-            last_updated: &self.last_updated,
-        };
-        sink.apply_value(
-            impeller2_wkt::Tick::COMPONENT_ID,
-            globals_id,
-            tick_component_view,
-            None,
-        );
-        self.set_entity_metadata(EntityMetadata {
+        let globals_metadata = EntityMetadata {
             entity_id: globals_id,
             name: "Globals".to_string(),
             metadata: Default::default(),
-        })?;
-        self.set_component_metadata(ComponentMetadata {
-            component_id: impeller2_wkt::Tick::COMPONENT_ID,
-            name: "Tick".to_string(),
+        };
+        let tick_component_id = impeller2_wkt::Tick::COMPONENT_ID;
+        let tick_component_view = ComponentView::U64(arr.view());
+        let tick_component_schema =
+            ComponentSchema::new(tick_component_view.prim_type(), tick_component_view.shape());
+        let tick_component_metadata = ComponentMetadata {
+            component_id: tick_component_id,
+            name: impeller2_wkt::Tick::NAME.to_string(),
             metadata: [("element_names".to_string(), "tick".to_string())]
                 .into_iter()
                 .collect(),
             asset: false,
-        })?;
-        Ok(())
-    }
+        };
 
-    fn set_entity_metadata(&self, metadata: EntityMetadata) -> Result<(), Error> {
-        info!(entity.name = ?metadata.name, entity.id = ?metadata.entity_id.0, "setting entity metadata");
-        let entity_metadata_path = self.path.join("entity_metadata");
-        std::fs::create_dir_all(&entity_metadata_path)?;
-        metadata.write(entity_metadata_path.join(metadata.entity_id.to_string()))?;
         self.with_state_mut(|state| {
-            state.entity_metadata.insert(metadata.entity_id, metadata);
-        });
-        Ok(())
-    }
-
-    fn set_component_metadata(&self, metadata: ComponentMetadata) -> Result<(), Error> {
-        let component_id = metadata.component_id;
-        info!(component.name= ?metadata.name, component.id = ?component_id.0, "setting component metadata");
-        let component_metadata_path = self.path.join(component_id.to_string());
-        std::fs::create_dir_all(&component_metadata_path)?;
-        metadata.write(component_metadata_path.join("metadata"))?;
-        self.with_state_mut(|state| {
-            if let Some(component) = state.components.get_mut(&component_id) {
-                component.metadata = metadata;
-            } else {
-                warn!(component.id = ?component_id, "component not found when setting metadata");
-            }
-        });
-        Ok(())
+            state.set_entity_metadata(globals_metadata, &self.path)?;
+            state.set_component_metadata(tick_component_metadata, &self.path)?;
+            state.insert_component(
+                tick_component_id,
+                tick_component_schema,
+                globals_id,
+                &self.path,
+            )?;
+            let mut sink = DBSink {
+                components: &state.components,
+                last_updated: &self.last_updated,
+            };
+            sink.apply_value(tick_component_id, globals_id, tick_component_view, None);
+            Ok(())
+        })
     }
 
     fn db_settings(&self) -> DbSettings {
@@ -209,7 +170,9 @@ impl DB {
     }
 
     pub fn open(path: PathBuf) -> Result<Self, Error> {
-        let mut components = HashMap::new();
+        let mut entity_metadata = HashMap::new();
+        let mut component_metadata = HashMap::new();
+        let mut entity_components = HashMap::new();
         let mut last_updated = i64::MIN;
         let mut start_timestamp = i64::MAX;
 
@@ -232,12 +195,7 @@ impl DB {
 
             let schema = ComponentSchema::read(path.join("schema"))?;
             let metadata = ComponentMetadata::read(path.join("metadata"))?;
-
-            let mut component = Component {
-                schema,
-                entities: Default::default(),
-                metadata,
-            };
+            component_metadata.insert(component_id, metadata);
 
             for elem in std::fs::read_dir(path)? {
                 let Ok(elem) = elem else { continue };
@@ -259,18 +217,15 @@ impl DB {
                         .ok_or(Error::InvalidComponentId)?,
                 );
 
-                let entity = Entity::open(path, entity_id, component.schema.clone())?;
+                let entity = Component::open(path, component_id, entity_id, schema.clone())?;
                 if let Some((timestamp, _)) = entity.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
                 };
                 start_timestamp = start_timestamp.min(entity.time_series.start_timestamp().0);
-                component.entities.insert(entity_id, entity);
+                entity_components.insert((entity_id, component_id), entity);
             }
-
-            components.insert(component_id, component);
         }
 
-        let mut entity_metadata = HashMap::new();
         for elem in std::fs::read_dir(path.join("entity_metadata"))? {
             let Ok(elem) = elem else { continue };
 
@@ -287,8 +242,9 @@ impl DB {
         info!(db.path = ?path, "opened db");
         let db_state = DbSettings::read(path.join("db_state"))?;
         let state = State {
-            components,
+            components: entity_components,
             entity_metadata,
+            component_metadata,
             assets: open_assets(&path)?,
             ..Default::default()
         };
@@ -313,34 +269,9 @@ impl DB {
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
         self.with_state_mut(|state| {
-            for (entity_id, component_id, prim_ty, shape) in vtable.vtable.id_pair_iter() {
-                info!(entity.id = ?entity_id, component.id = ?component_id, "inserting entity");
-                let component = match state.components.entry(component_id) {
-                    hash_map::Entry::Vacant(entry) => {
-                        let component =
-                            Component::try_create(component_id, prim_ty, shape, &self.path)?;
-                        entry.insert(component)
-                    }
-                    hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                };
-                let schema = component.schema.clone();
-                let _ = match component.entities.entry(entity_id) {
-                    hash_map::Entry::Vacant(entry) => {
-                        let component_dir = self.path.join(component_id.to_string());
-                        let path = component_dir.join(entity_id.to_string());
-                        let entity = Entity::create(path, entity_id, schema, Timestamp::now())?;
-                        entry.insert(entity)
-                    }
-                    hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                };
-                let _ = state
-                    .entity_metadata
-                    .entry(entity_id)
-                    .or_insert_with(|| EntityMetadata {
-                        entity_id,
-                        name: entity_id.to_string(),
-                        metadata: Default::default(),
-                    });
+            for (entity_id, component_id, prim_ty, shape) in vtable.vtable.column_iter() {
+                let component_schema = ComponentSchema::new(prim_ty, shape);
+                state.insert_component(component_id, component_schema, entity_id, &self.path)?;
                 self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             }
             state.vtable_registry.map.insert(vtable.id, vtable.vtable);
@@ -354,56 +285,123 @@ impl DB {
     }
 }
 
-#[derive(Clone)]
-pub struct Component {
-    pub schema: ComponentSchema,
-    pub metadata: ComponentMetadata,
-    pub entities: HashMap<EntityId, Entity>,
-}
-
-impl Component {
-    pub fn try_create(
+impl State {
+    pub fn insert_component(
+        &mut self,
         component_id: ComponentId,
-        prim_type: PrimType,
-        shape: &[usize],
+        schema: ComponentSchema,
+        entity_id: EntityId,
         db_path: &Path,
-    ) -> Result<Self, Error> {
-        let schema = ComponentSchema {
-            component_id,
-            prim_type,
-            shape: shape.iter().map(|&x| x as u64).collect(),
-            dim: shape.iter().copied().collect(),
-        };
-        let component_dir = db_path.join(component_id.to_string());
-        std::fs::create_dir_all(&component_dir)?;
-        let schema_path = component_dir.join("schema");
-        schema.write(schema_path)?;
-        let metadata = ComponentMetadata {
+    ) -> Result<(), Error> {
+        if self.components.contains_key(&(entity_id, component_id)) {
+            return Ok(());
+        }
+        info!(entity.id = ?entity_id.0, component.id = ?component_id.0, "inserting");
+        let component_metadata = ComponentMetadata {
             component_id,
             name: component_id.to_string(),
             metadata: Default::default(),
             asset: false,
         };
-        metadata.write(component_dir.join("metadata"))?;
-        Ok(Component {
-            schema,
-            entities: Default::default(),
-            metadata,
-        })
+        let entity_metadata = EntityMetadata {
+            entity_id,
+            name: entity_id.to_string(),
+            metadata: Default::default(),
+        };
+        let entity = Component::create(db_path, component_id, entity_id, schema, Timestamp::now())?;
+        if !self.entity_metadata.contains_key(&entity_id) {
+            self.set_entity_metadata(entity_metadata.clone(), db_path)?;
+        }
+        if !self.component_metadata.contains_key(&component_id) {
+            self.set_component_metadata(component_metadata, db_path)?;
+        }
+        self.components.insert((entity_id, component_id), entity);
+        Ok(())
+    }
+
+    pub fn get_component_metadata(&self, component_id: ComponentId) -> Option<&ComponentMetadata> {
+        self.component_metadata.get(&component_id)
+    }
+
+    pub fn get_entity_metadata(&self, entity_id: EntityId) -> Option<&EntityMetadata> {
+        self.entity_metadata.get(&entity_id)
+    }
+
+    pub fn get_component(
+        &self,
+        entity_id: EntityId,
+        component_id: ComponentId,
+    ) -> Option<&Component> {
+        self.components.get(&(entity_id, component_id))
+    }
+
+    pub fn set_entity_metadata(
+        &mut self,
+        metadata: EntityMetadata,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        let entity_metadata_path = db_path.join("entity_metadata");
+        std::fs::create_dir_all(&entity_metadata_path)?;
+        let entity_metadata_path = entity_metadata_path.join(metadata.entity_id.to_string());
+        if entity_metadata_path.exists() && EntityMetadata::read(&entity_metadata_path)? == metadata
+        {
+            return Ok(());
+        }
+        info!(entity.name = ?metadata.name, entity.id = ?metadata.entity_id.0, "setting entity metadata");
+        metadata.write(entity_metadata_path)?;
+        self.entity_metadata.insert(metadata.entity_id, metadata);
+        Ok(())
+    }
+
+    pub fn set_component_metadata(
+        &mut self,
+        metadata: ComponentMetadata,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        let component_metadata_path = db_path.join(metadata.component_id.to_string());
+        std::fs::create_dir_all(&component_metadata_path)?;
+        let component_metadata_path = component_metadata_path.join("metadata");
+        if component_metadata_path.exists()
+            && ComponentMetadata::read(&component_metadata_path)? == metadata
+        {
+            return Ok(());
+        }
+        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
+        metadata.write(component_metadata_path)?;
+        self.component_metadata
+            .insert(metadata.component_id, metadata);
+        Ok(())
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ComponentSchema {
-    pub component_id: ComponentId,
     pub prim_type: PrimType,
-    pub shape: SmallVec<[u64; 4]>,
     pub dim: SmallVec<[usize; 4]>,
 }
 
+impl Serialize for ComponentSchema {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let schema = self.to_schema();
+        schema.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentSchema {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let schema = Schema::<Vec<u64>>::deserialize(deserializer)?;
+        Ok(schema.into())
+    }
+}
+
 impl ComponentSchema {
+    pub fn new(prim_type: PrimType, shape: &[usize]) -> Self {
+        let dim = shape.into();
+        ComponentSchema { prim_type, dim }
+    }
+
     pub fn size(&self) -> usize {
-        self.shape.iter().product::<u64>() as usize * self.prim_type.size()
+        self.dim.iter().product::<usize>() * self.prim_type.size()
     }
 
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
@@ -418,7 +416,11 @@ impl ComponentSchema {
     }
 
     pub fn to_schema(&self) -> Schema<Vec<u64>> {
-        Schema::new(self.component_id, self.prim_type, &self.dim).expect("failed to create shape")
+        Schema::new(self.prim_type, self.shape()).expect("failed to create shape")
+    }
+
+    pub fn shape(&self) -> SmallVec<[u64; 4]> {
+        self.dim.iter().map(|&x| x as u64).collect()
     }
 
     pub fn parse_value<'a>(&'a self, buf: &'a [u8]) -> Result<(usize, ComponentView<'a>), Error> {
@@ -426,49 +428,50 @@ impl ComponentSchema {
         let buf = buf
             .get(..size)
             .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?;
+        let dim = &self.dim;
         let view = match self.prim_type {
             PrimType::U8 => ComponentView::U8(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::U16 => ComponentView::U16(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::U32 => ComponentView::U32(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::U64 => ComponentView::U64(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::I8 => ComponentView::I8(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::I16 => ComponentView::I16(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::I32 => ComponentView::I32(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::I64 => ComponentView::I64(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::Bool => ComponentView::Bool(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::F32 => ComponentView::F32(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
             PrimType::F64 => ComponentView::F64(
-                nox::ArrayView::from_bytes_shape_unchecked(buf, &self.dim)
+                nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
                     .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
             ),
         };
@@ -478,16 +481,17 @@ impl ComponentSchema {
 
 impl From<Schema<Vec<u64>>> for ComponentSchema {
     fn from(value: Schema<Vec<u64>>) -> Self {
-        let component_id = value.component_id();
         let prim_type = value.prim_type();
-        let shape = value.shape().iter().map(|&x| x as u64).collect();
-        let dim = value.shape().iter().copied().collect();
         ComponentSchema {
-            component_id,
             prim_type,
-            shape,
-            dim,
+            dim: value.shape().into(),
         }
+    }
+}
+
+impl From<ComponentSchema> for Schema<Vec<u64>> {
+    fn from(value: ComponentSchema) -> Self {
+        value.to_schema()
     }
 }
 
@@ -507,21 +511,31 @@ impl MetadataExt for EntityMetadata {}
 impl MetadataExt for ComponentMetadata {}
 
 #[derive(Clone)]
-pub struct Entity {
+pub struct Component {
+    pub component_id: ComponentId,
     pub entity_id: EntityId,
     pub time_series: TimeSeries,
     pub schema: ComponentSchema,
 }
 
-impl Entity {
+impl Component {
     pub fn create(
-        path: impl AsRef<Path>,
+        db_path: &Path,
+        component_id: ComponentId,
         entity_id: EntityId,
         schema: ComponentSchema,
         start_timestamp: Timestamp,
     ) -> Result<Self, Error> {
-        let time_series = TimeSeries::create(path, start_timestamp, schema.size() as u64)?;
-        Ok(Entity {
+        let component_path = db_path.join(component_id.to_string());
+        let entity_path = component_path.join(entity_id.to_string());
+        std::fs::create_dir_all(&entity_path)?;
+        let component_schema_path = component_path.join("schema");
+        if !component_schema_path.exists() {
+            schema.write(component_schema_path)?;
+        }
+        let time_series = TimeSeries::create(entity_path, start_timestamp, schema.size() as u64)?;
+        Ok(Component {
+            component_id,
             entity_id,
             time_series,
             schema,
@@ -530,11 +544,13 @@ impl Entity {
 
     pub fn open(
         path: impl AsRef<Path>,
+        component_id: ComponentId,
         entity_id: EntityId,
         schema: ComponentSchema,
     ) -> Result<Self, Error> {
         let time_series = TimeSeries::open(path)?;
-        Ok(Entity {
+        Ok(Component {
+            component_id,
             entity_id,
             time_series,
             schema,
@@ -549,9 +565,9 @@ impl Entity {
         vtable.entity_with_timestamp(
             self.entity_id,
             &[(
-                self.schema.component_id,
+                self.component_id,
                 self.schema.prim_type,
-                &self.schema.shape,
+                &self.schema.shape(),
             )],
             Some(timestamp),
         )?;
@@ -568,30 +584,25 @@ impl Entity {
 }
 
 struct DBSink<'a> {
-    components: &'a HashMap<ComponentId, Component>,
+    components: &'a HashMap<(EntityId, ComponentId), Component>,
     last_updated: &'a AtomicCell<Timestamp>,
 }
 
 impl Decomponentize for DBSink<'_> {
     fn apply_value(
         &mut self,
-        component_id: impeller2::types::ComponentId,
+        component_id: ComponentId,
         entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) {
         let timestamp = timestamp.unwrap_or_else(Timestamp::now);
         let value_buf = value.as_bytes();
-        let Some(component) = self.components.get(&component_id) else {
-            warn!(component.id = ?component_id, "component not found when sinking");
+        let Some(component) = self.components.get(&(entity_id, component_id)) else {
+            warn!(component.id = ?component_id, entity.id = ?entity_id, "component not found when sinking");
             return;
         };
-        let Some(entity) = component.entities.get(&entity_id) else {
-            warn!(component.id = ?component_id, entity.id = ?entity_id, "entity not found");
-            return;
-        };
-
-        if let Err(err) = entity.time_series.push_buf(timestamp, value_buf) {
+        if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
             warn!(?err, "failed to write head value");
             return;
         }
@@ -758,10 +769,13 @@ async fn handle_packet(
         Packet::Msg(m) if m.id == GetSchema::ID => {
             let get_schema = m.parse::<GetSchema>()?;
             let schema = db.with_state(|state| {
-                let Some(component) = state.components.get(&get_schema.component_id) else {
-                    return Err(Error::ComponentNotFound(get_schema.component_id));
-                };
-                Ok(component.schema.to_schema())
+                state
+                    .components
+                    .iter()
+                    .filter(|((_, component_id), _)| component_id == &get_schema.component_id)
+                    .map(|(_, component)| component.schema.to_schema())
+                    .next()
+                    .ok_or(Error::ComponentNotFound(get_schema.component_id))
             })?;
             let tx = tx.lock().await;
             tx.send(&SchemaMsg(schema)).await.0?;
@@ -773,30 +787,31 @@ async fn handle_packet(
             let tx = tx.clone();
             let db = db.clone();
             let result = (|| {
+                let GetTimeSeries {
+                    component_id,
+                    entity_id,
+                    range,
+                    limit,
+                    id,
+                } = get_time_series;
                 let entity = db.with_state(|state| {
-                    let Some(component) = state.components.get(&get_time_series.component_id)
-                    else {
-                        return Err(Error::ComponentNotFound(get_time_series.component_id));
+                    let Some(component) = state.components.get(&(entity_id, component_id)) else {
+                        return Err(Error::ComponentNotFound(component_id));
                     };
-                    let Some(entity) = component.entities.get(&get_time_series.entity_id) else {
-                        return Err(Error::EntityNotFound(get_time_series.entity_id));
-                    };
-                    Ok(entity.clone())
+                    Ok(component.clone())
                 })?;
-                let Some((timestamps, data)) = entity.get_range(get_time_series.range) else {
+                let Some((timestamps, data)) = entity.get_range(range) else {
                     return Err(Error::TimeRangeOutOfBounds);
                 };
                 let size = entity.schema.size();
-                let (timestamps, data) = if let Some(limit) = get_time_series.limit {
+                let (timestamps, data) = if let Some(limit) = limit {
                     let len = timestamps.len().min(limit);
                     (&timestamps[..len], &data[..len * size])
                 } else {
                     (timestamps, data)
                 };
-                let mut pkt = LenPacket::time_series(
-                    get_time_series.id,
-                    data.len() + timestamps.as_bytes().len() + 8,
-                );
+                let mut pkt =
+                    LenPacket::time_series(id, data.len() + timestamps.as_bytes().len() + 8);
                 pkt.extend_from_slice(&(timestamps.len() as u64).to_le_bytes());
                 pkt.extend_from_slice(timestamps.as_bytes());
                 pkt.extend_from_slice(data);
@@ -815,15 +830,15 @@ async fn handle_packet(
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
-            db.set_component_metadata(metadata)?;
+            db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
             let metadata = db.with_state(|state| {
-                let Some(component) = state.components.get(&component_id) else {
+                let Some(metadata) = state.component_metadata.get(&component_id) else {
                     return Err(Error::ComponentNotFound(component_id));
                 };
-                Ok(component.metadata.into_len_packet())
+                Ok(metadata.into_len_packet())
             })?;
             let tx = tx.lock().await;
             tx.send(metadata).await.0?;
@@ -831,7 +846,7 @@ async fn handle_packet(
 
         Packet::Msg(m) if m.id == SetEntityMetadata::ID => {
             let SetEntityMetadata(metadata) = m.parse::<SetEntityMetadata>()?;
-            db.set_entity_metadata(metadata)?;
+            db.with_state_mut(|state| state.set_entity_metadata(metadata, &db.path))?;
         }
 
         Packet::Msg(m) if m.id == GetEntityMetadata::ID => {
@@ -867,12 +882,8 @@ async fn handle_packet(
         }
         Packet::Msg(m) if m.id == DumpMetadata::ID => {
             let msg = db.with_state(|state| {
-                let component_metadata: Vec<_> = state
-                    .components
-                    .values()
-                    .map(|component| component.metadata.clone())
-                    .collect();
-                let entity_metadata: Vec<_> = state.entity_metadata.values().cloned().collect();
+                let component_metadata = state.component_metadata.values().cloned().collect();
+                let entity_metadata = state.entity_metadata.values().cloned().collect();
                 DumpMetadataResp {
                     component_metadata,
                     entity_metadata,
@@ -886,8 +897,8 @@ async fn handle_packet(
                 let schemas = state
                     .components
                     .values()
-                    .map(|c| c.schema.to_schema())
-                    .collect::<Vec<_>>();
+                    .map(|c| (c.component_id, c.schema.to_schema()))
+                    .collect();
                 DumpSchemaResp { schemas }
             });
 
@@ -965,7 +976,7 @@ async fn handle_packet(
             tx.send(&settings).await.0?;
         }
         Packet::Table(table) => {
-            debug!(table.len = table.buf.len(), "sinking table");
+            trace!(table.len = table.buf.len(), "sinking table");
             db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
@@ -1102,11 +1113,11 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     let mut visited_ids = HashSet::new();
     loop {
         db.with_state(|state| {
-            filter.visit(&state.components, |component_id, _, entity| {
-                if visited_ids.contains(&(component_id, entity.entity_id)) {
+            filter.visit(&state.components, |entity| {
+                if visited_ids.contains(&(entity.component_id, entity.entity_id)) {
                     return Ok(());
                 }
-                visited_ids.insert((component_id, entity.entity_id));
+                visited_ids.insert((entity.component_id, entity.entity_id));
                 let stream = stream.clone();
 
                 let mut vtable = VTableBuilder::default();
@@ -1130,7 +1141,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 
 async fn handle_real_time_entity<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
-    entity: Entity,
+    entity: Component,
     waiter: Arc<WaitQueue>,
     vtable: VTable<Vec<Entry>, Vec<u8>>,
 ) -> Result<(), Error> {
@@ -1171,7 +1182,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components = db.components();
+    let mut components = db.with_state(|state| state.components.clone());
     loop {
         if state
             .playing_cell
@@ -1186,7 +1197,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         let current_timestamp = state.current_timestamp();
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
-            components = db.components();
+            components = db.with_state(|state| state.components.clone());
             let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
@@ -1231,16 +1242,16 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 pub trait StreamFilterExt {
     fn visit(
         &self,
-        components: &HashMap<ComponentId, Component>,
-        f: impl for<'a> FnMut(ComponentId, &'a Component, &'a Entity) -> Result<(), Error>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
+        f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
     ) -> Result<(), Error>;
     fn vtable(
         &self,
-        components: &HashMap<ComponentId, Component>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
     ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error>;
     fn populate_table(
         &self,
-        components: &HashMap<ComponentId, Component>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
         table: &mut LenPacket,
         tick: Timestamp,
     ) -> Result<(), Error>;
@@ -1249,10 +1260,10 @@ pub trait StreamFilterExt {
 impl StreamFilterExt for StreamFilter {
     fn vtable(
         &self,
-        components: &HashMap<ComponentId, Component>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
     ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {
         let mut vtable = VTableBuilder::default();
-        self.visit(components, |_, _, entity| {
+        self.visit(components, |entity| {
             entity.add_to_vtable(&mut vtable)?;
             Ok(())
         })?;
@@ -1261,17 +1272,17 @@ impl StreamFilterExt for StreamFilter {
 
     fn populate_table(
         &self,
-        components: &HashMap<ComponentId, Component>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
-        self.visit(components, |_, component, entity| {
+        self.visit(components, |entity| {
             let tick = entity.time_series.start_timestamp().max(timestamp);
             let Some((timestamp, buf)) = entity.get_nearest(tick) else {
                 return Ok(());
             };
             table.push_aligned(timestamp);
-            table.pad_for_type(component.schema.prim_type);
+            table.pad_for_type(entity.schema.prim_type);
             table.extend_from_slice(buf);
             Ok(())
         })
@@ -1279,46 +1290,14 @@ impl StreamFilterExt for StreamFilter {
 
     fn visit(
         &self,
-        components: &HashMap<ComponentId, Component>,
-        mut f: impl for<'a> FnMut(ComponentId, &'a Component, &'a Entity) -> Result<(), Error>,
+        components: &HashMap<(EntityId, ComponentId), Component>,
+        mut f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        match (self.component_id, self.entity_id) {
-            (None, None) => {
-                for (component_id, component) in components {
-                    for entity in component.entities.values() {
-                        f(*component_id, component, entity)?;
-                    }
-                }
-                Ok(())
-            }
-            (None, Some(id)) => {
-                for (component_id, component) in components {
-                    let Some(entity) = component.entities.get(&id) else {
-                        continue;
-                    };
-                    f(*component_id, component, entity)?;
-                }
-                Ok(())
-            }
-            (Some(id), None) => {
-                let component = components.get(&id).ok_or(Error::ComponentNotFound(id))?;
-                for entity in component.entities.values() {
-                    f(id, component, entity)?;
-                }
-                Ok(())
-            }
-
-            (Some(component_id), Some(entity_id)) => {
-                let component = components
-                    .get(&component_id)
-                    .ok_or(Error::ComponentNotFound(component_id))?;
-                let entity = component
-                    .entities
-                    .get(&entity_id)
-                    .ok_or(Error::EntityNotFound(entity_id))?;
-                f(component_id, component, entity)
-            }
-        }
+        components
+            .iter()
+            .filter(|((_, id), _)| self.component_id.is_none() || self.component_id == Some(*id))
+            .filter(|((id, _), _)| self.entity_id.is_none() || self.entity_id == Some(*id))
+            .try_for_each(|(_, component)| f(component))
     }
 }
 

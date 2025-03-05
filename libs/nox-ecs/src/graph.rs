@@ -86,12 +86,7 @@ impl Component for Edge {
     const NAME: &'static str = "edge";
 
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::U64,
-            [2usize],
-        )
-        .unwrap()
+        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [2usize]).unwrap()
     }
 }
 

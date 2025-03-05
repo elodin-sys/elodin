@@ -29,7 +29,7 @@ futures-lite = "2.5.0"
 # data structures
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
-bytemuck.version = "1.14"
+bytemuck.version = "1.21"
 bytemuck.features = ["derive"]
 ndarray = "0.16.1"
 byteorder = "1.5.0"

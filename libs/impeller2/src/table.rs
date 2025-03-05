@@ -237,7 +237,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTable<EntryBuf, DataBuf> {
         })
     }
 
-    pub fn id_pair_iter(
+    pub fn column_iter(
         &self,
     ) -> impl Iterator<Item = (EntityId, ComponentId, PrimType, &[usize])> + '_ {
         let columns = self
@@ -366,7 +366,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
         let data_col_offset = (self.data_len + padding) as u64;
         self.data_len += total_len;
 
-        let entry = dbg!(ColumnEntry {
+        let entry = ColumnEntry {
             len: len as u64,
             component_id,
             shape_entry: ShapeEntry {
@@ -380,7 +380,7 @@ impl<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>> VTableBuilder<EntryBuf, DataBuf> {
             },
             data_col_offset,
             timestamp_offset,
-        });
+        };
         self.vtable.entries.push(Entry::Column(entry))?;
         Ok(self)
     }

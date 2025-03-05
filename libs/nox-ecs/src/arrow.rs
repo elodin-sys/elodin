@@ -40,7 +40,7 @@ fn to_arrow(
     schema: &ComponentSchema,
     metadata: &ComponentMetadata,
 ) -> (FieldRef, ArrayRef) {
-    let size = schema.shape.iter().product::<u64>() as i32;
+    let size = schema.dim.iter().product::<usize>() as i32;
     let array = match schema.prim_type {
         PrimType::F64 => array_ref::<Float64Type>(buf),
         PrimType::F32 => array_ref::<Float32Type>(buf),
@@ -61,7 +61,7 @@ fn to_arrow(
         false,
     ));
 
-    if schema.shape.is_empty() {
+    if schema.dim.is_empty() {
         return (inner_field, array);
     }
 

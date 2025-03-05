@@ -33,12 +33,7 @@ impl<T: Asset> impeller2::component::Component for Handle<T> {
     const ASSET: bool = true;
 
     fn schema() -> Schema<Vec<u64>> {
-        Schema::new(
-            Self::COMPONENT_ID,
-            impeller2::types::PrimType::U64,
-            [0usize; 0],
-        )
-        .unwrap()
+        Schema::new(impeller2::types::PrimType::U64, [0usize; 0]).unwrap()
     }
 }
 
