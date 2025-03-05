@@ -508,6 +508,7 @@ fn extract_lines(
                     index_buffer,
                     &render_queue,
                     selected_time_range.0.clone(),
+                    INDEX_BUFFER_LEN,
                 )
             });
             let count = counts.into_iter().min().unwrap_or_default();

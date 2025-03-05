@@ -1,5 +1,5 @@
 pub mod data;
-use bevy::app::{Plugin, Startup, Update};
+use bevy::app::{Plugin, PostUpdate, Startup, Update};
 pub use data::*;
 pub mod gpu;
 mod widget;
@@ -16,7 +16,8 @@ impl Plugin for PlotPlugin {
             .add_systems(Update, graph_touch)
             .add_systems(Update, pan_graph)
             .add_systems(Update, reset_graph)
-            .add_systems(Update, queue_timestamp_read)
+            .add_systems(PostUpdate, queue_timestamp_read)
+            .add_systems(Update, collect_garbage)
             .add_plugins(gpu::PlotGpuPlugin);
     }
 }

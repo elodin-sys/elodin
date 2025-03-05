@@ -54,7 +54,7 @@ const LINE_SHADER_HANDLE: Handle<Shader> =
 
 pub const VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
-pub const INDEX_BUFFER_LEN: usize = 1024 * 2;
+pub const INDEX_BUFFER_LEN: usize = 1024 * 4;
 pub const INDEX_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((INDEX_BUFFER_LEN * size_of::<u32>()) as u64).unwrap();
 
@@ -307,6 +307,9 @@ pub struct LineConfig {
     pub render_layers: RenderLayers,
 }
 
+#[derive(Component, Clone, ExtractComponent)]
+pub struct LineWidgetWidth(pub usize);
+
 #[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
     values_bind_group: BindGroup,
@@ -357,7 +360,6 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         pass: &mut bevy::render::render_phase::TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(gpu_line) = handle else {
-            println!("no gpu line");
             return RenderCommandResult::Failure("no gpu line");
         };
         pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
@@ -380,6 +382,7 @@ type LineQueryMut = (
     &'static LineConfig,
     &'static mut LineUniform,
     &'static mut LineVisibleRange,
+    &'static mut LineWidgetWidth,
     Option<&'static mut GpuLine>,
 );
 
@@ -395,7 +398,9 @@ fn extract_lines(
         ResMut<'static, Assets<Line>>,
     )>::new(&mut main_world);
     let (mut lines, mut line_assets) = state.get_mut(&mut main_world);
-    for (entity, line_handle, config, uniform, line_visible_range, gpu_line) in lines.iter_mut() {
+    for (entity, line_handle, config, uniform, line_visible_range, width, gpu_line) in
+        lines.iter_mut()
+    {
         let Some(line) = line_assets.get_mut(&line_handle.0) else {
             continue;
         };
@@ -455,8 +460,12 @@ fn extract_lines(
                 ],
             )
         };
-        let count =
-            line.write_to_index_buffer(&index_buffer, &render_queue, line_visible_range.0.clone());
+        let count = line.write_to_index_buffer(
+            &index_buffer,
+            &render_queue,
+            line_visible_range.0.clone(),
+            width.0,
+        );
         let gpu_line = GpuLine {
             values_bind_group,
             index_buffer,

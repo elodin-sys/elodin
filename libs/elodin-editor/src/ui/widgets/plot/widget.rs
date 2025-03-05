@@ -47,7 +47,7 @@ use crate::{
 };
 
 use super::{
-    gpu::{LineHandle, LineVisibleRange},
+    gpu::{LineHandle, LineVisibleRange, LineWidgetWidth},
     PlotDataComponent, PlotDataEntity,
 };
 
@@ -357,6 +357,7 @@ impl Plot {
                                         line_visible_range.clone(),
                                     ),
                                 })
+                                .insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .id();
                             graph_state
                                 .enabled_lines
@@ -377,6 +378,7 @@ impl Plot {
                                     graph_state.line_width,
                                     color.into_bevy(),
                                 ))
+                                .try_insert(LineWidgetWidth(ui.max_rect().width() as usize))
                                 .try_insert(LineVisibleRange(line_visible_range.clone()));
                         }
                         (None, false) => {}
