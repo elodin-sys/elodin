@@ -9,6 +9,8 @@ use core::ops::Div;
 use core::ops::{Add, Mul};
 
 /// A spatial transform is a 7D vector that represents a rigid body transformation in 3D space.
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[repr(transparent)]
 pub struct SpatialTransform<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
@@ -134,6 +136,8 @@ impl<T: TensorItem + RealField, R: OwnedRepr> Mul for SpatialTransform<T, R> {
 }
 
 /// A spatial force is a 6D vector that represents the linear force and torque applied to a rigid body in 3D space.
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[repr(transparent)]
 pub struct SpatialForce<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 6, R>,
 }

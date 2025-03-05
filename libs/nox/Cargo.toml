@@ -41,6 +41,7 @@ indent_write.version = "2.2.0"
 indent_write.optional = true
 
 zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
 
 # noxla - a wrapper around raw xla
 xla = { optional = true, workspace = true }

@@ -16,7 +16,7 @@ use bevy::{
         camera::{Exposure, PhysicalCameraParameters},
         view::RenderLayers,
     },
-    window::{PresentMode, WindowResolution, WindowTheme},
+    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
     winit::WinitSettings,
     DefaultPlugins,
 };
@@ -174,6 +174,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_window_icon)
             .add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
+            .add_systems(Startup, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
@@ -213,6 +214,15 @@ impl Plugin for EditorPlugin {
             app.insert_resource(DirectionalLightShadowMap { size: 8192 });
         }
     }
+}
+
+fn setup_egui_context(window: Query<Entity, With<PrimaryWindow>>, mut commands: Commands) {
+    commands
+        .entity(window.single())
+        .insert(bevy_egui::EguiContextSettings {
+            capture_pointer_input: false,
+            ..default()
+        });
 }
 
 #[derive(Component, Clone)]

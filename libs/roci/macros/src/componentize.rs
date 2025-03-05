@@ -26,17 +26,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
-        let ty = &field.ty;
-        let component_id = match &field.component_id {
-            Some(c) => quote! {
-                #impeller::types::ComponentId::new(#c)
-            },
-            None => {
-                quote! {
-                    <#ty as #impeller::component::Component>::COMPONENT_ID
-                }
-            }
-        };
+        let component_id = field.component_id();
         let ident = field.ident.as_ref().expect("only named fields allowed");
         if let Some(id) = field.entity_id.or(entity_id) {
             quote! {

@@ -473,7 +473,7 @@ pub struct Select {
     pub on_false: Noxpr,
 }
 
-/// Represents a scan operation, a form of reduction across one dimension.
+/// Represents a conversion operation from one type to another
 #[derive(Debug, Clone)]
 pub struct Convert {
     pub arg: Noxpr,
