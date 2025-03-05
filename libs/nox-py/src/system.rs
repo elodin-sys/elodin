@@ -152,7 +152,7 @@ impl CompiledSystemExt for CompiledSystem {
             let shape = PyTuple::new_bound(
                 py,
                 std::iter::once(col.len() as u64)
-                    .chain(col.schema.shape.iter().copied())
+                    .chain(col.schema.shape().iter().copied())
                     .collect::<Vec<_>>(),
             );
             let arr = jnp.call_method1("zeros", (shape, dtype))?; // NOTE(sphw): this could be a huge bottleneck

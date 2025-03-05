@@ -51,7 +51,7 @@ impl QueryInner {
                         buffer: Noxpr::jax(buffer.clone()),
                         len: meta.len,
                         entity_map: meta.entity_map,
-                        component_id: meta.schema.component_id,
+                        component_id: id,
                         phantom_data: PhantomData,
                     },
                     meta.component,

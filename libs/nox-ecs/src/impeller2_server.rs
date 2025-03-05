@@ -1,11 +1,7 @@
-use elodin_db::{handle_conn, DB};
-use elodin_db::{Component, MetadataExt};
-use impeller2::types::{ComponentId, Timestamp};
+use elodin_db::{handle_conn, State, DB};
+use impeller2::types::Timestamp;
 use nox_ecs::Error;
-use smallvec::SmallVec;
-use std::collections::{hash_map, HashMap};
 use std::{
-    io,
     sync::{atomic, Arc},
     time::{Duration, Instant},
 };
@@ -34,10 +30,10 @@ impl Server {
         is_cancelled: impl Fn() -> bool + 'static,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
-        let Self { db, mut world } = self;
+        let Self { db, world } = self;
         let elodin_db::Server { listener, db } = db;
         let start_time = Timestamp::now();
-        init_db(&db, &mut world.world, start_time)?;
+        init_db(&db, &world.world, start_time)?;
         let tick_db = db.clone();
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
@@ -59,7 +55,7 @@ impl Server {
 
 pub fn init_db(
     db: &elodin_db::DB,
-    world: &mut World,
+    world: &World,
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
@@ -67,76 +63,28 @@ pub fn init_db(
         db.insert_asset(id as u64, &asset.inner)?;
     }
     db.with_state_mut(|state| {
-        for (component_id, (schema, _)) in world.metadata.component_map.iter() {
-            let shape: SmallVec<[usize; 4]> = schema.shape.iter().map(|&x| x as usize).collect();
-            let Some(column) = world.host.get_mut(component_id) else {
+        for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
+            let Some(column) = world.host.get(component_id) else {
                 continue;
-            };
-            let component_id = impeller2::types::ComponentId(component_id.0);
-            let db_component = match state.components.entry(component_id) {
-                hash_map::Entry::Vacant(entry) => {
-                    let component = elodin_db::Component::try_create(
-                        component_id,
-                        schema.prim_type,
-                        &shape,
-                        &db.path,
-                    )?;
-                    tracing::info!(component.id = ?component_id, "created component");
-                    entry.insert(component)
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
             let size = schema.size();
             let entity_ids =
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
+            state.set_component_metadata(component_metadata.clone(), &db.path)?;
             for (i, entity_id) in entity_ids.iter().enumerate() {
                 let offset = i * size;
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                let path = db
-                    .path
-                    .join(component_id.to_string())
-                    .join(entity_id.to_string());
-                let entity = match elodin_db::Entity::create(
-                    path,
-                    entity_id,
-                    db_component.schema.clone(),
-                    start_timestamp,
-                ) {
-                    Ok(entity) => entity,
-                    Err(elodin_db::Error::Io(err))
-                        if err.kind() == io::ErrorKind::AlreadyExists =>
-                    {
-                        continue;
-                    }
-                    Err(err) => return Err(err),
-                };
-                {
-                    let buf = &column.buffer[offset..offset + size];
-                    entity.time_series.push_buf(start_timestamp, buf)?;
+                if let Some(entity_metadata) = world.entity_metadata().get(&entity_id) {
+                    state.set_entity_metadata(entity_metadata.clone(), &db.path)?;
                 }
-                db_component.entities.insert(entity_id, entity);
+
+                state.insert_component(*component_id, schema.clone(), entity_id, &db.path)?;
+                let component = state.get_component(entity_id, *component_id).unwrap();
+                let buf = &column.buffer[offset..offset + size];
+                component.time_series.push_buf(start_timestamp, buf)?;
             }
         }
-        let entity_metadata_path = db.path.join("entity_metadata");
-        std::fs::create_dir_all(&entity_metadata_path)?;
-        for (id, metadata) in world.entity_metadata().iter() {
-            let path = entity_metadata_path.join(id.to_string());
-            state.entity_metadata.insert(*id, metadata.clone());
-            if let Err(err) = metadata.write(&path) {
-                warn!(?err, "failed to write metadata");
-            }
-        }
-        for (component_id, (_, metadata)) in world.component_map().iter() {
-            if let Some(component) = state.components.get_mut(component_id) {
-                if let Err(err) =
-                    metadata.write(db.path.join(component_id.to_string()).join("metadata"))
-                {
-                    warn!(?err, "failed to write metadata");
-                }
-                component.metadata = metadata.clone();
-            }
-        }
-        Ok(())
+        Ok::<_, elodin_db::Error>(())
     })?;
 
     db.time_step.store(
@@ -155,15 +103,8 @@ pub fn init_db(
     Ok(())
 }
 
-pub fn copy_db_to_world(
-    components: &HashMap<ComponentId, Component>,
-    world: &mut WorldExec<Compiled>,
-) {
+pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
-        let Some(component) = components.get(&impeller2::types::ComponentId(component_id.0)) else {
-            continue;
-        };
-
         let Some(column) = world.world.host.get_mut(component_id) else {
             continue;
         };
@@ -171,28 +112,22 @@ pub fn copy_db_to_world(
         let size = schema.size();
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
-            let Some(db_buf) = component
-                .entities
-                .get(&impeller2::types::EntityId(*entity_id))
-            else {
+            let entity_id = impeller2::types::EntityId(*entity_id);
+            let Some(component) = state.get_component(entity_id, *component_id) else {
                 continue;
             };
-            let (_, head) = db_buf.time_series.latest().unwrap();
+            let (_, head) = component.time_series.latest().unwrap();
             column.buffer[offset..offset + size].copy_from_slice(head);
         }
     }
 }
 
 pub fn commit_world_head(
-    components: &HashMap<ComponentId, Component>,
+    state: &State,
     world: &mut WorldExec<Compiled>,
     timestamp: Timestamp,
 ) -> Result<(), Error> {
     for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
-        let Some(component) = components.get(&impeller2::types::ComponentId(component_id.0)) else {
-            continue;
-        };
-
         let Some(column) = world.world.host.get_mut(component_id) else {
             continue;
         };
@@ -200,14 +135,12 @@ pub fn commit_world_head(
         let size = schema.size();
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
-            let Some(db_buf) = component
-                .entities
-                .get(&impeller2::types::EntityId(*entity_id))
-            else {
+            let entity_id = impeller2::types::EntityId(*entity_id);
+            let Some(component) = state.get_component(entity_id, *component_id) else {
                 continue;
             };
             let buf = &column.buffer[offset..offset + size];
-            db_buf.time_series.push_buf(timestamp, buf)?;
+            component.time_series.push_buf(timestamp, buf)?;
         }
     }
     Ok(())
@@ -226,12 +159,12 @@ async fn tick(
             db.recording_cell.set_playing(false);
             world.world.metadata.max_tick = u64::MAX;
         }
-        db.with_state(|state| copy_db_to_world(&state.components, &mut world));
+        db.with_state(|state| copy_db_to_world(state, &mut world));
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
         db.with_state(|state| {
-            if let Err(err) = commit_world_head(&state.components, &mut world, timestamp) {
+            if let Err(err) = commit_world_head(state, &mut world, timestamp) {
                 warn!(?err, "error committing head");
             }
         });

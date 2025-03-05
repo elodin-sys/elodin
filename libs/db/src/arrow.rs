@@ -12,7 +12,7 @@ use impeller2::types::PrimType;
 use std::{ptr::NonNull, sync::Arc};
 use zerocopy::{Immutable, IntoBytes};
 
-use crate::{DB, Entity, append_log::AppendLog};
+use crate::{Component, DB, append_log::AppendLog};
 
 impl<T: IntoBytes + Immutable> AppendLog<T> {
     pub fn as_arrow_buffer(&self) -> Buffer {
@@ -24,9 +24,9 @@ impl<T: IntoBytes + Immutable> AppendLog<T> {
     }
 }
 
-impl Entity {
+impl Component {
     pub fn as_data_array(&self, name: impl ToString) -> (FieldRef, ArrayRef) {
-        let size = self.schema.shape.iter().product::<u64>() as i32;
+        let size = self.schema.dim.iter().product::<usize>() as i32;
         let buf = self.time_series.data();
         let array = match self.schema.prim_type {
             PrimType::F64 => array_ref::<Float64Type, _>(buf),
@@ -48,7 +48,7 @@ impl Entity {
             false,
         ));
 
-        if self.schema.shape.is_empty() {
+        if self.schema.dim.is_empty() {
             return (inner_field, array);
         }
 
@@ -127,16 +127,16 @@ impl DB {
         let ctx = SessionContext::new_with_config(config);
         self.with_state(|state| {
             for component in state.components.values() {
-                for (entity_id, entity) in &component.entities {
-                    let Some(entity_metadata) = state.entity_metadata.get(entity_id) else {
-                        continue;
-                    };
-                    let entity_name = entity_metadata.name.to_case(convert_case::Case::Snake);
-                    let component_name = component.metadata.name.to_case(convert_case::Case::Snake);
-                    let name = format!("{entity_name}_{component_name}");
-                    let mem_table = entity.as_mem_table(component_name);
-                    ctx.register_table(name, Arc::new(mem_table))?;
-                }
+                let entity_metadata = state.entity_metadata.get(&component.entity_id).unwrap();
+                let component_metadata = state
+                    .component_metadata
+                    .get(&component.component_id)
+                    .unwrap();
+                let entity_name = entity_metadata.name.to_case(convert_case::Case::Snake);
+                let component_name = component_metadata.name.to_case(convert_case::Case::Snake);
+                let name = format!("{entity_name}_{component_name}");
+                let mem_table = component.as_mem_table(component_name);
+                ctx.register_table(name, Arc::new(mem_table))?;
             }
             Ok::<_, datafusion::error::DataFusionError>(())
         })?;
@@ -153,19 +153,18 @@ impl DB {
                 let mut view_query_end = "".to_string();
                 let mut selects = vec![];
                 let mut first_table = None;
-                for component in state.components.values() {
-                    let component_name = component.metadata.name.to_case(Case::Snake);
-                    if component.entities.contains_key(entity_id) {
-                        let table = format!("{entity_name}_{component_name}");
-                        selects.push(format!("{table:?}.{component_name:?}"));
-                        if let Some(first_table) = &first_table {
-                            view_query_end = format!(
-                                "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
-                            );
-                        } else {
-                            first_table = Some(table);
-                        }
-                    }
+                for component in state.components.values().filter(|c| c.entity_id == *entity_id) {
+                    let component_metadata = state.component_metadata.get(&component.component_id).unwrap();
+                    let component_name = component_metadata.name.to_case(Case::Snake);
+                    let table = format!("{entity_name}_{component_name}");
+                    selects.push(format!("{table:?}.{component_name:?}"));
+                    if let Some(first_table) = &first_table {
+                        view_query_end = format!(
+                            "{view_query_end} FULL OUTER JOIN {table:?} on {first_table:?}.time = {table:?}.time"
+                        );
+                    } else {
+                        first_table = Some(table);
+                    };
                 }
                 let Some(first_table) = first_table else {
                     continue;
@@ -175,9 +174,9 @@ impl DB {
                 }
                 selects.push(format!("{first_table:?}.time"));
                 let selects = selects.join(",");
-                let view_query = dbg!(format!(
+                let view_query = format!(
                     "CREATE VIEW {entity_name:?} AS SELECT {selects} FROM {first_table:?} {view_query_end}"
-                ));
+                );
                 queries.push(view_query);
             }
             queries

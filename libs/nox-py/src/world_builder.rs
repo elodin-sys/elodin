@@ -135,9 +135,7 @@ impl WorldBuilder {
                     component_id,
                     (
                         ComponentSchema {
-                            component_id,
                             prim_type: PrimType::U64,
-                            shape: iter::empty().collect(),
                             dim: iter::empty().collect(),
                         },
                         metadata,
@@ -253,11 +251,11 @@ impl WorldBuilder {
                     });
                 }
                 let exec = exec.compile(client.clone())?;
+                if let Some(port) = liveness_port {
+                    stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
+                }
                 py.allow_threads(|| {
                     stellarator::run(|| {
-                        if let Some(port) = liveness_port {
-                            ::s10::liveness::monitor(port);
-                        }
                         let tmpfile = tempfile::tempdir().unwrap().into_path();
                         nox_ecs::impeller2_server::Server::new(
                             elodin_db::Server::new(tmpfile.join("db"), addr).unwrap(),
@@ -499,7 +497,7 @@ impl WorldBuilder {
             let component = world.column_by_id(*id).unwrap();
             let schema = component.schema;
             let data = component.column;
-            let mut dim = schema.dim.clone();
+            let mut dim = schema.dim.to_vec();
             dim.insert(0, component.entities.len() / 8);
 
             let comp_name = component.metadata.name.clone();

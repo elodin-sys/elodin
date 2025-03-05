@@ -169,12 +169,7 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == DumpSchemaResp::ID => {
                 let dump_schema = m.parse::<DumpSchemaResp>()?;
-                for schema in dump_schema.schemas {
-                    world_sink
-                        .schema_reg
-                        .0
-                        .insert(schema.component_id(), schema);
-                }
+                world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
                 table.sink(&*vtable_registry, &mut world_sink)?;

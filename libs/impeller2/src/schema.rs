@@ -1,26 +1,17 @@
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, IntoBytes};
 
-use crate::{
-    buf::Buf,
-    error::Error,
-    types::{ComponentId, PrimType},
-};
+use crate::{buf::Buf, error::Error, types::PrimType};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Schema<S: Buf<u64>> {
-    component_id: ComponentId,
     prim_type: PrimType,
     #[serde(bound(deserialize = ""))]
     shape: S,
 }
 
 impl<D: Buf<u64>> Schema<D> {
-    pub fn new<T, I>(
-        component_id: ComponentId,
-        prim_type: PrimType,
-        shape: I,
-    ) -> Result<Self, Error>
+    pub fn new<T, I>(prim_type: PrimType, shape: I) -> Result<Self, Error>
     where
         T: DimElem,
         I: IntoIterator<Item = T>,
@@ -32,14 +23,9 @@ impl<D: Buf<u64>> Schema<D> {
             data.push(dim.into_u64())?;
         }
         Ok(Self {
-            component_id,
             shape: data,
             prim_type,
         })
-    }
-
-    pub fn component_id(&self) -> ComponentId {
-        self.component_id
     }
 
     pub fn prim_type(&self) -> PrimType {

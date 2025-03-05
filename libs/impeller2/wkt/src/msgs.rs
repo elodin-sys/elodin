@@ -4,8 +4,8 @@ use impeller2::{
     types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::ops::Range;
 use std::{borrow::Cow, time::Duration};
+use std::{collections::HashMap, ops::Range};
 
 use crate::{
     metadata::{ComponentMetadata, EntityMetadata},
@@ -363,7 +363,7 @@ impl Msg for DumpSchema {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DumpSchemaResp {
-    pub schemas: Vec<Schema<Vec<u64>>>,
+    pub schemas: HashMap<ComponentId, Schema<Vec<u64>>>,
 }
 
 impl Msg for DumpSchemaResp {
