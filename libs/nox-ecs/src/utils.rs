@@ -36,7 +36,7 @@ impl SchemaExt for elodin_db::ComponentSchema {
     fn to_array_ty(&self) -> ArrayTy {
         ArrayTy {
             element_type: self.element_type(),
-            shape: self.shape.iter().map(|x| *x as i64).collect(),
+            shape: self.dim.iter().map(|x| *x as i64).collect(),
         }
     }
 }

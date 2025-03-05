@@ -33,15 +33,11 @@ impl Exec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-        nox_ecs::impeller2_server::init_db(&self.db, &mut self.exec.world, timestamp)?;
+        nox_ecs::impeller2_server::init_db(&self.db, &self.exec.world, timestamp)?;
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(
-                    &state.components,
-                    &mut self.exec,
-                    timestamp,
-                )
+                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp)
             })?;
             timestamp += self.exec.world.sim_time_step().0;
             py.check_signals()?;
@@ -66,29 +62,27 @@ impl Exec {
         entity_id: EntityId,
     ) -> Result<Bound<'a, PyAny>, Error> {
         let id = ComponentId::new(&component_name);
-        let component = self.db.with_state(|state| {
-            state
-                .components
-                .get(&id)
-                .cloned()
-                .ok_or(elodin_db::Error::ComponentNotFound(id))
-        })?;
         let entity_id = entity_id.inner;
-        let entity = component
-            .entities
-            .get(&entity_id)
-            .ok_or(elodin_db::Error::EntityNotFound(entity_id))?;
+
+        let component = self
+            .db
+            .with_state(|state| state.get_component(entity_id, id).cloned())
+            .ok_or(elodin_db::Error::ComponentNotFound(id))?;
+        let component_metadata = self
+            .db
+            .with_state(|state| state.get_component_metadata(id).cloned())
+            .unwrap();
 
         let temp_file = tempfile::NamedTempFile::with_suffix(".feather")?;
         let path = temp_file.path().to_owned();
         nox_ecs::arrow::write_ipc(
-            entity
+            component
                 .time_series
                 .get_range(Timestamp(i64::MIN)..Timestamp(i64::MAX))
                 .expect("failed to get data")
                 .1,
-            &entity.schema,
-            &component.metadata,
+            &component.schema,
+            &component_metadata,
             path.clone(),
         )?;
 

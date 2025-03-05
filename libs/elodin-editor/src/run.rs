@@ -9,7 +9,6 @@ pub async fn run_recipe(
     path: PathBuf,
     cancel_token: CancelToken,
 ) -> miette::Result<()> {
-    println!("run recipe {path:?}");
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
         let py = path.join("main.py");

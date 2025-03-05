@@ -26,7 +26,6 @@ numpy.version = "0.21"
 nox-ecs.path = "../nox-ecs"
 nox-ecs.features = ["pyo3"]
 nox-ecs-macros.path = "../nox-ecs-macros"
-parking_lot = "0.12.1"
 
 # types
 postcard.version = "1.0"

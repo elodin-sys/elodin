@@ -378,7 +378,7 @@ use nox::{xla, Client};
 
 impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn copy_to_client(&self, client: &Client) -> Result<xla::PjRtBuffer, xla::Error> {
-        let mut dims: SmallVec<[i64; 4]> = self.schema.shape.iter().map(|&x| x as i64).collect();
+        let mut dims: SmallVec<[i64; 4]> = self.schema.dim.iter().map(|&x| x as i64).collect();
         dims.insert(0, self.len() as i64);
         client.copy_raw_host_buffer(self.schema.element_type(), self.column.as_ref(), &dims[..])
     }

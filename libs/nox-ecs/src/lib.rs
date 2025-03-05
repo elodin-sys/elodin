@@ -592,7 +592,7 @@ pub enum Error {
     #[cfg(feature = "pyo3")]
     #[error("python error")]
     PyO3(#[from] pyo3::PyErr),
-    #[error("impeller db {0}")]
+    #[error("db {0}")]
     DB(#[from] elodin_db::Error),
     #[error("stellarator error {0}")]
     Stellar(#[from] stellarator::Error),
