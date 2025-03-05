@@ -1,6 +1,6 @@
 use bevy::asset::Asset;
 use bevy::log::warn;
-use bevy::prelude::{InRef, Res, ResMut};
+use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{Assets, Handle},
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::ui::widgets::plot::gpu::INDEX_BUFFER_LEN;
-use crate::SelectedTimeRange;
+use crate::{SelectedTimeRange, TimeRangeBehavior};
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -83,7 +83,7 @@ impl PlotDataComponent {
             });
             let line = assets.get_mut(line.id()).expect("missing line asset");
             if let Some(last) = line.data.last() {
-                if last.timestamps.cpu().len() < CHUNK_LEN {
+                if last.timestamps.len() < CHUNK_LEN {
                     line.data.update_last(|c| {
                         c.push(timestamp, earliest_timestamp, new_value);
                     });
@@ -365,12 +365,20 @@ pub fn handle_time_series(
             let Some(last_timestamp) = timestamps.last() else {
                 return;
             };
+            if last_timestamp >= &range.end {
+                return;
+            }
             range.start = *last_timestamp;
 
             if range.start >= range.end {
                 return;
             }
+
+            if timestamps.len() < CHUNK_LEN {
+                return;
+            }
             let range = next_range(range, plot_data, &lines);
+
             let packet_id = fastrand::u16(..).to_le_bytes();
             let start = range.start;
             let end = range.end;
@@ -500,7 +508,10 @@ pub fn queue_timestamp_read(
                 line.last_queried = Some(Instant::now());
                 line.data
                     .tree
-                    .gaps_trimmed(ii(selected_range.0.start.0, selected_range.0.end.0))
+                    .gaps_trimmed(nodit::interval::ie(
+                        selected_range.0.start.0,
+                        selected_range.0.end.0,
+                    ))
                     .map(|i| Timestamp(i.start())..Timestamp(i.end()))
                     .for_each(process_range)
             } else {
@@ -544,7 +555,7 @@ macro_rules! impl_as_f32 {
                 fn as_f32(&self) -> f32 { *self as f32 }
             }
         )*
-    };
+    }
 }
 
 impl_as_f32!(u8, u16, u32, u64, i8, i16, i32, i64, f64);
@@ -605,16 +616,6 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
         self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
         Some(())
     }
-
-    pub fn slice(&self, slice: Range<usize>) -> Option<Self> {
-        let cpu = &self.cpu.get(slice)?;
-        let cpu = cpu.to_vec();
-        Some(Self {
-            cpu,
-            gpu: Arc::new(spin::Mutex::new(None)),
-            gpu_dirty: Arc::new(AtomicBool::new(true)),
-        })
-    }
 }
 
 impl<T, const N: usize> SharedBuffer<T, N> {
@@ -625,7 +626,7 @@ impl<T, const N: usize> SharedBuffer<T, N> {
 
 #[derive(Clone, Debug)]
 pub struct Chunk<D> {
-    timestamps: SharedBuffer<Timestamp, CHUNK_LEN>,
+    timestamps: Vec<Timestamp>,
     timestamps_float: SharedBuffer<f32, CHUNK_LEN>,
     data: SharedBuffer<D, CHUNK_LEN>,
     summary: ChunkSummary<D>,
@@ -674,11 +675,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         };
 
-        let timestamps = SharedBuffer {
-            cpu: timestamps.to_vec(),
-            gpu: Default::default(),
-            gpu_dirty: Arc::new(AtomicBool::new(true)),
-        };
+        let timestamps = timestamps.to_vec();
         Some(Chunk {
             timestamps,
             timestamps_float,
@@ -693,7 +690,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
         value: D,
     ) -> Self {
         let mut chunk = Chunk {
-            timestamps: SharedBuffer::default(),
+            timestamps: vec![],
             timestamps_float: SharedBuffer::default(),
             data: SharedBuffer::default(),
             summary: ChunkSummary {
@@ -725,7 +722,7 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
         earliest_timestamp: Timestamp,
         value: D,
     ) -> Option<()> {
-        self.timestamps.push(timestamp)?;
+        self.timestamps.push(timestamp);
         self.timestamps_float
             .push((timestamp.0 - earliest_timestamp.0) as f32)?;
         self.data.push(value.clone())?;
@@ -738,27 +735,6 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
         *max = max.clone().max(value.clone());
 
         Some(())
-    }
-
-    pub fn slice(&self, range: Range<Timestamp>) -> Option<Self> {
-        let start_ix = match self.timestamps.cpu.binary_search(&range.start) {
-            Ok(i) => i.saturating_sub(1),
-            Err(i) => i.saturating_sub(1),
-        };
-        let end_ix = match self.timestamps.cpu.binary_search(&range.end) {
-            Ok(i) => i + 1,
-            Err(i) => i,
-        };
-        let timestamps = self.timestamps.slice(start_ix..end_ix)?;
-        let timestamps_float = self.timestamps_float.slice(start_ix..end_ix)?;
-        let data = self.data.slice(start_ix..end_ix)?;
-        let summary = ChunkSummary::from_data(timestamps.cpu(), data.cpu())?;
-        Some(Self {
-            timestamps,
-            timestamps_float,
-            data,
-            summary,
-        })
     }
 }
 
@@ -784,32 +760,6 @@ impl<D> Default for ChunkSummary<D> {
 }
 
 impl<D: Clone + BoundOrd> ChunkSummary<D> {
-    fn from_data(timestamps: &[Timestamp], data: &[D]) -> Option<Self> {
-        let start_timestamp = *timestamps.first()?;
-        let end_timestamp = *timestamps.last()?;
-        let min = data.iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.min(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
-        let max = data.iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.max(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
-        Some(ChunkSummary {
-            len: timestamps.len(),
-            start_timestamp,
-            end_timestamp,
-            min,
-            max,
-        })
-    }
-
     pub fn range(&self) -> RangeInclusive<Timestamp> {
         self.start_timestamp..=self.end_timestamp
     }
@@ -891,14 +841,11 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &D)> {
         let (_, chunk) = self.tree.overlapping(ii(timestamp.0, timestamp.0)).next()?;
-        let index = match chunk.timestamps.cpu.binary_search(&timestamp) {
+        let index = match chunk.timestamps.binary_search(&timestamp) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
         };
-        Some((
-            *chunk.timestamps.cpu.get(index)?,
-            chunk.data.cpu().get(index)?,
-        ))
+        Some((*chunk.timestamps.get(index)?, chunk.data.cpu().get(index)?))
     }
 
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
@@ -926,10 +873,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         }
     }
 
-    pub fn draw_index_count(&self, range: Range<Timestamp>) -> usize {
-        self.draw_index_chunk_iter(range)
-            .flat_map(|chunk| chunk.into_index_iter())
-            .count()
+    pub fn draw_index_count(&self, range: Range<Timestamp>) -> (usize, usize) {
+        let mut chunks = 0;
+        let mut total_count = 0;
+        for chunk in self.draw_index_chunk_iter(range) {
+            chunks += 1;
+            total_count += chunk.into_index_iter().count() + 6;
+        }
+        (chunks, total_count)
     }
 
     pub fn draw_index_chunk_iter(
@@ -939,7 +890,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.range_iter(range).filter_map(|c| {
             let gpu = c.data.gpu.lock();
             let gpu = gpu.as_ref()?;
-            Some(gpu.as_index_chunk::<f32>(c.summary.len))
+
+            let index_chunk = gpu.as_index_chunk::<f32>(c.summary.len);
+
+            #[cfg(debug_assertions)]
+            {
+                let timestamp = c.timestamps_float.gpu.lock();
+                let timestamp = timestamp.as_ref()?;
+
+                assert_eq!(index_chunk, timestamp.as_index_chunk::<f32>(c.summary.len));
+            }
+
+            Some(index_chunk)
         })
     }
 
@@ -948,6 +910,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
+        pixel_width: usize,
     ) -> u32 {
         let mut view = render_queue
             .write_buffer_with(
@@ -956,8 +919,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
             )
             .expect("no write buf");
-        let index_total_count = self.draw_index_count(line_visible_range.clone());
-        let step = (index_total_count / INDEX_BUFFER_LEN) + 1;
+        let (chunk_count, index_count) = self.draw_index_count(line_visible_range.clone());
+        let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
+        let step = (index_count.div_ceil(desired_index_len - 2 * chunk_count)).max(1);
         fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
             if view.len() < 4 {
                 return view;
@@ -988,9 +952,61 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         }
         count
     }
+
+    pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
+        let first_half = nodit::interval::ee(i64::MIN, line_visible_range.start.0 - 1);
+        let second_half = nodit::interval::ee(line_visible_range.end.0 + 1, i64::MAX);
+        for (range, chunk) in self
+            .tree
+            .overlapping(first_half)
+            .chain(self.tree.overlapping(second_half))
+        {
+            if line_visible_range.contains(&Timestamp(range.start()))
+                || line_visible_range.contains(&Timestamp(range.end()))
+            {
+                continue;
+            }
+            if let Some(alloc) = &mut self.data_buffer_shard_alloc {
+                if let Some(gpu) = chunk.data.gpu.lock().take() {
+                    alloc.dealloc(gpu);
+                    chunk.data.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+                }
+            }
+            if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc {
+                if let Some(gpu) = chunk.timestamps_float.gpu.lock().take() {
+                    alloc.dealloc(gpu);
+                    chunk
+                        .timestamps_float
+                        .gpu_dirty
+                        .store(true, atomic::Ordering::SeqCst);
+                }
+            }
+        }
+    }
 }
 
-#[derive(Clone)]
+pub fn collect_garbage(
+    behavior: Res<TimeRangeBehavior>,
+    selected_range: Res<SelectedTimeRange>,
+    graph_data: ResMut<CollectedGraphData>,
+    mut lines: ResMut<Assets<Line>>,
+) {
+    if !behavior.is_changed() {
+        return;
+    }
+    for entity in graph_data.entities.values() {
+        for component in entity.components.values() {
+            for line in component.lines.values() {
+                let Some(line) = lines.get_mut(line) else {
+                    continue;
+                };
+                line.data.garbage_collect(selected_range.0.clone());
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexChunk {
     range: Range<u32>,
     len: usize,
@@ -1072,9 +1088,11 @@ impl BufferShardAlloc {
     }
 
     pub fn dealloc(&mut self, shard: BufferShard) {
-        if self.buffer.id() == shard.buffer.id() {
-            return;
-        }
+        debug_assert_eq!(
+            self.buffer.id(),
+            shard.buffer.id(),
+            "trying to dealloc shard from wrong buffer",
+        );
         let i = shard.range.start as usize / self.chunk_size;
         self.free_map.insert(i as u32);
     }
