@@ -20,24 +20,24 @@ use bevy::render::{ExtractSchedule, MainWorld, Render, RenderSet};
 use bevy::sprite::{Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup};
 use bevy::{
     app::Plugin,
-    asset::{load_internal_asset, Handle},
+    asset::{Handle, load_internal_asset},
     core_pipeline::core_2d::Transparent2d,
     ecs::{
         component::Component,
         system::{
-            lifetimeless::{Read, SRes},
             Resource,
+            lifetimeless::{Read, SRes},
         },
         world::FromWorld,
     },
     prelude::Color,
     render::{
+        RenderApp,
         extract_component::UniformComponentPlugin,
         render_phase::{AddRenderCommand, PhaseItem, RenderCommand},
         render_resource::{binding_types::uniform_buffer, *},
         renderer::RenderDevice,
         view::ViewTarget,
-        RenderApp,
     },
 };
 use bevy_render::extract_component::ExtractComponent;
@@ -47,7 +47,7 @@ use impeller2::types::Timestamp;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use crate::ui::widgets::plot::{Line, CHUNK_COUNT, CHUNK_LEN};
+use crate::ui::widgets::plot::{CHUNK_COUNT, CHUNK_LEN, Line};
 
 const LINE_SHADER_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(175745314079092880743018103868034362817);

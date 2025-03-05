@@ -59,7 +59,7 @@ impl<T: Default + Clone> BskChannel<T> {
     /// This function is safe to call as long as the pointer is valid.
     /// The raw pointer must have been previously returned by a call to `into_raw`.
     pub unsafe fn from_raw(ptr: *mut Mailbox<(T, u64)>) -> Self {
-        Self(Arc::from_raw(ptr))
+        Self(unsafe { Arc::from_raw(ptr) })
     }
 }
 
@@ -81,23 +81,23 @@ macro_rules! impl_basilisk_channel {
             ///
             /// # Safety
             /// Don't call this yourself, Basilisk will call it for you
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$msg_name _write>](
                 data: *const $payload_name,
                 channel: *mut $msg_name,
                 _module_id: i64,
                 call_time: u64
             ) {
-                let channel = channel.as_ref().unwrap();
+                let channel = unsafe { channel.as_ref() }.unwrap();
                 if channel.header != CHANNEL_MSG_HEADER {
                     return;
                 }
-                let Some(data) = data.as_ref() else {
+                let Some(data) = (unsafe { data.as_ref() }) else {
                     tracing::warn!("watcha doing passing null ptrs to write, you know better than that");
                     return;
                 };
                 let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
-                mailbox.as_ref().unwrap().write(data.clone(), call_time);
+                unsafe { mailbox.as_ref() }.unwrap().write(data.clone(), call_time);
             }
         }
 
@@ -106,14 +106,14 @@ macro_rules! impl_basilisk_channel {
             ///
             /// # Safety
             /// Don't call this yourself, Basilisk will call it for you
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$msg_name _read>](channel: *mut $msg_name) -> $payload_name {
-                let channel = channel.as_ref().unwrap();
+                let channel = unsafe { channel.as_ref() }.unwrap();
                 if channel.header != CHANNEL_MSG_HEADER {
                     return $payload_name::default();
                 }
                 let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
-                mailbox.as_ref().unwrap().read().0
+                unsafe { mailbox.as_ref() }.unwrap().read().0
             }
         }
 
@@ -122,14 +122,14 @@ macro_rules! impl_basilisk_channel {
             ///
             /// # Safety
             /// Don't call this yourself, Basilisk will call it for you
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$msg_name _timeWritten>](channel: *mut $msg_name) -> u64 {
-                let channel = channel.as_ref().unwrap();
+                let channel = unsafe { channel.as_ref() }.unwrap();
                 if channel.header != CHANNEL_MSG_HEADER {
                     return u64::MAX;
                 }
                 let mailbox = channel.payloadPointer as *const Mailbox<($payload_name, u64)>;
-                mailbox.as_ref().unwrap().read().1
+                unsafe { mailbox.as_ref() }.unwrap().read().1
             }
         }
 
@@ -138,9 +138,9 @@ macro_rules! impl_basilisk_channel {
             ///
             /// # Safety
             /// Don't call this yourself, Basilisk will call it for you
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$msg_name _isLinked>](channel: *mut $msg_name) -> bool {
-                channel.as_ref().is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
+                unsafe { channel.as_ref() }.is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
             }
         }
 
@@ -149,9 +149,9 @@ macro_rules! impl_basilisk_channel {
             ///
             /// # Safety
             /// Don't call this yourself, Basilisk will call it for you
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$msg_name _isWritten>](channel: *mut $msg_name) -> bool {
-                channel.as_ref().is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
+                unsafe { channel.as_ref() }.is_some_and(|channel| channel.header == CHANNEL_MSG_HEADER)
             }
         }
 
@@ -159,7 +159,7 @@ macro_rules! impl_basilisk_channel {
 
 
         paste! {
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub extern "C" fn [<$msg_name _zeroMsgPayload>]() -> $payload_name {
                 $payload_name::default()
             }

@@ -12,26 +12,26 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
-use big_space::propagation::NoPropagateRot;
 use big_space::GridCell;
+use big_space::propagation::NoPropagateRot;
 use impeller2::component::Component;
 use impeller2_wkt::WorldPos;
 
-use crate::ui::widgets::label::label_with_buttons;
-use crate::ui::widgets::WidgetSystem;
 use crate::ui::CameraQuery;
+use crate::ui::widgets::WidgetSystem;
+use crate::ui::widgets::label::label_with_buttons;
 use crate::{
+    GridHandle, MainCamera,
     ui::{
+        EntityData,
         colors::{self, with_opacity},
         theme,
         utils::MarginSides,
         widgets::label::ELabel,
-        EntityData,
     },
-    GridHandle, MainCamera,
 };
 
-use super::{empty_inspector, InspectorIcons};
+use super::{InspectorIcons, empty_inspector};
 
 #[derive(SystemParam)]
 pub struct InspectorViewport<'w, 's> {

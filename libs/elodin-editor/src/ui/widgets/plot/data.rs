@@ -15,8 +15,8 @@ use impeller2_bevy::{
     PacketGrantR, PacketHandlerInput, PacketHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
-use nodit::interval::ii;
 use nodit::NoditMap;
+use nodit::interval::ii;
 use roaring::bitmap::RoaringBitmap;
 use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
@@ -24,8 +24,8 @@ use std::any::type_name;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::ops::RangeInclusive;
-use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
+use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
@@ -568,11 +568,7 @@ impl AsF32 for f32 {
 
 impl AsF32 for bool {
     fn as_f32(&self) -> f32 {
-        if *self {
-            1.0
-        } else {
-            0.0
-        }
+        if *self { 1.0 } else { 0.0 }
     }
 }
 

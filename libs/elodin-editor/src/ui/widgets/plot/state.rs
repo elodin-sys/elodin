@@ -11,9 +11,9 @@ use bevy_egui::egui::{self, Color32};
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_bevy::ComponentValue;
 
-use crate::plugins::navigation_gizmo::RenderLayerAlloc;
-use crate::ui::{colors, ViewportRect};
 use crate::MainCamera;
+use crate::plugins::navigation_gizmo::RenderLayerAlloc;
+use crate::ui::{ViewportRect, colors};
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
 pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;

@@ -4,7 +4,7 @@ use nox::NoxprNode;
 
 use impeller2::schema::Schema;
 
-use crate::{assets::Handle, World};
+use crate::{World, assets::Handle};
 
 pub trait Archetype {
     fn components() -> Vec<(Schema<Vec<u64>>, ComponentMetadata)>;

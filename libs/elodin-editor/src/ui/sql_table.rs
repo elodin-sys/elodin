@@ -16,7 +16,7 @@ use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use super::{
     colors,
-    widgets::{button::EButton, WidgetSystem},
+    widgets::{WidgetSystem, button::EButton},
 };
 
 #[derive(Clone)]

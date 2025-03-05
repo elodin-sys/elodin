@@ -1,8 +1,8 @@
 use crate::{
     channel::BskChannel,
     sys::{
-        attTrackingErrorConfig, hillPointConfig, AttGuidMsgPayload, AttRefMsgPayload,
-        EphemerisMsgPayload, NavAttMsgPayload, NavTransMsgPayload,
+        AttGuidMsgPayload, AttRefMsgPayload, EphemerisMsgPayload, NavAttMsgPayload,
+        NavTransMsgPayload, attTrackingErrorConfig, hillPointConfig,
     },
 };
 

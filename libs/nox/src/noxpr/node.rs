@@ -8,7 +8,7 @@ use std::{
 
 use crate::Error;
 use itertools::Itertools;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
 /// Represents various types of nodes in an expression tree (Noxpr) for tensor computations.
@@ -763,17 +763,17 @@ impl Noxpr {
                 shape: c.ty.shape.clone(),
             })),
             NoxprNode::Param(p) => Some(p.ty.clone()),
-            NoxprNode::Add(ref b)
-            | NoxprNode::Sub(ref b)
-            | NoxprNode::Div(ref b)
-            | NoxprNode::Mul(ref b)
-            | NoxprNode::And(ref b)
-            | NoxprNode::Or(ref b)
-            | NoxprNode::GreaterOrEqual(ref b)
-            | NoxprNode::LessOrEqual(ref b)
-            | NoxprNode::Less(ref b)
-            | NoxprNode::Equal(ref b)
-            | NoxprNode::Atan2(ref b) => b.ty(),
+            NoxprNode::Add(b)
+            | NoxprNode::Sub(b)
+            | NoxprNode::Div(b)
+            | NoxprNode::Mul(b)
+            | NoxprNode::And(b)
+            | NoxprNode::Or(b)
+            | NoxprNode::GreaterOrEqual(b)
+            | NoxprNode::LessOrEqual(b)
+            | NoxprNode::Less(b)
+            | NoxprNode::Equal(b)
+            | NoxprNode::Atan2(b) => b.ty(),
 
             NoxprNode::Dot(b) => {
                 let NoxprTy::ArrayTy(lhs_ty) = b.lhs.ty()? else {
@@ -1002,13 +1002,13 @@ impl Noxpr {
                 NoxprTy::Tuple(_) => None,
                 NoxprTy::ArrayTy(a) => Some(a.element_type),
             },
-            NoxprNode::Add(ref b)
-            | NoxprNode::Sub(ref b)
-            | NoxprNode::Div(ref b)
-            | NoxprNode::Mul(ref b)
-            | NoxprNode::And(ref b)
-            | NoxprNode::Or(ref b)
-            | NoxprNode::Atan2(ref b) => b.rhs.element_type(),
+            NoxprNode::Add(b)
+            | NoxprNode::Sub(b)
+            | NoxprNode::Div(b)
+            | NoxprNode::Mul(b)
+            | NoxprNode::And(b)
+            | NoxprNode::Or(b)
+            | NoxprNode::Atan2(b) => b.rhs.element_type(),
             NoxprNode::GreaterOrEqual(_)
             | NoxprNode::LessOrEqual(_)
             | NoxprNode::Less(_)
@@ -1073,17 +1073,17 @@ impl Noxpr {
                 NoxprTy::Tuple(_) => None,
                 NoxprTy::ArrayTy(a) => Some(a.shape.clone()),
             },
-            NoxprNode::Add(ref b)
-            | NoxprNode::Sub(ref b)
-            | NoxprNode::Div(ref b)
-            | NoxprNode::Mul(ref b)
-            | NoxprNode::And(ref b)
-            | NoxprNode::Or(ref b)
-            | NoxprNode::GreaterOrEqual(ref b)
-            | NoxprNode::LessOrEqual(ref b)
-            | NoxprNode::Less(ref b)
-            | NoxprNode::Equal(ref b)
-            | NoxprNode::Atan2(ref b) => b.shape(),
+            NoxprNode::Add(b)
+            | NoxprNode::Sub(b)
+            | NoxprNode::Div(b)
+            | NoxprNode::Mul(b)
+            | NoxprNode::And(b)
+            | NoxprNode::Or(b)
+            | NoxprNode::GreaterOrEqual(b)
+            | NoxprNode::LessOrEqual(b)
+            | NoxprNode::Less(b)
+            | NoxprNode::Equal(b)
+            | NoxprNode::Atan2(b) => b.shape(),
 
             NoxprNode::Dot(b) => {
                 let lhs_shape = b.lhs.shape()?;
@@ -1196,7 +1196,7 @@ impl Noxpr {
             #[cfg(feature = "jax")]
             NoxprNode::Jax(o) => pyo3::Python::with_gil(|py| {
                 use pyo3::prelude::PyAnyMethods;
-                let jnp = py.import_bound("jax.numpy").unwrap();
+                let jnp = py.import("jax.numpy").unwrap();
                 let o = jnp.call_method1("array", (o,)).ok()?;
                 let shape = o.getattr("shape").ok()?.extract::<Vec<i64>>().ok()?;
                 Some(SmallVec::from_vec(shape))
@@ -1963,7 +1963,9 @@ impl ReplacementTracer {
                 scan_fn: s.scan_fn.clone(),
             })),
             #[cfg(feature = "jax")]
-            NoxprNode::Jax(j) => Noxpr::new(NoxprNode::Jax(j.clone())),
+            NoxprNode::Jax(j) => {
+                pyo3::Python::with_gil(|py| Noxpr::new(NoxprNode::Jax(j.clone_ref(py))))
+            }
             NoxprNode::Convert(c) => {
                 let arg = self.visit(&c.arg);
                 Noxpr::new(NoxprNode::Convert(Convert { arg, ty: c.ty }))
@@ -2227,7 +2229,13 @@ impl PrettyPrintTracer {
                 write!(
                     writer,
                     "gather(expr = var_{}, indices = var_{}, offset_dims = {:?}, collapsed_slice_dims = {:?}, start_index_map = {:?}, slice_sizes = {:?}, index_vector_dim = {})",
-                    expr, indices, g.offset_dims, g.collapsed_slice_dims, g.start_index_map, g.slice_sizes, g.index_vector_dim
+                    expr,
+                    indices,
+                    g.offset_dims,
+                    g.collapsed_slice_dims,
+                    g.start_index_map,
+                    g.slice_sizes,
+                    g.index_vector_dim
                 )?;
                 Ok(num)
             }
@@ -2357,7 +2365,7 @@ impl PrettyPrintTracer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{tensor, Client, Collapse, CompFn, Const, Matrix, Scalar, Tensor, Vector};
+    use crate::{Client, Collapse, CompFn, Const, Matrix, Scalar, Tensor, Vector, tensor};
 
     #[test]
     fn test_scalar_add_vmap() {

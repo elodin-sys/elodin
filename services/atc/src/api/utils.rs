@@ -1,9 +1,8 @@
 use super::{Claims, UserInfo};
 use crate::error::Error;
 use jsonwebtoken::{
-    decode, decode_header,
+    Algorithm, DecodingKey, Validation, decode, decode_header,
     jwk::{AlgorithmParameters, JwkSet},
-    Algorithm, DecodingKey, Validation,
 };
 use reqwest::Client;
 use std::future::Future;

@@ -7,7 +7,7 @@ use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
 use nox::{ArrayTy, Client, CompFn, Noxpr};
 use profile::Profiler;
 use serde::{Deserialize, Serialize};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 use std::fs::File;
 use std::iter::once;
@@ -612,7 +612,7 @@ mod tests {
     use crate::{Archetype, World};
     use assets::Handle;
     use impeller2_wkt::Glb;
-    use nox::{tensor, Op, OwnedRepr, Scalar, Vector};
+    use nox::{Op, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::ReprMonad;
 
     #[test]

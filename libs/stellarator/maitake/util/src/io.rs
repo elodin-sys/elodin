@@ -23,7 +23,7 @@ mod util;
 pub use self::cursor::Cursor;
 pub use self::error::{Error, ErrorKind, Result};
 pub use self::initializer::Initializer;
-pub use self::util::{copy, empty, repeat, sink, Empty, Repeat, Sink};
+pub use self::util::{Empty, Repeat, Sink, copy, empty, repeat, sink};
 use core::{cmp, fmt, slice, str};
 
 #[cfg(feature = "alloc")]
@@ -388,7 +388,7 @@ pub trait Write {
                     return Err(Error::new(
                         ErrorKind::WriteZero,
                         "failed to write whole buffer",
-                    ))
+                    ));
                 }
                 Ok(n) => buf = &buf[n..],
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => {}

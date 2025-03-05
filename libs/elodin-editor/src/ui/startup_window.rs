@@ -5,11 +5,11 @@ use bevy::{
     window::{EnabledButtons, PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
 };
 use bevy_egui::EguiContexts;
-use egui::{load::SizedTexture, Color32, CornerRadius, RichText, Stroke};
+use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
-    spawn_tcp_connect, ConnectionStatus, CurrentStreamId, PacketRx, PacketTx,
-    ThreadConnectionStatus,
+    ConnectionStatus, CurrentStreamId, PacketRx, PacketTx, ThreadConnectionStatus,
+    spawn_tcp_connect,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -25,7 +25,7 @@ use super::{
     colors::{self, ColorExt},
     images,
     theme::{self, corner_radius_sm},
-    widgets::{button::EButton, RootWidgetSystem, RootWidgetSystemExt},
+    widgets::{RootWidgetSystem, RootWidgetSystemExt, button::EButton},
 };
 
 #[derive(Component)]

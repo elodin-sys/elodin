@@ -1,15 +1,16 @@
 use cargo_metadata::camino::Utf8PathBuf;
 use core::iter;
 use futures::{
-    future::{maybe_done, BoxFuture},
-    pin_mut, FutureExt,
+    FutureExt,
+    future::{BoxFuture, maybe_done},
+    pin_mut,
 };
 use miette::Diagnostic;
 use nu_ansi_term::{Color, Style};
 use std::{
     collections::HashMap,
     env,
-    io::{self, stdout, Write},
+    io::{self, Write, stdout},
     path::PathBuf,
     process::Stdio,
     time::Duration,

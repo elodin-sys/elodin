@@ -1,5 +1,5 @@
 use bevy::utils::tracing;
-use miette::{miette, Context, IntoDiagnostic};
+use miette::{Context, IntoDiagnostic, miette};
 use std::path::PathBuf;
 use stellarator::util::CancelToken;
 
@@ -17,7 +17,9 @@ pub async fn run_recipe(
         } else if py.exists() {
             py
         } else {
-            return Err(miette!("couldn't find a elodin config, please add either a main.py or s10.toml file to the directory"));
+            return Err(miette!(
+                "couldn't find a elodin config, please add either a main.py or s10.toml file to the directory"
+            ));
         }
     } else {
         path.clone()

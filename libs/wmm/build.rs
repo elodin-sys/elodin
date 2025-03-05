@@ -1,4 +1,6 @@
 use std::env;
+use std::fs;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 fn main() {
@@ -24,9 +26,24 @@ fn main() {
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings_path = out_path.join("bindings.rs");
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file(&bindings_path)
         .expect("Couldn't write bindings!");
+
+    // Post-process the bindings to make extern blocks unsafe for Rust 2024 edition
+    let mut content = String::new();
+    fs::File::open(&bindings_path)
+        .expect("Failed to open bindings.rs")
+        .read_to_string(&mut content)
+        .expect("Failed to read bindings.rs");
+
+    let processed_content = content.replace("extern \"C\" {", "unsafe extern \"C\" {");
+
+    fs::File::create(&bindings_path)
+        .expect("Failed to create bindings.rs")
+        .write_all(processed_content.as_bytes())
+        .expect("Failed to write to bindings.rs");
 
     cc::Build::new()
         .file("vendor/GeomagnetismLibrary.c")

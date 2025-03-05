@@ -7,7 +7,7 @@ use bevy::{
     },
     window::PrimaryWindow,
 };
-use bevy_egui::{egui, EguiContext};
+use bevy_egui::{EguiContext, egui};
 use std::collections::HashMap;
 
 use crate::set_floating_origin;

@@ -3,7 +3,7 @@
   crane,
   ...
 }: let
-  rustToolchain = pkgs.rust-bin.stable."1.85.0".default;
+  rustToolchain = p: p.rust-bin.stable."1.85.0".default;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
   crateName = craneLib.crateNameFromCargoToml {cargoToml = ../../../libs/db/Cargo.toml;};
   src = pkgs.nix-gitignore.gitignoreSource [] ../../../.;

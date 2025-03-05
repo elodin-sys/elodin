@@ -6,7 +6,7 @@ pub const unsafe fn buf_and_len_to_str<const MAX_LEN: usize>(
     let buf = &buf_len.0;
     let len = buf_len.1;
     let buf = buf.split_at(len).0;
-    core::str::from_utf8_unchecked(buf)
+    unsafe { core::str::from_utf8_unchecked(buf) }
 }
 
 pub const fn concat_buf<const MAX_LEN: usize>(left: &str, right: &str) -> ([u8; MAX_LEN], usize) {

@@ -1,6 +1,7 @@
 use core::ops::{Add, Mul};
 
 use nox_ecs::nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
+use pyo3::IntoPyObjectExt;
 use pyo3::{prelude::*, types::PyTuple};
 
 use crate::{Component, Error};
@@ -20,6 +21,7 @@ impl From<nox::SpatialTransform<f64>> for SpatialTransform {
 #[pymethods]
 impl SpatialTransform {
     #[new]
+    #[pyo3(signature = (arr=None, angular=None, linear=None))]
     fn new(
         arr: Option<PyObject>,
         angular: Option<Quaternion>,
@@ -91,11 +93,11 @@ impl SpatialTransform {
         if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
             let op = self.inner.clone().add(s.inner).into_inner();
             let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_inner(op));
-            Ok(spatial_transform.into_py(py).to_owned())
+            Ok(spatial_transform.into_py_any(py)?)
         } else if let Ok(s) = rhs.extract::<SpatialMotion>(py) {
             let op = self.inner.clone().add(s.inner).into_inner();
             let spatial_motion = SpatialMotion::from(nox::SpatialMotion::from_inner(op));
-            Ok(spatial_motion.into_py(py).to_owned())
+            Ok(spatial_motion.into_py_any(py)?)
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
                 "Unsupported type for addition",
@@ -119,6 +121,7 @@ impl From<nox::SpatialMotion<f64>> for SpatialMotion {
 #[pymethods]
 impl SpatialMotion {
     #[new]
+    #[pyo3(signature = (angular=None, linear=None))]
     fn new(angular: Option<PyObject>, linear: Option<PyObject>) -> Self {
         let linear = linear
             .map(|arr| Tensor::<_, _, Op>::from_inner(Noxpr::jax(arr)))
@@ -187,6 +190,7 @@ impl From<nox::SpatialForce<f64>> for SpatialForce {
 #[pymethods]
 impl SpatialForce {
     #[new]
+    #[pyo3(signature = (arr=None, torque=None, linear=None))]
     fn new(
         arr: Option<PyObject>,
         torque: Option<PyObject>,
@@ -348,15 +352,15 @@ impl Quaternion {
         if let Ok(s) = rhs.extract::<SpatialTransform>(py) {
             let op = self.inner.clone().mul(s.inner).into_inner();
             let spatial_transform = SpatialTransform::from(nox::SpatialTransform::from_inner(op));
-            Ok(spatial_transform.into_py(py).to_owned())
+            Ok(spatial_transform.into_py_any(py)?)
         } else if let Ok(s) = rhs.extract::<SpatialMotion>(py) {
             let op = self.inner.clone().mul(s.inner).into_inner();
             let spatial_motion = SpatialMotion::from(nox::SpatialMotion::from_inner(op));
-            Ok(spatial_motion.into_py(py).to_owned())
+            Ok(spatial_motion.into_py_any(py)?)
         } else if let Ok(s) = rhs.extract::<SpatialForce>(py) {
             let op = self.inner.clone().mul(s.inner).into_inner();
             let spatial_force = SpatialForce::from(nox::SpatialForce::from_inner(op));
-            Ok(spatial_force.into_py(py).to_owned())
+            Ok(spatial_force.into_py_any(py)?)
         } else {
             let vec = Vector::from_inner(Noxpr::jax(rhs));
             let op = self.inner.clone().mul(vec).into_inner();
@@ -388,6 +392,7 @@ impl From<nox::SpatialInertia<f64>> for SpatialInertia {
 #[pymethods]
 impl SpatialInertia {
     #[new]
+    #[pyo3(signature = (mass, inertia=None))]
     fn new(mass: PyObject, inertia: Option<PyObject>) -> Self {
         let mass = Scalar::<f64>::from_inner(Noxpr::jax(mass));
         let momentum = Vector::<f64, 3>::zeros();

@@ -3,8 +3,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use enumflags2::{bitflags, BitFlags};
-use sea_orm::{entity::prelude::*, FromJsonQueryResult};
+use enumflags2::{BitFlags, bitflags};
+use sea_orm::{FromJsonQueryResult, entity::prelude::*};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Deserialize, Serialize)]
@@ -76,7 +76,7 @@ pub enum Verb {
 
 impl Permissions {
     pub fn has_perm(&self, id: &Uuid, entity_type: EntityType, verb: BitFlags<Verb>) -> bool {
-        let Permissions(ref perms) = self;
+        let Permissions(perms) = self;
         let Some(perm) = perms.get(id) else {
             return false;
         };
@@ -88,7 +88,7 @@ impl Permissions {
         entity_type: EntityType,
         verb: BitFlags<Verb>,
     ) -> impl Iterator<Item = Uuid> + '_ {
-        let Permissions(ref perms) = self;
+        let Permissions(perms) = self;
         perms
             .iter()
             .filter(move |(_, p)| p.entity_type == entity_type && p.verb.contains(verb))

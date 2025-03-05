@@ -76,7 +76,7 @@ impl AssetStore {
         Some(val)
     }
 
-    pub fn gen<C>(&self, handle: Handle<C>) -> Option<usize> {
+    pub fn generation<C>(&self, handle: Handle<C>) -> Option<usize> {
         let val = self.data.get(handle.id as usize)?;
         Some(val.generation)
     }

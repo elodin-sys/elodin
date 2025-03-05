@@ -1,9 +1,9 @@
 use impeller2::component::Component;
 use impeller2_wkt::{Color, Line3d, Material, Mesh, Panel, Viewport};
 use nox::{
-    tensor, ArrayRepr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector3,
+    ArrayRepr, SpatialForce, SpatialInertia, SpatialMotion, SpatialTransform, Vector3, tensor,
 };
-use nox_ecs::{six_dof::*, Integrator, Query, World, WorldExt, WorldPos};
+use nox_ecs::{Integrator, Query, World, WorldExt, WorldPos, six_dof::*};
 
 fn gravity(pos: Query<(WorldPos, Inertia, Force)>) -> Query<Force> {
     const G: f64 = 6.649e-11;

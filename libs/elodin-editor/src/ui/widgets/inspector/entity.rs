@@ -4,8 +4,8 @@ use bevy::ecs::{
     system::{Query, Res, ResMut, Resource, SystemParam, SystemState},
     world::World,
 };
-use bevy_egui::egui::{self, emath, Align, Color32, Layout, RichText};
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, ElementValueMut};
 use impeller2_wkt::MetadataExt;
 use smallvec::SmallVec;
@@ -13,19 +13,18 @@ use smallvec::SmallVec;
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
+        EntityData, EntityPair,
         colors::{self, with_opacity},
         tiles,
-        utils::{format_num, MarginSides},
+        utils::{MarginSides, format_num},
         widgets::{
-            label,
-            plot::{default_component_values, GraphBundle},
-            WidgetSystem,
+            WidgetSystem, label,
+            plot::{GraphBundle, default_component_values},
         },
-        EntityData, EntityPair,
     },
 };
 
-use super::{empty_inspector, InspectorIcons};
+use super::{InspectorIcons, empty_inspector};
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {

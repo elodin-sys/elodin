@@ -121,7 +121,7 @@ impl<T: Unloaded> Chunks<T> {
     }
 
     pub fn push(&mut self, tick: usize, value: T) {
-        if let Some(Some(ref mut last)) = self.chunks.last_mut() {
+        if let Some(Some(last)) = self.chunks.last_mut() {
             if last.range.end.saturating_add(1) == tick {
                 let i = tick - last.range.start;
                 if i > last.data.len() {

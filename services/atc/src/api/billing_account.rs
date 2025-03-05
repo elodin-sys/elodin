@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::Error;
 
-use super::{stripe::get_subscription_config, Api, CurrentUser};
+use super::{Api, CurrentUser, stripe::get_subscription_config};
 
 impl Api {
     pub async fn create_billing_account(

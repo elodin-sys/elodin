@@ -2,14 +2,15 @@ use std::{collections::HashMap, ops::Range, time::Duration};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
+    DefaultPlugins,
     asset::embedded_asset,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     log::LogPlugin,
     math::{DQuat, DVec3},
     pbr::{
-        wireframe::{WireframeConfig, WireframePlugin},
         DirectionalLightShadowMap,
+        wireframe::{WireframeConfig, WireframePlugin},
     },
     prelude::*,
     render::{
@@ -18,7 +19,6 @@ use bevy::{
     },
     window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
     winit::WinitSettings,
-    DefaultPlugins,
 };
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
@@ -33,11 +33,11 @@ use impeller2_bevy::{
 use impeller2_wkt::{CurrentTimestamp, NewConnection, SetStreamState, Viewport, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, Glb, LastUpdated};
 use nox::Tensor;
-use plugins::navigation_gizmo::{spawn_gizmo, NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc, spawn_gizmo};
 use ui::{
-    tiles::{self, TileState},
-    widgets::plot::{gpu::LineHandle, CollectedGraphData},
     SelectedObject,
+    tiles::{self, TileState},
+    widgets::plot::{CollectedGraphData, gpu::LineHandle},
 };
 
 pub mod chunks;
@@ -391,7 +391,7 @@ fn setup_titlebar(
             NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
             NSWindowToolbarStyle,
         },
-        base::{id, nil, BOOL},
+        base::{BOOL, id, nil},
     };
     use objc::{
         class,

@@ -4,7 +4,7 @@ use atc_entity::events::DbExt;
 use atc_entity::user::{self, Permissions};
 use elodin_types::api::{CreateUserReq, CreateUserResp, CurrentUserResp};
 use elodin_types::api::{LicenseType, UpdateUserReq, UpdateUserResp};
-use sea_orm::{prelude::Uuid, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, prelude::Uuid};
 use sea_orm::{DatabaseTransaction, Unchanged};
 
 impl Api {

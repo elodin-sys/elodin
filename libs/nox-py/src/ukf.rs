@@ -171,12 +171,14 @@ impl UKFState {
                 Tensor::from_inner(Noxpr::jax(result))
             };
 
-        let x_hat: Tensor<f64, Dyn, Op> = Tensor::from_inner(Noxpr::jax(self.x_hat.clone()));
-        let covar: Tensor<f64, (Dyn, Dyn), Op> = Tensor::from_inner(Noxpr::jax(self.covar.clone()));
+        let x_hat: Tensor<f64, Dyn, Op> =
+            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.x_hat.clone_ref(py))));
+        let covar: Tensor<f64, (Dyn, Dyn), Op> =
+            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.covar.clone_ref(py))));
         let prop_covar: Tensor<f64, (Dyn, Dyn), Op> =
-            Tensor::from_inner(Noxpr::jax(self.prop_covar.clone()));
+            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.prop_covar.clone_ref(py))));
         let noise_covar: Tensor<f64, (Dyn, Dyn), Op> =
-            Tensor::from_inner(Noxpr::jax(self.noise_covar.clone()));
+            Python::with_gil(|py| Tensor::from_inner(Noxpr::jax(self.noise_covar.clone_ref(py))));
 
         let state = UncheckedState {
             x_hat,
@@ -196,7 +198,7 @@ impl UKFState {
 }
 
 pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child = PyModule::new_bound(parent_module.py(), "ukf")?;
+    let child = PyModule::new(parent_module.py(), "ukf")?;
     child.add_function(wrap_pyfunction!(unscented_transform, &child)?)?;
     child.add_function(wrap_pyfunction!(cross_covar, &child)?)?;
     child.add_function(wrap_pyfunction!(predict, &child)?)?;

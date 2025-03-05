@@ -3,8 +3,8 @@ use crate::loom::{
     self,
     alloc::track_future,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
 };

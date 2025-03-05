@@ -14,12 +14,12 @@ use std::ops::RangeInclusive;
 
 use crate::ui::{
     colors,
-    widgets::{time_label::PrettyDuration, WidgetSystem},
+    widgets::{WidgetSystem, time_label::PrettyDuration},
 };
 
 use super::{
-    get_position_range, position_from_value, value_from_position, DurationExt, TimelineArgs,
-    TimelineIcons,
+    DurationExt, TimelineArgs, TimelineIcons, get_position_range, position_from_value,
+    value_from_position,
 };
 
 // ----------------------------------------------------------------------------
@@ -422,5 +422,5 @@ impl WidgetSystem for TimelineSlider<'_> {
 }
 
 pub fn sync_ui_tick(tick: Res<CurrentTimestamp>, mut ui_tick: ResMut<UITick>) {
-    ui_tick.0 = tick.0 .0;
+    ui_tick.0 = tick.0.0;
 }

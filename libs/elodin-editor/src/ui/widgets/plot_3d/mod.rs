@@ -22,7 +22,7 @@ use impeller2_wkt::{EntityMetadata, GetTimeSeries, Line3d};
 use gpu::LineBundle;
 use gpu::{LineConfig, LineUniform};
 
-use super::plot::{gpu::LineHandle, Line, PlotDataComponent, PlotDataEntity};
+use super::plot::{Line, PlotDataComponent, PlotDataEntity, gpu::LineHandle};
 
 pub mod gpu;
 

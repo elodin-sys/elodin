@@ -1,5 +1,5 @@
 use crate::MainCamera;
-use bevy::animation::{animated_field, AnimationTarget, AnimationTargetId};
+use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;

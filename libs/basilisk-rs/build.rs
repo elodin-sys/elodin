@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
@@ -14,6 +15,9 @@ fn main() {
         .derive_default(true)
         .derive_debug(true)
         .no_copy("(.*)Msg_C")
+        .blocklist_item(".*MaybeUninit.*")
+        .wrap_unsafe_ops(true)
+        .default_macro_constant_type(bindgen::MacroTypeVariation::Signed)
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -24,9 +28,15 @@ fn main() {
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings_file = out_path.join("bindings.rs");
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file(&bindings_file)
         .expect("Couldn't write bindings!");
+
+    // Post-process the generated bindings to fix extern blocks
+    let contents = fs::read_to_string(&bindings_file).expect("Unable to read bindings file");
+    let updated_contents = contents.replace("extern \"C\" {", "unsafe extern \"C\" {");
+    fs::write(&bindings_file, updated_contents).expect("Unable to write updated bindings file");
 
     cc::Build::new()
         .file("vendor/fswAlgorithms/attControl/mrpSteering/mrpSteering.c")

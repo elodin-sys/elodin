@@ -3,11 +3,11 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_wkt::EntityMetadata;
 
 use crate::ui::{
-    colors, utils, EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState,
+    EntityData, EntityFilter, EntityPair, SelectedObject, SidebarState, colors, utils,
 };
 
 use super::{WidgetSystem, WidgetSystemExt};
