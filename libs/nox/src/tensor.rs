@@ -13,6 +13,7 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
     #[cfg_attr(
         feature = "serde",
