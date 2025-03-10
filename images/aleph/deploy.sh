@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-aleph_ip="fde1:2240:a1ef::1"
+aleph_ip="${1:-aleph.local}"
 set -euxo pipefail
 export CONFIG="$(nix eval .#toplevel --raw)"
 echo "deploying $CONFIG"

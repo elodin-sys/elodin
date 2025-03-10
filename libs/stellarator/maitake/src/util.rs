@@ -60,7 +60,7 @@ pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
 #[cfg(not(debug_assertions))]
 #[inline(always)]
 pub(crate) unsafe fn non_null<T>(ptr: *mut T) -> NonNull<T> {
-    NonNull::new_unchecked(ptr)
+    unsafe { NonNull::new_unchecked(ptr) }
 }
 
 #[cfg(test)]

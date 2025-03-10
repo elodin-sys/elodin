@@ -59,6 +59,7 @@ pub mod prelude {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
 #[repr(transparent)]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Array<T: Elem, D: ArrayDim> {
     #[cfg_attr(
         feature = "serde",
