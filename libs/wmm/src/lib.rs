@@ -1,4 +1,4 @@
-use hifitime::Epoch;
+pub use hifitime::Epoch;
 use sys::MAG_SetDefaults;
 
 mod coef;

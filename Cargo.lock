@@ -7356,14 +7356,18 @@ name = "mekf"
 version = "0.12.0"
 dependencies = [
  "anyhow",
+ "clap 4.5.20",
  "fastrand 2.2.0",
  "impeller2",
  "impeller2-stella",
  "impeller2-wkt",
+ "mlua",
  "nox",
  "roci",
  "roci-adcs",
+ "serde",
  "stellarator",
+ "wmm",
  "zerocopy 0.8.14",
 ]
 

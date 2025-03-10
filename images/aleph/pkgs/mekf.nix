@@ -15,6 +15,10 @@
     cargoExtraArgs = "--package=${crateName.pname}";
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
+    buildInputs = [
+      pkgs.buildPackages.clang
+    ];
+    LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
   };
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
   bin = craneLib.buildPackage (commonArgs
