@@ -1,6 +1,6 @@
 use core::mem::align_of;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use zerocopy::{Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::error::Error;
 
@@ -140,4 +140,71 @@ impl<T: Serialize + DeserializeOwned, const N: usize> Buf<T> for heapless::Vec<T
     fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self[..]
     }
+}
+
+#[repr(C)]
+#[derive(FromBytes, KnownLayout, Immutable, IntoBytes)]
+pub struct UmbraBuf {
+    pub len: u32,
+    pub data: UmbraBufData,
+}
+
+impl UmbraBuf {
+    pub fn with_inline(len: u32, data: [u8; 12]) -> Self {
+        debug_assert!(len <= 12, "inline is only valid len <= 12");
+        Self {
+            len,
+            data: UmbraBufData { inline: data },
+        }
+    }
+
+    pub fn with_offset(len: u32, prefix: [u8; 4], offset: u32) -> Self {
+        debug_assert!(len > 12, "offset is only valid for lens above 12");
+        Self {
+            len,
+            data: UmbraBufData {
+                offset: LongBufOffset {
+                    prefix,
+                    _index: 0,
+                    offset,
+                },
+            },
+        }
+    }
+
+    pub fn offset(&self) -> Option<u32> {
+        if self.len >= 12 {
+            Some(unsafe { self.data.offset.offset })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub union UmbraBufData {
+    pub inline: [u8; 12],
+    pub offset: LongBufOffset,
+}
+
+unsafe impl IntoBytes for UmbraBufData {
+    fn only_derive_is_allowed_to_implement_this_trait()
+    where
+        Self: Sized,
+    {
+        // gottem
+    }
+}
+
+#[derive(FromBytes, KnownLayout, Immutable, IntoBytes, Clone, Copy)]
+#[repr(C)]
+pub struct LongBufOffset {
+    /// A copy of the first 4 bytes of the data stored in the long buf
+    pub prefix: [u8; 4],
+    /// Which buffer to pull the data from, in our case this is always zero, but we need to keep this
+    /// field for compatibility
+    pub _index: u32,
+    /// The offset into the buffer that contains the data
+    pub offset: u32,
 }

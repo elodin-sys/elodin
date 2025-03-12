@@ -21,7 +21,9 @@ impeller2-wkt.path = "../impeller2/wkt"
 impeller2-cli.path = "cli"
 serde.version = "1.0"
 serde.features = ["derive"]
-postcard = "1.0"
+postcard = "1.1"
+postcard-schema = "0.2"
+postcard-dyn = "0.2"
 nox.path = "../nox"
 nox.default-features = false
 

@@ -135,7 +135,7 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
         &self.map
     }
 
-    pub fn write(&self, buf: &[u8]) -> Result<(), Error> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize, Error> {
         let guard = self.write_lock.lock().unwrap();
         let slice: &mut [u8] =
             unsafe { slice::from_raw_parts_mut(self.map.as_mut_ptr(), self.map.len()) };
@@ -146,17 +146,11 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
             return Err(Error::MapOverflow);
         }
         let slice = slice.get_mut(end..head_end).ok_or(Error::MapOverflow)?;
-        self.head_len().store(buf.len() as u64, Ordering::Release);
-
         slice.copy_from_slice(buf);
 
-        let end = self.committed_len().load(Ordering::Acquire) as usize;
-        let head_len = self.head_len().load(Ordering::Acquire) as usize;
-        let head_end = end.checked_add(head_len).ok_or(Error::MapOverflow)?;
-        self.head_len().store(0, Ordering::Release);
         self.committed_len()
             .store(head_end as u64, Ordering::Release);
         drop(guard);
-        Ok(())
+        Ok(end - size_of::<Header<E>>())
     }
 }

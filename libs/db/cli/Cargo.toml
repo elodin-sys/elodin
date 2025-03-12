@@ -40,7 +40,8 @@ impeller2-wkt.path = "../../impeller2/wkt"
 impeller2-wkt.features = ["std", "mlua"]
 serde.version = "1.0"
 serde.features = ["derive"]
-postcard = "1.0"
+postcard = "1.1"
+postcard-dyn = "0.2"
 zerocopy = "0.8"
 
 # rand

@@ -538,6 +538,19 @@ pub trait Msg: Serialize {
     const ID: PacketId;
 }
 
+impl<T: Serialize + postcard_schema::Schema> Msg for T {
+    const ID: PacketId = const_fnv1a_hash::fnv1a_hash_str_16_xor(T::SCHEMA.name).to_le_bytes();
+}
+
+pub const fn msg_id(name: &str) -> PacketId {
+    let bytes = const_fnv1a_hash::fnv1a_hash_str_16_xor(name).to_le_bytes();
+    if bytes[0] == 224 {
+        [223, bytes[1]]
+    } else {
+        bytes
+    }
+}
+
 pub trait IntoLenPacket {
     fn into_len_packet(self) -> LenPacket;
 
