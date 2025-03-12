@@ -3,6 +3,7 @@ use impeller2::{
     table::{Entry, VTable},
     types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
 };
+use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{borrow::Cow, time::Duration};
 use std::{collections::HashMap, ops::Range};
@@ -255,6 +256,7 @@ impl Request for DumpMetadata {
 pub struct DumpMetadataResp {
     pub component_metadata: Vec<ComponentMetadata>,
     pub entity_metadata: Vec<EntityMetadata>,
+    pub msg_metadata: Vec<MsgMetadata>,
 }
 
 impl Msg for DumpMetadataResp {
@@ -432,4 +434,71 @@ pub trait Request {
 
 impl Request for SQLQuery {
     type Reply = ArrowIPC<'static>;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MsgMetadata {
+    pub name: String,
+    pub schema: OwnedNamedType,
+    pub metadata: HashMap<String, String>,
+}
+
+impl Msg for MsgMetadata {
+    const ID: PacketId = [224, 30];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SetMsgMetadata {
+    pub id: PacketId,
+    pub metadata: MsgMetadata,
+}
+
+impl Msg for SetMsgMetadata {
+    const ID: PacketId = [224, 31];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MsgStream {
+    pub msg_id: PacketId,
+}
+
+impl Msg for MsgStream {
+    const ID: PacketId = [224, 32];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetMsgMetadata {
+    pub msg_id: PacketId,
+}
+
+impl Msg for GetMsgMetadata {
+    const ID: PacketId = [224, 33];
+}
+
+impl Request for GetMsgMetadata {
+    type Reply = MsgMetadata;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetMsgs {
+    pub msg_id: PacketId,
+    pub range: Range<Timestamp>,
+    pub limit: Option<usize>,
+}
+
+impl Msg for GetMsgs {
+    const ID: PacketId = [224, 34];
+}
+
+impl Request for GetMsgs {
+    type Reply = MsgBatch;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MsgBatch {
+    pub data: Vec<(Timestamp, Vec<u8>)>,
+}
+
+impl Msg for MsgBatch {
+    const ID: PacketId = [224, 35];
 }

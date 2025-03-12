@@ -4385,6 +4385,8 @@ dependencies = [
  "miette",
  "nox",
  "postcard",
+ "postcard-dyn",
+ "postcard-schema",
  "serde",
  "smallvec",
  "stellarator",
@@ -6375,6 +6377,7 @@ dependencies = [
  "mlua",
  "nox",
  "postcard",
+ "postcard-schema",
  "replace_with",
  "serde",
  "stellarator-buf",
@@ -6432,6 +6435,7 @@ dependencies = [
  "nox",
  "nu-ansi-term 0.49.0",
  "postcard",
+ "postcard-dyn",
  "rustyline",
  "serde",
  "stellarator",
@@ -6470,6 +6474,7 @@ dependencies = [
  "mlua",
  "nox",
  "postcard",
+ "postcard-schema",
  "serde",
  "zerocopy 0.8.14",
 ]
@@ -7527,6 +7532,22 @@ dependencies = [
  "lua-src",
  "luajit-src",
  "pkg-config",
+]
+
+[[package]]
+name = "msg-test"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "fastrand 2.2.0",
+ "impeller2",
+ "impeller2-stella",
+ "impeller2-wkt",
+ "postcard-schema",
+ "roci",
+ "serde",
+ "stellarator",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]
@@ -9043,15 +9064,15 @@ dependencies = [
 
 [[package]]
 name = "postcard"
-version = "1.0.10"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f7f0a8d620d71c457dd1d47df76bb18960378da56af4527aaa10f515eee732e"
+checksum = "170a2601f67cc9dba8edd8c4870b15f71a6a2dc196daec8c83f72b59dff628a8"
 dependencies = [
  "cobs",
  "embedded-io 0.4.0",
  "embedded-io 0.6.1",
  "heapless 0.7.17",
- "postcard-derive",
+ "postcard-derive 0.1.2",
  "serde",
 ]
 
@@ -9064,6 +9085,39 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "postcard-derive"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f049d94cb6dda6938cc8a531d2898e7c08d71c6de63d8e67123cca6cdde2cc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "postcard-dyn"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4da5a67cc15c6eec3a49e1134f4b5053800195589d29c5cd547c7ab8c5ad939d"
+dependencies = [
+ "postcard",
+ "postcard-schema",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "postcard-schema"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8035e2716f5fc9dc2bd86d6bee40ef054aad7e437d3c126ffb22026f15948e15"
+dependencies = [
+ "postcard-derive 0.2.1",
+ "serde",
 ]
 
 [[package]]
@@ -10062,6 +10116,8 @@ dependencies = [
  "impeller2-wkt",
  "nix 0.29.0",
  "nox",
+ "postcard",
+ "postcard-schema",
  "roci-macros",
  "serde",
  "stellarator",

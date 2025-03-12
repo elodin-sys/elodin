@@ -19,8 +19,9 @@ zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 serde.version = "1.0"
 serde.features = ["derive"]
-postcard.version = "1.0.10"
+postcard.version = "1.1"
 postcard.features = ["alloc", "experimental-derive"]
+postcard-schema = "0.2"
 
 
 # types
