@@ -11,4 +11,5 @@
       Environment = "RUST_LOG=info";
     };
   };
+  environment.systemPackages = [pkgs.elodin-db];
 }

@@ -21,6 +21,8 @@ pub mod fs;
 pub mod io;
 pub mod net;
 pub mod os;
+#[cfg(not(target_os = "windows"))]
+pub mod serial;
 pub mod struc_con;
 pub mod util;
 

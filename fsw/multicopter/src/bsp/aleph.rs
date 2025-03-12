@@ -113,6 +113,9 @@ pub struct Pins {
     pub pf12: Pin, // ADC1 IN6 (voltage)
     pub pc4: Pin,  // ADC2 IN4 (gpio0)
     pub pc5: Pin,  // ADC2 IN8 (gpio1)
+
+    // GPIO:
+    pub gpio_connector: [Pin; 8], // PF13, PA0, PG2, PG3, PG4, PG5, PG6, PG7
 }
 
 impl Pins {
@@ -211,6 +214,17 @@ impl Pins {
             pf12: Pin::new(Port::F, 12, PinMode::Analog),
             pc4: Pin::new(Port::C, 4, PinMode::Analog),
             pc5: Pin::new(Port::C, 5, PinMode::Analog),
+
+            gpio_connector: [
+                Pin::new(Port::F, 13, PinMode::Output),
+                Pin::new(Port::A, 0, PinMode::Output),
+                Pin::new(Port::G, 2, PinMode::Output),
+                Pin::new(Port::G, 3, PinMode::Output),
+                Pin::new(Port::G, 4, PinMode::Output),
+                Pin::new(Port::G, 5, PinMode::Output),
+                Pin::new(Port::G, 6, PinMode::Output),
+                Pin::new(Port::G, 7, PinMode::Output),
+            ],
         };
         // Enable open drain for I2C
         pins.pb6.output_type(OutputType::OpenDrain);

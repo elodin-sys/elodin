@@ -19,6 +19,7 @@ pub trait Buf<T>: Serialize + DeserializeOwned + for<'de> Deserialize<'de> + Def
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn clear(&mut self);
 }
 
 pub trait ByteBufExt {
@@ -108,6 +109,10 @@ impl<T: Serialize + DeserializeOwned> Buf<T> for alloc::vec::Vec<T> {
     fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self[..]
     }
+
+    fn clear(&mut self) {
+        self.clear();
+    }
 }
 impl<T: Serialize + DeserializeOwned, const N: usize> Buf<T> for heapless::Vec<T, N> {
     fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T>
@@ -139,6 +144,10 @@ impl<T: Serialize + DeserializeOwned, const N: usize> Buf<T> for heapless::Vec<T
 
     fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self[..]
+    }
+
+    fn clear(&mut self) {
+        self.clear()
     }
 }
 
