@@ -1,8 +1,8 @@
 use crate::io::{AsyncRead, AsyncWrite};
 use crate::reactor::Completion;
 use crate::{BufResult, Error};
-use std::io;
 use std::path::Path;
+use std::{io, os};
 
 pub struct File {
     handle: crate::os::OwnedHandle,
@@ -15,7 +15,7 @@ impl File {
         Self::open_with(path, &options).await
     }
 
-    async fn open_with<P: AsRef<Path>>(path: P, options: &OpenOptions) -> Result<Self, Error> {
+    pub async fn open_with<P: AsRef<Path>>(path: P, options: &OpenOptions) -> Result<Self, Error> {
         let handle = Completion::run(crate::reactor::ops::Open::new(
             path.as_ref().to_path_buf(),
             options,
@@ -222,9 +222,16 @@ impl AsyncWrite for File {
 }
 
 #[cfg(not(target_os = "windows"))]
-impl std::os::fd::AsRawFd for File {
-    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+impl os::fd::AsRawFd for File {
+    fn as_raw_fd(&self) -> os::unix::prelude::RawFd {
         self.handle.as_handle().as_raw_fd()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl os::fd::AsFd for File {
+    fn as_fd(&self) -> os::unix::prelude::BorrowedFd<'_> {
+        self.handle.as_fd()
     }
 }
 
