@@ -96,23 +96,29 @@ pub struct StartupLayout<'w, 's> {
     packet_rx: ResMut<'w, PacketRx>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
     status: ResMut<'w, ThreadConnectionStatus>,
-    recent_files: ResMut<'w, RecentFiles>,
+    recent_files: ResMut<'w, RecentItems>,
     commands: Commands<'w, 's>,
 }
 
 #[derive(Resource, Serialize, Deserialize, Default)]
-struct RecentFiles {
-    recent_files: BTreeMap<Epoch, PathBuf>,
-    index: HashMap<PathBuf, Epoch>,
+struct RecentItems {
+    recent_files: BTreeMap<Epoch, RecentItem>,
+    index: HashMap<RecentItem, Epoch>,
 }
 
-impl RecentFiles {
-    fn push(&mut self, epoch: Epoch, path: PathBuf) {
-        if let Some(existing_epoch) = self.index.insert(path.clone(), epoch) {
+impl RecentItems {
+    fn push(&mut self, epoch: Epoch, item: RecentItem) {
+        if let Some(existing_epoch) = self.index.insert(item.clone(), epoch) {
             self.recent_files.remove(&existing_epoch);
         }
-        self.recent_files.insert(epoch, path);
+        self.recent_files.insert(epoch, item);
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub enum RecentItem {
+    File(PathBuf),
+    Addr(String),
 }
 
 #[derive(Default, Clone)]
@@ -178,8 +184,10 @@ impl StartupLayout<'_, '_> {
         let dirs = dirs();
 
         let cache_dir = dirs.cache_dir().to_owned();
-        self.recent_files
-            .push(hifitime::Epoch::now().unwrap(), file.clone());
+        self.recent_files.push(
+            hifitime::Epoch::now().unwrap(),
+            RecentItem::File(file.clone()),
+        );
         save_recent_files(&self.recent_files);
 
         std::thread::spawn(move || {
@@ -194,6 +202,41 @@ impl StartupLayout<'_, '_> {
         });
         self.connect(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240), true);
         self.switch_to_main();
+    }
+
+    fn start_connect(&mut self, addr: String) {
+        let socket_addr = match addr.to_socket_addrs().map(|mut x| x.next()) {
+            Ok(Some(addr)) => addr,
+            Ok(None) => {
+                *self.modal_state = ModalState::ConnectToIp {
+                    addr,
+                    error: Some(ConnectError::ResolutionFailed),
+                    connecting: None,
+                };
+                return;
+            }
+
+            Err(err) => {
+                *self.modal_state = ModalState::ConnectToIp {
+                    addr,
+                    error: Some(ConnectError::SocketParse(Arc::new(err))),
+                    connecting: None,
+                };
+                return;
+            }
+        };
+        self.recent_files.push(
+            hifitime::Epoch::now().unwrap(),
+            RecentItem::Addr(addr.clone()),
+        );
+        save_recent_files(&self.recent_files);
+
+        let status = self.connect(socket_addr, false);
+        *self.modal_state = ModalState::ConnectToIp {
+            addr,
+            error: None,
+            connecting: Some(status),
+        };
     }
 }
 
@@ -285,9 +328,16 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .frame(egui::Frame::NONE)
             .resizable(false)
             .show(ctx, |ui| {
-                for path in state.recent_files.recent_files.clone().into_values().rev() {
-                    if ui.add(recent_file_button(path.clone(), arrow)).clicked() {
-                        state.open_file(path.clone());
+                for item in state.recent_files.recent_files.clone().into_values().rev() {
+                    if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
+                        match item {
+                            RecentItem::File(path) => {
+                                state.open_file(path.clone());
+                            }
+                            RecentItem::Addr(addr) => {
+                                state.start_connect(addr);
+                            }
+                        }
                     }
                 }
             });
@@ -362,9 +412,12 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                             .selectable(false),
                         );
                         ui.add_space(5.);
-                        ui.add(
+                        let text_edit = ui.add(
                             egui::TextEdit::singleline(&mut addr).margin(egui::Margin::same(16)),
                         );
+                        let enter_key = text_edit.lost_focus()
+                            && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+
                         if let Some(error) = &error {
                             ui.add(
                                 egui::Label::new(
@@ -419,36 +472,10 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                     *state.modal_state = ModalState::None;
                                 }
                                 ui.add_space(10.0);
-                                if ui.add(EButton::green("CONNECT").width(156.)).clicked() {
-                                    let socket_addr =
-                                        match addr.to_socket_addrs().map(|mut x| x.next()) {
-                                            Ok(Some(addr)) => addr,
-                                            Ok(None) => {
-                                                *state.modal_state = ModalState::ConnectToIp {
-                                                    addr,
-                                                    error: Some(ConnectError::ResolutionFailed),
-                                                    connecting: None,
-                                                };
-                                                return;
-                                            }
-
-                                            Err(err) => {
-                                                *state.modal_state = ModalState::ConnectToIp {
-                                                    addr,
-                                                    error: Some(ConnectError::SocketParse(
-                                                        Arc::new(err),
-                                                    )),
-                                                    connecting: None,
-                                                };
-                                                return;
-                                            }
-                                        };
-                                    let status = state.connect(socket_addr, false);
-                                    *state.modal_state = ModalState::ConnectToIp {
-                                        addr,
-                                        error: None,
-                                        connecting: Some(status),
-                                    };
+                                if ui.add(EButton::green("CONNECT").width(156.)).clicked()
+                                    || enter_key
+                                {
+                                    state.start_connect(addr);
                                 }
                             },
                         )
@@ -506,8 +533,8 @@ fn startup_button(
     }
 }
 
-fn recent_file_button(
-    path: PathBuf,
+fn recent_item_button(
+    item: RecentItem,
     arrow: egui::TextureId,
 ) -> impl FnOnce(&mut egui::Ui) -> egui::Response {
     move |ui| {
@@ -515,10 +542,10 @@ fn recent_file_button(
             egui::vec2(322., 61.),
             egui::Layout::left_to_right(egui::Align::Center),
             move |ui| {
-                let mut name_font_id = egui::TextStyle::Button.resolve(ui.style());
-                name_font_id.size = 12.0;
-                let mut path_font_id = egui::TextStyle::Button.resolve(ui.style());
-                path_font_id.size = 10.0;
+                let mut title_font_id = egui::TextStyle::Button.resolve(ui.style());
+                title_font_id.size = 12.0;
+                let mut subtitle_font_id = egui::TextStyle::Button.resolve(ui.style());
+                subtitle_font_id.size = 10.0;
                 let response =
                     ui.allocate_rect(ui.max_rect(), egui::Sense::CLICK | egui::Sense::HOVER);
 
@@ -533,40 +560,46 @@ fn recent_file_button(
                         ),
                     );
 
-                let path = path.canonicalize().unwrap_or(path);
+                let (title, subtitle) = match item {
+                    RecentItem::File(path) => {
+                        let path = path.canonicalize().unwrap_or(path);
 
-                let dir = path.parent().unwrap_or_else(|| &path);
-                let mut path_display = format!("{}", dir.display());
-                if let Some(dirs) = directories::UserDirs::new() {
-                    if let Some(home_dir) = dirs.home_dir().to_str() {
-                        path_display = path_display.replace(home_dir, "~");
+                        let dir = path.parent().unwrap_or_else(|| &path);
+                        let mut path_display = format!("{}", dir.display());
+                        if let Some(dirs) = directories::UserDirs::new() {
+                            if let Some(home_dir) = dirs.home_dir().to_str() {
+                                path_display = path_display.replace(home_dir, "~");
+                            }
+                        }
+                        let name = if path
+                            .file_name()
+                            .map(|name| name == "main.py")
+                            .unwrap_or_default()
+                        {
+                            dir.file_stem()
+                        } else {
+                            path.file_stem()
+                        }
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("N/A");
+                        (name.to_string(), path_display)
                     }
-                }
-                let name = if path
-                    .file_name()
-                    .map(|name| name == "main.py")
-                    .unwrap_or_default()
-                {
-                    dir.file_stem()
-                } else {
-                    path.file_stem()
-                }
-                .and_then(|f| f.to_str())
-                .unwrap_or("N/A");
+                    RecentItem::Addr(addr) => (addr, "IP ADDR".to_string()),
+                };
 
                 ui.painter().text(
                     ui.max_rect().min + egui::vec2(16.0, 24.0),
                     egui::Align2::LEFT_CENTER,
-                    name,
-                    name_font_id,
+                    title,
+                    title_font_id,
                     colors::PRIMARY_CREAME,
                 );
 
                 ui.painter().text(
                     ui.max_rect().min + egui::vec2(16.0, 16.0 + 24.0),
                     egui::Align2::LEFT_CENTER,
-                    path_display,
-                    path_font_id,
+                    subtitle,
+                    subtitle_font_id,
                     colors::PRIMARY_CREAME_6,
                 );
 
@@ -612,20 +645,20 @@ fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }
 
-fn recent_files() -> RecentFiles {
-    let recent_file_path = dirs().data_dir().join("recent_files.toml");
-    let Ok(contents) = std::fs::read_to_string(recent_file_path) else {
-        return RecentFiles::default();
+fn recent_files() -> RecentItems {
+    let recent_file_path = dirs().data_dir().join("recent_items.toml");
+    let Ok(contents) = std::fs::read(recent_file_path) else {
+        return RecentItems::default();
     };
-    toml::from_str(&contents).unwrap_or_default()
+    postcard::from_bytes(&contents).unwrap_or_default()
 }
 
-fn save_recent_files(paths: &RecentFiles) {
+fn save_recent_files(paths: &RecentItems) {
     let dirs = dirs();
     let data_dir = dirs.data_dir();
     let _ = std::fs::create_dir_all(data_dir);
-    let recent_file_path = data_dir.join("recent_files.toml");
-    let Ok(contents) = toml::to_string(&paths) else {
+    let recent_file_path = data_dir.join("recent_items.toml");
+    let Ok(contents) = postcard::to_allocvec(&paths) else {
         return;
     };
     let _ = std::fs::write(recent_file_path, contents);

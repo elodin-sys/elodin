@@ -7,11 +7,12 @@ use impeller2::{
     table::{Entry, VTable, VTableBuilder},
     types::{
         ComponentId, ComponentView, EntityId, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
-        PacketId, PrimType, Timestamp,
+        PacketId, PrimType, RequestId, Timestamp,
     },
 };
 use impeller2_stella::PacketSink;
 use impeller2_wkt::*;
+use msg_log::MsgLog;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
 use std::{
@@ -50,6 +51,7 @@ pub mod append_log;
 mod arrow;
 mod assets;
 mod error;
+mod msg_log;
 pub(crate) mod time_series;
 
 pub struct DB {
@@ -71,6 +73,9 @@ pub struct State {
     component_metadata: HashMap<ComponentId, ComponentMetadata>,
     entity_metadata: HashMap<EntityId, EntityMetadata>,
     assets: HashMap<AssetId, memmap2::Mmap>,
+
+    msg_logs: HashMap<PacketId, MsgLog>,
+
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
 }
@@ -173,6 +178,7 @@ impl DB {
         let mut entity_metadata = HashMap::new();
         let mut component_metadata = HashMap::new();
         let mut entity_components = HashMap::new();
+        let mut msg_logs = HashMap::new();
         let mut last_updated = i64::MIN;
         let mut start_timestamp = i64::MAX;
 
@@ -182,6 +188,7 @@ impl DB {
             if !path.is_dir()
                 || (path.file_name() == Some(OsStr::new("entity_metadata"))
                     || path.file_name() == Some(OsStr::new("assets")))
+                || path.file_name() == Some(OsStr::new("msgs"))
             {
                 continue;
             }
@@ -197,7 +204,7 @@ impl DB {
             let metadata = ComponentMetadata::read(path.join("metadata"))?;
             component_metadata.insert(component_id, metadata);
 
-            for elem in std::fs::read_dir(path)? {
+            for elem in std::fs::read_dir(&path)? {
                 let Ok(elem) = elem else { continue };
 
                 let path = elem.path();
@@ -225,6 +232,18 @@ impl DB {
                 entity_components.insert((entity_id, component_id), entity);
             }
         }
+        for elem in std::fs::read_dir(path.join("msgs"))? {
+            let Ok(elem) = elem else { continue };
+
+            let path = elem.path();
+            let msg_id: u16 = path
+                .file_name()
+                .and_then(|p| p.to_str())
+                .and_then(|p| p.parse().ok())
+                .ok_or(Error::InvalidMsgId)?;
+            let msg_log = MsgLog::open(path)?;
+            msg_logs.insert(msg_id.to_le_bytes(), msg_log);
+        }
 
         for elem in std::fs::read_dir(path.join("entity_metadata"))? {
             let Ok(elem) = elem else { continue };
@@ -246,6 +265,7 @@ impl DB {
             entity_metadata,
             component_metadata,
             assets: open_assets(&path)?,
+            msg_logs,
             ..Default::default()
         };
         Ok(DB {
@@ -282,6 +302,25 @@ impl DB {
 
     pub fn insert_asset(&self, id: AssetId, buf: &[u8]) -> Result<(), Error> {
         self.with_state_mut(|state| assets::insert_asset(&self.path, &mut state.assets, id, buf))
+    }
+
+    pub fn push_msg(&self, timestamp: Timestamp, id: PacketId, msg: &[u8]) -> Result<(), Error> {
+        let exists = self.with_state(|s| {
+            if let Some(msg_log) = s.msg_logs.get(&id) {
+                msg_log.push(timestamp, msg)?;
+                Ok::<_, Error>(true)
+            } else {
+                Ok(false)
+            }
+        })?;
+        if !exists {
+            self.with_state_mut(move |s| {
+                let msg_log = s.get_or_insert_msg_log(id, &self.path)?;
+                msg_log.push(timestamp, msg)?;
+                Ok::<_, Error>(())
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -370,6 +409,35 @@ impl State {
         metadata.write(component_metadata_path)?;
         self.component_metadata
             .insert(metadata.component_id, metadata);
+        Ok(())
+    }
+
+    pub fn get_or_insert_msg_log(
+        &mut self,
+        id: PacketId,
+        db_path: &Path,
+    ) -> Result<&mut MsgLog, Error> {
+        Ok(match self.msg_logs.entry(id) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let msg_log = MsgLog::create(
+                    db_path
+                        .join("msgs")
+                        .join(u16::from_le_bytes(id).to_string()),
+                )?;
+                entry.insert(msg_log)
+            }
+        })
+    }
+
+    pub fn set_msg_metadata(
+        &mut self,
+        id: PacketId,
+        metadata: MsgMetadata,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        let msg_log = self.get_or_insert_msg_log(id, db_path)?;
+        msg_log.set_metadata(metadata)?;
         Ok(())
     }
 }
@@ -509,6 +577,7 @@ pub trait MetadataExt: Sized + Serialize + DeserializeOwned {
 
 impl MetadataExt for EntityMetadata {}
 impl MetadataExt for ComponentMetadata {}
+impl MetadataExt for MsgMetadata {}
 
 #[derive(Clone)]
 pub struct Component {
@@ -663,6 +732,7 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
+                warn!(?err, "error handling packet");
                 let tx = tx.lock().await;
                 if let Err(err) = tx
                     .send(
@@ -884,9 +954,16 @@ async fn handle_packet(
             let msg = db.with_state(|state| {
                 let component_metadata = state.component_metadata.values().cloned().collect();
                 let entity_metadata = state.entity_metadata.values().cloned().collect();
+                let msg_metadata = state
+                    .msg_logs
+                    .values()
+                    .flat_map(|m| m.metadata())
+                    .cloned()
+                    .collect();
                 DumpMetadataResp {
                     component_metadata,
                     entity_metadata,
+                    msg_metadata,
                 }
             });
             let tx = tx.lock().await;
@@ -1019,9 +1096,71 @@ async fn handle_packet(
             let tx = inner_tx.lock().await;
             tx.send(msg.with_request_id(req_id)).await.0?;
         }
+        Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
+            let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
+            db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
+        }
+        Packet::Msg(m) if m.id == MsgStream::ID => {
+            let MsgStream { msg_id } = m.parse::<MsgStream>()?;
+            let msg_log =
+                db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            let req_id = m.req_id;
+            let tx = tx.clone();
+            stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx));
+        }
+        Packet::Msg(m) if m.id == GetMsgMetadata::ID => {
+            let GetMsgMetadata { msg_id } = m.parse::<GetMsgMetadata>()?;
+            let Some(metadata) =
+                db.with_state(|s| s.msg_logs.get(&msg_id).and_then(|m| m.metadata().cloned()))
+            else {
+                return Err(Error::MsgNotFound(msg_id));
+            };
+            let tx = tx.lock().await;
+            tx.send(metadata.with_request_id(m.req_id)).await.0.unwrap();
+        }
+        Packet::Msg(m) if m.id == GetMsgs::ID => {
+            let GetMsgs {
+                msg_id,
+                range,
+                limit,
+            } = m.parse::<GetMsgs>()?;
+            let msg_log =
+                db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            let iter = msg_log.get_range(range).map(|(t, b)| (t, b.to_vec()));
+            let data = if let Some(limit) = limit {
+                iter.take(limit).collect()
+            } else {
+                iter.collect()
+            };
+            let tx = tx.lock().await;
+            tx.send(MsgBatch { data }.with_request_id(m.req_id))
+                .await
+                .0
+                .unwrap();
+        }
+        Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
         _ => {}
     }
     Ok(())
+}
+
+pub async fn handle_msg_stream<A: AsyncWrite>(
+    msg_id: PacketId,
+    req_id: RequestId,
+    msg_log: MsgLog,
+    tx: Arc<Mutex<PacketSink<A>>>,
+) -> Result<(), Error> {
+    let mut pkt = LenPacket::msg(msg_id, 64).with_request_id(req_id);
+    loop {
+        msg_log.wait().await;
+        let Some((_timestamp, msg)) = msg_log.latest() else {
+            continue;
+        };
+        let tx = tx.lock().await;
+        pkt.extend_from_slice(msg);
+        rent!(tx.send(pkt).await, pkt)?;
+        pkt.clear();
+    }
 }
 
 pub struct FixedRateStreamState {

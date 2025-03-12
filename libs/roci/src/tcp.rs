@@ -10,7 +10,7 @@ use impeller2::{
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_stella::PacketStream;
 use impeller2_stella::queue::tcp_connect;
-use impeller2_wkt::{Stream, StreamFilter, VTableMsg};
+use impeller2_wkt::{MsgMetadata, SetMsgMetadata, Stream, StreamFilter, VTableMsg};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::future::Future;
@@ -208,6 +208,9 @@ pub trait SinkExt {
         &self,
         vtable_id: PacketId,
     ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    fn init_msg<M: postcard_schema::Schema + Msg>(
+        &self,
+    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
 }
 
 impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
@@ -232,6 +235,25 @@ impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
     ) -> Result<(), impeller2_stella::Error> {
         self.send_vtable::<V>(vtable_id).await?;
         self.send_metadata::<V>().await?;
+        Ok(())
+    }
+
+    async fn init_msg<M: postcard_schema::Schema + Msg>(
+        &self,
+    ) -> Result<(), impeller2_stella::Error> {
+        let schema = M::SCHEMA;
+        let name = std::any::type_name::<M>();
+        let metadata = MsgMetadata {
+            name: name.to_string(),
+            schema: schema.into(),
+            metadata: Default::default(),
+        };
+        self.send(&SetMsgMetadata {
+            id: M::ID,
+            metadata,
+        })
+        .await
+        .0?;
         Ok(())
     }
 }

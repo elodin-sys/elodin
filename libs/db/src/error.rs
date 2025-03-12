@@ -1,6 +1,6 @@
 use std::io;
 
-use impeller2::types::{ComponentId, EntityId};
+use impeller2::types::{ComponentId, EntityId, PacketId};
 use impeller2_wkt::{AssetId, ErrorResponse, StreamId};
 use thiserror::Error;
 #[derive(Debug, Error)]
@@ -37,6 +37,10 @@ pub enum Error {
     AssetNotFound(AssetId),
     #[error("time range out of bounds")]
     TimeRangeOutOfBounds,
+    #[error("invalid msg id")]
+    InvalidMsgId,
+    #[error("msg not found {0:?}")]
+    MsgNotFound(PacketId),
 }
 
 impl From<impeller2_stella::Error> for Error {

@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use arrow::{
     array::RecordBatch,
     error::ArrowError,
@@ -9,6 +10,7 @@ use impeller2::{
     table::{Entry, VTableBuilder},
     types::{
         ComponentId, EntityId, Msg, OwnedPacket, OwnedTimeSeries, PacketId, PrimType, Timestamp,
+        msg_id,
     },
 };
 
@@ -68,10 +70,10 @@ impl Client {
         self.tx.send(&msg).await.0?;
         match self.read_with_error().await? {
             impeller2::types::OwnedPacket::Msg(m) if m.id == M::Reply::ID => {
-                let m = m.parse::<M::Reply>()?;
+                let m = m.parse::<M::Reply>().unwrap();
                 Ok(m)
             }
-            _ => Err(anyhow::anyhow!("wrong msg type")),
+            m => Err(anyhow!("wrong msg type {:?}", m)),
         }
     }
 
@@ -82,14 +84,14 @@ impl Client {
             match pkt {
                 impeller2::types::OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
                     let m = m.parse::<ErrorResponse>()?;
-                    Err(anyhow::anyhow!(m.description))
+                    Err(anyhow!(m.description))
                 }
                 pkt => Ok(pkt),
             }
         };
         let timeout = async {
             stellarator::sleep(Duration::from_secs(25)).await;
-            Err(anyhow::anyhow!("request timed out"))
+            Err(anyhow!("request timed out"))
         };
         futures_lite::future::race(timeout, resp).await
     }
@@ -122,7 +124,7 @@ impl Client {
         let pkt = self.read_with_error().await?;
         let time_series = match &pkt {
             impeller2::types::OwnedPacket::TimeSeries(time_series) => time_series,
-            _ => return Err(anyhow::anyhow!("wrong msg type")),
+            _ => return Err(anyhow!("wrong msg type")),
         };
 
         fn print_time_series_as_table<
@@ -134,9 +136,8 @@ impl Client {
             let len = schema.shape().iter().product();
             let data = time_series
                 .data()
-                .map_err(|err| anyhow::anyhow!("{err:?} failed to get data"))?;
-            let buf = <[T]>::try_ref_from_bytes(data)
-                .map_err(|_| anyhow::anyhow!("failed to get data"))?;
+                .map_err(|err| anyhow!("{err:?} failed to get data"))?;
+            let buf = <[T]>::try_ref_from_bytes(data).map_err(|_| anyhow!("failed to get data"))?;
             let mut builder = tabled::builder::Builder::default();
             builder.push_record(["TIME".to_string(), "DATA".to_string()]);
             for (chunk, timestamp) in buf
@@ -319,6 +320,78 @@ impl Client {
         }
         Ok(())
     }
+
+    pub async fn stream_msgs(&mut self, stream_msgs: MsgStream) -> anyhow::Result<()> {
+        let request_id = fastrand::u8(..);
+        let metadata = self
+            .send_req(GetMsgMetadata {
+                msg_id: stream_msgs.msg_id,
+            })
+            .await?;
+        self.tx
+            .send(stream_msgs.with_request_id(request_id))
+            .await
+            .0?;
+
+        let mut buf = vec![0; 1024 * 8];
+        let cancel = Arc::new(AtomicBool::new(true));
+        let canceler = cancel.clone();
+        std::thread::spawn(move || {
+            let mut stdin = io::stdin().lock();
+            let mut buf = [0u8];
+            let _ = stdin.read(&mut buf);
+            canceler.store(false, atomic::Ordering::SeqCst);
+        });
+
+        while cancel.load(atomic::Ordering::SeqCst) {
+            let pkt = self.rx.next(buf).await?;
+            match &pkt {
+                impeller2::types::OwnedPacket::Msg(msg) if msg.req_id == request_id => {
+                    let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg.buf[..])
+                        .map_err(|e| anyhow!("failed to deserialize msg: {:?}", e))?;
+                    println!("{:?}", data);
+                }
+                _ => {}
+            }
+            buf = pkt.into_buf().into_inner();
+        }
+        Ok(())
+    }
+
+    pub async fn get_msgs(
+        &mut self,
+        msg_id: PacketId,
+        start: Option<i64>,
+        stop: Option<i64>,
+    ) -> anyhow::Result<()> {
+        let start = Timestamp(start.unwrap_or(i64::MIN));
+        let stop = Timestamp(stop.unwrap_or(i64::MAX));
+        let metadata = self.send_req(GetMsgMetadata { msg_id }).await?;
+        let get_msgs = GetMsgs {
+            msg_id,
+            range: start..stop,
+            limit: Some(1000),
+        };
+        let batch = self.send_req(get_msgs).await?;
+        let mut builder = tabled::builder::Builder::default();
+        for (timestamp, msg) in batch.data {
+            let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg[..])
+                .map_err(|e| anyhow!("failed to deserialize msg: {:?}", e))?;
+
+            let epoch = hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0);
+            builder.push_record([epoch.to_string(), data.to_string()]);
+        }
+        println!(
+            "{}",
+            builder
+                .build()
+                .with(tabled::settings::Style::rounded())
+                .with(tabled::settings::style::BorderColor::filled(
+                    tabled::settings::Color::FG_BLUE
+                ))
+        );
+        Ok(())
+    }
 }
 
 fn create_table(
@@ -409,6 +482,33 @@ impl UserData for Client {
             this.stream(msg).await?;
             Ok(())
         });
+
+        methods.add_async_method_mut("stream_msgs", |lua, mut this, id: Value| async move {
+            let msg_id = if let Ok(id) = lua.from_value::<PacketId>(id.clone()) {
+                id
+            } else if let Ok(name) = lua.from_value::<String>(id) {
+                msg_id(&name)
+            } else {
+                return Err(anyhow!("msg id must be a PacketId or String").into());
+            };
+            this.stream_msgs(MsgStream { msg_id }).await?;
+            Ok(())
+        });
+
+        methods.add_async_method_mut(
+            "get_msgs",
+            |lua, mut this, (id, start, stop): (Value, Option<i64>, Option<i64>)| async move {
+                let msg_id = if let Ok(id) = lua.from_value::<PacketId>(id.clone()) {
+                    id
+                } else if let Ok(name) = lua.from_value::<String>(id) {
+                    msg_id(&name)
+                } else {
+                    return Err(anyhow!("msg id must be a PacketId or String").into());
+                };
+                this.get_msgs(msg_id, start, stop).await?;
+                Ok(())
+            },
+        );
 
         macro_rules! add_req_reply_method {
             ($name:tt, $ty:tt, $req:tt) => {
@@ -606,7 +706,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         };
         let mut history = rustyline::history::FileHistory::with_config(config);
         let dirs = directories::ProjectDirs::from("systems", "elodin", "impeller2-cli")
-            .ok_or_else(|| anyhow::anyhow!("dir not found"))?;
+            .ok_or_else(|| anyhow!("dir not found"))?;
         std::fs::create_dir_all(dirs.data_dir())?;
         let history_path = dirs.data_dir().join("impeller2-history");
         if history_path.exists() {

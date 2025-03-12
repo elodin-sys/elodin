@@ -62,6 +62,11 @@ serde.version = "1.0"
 serde.features = ["derive"]
 serde.optional = true
 
+# serde
+postcard.version = "1.1"
+postcard-schema.version = "0.2"
+postcard-schema.features = ["use-std"]
+
 
 [dev-dependencies]
 roci-macros.workspace = true
