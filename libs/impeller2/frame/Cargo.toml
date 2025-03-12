@@ -1,0 +1,9 @@
+[package]
+name = "impeller2-frame"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+impeller2.path = ".."
+impeller2.features = ["std"]
+cobs.version = "0.2.3"

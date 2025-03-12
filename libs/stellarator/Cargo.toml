@@ -10,6 +10,7 @@ std = []
 miette = ["dep:miette"]
 futures = ["dep:futures"]
 tokio = ["dep:tokio"]
+serial = []
 
 [dependencies]
 # async

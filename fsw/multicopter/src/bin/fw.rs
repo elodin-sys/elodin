@@ -7,10 +7,8 @@ use alloc::boxed::Box;
 use cortex_m::delay::Delay;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_compat::ForwardCompat;
-use embedded_io::Write;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
-use zerocopy::IntoBytes;
 
 use roci_multicopter::bsp::aleph as bsp;
 use roci_multicopter::{dma::*, i2c_dma::*, peripheral::*, *};
@@ -35,6 +33,7 @@ fn main() -> ! {
         pd10: led_sg0,
         pb15: mut _led_sb0,
         pb14: mut led_sa0,
+        mut gpio_connector,
         ..
     } = pins;
     defmt::info!("Configured peripherals");
@@ -67,7 +66,7 @@ fn main() -> ! {
     defmt::info!("Configured ELRS UART");
     let mut crsf = crsf::CrsfReceiver::new(elrs_uart);
 
-    let mut uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
+    let uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.UART8,
         115200,
         usart::UsartConfig::default(),
@@ -124,6 +123,8 @@ fn main() -> ! {
     let mut dshot_driver = dshot::Driver::new(pwm_timer, dshot_tx, &mut dp.DMAMUX1);
     defmt::info!("Configured DSHOT driver");
 
+    let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
+
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
@@ -167,10 +168,12 @@ fn main() -> ! {
                 baro: bmp581.data.pressure_pascal,
                 baro_temp: bmp581.data.temp_c,
             };
-            let mut cobs = [0u8; 128];
-            let len = cobs::encode(record.as_bytes(), &mut cobs[1..]);
-            let _ = uart_bridge.write_all(&cobs[0..=len]);
-            let _ = uart_bridge.flush();
+            cmd_bridge.write_record(&record);
+        }
+
+        if let Some(command) = cmd_bridge.read() {
+            defmt::info!("Received command: {:?}", command);
+            command.apply(gpio_connector.each_mut())
         }
 
         running_led.update(now);

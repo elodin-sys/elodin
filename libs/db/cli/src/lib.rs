@@ -32,7 +32,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     io::{self, Read, Write, stdout},
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     sync::{
         Arc,
@@ -392,6 +392,20 @@ impl Client {
         );
         Ok(())
     }
+
+    pub async fn send_msg(
+        &mut self,
+        msg_id: PacketId,
+        msg: postcard_dyn::Value,
+    ) -> anyhow::Result<()> {
+        let metadata = self.send_req(GetMsgMetadata { msg_id }).await?;
+        let bytes =
+            postcard_dyn::to_stdvec_dyn(&metadata.schema, &msg).map_err(|e| anyhow!("{e:?}"))?;
+        let mut pkt = LenPacket::msg(msg_id, bytes.len());
+        pkt.extend_from_slice(&bytes);
+        self.tx.send(pkt).await.0?;
+        Ok(())
+    }
 }
 
 fn create_table(
@@ -441,15 +455,36 @@ impl UserData for Client {
                 Ok(())
             },
         );
-        methods.add_async_method("send_msg", |_lua, this, msg: AnyUserData| async move {
-            let msg = msg.call_method::<Vec<u8>>("msg", ())?;
-            this.tx
-                .send(LenPacket { inner: msg })
-                .await
-                .0
-                .map_err(anyhow::Error::from)?;
-            Ok(())
-        });
+        methods.add_async_method_mut(
+            "send_msg",
+            |lua, mut this, (msg_or_id, val): (Value, Option<Value>)| async move {
+                if let Some(msg) = msg_or_id.as_userdata() {
+                    let msg = msg.call_method::<Vec<u8>>("msg", ())?;
+                    this.tx
+                        .send(LenPacket { inner: msg })
+                        .await
+                        .0
+                        .map_err(anyhow::Error::from)?;
+                } else if let Some(msg) = val {
+                    let id = msg_or_id;
+                    let msg_id = if let Ok(id) = lua.from_value::<PacketId>(id.clone()) {
+                        id
+                    } else if let Ok(name) = lua.from_value::<String>(id) {
+                        msg_id(&name)
+                    } else {
+                        return Err(anyhow!("msg id must be a PacketId or String").into());
+                    };
+                    let msg = lua.from_value(msg)?;
+                    this.send_msg(msg_id, msg).await?;
+                } else {
+                    return Err(anyhow!(
+                        "send_msg requires either a native msg or a id and a table"
+                    )
+                    .into());
+                };
+                Ok(())
+            },
+        );
 
         methods.add_async_method(
             "send_msgs",
@@ -663,7 +698,11 @@ impl<M: Msg> UserData for LuaMsg<M> {
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = Lua::new();
     let client = lua.create_async_function(|_lua, addr: String| async move {
-        let addr = addr.parse().map_err(anyhow::Error::from)?;
+        let addr = addr
+            .to_socket_addrs()
+            .map_err(anyhow::Error::from)?
+            .next()
+            .ok_or_else(|| anyhow!("missing socket ip"))?;
         let c = Client::connect(addr).await?;
         Ok(c)
     })?;

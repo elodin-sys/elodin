@@ -16,6 +16,7 @@ pub mod bmm350;
 pub mod bmp581;
 pub mod bsp;
 pub mod can;
+pub mod command;
 pub mod crsf;
 pub mod dma;
 pub mod dronecan;
