@@ -32,7 +32,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     io::{self, Read, Write, stdout},
-    net::{SocketAddr, ToSocketAddrs},
+    net::ToSocketAddrs,
     path::PathBuf,
     sync::{
         Arc,
@@ -53,7 +53,12 @@ struct Client {
 }
 
 impl Client {
-    pub async fn connect(addr: SocketAddr) -> anyhow::Result<Self> {
+    pub async fn connect<T: ToSocketAddrs>(addr: T) -> anyhow::Result<Self> {
+        let addr = addr
+            .to_socket_addrs()
+            .map_err(anyhow::Error::from)?
+            .next()
+            .ok_or_else(|| anyhow!("missing socket ip"))?;
         let stream = TcpStream::connect(addr)
             .await
             .map_err(anyhow::Error::from)?;
@@ -698,11 +703,6 @@ impl<M: Msg> UserData for LuaMsg<M> {
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = Lua::new();
     let client = lua.create_async_function(|_lua, addr: String| async move {
-        let addr = addr
-            .to_socket_addrs()
-            .map_err(anyhow::Error::from)?
-            .next()
-            .ok_or_else(|| anyhow!("missing socket ip"))?;
         let c = Client::connect(addr).await?;
         Ok(c)
     })?;
@@ -762,6 +762,7 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
             };
             let mut line = String::new();
             loop {
+                line.clear();
                 match editor.readline(prompt) {
                     Ok(input) => line.push_str(&input),
                     Err(_) => return Ok(()),
@@ -774,14 +775,12 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     }
                     std::process::exit(0);
                 }
-                if line.starts_with(":sql ") {
+                if line.starts_with(":sql") {
                     let addr = &line.strip_prefix(":sql ").unwrap_or_default();
-                    let addr: SocketAddr = match addr.parse() {
-                        Ok(addr) => addr,
-                        Err(err) => {
-                            println!("{err}");
-                            continue;
-                        }
+                    let addr = if addr.is_empty() {
+                        "localhost:2240"
+                    } else {
+                        addr
                     };
                     let client = match Client::connect(addr).await {
                         Ok(c) => c,
@@ -859,7 +858,6 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                             let err = err.to_string();
                             println!("{}", Color::Red.paint(&err));
                         }
-                        line.clear();
                     }
                     Mode::Lua => match lua.load(&line).eval_async::<MultiValue>().await {
                         Ok(values) => {
