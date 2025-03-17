@@ -27,6 +27,7 @@ extend-exclude = [
  "services/dashboard/priv/static/fonts/**/*",
  "**/simulink/**/*.xml",
  "libs/basilisk-rs/basilisk/**/*",
- "libs/stellarator/maitake"
+ "libs/stellarator/maitake",
+ "images/aleph/modules/*.nix"
 ]
 ignore-vcs = true
