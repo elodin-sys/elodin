@@ -182,6 +182,7 @@ impl DB {
         let mut last_updated = i64::MIN;
         let mut start_timestamp = i64::MAX;
 
+        info!("Opening database: {}", path.display());
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
@@ -190,6 +191,7 @@ impl DB {
                     || path.file_name() == Some(OsStr::new("assets")))
                 || path.file_name() == Some(OsStr::new("msgs"))
             {
+                trace!("Skipping non-component directory: {}", path.display());
                 continue;
             }
 
@@ -202,6 +204,7 @@ impl DB {
 
             let schema = ComponentSchema::read(path.join("schema"))?;
             let metadata = ComponentMetadata::read(path.join("metadata"))?;
+            trace!("Read component metadata for {}", metadata.name);
             component_metadata.insert(component_id, metadata);
 
             for elem in std::fs::read_dir(&path)? {
@@ -224,6 +227,8 @@ impl DB {
                         .ok_or(Error::InvalidComponentId)?,
                 );
 
+                trace!("Opening entity file {}", path.display());
+
                 let entity = Component::open(path, component_id, entity_id, schema.clone())?;
                 if let Some((timestamp, _)) = entity.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
@@ -232,17 +237,19 @@ impl DB {
                 entity_components.insert((entity_id, component_id), entity);
             }
         }
-        for elem in std::fs::read_dir(path.join("msgs"))? {
-            let Ok(elem) = elem else { continue };
+        if let Ok(msgs_dir) = std::fs::read_dir(path.join("msgs")) {
+            for elem in msgs_dir {
+                let Ok(elem) = elem else { continue };
 
-            let path = elem.path();
-            let msg_id: u16 = path
-                .file_name()
-                .and_then(|p| p.to_str())
-                .and_then(|p| p.parse().ok())
-                .ok_or(Error::InvalidMsgId)?;
-            let msg_log = MsgLog::open(path)?;
-            msg_logs.insert(msg_id.to_le_bytes(), msg_log);
+                let path = elem.path();
+                let msg_id: u16 = path
+                    .file_name()
+                    .and_then(|p| p.to_str())
+                    .and_then(|p| p.parse().ok())
+                    .ok_or(Error::InvalidMsgId)?;
+                let msg_log = MsgLog::open(path)?;
+                msg_logs.insert(msg_id.to_le_bytes(), msg_log);
+            }
         }
 
         for elem in std::fs::read_dir(path.join("entity_metadata"))? {
