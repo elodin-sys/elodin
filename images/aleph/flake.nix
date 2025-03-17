@@ -41,16 +41,17 @@
             [
               "${nixpkgs}/nixos/modules/profiles/minimal.nix"
               jetpack.nixosModules.default
-              ./modules/usb_eth.nix
+              ./modules/usb-eth.nix
               ./modules/hardware.nix
               ./modules/minimal.nix
-              ./modules/sd_image.nix
+              ./modules/sd-image.nix
               ./modules/systemd-boot-dtb.nix
               ./modules/elodin-db.nix
               ./modules/aleph-serial-bridge.nix
               ./modules/mekf.nix
+              ./modules/aleph-dev.nix
             ]
-            ++ lib.optional (builtins.pathExists ./modules/elodin_dev.nix) ./modules/elodin_dev.nix;
+            ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
 
           nixpkgs.overlays = [
             jetpack.overlays.default
