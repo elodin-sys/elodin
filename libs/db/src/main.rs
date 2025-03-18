@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Parser, Subcommand};
 use elodin_db::Server;
 use miette::IntoDiagnostic;
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Clone)]
@@ -24,9 +25,12 @@ enum Commands {
 struct RunArgs {
     #[clap(default_value = "[::]:2240")]
     addr: SocketAddr,
+    #[cfg(feature = "axum")]
     path: Option<PathBuf>,
     #[clap(long)]
     pub config: Option<PathBuf>,
+    #[clap(default_value = "[::]:2248", long)]
+    http_addr: SocketAddr,
 }
 
 fn main() -> miette::Result<()> {
@@ -46,14 +50,24 @@ fn main() -> miette::Result<()> {
     let args = Cli::parse();
     stellarator::run(|| async {
         match args.command {
-            Commands::Run(RunArgs { addr, path, config }) => {
+            Commands::Run(RunArgs {
+                addr,
+                http_addr,
+                path,
+                config,
+            }) => {
                 let path = path.unwrap_or_else(|| {
                     let dirs =
                         directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
                     dirs.data_dir().join("data")
                 });
+                info!(?path, "starting db");
                 let server = Server::new(path, addr).into_diagnostic()?;
+                let axum_db = server.db.clone();
                 let db = stellarator::spawn(server.run());
+                stellarator::struc_con::tokio(move |_| async move {
+                    elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
+                });
                 if let Some(lua_config) = config {
                     let args = impeller2_cli::Args {
                         path: Some(lua_config),

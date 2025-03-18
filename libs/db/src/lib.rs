@@ -50,6 +50,7 @@ pub use error::Error;
 pub mod append_log;
 mod arrow;
 mod assets;
+pub mod axum;
 mod error;
 mod msg_log;
 pub(crate) mod time_series;

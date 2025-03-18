@@ -6,10 +6,12 @@ use smallvec::SmallVec;
 use crate::{ArrayBuf, ArrayDim, Const, Dyn, Elem};
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DynArray<T: Elem, S = Vec<T>> {
     storage: S,
     shape: SmallVec<[usize; 4]>,
     strides: SmallVec<[usize; 4]>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     _phantom: PhantomData<T>,
 }
 
