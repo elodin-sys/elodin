@@ -58,7 +58,7 @@ Impeller Lua REPL
 
 ### Connect to the database using the Elodin Editor
 
-Install the [Elodin Editor](https://docs.elodin.systems/get-started/quickstart/#install) if you haven't already. Then, launch the editor by providing the database IP and port:
+Install the [Elodin Editor](https://docs.elodin.systems/hello/quickstart/#install) if you haven't already. Then, launch the editor by providing the database IP and port:
 
 ```sh
 elodin editor 127.0.0.1:2240
