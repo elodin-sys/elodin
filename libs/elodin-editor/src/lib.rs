@@ -17,12 +17,12 @@ use bevy::{
         camera::{Exposure, PhysicalCameraParameters},
         view::RenderLayers,
     },
-    window::{PresentMode, PrimaryWindow, WindowResolution, WindowTheme},
+    window::{PresentMode, WindowResolution, WindowTheme},
     winit::WinitSettings,
 };
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::prelude::OrbitConstraint;
-use bevy_egui::EguiPlugin;
+use bevy_egui::{EguiContextSettings, EguiPlugin};
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::OwnedPacket;
 use impeller2::types::{Msg, Timestamp};
@@ -174,7 +174,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, setup_window_icon)
             .add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
-            .add_systems(Startup, setup_egui_context)
+            .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
@@ -216,13 +216,10 @@ impl Plugin for EditorPlugin {
     }
 }
 
-fn setup_egui_context(window: Query<Entity, With<PrimaryWindow>>, mut commands: Commands) {
-    commands
-        .entity(window.single())
-        .insert(bevy_egui::EguiContextSettings {
-            capture_pointer_input: false,
-            ..default()
-        });
+fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
+    for mut context in &mut contexts {
+        context.capture_pointer_input = false;
+    }
 }
 
 #[derive(Component, Clone)]
@@ -343,7 +340,6 @@ fn spawn_main_camera(
             last_anchor_depth: 2.0,
             ..Default::default()
         },
-        //impeller::bevy::Persistent,
         GridHandle { grid: grid_id },
     ));
 

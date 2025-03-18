@@ -7,7 +7,7 @@ use bevy::{
         system::{Commands, Query},
     },
     hierarchy::BuildChildren,
-    math::{Mat3, Vec3},
+    math::Vec3,
     render::{camera::Projection, view::Visibility},
 };
 use bevy_egui::egui::{self, Align};
@@ -125,8 +125,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             if let Some(entity) = selected_parent {
                 if let Ok(entity_cell) = entity_transform_query.get(entity) {
                     cam_entity.set_parent(entity);
-                    let rot_matrix = Mat3::from_quat(cam.transform.rotation);
-                    cam.transform.translation = rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, 10.0));
+                    cam.transform.translation = Vec3::new(10.0, 0.0, 0.0);
+                    cam.transform.look_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
                     *cam.grid_cell = *entity_cell;
                 }
             } else {

@@ -7,6 +7,7 @@ use bevy::{
 };
 use bevy_egui::EguiContexts;
 use egui::{Margin, Modifiers, epaint::Shadow};
+use palette_items::PaletteItem;
 
 use crate::{
     plugins::LogicalKeyState,
@@ -21,7 +22,7 @@ use self::palette_items::{MatchedPaletteItem, PaletteEvent, PaletteIcon, Palette
 
 use super::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystem, WidgetSystemExt};
 
-mod palette_items;
+pub mod palette_items;
 
 #[derive(Resource, Default)]
 pub struct CommandPaletteState {
@@ -30,6 +31,36 @@ pub struct CommandPaletteState {
     pub input_focus: bool,
     pub page_stack: Vec<PalettePage>,
     pub selected_index: usize,
+    pub auto_open_item: Option<PaletteItem>,
+}
+
+impl CommandPaletteState {
+    pub fn open_item(&mut self, item: PaletteItem) {
+        *self = CommandPaletteState::default();
+        self.auto_open_item = Some(item);
+        self.show = true;
+    }
+
+    pub fn handle_event(&mut self, event: PaletteEvent) {
+        match event {
+            PaletteEvent::Exit => {
+                self.show = false;
+                self.selected_index = 0;
+            }
+            PaletteEvent::NextPage {
+                next_page,
+                prev_page_label,
+            } => {
+                self.filter = "".to_string();
+                if let Some(prev_page_label) = prev_page_label {
+                    self.page_stack.last_mut().expect("unreachable").label = Some(prev_page_label);
+                }
+                self.page_stack.push(next_page);
+                self.input_focus = true;
+                self.selected_index = 0;
+            }
+        }
+    }
 }
 
 #[derive(SystemParam)]
@@ -50,28 +81,42 @@ impl RootWidgetSystem for CommandPalette<'_> {
     ) {
         let clicked_elsewhere = world.add_root_widget::<PaletteWindow>("command_palette_window");
 
-        let state_mut = state.get_mut(world);
+        let (auto_open_item, filter) = {
+            let state_mut = state.get_mut(world);
 
-        let mut command_palette_state = state_mut.command_palette_state;
-        let kbd = state_mut.key_state;
-        let cmd_pressed = if cfg!(target_os = "macos") {
-            kbd.pressed(&Key::Super)
-        } else {
-            kbd.pressed(&Key::Control)
-        };
-        if cmd_pressed && kbd.just_pressed(&Key::Character("p".into())) {
-            command_palette_state.show = !command_palette_state.show;
-            if command_palette_state.show {
-                command_palette_state.input_focus = true;
+            let mut command_palette_state = state_mut.command_palette_state;
+            let kbd = state_mut.key_state;
+            let cmd_pressed = if cfg!(target_os = "macos") {
+                kbd.pressed(&Key::Super)
+            } else {
+                kbd.pressed(&Key::Control)
+            };
+            if cmd_pressed && kbd.just_pressed(&Key::Character("p".into())) {
+                command_palette_state.show = !command_palette_state.show;
+                if command_palette_state.show {
+                    command_palette_state.input_focus = true;
+                }
             }
-        }
 
-        if kbd.just_pressed(&Key::Escape) || clicked_elsewhere {
-            command_palette_state.show = false;
-        }
+            if kbd.just_pressed(&Key::Escape)
+                || (clicked_elsewhere && command_palette_state.auto_open_item.is_none())
+            {
+                command_palette_state.show = false;
+            }
 
-        if !command_palette_state.show {
-            command_palette_state.filter = "".to_string();
+            if !command_palette_state.show {
+                command_palette_state.filter = "".to_string();
+            }
+            (
+                command_palette_state.auto_open_item.take(),
+                command_palette_state.filter.clone(),
+            )
+        };
+        if let Some(mut item) = auto_open_item {
+            item.system.initialize(world);
+            let event = item.system.run(filter, world);
+            let mut state_mut = state.get_mut(world);
+            state_mut.command_palette_state.handle_event(event);
         }
     }
 }
@@ -240,6 +285,14 @@ impl WidgetSystem for PaletteSearch<'_> {
                         })
                     }
 
+                    let prompt = command_palette_state
+                        .page_stack
+                        .last()
+                        .and_then(|p| p.prompt.as_ref())
+                        .map(|s| s.as_str())
+                        .unwrap_or("Type a command...")
+                        .to_string();
+
                     let (up_pressed, down_pressed) = ui.ctx().input_mut(|i| {
                         (
                             i.consume_key(Modifiers::NONE, egui::Key::ArrowUp),
@@ -248,7 +301,7 @@ impl WidgetSystem for PaletteSearch<'_> {
                     });
                     let search_bar = ui.add(
                         egui::TextEdit::singleline(&mut command_palette_state.filter)
-                            .hint_text("Type a command...")
+                            .hint_text(prompt)
                             .font(font_id)
                             .return_key(egui::KeyboardShortcut::new(
                                 egui::Modifiers::NONE,
@@ -334,18 +387,20 @@ impl WidgetSystem for PaletteItems<'_> {
                     ) in palette_items_filtered.drain(row_range).enumerate()
                     {
                         if Some(&item.header) != current_heading.as_ref() {
-                            egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(item.header.clone())
-                                        .monospace()
-                                        .color(colors::PRIMARY_CREAME_6),
-                                );
-                            });
+                            if !item.header.is_empty() {
+                                egui::Frame::NONE.inner_margin(row_margin).show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(item.header.clone())
+                                            .monospace()
+                                            .color(colors::PRIMARY_CREAME_6),
+                                    );
+                                });
+                            }
                             current_heading = Some(item.header.clone());
                         }
                         let btn = ui.add({
                             let widget = PaletteItemWidget::new(
-                                item.label.clone(),
+                                item.label.get(world, &filter),
                                 match_indices,
                                 i == selected_index,
                             )
@@ -357,36 +412,17 @@ impl WidgetSystem for PaletteItems<'_> {
                         });
 
                         if btn.clicked() || (i == selected_index && hit_enter) {
-                            return Some(item.system.run((), world));
+                            return Some(item.system.run(filter.clone(), world));
                         }
                     }
                     None
                 });
-            match res.inner {
-                Some(PaletteEvent::Exit) => {
-                    let mut state_mut = state.get_mut(world);
-                    state_mut.command_palette_state.show = false;
-                    state_mut.command_palette_state.selected_index = 0;
-                }
-                Some(PaletteEvent::NextPage {
-                    next_page,
-                    prev_page_label,
-                }) => {
-                    let mut state_mut = state.get_mut(world);
-                    state_mut.command_palette_state.filter = "".to_string();
-                    if let Some(prev_page_label) = prev_page_label {
-                        page.label = Some(prev_page_label);
-                    }
-                    state_mut.command_palette_state.page_stack.push(page);
-                    state_mut.command_palette_state.page_stack.push(next_page);
-                    state_mut.command_palette_state.input_focus = true;
-                    state_mut.command_palette_state.selected_index = 0;
-                }
-                None => {
-                    let mut state_mut = state.get_mut(world);
-                    state_mut.command_palette_state.page_stack.push(page);
-                    state_mut.command_palette_state.selected_index = selected_index;
-                }
+            let mut state_mut = state.get_mut(world);
+            state_mut.command_palette_state.page_stack.push(page);
+            if let Some(event) = res.inner {
+                state_mut.command_palette_state.handle_event(event);
+            } else {
+                state_mut.command_palette_state.selected_index = selected_index;
             }
         } else {
             let mut state_mut = state.get_mut(world);

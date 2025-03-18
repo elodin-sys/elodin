@@ -38,10 +38,6 @@
       cp --no-preserve=mode,ownership -r ${../libs/elodin-types/elixir}/* ./vendor/elodin_types
     '';
     preBuild = ''
-      mkdir -p ./priv/static/assets/wasm
-      cp --no-preserve=mode,ownership -r ${config.packages.editor-web}/* ./priv/static/assets/wasm/
-      ls -la ./priv/static/assets/wasm/
-      cp -R --no-preserve=mode,ownership  ${../services/dashboard/priv/static/images} ./priv/static/images
     '';
     postBuild = ''
       mix assets.deploy

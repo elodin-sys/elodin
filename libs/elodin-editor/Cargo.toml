@@ -29,7 +29,6 @@ raw-window-handle = "0.5"
 bevy_infinite_grid = "=0.14.0"                                # the released version of infinite grid has a bug with hdr this commit is just before that release
 big_space.git = "https://github.com/elodin-sys/big_space.git"
 big_space.branch = "no_prop_rot_v0.15"
-#big_space.path = "../../../big_space"
 bevy_editor_cam = "0.5.0"
 bevy_framepace = "0.18"
 
@@ -79,6 +78,13 @@ stacker = "0.1.19"
 # arrow
 arrow.version = "54.2.0"
 arrow.features = ["canonical_extension_types"]
+
+# lua
+impeller2-cli.path = "../db/cli"
+
+# channels
+flume = "0.11.1"
+
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller2-bevy.path = "../../libs/impeller2/bevy"
