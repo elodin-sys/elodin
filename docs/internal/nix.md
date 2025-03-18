@@ -4,44 +4,28 @@ Elodin uses Nix for building docker images and for CI dependencies. We heavily u
 
 If you want to use the official Nix installer, you will need to follow the instructions located here: https://nixos.wiki/wiki/Flakes
 
-# Flake Errors
-If you receive an error that looks like `cannot fetch input 'path:../../.?lastModified=0&narHash=sha256-GwiMX0tMqRYHeABWRWUIB6%2BLAA2yYtQqF8l1C5QkLTo%3D' because it uses a relative path` you need to run:
-
-```
-nix flake lock --update-input elodin
-```
-
-
 # macOS VM
-Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using UTM, that supports remote builds.
+Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using OrbStack, that supports remote builds.
 
-1. Download and install [UTM](https://mac.getutm.app). You don't need to use the Mac App Store version if you don't want to, but I'm sure the author would appreciate the donation.
-2. Download the Arm64 NixOS image from the [NixOS site](https://nixos.org/download#nixos-iso) - I usually select the "Gnome, 64 Bit ARM" version, but the Plasma Arm version would work as well
-
-  <img src="./assets/utm-a.png" style="width: 400px;"> <img src="./assets/utm-b.png" style="width: 400px;"/>
-
-3. Create a new VM - when you create it make sure to the same number of cores as your computer. Make sure to use the Apple Hypervisor option, and to enable Rosetta 2
-4. Follow the instructions to install NixOS normally - The installer will appear to be stuck around 46% for the majority of the install, don't worry about it. Eventually it will finish.
-5. Once in NixOS, open `sudo nano /etc/nixos/configuration.nix`, and find the line referencing `openssh` and enable it.
-6. Run `sudo nixos-rebuild switch`
-8. Run `mkdir ~/.ssh`
-7. Now you can ssh into your machine with its IP address. You can find this using `ip addr show` it will be under the interface named within like `enp0s1`
-9. Now copy your ssh public key to the vm's authorized keys file. The following command should work to do it.
-```sh
-scp YOUR_SSH_PUBLIC_KEY USERNAME@VM_IP:~/.ssh/authorized_keys
+1. Install OrbStack - https://orbstack.dev
+2. Create new NixOS machine called nixos - use whatever the default NixOS version is
+![screenshot of orbstack](assets/orbstack-nixos.png)
+4. Add this to /var/root/.ssh/config on macOS - you may need to create the directory first and run your editor using sudo
 ```
-10. Add the following two lines to the end of `/etc/nixos/configuration.nix` (but before the final `}`)
+Host orb
+  Hostname 127.0.0.1
+  Port 32222
 ```
-  virtualisation.rosetta.enable = true;
-  nix.settings.trusted-users = ["USERNAME"];
+5. Still in macOS - Add this to `/etc/nix/machines` - replacing `sphw` with your username. You will also need to edit the file as root
 ```
-replace `USERNAME` with your username
-11. Now re-run `sudo nixos-rebuild switch`
-12. Next add the following line to /etc/nix/machines in macOS
+ssh://sphw@orb x86_64-linux,aarch64-linux /Users/sphw/.orbstack/ssh/id_ed25519 20 20 nixos-test,benchmark,big-parallel,kvm - -
 ```
-ssh://USERNAME@IP x86_64-linux,aarch64-linux PRIVATE_KEY_PATH 20 20 nixos-test,benchmark,big-parallel,kvm - -
+6. Run `orb` to enter the nixos machine
+7. Add this line below the `users` declaration in `/etc/nixos/configuration.nix`. You will likely need to add some sort of text-editor. This can be done temporarily with `nix-shell -p vim`
 ```
-Replace `USERNAME` with your username, `IP` with your ip address, and `PUBLIC_KEY_PATH` with the path to your public key.
-13. Last but not least, you need to ssh into your VM as the root user. You can do this with `sudo ssh USERNAME@IP`. This is just to ensure that
-it is a known-host
+nix.settings.trusted-users = ["root" "@wheel"];
+```
+8. Run `sudo nixos-rebuild switch` to rebuild the nixos config
+9. Next `sudo ssh -i ~/.orbstack/ssh/id_ed25519 sphw@orb` on macOS replacing sphw with your username. If everything work this should drop you into your vm.
 14. Test your build by running `nix build --impure --expr '(with import <nixpkgs> { system = "x86_64-linux"; }; runCommand "foo" {} "uname > $out")'` in macOS
+11. Profit!
