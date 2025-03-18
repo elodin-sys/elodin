@@ -16,7 +16,7 @@ cuda = ["shared", "xla"]
 noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
 xla = ["dep:xla", "lapack-src", "std"]
 shared = []
-serde = ["dep:serde"]
+serde = ["dep:serde", "smallvec/serde"]
 
 [dependencies]
 typenum = "1.17.0"
