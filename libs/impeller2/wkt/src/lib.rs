@@ -6,10 +6,14 @@ use serde::{Deserialize, Serialize};
 mod assets;
 mod metadata;
 mod msgs;
+#[cfg(feature = "nox")]
+mod value;
 
 pub use assets::*;
 pub use metadata::*;
 pub use msgs::*;
+#[cfg(feature = "nox")]
+pub use value::*;
 
 #[cfg(feature = "gui")]
 mod gui;

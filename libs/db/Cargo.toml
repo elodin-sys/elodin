@@ -5,7 +5,11 @@ repository.workspace = true
 edition = "2024"
 publish = true
 description = "Elodin Database"
-authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
+authors = [
+    "sascha@elodin.systems",
+    "akhil@elodin.systems",
+    "van@elodin.systems",
+]
 
 [package.metadata.wix]
 upgrade-guid = "154415C8-2D06-41C4-87DA-A9AB1842801B"
@@ -13,11 +17,16 @@ path-guid = "1AF0FF55-0176-42C0-AD24-CF35FA4F1DC5"
 license = false
 eula = false
 
+[features]
+default = ["axum"]
+axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
+
 [dependencies]
 # ser-de
 impeller2.path = "../impeller2"
 impeller2.features = ["std"]
 impeller2-wkt.path = "../impeller2/wkt"
+impeller2-wkt.features = ["nox"]
 impeller2-cli.path = "cli"
 serde.version = "1.0"
 serde.features = ["derive"]
@@ -67,3 +76,16 @@ arrow-schema.features = ["canonical_extension_types"]
 #arrow.default-features = false
 datafusion.version = "45.0.0"
 convert_case = "0.6.0"
+
+
+# axum
+axum.version = "0.8.1"
+axum.features = ["ws", "macros"]
+axum.optional = true
+axum-streams.version = "0.20"
+axum-streams.features = ["json"]
+axum-streams.optional = true
+serde_json.version = "1"
+serde_json.optional = true
+tokio.version = "1"
+tokio.optional = true

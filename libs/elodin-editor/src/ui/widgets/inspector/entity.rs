@@ -6,7 +6,9 @@ use bevy::ecs::{
 };
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, ElementValueMut};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentValue, ComponentValueExt, ElementValueMut,
+};
 use impeller2_wkt::MetadataExt;
 use smallvec::SmallVec;
 
