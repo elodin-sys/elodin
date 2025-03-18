@@ -8,7 +8,7 @@ use bevy_egui::EguiContexts;
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller2_bevy::{
-    ConnectionStatus, CurrentStreamId, PacketRx, PacketTx, ThreadConnectionStatus,
+    ConnectionAddr, ConnectionStatus, CurrentStreamId, PacketRx, PacketTx, ThreadConnectionStatus,
     spawn_tcp_connect,
 };
 use serde::{Deserialize, Serialize};
@@ -167,6 +167,7 @@ impl StartupLayout<'_, '_> {
             stream_id,
             reconnect,
         );
+        self.commands.insert_resource(ConnectionAddr(addr));
         *self.current_stream_id = CurrentStreamId(stream_id);
         *self.packet_tx = packet_tx;
         *self.packet_rx = packet_rx;

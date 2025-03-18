@@ -4,10 +4,11 @@ use bevy::{
     ecs::{
         entity::Entity,
         query::With,
-        system::{Commands, IntoSystem, Query, Res, ResMut, System},
+        system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
     pbr::wireframe::WireframeConfig,
+    prelude::In,
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
@@ -28,6 +29,7 @@ pub struct PalettePage {
     items: Vec<PaletteItem>,
     pub label: Option<String>,
     initialized: bool,
+    pub prompt: Option<String>,
 }
 
 impl PalettePage {
@@ -36,6 +38,7 @@ impl PalettePage {
             items,
             initialized: false,
             label: None,
+            prompt: None,
         }
     }
 
@@ -47,7 +50,8 @@ impl PalettePage {
     pub fn initialize(&mut self, world: &mut World) {
         if !self.initialized {
             for item in &mut self.items {
-                item.system.initialize(world)
+                item.system.initialize(world);
+                item.label.init(world);
             }
         }
     }
@@ -58,7 +62,24 @@ impl PalettePage {
             .items
             .iter_mut()
             .filter_map(|item| {
-                let (score, match_indices) = matcher.fuzzy_indices(&item.label, filter)?;
+                let label = match &item.label {
+                    LabelSource::Label(l) => l.as_str(),
+                    LabelSource::System(_) => "",
+                };
+                let Some((mut score, match_indices)) = matcher.fuzzy_indices(label, filter) else {
+                    return if item.default {
+                        Some(MatchedPaletteItem {
+                            item,
+                            score: 0,
+                            match_indices: Vec::new(),
+                        })
+                    } else {
+                        None
+                    };
+                };
+                if match_indices.len() == label.len() {
+                    score *= 16
+                }
                 Some(MatchedPaletteItem {
                     item,
                     score,
@@ -69,13 +90,66 @@ impl PalettePage {
         items.sort_by(|a, b| b.score.cmp(&a.score));
         items
     }
+
+    pub fn prompt(mut self, prompt: impl ToString) -> Self {
+        self.prompt = Some(prompt.to_string());
+        self
+    }
 }
 
 pub struct PaletteItem {
-    pub label: String,
+    pub label: LabelSource,
     pub header: String,
     pub icon: PaletteIcon,
-    pub system: Box<dyn System<In = (), Out = PaletteEvent>>,
+    pub system: Box<dyn System<In = In<String>, Out = PaletteEvent>>,
+    pub default: bool,
+}
+
+pub enum LabelSource {
+    Label(String),
+    System(Box<dyn System<In = InRef<'static, str>, Out = String>>),
+}
+
+impl LabelSource {
+    pub fn placeholder(placeholder: impl ToString) -> Self {
+        let placeholder = placeholder.to_string();
+        LabelSource::system(move |label: InRef<'_, str>| {
+            if label.is_empty() {
+                placeholder.clone()
+            } else {
+                label.0.to_string()
+            }
+        })
+    }
+
+    pub fn system<M, I: IntoSystem<InRef<'static, str>, String, M>>(system: I) -> Self {
+        LabelSource::System(Box::new(I::into_system(system)))
+    }
+
+    pub fn init(&mut self, world: &mut World) {
+        if let LabelSource::System(system) = self {
+            system.initialize(world);
+        }
+    }
+
+    pub fn get(&mut self, world: &mut World, filter: &str) -> String {
+        match self {
+            LabelSource::Label(l) => l.clone(),
+            LabelSource::System(system) => system.run(filter, world),
+        }
+    }
+}
+
+impl From<&str> for LabelSource {
+    fn from(value: &str) -> Self {
+        LabelSource::Label(value.into())
+    }
+}
+
+impl From<String> for LabelSource {
+    fn from(val: String) -> Self {
+        LabelSource::Label(val)
+    }
 }
 
 pub enum PaletteIcon {
@@ -84,21 +158,27 @@ pub enum PaletteIcon {
 }
 
 impl PaletteItem {
-    pub fn new<M, I: IntoSystem<(), PaletteEvent, M>>(
-        label: impl ToString,
+    pub fn new<M, I: IntoSystem<In<String>, PaletteEvent, M>>(
+        label: impl Into<LabelSource>,
         header: impl ToString,
         system: I,
     ) -> Self {
         Self {
-            label: label.to_string(),
+            label: label.into(),
             header: header.to_string(),
             system: Box::new(I::into_system(system)),
             icon: PaletteIcon::None,
+            default: false,
         }
     }
 
     pub fn icon(mut self, icon: PaletteIcon) -> Self {
         self.icon = icon;
+        self
+    }
+
+    pub fn default(mut self) -> Self {
+        self.default = true;
         self
     }
 }
@@ -127,20 +207,74 @@ pub struct MatchedPaletteItem<'a> {
 }
 
 const VIEWPORT_LABEL: &str = "VIEWPORT";
+const TILES_LABEL: &str = "TILES";
 const SIMULATION_LABEL: &str = "SIMULATION";
 const HELP_LABEL: &str = "HELP";
 
-fn create_graph() -> PaletteItem {
+pub fn create_action() -> PaletteItem {
+    PaletteItem::new("Create Action", TILES_LABEL, |_: In<String>| {
+        PalettePage::new(vec![
+                    PaletteItem::new(
+                        LabelSource::placeholder("Enter a label for the button"),
+                        "",
+                        move |In(label): In<String>| {
+                            let msg_label = label.clone();
+                            PalettePage::new(vec![
+                                PaletteItem::new("send_msg", "Presets", move |_: In<String>| {
+                                let msg_label = msg_label.clone();
+                                    PalettePage::new(vec![PaletteItem::new(
+                                        LabelSource::placeholder("Enter the name of the msg to send"),
+                                        "Enter the name of the msg to send",
+                                        move |In(name): In<String>| {
+                                            let msg_label = msg_label.clone();
+                                            PalettePage::new(vec![PaletteItem::new(
+                                                LabelSource::placeholder("Msg"),
+                                                "Contents of the msg as a lua table - {foo = \"bar\"}",
+                                                move |In(msg): In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                                                    tile_state.create_action_tile(
+                                                        msg_label.clone(),
+                                                        format!("client:send_msg({name:?}, {msg})"),
+                                                    );
+                                                    PaletteEvent::Exit
+                                                },
+                                            ).default()])
+                                            .into()
+                                        },
+                                    ).default()])
+                                    .into()
+                                }),
+                                PaletteItem::new(
+                                    LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
+                                    "Enter a custom lua command",
+                                    move |lua: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+                                        tile_state.create_action_tile(label.clone(), lua.0);
+                                        PaletteEvent::Exit
+                                    },
+                                )
+                                .default(),
+                            ]).prompt("Enter a lua command to send")
+                            .into()
+                        },
+                    )
+                    .default(),
+                ])
+                .prompt("Enter a label for the action button")
+                .into()
+    })
+}
+
+pub fn create_graph() -> PaletteItem {
     PaletteItem::new(
         "Create Graph",
-        VIEWPORT_LABEL,
-        |entities: Query<EntityData>| {
+        TILES_LABEL,
+        |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 entities
                     .iter()
                     .map(|(_, entity, _, metadata)| graph_entity_item(metadata, entity))
                     .collect(),
             )
+            .prompt("Select an entity to graph")
             .into()
         },
     )
@@ -150,7 +284,9 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
     PaletteItem::new(
         entity_metadata.name.clone(),
         "Entities",
-        move |entities: Query<EntityData>, metadata: Res<ComponentMetadataRegistry>| {
+        move |_: In<String>,
+              entities: Query<EntityData>,
+              metadata: Res<ComponentMetadataRegistry>| {
             let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
             let items = components
                 .0
@@ -160,7 +296,8 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
                     PaletteItem::new(
                         item.name.clone(),
                         "Components",
-                        move |entities: Query<EntityData>,
+                        move |_: In<String>,
+                              entities: Query<EntityData>,
                               mut render_layer_alloc: ResMut<RenderLayerAlloc>,
                               mut tile_state: ResMut<tiles::TileState>| {
                             let component_id = item.component_id;
@@ -188,7 +325,61 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
                 .collect();
             PaletteEvent::NextPage {
                 prev_page_label: Some(entity_metadata.name.clone()),
-                next_page: PalettePage::new(items),
+                next_page: PalettePage::new(items).prompt("Select a component to graph"),
+            }
+        },
+    )
+}
+
+pub fn create_monitor() -> PaletteItem {
+    PaletteItem::new(
+        "Create Monitor",
+        TILES_LABEL,
+        |_: In<String>, entities: Query<EntityData>| {
+            PalettePage::new(
+                entities
+                    .iter()
+                    .map(|(_, entity, _, metadata)| monitor_entity_item(metadata, entity))
+                    .collect(),
+            )
+            .prompt("Select an entity to monitor")
+            .into()
+        },
+    )
+}
+
+fn monitor_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> PaletteItem {
+    PaletteItem::new(
+        entity_metadata.name.clone(),
+        "Entities",
+        move |_: In<String>,
+              entities: Query<EntityData>,
+              metadata: Res<ComponentMetadataRegistry>| {
+            let (_, entity, components, entity_metadata) = entities.get(entity).unwrap();
+            let items = components
+                .0
+                .keys()
+                .filter_map(|id| metadata.get_metadata(id).cloned())
+                .map(move |item| {
+                    PaletteItem::new(
+                        item.name.clone(),
+                        "Components",
+                        move |_: In<String>,
+                              entities: Query<EntityData>,
+                              mut tile_state: ResMut<tiles::TileState>| {
+                            let component_id = item.component_id;
+                            let Ok((entity_id, _, _, _)) = entities.get(entity) else {
+                                return PaletteEvent::Exit;
+                            };
+                            tile_state.create_monitor_tile(*entity_id, component_id);
+                            PaletteEvent::Exit
+                        },
+                    )
+                })
+                .collect();
+            PaletteEvent::NextPage {
+                prev_page_label: Some(entity_metadata.name.clone()),
+                next_page: PalettePage::new(items).prompt("Select a component to monitor"),
             }
         },
     )
@@ -198,7 +389,7 @@ fn toggle_body_axes() -> PaletteItem {
     PaletteItem::new(
         "Toggle Body Axes",
         VIEWPORT_LABEL,
-        |entities: Query<EntityData>| {
+        |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 entities
                     .iter()
@@ -207,7 +398,7 @@ fn toggle_body_axes() -> PaletteItem {
                             Some(PaletteItem::new(
                                 metadata.name.clone(),
                                 "Entities",
-                                move |mut commands: Commands, query: Query<(Entity, &BodyAxes)>| {
+                                move |_: In<String>, mut commands: Commands, query: Query<(Entity, &BodyAxes)>| {
                                     let mut found = false;
                                     for (e, axes) in query.iter() {
                                         if axes.entity_id == entity_id {
@@ -235,16 +426,16 @@ fn toggle_body_axes() -> PaletteItem {
     )
 }
 
-fn create_viewport() -> PaletteItem {
+pub fn create_viewport() -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
-        VIEWPORT_LABEL,
-        |entities: Query<EntityData>| {
+        TILES_LABEL,
+        |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 std::iter::once(PaletteItem::new(
                     "None",
                     "Entities",
-                    move |mut tile_state: ResMut<tiles::TileState>| {
+                    move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
                         tile_state.create_viewport_tile(None);
                         PaletteEvent::Exit
                     },
@@ -257,7 +448,7 @@ fn create_viewport() -> PaletteItem {
                                 Some(PaletteItem::new(
                                     metadata.name.clone(),
                                     "Entities",
-                                    move |mut tile_state: ResMut<tiles::TileState>| {
+                                    move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
                                         tile_state.create_viewport_tile(Some(entity_id));
                                         PaletteEvent::Exit
                                     },
@@ -269,13 +460,14 @@ fn create_viewport() -> PaletteItem {
                 )
                 .collect(),
             )
+            .prompt("Select the entity the viewport will track")
             .into()
         },
     )
 }
 
 fn set_playback_speed() -> PaletteItem {
-    PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, || {
+    PaletteItem::new("Set Playback Speed", SIMULATION_LABEL, |_: In<String>| {
         let speeds = [
             0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
             50.0, 100.0,
@@ -287,7 +479,9 @@ fn set_playback_speed() -> PaletteItem {
                     PaletteItem::new(
                         speed.to_string(),
                         "SPEED".to_string(),
-                        move |packet_tx: Res<PacketTx>, stream_id: Res<CurrentStreamId>| {
+                        move |_: In<String>,
+                              packet_tx: Res<PacketTx>,
+                              stream_id: Res<CurrentStreamId>| {
                             packet_tx.send_msg(SetStreamState {
                                 id: stream_id.0,
                                 playing: None,
@@ -315,7 +509,7 @@ impl Default for PalettePage {
             PaletteItem::new(
                 "Toggle Wireframe",
                 VIEWPORT_LABEL,
-                |mut wireframe: ResMut<WireframeConfig>| {
+                |_: In<String>, mut wireframe: ResMut<WireframeConfig>| {
                     wireframe.global = !wireframe.global;
                     PaletteEvent::Exit
                 },
@@ -323,7 +517,7 @@ impl Default for PalettePage {
             PaletteItem::new(
                 "Toggle HDR",
                 VIEWPORT_LABEL,
-                |mut hdr: ResMut<HdrEnabled>| {
+                |_: In<String>, mut hdr: ResMut<HdrEnabled>| {
                     hdr.0 = !hdr.0;
                     PaletteEvent::Exit
                 },
@@ -331,7 +525,7 @@ impl Default for PalettePage {
             PaletteItem::new(
                 "Toggle Grid",
                 VIEWPORT_LABEL,
-                |mut grid_visibility: Query<&mut Visibility, With<InfiniteGrid>>| {
+                |_: In<String>, mut grid_visibility: Query<&mut Visibility, With<InfiniteGrid>>| {
                     let all_hidden = grid_visibility
                         .iter()
                         .all(|grid_visibility| grid_visibility == Visibility::Hidden);
@@ -347,10 +541,11 @@ impl Default for PalettePage {
                     PaletteEvent::Exit
                 },
             ),
+            toggle_body_axes(),
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,
-                |packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>| {
+                |_: In<String>, packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>| {
                     simulating.0 = !simulating.0;
                     packet_tx.send_msg(SetDbSettings {
                         recording: Some(simulating.0),
@@ -361,14 +556,15 @@ impl Default for PalettePage {
             ),
             set_playback_speed(),
             create_graph(),
+            create_action(),
+            create_monitor(),
             create_viewport(),
-            toggle_body_axes(),
-            PaletteItem::new("Documentation", HELP_LABEL, || {
+            PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit
             })
             .icon(PaletteIcon::Link),
-            PaletteItem::new("Release Notes", HELP_LABEL, || {
+            PaletteItem::new("Release Notes", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems/updates/changelog");
                 PaletteEvent::Exit
             })

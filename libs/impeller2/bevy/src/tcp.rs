@@ -25,6 +25,7 @@ impl Plugin for TcpImpellerPlugin {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
+            app.insert_resource(ConnectionAddr(addr));
             spawn_tcp_connect(
                 addr,
                 outgoing_packet_rx,
@@ -136,3 +137,6 @@ impl ThreadConnectionStatus {
         self.0.store(status as u64, atomic::Ordering::SeqCst);
     }
 }
+
+#[derive(Clone, Resource, Deref)]
+pub struct ConnectionAddr(pub SocketAddr);

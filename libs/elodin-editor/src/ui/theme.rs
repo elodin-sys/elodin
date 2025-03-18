@@ -42,8 +42,8 @@ pub fn set_theme(context: &mut egui::Context) {
 
     style.spacing.menu_margin = Margin::same(8);
     style.spacing.window_margin = Margin::same(8);
-    style.visuals.selection.bg_fill = with_opacity(colors::YOLK_DEFAULT, 0.6);
-    style.visuals.selection.stroke.color = colors::YOLK_DEFAULT;
+    style.visuals.selection.bg_fill = with_opacity(colors::HYPERBLUE_DEFAULT, 0.6);
+    style.visuals.selection.stroke.color = colors::HYPERBLUE_DEFAULT;
 
     configure_default_fonts(context);
 

@@ -19,13 +19,15 @@ use nox::Tensor;
 use std::collections::{BTreeMap, HashMap};
 
 use super::{
-    HdrEnabled, SelectedObject, ViewportRect, colors, images,
+    HdrEnabled, SelectedObject, ViewportRect,
+    actions::ActionTileWidget,
+    colors, images,
     monitor::{MonitorPane, MonitorWidget},
     sql_table::{SQLTablePane, SqlTable, SqlTableWidget},
     widgets::{
         WidgetSystem, WidgetSystemExt,
         button::{EImageButton, ETileButton},
-        modal::ModalNewTile,
+        command_palette::{CommandPaletteState, palette_items},
         plot::{self, GraphBundle, PlotWidget},
     },
 };
@@ -54,6 +56,11 @@ pub struct TileState {
 
 #[derive(Resource, Default)]
 pub struct ViewportContainsPointer(pub bool);
+#[derive(Clone)]
+pub struct ActionTilePane {
+    pub entity: Entity,
+    pub label: String,
+}
 
 impl TileState {
     fn insert_tile(
@@ -108,6 +115,11 @@ impl TileState {
             .push(TreeAction::AddMonitor(None, entity_id, component_id));
     }
 
+    pub fn create_action_tile(&mut self, button_name: String, lua_code: String) {
+        self.tree_actions
+            .push(TreeAction::AddActionTile(None, button_name, lua_code));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tree.active_tiles().is_empty()
     }
@@ -155,6 +167,7 @@ enum Pane {
     Graph(GraphPane),
     Monitor(MonitorPane),
     SQLTable(SQLTablePane),
+    ActionTile(ActionTilePane),
 }
 
 impl Pane {
@@ -164,6 +177,7 @@ impl Pane {
             Pane::Viewport(viewport) => &viewport.label,
             Pane::Monitor(monitor) => &monitor.label,
             Pane::SQLTable(..) => "SQL",
+            Pane::ActionTile(action) => &action.label,
         }
     }
 
@@ -197,6 +211,10 @@ impl Pane {
             }
             Pane::SQLTable(pane) => {
                 ui.add_widget_with::<SqlTableWidget>(world, "sql", pane.clone());
+                egui_tiles::UiResponse::None
+            }
+            Pane::ActionTile(pane) => {
+                ui.add_widget_with::<ActionTileWidget>(world, "action_tile", pane.entity);
                 egui_tiles::UiResponse::None
             }
         }
@@ -279,6 +297,7 @@ pub enum TreeAction {
     AddGraph(Option<TileId>, Option<GraphBundle>),
     AddMonitor(Option<TileId>, EntityId, ComponentId),
     AddSQLTable(Option<TileId>),
+    AddActionTile(Option<TileId>, String, String),
     DeleteTab(TileId),
     SelectTile(TileId),
 }
@@ -435,6 +454,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     };
                     *layout.selected_object = SelectedObject::Viewport { tile_id, camera };
                 }
+                Tile::Pane(Pane::ActionTile(action)) => {
+                    *layout.selected_object = SelectedObject::Action {
+                        tile_id,
+                        action_id: action.entity,
+                    };
+                }
                 _ => {
                     *layout.selected_object = SelectedObject::None;
                 }
@@ -515,20 +540,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             }
             ui.separator();
             if ui.button("GRAPH").clicked() {
-                *layout.new_tile_state = NewTileState::Graph {
-                    entity_id: None,
-                    component_id: None,
-                    parent_id: Some(tile_id),
-                };
+                layout
+                    .cmd_palette_state
+                    .open_item(palette_items::create_graph());
                 ui.close_menu();
             }
             ui.separator();
             if ui.button("MONITOR").clicked() {
-                *layout.new_tile_state = NewTileState::Monitor {
-                    entity_id: None,
-                    component_id: None,
-                    parent_id: None,
-                };
+                layout
+                    .cmd_palette_state
+                    .open_item(palette_items::create_monitor());
                 ui.close_menu();
             }
 
@@ -536,6 +557,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             if ui.button("SQL").clicked() {
                 self.tree_actions
                     .push(TreeAction::AddSQLTable(Some(tile_id)));
+                ui.close_menu();
+            }
+
+            ui.separator();
+            if ui.button("ACTION").clicked() {
+                layout
+                    .cmd_palette_state
+                    .open_item(palette_items::create_action());
                 ui.close_menu();
             }
         });
@@ -547,7 +576,6 @@ pub struct TileSystem<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     ui_state: Res<'w, TileState>,
-    new_tile_state: Res<'w, NewTileState>,
 }
 
 impl WidgetSystem for TileSystem<'_, '_> {
@@ -565,7 +593,6 @@ impl WidgetSystem for TileSystem<'_, '_> {
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let ui_state = state_mut.ui_state;
-        let new_tile_state = state_mut.new_tile_state;
 
         let icons = TileIcons {
             add: contexts.add_image(images.icon_add.clone_weak()),
@@ -576,9 +603,8 @@ impl WidgetSystem for TileSystem<'_, '_> {
         };
 
         let is_empty_tile_tree = ui_state.is_empty() && ui_state.tree_actions.is_empty();
-        let is_tile_modal_closed = matches!(new_tile_state.as_ref(), NewTileState::None);
 
-        let center_panel = egui::CentralPanel::default()
+        egui::CentralPanel::default()
             .frame(Frame {
                 fill: if is_empty_tile_tree {
                     colors::PRIMARY_SMOKE
@@ -589,43 +615,21 @@ impl WidgetSystem for TileSystem<'_, '_> {
             })
             .show_inside(ui, |ui| {
                 if is_empty_tile_tree {
-                    if is_tile_modal_closed {
-                        ui.add_widget_with::<TileLayoutEmpty>(
-                            world,
-                            "tile_layout_empty",
-                            icons.clone(),
-                        );
-                    }
+                    ui.add_widget_with::<TileLayoutEmpty>(
+                        world,
+                        "tile_layout_empty",
+                        icons.clone(),
+                    );
                 } else {
                     ui.add_widget_with::<TileLayout>(world, "tile_layout", icons.clone());
                 }
             });
-
-        let center_pos = center_panel.response.rect.center();
-        ui.add_widget_with::<ModalNewTile>(world, "modal_new_tile", (center_pos, icons));
     }
-}
-
-#[derive(Resource, Default, Clone)]
-pub enum NewTileState {
-    #[default]
-    None,
-    Viewport(Option<EntityId>),
-    Graph {
-        entity_id: Option<EntityId>,
-        component_id: Option<ComponentId>,
-        parent_id: Option<TileId>,
-    },
-    Monitor {
-        entity_id: Option<EntityId>,
-        component_id: Option<ComponentId>,
-        parent_id: Option<TileId>,
-    },
 }
 
 #[derive(SystemParam)]
 pub struct TileLayoutEmpty<'w> {
-    new_tile_state: ResMut<'w, NewTileState>,
+    cmd_palette_state: ResMut<'w, CommandPaletteState>,
 }
 
 impl WidgetSystem for TileLayoutEmpty<'_> {
@@ -638,9 +642,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
-
-        let mut new_tile_state = state_mut.new_tile_state;
+        let mut state_mut = state.get_mut(world);
 
         let icons = args;
 
@@ -667,7 +669,9 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_viewport_btn.clicked() {
-                        *new_tile_state = NewTileState::Viewport(None);
+                        state_mut
+                            .cmd_palette_state
+                            .open_item(palette_items::create_viewport());
                     }
 
                     let create_graph_btn = ui.add(
@@ -678,11 +682,9 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_graph_btn.clicked() {
-                        *new_tile_state = NewTileState::Graph {
-                            entity_id: None,
-                            component_id: None,
-                            parent_id: None,
-                        };
+                        state_mut
+                            .cmd_palette_state
+                            .open_item(palette_items::create_graph());
                     }
 
                     let create_monitor_btn = ui.add(
@@ -693,11 +695,9 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     );
 
                     if create_monitor_btn.clicked() {
-                        *new_tile_state = NewTileState::Monitor {
-                            entity_id: None,
-                            component_id: None,
-                            parent_id: None,
-                        };
+                        state_mut
+                            .cmd_palette_state
+                            .open_item(palette_items::create_monitor());
                     }
                 });
             },
@@ -719,7 +719,7 @@ pub struct TileLayout<'w, 's> {
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     grid_cell: Query<'w, 's, &'static GridCell<i128>, Without<MainCamera>>,
-    new_tile_state: ResMut<'w, NewTileState>,
+    cmd_palette_state: ResMut<'w, CommandPaletteState>,
 }
 
 impl WidgetSystem for TileLayout<'_, '_> {
@@ -779,6 +779,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
                         if let egui_tiles::Tile::Pane(Pane::Graph(graph)) = tile {
                             state_mut.commands.entity(graph.id).despawn();
+                        };
+
+                        if let egui_tiles::Tile::Pane(Pane::ActionTile(action)) = tile {
+                            state_mut.commands.entity(action.entity).despawn();
                         };
                         ui_state.tree.remove_recursively(tile_id);
 
@@ -873,6 +877,25 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::SelectTile(tile_id) => {
                         ui_state.tree.make_active(|id, _| id == tile_id);
                     }
+                    TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::actions::ActionTile {
+                                button_name,
+                                lua: lua_code,
+                                status: Default::default(),
+                            })
+                            .id();
+                        let pane = Pane::ActionTile(ActionTilePane {
+                            entity,
+                            label: "Action".to_string(),
+                        });
+                        if let Some(tile_id) =
+                            ui_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                     TreeAction::AddSQLTable(parent_tile_id) => {
                         let entity = state_mut.commands.spawn(SqlTable::default()).id();
                         let pane = Pane::SQLTable(SQLTablePane { entity });
@@ -912,6 +935,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
                     Pane::Monitor(_) => {}
                     Pane::SQLTable(_) => {}
+                    Pane::ActionTile(_) => {}
                 }
             }
         })

@@ -217,6 +217,7 @@ pub struct EButton {
     corner_radius: egui::CornerRadius,
     stroke: egui::Stroke,
     width: Option<f32>,
+    loading: bool,
 }
 
 impl EButton {
@@ -230,6 +231,7 @@ impl EButton {
             corner_radius: egui::CornerRadius::same(2),
             margin: egui::Margin::same(8),
             width: None,
+            loading: false,
         }
     }
 
@@ -238,6 +240,13 @@ impl EButton {
             .color(colors::MINT_DEFAULT)
             .bg_color(colors::MINT_DEFAULT.opacity(0.04))
             .stroke(Stroke::new(1.0, colors::MINT_40))
+    }
+
+    pub fn red(label: impl ToString) -> Self {
+        EButton::new(label)
+            .color(colors::REDDISH_DEFAULT)
+            .bg_color(colors::REDDISH_DEFAULT.opacity(0.04))
+            .stroke(Stroke::new(1.0, colors::REDDISH_DEFAULT))
     }
 
     pub fn gray(label: impl ToString) -> Self {
@@ -269,6 +278,11 @@ impl EButton {
 
     pub fn stroke(mut self, stroke: egui::Stroke) -> Self {
         self.stroke = stroke;
+        self
+    }
+
+    pub fn loading(mut self, loading: bool) -> Self {
+        self.loading = loading;
         self
     }
 
@@ -315,6 +329,14 @@ impl EButton {
             );
 
             // Label
+            //
+            if self.loading {
+                egui::Spinner::new().paint_at(
+                    ui,
+                    egui::Rect::from_center_size(rect.center(), egui::vec2(10., 10.)),
+                );
+                ui.disable();
+            }
 
             let inner_rect = rect.shrink4(self.margin);
             ui.painter().text(

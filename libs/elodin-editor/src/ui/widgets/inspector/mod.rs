@@ -1,3 +1,4 @@
+use action::InspectorAction;
 use bevy::ecs::{
     system::{Res, ResMut, SystemParam, SystemState},
     world::World,
@@ -10,6 +11,7 @@ use self::{entity::InspectorEntity, graph::InspectorGraph, viewport::InspectorVi
 
 use super::{WidgetSystem, WidgetSystemExt};
 
+pub mod action;
 pub mod entity;
 pub mod graph;
 pub mod viewport;
@@ -124,40 +126,50 @@ impl WidgetSystem for InspectorContent<'_> {
             None
         };
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Frame::NONE
-                .fill(colors::PRIMARY_SMOKE)
-                .inner_margin(16.0)
-                .show(ui, |ui| {
-                    ui.vertical(|ui| match selected_object {
-                        SelectedObject::None => {
-                            ui.add(empty_inspector());
-                        }
-                        SelectedObject::Entity(pair) => {
-                            ui.add_widget_with::<InspectorEntity>(
-                                world,
-                                "inspector_entity",
-                                (icons, pair),
-                            );
-                        }
-                        SelectedObject::Viewport { camera, .. } => {
-                            ui.add_widget_with::<InspectorViewport>(
-                                world,
-                                "inspector_viewport",
-                                (icons, camera),
-                            );
-                        }
-                        SelectedObject::Graph {
-                            label, graph_id, ..
-                        } => {
-                            ui.add_widget_with::<InspectorGraph>(
-                                world,
-                                "inspector_graph",
-                                (icons, graph_id, label),
-                            );
-                        }
+        egui::ScrollArea::vertical()
+            .max_width(ui.available_width())
+            .auto_shrink(egui::Vec2b::TRUE)
+            .show(ui, |ui| {
+                egui::Frame::NONE
+                    .fill(colors::PRIMARY_SMOKE)
+                    .inner_margin(16.0)
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| match selected_object {
+                            SelectedObject::None => {
+                                ui.add(empty_inspector());
+                            }
+                            SelectedObject::Entity(pair) => {
+                                ui.add_widget_with::<InspectorEntity>(
+                                    world,
+                                    "inspector_entity",
+                                    (icons, pair),
+                                );
+                            }
+                            SelectedObject::Viewport { camera, .. } => {
+                                ui.add_widget_with::<InspectorViewport>(
+                                    world,
+                                    "inspector_viewport",
+                                    (icons, camera),
+                                );
+                            }
+                            SelectedObject::Graph {
+                                label, graph_id, ..
+                            } => {
+                                ui.add_widget_with::<InspectorGraph>(
+                                    world,
+                                    "inspector_graph",
+                                    (icons, graph_id, label),
+                                );
+                            }
+                            SelectedObject::Action { action_id, .. } => {
+                                ui.add_widget_with::<InspectorAction>(
+                                    world,
+                                    "inspector_action",
+                                    action_id,
+                                );
+                            }
+                        })
                     })
-                })
-        });
+            });
     }
 }

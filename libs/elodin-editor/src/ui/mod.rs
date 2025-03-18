@@ -40,6 +40,7 @@ use self::{
     widgets::{button::EImageButton, inspector},
 };
 
+pub mod actions;
 pub mod colors;
 pub mod images;
 pub mod monitor;
@@ -72,6 +73,10 @@ pub enum SelectedObject {
         label: String,
         graph_id: Entity,
     },
+    Action {
+        tile_id: TileId,
+        action_id: Entity,
+    },
 }
 
 impl SelectedObject {
@@ -89,6 +94,7 @@ impl SelectedObject {
             SelectedObject::Entity(_) => None,
             SelectedObject::Viewport { tile_id, .. } => Some(*tile_id),
             SelectedObject::Graph { tile_id, .. } => Some(*tile_id),
+            SelectedObject::Action { tile_id, .. } => Some(*tile_id),
         }
     }
 }
@@ -162,7 +168,6 @@ impl Plugin for UiPlugin {
             .init_resource::<ComponentFilter>()
             .init_resource::<InspectorAnchor>()
             .init_resource::<tiles::TileState>()
-            .init_resource::<tiles::NewTileState>()
             .init_resource::<SidebarState>()
             .init_resource::<FullscreenState>()
             .init_resource::<SettingModalState>()
@@ -170,6 +175,7 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
+            .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, shortcuts)
             .add_systems(Update, render_layout)
             .add_systems(Update, sync_hdr)
