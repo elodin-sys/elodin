@@ -47,7 +47,9 @@ use stellarator::{
 };
 use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
-struct Client {
+pub use mlua;
+
+pub struct Client {
     rx: impeller2_stella::PacketStream<OwnedReader<TcpStream>>,
     tx: impeller2_stella::PacketSink<OwnedWriter<TcpStream>>,
 }
@@ -454,9 +456,19 @@ impl UserData for Client {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_method(
             "send_table",
-            |lua, this, (component_id, entity_id, ty, shape, buf): (_, _, _, Vec<u64>, _)| async move {
+            |lua, this, (component_id, entity_id, ty, shape, buf): (Value, _, _, Vec<u64>, _)| async move {
+
+                    let component_id = if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
+                        id
+                    } else if let Ok(name) = lua.from_value::<String>(component_id.clone()) {
+                        ComponentId::new(&name)
+                    } else if let Ok(id) = lua.from_value::<i64>(component_id) {
+                        ComponentId(id as u64)
+                    } else {
+                        return Err(anyhow!("msg id must be a PacketId or String").into());
+                    };
                 let ty: PrimType = lua.from_value(ty)?;
-                this.send(&lua, component_id, entity_id, ty, shape, buf).await?;
+                this.send(&lua, component_id.0, entity_id, ty, shape, buf).await?;
                 Ok(())
             },
         );
@@ -700,7 +712,7 @@ impl<M: Msg> UserData for LuaMsg<M> {
     }
 }
 
-pub async fn run(args: Args) -> anyhow::Result<()> {
+pub fn lua() -> anyhow::Result<Lua> {
     let lua = Lua::new();
     let client = lua.create_async_function(|_lua, addr: String| async move {
         let c = Client::connect(addr).await?;
@@ -728,6 +740,11 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
         "SQLQuery",
         lua.create_function(|lua, m: SQLQuery| lua.create_ser_userdata(m))?,
     )?;
+    Ok(lua)
+}
+
+pub async fn run(args: Args) -> anyhow::Result<()> {
+    let lua = lua()?;
     if let Some(path) = args.path {
         let script = std::fs::read_to_string(path)?;
         lua.load(&script).eval_async::<MultiValue>().await?;

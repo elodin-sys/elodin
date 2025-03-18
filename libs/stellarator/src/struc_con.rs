@@ -91,7 +91,7 @@ pub fn stellar<T, F, Fut>(f: F) -> Thread<Option<T>>
 where
     T: Send + 'static,
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = T> + Send + 'static,
+    Fut: Future<Output = T> + 'static,
 {
     ThreadBuilder::default().stellar(f)
 }
@@ -129,7 +129,7 @@ impl ThreadBuilder {
     where
         T: Send + 'static,
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = T> + Send + 'static,
+        Fut: Future<Output = T> + 'static,
     {
         self.thread(|cancel| {
             crate::run(move || {
