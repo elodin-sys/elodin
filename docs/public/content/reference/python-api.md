@@ -507,7 +507,7 @@ GravityEdge = typing.Annotated[elodin.Edge, elodin.Component("gravity_edge")]
     `edge_fold` makes no guarantees about the order in which edges are processed. For associative operators like `+`, the order the elements are combined in is not important, but for non-associative operators like `-`, the order will affect the final result.
     {% end %}
 
-    See the [Three-Body Orbit Tutorial](/get-started/3-body) for a practical example of using `edge_fold` to compute gravitational forces between entities.
+    See the [Three-Body Orbit Tutorial](/home/3-body) for a practical example of using `edge_fold` to compute gravitational forces between entities.
 
 <br></br>
 ## Primitives

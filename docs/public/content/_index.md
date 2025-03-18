@@ -1,12 +1,12 @@
 +++
 title = "Elodin Documentation"
-redirect_to = "/get-started"
+redirect_to = "/home"
 
 # Menu items
 [[extra.menu.main]]
-name = "QuickStart"
-section = "get-started"
-url = "/get-started/quickstart"
+name = "HOME"
+section = "home"
+url = "/home/quickstart"
 weight = 10
 
 [[extra.menu.main]]

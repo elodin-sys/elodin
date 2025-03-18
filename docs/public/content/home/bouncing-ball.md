@@ -428,6 +428,6 @@ You'll notice that the template code is broken into multiple files, this is mean
 
 ## Next Steps
 
-{% cardlink(title="The Tao of Elodin", icon="book", href="/get-started/tao/introduction") %}
+{% cardlink(title="The Tao of Elodin", icon="book", href="/home/tao/introduction") %}
 Learn about the design principles behind Elodin.
 {% end %}

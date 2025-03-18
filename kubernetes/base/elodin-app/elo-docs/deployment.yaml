@@ -22,9 +22,9 @@ spec:
             memory: 1Gi
         readinessProbe:
           httpGet:
-            path: /get-started/quickstart
+            path: /home/quickstart
             port: 8080
         livenessProbe:
           httpGet:
-            path: /get-started/quickstart
+            path: /home/quickstart
             port: 8080

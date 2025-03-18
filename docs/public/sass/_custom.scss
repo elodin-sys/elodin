@@ -202,13 +202,13 @@ body.dark .navbar-light .navbar-nav .nav-link:hover {
     color: #fffbf0;
 }
 
-.navbar-light .navbar-nav .get-started > .nav-link {
+.navbar-light .navbar-nav .home > .nav-link {
     border-radius: 5px;
     color: #20813a !important;
     background: rgba(32, 129, 58, 0.1);
 }
 
-body.dark .navbar-light .navbar-nav .get-started > .nav-link {
+body.dark .navbar-light .navbar-nav .home > .nav-link {
     color: #88de9f !important;
     background: rgba(136, 222, 159, 0.05) !important;
 }
@@ -325,8 +325,6 @@ body.dark .docs-sidebar {
 }
 
 .docs-links {
-    padding-left: 20px;
-    margin-left: -28px;
     scrollbar-color: #ffffff00 #ffffff00 !important;
 }
 

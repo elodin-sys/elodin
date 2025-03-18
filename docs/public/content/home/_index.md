@@ -1,11 +1,11 @@
 +++
-title = "Get Started"
+title = "Overview"
 description = "Elodin Overview."
 sort_by = "weight"
 weight = 1
-redirect_to = "/get-started/quickstart"
+redirect_to = "/home/quickstart"
 
 [extra]
-nav_section = "get-started"
+nav_section = "home"
 color = "green"
 +++
