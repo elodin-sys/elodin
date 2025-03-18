@@ -29,6 +29,7 @@ pub struct Input {
 pub struct Output {
     pub q_hat: Quat<f64>,
     pub b_hat: Vec3<f64>,
+    pub gyro_est: Vec3<f64>,
     pub world_pos: SpatialTransform<f64>,
     pub mag_cal: Vec3<f64>,
     #[roci(asset = true)]
@@ -83,6 +84,7 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
             [config.mekf.accel_sigma, config.mekf.mag_sigma],
         );
         let world_pos = nox::SpatialTransform::from_angular(mekf.q_hat);
+        let gyro_est = mekf.omega - mekf.b_hat;
         let mut table = LenPacket::table(id, 64);
         let output = Output {
             q_hat: mekf.q_hat,
@@ -90,6 +92,7 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
             asset_handle_glb: AssetHandle::new(glb_id),
             b_hat: mekf.b_hat,
             mag_cal: mag,
+            gyro_est,
         };
         table.extend_from_slice(output.as_bytes());
         tx.send(table).await.0?;

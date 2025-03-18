@@ -35,13 +35,10 @@ members = [
     "fsw/file-bridge",
     "fsw/serial-bridge",
     "fsw/mekf",
+    "fsw/lqr",
     "examples/msg-test",
 ]
-exclude = [
-    "fsw/multicopter",
-    "fsw/blackbox",
-    "docs/memserve",
-]
+exclude = ["fsw/multicopter", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
 version = "0.12.0"
