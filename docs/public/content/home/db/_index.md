@@ -1,5 +1,5 @@
 +++
-title = "Eloidin DB"
+title = "Elodin DB"
 description = "Documentation for Elodin DB"
 sort_by = "weight"
 weight = 106
