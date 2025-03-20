@@ -15,6 +15,9 @@ order = 1
 
 ## v0.12
 
+### v0.12.1
+- **(feat)** Add HTTP API to elodin-db
+
 ### v0.12.0
 - **(breaking)** Add a request_id field to `PacketHeader` and shorten `PacketId` to `[u8; 3]`. In order to support better request-reply semantics, a u8 request_id was added to `PacketHeader`.
 - **(breaking)** The primitive types in the lua api have been lowercased so `F64` is now `f64` and so on.
