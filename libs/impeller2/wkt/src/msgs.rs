@@ -335,6 +335,7 @@ impl_user_data_msg!(SetAsset<'_>);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(SetEntityMetadata);
+impl_user_data_msg!(Stream);
 
 #[cfg(feature = "mlua")]
 impl mlua::FromLua for SetComponentMetadata {
@@ -345,6 +346,13 @@ impl mlua::FromLua for SetComponentMetadata {
 
 #[cfg(feature = "mlua")]
 impl mlua::FromLua for SetEntityMetadata {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        mlua::LuaSerdeExt::from_value(lua, value)
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::FromLua for Stream {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         mlua::LuaSerdeExt::from_value(lua, value)
     }

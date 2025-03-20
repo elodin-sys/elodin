@@ -4,7 +4,7 @@ use impeller2::{
     component::Component as _,
     registry,
     schema::Schema,
-    table::{Entry, VTable, VTableBuilder},
+    table::{VTable, VTableBuilder},
     types::{
         ComponentId, ComponentView, EntityId, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
         PacketId, PrimType, RequestId, Timestamp,
@@ -1260,20 +1260,15 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     let mut visited_ids = HashSet::new();
     loop {
         db.with_state(|state| {
-            filter.visit(&state.components, |entity| {
-                if visited_ids.contains(&(entity.component_id, entity.entity_id)) {
+            filter.visit(&state.components, |component| {
+                if visited_ids.contains(&(component.component_id, component.entity_id)) {
                     return Ok(());
                 }
-                visited_ids.insert((entity.component_id, entity.entity_id));
+                visited_ids.insert((component.component_id, component.entity_id));
                 let stream = stream.clone();
-
-                let mut vtable = VTableBuilder::default();
-                entity.add_to_vtable(&mut vtable)?;
-                let vtable = vtable.build();
-                let waiter = entity.time_series.waiter();
-                let entity = entity.clone();
+                let component = component.clone();
                 stellarator::spawn(async move {
-                    match handle_real_time_entity(stream, entity, waiter, vtable).await {
+                    match handle_real_time_entity(stream, component).await {
                         Ok(_) => {}
                         Err(err) if err.is_stream_closed() => {}
                         Err(err) => warn!(?err, "failed to handle real time stream"),
@@ -1288,10 +1283,12 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 
 async fn handle_real_time_entity<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
-    entity: Component,
-    waiter: Arc<WaitQueue>,
-    vtable: VTable<Vec<Entry>, Vec<u8>>,
+    component: Component,
 ) -> Result<(), Error> {
+    let mut vtable = VTableBuilder::default();
+    component.add_to_vtable(&mut vtable)?;
+    let vtable = vtable.build();
+    let waiter = component.time_series.waiter();
     let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     {
         let stream = stream.lock().await;
@@ -1304,11 +1301,11 @@ async fn handle_real_time_entity<A: AsyncWrite>(
             .0?;
     }
 
-    let prim_type = entity.schema.prim_type;
+    let prim_type = component.schema.prim_type;
     let mut table = LenPacket::table(vtable_id, 2048 - 16);
     loop {
         let _ = waiter.wait().await;
-        let Some((&timestamp, buf)) = entity.time_series.latest() else {
+        let Some((&timestamp, buf)) = component.time_series.latest() else {
             continue;
         };
         table.push_aligned(timestamp);

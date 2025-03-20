@@ -735,6 +735,10 @@ pub fn lua() -> anyhow::Result<Lua> {
         "SetEntityMetadata",
         lua.create_function(|lua, m: SetEntityMetadata| lua.create_ser_userdata(m))?,
     )?;
+    lua.globals().set(
+        "Stream",
+        lua.create_function(|lua, m: Stream| lua.create_ser_userdata(m))?,
+    )?;
 
     lua.globals().set(
         "SQLQuery",
