@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-file-bridge"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "cobs",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-serial-bridge"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "cobs",
@@ -1129,7 +1129,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.5.0",
+ "hyper 1.6.0",
  "hyper-util",
  "itoa",
  "matchit 0.8.4",
@@ -4422,7 +4422,7 @@ dependencies = [
 
 [[package]]
 name = "elodin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4457,7 +4457,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "arc-swap",
  "arrow",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-editor"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "arrow",
  "bevy",
@@ -6476,7 +6476,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bevy",
  "const-fnv1a-hash",
@@ -7280,7 +7280,7 @@ dependencies = [
 
 [[package]]
 name = "lqr"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
@@ -7500,7 +7500,7 @@ dependencies = [
 
 [[package]]
 name = "mekf"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
@@ -7678,7 +7678,7 @@ dependencies = [
 
 [[package]]
 name = "msg-test"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "fastrand 2.2.0",
@@ -8030,7 +8030,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "approx",
  "boxcar",
@@ -8112,7 +8112,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bytes",
  "clap 4.5.20",
@@ -8143,7 +8143,7 @@ dependencies = [
 
 [[package]]
 name = "noxla"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "cc",
@@ -10276,7 +10276,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "bbq2",
  "csv",
@@ -10308,7 +10308,7 @@ dependencies = [
 
 [[package]]
 name = "roci-macros"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "convert_case",
  "darling",
@@ -10614,7 +10614,7 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "s10"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -11616,7 +11616,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellarator"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "blocking",
  "futures",
@@ -13981,7 +13981,7 @@ dependencies = [
 
 [[package]]
 name = "wmm"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "approx",
  "bindgen 0.70.1",
