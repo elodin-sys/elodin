@@ -12,6 +12,7 @@ use std::time::Duration;
 use std::{
     ffi::CString,
     io::IoSlice,
+    net::SocketAddr,
     os::{
         fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd},
         unix::ffi::OsStrExt,
@@ -405,7 +406,8 @@ impl<T: IoBuf> OpCode for SendTo<'_, T> {
 }
 
 impl<'fd, T: IoBuf> SendTo<'fd, T> {
-    pub fn new(fd: BorrowedHandle<'fd>, buf: T, sock_addr: Box<SockAddrRaw>) -> Self {
+    pub fn new(fd: BorrowedHandle<'fd>, buf: T, sock_addr: SocketAddr) -> Self {
+        let sock_addr: Box<SockAddrRaw> = Box::new(socket2::SockAddr::from(sock_addr).into());
         let io_slices = Box::new([IoSlice::new(unsafe {
             std::slice::from_raw_parts(buf.stable_init_ptr(), buf.init_len())
         })]);
