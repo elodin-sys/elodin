@@ -11,6 +11,7 @@ use socket2::Socket;
 use std::time::Duration;
 use std::{
     ffi::CString,
+    io::IoSlice,
     os::{
         fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd},
         unix::ffi::OsStrExt,
@@ -364,6 +365,62 @@ impl Timeout {
     pub fn flags(mut self, flags: TimeoutFlags) -> Self {
         self.flags = flags;
         self
+    }
+}
+
+pub struct SendTo<'fd, T> {
+    fd: BorrowedHandle<'fd>,
+    buf: T,
+    msghdr: Box<libc::msghdr>,
+    #[allow(dead_code)]
+    sock_addr: Box<SockAddrRaw>,
+    #[allow(dead_code)]
+    io_slices: Box<[IoSlice<'fd>]>,
+}
+
+impl<T: IoBuf> OpCode for SendTo<'_, T> {
+    type Output = BufResult<usize, T>;
+
+    fn output(self, entry: cqueue::Entry) -> Self::Output {
+        (entry.as_result().map(|res| res as usize), self.buf)
+    }
+
+    fn output_from_error(self, err: Error) -> Self::Output {
+        (Err(err), self.buf)
+    }
+
+    unsafe fn sqe(&mut self) -> squeue::Entry {
+        opcode::SendMsg::new(
+            types::Fd(self.fd.as_raw_fd()),
+            self.msghdr.as_ref() as *const _,
+        )
+        .build()
+    }
+
+    type Buf = T;
+
+    fn into_buf(self) -> Self::Buf {
+        self.buf
+    }
+}
+
+impl<'fd, T: IoBuf> SendTo<'fd, T> {
+    pub fn new(fd: BorrowedHandle<'fd>, buf: T, sock_addr: Box<SockAddrRaw>) -> Self {
+        let io_slices = Box::new([IoSlice::new(unsafe {
+            std::slice::from_raw_parts(buf.stable_init_ptr(), buf.init_len())
+        })]);
+        let mut msghdr: Box<libc::msghdr> = Box::new(unsafe { std::mem::zeroed() });
+        msghdr.msg_iov = io_slices.as_ptr() as *mut _;
+        msghdr.msg_iovlen = io_slices.len() as _;
+        msghdr.msg_name = &raw const sock_addr.storage as _;
+        msghdr.msg_namelen = sock_addr.len;
+        Self {
+            fd,
+            buf,
+            msghdr,
+            sock_addr,
+            io_slices,
+        }
     }
 }
 

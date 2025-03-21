@@ -27,6 +27,10 @@ msgs = {
 	SetComponentMetadata({ component_id = temp_id, name = "temp", metadata = { priority = "96" } }),
 	SetComponentMetadata({ component_id = pressure_id, name = "pressure", metadata = { priority = "95" } }),
 	SetComponentMetadata({ component_id = humidity_id, name = "humidity", metadata = { priority = "94" } }),
+	UdpUnicast({
+		stream = { id = 2 },
+		addr = "0.0.0.0:2249",
+	}),
 }
 
 client = connect("127.0.0.1:2240")

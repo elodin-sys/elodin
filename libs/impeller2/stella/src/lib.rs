@@ -56,7 +56,7 @@ pub enum Error {
     #[error("{0}")]
     Impeller(#[from] impeller2::error::Error),
     #[error("{0}")]
-    Stellerator(#[from] stellarator::Error),
+    Stellarator(#[from] stellarator::Error),
     #[error("postcard: {0}")]
     Postcard(#[from] postcard::Error),
 }

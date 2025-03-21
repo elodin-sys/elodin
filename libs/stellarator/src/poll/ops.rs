@@ -1,11 +1,10 @@
 use super::{OpCode, OpState};
 use crate::BufResult;
-use crate::os::{BorrowedHandle, OwnedHandle};
+use crate::os::{AsRawOsHandle, BorrowedHandle, OwnedHandle};
 use crate::{
     Error, Executor,
     buf::{IoBuf, IoBufMut, deref, deref_mut},
     net::SockAddrRaw,
-    os::AsRawOsHandle,
 };
 use blocking::Task;
 use pin_project::pin_project;
@@ -475,5 +474,97 @@ impl LibcExt for libc::c_int {
 impl LibcExt for libc::ssize_t {
     fn is_err(&self) -> bool {
         *self < 0
+    }
+}
+
+#[pin_project]
+pub struct SendTo<'fd, T> {
+    #[pin]
+    state: SendToState<'fd, T>,
+}
+
+#[pin_project(project = SendToStateProj)]
+enum SendToState<'a, T> {
+    Blocking(#[pin] blocking::Task<BufResult<usize, T>>),
+    NonBlocking {
+        sock: &'a Socket,
+        buf: Option<T>,
+        addr: Box<SockAddrRaw>,
+    },
+}
+
+impl<'fd, T: IoBuf> SendTo<'fd, T> {
+    pub fn new(fd: BorrowedHandle<'fd>, buf: T, addr: Box<SockAddrRaw>) -> Self {
+        Self {
+            state: match fd {
+                BorrowedHandle::Fd(_) => SendToState::Blocking(unblock(move || {
+                    let res: io::Result<usize> = Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "sendto on file descriptor",
+                    ));
+                    (res.map_err(Error::from), buf)
+                })),
+                BorrowedHandle::Socket(sock) => SendToState::NonBlocking {
+                    sock,
+                    buf: Some(buf),
+                    addr,
+                },
+            },
+        }
+    }
+}
+
+impl<T: IoBuf> OpCode for SendTo<'_, T> {
+    type Output = BufResult<usize, T>;
+
+    fn initial_state(&self) -> OpState {
+        match &self.state {
+            SendToState::Blocking(_) => OpState::Ready,
+            SendToState::NonBlocking { .. } => OpState::Waiting(None),
+        }
+    }
+
+    fn event(&self) -> Option<polling::Event> {
+        match &self.state {
+            SendToState::Blocking(_) => None,
+            SendToState::NonBlocking { sock, .. } => {
+                Some(Event::writable(sock.as_raw_os_handle() as usize).with_interrupt())
+            }
+        }
+    }
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.project();
+        let state = this.state.project();
+        match state {
+            SendToStateProj::Blocking(mut task) => task.as_mut().poll(cx),
+            SendToStateProj::NonBlocking { sock, buf, addr } => {
+                let temp_buf = buf.take().expect("buffer missing from op");
+
+                match unsafe {
+                    libc::sendto(
+                        sock.as_raw_os_handle() as _,
+                        deref(&temp_buf).as_ptr() as *const _,
+                        deref(&temp_buf).len(),
+                        0,
+                        &raw const addr.storage as *const libc::sockaddr,
+                        addr.len as libc::socklen_t,
+                    )
+                }
+                .as_result()
+                .to_poll()
+                {
+                    Poll::Ready(Ok(len)) => Poll::Ready((Ok(len as usize), temp_buf)),
+                    Poll::Ready(Err(err)) => Poll::Ready((Err(err), temp_buf)),
+                    Poll::Pending => {
+                        *buf = Some(temp_buf);
+                        Poll::Pending
+                    }
+                }
+            }
+        }
     }
 }
