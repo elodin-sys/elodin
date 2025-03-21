@@ -15,8 +15,13 @@ order = 1
 
 ## v0.12
 
+### v0.12.2
+- **(breaking)** Make the elodin-db HTTP server optional. If an explicit `--http-addr` argument is not provided, the HTTP server will not be started.
+- Add UDP unicast support to elodin-db. Configure using the `UdpUnicast` message.
+- Add ability to mirror elodin-db over UDP unicast. Simply configure one db instance to stream data to another db instance's listen address.
+
 ### v0.12.1
-- **(feat)** Add HTTP API to elodin-db
+- **(feat)** Add HTTP API to elodin-db.
 
 ### v0.12.0
 - **(breaking)** Add a request_id field to `PacketHeader` and shorten `PacketId` to `[u8; 3]`. In order to support better request-reply semantics, a u8 request_id was added to `PacketHeader`.
