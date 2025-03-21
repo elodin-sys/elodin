@@ -65,3 +65,23 @@ elodin editor 127.0.0.1:2240
 ```
 
 The example C client just streams a sine wave component to entity "1". You can view this in the editor by creating a graph for entity "1" and selecting the only component available for that entity.
+
+### Mirror data from one db instance to another
+
+Launch a secondary db instance:
+
+```sh
+elodin-db run [::]:2241 $HOME/.local/share/elodin/ground-station
+```
+
+Run the `downlink.lua` script to sync metadata from the primary db instance to the secondary db instance *and* command the primary instance to start streaming data to the secondary instance:
+
+```sh
+FC_ADDR="127.0.0.1:2240" GROUND_STATION_ADDR="127.0.0.1:2241" elodin-db lua examples/downlink.lua
+```
+
+Confirm that the secondary instance is receiving data by connecting to it via the Elodin Editor:
+
+```sh
+elodin editor 127.0.0.1:2241
+```
