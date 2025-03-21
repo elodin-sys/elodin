@@ -3,7 +3,7 @@ use crate::buf::{IoBuf, IoBufMut};
 use crate::io::{AsyncRead, AsyncWrite};
 use crate::os::BorrowedHandle;
 use crate::reactor::{Completion, ops};
-use socket2::{SockAddr, Socket};
+use socket2::Socket;
 use std::io;
 use std::net::SocketAddr;
 
@@ -54,12 +54,7 @@ impl UdpSocket {
     }
 
     pub async fn send_to<B: IoBuf>(&self, buf: B, target: SocketAddr) -> BufResult<usize, B> {
-        Completion::run(ops::SendTo::new(
-            self.as_handle(),
-            buf,
-            Box::new(SockAddr::from(target).into()),
-        ))
-        .await
+        Completion::run(ops::SendTo::new(self.as_handle(), buf, target)).await
     }
 
     pub fn connect(&mut self, addr: SocketAddr) {

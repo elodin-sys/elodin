@@ -13,6 +13,7 @@ use rustix::net::RecvFlags;
 use rustix::net::SendFlags;
 use socket2::Socket;
 use std::ffi::CString;
+use std::net::SocketAddr;
 use std::{
     future::Future,
     io::{self},
@@ -489,12 +490,12 @@ enum SendToState<'a, T> {
     NonBlocking {
         sock: &'a Socket,
         buf: Option<T>,
-        addr: Box<SockAddrRaw>,
+        addr: SocketAddr,
     },
 }
 
 impl<'fd, T: IoBuf> SendTo<'fd, T> {
-    pub fn new(fd: BorrowedHandle<'fd>, buf: T, addr: Box<SockAddrRaw>) -> Self {
+    pub fn new(fd: BorrowedHandle<'fd>, buf: T, addr: SocketAddr) -> Self {
         Self {
             state: match fd {
                 BorrowedHandle::Fd(_) => SendToState::Blocking(unblock(move || {
@@ -543,21 +544,15 @@ impl<T: IoBuf> OpCode for SendTo<'_, T> {
             SendToStateProj::Blocking(mut task) => task.as_mut().poll(cx),
             SendToStateProj::NonBlocking { sock, buf, addr } => {
                 let temp_buf = buf.take().expect("buffer missing from op");
-
-                match unsafe {
-                    libc::sendto(
-                        sock.as_raw_os_handle() as _,
-                        deref(&temp_buf).as_ptr() as *const _,
-                        deref(&temp_buf).len(),
-                        0,
-                        &raw const addr.storage as *const libc::sockaddr,
-                        addr.len as libc::socklen_t,
-                    )
-                }
-                .as_result()
-                .to_poll()
+                #[cfg(not(target_os = "windows"))]
+                let fd = sock.as_fd();
+                #[cfg(target_os = "windows")]
+                let fd = sock.as_socket();
+                match rustix::net::sendto(fd, deref(&temp_buf), SendFlags::empty(), addr)
+                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
+                    .to_poll()
                 {
-                    Poll::Ready(Ok(len)) => Poll::Ready((Ok(len as usize), temp_buf)),
+                    Poll::Ready(Ok(len)) => Poll::Ready((Ok(len), temp_buf)),
                     Poll::Ready(Err(err)) => Poll::Ready((Err(err), temp_buf)),
                     Poll::Pending => {
                         *buf = Some(temp_buf);
