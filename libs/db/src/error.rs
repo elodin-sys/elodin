@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum Error {
     #[error("map overflow")]
     MapOverflow,
-    #[error("stellerator {0}")]
+    #[error("stellarator {0}")]
     Stellar(stellarator::Error),
     #[error("io {0}")]
     Io(#[from] std::io::Error),
@@ -41,12 +41,14 @@ pub enum Error {
     InvalidMsgId,
     #[error("msg not found {0:?}")]
     MsgNotFound(PacketId),
+    #[error("bad message")]
+    BadMessage,
 }
 
 impl From<impeller2_stella::Error> for Error {
     fn from(value: impeller2_stella::Error) -> Self {
         match value {
-            impeller2_stella::Error::Stellerator(error) => Error::from(error),
+            impeller2_stella::Error::Stellarator(error) => Error::from(error),
             err => Error::ImpellerStella(err),
         }
     }

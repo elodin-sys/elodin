@@ -35,7 +35,7 @@ use std::{sync::RwLock, time::Duration};
 use stellarator::{
     buf::Slice,
     io::{AsyncWrite, OwnedWriter, SplitExt},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, UdpSocket},
     rent,
     struc_con::Joinable,
     sync::{Mutex, WaitQueue},
@@ -772,54 +772,16 @@ async fn handle_packet(
             let vtable = m.parse::<VTableMsg>()?;
             db.insert_vtable(vtable)?;
         }
+        Packet::Msg(m) if m.id == UdpUnicast::ID => {
+            let udp_broadcast = m.parse::<UdpUnicast>()?;
+            let db = db.clone();
+            handle_unicast_stream(udp_broadcast.addr, udp_broadcast.stream, db);
+        }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
-            let stream_id = stream.id;
-            match stream.behavior {
-                StreamBehavior::RealTime => {
-                    let tx = tx.clone();
-                    let db = db.clone();
-                    stellarator::spawn(async move {
-                        match handle_real_time_stream(tx, stream_id, stream.filter, db).await {
-                            Ok(_) => {}
-                            Err(err) if err.is_stream_closed() => {}
-                            Err(err) => {
-                                warn!(?err, "error streaming data");
-                            }
-                        }
-                    });
-                }
-                StreamBehavior::FixedRate(fixed_rate) => {
-                    let state = Arc::new(FixedRateStreamState::from_state(
-                        stream.id,
-                        fixed_rate.timestep.unwrap_or_else(|| {
-                            Duration::from_nanos(
-                                db.default_stream_time_step.load(atomic::Ordering::Relaxed),
-                            )
-                        }),
-                        match fixed_rate.initial_timestamp {
-                            InitialTimestamp::Earliest => db.earliest_timestamp,
-                            InitialTimestamp::Latest => db.last_updated.latest(),
-                            InitialTimestamp::Manual(timestamp) => timestamp,
-                        },
-                        stream.filter,
-                        fixed_rate.frequency.unwrap_or(60),
-                    ));
-                    debug!(stream.id = ?stream_id, "inserting stream");
-                    db.with_state_mut(|s| s.streams.insert(stream_id, state.clone()));
-                    let db = db.clone();
-                    let tx = tx.clone();
-                    stellarator::spawn(async move {
-                        match handle_fixed_stream(tx, state, db).await {
-                            Ok(_) => {}
-                            Err(err) if err.is_stream_closed() => {}
-                            Err(err) => {
-                                warn!(?err, "error streaming data");
-                            }
-                        }
-                    });
-                }
-            }
+            let tx = tx.clone();
+            let db = db.clone();
+            handle_stream(tx, stream, db);
         }
         Packet::Msg(m) if m.id == SetStreamState::ID => {
             let set_stream_state = m.parse::<SetStreamState>()?;
@@ -1170,7 +1132,6 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
         pkt.clear();
     }
 }
-
 pub struct FixedRateStreamState {
     stream_id: StreamId,
     time_step: AtomicU64,
@@ -1251,6 +1212,66 @@ impl FixedRateStreamState {
     }
 }
 
+fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>) {
+    stellarator::struc_con::stellar(move || async move {
+        info!("UDP unicasting to {}", addr);
+        let mut socket = UdpSocket::ephemeral()?;
+        socket.connect(addr);
+        let (_, tx) = socket.split();
+        let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
+        handle_stream(tx.clone(), stream.clone(), db.clone())
+            .await
+            .unwrap();
+        Ok::<_, Error>(())
+    });
+}
+
+fn handle_stream<A: AsyncWrite + 'static>(
+    tx: Arc<Mutex<PacketSink<A>>>,
+    stream: Stream,
+    db: Arc<DB>,
+) -> stellarator::JoinHandle<()> {
+    match stream.behavior {
+        StreamBehavior::RealTime => stellarator::spawn(async move {
+            match handle_real_time_stream(tx, stream.id, stream.filter, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
+                }
+            }
+        }),
+        StreamBehavior::FixedRate(fixed_rate) => {
+            let state = Arc::new(FixedRateStreamState::from_state(
+                stream.id,
+                fixed_rate.timestep.unwrap_or_else(|| {
+                    Duration::from_nanos(
+                        db.default_stream_time_step.load(atomic::Ordering::Relaxed),
+                    )
+                }),
+                match fixed_rate.initial_timestamp {
+                    InitialTimestamp::Earliest => db.earliest_timestamp,
+                    InitialTimestamp::Latest => db.last_updated.latest(),
+                    InitialTimestamp::Manual(timestamp) => timestamp,
+                },
+                stream.filter,
+                fixed_rate.frequency.unwrap_or(60),
+            ));
+            debug!(stream.id = ?stream.id, "inserting stream");
+            db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
+            stellarator::spawn(async move {
+                match handle_fixed_stream(tx, state, db).await {
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => {
+                        warn!(?err, "error streaming data");
+                    }
+                }
+            })
+        }
+    }
+}
+
 async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     stream: Arc<Mutex<PacketSink<A>>>,
     _stream_id: StreamId,
@@ -1268,7 +1289,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
                 let stream = stream.clone();
                 let component = component.clone();
                 stellarator::spawn(async move {
-                    match handle_real_time_entity(stream, component).await {
+                    match handle_real_time_component(stream, component).await {
                         Ok(_) => {}
                         Err(err) if err.is_stream_closed() => {}
                         Err(err) => warn!(?err, "failed to handle real time stream"),
@@ -1277,11 +1298,12 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
                 Ok(())
             })
         })?;
+        // TODO: Terminate previous generation streams to avoid stream duplication
         db.vtable_gen.wait().await;
     }
 }
 
-async fn handle_real_time_entity<A: AsyncWrite>(
+async fn handle_real_time_component<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
     component: Component,
 ) -> Result<(), Error> {

@@ -739,6 +739,10 @@ pub fn lua() -> anyhow::Result<Lua> {
         "Stream",
         lua.create_function(|lua, m: Stream| lua.create_ser_userdata(m))?,
     )?;
+    lua.globals().set(
+        "UdpUnicast",
+        lua.create_function(|lua, m: UdpUnicast| lua.create_ser_userdata(m))?,
+    )?;
 
     lua.globals().set(
         "SQLQuery",
@@ -864,6 +868,9 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                     println!("{}", Color::Yellow.bold().paint("Messages"));
                     print_message("SetComponentMetadata { component_id, name, metadata, asset }");
                     print_message("SetEntityMetadata { entity_id, name, metadata }");
+                    print_message(
+                        "UdpUnicast { stream = { filter = { component_id, entity_id }, id }, port }",
+                    );
                     print_message("SetStreamState { id, playing, tick, time_step }");
                     print_message("SetAsset { id, buf }");
                     break;

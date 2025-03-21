@@ -1,11 +1,12 @@
 # Changelog
 
 ## unreleased
+- **(feat)** Add UDP unicast support to elodin-db. Configure using the `UdpUnicast` message.
 
 ## v0.12
 
 ### v0.12.1
-- **(feat)** Add HTTP API to elodin-db
+- **(feat)** Add HTTP API to elodin-db.
 
 ### v0.12.0
 - **(breaking)** Add a request_id field to `PacketHeader` and shorten `PacketId` to `[u8; 3]`. In order to support better request-reply semantics, a u8 request_id was added to `PacketHeader`.
