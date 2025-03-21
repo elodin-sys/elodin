@@ -1,11 +1,13 @@
 # Changelog
 
 ## unreleased
+
+## v0.12
+
+### v0.12.2
 - **(breaking)** Make the elodin-db HTTP server optional. If an explicit `--http-addr` argument is not provided, the HTTP server will not be started.
 - Add UDP unicast support to elodin-db. Configure using the `UdpUnicast` message.
 - Add ability to mirror elodin-db over UDP unicast. Simply configure one db instance to stream data to another db instance's listen address.
-
-## v0.12
 
 ### v0.12.1
 - **(feat)** Add HTTP API to elodin-db.
