@@ -5,7 +5,7 @@ use impeller2::{
 };
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, net::SocketAddr, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
@@ -25,7 +25,7 @@ impl Msg for VTableMsg {
     const ID: PacketId = [224, 0];
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Stream {
     #[serde(default)]
     pub filter: StreamFilter,
@@ -59,7 +59,7 @@ pub enum StreamBehavior {
 
 pub type StreamId = u64;
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct StreamFilter {
     pub component_id: Option<ComponentId>,
     pub entity_id: Option<EntityId>,
@@ -336,6 +336,7 @@ impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(SetEntityMetadata);
 impl_user_data_msg!(Stream);
+impl_user_data_msg!(UdpUnicast);
 
 #[cfg(feature = "mlua")]
 impl mlua::FromLua for SetComponentMetadata {
@@ -353,6 +354,13 @@ impl mlua::FromLua for SetEntityMetadata {
 
 #[cfg(feature = "mlua")]
 impl mlua::FromLua for Stream {
+    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+        mlua::LuaSerdeExt::from_value(lua, value)
+    }
+}
+
+#[cfg(feature = "mlua")]
+impl mlua::FromLua for UdpUnicast {
     fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
         mlua::LuaSerdeExt::from_value(lua, value)
     }
@@ -509,4 +517,14 @@ pub struct MsgBatch {
 
 impl Msg for MsgBatch {
     const ID: PacketId = [224, 35];
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UdpUnicast {
+    pub stream: Stream,
+    pub addr: SocketAddr,
+}
+
+impl Msg for UdpUnicast {
+    const ID: PacketId = [224, 36];
 }
