@@ -2,6 +2,7 @@
 
 ## unreleased
 - **(feat)** Add UDP unicast support to elodin-db. Configure using the `UdpUnicast` message.
+- **(feat)** Add ability to mirror elodin-db over UDP unicast. Simply configure one db instance to stream data to another db instance's listen address.
 
 ## v0.12
 
