@@ -18,7 +18,6 @@ sensor_vt:column(pressure_id, "f32", {}, entity_ids)
 sensor_vt:column(humidity_id, "f32", {}, entity_ids)
 
 msgs = {
-	sensor_vt,
 	SetEntityMetadata({ entity_id = entity_ids[1], name = "Vehicle" }),
 	SetComponentMetadata({ component_id = time_id, name = "time", metadata = { priority = "100" } }),
 	SetComponentMetadata({ component_id = mag_id, name = "mag", metadata = { priority = "99" } }),
@@ -27,10 +26,7 @@ msgs = {
 	SetComponentMetadata({ component_id = temp_id, name = "temp", metadata = { priority = "96" } }),
 	SetComponentMetadata({ component_id = pressure_id, name = "pressure", metadata = { priority = "95" } }),
 	SetComponentMetadata({ component_id = humidity_id, name = "humidity", metadata = { priority = "94" } }),
-	UdpUnicast({
-		stream = { id = 2 },
-		addr = "0.0.0.0:2249",
-	}),
+	sensor_vt,
 }
 
 client = connect("127.0.0.1:2240")

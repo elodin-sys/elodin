@@ -1304,13 +1304,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
                 visited_ids.insert((component.component_id, component.entity_id));
                 let stream = stream.clone();
                 let component = component.clone();
-                stellarator::spawn(async move {
-                    match handle_real_time_component(stream, component).await {
-                        Ok(_) => {}
-                        Err(err) if err.is_stream_closed() => {}
-                        Err(err) => warn!(?err, "failed to handle real time stream"),
-                    }
-                });
+                stellarator::spawn(handle_real_time_component(stream, component));
                 Ok(())
             })
         })?;
@@ -1351,7 +1345,12 @@ async fn handle_real_time_component<A: AsyncWrite>(
         table.extend_from_slice(buf);
         {
             let stream = stream.lock().await;
-            rent!(stream.send(table).await, table)?;
+            if let Err(err) = rent!(stream.send(table).await, table) {
+                debug!(%err, "error sending table");
+                if Error::from(err).is_stream_closed() {
+                    return Ok(());
+                }
+            }
         }
         table.clear();
     }

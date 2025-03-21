@@ -23,14 +23,17 @@ enum Commands {
 
 #[derive(clap::Args, Clone, Debug)]
 struct RunArgs {
-    #[clap(default_value = "[::]:2240")]
+    #[clap(default_value = "[::]:2240", help = "Address to bind the server to")]
     addr: SocketAddr,
-    #[cfg(feature = "axum")]
+    #[clap(help = "Path to the data directory")]
     path: Option<PathBuf>,
-    #[clap(long)]
+    #[clap(long, help = "Path to the configuration file")]
     pub config: Option<PathBuf>,
-    #[clap(default_value = "[::]:2248", long)]
-    http_addr: SocketAddr,
+    #[cfg(feature = "axum")]
+    #[clap(long, help = "Address to bind the HTTP server to")]
+    http_addr: Option<SocketAddr>,
+    #[clap(long, hide = true)]
+    reset: bool,
 }
 
 fn main() -> miette::Result<()> {
@@ -55,19 +58,28 @@ fn main() -> miette::Result<()> {
                 http_addr,
                 path,
                 config,
+                reset,
             }) => {
                 let path = path.unwrap_or_else(|| {
                     let dirs =
                         directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
                     dirs.data_dir().join("data")
                 });
+                if reset && path.exists() {
+                    info!(?path, "resetting db");
+                    std::fs::remove_dir_all(&path).unwrap_or_else(|_| {
+                        tracing::warn!("failed to remove existing data directory");
+                    });
+                }
                 info!(?path, "starting db");
                 let server = Server::new(path, addr).into_diagnostic()?;
                 let axum_db = server.db.clone();
                 let db = stellarator::spawn(server.run());
-                stellarator::struc_con::tokio(move |_| async move {
-                    elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
-                });
+                if let Some(http_addr) = http_addr {
+                    stellarator::struc_con::tokio(move |_| async move {
+                        elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
+                    });
+                }
                 if let Some(lua_config) = config {
                     let args = impeller2_cli::Args {
                         path: Some(lua_config),
