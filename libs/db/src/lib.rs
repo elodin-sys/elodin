@@ -34,7 +34,7 @@ use std::{
 use std::{sync::RwLock, time::Duration};
 use stellarator::{
     buf::Slice,
-    io::{AsyncWrite, OwnedWriter, SplitExt},
+    io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
     rent,
     struc_con::Joinable,
@@ -710,16 +710,31 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         let Self { listener, db } = self;
+        let addr = listener.local_addr()?;
+        let udp_db = db.clone();
+        stellarator::struc_con::stellar(move || Self::handle_udp(addr, udp_db));
         loop {
             let stream = listener.accept().await?;
             let conn_db = db.clone();
             stellarator::struc_con::stellar(move || handle_conn(stream, conn_db));
         }
     }
+
+    pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
+        let socket = UdpSocket::bind(addr)?;
+        let (rx, tx) = socket.split();
+        let rx = impeller2_stella::PacketStream::new(rx);
+        let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
+        handle_conn_inner(tx, rx, db).await?;
+        Ok(())
+    }
 }
 
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
-    match handle_conn_inner(stream, db).await {
+    let (rx, tx) = stream.split();
+    let rx = impeller2_stella::PacketStream::new(rx);
+    let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
+    match handle_conn_inner(tx, rx, db).await {
         Ok(_) => {}
         Err(err) if err.is_stream_closed() => {}
         Err(err) => {
@@ -728,10 +743,11 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     }
 }
 
-async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> {
-    let (rx, tx) = stream.split();
-    let mut rx = impeller2_stella::PacketStream::new(rx);
-    let tx = Arc::new(Mutex::new(impeller2_stella::PacketSink::new(tx)));
+async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
+    tx: Arc<Mutex<impeller2_stella::PacketSink<OwnedWriter<A>>>>,
+    mut rx: impeller2_stella::PacketStream<OwnedReader<A>>,
+    db: Arc<DB>,
+) -> Result<(), Error> {
     let mut buf = vec![0u8; 1024 * 64];
     loop {
         let pkt = rx.next(buf).await?;
@@ -761,10 +777,10 @@ async fn handle_conn_inner(stream: TcpStream, db: Arc<DB>) -> Result<(), Error> 
     }
 }
 
-async fn handle_packet(
+async fn handle_packet<A: AsyncWrite + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
-    tx: &Arc<Mutex<impeller2_stella::PacketSink<OwnedWriter<TcpStream>>>>,
+    tx: &Arc<Mutex<impeller2_stella::PacketSink<OwnedWriter<A>>>>,
 ) -> Result<(), Error> {
     trace!(?pkt, "handling pkt");
     match &pkt {
