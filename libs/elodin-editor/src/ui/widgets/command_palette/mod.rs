@@ -493,7 +493,7 @@ impl PaletteItemWidget {
         let mut layout_job = egui::text::LayoutJob::default();
         let text_format_default = egui::TextFormat::simple(font_id, self.text_color);
         let text_format_highlighted = egui::TextFormat {
-            background: colors::YOLK_40,
+            background: colors::HYPERBLUE_DEFAULT,
             ..text_format_default.clone()
         };
         let mut peekable = self.matched_char_indices.iter().peekable();

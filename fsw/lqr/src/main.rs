@@ -35,8 +35,8 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
         .await
         .map_err(anyhow::Error::from)?;
     let (rx, tx) = stream.split();
-    let tx = impeller2_stella::PacketSink::new(tx);
-    let rx = impeller2_stella::PacketStream::new(rx);
+    let tx = impeller2_stellar::PacketSink::new(tx);
+    let rx = impeller2_stellar::PacketStream::new(rx);
     let id: PacketId = fastrand::u16(..).to_le_bytes();
     tx.init_world::<Output>(id).await?;
     let mut sub = rx.subscribe::<Input>();

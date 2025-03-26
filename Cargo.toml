@@ -21,7 +21,7 @@ members = [
     "libs/wmm",
     "libs/s10",
     "libs/impeller2",
-    "libs/impeller2/stella",
+    "libs/impeller2/stellar",
     "libs/impeller2/bevy",
     "libs/impeller2/wkt",
     "libs/impeller2/bbq",
@@ -37,6 +37,7 @@ members = [
     "fsw/mekf",
     "fsw/lqr",
     "examples/msg-test",
+    "libs/postcard-c/codegen",
 ]
 exclude = ["fsw/multicopter", "fsw/blackbox", "docs/memserve"]
 

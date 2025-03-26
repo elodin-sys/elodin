@@ -8,8 +8,8 @@ use impeller2::{
     types::{ComponentView, LenPacket, Msg, OwnedPacket, PacketId, Timestamp},
 };
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
-use impeller2_stella::PacketStream;
-use impeller2_stella::queue::tcp_connect;
+use impeller2_stellar::PacketStream;
+use impeller2_stellar::queue::tcp_connect;
 use impeller2_wkt::{MsgMetadata, SetMsgMetadata, Stream, StreamFilter, VTableMsg};
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -200,27 +200,27 @@ pub trait SinkExt {
     fn send_vtable<V: AsVTable>(
         &self,
         id: PacketId,
-    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    ) -> impl Future<Output = Result<(), impeller2_stellar::Error>>;
     fn send_metadata<V: Metadatatize>(
         &self,
-    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    ) -> impl Future<Output = Result<(), impeller2_stellar::Error>>;
     fn init_world<V: AsVTable + Metadatatize>(
         &self,
         vtable_id: PacketId,
-    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    ) -> impl Future<Output = Result<(), impeller2_stellar::Error>>;
     fn init_msg<M: postcard_schema::Schema + Msg>(
         &self,
-    ) -> impl Future<Output = Result<(), impeller2_stella::Error>>;
+    ) -> impl Future<Output = Result<(), impeller2_stellar::Error>>;
 }
 
-impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
-    async fn send_vtable<V: AsVTable>(&self, id: PacketId) -> Result<(), impeller2_stella::Error> {
+impl<W: AsyncWrite> SinkExt for impeller2_stellar::PacketSink<W> {
+    async fn send_vtable<V: AsVTable>(&self, id: PacketId) -> Result<(), impeller2_stellar::Error> {
         let vtable = V::as_vtable();
         self.send(&(VTableMsg { id, vtable })).await.0?;
         Ok(())
     }
 
-    async fn send_metadata<V: Metadatatize>(&self) -> Result<(), impeller2_stella::Error> {
+    async fn send_metadata<V: Metadatatize>(&self) -> Result<(), impeller2_stellar::Error> {
         for metadata in V::metadata() {
             self.send(&impeller2_wkt::SetComponentMetadata(metadata))
                 .await
@@ -232,7 +232,7 @@ impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
     async fn init_world<V: AsVTable + Metadatatize>(
         &self,
         vtable_id: PacketId,
-    ) -> Result<(), impeller2_stella::Error> {
+    ) -> Result<(), impeller2_stellar::Error> {
         self.send_vtable::<V>(vtable_id).await?;
         self.send_metadata::<V>().await?;
         Ok(())
@@ -240,7 +240,7 @@ impl<W: AsyncWrite> SinkExt for impeller2_stella::PacketSink<W> {
 
     async fn init_msg<M: postcard_schema::Schema + Msg>(
         &self,
-    ) -> Result<(), impeller2_stella::Error> {
+    ) -> Result<(), impeller2_stellar::Error> {
         let schema = M::SCHEMA;
         let name = std::any::type_name::<M>();
         let metadata = MsgMetadata {
@@ -270,7 +270,7 @@ impl<A: AsyncRead, W: Decomponentize + Debug> Subscriber<A, W> {
     pub async fn next(
         &mut self,
         buffer: Vec<u8>,
-    ) -> Result<(Option<&W>, Vec<u8>), impeller2_stella::Error> {
+    ) -> Result<(Option<&W>, Vec<u8>), impeller2_stellar::Error> {
         let pkt = self.stream.next(buffer).await?;
         match &pkt {
             impeller2::types::OwnedPacket::Msg(msg) if msg.id == VTableMsg::ID => {

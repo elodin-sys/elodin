@@ -4,7 +4,7 @@ use bbq2::traits::storage::BoxedSlice;
 use bevy::app::{Plugin, Update};
 use impeller2::types::LenPacket;
 use impeller2_bbq::*;
-use impeller2_stella::queue::tcp_connect;
+use impeller2_stellar::queue::tcp_connect;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicU64};
 use std::{net::SocketAddr, time::Duration};

@@ -1,0 +1,14 @@
+(name:"Foo",ty:Struct([
+  (name:"id",ty:(name:"u32",ty:U32)),
+  (name:"name",ty:(name:"String",ty:String)),
+  (name:"values",ty:(name:"Vec<T>",ty:Seq((name:"i64",ty:I64)))),
+  (name:"is_active",ty:(name:"bool",ty:Bool)),
+  (name:"byte_arr",ty:(name:"Vec<u8>",ty:ByteArray)),
+  (name:"metadata",ty: (
+    name:"Map<String, i32>",
+    ty:Map(
+      key:(name:"String",ty:String),
+      val:(name:"i32",ty:I32)
+    )
+  ))
+]))

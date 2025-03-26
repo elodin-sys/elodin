@@ -169,7 +169,7 @@ dependencies = [
  "futures-lite 2.5.0",
  "impeller2",
  "impeller2-frame",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "postcard-schema",
  "roci",
@@ -1360,7 +1360,7 @@ dependencies = [
  "downcast-rs",
  "either",
  "petgraph 0.6.5",
- "ron",
+ "ron 0.8.1",
  "serde",
  "smallvec",
  "thread_local",
@@ -1414,7 +1414,7 @@ dependencies = [
  "futures-lite 2.5.0",
  "js-sys",
  "parking_lot",
- "ron",
+ "ron 0.8.1",
  "serde",
  "stackfuture",
  "uuid 1.11.0",
@@ -3103,7 +3103,7 @@ dependencies = [
  "json5",
  "nom",
  "pathdiff",
- "ron",
+ "ron 0.8.1",
  "rust-ini",
  "serde",
  "serde_json",
@@ -4385,17 +4385,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_extras"
-version = "0.31.0"
+name = "egui_table"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b5cf69510eb3d19211fc0c062fb90524f43fe8e2c012967dcf0e2d81cb040f"
+checksum = "448481435bd5741d1636fcd52775bef23eb25692927c8f2d06e72c0c2836b9ab"
 dependencies = [
- "ahash 0.8.11",
  "egui",
- "enum-map",
- "log",
- "mime_guess2",
- "profiling",
+ "serde",
+ "vec1",
 ]
 
 [[package]]
@@ -4472,18 +4469,20 @@ dependencies = [
  "futures-lite 2.5.0",
  "impeller2",
  "impeller2-cli",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "memmap2",
  "miette",
  "nox",
  "postcard",
+ "postcard-c-codegen",
  "postcard-dyn",
  "postcard-schema",
  "serde",
  "serde_json",
  "smallvec",
  "stellarator",
+ "thingbuf",
  "thiserror 2.0.12",
  "tokio",
  "tracing 0.1.40",
@@ -4508,7 +4507,7 @@ dependencies = [
  "const-fnv1a-hash",
  "directories",
  "egui",
- "egui_extras",
+ "egui_table",
  "egui_tiles",
  "fastrand 2.2.0",
  "flume",
@@ -4646,27 +4645,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
  "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
-name = "enum-map"
-version = "2.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
-dependencies = [
- "enum-map-derive",
- "serde",
-]
-
-[[package]]
-name = "enum-map-derive"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
-dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -6514,7 +6492,7 @@ dependencies = [
  "futures-lite 2.5.0",
  "impeller2",
  "impeller2-bbq",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "miette",
  "nox",
@@ -6538,7 +6516,7 @@ dependencies = [
  "futures-lite 2.5.0",
  "hifitime 3.9.0",
  "impeller2",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "mlua",
  "nox",
@@ -6564,7 +6542,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-stella"
+name = "impeller2-stellar"
 version = "0.1.0"
 dependencies = [
  "bbq2",
@@ -7286,7 +7264,7 @@ dependencies = [
  "clap 4.5.20",
  "fastrand 2.2.0",
  "impeller2",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "mlua",
  "nox",
@@ -7506,7 +7484,7 @@ dependencies = [
  "clap 4.5.20",
  "fastrand 2.2.0",
  "impeller2",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "mlua",
  "nox",
@@ -7595,13 +7573,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mime_guess2"
-version = "2.0.5"
+name = "minijinja"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25a3333bb1609500601edc766a39b4c1772874a4ce26022f4d866854dc020c41"
+checksum = "6e36f1329330bb1614c94b78632b9ce45dd7d761f3304a1bed07b2990a7c5097"
 dependencies = [
- "mime",
- "unicase",
+ "serde",
 ]
 
 [[package]]
@@ -7683,7 +7660,7 @@ dependencies = [
  "anyhow",
  "fastrand 2.2.0",
  "impeller2",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "postcard-schema",
  "roci",
@@ -8069,7 +8046,7 @@ dependencies = [
  "elodin-db",
  "futures-lite 2.5.0",
  "impeller2",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "ndarray",
  "nox",
@@ -9219,6 +9196,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "postcard-c-codegen"
+version = "0.12.2"
+dependencies = [
+ "clap 4.5.20",
+ "convert_case",
+ "miette",
+ "minijinja",
+ "postcard-schema",
+ "ron 0.9.0",
+]
+
+[[package]]
 name = "postcard-derive"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10284,7 +10273,7 @@ dependencies = [
  "heapless 0.8.0",
  "impeller2",
  "impeller2-bbq",
- "impeller2-stella",
+ "impeller2-stellar",
  "impeller2-wkt",
  "nix 0.29.0",
  "nox",
@@ -10339,6 +10328,19 @@ dependencies = [
  "bitflags 2.6.0",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "ron"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63f3aa105dea217ef30d89581b65a4d527a19afc95ef5750be3890e8d3c5b837"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.6.0",
+ "serde",
+ "serde_derive",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -12846,12 +12848,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unicase"
-version = "2.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75b844d17643ee918803943289730bec8aac480150456169e647ed0b576ba539"
-
-[[package]]
 name = "unicode-bidi"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13044,6 +13040,12 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vec1"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab68b56840f69efb0fefbe3ab6661499217ffdc58e2eef7c3f6f69835386322"
 
 [[package]]
 name = "vec_map"

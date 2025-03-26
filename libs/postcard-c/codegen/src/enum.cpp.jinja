@@ -1,0 +1,165 @@
+#ifndef {{name}}_H
+#define {{name}}_H
+
+#include <stdio.h>
+#include <span>
+#include <variant>
+#include <type_traits>
+#include <vector>
+#include <optional>
+
+#if __has_include("postcard.h")
+#include "postcard.h"
+#endif
+
+class {{name}} : public std::variant<{% for variant in ty.Enum -%}
+  {{cpp_variant_type(variant.ty)}}{% if not loop.last %}, {% endif %}
+{%- endfor %}> {
+public:
+  // Inherit constructors from std::variant
+  using std::variant<{% for variant in ty.Enum -%}
+    {{cpp_variant_type(variant.ty)}}{% if not loop.last %}, {% endif %}
+  {%- endfor %}>::variant;
+
+  {% for variant in ty.Enum -%}
+  {% if variant_is_unit(variant.ty) %}
+  // Static constructor for unit variant {{variant.name}}
+  static {{name}} {{variant.name}}() {
+    return {{name}}{std::in_place_index<{{loop.index0}}>, std::monostate{}};
+  }
+  {% else %}
+  // Static constructor for {{variant.name}} variant
+  static {{name}} {{variant.name}}(const {{cpp_variant_type(variant.ty)}}& value) {
+    return {{name}}{std::in_place_index<{{loop.index0}}>, value};
+  }
+  {% endif %}
+
+  // Accessor method for variant {{variant.name}}
+  bool is_{{variant.name | snake_case}}() const {
+    return this->index() == {{loop.index0}};
+  }
+  {% if variant.ty.UnitVariant %}
+  {% else %}
+  const {{cpp_variant_type(variant.ty)}}* get_{{variant.name | snake_case }}() const {
+    return std::get_if<{{loop.index0}}>((const std::variant<{% for v in ty.Enum -%}
+      {{cpp_variant_type(v.ty)}}{% if not loop.last %}, {% endif %}
+    {%- endfor %}>*)this);
+  }
+
+  {{cpp_variant_type(variant.ty)}}* get_{{variant.name | snake_case }}() {
+    return std::get_if<{{loop.index0}}>((std::variant<{% for v in ty.Enum -%}
+      {{cpp_variant_type(v.ty)}}{% if not loop.last %}, {% endif %}
+    {%- endfor %}>*)this);
+  }
+  {% endif %}
+
+  {% endfor %}
+
+  size_t encoded_size() const {
+    size_t size = 0;
+
+    // Tag size (discriminant)
+    size += postcard_size_u8(); // Just for the variant tag
+
+    {% for variant in ty.Enum -%}
+    {% if loop.first %}if{% else %}else if{% endif %} (auto val = std::get_if<{{loop.index0}}>((const std::variant<{% for v in ty.Enum -%}
+      {{cpp_variant_type(v.ty)}}{% if not loop.last %}, {% endif %}
+    {%- endfor %}>*)this)) {
+        {{cpp_size_variant("(*val)", variant.ty) | indent(8)}}
+    }
+    {% endfor %}
+
+    return size;
+  }
+
+  postcard_error_t encode(std::span<std::byte>& output) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(output.data()), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<std::byte> encode_vec() {
+    // Pre-allocate vector with the required size
+    std::vector<std::byte> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<std::byte>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, reinterpret_cast<uint8_t*>(span.data()), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+
+    {% for variant in ty.Enum -%}
+    {% if loop.first %}if{% else %}else if{% endif %} (auto val = std::get_if<{{loop.index0}}>((std::variant<{% for v in ty.Enum -%}
+      {{cpp_variant_type(v.ty)}}{% if not loop.last %}, {% endif %}
+    {%- endfor %}>*)this)) {
+        result = postcard_encode_u8(slice, {{loop.index0}});
+        if (result != POSTCARD_SUCCESS) return result;
+        {{cpp_encode_variant("(*val)", variant.ty) | indent(8)}}
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    {% endfor %}
+    else {
+        return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const std::byte>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(input.data())), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    uint8_t tag;
+    result = postcard_decode_u8(slice, &tag);
+    if (result != POSTCARD_SUCCESS) return result;
+
+    switch(tag) {
+        {% for variant in ty.Enum -%}
+        case {{loop.index0}}: {  // {{variant.name}}
+            {% if variant_is_unit(variant.ty) %}
+            this->emplace<{{loop.index0}}>(std::monostate{});
+            {% else %}
+            {{cpp_variant_type(variant.ty)}} val;
+            {{cpp_decode_variant("val", variant.ty) | indent(12)}}
+            if (result != POSTCARD_SUCCESS) return result;
+            this->emplace<{{loop.index0}}>(val);
+            {% endif %}
+            break;
+        }
+        {% endfor %}
+        default:
+            return POSTCARD_ERROR_INVALID_INPUT;
+    }
+
+    return POSTCARD_SUCCESS;
+  }
+};
+
+#endif
