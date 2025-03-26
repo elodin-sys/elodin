@@ -1,7 +1,7 @@
 import os
 
 from buildkite import group, pipeline, step
-from steps import build_image_step, nix_step, rust_step
+from steps import build_image_step, c_step, nix_step, rust_step
 from utils import codename
 
 AZ_CONFIG = {"cluster_name": "dev", "rg_name": "dev"}
@@ -55,6 +55,13 @@ def cleanup_k8s_step(branch_name):
 
 
 test_steps = [
+    group(
+        name=":c: C",
+        steps=[
+            c_step(label="db-c-example", command="cd libs/db; cc examples/client.c -lm"),
+            # c_step(label="db-cpp-example", command="cd libs/db; c++ -std=c++23 examples/client.cpp"),
+        ],
+    ),
     group(
         name=":crab: rust",
         steps=[

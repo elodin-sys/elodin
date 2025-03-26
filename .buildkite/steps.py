@@ -61,3 +61,13 @@ def rust_step(label, command, env={}, emoji=":crab:"):
         command=command,
         env=env,
     )
+
+
+def c_step(label, command, env={}, emoji=":c:"):
+    return nix_step(
+        label=label,
+        flake=".#c",
+        emoji=emoji,
+        command=command,
+        env=env,
+    )

@@ -7,6 +7,13 @@
   ...
 }: {
   devShells = {
+    c = pkgs.mkShell {
+      name = "elo-c-shell";
+      buildInputs = with pkgs; [
+        clang
+      ];
+      doCheck = false;
+    };
     rust = pkgs.mkShell {
       name = "elo-rust-shell";
       buildInputs = with pkgs; [
