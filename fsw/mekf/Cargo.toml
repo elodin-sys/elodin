@@ -9,7 +9,7 @@ publish = false
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
-impeller2-stella.path = "../../libs/impeller2/stella"
+impeller2-stellar.path = "../../libs/impeller2/stellar"
 
 # ser-de
 impeller2.path = "../../libs/impeller2"

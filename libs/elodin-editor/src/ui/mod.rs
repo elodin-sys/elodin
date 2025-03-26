@@ -9,7 +9,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_egui::{
-    EguiContexts,
+    EguiContext, EguiContexts,
     egui::{self, Color32, Label, Margin, RichText},
 };
 
@@ -121,8 +121,12 @@ pub fn shortcuts(
     mut paused: ResMut<Paused>,
     command_palette_state: Res<CommandPaletteState>,
     key_state: Res<LogicalKeyState>,
+    mut context: Query<&mut EguiContext>,
 ) {
-    let input_has_focus = command_palette_state.show;
+    let input_has_focus = command_palette_state.show
+        || context
+            .iter_mut()
+            .any(|mut c| c.get_mut().memory(|m| m.focused().is_some()));
 
     if !input_has_focus && key_state.just_pressed(&Key::Space) {
         paused.0 = !paused.0;

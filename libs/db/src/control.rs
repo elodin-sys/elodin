@@ -3,7 +3,7 @@ use impeller2::{
     table::{Entry, VTable},
     types::{ComponentId, EntityId, Msg, PacketId},
 };
-use impeller2_stella::MsgExt;
+use impeller2_stellar::MsgExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{collections::HashMap, ops::Range};

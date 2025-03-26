@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use arrow::{
-    error::ArrowError,
     record_batch::RecordBatch,
     util::display::{ArrayFormatter, FormatOptions},
 };
@@ -9,13 +8,13 @@ use bevy::{
     ecs::system::SystemParam,
     prelude::{Commands, Component, Entity, In, Query},
 };
-use egui::{Color32, CornerRadius, RichText, Stroke};
-use egui_extras::{Column, TableBuilder};
+use egui::{RichText, Stroke};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
 use super::{
-    colors,
+    colors::{self, ColorExt},
+    theme,
     widgets::{WidgetSystem, button::EButton},
 };
 
@@ -37,6 +36,98 @@ pub enum SqlTableState {
     Requested(Instant),
     Results(Vec<RecordBatch>),
     Error(ErrorResponse),
+}
+impl SqlTableState {
+    pub fn push_result(&mut self, batch: RecordBatch) {
+        match self {
+            SqlTableState::Results(record_batches) => {
+                record_batches.push(batch);
+            }
+            other => {
+                *other = SqlTableState::Results(vec![batch]);
+            }
+        }
+    }
+}
+
+pub struct SqlTableResults<'a> {
+    batches: &'a [RecordBatch],
+    formatters: Vec<Vec<ArrayFormatter<'a>>>,
+}
+
+impl<'a> SqlTableResults<'a> {
+    pub fn from_record_batches(batches: &'a [RecordBatch], columns: usize) -> Self {
+        let options = FormatOptions::default();
+        let mut formatters = (0..columns).map(|_| vec![]).collect::<Vec<_>>();
+        for batch in batches {
+            for (i, col) in batch.columns().iter().enumerate() {
+                let Ok(fmt) = ArrayFormatter::try_new(col.as_ref(), &options) else {
+                    continue;
+                };
+                formatters[i].push(fmt);
+            }
+        }
+        SqlTableResults {
+            batches,
+            formatters,
+        }
+    }
+}
+
+impl egui_table::TableDelegate for SqlTableResults<'_> {
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
+        let Some(first_batch) = self.batches.first() else {
+            return;
+        };
+        let schema = first_batch.schema();
+
+        ui.painter().rect_filled(
+            ui.max_rect(),
+            egui::CornerRadius::ZERO,
+            colors::BONE_DEFAULT,
+        );
+        for field in &schema.fields[cell.col_range.clone()] {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.strong(RichText::new(field.name()).color(colors::PRIMARY_SMOKE));
+                });
+        }
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        let mut count: usize = 0;
+        let mut batch_i = 0;
+        for (i, batch) in self.batches.iter().enumerate() {
+            let next_count = count + batch.num_rows();
+            if (count..next_count).contains(&(cell.row_nr as usize)) {
+                batch_i = i;
+                break;
+            }
+            count = next_count;
+        }
+        let offset = cell.row_nr as usize - count;
+        let formatters = &self.formatters[cell.col_nr];
+        let formatter = &formatters[batch_i];
+        if cell.row_nr % 2 == 0 {
+            ui.painter().rect_filled(
+                ui.max_rect(),
+                egui::CornerRadius::ZERO,
+                colors::SURFACE_SECONDARY.opacity(0.4),
+            );
+        }
+
+        let label = formatter.value(offset).to_string();
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 0))
+            .show(ui, |ui| {
+                ui.label(label);
+            });
+    }
+
+    fn row_top_offset(&self, _ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
+        (24 * row_nr) as f32
+    }
 }
 
 #[derive(SystemParam)]
@@ -60,33 +151,34 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
         let Ok(mut table) = state.states.get_mut(entity) else {
             return;
         };
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
+        ui.horizontal_top(|ui| {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
                     let style = ui.style_mut();
-                    style.visuals.widgets.active.corner_radius = CornerRadius::ZERO;
-                    style.visuals.widgets.hovered.corner_radius = CornerRadius::ZERO;
-                    style.visuals.widgets.open.corner_radius = CornerRadius::ZERO;
+                    style.visuals.widgets.active.corner_radius = theme::corner_radius_xs();
+                    style.visuals.widgets.hovered.corner_radius = theme::corner_radius_xs();
+                    style.visuals.widgets.open.corner_radius = theme::corner_radius_xs();
 
-                    style.visuals.widgets.active.fg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-                    style.visuals.widgets.active.bg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-                    style.visuals.widgets.hovered.fg_stroke =
-                        Stroke::new(0.0, Color32::TRANSPARENT);
+                    style.visuals.widgets.inactive.bg_stroke =
+                        Stroke::new(1.0, colors::BORDER_GREY);
+                    style.visuals.widgets.inactive.fg_stroke =
+                        Stroke::new(1.0, colors::PRIMARY_CREAME);
                     style.visuals.widgets.hovered.bg_stroke =
-                        Stroke::new(0.0, Color32::TRANSPARENT);
-                    style.visuals.widgets.open.fg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
-                    style.visuals.widgets.open.bg_stroke = Stroke::new(0.0, Color32::TRANSPARENT);
+                        Stroke::new(1.0, colors::HYPERBLUE_DEFAULT.opacity(0.5));
 
                     style.spacing.button_padding = [16.0, 16.0].into();
 
-                    style.visuals.widgets.active.bg_fill = colors::SURFACE_SECONDARY;
-                    style.visuals.widgets.open.bg_fill = colors::SURFACE_SECONDARY;
+                    style.visuals.widgets.active.bg_fill = colors::PRIMARY_SMOKE;
+                    style.visuals.widgets.open.bg_fill = colors::PRIMARY_SMOKE;
                     style.visuals.widgets.inactive.bg_fill = colors::SURFACE_SECONDARY;
                     style.visuals.widgets.hovered.bg_fill = colors::SURFACE_SECONDARY;
-                    let text_edit_width = ui.max_rect().width() - 132.0;
+                    style.visuals.widgets.active.fg_stroke =
+                        Stroke::new(1.0, colors::PRIMARY_CREAME);
+                    let text_edit_width = ui.max_rect().width() - 104.0;
                     let text_edit_res = ui.add(
                         egui::TextEdit::singleline(&mut table.current_query)
+                            .hint_text("Enter an SQL query - like `show tables`")
                             .desired_width(text_edit_width)
                             .margin(egui::Margin::symmetric(16, 8)),
                     );
@@ -101,123 +193,58 @@ impl WidgetSystem for SqlTableWidget<'_, '_> {
                             move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                                   mut states: Query<&mut SqlTable>| {
                                 let Ok(mut entity) = states.get_mut(entity) else {
-                                    return;
+                                    return true;
                                 };
                                 match res {
                                     Ok(ipc) => {
                                         let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                        let collect = ipc
-                                            .batches
-                                            .into_iter()
-                                            .filter_map(|batch| {
-                                                let mut buffer =
-                                                    arrow::buffer::Buffer::from(batch.into_owned());
-                                                decoder.decode(&mut buffer).ok()?
-                                            })
-                                            .collect::<Vec<_>>();
-                                        entity.state = SqlTableState::Results(collect);
+                                        if let Some(batch) = ipc.batch {
+                                            let mut buffer =
+                                                arrow::buffer::Buffer::from(batch.into_owned());
+                                            if let Some(batch) =
+                                                decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                            {
+                                                entity.state.push_result(batch);
+                                                return false;
+                                            }
+                                        }
                                     }
                                     Err(err) => {
                                         entity.state = SqlTableState::Error(err);
                                     }
                                 }
+                                true
                             },
                         );
                     }
                 });
-                ui.add_space(8.0);
-                match &table.state {
-                    SqlTableState::None => {}
-                    SqlTableState::Requested(_) => {
-                        ui.label("Loading");
-                    }
-                    SqlTableState::Results(batches) => {
-                        egui::Frame::NONE
-                            .stroke(Stroke::new(1.0, colors::PRIMARY_CREAME_5))
-                            .outer_margin(egui::Margin::same(8))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.max_rect().width() - 16.);
-                                let options = FormatOptions::default();
-                                ui.style_mut().spacing.item_spacing = [8., 8.].into();
-                                ui.visuals_mut().clip_rect_margin = 8.;
-                                if let Some(first_batch) = batches.first() {
-                                    let schema = first_batch.schema();
-                                    let mut table = TableBuilder::new(ui)
-                                        .striped(true)
-                                        .resizable(true)
-                                        .auto_shrink(false);
-                                    let count = schema.fields().len();
-                                    for (i, _) in schema.fields().iter().enumerate() {
-                                        table = table.column(if (i + 1) == count {
-                                            Column::remainder()
-                                        } else {
-                                            Column::auto().at_least(100.0)
-                                        });
-                                    }
-
-                                    let table = table.header(22.0, |mut header| {
-                                        for field in schema.fields() {
-                                            header.col(|ui| {
-                                                ui.strong(field.name());
-                                            });
-                                        }
-                                    });
-
-                                    table.body(|mut body| {
-                                        for batch in batches {
-                                            let Ok(formatters) = batch
-                                                .columns()
-                                                .iter()
-                                                .map(|c| {
-                                                    ArrayFormatter::try_new(c.as_ref(), &options)
-                                                })
-                                                .collect::<Result<Vec<_>, ArrowError>>()
-                                            else {
-                                                continue;
-                                            };
-                                            for row_idx in 0..batch.num_rows() {
-                                                body.row(20.0, |mut row| {
-                                                    for formatter in &formatters {
-                                                        row.col(|ui| {
-                                                            let label = formatter
-                                                                .value(row_idx)
-                                                                .to_string();
-                                                            ui.label(label);
-                                                        });
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    });
-                                }
-                            });
-                    }
-                    SqlTableState::Error(error_response) => {
-                        let label = RichText::new(&error_response.description)
-                            .color(colors::REDDISH_DEFAULT);
-                        ui.label(label);
-                    }
-                }
-            });
+        });
+        match &mut table.state {
+            SqlTableState::None => {}
+            SqlTableState::Requested(_) => {
+                ui.label("Loading");
+            }
+            SqlTableState::Results(batches) => {
+                let Some(first_batch) = batches.first() else {
+                    return;
+                };
+                let schema = first_batch.schema();
+                let count = schema.fields().len();
+                let rows = batches.iter().map(|b| b.num_rows()).sum::<usize>();
+                let table = egui_table::Table::new()
+                    .id_salt("table")
+                    .num_rows(rows as u64)
+                    .columns(vec![egui_table::Column::default(); count])
+                    .num_sticky_cols(0)
+                    .headers(vec![egui_table::HeaderRow::new(28.0)]);
+                let mut del = SqlTableResults::from_record_batches(batches, count);
+                table.show(ui, &mut del);
+            }
+            SqlTableState::Error(error_response) => {
+                let label =
+                    RichText::new(&error_response.description).color(colors::REDDISH_DEFAULT);
+                ui.label(label);
+            }
+        }
     }
 }
-
-// pub fn handle_pkt(
-//     InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-//     query: Query<'w, 's, &'static mut SqlTable>,
-//     entity: Entity,
-// ) {
-//     let Ok(mut table) = query.get_mut(entity) else {
-//         return;
-//     };
-//     match pkt {
-//         impeller2::types::OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
-//             let m = m.parse::<ErrorResponse>()?;
-//         }
-//         impeller2::types::OwnedPacket::Msg(m) if m.id == M::Reply::ID => {
-//             let m = m.parse::<M::Reply>()?;
-//             Ok(m)
-//         }
-//         _ => {}
-//     }
-// }

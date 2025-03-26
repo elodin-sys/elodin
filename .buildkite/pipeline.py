@@ -59,7 +59,9 @@ test_steps = [
         name=":c: C",
         steps=[
             c_step(label="db-c-example", command="cd libs/db; cc examples/client.c -lm"),
-            # c_step(label="db-cpp-example", command="cd libs/db; c++ -std=c++23 examples/client.cpp"),
+            c_step(
+                label="db-cpp-example", command="cd libs/db; c++ -std=c++23 examples/client.cpp"
+            ),
         ],
     ),
     group(

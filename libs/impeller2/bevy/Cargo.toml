@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = ["tcp"]
-tcp = ["stellarator", "impeller2-stella"]
+tcp = ["stellarator", "impeller2-stellar"]
 
 [dependencies]
 impeller2.path = ".."
@@ -30,9 +30,9 @@ stellarator-buf.path = "../../stellarator/buf"
 stellarator.path = "../../stellarator"
 stellarator.optional = true
 stellarator.features = ["miette"]
-impeller2-stella.path = "../stella"
-impeller2-stella.features = ["queue"]
-impeller2-stella.optional = true
+impeller2-stellar.path = "../stellar"
+impeller2-stellar.features = ["queue"]
+impeller2-stellar.optional = true
 futures-lite = "2.5.0"
 
 # helpers

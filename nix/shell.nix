@@ -7,11 +7,9 @@
   ...
 }: {
   devShells = {
-    c = pkgs.mkShell {
+    c = (pkgs.mkShell.override {stdenv = pkgs.llvmPackages_19.libcxxStdenv;}) {
       name = "elo-c-shell";
-      buildInputs = with pkgs; [
-        clang
-      ];
+      buildInputs = [];
       doCheck = false;
     };
     rust = pkgs.mkShell {

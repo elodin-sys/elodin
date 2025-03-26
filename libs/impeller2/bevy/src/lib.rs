@@ -15,7 +15,7 @@ use impeller2::{
     com_de::Decomponentize,
     component::Asset,
     registry::HashMapRegistry,
-    types::{OwnedPacket, PacketId},
+    types::{OwnedPacket, PacketId, Request},
 };
 use impeller2::{
     schema::Schema,
@@ -26,8 +26,8 @@ use impeller2_wkt::{
     AssetId, BodyAxes, ComponentMetadata, CurrentTimestamp, DbSettings, DumpAssets, DumpMetadata,
     DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp, EntityMetadata, ErrorResponse,
     FixedRateBehavior, GetDbSettings, GetEarliestTimestamp, Glb, IsRecording, LastUpdated, Line3d,
-    Material, Mesh, Panel, Request, Stream, StreamBehavior, StreamFilter, StreamId,
-    StreamTimestamp, SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
+    Material, Mesh, Panel, Stream, StreamBehavior, StreamFilter, StreamId, StreamTimestamp,
+    SubscribeLastUpdated, VTableMsg, VectorArrow, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -35,6 +35,7 @@ use std::{
     marker::PhantomData,
     time::Duration,
 };
+use stellarator_buf::Slice;
 
 pub use impeller2_bbq::PacketGrantR;
 pub use impeller2_wkt::ComponentValue;
@@ -113,8 +114,17 @@ fn sink_inner(
                 .get_resource_mut::<RequestIdHandlers>()
                 .and_then(|mut handlers| handlers.remove(&req_id));
             if let Some(handler) = handler {
-                if let Err(err) = world.run_system_with_input(handler, &pkt) {
-                    bevy::log::error!(?err, "packet id handler error");
+                match world.run_system_with_input(handler, &pkt) {
+                    Ok(completed) => {
+                        if !completed {
+                            world
+                                .get_resource_mut::<RequestIdHandlers>()
+                                .and_then(|mut handlers| handlers.insert(req_id, handler));
+                        }
+                    }
+                    Err(err) => {
+                        bevy::log::error!(?err, "packet id handler error");
+                    }
                 }
             }
         }
@@ -243,7 +253,7 @@ impl bevy::prelude::SystemInput for PacketHandlerInput<'_> {
 #[allow(clippy::type_complexity)]
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct RequestIdHandlers(
-    pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, ()>>,
+    pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool>>,
 );
 
 #[derive(Component, Default, DerefMut, Deref)]
@@ -649,15 +659,16 @@ where
     }
 }
 
-pub struct ReplyHandlerCommand<S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>>
-{
+pub struct ReplyHandlerCommand<
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
+> {
     request: LenPacket,
     system: S,
 }
 
 impl<S> Command for ReplyHandlerCommand<S>
 where
-    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = ()>,
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
 {
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
@@ -690,8 +701,8 @@ pub trait CommandsExt {
 
     fn send_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
     where
-        M::Reply: 'static,
-        S: IntoSystem<In<Result<M::Reply, ErrorResponse>>, (), Marker>;
+        M::Reply<Slice<Vec<u8>>>: Msg + DeserializeOwned + 'static,
+        S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
@@ -710,8 +721,8 @@ impl CommandsExt for Commands<'_, '_> {
 
     fn send_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
     where
-        M::Reply: 'static,
-        S: IntoSystem<In<Result<M::Reply, ErrorResponse>>, (), Marker>,
+        M::Reply<Slice<Vec<u8>>>: DeserializeOwned + Msg + 'static,
+        S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>,
     {
         fn adapter<R: Msg + DeserializeOwned>(
             msg: InRef<OwnedPacket<PacketGrantR>>,
@@ -738,7 +749,7 @@ impl CommandsExt for Commands<'_, '_> {
                 }),
             }
         }
-        let system = adapter::<M::Reply>.pipe(handler);
+        let system = adapter::<M::Reply<Slice<Vec<u8>>>>.pipe(handler);
         let system = IntoSystem::into_system(system);
 
         let cmd = ReplyHandlerCommand {
@@ -758,7 +769,7 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
             },
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: Some(Duration::from_secs_f64(1.0 / 60.0)),
+                timestep: Some(Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64),
                 frequency: Some(60),
             }),
             id: stream_id,

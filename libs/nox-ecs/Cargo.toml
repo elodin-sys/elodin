@@ -23,7 +23,7 @@ impeller2.path = "../impeller2"
 impeller2-wkt.path = "../impeller2/wkt"
 impeller2-wkt.features = ["gui", "std"]
 elodin-db.path = "../db"
-impeller2-stella.path = "../impeller2/stella"
+impeller2-stellar.path = "../impeller2/stellar"
 futures-lite = "2.5.0"
 
 # data structures

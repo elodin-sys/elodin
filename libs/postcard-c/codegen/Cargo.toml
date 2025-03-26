@@ -1,0 +1,20 @@
+[package]
+name = "postcard-c-codegen"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+miette.version = "7.2"
+miette.features = ["fancy"]
+minijinja = "2.8"
+postcard-schema.version = "0.2"
+postcard-schema.features = ["use-std"]
+convert_case = "0.6.0"
+
+
+# cli
+ron = "0.9"
+clap.version = "4.4.18"
+clap.features = ["derive"]
