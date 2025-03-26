@@ -7,7 +7,7 @@ use core::{
 };
 
 use nox::ArrayView;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 use crate::{buf::ByteBufExt, error::Error};
@@ -27,6 +27,7 @@ use stellarator_buf::{AtomicValue, IoBuf, Slice};
     Immutable,
     Hash,
     FromBytes,
+    postcard_schema::Schema,
 )]
 #[repr(transparent)]
 pub struct ComponentId(pub u64);
@@ -63,6 +64,7 @@ impl Display for ComponentId {
     Immutable,
     Hash,
     FromBytes,
+    postcard_schema::Schema,
 )]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 #[repr(transparent)]
@@ -681,7 +683,7 @@ impl postcard::ser_flavors::Flavor for LenPacket {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OwnedPacket<B: IoBuf> {
     Msg(MsgBuf<B>),
     Table(OwnedTable<B>),
@@ -731,7 +733,7 @@ impl<B: IoBuf> OwnedPacket<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OwnedTable<B: IoBuf> {
     pub id: PacketId,
     pub req_id: RequestId,
@@ -749,7 +751,7 @@ impl<B: IoBuf> OwnedTable<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MsgBuf<B: IoBuf> {
     pub id: PacketId,
     pub req_id: RequestId,
@@ -770,7 +772,7 @@ impl<B: IoBuf> MsgBuf<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OwnedTimeSeries<B: IoBuf> {
     pub id: PacketId,
     pub req_id: RequestId,
@@ -822,6 +824,7 @@ impl<B: IoBuf> OwnedPacket<B> {
     Serialize,
     Deserialize,
     Default,
+    postcard_schema::Schema,
 )]
 #[repr(transparent)]
 pub struct Timestamp(pub i64);
@@ -906,6 +909,60 @@ impl From<std::time::SystemTime> for Timestamp {
             Err(err) => Self(-(err.duration().as_micros() as i64)),
         }
     }
+}
+
+pub trait Request {
+    type Reply<B: IoBuf + Clone>: TryFromPacket<B>;
+}
+
+pub trait TryFromPacket<B: IoBuf>: Sized {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error>;
+}
+
+impl<M: Msg + DeserializeOwned, B: IoBuf> TryFromPacket<B> for M {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error> {
+        match packet {
+            OwnedPacket::Msg(m) if m.id == M::ID => m.parse::<M>(),
+            _ => Err(Error::InvalidPacket),
+        }
+    }
+}
+
+impl<B: IoBuf + Clone> TryFromPacket<B> for MsgBuf<B> {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error> {
+        match packet {
+            OwnedPacket::Msg(m) => Ok(m.clone()),
+            _ => Err(Error::InvalidPacket),
+        }
+    }
+}
+
+impl<B: IoBuf + Clone> TryFromPacket<B> for OwnedTimeSeries<B> {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error> {
+        match packet {
+            OwnedPacket::TimeSeries(m) => Ok(m.clone()),
+            _ => Err(Error::InvalidPacket),
+        }
+    }
+}
+
+impl<B: IoBuf + Clone> TryFromPacket<B> for OwnedPacket<B> {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error> {
+        Ok(packet.clone())
+    }
+}
+
+impl<B: IoBuf + Clone> TryFromPacket<B> for OwnedTable<B> {
+    fn try_from_packet(packet: &OwnedPacket<B>) -> Result<Self, Error> {
+        match packet {
+            OwnedPacket::Table(m) => Ok(m.clone()),
+            _ => Err(Error::InvalidPacket),
+        }
+    }
+}
+
+impl<R: Request> Request for &'_ R {
+    type Reply<B: IoBuf + Clone> = R::Reply<B>;
 }
 
 #[cfg(test)]

@@ -4,17 +4,17 @@ use arrow::{
     error::ArrowError,
     util::display::{ArrayFormatter, FormatOptions},
 };
+use futures_lite::StreamExt;
 use impeller2::{
     com_de::Decomponentize,
     schema::Schema,
-    table::{Entry, VTableBuilder},
+    table::{Entry, VTable, VTableBuilder},
     types::{
-        ComponentId, EntityId, Msg, OwnedPacket, OwnedTimeSeries, PacketId, PrimType, Timestamp,
-        msg_id,
+        ComponentId, EntityId, Msg, OwnedTimeSeries, PacketId, PrimType, Request, Timestamp, msg_id,
     },
 };
 
-use impeller2::types::{IntoLenPacket, LenPacket};
+use impeller2::types::{IntoLenPacket, LenPacket, OwnedPacket};
 use impeller2_wkt::*;
 use mlua::{AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, Value};
 use nu_ansi_term::Color;
@@ -26,7 +26,7 @@ use rustyline::{
     history::History,
     validate::MatchingBracketValidator,
 };
-use serde::de::DeserializeOwned;
+// Unused imports removed
 use std::{
     borrow::Cow::{self, Borrowed, Owned},
     collections::HashMap,
@@ -40,18 +40,13 @@ use std::{
     },
     time::Duration,
 };
-use stellarator::{
-    buf::Slice,
-    io::{OwnedReader, OwnedWriter, SplitExt},
-    net::TcpStream,
-};
+use stellarator::buf::Slice;
 use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 
 pub use mlua;
 
 pub struct Client {
-    rx: impeller2_stella::PacketStream<OwnedReader<TcpStream>>,
-    tx: impeller2_stella::PacketSink<OwnedWriter<TcpStream>>,
+    client: impeller2_stellar::Client,
 }
 
 impl Client {
@@ -61,43 +56,20 @@ impl Client {
             .map_err(anyhow::Error::from)?
             .next()
             .ok_or_else(|| anyhow!("missing socket ip"))?;
-        let stream = TcpStream::connect(addr)
-            .await
-            .map_err(anyhow::Error::from)?;
-        let (rx, tx) = stream.split();
-        let tx = impeller2_stella::PacketSink::new(tx);
-        let rx = impeller2_stella::PacketStream::new(rx);
-        Ok(Client { tx, rx })
+        let client = impeller2_stellar::Client::connect(addr).await?;
+        Ok(Client { client })
     }
 
-    pub async fn send_req<M: Msg + DeserializeOwned + Request>(
+    pub async fn request<M: Request + IntoLenPacket>(
         &mut self,
         msg: M,
-    ) -> anyhow::Result<M::Reply> {
-        self.tx.send(&msg).await.0?;
-        match self.read_with_error().await? {
-            impeller2::types::OwnedPacket::Msg(m) if m.id == M::Reply::ID => {
-                let m = m.parse::<M::Reply>().unwrap();
-                Ok(m)
-            }
-            m => Err(anyhow!("wrong msg type {:?}", m)),
-        }
-    }
-
-    pub async fn read_with_error(&mut self) -> anyhow::Result<OwnedPacket<Slice<Vec<u8>>>> {
+    ) -> anyhow::Result<M::Reply<Slice<Vec<u8>>>> {
         let resp = async {
-            let buf = vec![0u8; 1024];
-            let pkt = self.rx.next_grow(buf).await?;
-            match pkt {
-                impeller2::types::OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
-                    let m = m.parse::<ErrorResponse>()?;
-                    Err(anyhow!(m.description))
-                }
-                pkt => Ok(pkt),
-            }
+            let resp = self.client.request(msg).await?;
+            Ok(resp)
         };
         let timeout = async {
-            stellarator::sleep(Duration::from_secs(25)).await;
+            stellarator::sleep(Duration::from_secs(3)).await;
             Err(anyhow!("request timed out"))
         };
         futures_lite::future::race(timeout, resp).await
@@ -116,7 +88,7 @@ impl Client {
         let id = fastrand::u16(..);
 
         let component_id: ComponentId = lua.from_value(component_id)?;
-        let schema = self.send_req(GetSchema { component_id }).await?;
+        let schema = self.client.request(&GetSchema { component_id }).await?;
         let start = Timestamp(start);
         let stop = Timestamp(stop);
         let msg = GetTimeSeries {
@@ -127,12 +99,7 @@ impl Client {
             limit: Some(256),
         };
 
-        self.tx.send(msg.into_len_packet()).await.0?;
-        let pkt = self.read_with_error().await?;
-        let time_series = match &pkt {
-            impeller2::types::OwnedPacket::TimeSeries(time_series) => time_series,
-            _ => return Err(anyhow!("wrong msg type")),
-        };
+        let time_series = self.request(&msg).await?;
 
         fn print_time_series_as_table<
             T: Immutable + TryFromBytes + Copy + std::fmt::Display + Default + 'static,
@@ -169,31 +136,34 @@ impl Client {
 
         let schema = schema.0;
         match schema.prim_type() {
-            PrimType::U8 => print_time_series_as_table::<u8>(time_series, schema),
-            PrimType::U16 => print_time_series_as_table::<u16>(time_series, schema),
-            PrimType::U32 => print_time_series_as_table::<u32>(time_series, schema),
-            PrimType::U64 => print_time_series_as_table::<u64>(time_series, schema),
-            PrimType::I8 => print_time_series_as_table::<i8>(time_series, schema),
-            PrimType::I16 => print_time_series_as_table::<i16>(time_series, schema),
-            PrimType::I32 => print_time_series_as_table::<i32>(time_series, schema),
-            PrimType::I64 => print_time_series_as_table::<i64>(time_series, schema),
-            PrimType::Bool => print_time_series_as_table::<bool>(time_series, schema),
-            PrimType::F32 => print_time_series_as_table::<f32>(time_series, schema),
-            PrimType::F64 => print_time_series_as_table::<f64>(time_series, schema),
+            PrimType::U8 => print_time_series_as_table::<u8>(&time_series, schema),
+            PrimType::U16 => print_time_series_as_table::<u16>(&time_series, schema),
+            PrimType::U32 => print_time_series_as_table::<u32>(&time_series, schema),
+            PrimType::U64 => print_time_series_as_table::<u64>(&time_series, schema),
+            PrimType::I8 => print_time_series_as_table::<i8>(&time_series, schema),
+            PrimType::I16 => print_time_series_as_table::<i16>(&time_series, schema),
+            PrimType::I32 => print_time_series_as_table::<i32>(&time_series, schema),
+            PrimType::I64 => print_time_series_as_table::<i64>(&time_series, schema),
+            PrimType::Bool => print_time_series_as_table::<bool>(&time_series, schema),
+            PrimType::F32 => print_time_series_as_table::<f32>(&time_series, schema),
+            PrimType::F64 => print_time_series_as_table::<f64>(&time_series, schema),
         }
     }
 
     pub async fn sql(&mut self, sql: &str) -> anyhow::Result<()> {
-        let resp = self.send_req(SQLQuery(sql.to_string())).await?;
-        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-        let batches = resp
-            .batches
-            .into_iter()
-            .filter_map(|batch| {
-                let mut buffer = arrow::buffer::Buffer::from(batch.into_owned());
-                decoder.decode(&mut buffer).unwrap()
-            })
-            .collect::<Vec<_>>();
+        let stream = self.client.stream(&SQLQuery(sql.to_string())).await?;
+        let mut batches = vec![];
+        futures_lite::pin!(stream);
+        while let Some(msg) = stream.next().await {
+            let Some(batch) = msg?.batch else {
+                break;
+            };
+            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+            let mut buffer = arrow::buffer::Buffer::from(batch.into_owned());
+            if let Some(batch) = decoder.decode(&mut buffer)? {
+                batches.push(batch);
+            }
+        }
         let mut table = create_table(&batches, &FormatOptions::default())?;
         println!(
             "{}",
@@ -205,7 +175,7 @@ impl Client {
     }
 
     pub async fn send(
-        &self,
+        &mut self,
         lua: &Lua,
         component_id: u64,
         entity_id: u64,
@@ -225,7 +195,7 @@ impl Client {
         let vtable = vtable.build();
         let id: [u8; 2] = fastrand::u16(..).to_le_bytes();
         let msg = VTableMsg { id, vtable };
-        self.tx.send(msg.into_len_packet()).await.0?;
+        self.client.send(&msg).await.0?;
         let mut table = LenPacket::table(id, 8);
         match prim_type {
             PrimType::U8 => {
@@ -284,7 +254,7 @@ impl Client {
                 table.extend_from_slice(buf);
             }
         }
-        self.tx.send(table).await.0?;
+        self.client.send(table).await.0?;
         Ok(())
     }
 
@@ -292,11 +262,10 @@ impl Client {
         if stream.id == 0 {
             stream.id = fastrand::u64(..);
         }
-        self.tx.send(stream.into_len_packet()).await.0?;
-        let mut vtable = HashMap::new();
-        let mut buf = vec![0; 1024 * 8];
+        let stream = self.client.stream(&stream).await?;
         let cancel = Arc::new(AtomicBool::new(true));
         let canceler = cancel.clone();
+        let mut vtable: HashMap<PacketId, VTable<Vec<Entry>, Vec<u8>>> = HashMap::new();
         std::thread::spawn(move || {
             let mut stdin = io::stdin().lock();
             let mut buf = [0u8];
@@ -304,43 +273,41 @@ impl Client {
             canceler.store(false, atomic::Ordering::SeqCst);
         });
 
+        futures_lite::pin!(stream);
         while cancel.load(atomic::Ordering::SeqCst) {
-            let pkt = self.rx.next(buf).await?;
-            match &pkt {
-                impeller2::types::OwnedPacket::Msg(msg) if msg.id == VTableMsg::ID => {
-                    let msg = msg.parse::<VTableMsg>()?;
-                    vtable.insert(msg.id, msg.vtable);
-                }
-                impeller2::types::OwnedPacket::Msg(msg) => {
-                    println!("msg ({:?}) = {:?}", msg.id, &msg.buf[..]);
-                }
-                impeller2::types::OwnedPacket::Table(table) => {
+            match stream.next().await {
+                Some(Ok(StreamReply::Table(table))) => {
                     if let Some(vtable) = vtable.get(&table.id) {
                         vtable.parse_table(&table.buf[..], &mut DebugSink)?;
                     } else {
                         println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
                     }
                 }
-                impeller2::types::OwnedPacket::TimeSeries(_) => {}
+                Some(Ok(StreamReply::VTable(msg))) => {
+                    vtable.insert(msg.id, msg.vtable);
+                }
+                Some(Err(e)) => return Err(anyhow::Error::from(e)),
+                None => {
+                    break;
+                }
             }
-            buf = pkt.into_buf().into_inner();
         }
         Ok(())
     }
 
     pub async fn stream_msgs(&mut self, stream_msgs: MsgStream) -> anyhow::Result<()> {
-        let request_id = fastrand::u8(..);
         let metadata = self
-            .send_req(GetMsgMetadata {
+            .request(&GetMsgMetadata {
                 msg_id: stream_msgs.msg_id,
             })
             .await?;
-        self.tx
+
+        let request_id = fastrand::u8(..);
+        self.client
             .send(stream_msgs.with_request_id(request_id))
             .await
             .0?;
 
-        let mut buf = vec![0; 1024 * 8];
         let cancel = Arc::new(AtomicBool::new(true));
         let canceler = cancel.clone();
         std::thread::spawn(move || {
@@ -351,16 +318,15 @@ impl Client {
         });
 
         while cancel.load(atomic::Ordering::SeqCst) {
-            let pkt = self.rx.next(buf).await?;
-            match &pkt {
-                impeller2::types::OwnedPacket::Msg(msg) if msg.req_id == request_id => {
-                    let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg.buf[..])
-                        .map_err(|e| anyhow!("failed to deserialize msg: {:?}", e))?;
-                    println!("{:?}", data);
-                }
-                _ => {}
+            let packet = self
+                .client
+                .recv::<OwnedPacket<Slice<Vec<u8>>>>(request_id)
+                .await?;
+            if let OwnedPacket::Msg(msg) = packet {
+                let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg.buf[..])
+                    .map_err(|e| anyhow!("failed to deserialize msg: {:?}", e))?;
+                println!("{:?}", data);
             }
-            buf = pkt.into_buf().into_inner();
         }
         Ok(())
     }
@@ -373,13 +339,13 @@ impl Client {
     ) -> anyhow::Result<()> {
         let start = Timestamp(start.unwrap_or(i64::MIN));
         let stop = Timestamp(stop.unwrap_or(i64::MAX));
-        let metadata = self.send_req(GetMsgMetadata { msg_id }).await?;
+        let metadata = self.request(&GetMsgMetadata { msg_id }).await?;
         let get_msgs = GetMsgs {
             msg_id,
             range: start..stop,
             limit: Some(1000),
         };
-        let batch = self.send_req(get_msgs).await?;
+        let batch = self.request(&get_msgs).await?;
         let mut builder = tabled::builder::Builder::default();
         for (timestamp, msg) in batch.data {
             let data = postcard_dyn::from_slice_dyn(&metadata.schema, &msg[..])
@@ -405,12 +371,12 @@ impl Client {
         msg_id: PacketId,
         msg: postcard_dyn::Value,
     ) -> anyhow::Result<()> {
-        let metadata = self.send_req(GetMsgMetadata { msg_id }).await?;
+        let metadata = self.request(&GetMsgMetadata { msg_id }).await?;
         let bytes =
             postcard_dyn::to_stdvec_dyn(&metadata.schema, &msg).map_err(|e| anyhow!("{e:?}"))?;
         let mut pkt = LenPacket::msg(msg_id, bytes.len());
         pkt.extend_from_slice(&bytes);
-        self.tx.send(pkt).await.0?;
+        self.client.send(pkt).await.0?;
         Ok(())
     }
 }
@@ -454,11 +420,13 @@ fn create_table(
 
 impl UserData for Client {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_method(
+        methods.add_async_method_mut(
             "send_table",
-            |lua, this, (component_id, entity_id, ty, shape, buf): (Value, _, _, Vec<u64>, _)| async move {
-
-                    let component_id = if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
+            |lua,
+             mut this,
+             (component_id, entity_id, ty, shape, buf): (Value, _, _, Vec<u64>, _)| async move {
+                let component_id =
+                    if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
                         id
                     } else if let Ok(name) = lua.from_value::<String>(component_id.clone()) {
                         ComponentId::new(&name)
@@ -468,7 +436,8 @@ impl UserData for Client {
                         return Err(anyhow!("msg id must be a PacketId or String").into());
                     };
                 let ty: PrimType = lua.from_value(ty)?;
-                this.send(&lua, component_id.0, entity_id, ty, shape, buf).await?;
+                this.send(&lua, component_id.0, entity_id, ty, shape, buf)
+                    .await?;
                 Ok(())
             },
         );
@@ -477,7 +446,7 @@ impl UserData for Client {
             |lua, mut this, (msg_or_id, val): (Value, Option<Value>)| async move {
                 if let Some(msg) = msg_or_id.as_userdata() {
                     let msg = msg.call_method::<Vec<u8>>("msg", ())?;
-                    this.tx
+                    this.client
                         .send(LenPacket { inner: msg })
                         .await
                         .0
@@ -503,12 +472,12 @@ impl UserData for Client {
             },
         );
 
-        methods.add_async_method(
+        methods.add_async_method_mut(
             "send_msgs",
-            |_lua, this, msgs: Vec<AnyUserData>| async move {
+            |_lua, mut this, msgs: Vec<AnyUserData>| async move {
                 for msg in msgs {
                     let msg = msg.call_method::<Vec<u8>>("msg", ())?;
-                    this.tx
+                    this.client
                         .send(LenPacket { inner: msg })
                         .await
                         .0
@@ -568,7 +537,7 @@ impl UserData for Client {
                     stringify!($name),
                     |lua, mut this, value| async move {
                         let msg: $ty = lua.from_value(value)?;
-                        let res = this.send_req(msg).await?;
+                        let res = this.request(&msg).await?;
                         lua.to_value(&res)
                     },
                 );
@@ -731,6 +700,11 @@ pub fn lua() -> anyhow::Result<Lua> {
         "SetComponentMetadata",
         lua.create_function(|lua, m: SetComponentMetadata| lua.create_ser_userdata(m))?,
     )?;
+
+    lua.globals().set(
+        "Stream",
+        lua.create_function(|lua, m: Stream| lua.create_ser_userdata(m))?,
+    )?;
     lua.globals().set(
         "SetEntityMetadata",
         lua.create_function(|lua, m: SetEntityMetadata| lua.create_ser_userdata(m))?,
@@ -748,6 +722,11 @@ pub fn lua() -> anyhow::Result<Lua> {
         "SQLQuery",
         lua.create_function(|lua, m: SQLQuery| lua.create_ser_userdata(m))?,
     )?;
+    lua.globals().set(
+        "MsgStream",
+        lua.create_function(|lua, m: MsgStream| lua.create_ser_userdata(m))?,
+    )?;
+
     Ok(lua)
 }
 

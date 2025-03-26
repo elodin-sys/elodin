@@ -39,7 +39,7 @@ nox.default-features = false
 # async
 stellarator.path = "../stellarator"
 stellarator.features = ["miette", "tokio"]
-impeller2-stella.path = "../impeller2/stella"
+impeller2-stellar.path = "../impeller2/stellar"
 futures-lite = "2.5.0"
 
 # data structures
@@ -76,6 +76,8 @@ arrow-schema.features = ["canonical_extension_types"]
 #arrow.default-features = false
 datafusion.version = "45.0.0"
 convert_case = "0.6.0"
+thingbuf.version = "0.1"
+
 
 
 # axum
@@ -89,3 +91,6 @@ serde_json.version = "1"
 serde_json.optional = true
 tokio.version = "1"
 tokio.optional = true
+
+# codegen
+postcard-c-codegen.path = "../postcard-c/codegen"

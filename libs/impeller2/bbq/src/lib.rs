@@ -26,6 +26,7 @@ type PacketGrantWInner = bbq2::prod_cons::framed::FramedGrantW<
     MaiNotSpsc,
     usize,
 >;
+
 pub struct PacketGrantW(PacketGrantWInner);
 
 unsafe impl Send for PacketGrantW {}

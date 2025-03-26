@@ -12,7 +12,7 @@ pub enum Error {
     #[error("io {0}")]
     Io(#[from] std::io::Error),
     #[error("impeller_stella {0}")]
-    ImpellerStella(impeller2_stella::Error),
+    ImpellerStella(impeller2_stellar::Error),
     #[error("impeller {0}")]
     Impeller(#[from] impeller2::error::Error),
     #[error("component not found {0}")]
@@ -45,10 +45,10 @@ pub enum Error {
     BadMessage,
 }
 
-impl From<impeller2_stella::Error> for Error {
-    fn from(value: impeller2_stella::Error) -> Self {
+impl From<impeller2_stellar::Error> for Error {
+    fn from(value: impeller2_stellar::Error) -> Self {
         match value {
-            impeller2_stella::Error::Stellarator(error) => Error::from(error),
+            impeller2_stellar::Error::Stellar(error) => Error::from(error),
             err => Error::ImpellerStella(err),
         }
     }

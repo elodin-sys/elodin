@@ -9,8 +9,8 @@ async fn connect() -> anyhow::Result<()> {
         .await
         .map_err(anyhow::Error::from)?;
     let (rx, tx) = stream.split();
-    let tx = impeller2_stella::PacketSink::new(tx);
-    let _rx = impeller2_stella::PacketStream::new(rx);
+    let tx = impeller2_stellar::PacketSink::new(tx);
+    let _rx = impeller2_stellar::PacketStream::new(rx);
     tx.init_msg::<Foo>().await?;
     tx.init_msg::<Bar>().await?;
     let mut flip = false;

@@ -12,7 +12,7 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["csv", "std", "stellar"]
 std = []
 csv = ["dep:csv", "serde"]
-stellar = ["dep:stellarator", "impeller2-stella", "impeller2/thingbuf", "fastrand", "bbq2", "impeller2-bbq"]
+stellar = ["dep:stellarator", "impeller2-stellar", "impeller2/thingbuf", "fastrand", "bbq2", "impeller2-bbq"]
 
 [dependencies]
 impeller2.path = "../impeller2"
@@ -26,9 +26,9 @@ thingbuf = "0.1.6"
 # async
 stellarator.path = "../stellarator"
 stellarator.optional = true
-impeller2-stella.path = "../impeller2/stella"
-impeller2-stella.features = ["queue"]
-impeller2-stella.optional = true
+impeller2-stellar.path = "../impeller2/stellar"
+impeller2-stellar.features = ["queue"]
+impeller2-stellar.optional = true
 impeller2-bbq.path = "../impeller2/bbq"
 impeller2-bbq.optional = true
 fastrand.version = "2.2.0"

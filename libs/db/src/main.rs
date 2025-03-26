@@ -3,6 +3,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Parser, Subcommand};
 use elodin_db::Server;
 use miette::IntoDiagnostic;
+use postcard_c_codegen::SchemaExt;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -19,6 +20,8 @@ enum Commands {
     Run(RunArgs),
     #[command(about = "Run a Lua script or launch a REPL")]
     Lua(impeller2_cli::Args),
+    #[command(about = "Generate C++ header files")]
+    GenCpp { output_path: PathBuf },
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -93,6 +96,21 @@ fn main() -> miette::Result<()> {
             Commands::Lua(args) => impeller2_cli::run(args)
                 .await
                 .map_err(|e| miette::miette!(e)),
+            Commands::GenCpp { output_path } => {
+                let defs = [
+                    include_str!("../../postcard-c/postcard.h").to_string(),
+                    include_str!("./helpers.hpp").to_string(),
+                    impeller2_wkt::InitialTimestamp::to_cpp()?,
+                    impeller2_wkt::FixedRateBehavior::to_cpp()?,
+                    impeller2_wkt::StreamBehavior::to_cpp()?,
+                    impeller2_wkt::StreamFilter::to_cpp()?,
+                    impeller2_wkt::Stream::to_cpp()?,
+                    impeller2_wkt::MsgStream::to_cpp()?,
+                ]
+                .join("\n");
+                std::fs::write(output_path, defs).into_diagnostic()?;
+                Ok(())
+            }
         }
     })
 }

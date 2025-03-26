@@ -30,7 +30,7 @@ tabled = "0.17.0"
 # async
 stellarator.path = "../../stellarator"
 stellarator.features = ["miette"]
-impeller2-stella.path = "../../impeller2/stella"
+impeller2-stellar.path = "../../impeller2/stellar"
 futures-lite = "2.5.0"
 
 # ser-de

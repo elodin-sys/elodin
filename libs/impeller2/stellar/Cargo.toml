@@ -1,5 +1,5 @@
 [package]
-name = "impeller2-stella"
+name = "impeller2-stellar"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,7 +9,6 @@ queue = [
     "bbq2",
     "impeller2-bbq",
     "impeller2/thingbuf",
-    "impeller2-wkt",
     "stellarator/miette"
     ]
 
@@ -22,6 +21,7 @@ futures-concurrency = "7.6.2"
 # ser-des
 impeller2.path = ".."
 impeller2.features = ["std"]
+impeller2-wkt.path = "../wkt"
 zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 serde.version = "1.0"
@@ -36,8 +36,6 @@ miette.version = "7.2"
 # thingbuf
 thingbuf.version = "0.1.6"
 thingbuf.optional = true
-impeller2-wkt.path = "../wkt"
-impeller2-wkt.optional = true
 bbq2.git = "https://github.com/elodin-sys/bbq2.git"
 bbq2.rev = "b6e36706a5549d770ebf2dc122b39cef1368b06d"
 bbq2.features = ["std", "maitake-sync-0_2"]

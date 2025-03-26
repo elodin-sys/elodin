@@ -24,12 +24,23 @@ Alternatively, you can download the latest portable binary for your platform:
 elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua
 ```
 
-### Stream data to the database
+### Stream data to the database with C
 
 See [./examples/client.c](./examples/client.c) for an example C client that streams fake sensor data to the database. Build and run the client:
 
 ```sh
 cc examples/client.c -lm -o /tmp/client; /tmp/client
+```
+
+
+### Subscribe to data with C++ 
+
+[./examples/client.cpp](./examples/client.cpp) includes an example of how to subscribe to data using C++. It can be built and run using:
+
+This example uses C++23, but the library itself is C++20 compatible.
+
+``` sh
+c++ -std=c++23 examples/client.cpp -o /tmp/client-cpp; /tmp/client-cpp
 ```
 
 ### Connect to the database using the CLI
@@ -85,3 +96,15 @@ Confirm that the secondary instance is receiving data by connecting to it via th
 ```sh
 elodin editor 127.0.0.1:2241
 ```
+
+### Generate C++ Header
+
+elodin-db ships with a single header C++20 library. The library includes message definitions for communicating with the DB.
+
+> NOTE: Not all definitions have been added yet if you need something ASAP please contact us
+
+You can generate the C++ library by running:
+
+`cargo run gen-cpp ./db.hpp`
+
+This will generate a C++ header file at `./db.hpp`

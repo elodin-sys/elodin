@@ -7,7 +7,7 @@ edition = "2024"
 bevy = ["dep:bevy", "std", "gui"]
 nox = ["dep:nox"]
 gui = ["nox"]
-std = ["impeller2/std"]
+std = ["impeller2/std", "postcard-schema/use-std"]
 mlua = ["dep:mlua"]
 
 [dependencies]

@@ -150,6 +150,7 @@ impl GrowableBuf for Vec<u8> {
     }
 }
 
+#[derive(Clone)]
 struct GrowableBufWrapper<B>(B);
 
 unsafe impl<B: IoBuf> IoBuf for GrowableBufWrapper<B> {

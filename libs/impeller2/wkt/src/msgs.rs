@@ -1,10 +1,14 @@
 use impeller2::{
+    buf::IoBuf,
     schema::Schema,
     table::{Entry, VTable},
-    types::{ComponentId, EntityId, Msg, PacketId, Timestamp},
+    types::{
+        ComponentId, EntityId, Msg, OwnedTable, OwnedTimeSeries, PacketId, Request, Timestamp,
+        TryFromPacket,
+    },
 };
 use postcard_schema::schema::owned::OwnedNamedType;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, net::SocketAddr, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
@@ -15,7 +19,7 @@ use crate::{
 
 use crate::AssetId;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct VTableMsg {
     pub id: PacketId,
     pub vtable: VTable<Vec<Entry>, Vec<u8>>,
@@ -25,7 +29,7 @@ impl Msg for VTableMsg {
     const ID: PacketId = [224, 0];
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct Stream {
     #[serde(default)]
     pub filter: StreamFilter,
@@ -35,14 +39,39 @@ pub struct Stream {
     pub id: StreamId,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Clone)]
+pub enum StreamReply<B: IoBuf> {
+    Table(OwnedTable<B>),
+    VTable(VTableMsg),
+}
+
+impl<B: IoBuf + Clone> TryFromPacket<B> for StreamReply<B> {
+    fn try_from_packet(
+        packet: &impeller2::types::OwnedPacket<B>,
+    ) -> Result<Self, impeller2::error::Error> {
+        match packet {
+            impeller2::types::OwnedPacket::Msg(m) if m.id == VTableMsg::ID => {
+                let msg = m.parse::<VTableMsg>()?;
+                Ok(Self::VTable(msg))
+            }
+            impeller2::types::OwnedPacket::Table(table) => Ok(Self::Table(table.clone())),
+            _ => Err(impeller2::error::Error::InvalidPacket),
+        }
+    }
+}
+
+impl Request for Stream {
+    type Reply<B: IoBuf + Clone> = StreamReply<B>;
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub struct FixedRateBehavior {
     pub initial_timestamp: InitialTimestamp,
-    pub timestep: Option<Duration>,
+    pub timestep: Option<u64>,
     pub frequency: Option<u64>,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub enum InitialTimestamp {
     #[default]
     Earliest,
@@ -50,7 +79,7 @@ pub enum InitialTimestamp {
     Manual(Timestamp),
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub enum StreamBehavior {
     #[default]
     RealTime,
@@ -59,14 +88,10 @@ pub enum StreamBehavior {
 
 pub type StreamId = u64;
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub struct StreamFilter {
     pub component_id: Option<ComponentId>,
     pub entity_id: Option<EntityId>,
-}
-
-impl Msg for Stream {
-    const ID: PacketId = [224, 1];
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -107,6 +132,10 @@ impl Msg for GetTimeSeries {
     const ID: PacketId = [224, 3];
 }
 
+impl Request for GetTimeSeries {
+    type Reply<B: IoBuf + Clone> = OwnedTimeSeries<B>;
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SchemaMsg(pub Schema<Vec<u64>>);
 impl Msg for SchemaMsg {
@@ -123,7 +152,7 @@ impl Msg for GetSchema {
 }
 
 impl Request for GetSchema {
-    type Reply = SchemaMsg;
+    type Reply<B: IoBuf + Clone> = SchemaMsg;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -136,7 +165,7 @@ impl Msg for GetComponentMetadata {
 }
 
 impl Request for GetComponentMetadata {
-    type Reply = crate::ComponentMetadata;
+    type Reply<B: IoBuf + Clone> = crate::ComponentMetadata;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -149,7 +178,7 @@ impl Msg for GetEntityMetadata {
 }
 
 impl Request for GetEntityMetadata {
-    type Reply = crate::EntityMetadata;
+    type Reply<B: IoBuf + Clone> = crate::EntityMetadata;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -238,7 +267,7 @@ impl Msg for GetAsset {
 }
 
 impl Request for GetAsset {
-    type Reply = crate::Asset<'static>;
+    type Reply<B: IoBuf + Clone> = crate::Asset<'static>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -249,7 +278,7 @@ impl Msg for DumpMetadata {
 }
 
 impl Request for DumpMetadata {
-    type Reply = DumpMetadataResp;
+    type Reply<B: IoBuf + Clone> = DumpMetadataResp;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -328,43 +357,22 @@ macro_rules! impl_user_data_msg {
                 });
             }
         }
+        #[cfg(feature = "mlua")]
+        impl mlua::FromLua for $t {
+            fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                mlua::LuaSerdeExt::from_value(lua, value)
+            }
+        }
     };
 }
 
+impl_user_data_msg!(Stream);
+impl_user_data_msg!(MsgStream);
 impl_user_data_msg!(SetAsset<'_>);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
 impl_user_data_msg!(SetEntityMetadata);
-impl_user_data_msg!(Stream);
 impl_user_data_msg!(UdpUnicast);
-
-#[cfg(feature = "mlua")]
-impl mlua::FromLua for SetComponentMetadata {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
-
-#[cfg(feature = "mlua")]
-impl mlua::FromLua for SetEntityMetadata {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
-
-#[cfg(feature = "mlua")]
-impl mlua::FromLua for Stream {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
-
-#[cfg(feature = "mlua")]
-impl mlua::FromLua for UdpUnicast {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct GetEarliestTimestamp;
@@ -416,19 +424,12 @@ impl Msg for SQLQuery {
     const ID: PacketId = [224, 27];
 }
 
-#[cfg(feature = "mlua")]
-impl mlua::FromLua for SQLQuery {
-    fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
-        mlua::LuaSerdeExt::from_value(lua, value)
-    }
-}
-
 impl_user_data_msg!(SQLQuery);
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[repr(transparent)]
 pub struct ArrowIPC<'a> {
-    pub batches: Vec<Cow<'a, [u8]>>,
+    pub batch: Option<Cow<'a, [u8]>>,
 }
 
 impl Msg for ArrowIPC<'_> {
@@ -440,16 +441,18 @@ pub struct ErrorResponse {
     pub description: String,
 }
 
+impl std::fmt::Display for ErrorResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.description)
+    }
+}
+
 impl Msg for ErrorResponse {
     const ID: PacketId = [224, 29];
 }
 
-pub trait Request {
-    type Reply: Msg + DeserializeOwned;
-}
-
 impl Request for SQLQuery {
-    type Reply = ArrowIPC<'static>;
+    type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -473,13 +476,9 @@ impl Msg for SetMsgMetadata {
     const ID: PacketId = [224, 31];
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct MsgStream {
     pub msg_id: PacketId,
-}
-
-impl Msg for MsgStream {
-    const ID: PacketId = [224, 32];
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -492,7 +491,7 @@ impl Msg for GetMsgMetadata {
 }
 
 impl Request for GetMsgMetadata {
-    type Reply = MsgMetadata;
+    type Reply<B: IoBuf + Clone> = MsgMetadata;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -507,7 +506,7 @@ impl Msg for GetMsgs {
 }
 
 impl Request for GetMsgs {
-    type Reply = MsgBatch;
+    type Reply<B: IoBuf + Clone> = MsgBatch;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
