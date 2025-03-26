@@ -115,7 +115,6 @@
         };
         packages = {
           default = nixosConfigurations.default.config.system.build.sdImage;
-          ext4 = nixosConfigurations.default.config.system.build.raw;
           toplevel = nixosConfigurations.default.config.system.build.toplevel;
           sdimage = nixosConfigurations.installer.config.system.build.sdImage;
           flash-uefi = pkgs.runCommand "flash-uefi" {} ''
