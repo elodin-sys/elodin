@@ -530,6 +530,18 @@ impl UserData for Client {
                 Ok(())
             },
         );
+        methods.add_async_method_mut(
+            "save_archive",
+            |lua, mut this, (path, format): (PathBuf, Option<Value>)| async move {
+                let format = if let Some(format) = format {
+                    lua.from_value(format)?
+                } else {
+                    ArchiveFormat::ArrowIpc
+                };
+                this.request(&SaveArchive { path, format }).await?;
+                Ok(())
+            },
+        );
 
         macro_rules! add_req_reply_method {
             ($name:tt, $ty:tt, $req:tt) => {
@@ -843,6 +855,12 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
                             "Gets a components schema {} {{ id }}",
                             Color::Blue.bold().paint("GetSchema")
                         ),
+                    );
+                    print_usage_line(
+                        "Client:save_archive(path, format)",
+                        r#"Dumps the database to arrow-ipc or parquet files at the specified path
+ - path - the path to the folder where the contents will be dumped
+ - format - 'arrow-ipc' (default), 'parquet' - the format that will be used"#,
                     );
                     println!("{}", Color::Yellow.bold().paint("Messages"));
                     print_message("SetComponentMetadata { component_id, name, metadata, asset }");

@@ -9,7 +9,7 @@ use impeller2::{
 };
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, net::SocketAddr, time::Duration};
+use std::{borrow::Cow, net::SocketAddr, path::PathBuf, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
@@ -526,4 +526,26 @@ pub struct UdpUnicast {
 
 impl Msg for UdpUnicast {
     const ID: PacketId = [224, 36];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct SaveArchive {
+    pub path: PathBuf,
+    pub format: ArchiveFormat,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct ArchiveSaved {
+    pub path: PathBuf,
+}
+
+impl Request for SaveArchive {
+    type Reply<B: IoBuf + Clone> = ArchiveSaved;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveFormat {
+    ArrowIpc,
+    Parquet,
 }

@@ -18,8 +18,9 @@ license = false
 eula = false
 
 [features]
-default = ["axum"]
+default = ["axum", "parquet"]
 axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
+parquet = ["dep:parquet"]
 
 [dependencies]
 # ser-de
@@ -72,12 +73,11 @@ arrow.version = "54.2.0"
 arrow.features = ["canonical_extension_types"]
 arrow-schema.version = "54.2.0"
 arrow-schema.features = ["canonical_extension_types"]
-#arrow.features = ["arrow-ipc"]
-#arrow.default-features = false
 datafusion.version = "45.0.0"
 convert_case = "0.6.0"
 thingbuf.version = "0.1"
-
+parquet.version = "54"
+parquet.optional = true
 
 
 # axum

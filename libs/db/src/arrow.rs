@@ -7,12 +7,13 @@ use arrow::{
     datatypes::*,
 };
 use convert_case::{Case, Casing};
-use datafusion::{datasource::MemTable, prelude::SessionContext};
+use datafusion::{datasource::MemTable, parquet, prelude::SessionContext};
 use impeller2::types::PrimType;
-use std::{ptr::NonNull, sync::Arc};
+use impeller2_wkt::ArchiveFormat;
+use std::{fs::File, path::Path, ptr::NonNull, sync::Arc};
 use zerocopy::{Immutable, IntoBytes};
 
-use crate::{Component, DB, append_log::AppendLog};
+use crate::{Component, DB, Error, append_log::AppendLog};
 
 impl<T: IntoBytes + Immutable> AppendLog<T> {
     pub fn as_arrow_buffer(&self) -> Buffer {
@@ -185,6 +186,51 @@ impl DB {
             ctx.sql(&view_query).await?.collect().await?;
         }
         Ok(())
+    }
+
+    pub fn save_archive(&self, path: impl AsRef<Path>, format: ArchiveFormat) -> Result<(), Error> {
+        let path = path.as_ref();
+        std::fs::create_dir_all(path)?;
+        self.with_state(|state| {
+            for component in state.components.values() {
+                let Some(component_metadata) =
+                    state.component_metadata.get(&component.component_id)
+                else {
+                    continue;
+                };
+                let Some(entity_metadata) = state.entity_metadata.get(&component.entity_id) else {
+                    continue;
+                };
+
+                let column_name = format!("{}_{}", entity_metadata.name, component_metadata.name);
+                let record_batch = component.as_record_batch(column_name.clone());
+                let schema = record_batch.schema_ref();
+                match format {
+                    ArchiveFormat::ArrowIpc => {
+                        let file_name = format!("{column_name}.arrow");
+                        let file_path = path.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer =
+                            arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
+                        writer.write(&record_batch)?;
+                        writer.flush()?;
+                    }
+                    #[cfg(feature = "parquet")]
+                    ArchiveFormat::Parquet => {
+                        let file_name = format!("{column_name}.parquet");
+                        let file_path = path.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer =
+                            parquet::arrow::ArrowWriter::try_new(&mut file, schema.clone(), None)?;
+                        writer.write(&record_batch)?;
+                        writer.close()?;
+                    }
+                    #[allow(unreachable_patterns)]
+                    _ => return Err(Error::UnsupportedArchiveFormat),
+                }
+            }
+            Ok(())
+        })
     }
 }
 
