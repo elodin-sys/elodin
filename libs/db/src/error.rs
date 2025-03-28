@@ -43,6 +43,11 @@ pub enum Error {
     MsgNotFound(PacketId),
     #[error("bad message")]
     BadMessage,
+    #[error("unsupported archive format")]
+    UnsupportedArchiveFormat,
+    #[cfg(feature = "parquet")]
+    #[error("parquet {0}")]
+    Parquet(#[from] parquet::errors::ParquetError),
 }
 
 impl From<impeller2_stellar::Error> for Error {

@@ -2,6 +2,10 @@
 
 ## unreleased
 
+- **(feat)** add `SaveArchive` method to db that allows saving arrow ipc or parquet archives
+  `SaveArchive` will dump the current contents of the database to the file system at the specified path. By default this uses arrow-ipc as the file format, but it can be switched to use parquet
+- **(feat)** add C++ code generation to elodin-db
+
 ## v0.12
 
 ### v0.12.2

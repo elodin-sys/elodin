@@ -4474,6 +4474,7 @@ dependencies = [
  "memmap2",
  "miette",
  "nox",
+ "parquet",
  "postcard",
  "postcard-c-codegen",
  "postcard-dyn",
