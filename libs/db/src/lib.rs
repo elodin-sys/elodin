@@ -1120,7 +1120,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 return Err(Error::MsgNotFound(msg_id));
             };
             let tx = tx.lock().await;
-            tx.send(metadata.with_request_id(m.req_id)).await.0.unwrap();
+            tx.send(metadata.with_request_id(m.req_id)).await.0?;
         }
         Packet::Msg(m) if m.id == GetMsgs::ID => {
             let GetMsgs {
@@ -1139,8 +1139,15 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             let tx = tx.lock().await;
             tx.send(MsgBatch { data }.with_request_id(m.req_id))
                 .await
-                .0
-                .unwrap();
+                .0?;
+        }
+        Packet::Msg(m) if m.id == SaveArchive::ID => {
+            let SaveArchive { path, format } = m.parse()?;
+            db.save_archive(&path, format)?;
+            let tx = tx.lock().await;
+            tx.send(ArchiveSaved { path }.with_request_id(m.req_id))
+                .await
+                .0?;
         }
         Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
         _ => {}
