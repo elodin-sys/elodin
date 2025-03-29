@@ -184,6 +184,16 @@ def world() -> tuple[el.World, el.EntityId]:
         ),
         name="Rate Control Panel",
     )
+    world.spawn(
+        el.Panel.hsplit(
+            el.Panel.vsplit(
+                el.Panel.graph(el.GraphEntity(drone, sensors.Gyro)),
+                el.Panel.graph(el.GraphEntity(drone, sensors.Accel)),
+                el.Panel.graph(el.GraphEntity(drone, sensors.Magnetometer)),
+            ),
+        ),
+        name="Sensor Panel",
+    )
     return world, drone
 
 

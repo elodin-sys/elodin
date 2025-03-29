@@ -112,7 +112,7 @@ TALON_QUAD_CONFIG = Config(
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
-    sensor_noise=False,
+    sensor_noise=True,
 )
 TALON_QUAD_CONFIG.set_as_global()
 # EDU_450_CONFIG.set_as_global()
