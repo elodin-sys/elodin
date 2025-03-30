@@ -13,7 +13,7 @@
     ripgrep
     tcpdump
     iperf3
-    v4l-utils
+    (v4l-utils.override {withGUI = false;})
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
   ];
