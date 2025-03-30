@@ -17,4 +17,5 @@ jobs:
           name: "elodin-sys/paracosm"
           rolling: true
           visibility: "private"
+          directory: ./images/aleph
           include-output-paths: true
