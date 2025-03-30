@@ -3,6 +3,7 @@ use impeller2::component::Asset;
 use impeller2::types::{ComponentId, EntityId};
 use nox::{ArrayRepr, Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ops::Range;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -12,12 +13,17 @@ pub enum Panel {
     VSplit(Split),
     HSplit(Split),
     Graph(Graph),
+    ComponentMonitor(ComponentMonitor),
+    ActionPane(ActionPane),
+    SQLTable(SQLTable),
+    Tabs(Vec<Panel>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Split {
     pub panels: Vec<Panel>,
+    pub shares: HashMap<usize, f32>,
     pub active: bool,
 }
 
@@ -176,4 +182,24 @@ impl Material {
 
 impl Asset for Material {
     const NAME: &'static str = "material";
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct ComponentMonitor {
+    pub component_id: ComponentId,
+    pub entity_id: EntityId,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct SQLTable {
+    pub query: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct ActionPane {
+    pub label: String,
+    pub lua: String,
 }
