@@ -42,7 +42,7 @@ members = [
 exclude = ["fsw/multicopter", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.12.2"
+version = "0.12.3"
 edition = "2024"
 repository = "https://github.com/elodin-sys/paracosm"
 
@@ -68,15 +68,15 @@ lto = "thin"
 # set workspace version as the version of xla
 xla.package = "noxla"
 xla.path = "libs/noxla"
-xla.version = "0.12.2"
+xla.version = "0.12.3"
 roci-macros.path = "libs/roci/macros"
-roci-macros.version = "0.12.2"
+roci-macros.version = "0.12.3"
 roci.path = "libs/roci"
 roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
-nox.version = "0.12.2"
+nox.version = "0.12.3"
 nox-ecs.path = "libs/nox-ecs"
 basilisk.path = "libs/basilisk-rs"
 nox-frames.path = "libs/nox-frames"
