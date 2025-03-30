@@ -79,6 +79,7 @@ impl Panel {
             inner: impeller2_wkt::Panel::VSplit(Split {
                 panels: panels.into_iter().map(|x| x.inner).collect(),
                 active,
+                shares: Default::default(),
             }),
         }
     }
@@ -90,6 +91,7 @@ impl Panel {
             inner: impeller2_wkt::Panel::HSplit(Split {
                 panels: panels.into_iter().map(|x| x.inner).collect(),
                 active,
+                shares: Default::default(),
             }),
         }
     }

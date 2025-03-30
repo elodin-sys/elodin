@@ -1,7 +1,7 @@
 # Changelog
 
 ## unreleased
-
+- **(feat)** Add "presets" to the editor. Presets allow you to save your current editor layout (graphs, viewports, etc), and load them later
 - **(feat)** add `SaveArchive` method to db that allows saving arrow ipc or parquet archives
   `SaveArchive` will dump the current contents of the database to the file system at the specified path. By default this uses arrow-ipc as the file format, but it can be switched to use parquet
 - **(feat)** add C++ code generation to elodin-db

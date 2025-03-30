@@ -44,6 +44,7 @@ pub mod actions;
 pub mod colors;
 pub mod images;
 pub mod monitor;
+pub mod preset;
 pub mod sql_table;
 mod theme;
 pub mod tiles;

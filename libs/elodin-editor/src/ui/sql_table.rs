@@ -25,8 +25,8 @@ pub struct SQLTablePane {
 
 #[derive(Component, Default)]
 pub struct SqlTable {
-    current_query: String,
-    state: SqlTableState,
+    pub current_query: String,
+    pub state: SqlTableState,
 }
 
 #[derive(Default)]

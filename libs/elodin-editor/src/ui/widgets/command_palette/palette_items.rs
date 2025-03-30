@@ -12,6 +12,7 @@ use bevy::{
     render::view::Visibility,
 };
 use bevy_infinite_grid::InfiniteGrid;
+use egui_tiles::TileId;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, CurrentStreamId, PacketTx};
@@ -20,7 +21,8 @@ use impeller2_wkt::{BodyAxes, EntityMetadata, IsRecording, SetDbSettings, SetStr
 use crate::{
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        EntityData, HdrEnabled, tiles,
+        self, EntityData, HdrEnabled,
+        tiles::{self, SyncViewportParams},
         widgets::plot::{GraphBundle, default_component_values},
     },
 };
@@ -210,9 +212,10 @@ const VIEWPORT_LABEL: &str = "VIEWPORT";
 const TILES_LABEL: &str = "TILES";
 const SIMULATION_LABEL: &str = "SIMULATION";
 const HELP_LABEL: &str = "HELP";
+const PRESETS_LABEL: &str = "PRESETS";
 
-pub fn create_action() -> PaletteItem {
-    PaletteItem::new("Create Action", TILES_LABEL, |_: In<String>| {
+pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new("Create Action", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
                     PaletteItem::new(
                         LabelSource::placeholder("Enter a label for the button"),
@@ -234,6 +237,7 @@ pub fn create_action() -> PaletteItem {
                                                     tile_state.create_action_tile(
                                                         msg_label.clone(),
                                                         format!("client:send_msg({name:?}, {msg})"),
+                                                        tile_id,
                                                     );
                                                     PaletteEvent::Exit
                                                 },
@@ -247,7 +251,7 @@ pub fn create_action() -> PaletteItem {
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
                                     "Enter a custom lua command",
                                     move |lua: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                                        tile_state.create_action_tile(label.clone(), lua.0);
+                                        tile_state.create_action_tile(label.clone(), lua.0, tile_id);
                                         PaletteEvent::Exit
                                     },
                                 )
@@ -263,15 +267,15 @@ pub fn create_action() -> PaletteItem {
     })
 }
 
-pub fn create_graph() -> PaletteItem {
+pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Graph",
         TILES_LABEL,
-        |_: In<String>, entities: Query<EntityData>| {
+        move |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 entities
                     .iter()
-                    .map(|(_, entity, _, metadata)| graph_entity_item(metadata, entity))
+                    .map(|(_, entity, _, metadata)| graph_entity_item(metadata, entity, tile_id))
                     .collect(),
             )
             .prompt("Select an entity to graph")
@@ -280,7 +284,11 @@ pub fn create_graph() -> PaletteItem {
     )
 }
 
-fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> PaletteItem {
+fn graph_entity_item(
+    entity_metadata: &EntityMetadata,
+    entity: Entity,
+    tile_id: Option<TileId>,
+) -> PaletteItem {
     PaletteItem::new(
         entity_metadata.name.clone(),
         "Entities",
@@ -317,7 +325,7 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
                                 ))),
                             )));
                             let bundle = GraphBundle::new(&mut render_layer_alloc, entities);
-                            tile_state.create_graph_tile(None, bundle);
+                            tile_state.create_graph_tile(tile_id, bundle);
                             PaletteEvent::Exit
                         },
                     )
@@ -331,15 +339,15 @@ fn graph_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Palett
     )
 }
 
-pub fn create_monitor() -> PaletteItem {
+pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Monitor",
         TILES_LABEL,
-        |_: In<String>, entities: Query<EntityData>| {
+        move |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 entities
                     .iter()
-                    .map(|(_, entity, _, metadata)| monitor_entity_item(metadata, entity))
+                    .map(|(_, entity, _, metadata)| monitor_entity_item(metadata, entity, tile_id))
                     .collect(),
             )
             .prompt("Select an entity to monitor")
@@ -348,7 +356,11 @@ pub fn create_monitor() -> PaletteItem {
     )
 }
 
-fn monitor_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> PaletteItem {
+fn monitor_entity_item(
+    entity_metadata: &EntityMetadata,
+    entity: Entity,
+    tile_id: Option<TileId>,
+) -> PaletteItem {
     PaletteItem::new(
         entity_metadata.name.clone(),
         "Entities",
@@ -371,7 +383,7 @@ fn monitor_entity_item(entity_metadata: &EntityMetadata, entity: Entity) -> Pale
                             let Ok((entity_id, _, _, _)) = entities.get(entity) else {
                                 return PaletteEvent::Exit;
                             };
-                            tile_state.create_monitor_tile(*entity_id, component_id);
+                            tile_state.create_monitor_tile(*entity_id, component_id, tile_id);
                             PaletteEvent::Exit
                         },
                     )
@@ -426,17 +438,17 @@ fn toggle_body_axes() -> PaletteItem {
     )
 }
 
-pub fn create_viewport() -> PaletteItem {
+pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Viewport",
         TILES_LABEL,
-        |_: In<String>, entities: Query<EntityData>| {
+        move |_: In<String>, entities: Query<EntityData>| {
             PalettePage::new(
                 std::iter::once(PaletteItem::new(
                     "None",
                     "Entities",
                     move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                        tile_state.create_viewport_tile(None);
+                        tile_state.create_viewport_tile(None, tile_id);
                         PaletteEvent::Exit
                     },
                 ))
@@ -449,7 +461,7 @@ pub fn create_viewport() -> PaletteItem {
                                     metadata.name.clone(),
                                     "Entities",
                                     move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
-                                        tile_state.create_viewport_tile(Some(entity_id));
+                                        tile_state.create_viewport_tile(Some(entity_id), tile_id);
                                         PaletteEvent::Exit
                                     },
                                 ))
@@ -462,6 +474,17 @@ pub fn create_viewport() -> PaletteItem {
             )
             .prompt("Select the entity the viewport will track")
             .into()
+        },
+    )
+}
+
+pub fn create_sql(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create SQL Table",
+        TILES_LABEL,
+        move |_: In<String>, mut tile_state: ResMut<tiles::TileState>| {
+            tile_state.create_sql_tile(tile_id);
+            PaletteEvent::Exit
         },
     )
 }
@@ -501,6 +524,128 @@ fn set_playback_speed() -> PaletteItem {
             next_page,
         }
     })
+}
+
+pub fn save_preset() -> PaletteItem {
+    PaletteItem::new("Save Preset", PRESETS_LABEL, |_name: In<String>| {
+        PalettePage::new(vec![save_preset_inner()]).into()
+    })
+}
+
+pub fn save_preset_inner() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Enter a name for the preset"),
+        "",
+        move |name: In<String>,
+              sql_tables: Query<&ui::sql_table::SqlTable>,
+              cameras: Query<ui::CameraQuery>,
+              entity_id: Query<&impeller2::types::EntityId>,
+              action_tiles: Query<&ui::actions::ActionTile>,
+              graph_states: Query<&ui::widgets::plot::GraphState>,
+              ui_state: Res<tiles::TileState>| {
+            if let Some(tile_id) = ui_state.tree.root() {
+                let panel = crate::ui::preset::tile_to_panel(
+                    &sql_tables,
+                    &cameras,
+                    &entity_id,
+                    &action_tiles,
+                    &graph_states,
+                    tile_id,
+                    &ui_state,
+                );
+                let dirs = ui::startup_window::dirs();
+                let dir = dirs.data_dir().join("presets");
+                let _ = std::fs::create_dir(&dir);
+                let _ = std::fs::write(
+                    dir.join(name.clone()),
+                    serde_json::to_string(&panel).unwrap(),
+                );
+            }
+            PaletteEvent::Exit
+        },
+    )
+    .default()
+}
+
+pub fn load_preset() -> PaletteItem {
+    PaletteItem::new("Load Preset", PRESETS_LABEL, |_: In<String>| {
+        let dirs = ui::startup_window::dirs();
+        let dir = dirs.data_dir().join("presets");
+        let Ok(elems) = std::fs::read_dir(dir) else {
+            return PaletteEvent::Exit;
+        };
+
+        let mut items = vec![];
+        for elem in elems {
+            let Ok(elem) = elem else { continue };
+            let path = elem.path();
+            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            items.push(load_preset_inner(file_name.to_string()))
+        }
+        PalettePage::new(items).into()
+    })
+}
+
+pub fn load_preset_inner(name: String) -> PaletteItem {
+    PaletteItem::new(
+        name.clone(),
+        "",
+        move |_: In<String>,
+              params: SyncViewportParams,
+              mut selected_object: ResMut<ui::SelectedObject>| {
+            let dirs = ui::startup_window::dirs();
+            let path = dirs.data_dir().join("presets").join(name.clone());
+            if let Ok(json) = std::fs::read_to_string(path) {
+                if let Ok(panel) = serde_json::from_str::<impeller2_wkt::Panel>(&json) {
+                    let SyncViewportParams {
+                        mut commands,
+                        mut tile_state,
+                        asset_server,
+                        mut meshes,
+                        mut materials,
+                        mut render_layer_alloc,
+                        entity_map,
+                        entity_metadata,
+                        grid_cell,
+                        metadata_store,
+                        mut hdr_enabled,
+                        schema_reg,
+                        ..
+                    } = params;
+                    tile_state.clear(&mut commands, &mut selected_object);
+                    tiles::spawn_panel(
+                        &panel,
+                        None,
+                        &asset_server,
+                        &mut tile_state,
+                        &mut meshes,
+                        &mut materials,
+                        &mut render_layer_alloc,
+                        &mut commands,
+                        &entity_map,
+                        &entity_metadata,
+                        &grid_cell,
+                        &metadata_store,
+                        &mut hdr_enabled,
+                        &schema_reg,
+                    );
+                }
+            }
+            PaletteEvent::Exit
+        },
+    )
+}
+
+pub fn create_tiles(tile_id: TileId) -> PalettePage {
+    PalettePage::new(vec![
+        create_graph(Some(tile_id)),
+        create_action(Some(tile_id)),
+        create_monitor(Some(tile_id)),
+        create_viewport(Some(tile_id)),
+        create_sql(Some(tile_id)),
+    ])
 }
 
 impl Default for PalettePage {
@@ -555,10 +700,13 @@ impl Default for PalettePage {
                 },
             ),
             set_playback_speed(),
-            create_graph(),
-            create_action(),
-            create_monitor(),
-            create_viewport(),
+            create_graph(None),
+            create_action(None),
+            create_monitor(None),
+            create_viewport(None),
+            create_sql(None),
+            save_preset(),
+            load_preset(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit

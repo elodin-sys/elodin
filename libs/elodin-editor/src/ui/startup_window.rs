@@ -642,7 +642,7 @@ fn recent_item_button(
     }
 }
 
-fn dirs() -> directories::ProjectDirs {
+pub fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }
 
