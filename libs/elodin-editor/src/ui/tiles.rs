@@ -49,9 +49,9 @@ pub struct TileIcons {
 
 #[derive(Resource, Clone)]
 pub struct TileState {
-    tree: egui_tiles::Tree<Pane>,
-    tree_actions: Vec<TreeAction>,
-    graphs: HashMap<TileId, Entity>,
+    pub tree: egui_tiles::Tree<Pane>,
+    pub tree_actions: Vec<TreeAction>,
+    pub graphs: HashMap<TileId, Entity>,
 }
 
 #[derive(Resource, Default)]
@@ -101,23 +101,41 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddGraph(None, None));
     }
 
-    pub fn create_viewport_tile(&mut self, focus_entity: Option<EntityId>) {
+    pub fn create_viewport_tile(
+        &mut self,
+        focus_entity: Option<EntityId>,
+        tile_id: Option<TileId>,
+    ) {
         self.tree_actions
-            .push(TreeAction::AddViewport(None, focus_entity));
+            .push(TreeAction::AddViewport(tile_id, focus_entity));
     }
 
     pub fn create_viewport_tile_empty(&mut self) {
         self.tree_actions.push(TreeAction::AddViewport(None, None));
     }
 
-    pub fn create_monitor_tile(&mut self, entity_id: EntityId, component_id: ComponentId) {
+    pub fn create_monitor_tile(
+        &mut self,
+        entity_id: EntityId,
+        component_id: ComponentId,
+        tile_id: Option<TileId>,
+    ) {
         self.tree_actions
-            .push(TreeAction::AddMonitor(None, entity_id, component_id));
+            .push(TreeAction::AddMonitor(tile_id, entity_id, component_id));
     }
 
-    pub fn create_action_tile(&mut self, button_name: String, lua_code: String) {
+    pub fn create_action_tile(
+        &mut self,
+        button_name: String,
+        lua_code: String,
+        tile_id: Option<TileId>,
+    ) {
         self.tree_actions
-            .push(TreeAction::AddActionTile(None, button_name, lua_code));
+            .push(TreeAction::AddActionTile(tile_id, button_name, lua_code));
+    }
+
+    pub fn create_sql_tile(&mut self, tile_id: Option<TileId>) {
+        self.tree_actions.push(TreeAction::AddSQLTable(tile_id));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -162,7 +180,7 @@ impl TileState {
 }
 
 #[derive(Clone)]
-enum Pane {
+pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
@@ -222,7 +240,7 @@ impl Pane {
 }
 
 #[derive(Default, Clone)]
-struct ViewportPane {
+pub struct ViewportPane {
     pub camera: Option<Entity>,
     pub nav_gizmo: Option<Entity>,
     pub nav_gizmo_camera: Option<Entity>,
@@ -259,7 +277,7 @@ impl ViewportPane {
 }
 
 #[derive(Clone)]
-struct GraphPane {
+pub struct GraphPane {
     pub id: Entity,
     pub label: String,
     pub rect: Option<egui::Rect>,
@@ -527,47 +545,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
         ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
         ui.add_space(5.0);
-        let mut resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
+        let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
-            resp.flags.set(egui::response::Flags::LONG_TOUCHED, true);
+            layout
+                .cmd_palette_state
+                .open_page(move || palette_items::create_tiles(tile_id));
         }
-        resp.context_menu(|ui| {
-            ui.style_mut().spacing.item_spacing = vec2(16.0, 8.0);
-            if ui.button("VIEWPORT").clicked() {
-                self.tree_actions
-                    .push(TreeAction::AddViewport(Some(tile_id), None));
-                ui.close_menu();
-            }
-            ui.separator();
-            if ui.button("GRAPH").clicked() {
-                layout
-                    .cmd_palette_state
-                    .open_item(palette_items::create_graph());
-                ui.close_menu();
-            }
-            ui.separator();
-            if ui.button("MONITOR").clicked() {
-                layout
-                    .cmd_palette_state
-                    .open_item(palette_items::create_monitor());
-                ui.close_menu();
-            }
-
-            ui.separator();
-            if ui.button("SQL").clicked() {
-                self.tree_actions
-                    .push(TreeAction::AddSQLTable(Some(tile_id)));
-                ui.close_menu();
-            }
-
-            ui.separator();
-            if ui.button("ACTION").clicked() {
-                layout
-                    .cmd_palette_state
-                    .open_item(palette_items::create_action());
-                ui.close_menu();
-            }
-        });
     }
 }
 
@@ -671,7 +654,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     if create_viewport_btn.clicked() {
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_viewport());
+                            .open_item(palette_items::create_viewport(None));
                     }
 
                     let create_graph_btn = ui.add(
@@ -684,7 +667,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     if create_graph_btn.clicked() {
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_graph());
+                            .open_item(palette_items::create_graph(None));
                     }
 
                     let create_monitor_btn = ui.add(
@@ -697,7 +680,7 @@ impl WidgetSystem for TileLayoutEmpty<'_> {
                     if create_monitor_btn.clicked() {
                         state_mut
                             .cmd_palette_state
-                            .open_item(palette_items::create_monitor());
+                            .open_item(palette_items::create_monitor(None));
                     }
                 });
             },
@@ -947,19 +930,19 @@ pub struct SyncedViewport;
 
 #[derive(SystemParam)]
 pub struct SyncViewportParams<'w, 's> {
-    panels: Query<'w, 's, (Entity, &'static Panel), Without<SyncedViewport>>,
-    commands: Commands<'w, 's>,
-    tile_state: ResMut<'w, TileState>,
-    asset_server: Res<'w, AssetServer>,
-    meshes: ResMut<'w, Assets<Mesh>>,
-    materials: ResMut<'w, Assets<StandardMaterial>>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
-    entity_map: Res<'w, EntityMap>,
-    entity_metadata: Query<'w, 's, &'static EntityMetadata>,
-    grid_cell: Query<'w, 's, &'static GridCell<i128>>,
-    metadata_store: Res<'w, ComponentMetadataRegistry>,
-    hdr_enabled: ResMut<'w, HdrEnabled>,
-    schema_reg: Res<'w, ComponentSchemaRegistry>,
+    pub panels: Query<'w, 's, (Entity, &'static Panel), Without<SyncedViewport>>,
+    pub commands: Commands<'w, 's>,
+    pub tile_state: ResMut<'w, TileState>,
+    pub asset_server: Res<'w, AssetServer>,
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+    pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    pub entity_map: Res<'w, EntityMap>,
+    pub entity_metadata: Query<'w, 's, &'static EntityMetadata>,
+    pub grid_cell: Query<'w, 's, &'static GridCell<i128>>,
+    pub metadata_store: Res<'w, ComponentMetadataRegistry>,
+    pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    pub schema_reg: Res<'w, ComponentSchemaRegistry>,
 }
 
 pub fn sync_viewports(params: SyncViewportParams) {
@@ -1001,7 +984,7 @@ pub fn sync_viewports(params: SyncViewportParams) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_panel(
+pub fn spawn_panel(
     panel: &Panel,
     parent_id: Option<TileId>,
     asset_server: &Res<AssetServer>,
@@ -1055,17 +1038,19 @@ fn spawn_panel(
             hdr_enabled.0 |= viewport.hdr;
             ui_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
         }
-        Panel::VSplit(split) => {
-            let tile_id = ui_state.insert_tile(
-                Tile::Container(Container::new_linear(
-                    egui_tiles::LinearDir::Vertical,
-                    vec![],
-                )),
-                parent_id,
-                false,
+        Panel::HSplit(split) | Panel::VSplit(split) => {
+            let linear = egui_tiles::Linear::new(
+                match panel {
+                    Panel::HSplit(_) => egui_tiles::LinearDir::Horizontal,
+                    Panel::VSplit(_) => egui_tiles::LinearDir::Vertical,
+                    _ => unreachable!(),
+                },
+                vec![],
             );
-            split.panels.iter().for_each(|panel| {
-                spawn_panel(
+            let tile_id =
+                ui_state.insert_tile(Tile::Container(Container::Linear(linear)), parent_id, false);
+            for (i, panel) in split.panels.iter().enumerate() {
+                let child_id = spawn_panel(
                     panel,
                     tile_id,
                     asset_server,
@@ -1081,19 +1066,33 @@ fn spawn_panel(
                     hdr_enabled,
                     schema_reg,
                 );
-            });
+                let Some(tile_id) = tile_id else {
+                    continue;
+                };
+
+                let Some(child_id) = child_id else {
+                    continue;
+                };
+                let Some(share) = split.shares.get(&i) else {
+                    continue;
+                };
+                let Some(Tile::Container(Container::Linear(linear))) =
+                    ui_state.tree.tiles.get_mut(tile_id)
+                else {
+                    continue;
+                };
+                linear.shares.set_share(child_id, *share);
+            }
             tile_id
         }
-        Panel::HSplit(split) => {
+        Panel::Tabs(tabs) => {
             let tile_id = ui_state.insert_tile(
-                Tile::Container(Container::new_linear(
-                    egui_tiles::LinearDir::Horizontal,
-                    vec![],
-                )),
+                Tile::Container(Container::new_tabs(vec![])),
                 parent_id,
                 false,
             );
-            split.panels.iter().for_each(|panel| {
+
+            tabs.iter().for_each(|panel| {
                 spawn_panel(
                     panel,
                     tile_id,
@@ -1145,6 +1144,41 @@ fn spawn_panel(
             let graph_label = graph_label(graph, entity_map, entity_metadata, metadata_store);
             let graph = GraphPane::new(graph_id, graph_label);
             ui_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
+        }
+        Panel::ComponentMonitor(monitor) => {
+            // Create a MonitorPane and add it to the UI
+            let pane = super::monitor::MonitorPane::new(
+                "Monitor".to_string(),
+                monitor.entity_id,
+                monitor.component_id,
+            );
+            ui_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
+        }
+        Panel::SQLTable(sql) => {
+            // Create a new SQL table entity
+            let entity = commands
+                .spawn(super::sql_table::SqlTable {
+                    current_query: sql.query.clone(),
+                    ..Default::default()
+                })
+                .id();
+            let pane = super::sql_table::SQLTablePane { entity };
+            ui_state.insert_tile(Tile::Pane(Pane::SQLTable(pane)), parent_id, false)
+        }
+        Panel::ActionPane(action) => {
+            // Create a new action tile entity
+            let entity = commands
+                .spawn(super::actions::ActionTile {
+                    button_name: action.label.clone(),
+                    lua: action.lua.clone(),
+                    status: Default::default(),
+                })
+                .id();
+            let pane = super::tiles::ActionTilePane {
+                entity,
+                label: "Action".to_string(),
+            };
+            ui_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
         }
     }
 }

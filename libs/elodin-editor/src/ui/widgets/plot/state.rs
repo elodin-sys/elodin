@@ -42,7 +42,6 @@ pub struct GraphState {
 
 impl GraphBundle {
     pub fn new(
-        //commands: &mut Commands,
         render_layer_alloc: &mut RenderLayerAlloc,
         entities: BTreeMap<EntityId, GraphStateEntity>,
     ) -> Self {

@@ -1,6 +1,6 @@
 use bevy::{
     ecs::{
-        system::{Local, Res, ResMut, Resource, SystemParam, SystemState},
+        system::{In, Local, Res, ResMut, Resource, SystemParam, SystemState},
         world::World,
     },
     input::keyboard::Key,
@@ -39,6 +39,10 @@ impl CommandPaletteState {
         *self = CommandPaletteState::default();
         self.auto_open_item = Some(item);
         self.show = true;
+    }
+
+    pub fn open_page(&mut self, page: impl Fn() -> PalettePage + Send + Sync + 'static) {
+        self.open_item(PaletteItem::new("", "", move |_: In<String>| page().into()));
     }
 
     pub fn handle_event(&mut self, event: PaletteEvent) {
@@ -161,17 +165,15 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
 
         let screen_rect = ctx.screen_rect();
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
-        let palette_size = egui::vec2(palette_width, 800.0);
-        let palette_min = egui::pos2(
-            screen_rect.center().x - palette_width / 2.0,
-            screen_rect.height() * 0.2,
-        );
+        let palette_size = egui::vec2(palette_width, screen_rect.height() - 128.0);
+        let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
 
         let cmd_window = egui::Window::new("command_palette")
             .title_bar(false)
             .resizable(false)
             .fixed_size(palette_size)
             .fixed_pos(palette_min)
+            .max_height(palette_size.y)
             .frame(egui::Frame {
                 fill: colors::PRIMARY_ONYX,
                 stroke: egui::Stroke::new(1.0, with_opacity(colors::PRIMARY_CREAME, 0.005)),
@@ -363,7 +365,7 @@ impl WidgetSystem for PaletteItems<'_> {
         let mut palette_items_filtered = page.filter(&filter);
         let row_margin = egui::Margin::symmetric(10, 12);
         let row_height = ui.spacing().interact_size.y + row_margin.sum().y;
-        let max_visible_rows = palette_items_filtered.len().clamp(0, 10);
+        let max_visible_rows = palette_items_filtered.len();
         if down_pressed {
             selected_index =
                 (selected_index + 1).min(palette_items_filtered.len().saturating_sub(1));
@@ -374,7 +376,8 @@ impl WidgetSystem for PaletteItems<'_> {
 
         if max_visible_rows > 0 {
             let res = egui::ScrollArea::vertical()
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                //.max_height(ui.max_rect().height() - 64.0)
                 .show_rows(ui, row_height, max_visible_rows, |ui, row_range| {
                     let mut current_heading: Option<String> = None;
                     for (

@@ -4534,6 +4534,7 @@ dependencies = [
  "roaring",
  "s10",
  "serde",
+ "serde_json",
  "smallvec",
  "spin",
  "stacker",
