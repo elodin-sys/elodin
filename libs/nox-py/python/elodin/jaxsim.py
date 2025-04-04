@@ -1,4 +1,5 @@
 from jax import numpy as np
+from jax.tree_util import register_pytree_node
 
 
 class JaxSim:
@@ -25,7 +26,15 @@ class JaxSim:
     """
 
     def __init__(
-        self, sim_obj, inputs, outputs, state, dictionary, entity_dict, component_entity_dict
+        self,
+        sim_obj,
+        inputs,
+        outputs,
+        state,
+        dictionary,
+        entity_dict,
+        component_entity_dict,
+        map=None,
     ):
         """
         Initializes the JaxSim class with a world, a system, and a simulation time step.
@@ -54,7 +63,10 @@ class JaxSim:
         self.dictionary = dictionary
         self.entity_dict = entity_dict
         self.component_entity_dict = component_entity_dict
-        self.map = self.generate_index_map(self.inputs, self.outputs)
+        if map is None:
+            self.map = self.generate_index_map(self.inputs, self.outputs)
+        else:
+            self.map = map
 
     def generate_index_map(self, desired_order, current_order):
         """
@@ -195,3 +207,42 @@ class JaxSim:
                             shape = self.state[d_p][entity_index].shape
                             entity_names_shapes.append(f"{name} (shape: {shape})")
             print(f"{component_name}: {', '.join(entity_names_shapes)}")
+
+    def sim_flatten(self):
+        """Flatten the JaxSim object for JAX.
+
+        Returns:
+            A tuple of (flattened_state, auxiliary_data)
+        """
+        state = self.state
+
+        aux_data = (
+            self.py_sim,
+            self.inputs,
+            self.outputs,
+            self.dictionary,
+            self.entity_dict,
+            self.component_entity_dict,
+            self.map,
+        )
+
+        return (state, aux_data)
+
+    def sim_unflatten(aux_data, cls):
+        """Reconstruct a JaxSim from flattened state and auxiliary data.
+
+        Args:
+            aux_data: The auxiliary data from tree_flatten
+            children: The children arrays from tree_flatten
+
+        Returns:
+            A new JaxSim instance
+        """
+        py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map = aux_data
+
+        return JaxSim(
+            py_sim, inputs, outputs, cls, dictionary, entity_dict, component_entity_dict, map
+        )
+
+
+register_pytree_node(JaxSim, JaxSim.sim_flatten, JaxSim.sim_unflatten)
