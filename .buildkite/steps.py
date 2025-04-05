@@ -39,11 +39,14 @@ def nix_step(
     plugins=[],
     agents={},
 ):
+    heredoc_command = f"""nix develop {flake} --command bash <<'EOF'
+{command}
+EOF"""
     return step(
         label=f"{emoji} {label}",
         command=[
             pre_command,
-            f"nix develop {flake} --command bash -euo pipefail -c '{command}'",
+            heredoc_command,
         ],
         key=key,
         depends_on=depends_on,

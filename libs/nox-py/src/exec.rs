@@ -51,10 +51,6 @@ impl Exec {
         self.exec.profile()
     }
 
-    pub fn write_to_dir(&mut self, path: String) -> Result<(), Error> {
-        self.exec.write_to_dir(path).map_err(Error::from)
-    }
-
     pub fn history<'a>(
         &mut self,
         py: Python<'a>,
