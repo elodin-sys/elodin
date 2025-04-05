@@ -48,6 +48,7 @@ impl<'a, T: Elem> ArrayView<'a, T> {
     pub fn get(&self, index: <Dyn as DimGet>::Index) -> T {
         let index = <Dyn as DimGet>::index_as_slice(&index);
         let i: usize = calculate_strides(self.shape)
+            .iter()
             .zip(index.iter())
             .map(|(s, i)| s * i)
             .sum();

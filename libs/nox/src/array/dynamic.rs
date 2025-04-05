@@ -31,7 +31,7 @@ impl<T: Elem> DynArray<T, Vec<T>> {
         if expected_len != storage.len() {
             return None;
         }
-        let strides = crate::utils::calculate_strides(&shape).collect::<SmallVec<[usize; 4]>>();
+        let strides = crate::utils::calculate_strides(&shape);
         Some(DynArray {
             storage,
             shape,
@@ -52,7 +52,7 @@ impl<T: Elem> ArrayBuf<T> for DynArray<T, Vec<T>> {
 
     fn default(dims: &[usize]) -> Self {
         let len: usize = dims.iter().copied().sum();
-        let strides = crate::utils::calculate_strides(dims).collect::<SmallVec<[usize; 4]>>();
+        let strides = crate::utils::calculate_strides(dims);
 
         let shape = SmallVec::from_slice(dims);
         let storage = vec![T::default(); len];
