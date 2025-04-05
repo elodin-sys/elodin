@@ -13,10 +13,6 @@ use zerocopy::{FromBytes, TryFromBytes};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub enum Args {
-    Build {
-        #[arg(long)]
-        dir: PathBuf,
-    },
     Run {
         #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
@@ -213,18 +209,6 @@ impl WorldBuilder {
         let args = Args::parse_from(args);
 
         match args {
-            Args::Build { dir } => {
-                let mut exec = self.build_uncompiled(
-                    py,
-                    sys,
-                    sim_time_step,
-                    run_time_step,
-                    default_playback_speed,
-                    max_ticks,
-                )?;
-                exec.write_to_dir(dir)?;
-                Ok(None)
-            }
             Args::Run {
                 addr,
                 no_s10,
@@ -295,8 +279,6 @@ impl WorldBuilder {
                     optimize,
                 )?;
                 exec.run(py, ticks, true)?;
-                let tempdir = tempfile::tempdir()?;
-                exec.exec.write_to_dir(tempdir)?;
                 let profile = exec.profile();
                 println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                 println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -305,7 +287,6 @@ impl WorldBuilder {
                 println!("= tick time:          {:.3} ms", profile["tick"]);
                 println!("build time:           {:.3} ms", profile["build"]);
                 println!("compile time:         {:.3} ms", profile["compile"]);
-                println!("write_to_dir time:    {:.3} ms", profile["write_to_dir"]);
                 println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
                 Ok(None)
             }

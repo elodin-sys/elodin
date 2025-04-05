@@ -343,17 +343,6 @@ pub struct Exec<S: ExecState = Uncompiled> {
     state: S,
 }
 
-impl<S: ExecState> Exec<S> {
-    pub fn write_to_dir(&self, path: impl AsRef<Path>) -> Result<(), Error> {
-        let path = path.as_ref();
-        std::fs::create_dir_all(path)?;
-        let mut metadata = File::create(path.join("metadata.json"))?;
-        serde_json::to_writer(&mut metadata, &self.metadata)?;
-        std::fs::write(path.join("hlo.binpb"), self.hlo_module.to_bytes())?;
-        Ok(())
-    }
-}
-
 impl Exec {
     pub fn new(metadata: ExecMetadata, hlo_module: HloModuleProto) -> Self {
         Self {
@@ -429,19 +418,6 @@ impl<S: ExecState> WorldExec<S> {
             startup_exec: self.startup_exec.clone(),
             profiler: self.profiler.clone(),
         }
-    }
-
-    pub fn write_to_dir(&mut self, dir: impl AsRef<Path>) -> Result<(), Error> {
-        let start = &mut Instant::now();
-        let dir = dir.as_ref();
-        let world_dir = dir.join("world");
-        self.tick_exec.write_to_dir(dir.join("tick_exec"))?;
-        if let Some(startup_exec) = &self.startup_exec {
-            startup_exec.write_to_dir(dir.join("startup_exec"))?;
-        }
-        self.world.write_to_dir(&world_dir)?;
-        self.profiler.write_to_dir.observe(start);
-        Ok(())
     }
 }
 

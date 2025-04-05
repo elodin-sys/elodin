@@ -8,7 +8,6 @@ use std::{
 pub struct Profiler {
     pub build: RollingMean,
     pub compile: RollingMean,
-    pub write_to_dir: RollingMean,
     pub copy_to_client: RollingMean,
     pub execute_buffers: RollingMean,
     pub copy_to_host: RollingMean,
@@ -29,7 +28,6 @@ impl Profiler {
         let profile = [
             ("build", self.build.mean()),
             ("compile", self.compile.mean()),
-            ("write_to_dir", self.write_to_dir.mean()),
             ("copy_to_client", self.copy_to_client.mean()),
             ("execute_buffers", self.execute_buffers.mean()),
             ("copy_to_host", self.copy_to_host.mean()),

@@ -239,11 +239,6 @@ impl World {
         })
     }
 
-    pub fn write_to_dir(&mut self, world_dir: &Path) -> Result<(), Error> {
-        self.write(world_dir.join("world"))?;
-        Ok(())
-    }
-
     pub fn entity_ids(&self) -> HashSet<EntityId> {
         self.host
             .values()
