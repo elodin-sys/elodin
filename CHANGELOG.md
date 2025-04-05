@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** Remove `exec.write_to_dir(path)`. This is made obsolete by the new `SaveArchive` method in elodin-db.
+- **(fix)** Fix an issue where the component inspector would show incorrect data for some multi-dimensional components.
 
 ## v0.12
 
