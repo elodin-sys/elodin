@@ -96,7 +96,21 @@ test_steps = [
         ],
     ),
     group(
+        name=":python: nox-py",
+        key="nox-py",
+        steps=[
+            nix_step(
+                label=":python: nox-py",
+                # this step is just to verify that the package can be imported
+                # nix does all the actual work of building nox-py and installing it in the environment
+                command="python -c 'import elodin; print(elodin.__version__)'",
+                flake=".#python",
+            ),
+        ],
+    ),
+    group(
         name=":python: python",
+        depends_on=["nox-py"],
         steps=[
             nix_step(
                 label=":python: pytest",
@@ -106,6 +120,37 @@ test_steps = [
             nix_step(
                 label=":python: lint",
                 command="ruff format --check; ruff check",
+                flake=".#python",
+            ),
+        ],
+    ),
+    group(
+        name=":python: examples",
+        depends_on=["nox-py"],
+        steps=[
+            nix_step(
+                label=":python: ball",
+                command="python3 examples/ball/main.py bench --ticks 100",
+                flake=".#python",
+            ),
+            nix_step(
+                label=":python: drone",
+                command="python3 examples/drone/main.py bench --ticks 100",
+                flake=".#python",
+            ),
+            nix_step(
+                label=":python: rocket",
+                command="python3 libs/nox-py/examples/rocket.py bench --ticks 100",
+                flake=".#python",
+            ),
+            nix_step(
+                label=":python: three-body",
+                command="python3 libs/nox-py/examples/three-body.py bench --ticks 100",
+                flake=".#python",
+            ),
+            nix_step(
+                label=":python: cube-sat",
+                command="python3 libs/nox-py/examples/cube-sat.py bench --ticks 10",
                 flake=".#python",
             ),
         ],

@@ -158,6 +158,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     ukf::register(m)?;
     s10::register(m)?;
     Ok(())

@@ -15,10 +15,12 @@ BALL_RADIUS = 0.2
 def world(seed: int = 0) -> el.World:
     world = el.World()
     # world.spawn(WindData(seed=jnp.int64(seed)), name="WindData")
+    ball_mesh = world.insert_asset(el.Mesh.sphere(BALL_RADIUS))
+    ball_color = world.insert_asset(el.Material.color(12.7, 9.2, 0.5))
     ball = world.spawn(
         [
             el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
-            world.shape(el.Mesh.sphere(BALL_RADIUS), el.Material.color(12.7, 9.2, 0.5)),
+            el.Shape(ball_mesh, ball_color),
             WindData(seed=jnp.int64(seed)),
         ],
         name="Ball",
