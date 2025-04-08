@@ -9,8 +9,6 @@ gcloud container clusters get-credentials "elodin-dev-gke" --region "us-central1
 
 # Run following commands from the root of the repo
 
-just decrypt-secrets-force
-
 kubectl kustomize kubernetes/overlays/dev > out.yaml
 BUILDKITE_COMMIT=$(git rev-parse HEAD) envsubst < out.yaml > out-with-envs.yaml
 
@@ -32,7 +30,6 @@ gcloud container clusters get-credentials "elodin-prod-gke" --region "us-central
 
 export RELEASE_IMAGE_TAG="0.2.0"
 
-just decrypt-secrets-force
 just re-tag-images-main $RELEASE_IMAGE_TAG
 
 kubectl kustomize kubernetes/overlays/prod > out.yaml
@@ -48,14 +45,3 @@ kubectl get all -n elodin-app-prod
 Kubernetes folder contains everything necessary to configure a cluster.
 
 `elodin-app` folders contains all resources that would be placed in namespaces with the respective names
-
-## Extra Notes
-
-### Example of deployment manifest configuration for `gvisor`
-
-```yml
-spec:
-  template:
-    spec:
-      runtimeClassName: gvisor
-```

@@ -11,20 +11,7 @@ patches:
   patch: |-
     - op: replace
       path: /spec/rules/0/host
-      value: $CLUSTER_NAME.elodin.dev
-    - op: add
-      path: /spec/rules/1
-      value:
-        host: $CLUSTER_NAME-docs.elodin.dev
-        http:
-          paths:
-          - pathType: Prefix
-            path: /
-            backend:
-              service:
-                name: elo-docs
-                port:
-                  number: 80
+      value: $CLUSTER_NAME-docs.elodin.dev
 - target:
     namespace: elodin-app
   patch: |-
@@ -38,48 +25,8 @@ patches:
     - op: replace
       path: /metadata/name
       value: elodin-app-$CLUSTER_NAME
-- target:
-    kind: RoleBinding
-    name: elo-atc
-  patch: |-
-    - op: replace
-      path: /subjects/0/namespace
-      value: elodin-app-$CLUSTER_NAME
-
-configMapGenerator:
-- name: elo-atc-config
-  namespace: elodin-app
-  files:
-  - atc.toml=elo-atc-config.toml
-  literals:
-  - ELODIN_API.BASE_URL=https://$CLUSTER_NAME.elodin.dev
-- name: elo-dashboard
-  namespace: elodin-app
-  literals:
-  - PHX_HOST=$CLUSTER_NAME.elodin.dev
-  - RELEASE_COOKIE=${CLUSTER_NAME}_cookie
-  - SECRET_KEY_BASE=pvS+BSCE9uyDsYR3d4A/vENpQj/0OtpzR+N/FAY1+yQD1OfS8Adp2nh537rzSEb0
-  - ATC_INTERNAL_ADDR=elo-atc.elodin-app-$CLUSTER_NAME.svc.cluster.local:50051
-  - ATC_ADDR=$CLUSTER_NAME.elodin.dev
-  - AUTH_BASE_URL=https://auth.elodin.dev
-
-secretGenerator:
-- name: elo-dashboard-secret
-  namespace: elodin-app
-  envs:
-  - elo-dashboard-secret.env
-- name: elo-atc-secret
-  namespace: elodin-app
-  envs:
-  - elo-dashboard-secret.env
 
 images:
-- name: elodin-infra/elo-atc
-  newName: elodin.azurecr.io/elodin-infra/elo-atc/x86_64
-  newTag: $BUILDKITE_COMMIT
-- name: elodin-infra/elo-dashboard
-  newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
-  newTag: $BUILDKITE_COMMIT
 - name: elodin-infra/elo-docs
   newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64
   newTag: $BUILDKITE_COMMIT

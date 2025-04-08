@@ -3,8 +3,6 @@
 
 k8s_overlays := "kubernetes/overlays"
 artifact_registry := "elodin.azurecr.io/elodin-infra"
-repo_atc := "elo-atc/x86_64"
-repo_dashboard := "elo-dashboard/x86_64"
 repo_docs := "elo-docs/x86_64"
 
 project := "dev"
@@ -14,19 +12,8 @@ cluster := "dev"
 default:
   @just --list
 
-decrypt-secrets *FLAGS:
-  @ echo "   🔑 Decrypting secrets for kubernetes..."
-  op inject {{FLAGS}} -i {{k8s_overlays}}/dev/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev/elo-dashboard-secret.env
-  op inject {{FLAGS}} -i {{k8s_overlays}}/dev-branch/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/dev-branch/elo-dashboard-secret.env
-  op inject {{FLAGS}} -i {{k8s_overlays}}/prod/enc.elo-dashboard-secret.env -o {{k8s_overlays}}/prod/elo-dashboard-secret.env
-
-decrypt-secrets-force:
-  just decrypt-secrets --force
-
 re-tag-images old_tag new_tag:
   @ echo "   📌 Adding '{{new_tag}}' tag to images with '{{old_tag}}' tag"
-  gcloud artifacts docker tags add {{artifact_registry}}/{{repo_atc}}:{{old_tag}} {{artifact_registry}}/{{repo_atc}}:{{new_tag}}
-  gcloud artifacts docker tags add {{artifact_registry}}/{{repo_dashboard}}:{{old_tag}} {{artifact_registry}}/{{repo_dashboard}}:{{new_tag}}
   gcloud artifacts docker tags add {{artifact_registry}}/{{repo_docs}}:{{old_tag}} {{artifact_registry}}/{{repo_docs}}:{{new_tag}}
 
 re-tag-images-main new_tag:
@@ -81,12 +68,6 @@ release tag:
   resources:
   - ../overlays/prod
   images:
-  - name: elodin-infra/elo-atc
-    newName: elodin.azurecr.io/elodin-infra/elo-atc/x86_64
-    newTag: {{tag}}
-  - name: elodin-infra/elo-dashboard
-    newName: elodin.azurecr.io/elodin-infra/elo-dashboard/x86_64
-    newTag: {{tag}}
   - name: elodin-infra/elo-docs
     newName: elodin.azurecr.io/elodin-infra/elo-docs/x86_64
     newTag: {{tag}}

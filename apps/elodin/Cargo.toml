@@ -34,7 +34,6 @@ zstd = "0.13.0"
 bevy.version = "0.15"
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
 
-elodin-types.path = "../../libs/elodin-types/rust"
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
 impeller2-bevy.path = "../../libs/impeller2/bevy"

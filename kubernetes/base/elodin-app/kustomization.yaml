@@ -4,10 +4,6 @@ kind: Kustomization
 resources:
 - namespace.yaml
 - ingress.yaml
-- ./postgres/
-- ./redis/
-- ./elo-dashboard/
-- ./elo-atc/
 - ./elo-docs/
 
 namespace: elodin-app

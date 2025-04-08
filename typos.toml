@@ -24,7 +24,6 @@ extend-exclude = [
  "/apps/unreal-demo/Plugins/RustPlugin",
  "*.dts",
  "images/orin-nano/flake.nix",
- "services/dashboard/priv/static/fonts/**/*",
  "**/simulink/**/*.xml",
  "libs/basilisk-rs/basilisk/**/*",
  "libs/stellarator/maitake",

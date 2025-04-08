@@ -45,17 +45,8 @@
           flakeInputs = inputs;
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         };
-        wasm-bindgen-cli = {
-          version = "0.2.97";
-          hash = "sha256-DDUdJtjCrGxZV84QcytdxrmS5qvXD8Gcdq4OApj5ktI=";
-          cargoHash = "sha256-Zfc2aqG7Qi44dY2Jz1MCdpcL3lk8C/3dt7QiE0QlNhc=";
-        };
         imports = [
-          ./nix/wasm-bindgen-cli.nix
           ./nix/shell.nix
-          ./nix/atc.nix
-          ./nix/editor-web.nix
-          ./nix/dashboard.nix
           ./nix/docs.nix
           ./nix/elodin-cli.nix
           ./nix/elodin-py.nix

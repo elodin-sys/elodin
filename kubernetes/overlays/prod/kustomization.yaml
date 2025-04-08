@@ -11,20 +11,7 @@ patches:
   patch: |-
     - op: replace
       path: /spec/rules/0/host
-      value: app.elodin.systems
-    - op: add
-      path: /spec/rules/1
-      value:
-        host: docs.elodin.systems
-        http:
-          paths:
-          - pathType: Prefix
-            path: /
-            backend:
-              service:
-                name: elo-docs
-                port:
-                  number: 80
+      value: docs.elodin.systems
 - target:
     namespace: elodin-app
   patch: |-
@@ -38,59 +25,3 @@ patches:
     - op: replace
       path: /metadata/name
       value: elodin-app-prod
-- target:
-    kind: Namespace
-    name: elodin-vms
-  patch: |-
-    - op: replace
-      path: /metadata/name
-      value: elodin-vms-prod
-- target:
-    namespace: elodin-vms
-  patch: |-
-    - op: replace
-      path: /metadata/namespace
-      value: elodin-vms-prod
-- target:
-    kind: RoleBinding
-    name: elo-atc
-  patch: |-
-    - op: replace
-      path: /subjects/0/namespace
-      value: elodin-app-prod
-
-
-configMapGenerator:
-- name: elo-atc-config
-  namespace: elodin-app
-  files:
-  - atc.toml=elo-atc-config.toml
-  literals:
-  - ELODIN_API.BASE_URL=https://app.elodin.systems
-- name: elo-atc-proxy-config
-  namespace: elodin-app
-  files:
-  - atc.toml=elo-atc-proxy-config.toml
-- name: elo-sim-config
-  namespace: elodin-vms
-  files:
-  - sim.toml=elo-sim-config.toml
-- name: elo-dashboard
-  namespace: elodin-app
-  literals:
-  - PHX_HOST=app.elodin.systems
-  - RELEASE_COOKIE=dummy_cookie
-  - SECRET_KEY_BASE=pvS+BSCE9uyDsYR3d4A/vENpQj/0OtpzR+N/FAY1+yQD1OfS8Adp2nh537rzSEb0
-  - ATC_INTERNAL_ADDR=elo-atc.elodin-app-prod.svc.cluster.local:50051
-  - ATC_ADDR=app.elodin.systems
-  - AUTH_BASE_URL=https://auth.elodin.systems
-
-secretGenerator:
-- name: elo-dashboard-secret
-  namespace: elodin-app
-  envs:
-  - elo-dashboard-secret.env
-- name: elo-atc-secret
-  namespace: elodin-app
-  envs:
-  - elo-dashboard-secret.env
