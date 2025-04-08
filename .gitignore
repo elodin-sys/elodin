@@ -16,7 +16,6 @@ out-with-envs.yaml
 
 # secrets
 
-elo-dashboard-secret.env
 *key.json
 
 # buildkite

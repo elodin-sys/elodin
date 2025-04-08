@@ -6,38 +6,17 @@ spec:
   ingressClassName: traefik
   defaultBackend:
     service:
-      name: elo-dashboard
+      name: elo-docs
       port:
         number: 80
   rules:
-  - host: app.elodin.dev
+  - host: docs.elodin.dev
     http:
       paths:
       - pathType: Prefix
         path: /
         backend:
           service:
-            name: elo-dashboard
-            port: 
+            name: elo-docs
+            port:
               number: 80
-      - path: /elodin.types.api.Api
-        pathType: Prefix
-        backend:
-          service:
-            name: elo-atc
-            port:
-              number: 50051
-      - path: /sim/ws
-        pathType: Prefix
-        backend:
-          service:
-            name: elo-atc
-            port:
-              number: 50051
-      - path: /stripe/webhook
-        pathType: Prefix
-        backend:
-          service:
-            name: elo-atc
-            port:
-              number: 50051

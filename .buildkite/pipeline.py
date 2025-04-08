@@ -30,7 +30,6 @@ def deploy_k8s_step(branch_name):
         [
             "az login --identity",
             f"az aks get-credentials --resource-group {az_rg_name} --name {az_cluster_name} --overwrite-existing",
-            "OP_SERVICE_ACCOUNT_TOKEN=$(cat /run/keys/1password-token) just decrypt-secrets-force",
             f"kubectl kustomize kubernetes/overlays/{overlay_name} > out.yaml",
             f"export CLUSTER_NAME={cluster_name}",
             "envsubst < out.yaml > out-with-envs.yaml",
@@ -155,23 +154,6 @@ test_steps = [
             ),
         ],
     ),
-    group(
-        name=":elixir: elixir",
-        steps=[
-            nix_step(
-                label="elixir build",
-                flake=".#elixir",
-                emoji=":elixir:",
-                command="cd services/dashboard && mix deps.get && mix deps.unlock --check-unused && mix compile --all-warnings --warning-as-errors && mix format --dry-run --check-formatted",
-            ),
-            nix_step(
-                label="dialyzer",
-                flake=".#elixir",
-                emoji=":elixir:",
-                command="cd services/dashboard && mix deps.get && mix dialyzer --plt && mix dialyzer",
-            ),
-        ],
-    ),
     nix_step(label="alejandra", flake=".#nix-tools", command="alejandra -c ."),
 ]
 
@@ -180,16 +162,6 @@ cluster_app_deploy_steps = [
         name=":docker: docker",
         key="build-images",
         steps=[
-            build_image_step(
-                image_name="elo-dashboard",
-                target="dashboard-image",
-                image_tag="\$BUILDKITE_COMMIT",
-            ),
-            build_image_step(
-                image_name="elo-atc",
-                target="atc-image",
-                image_tag="\$BUILDKITE_COMMIT",
-            ),
             build_image_step(
                 image_name="elo-docs",
                 target="docs-image",

@@ -48,26 +48,6 @@
       LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
       doCheck = false;
     };
-    elixir = pkgs.mkShell {
-      name = "elo-elixir-shell";
-      buildInputs = with pkgs; [
-        elixir
-        cacert
-        esbuild
-        tailwindcss
-      ];
-      doCheck = false;
-      HEX_CACERTS_PATH = "/etc/ssl/certs/ca-bundle.crt";
-      ESBUILD_BIN = "${pkgs.esbuild}/bin/esbuild";
-      TAILWIND_BIN = "${pkgs.tailwindcss}/bin/tailwindcss";
-    };
-    node = pkgs.mkShell.override {stdenv = pkgs.gcc12Stdenv;} {
-      name = "elo-node-shell";
-      buildInputs = with pkgs; [
-        nodejs_22
-      ];
-      doCheck = false;
-    };
     ops = pkgs.mkShell {
       name = "elo-ops-shell";
       buildInputs = with pkgs; [
