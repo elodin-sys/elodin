@@ -46,7 +46,6 @@
       [
         pkg-config
         python3
-        protobuf
         openssl
         gfortran
         gfortran.cc.lib

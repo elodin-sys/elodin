@@ -94,18 +94,13 @@ test_steps = [
             ),
         ],
     ),
-    group(
-        name=":python: nox-py",
+    nix_step(
+        label=":python: nox-py",
         key="nox-py",
-        steps=[
-            nix_step(
-                label=":python: nox-py",
-                # this step is just to verify that the package can be imported
-                # nix does all the actual work of building nox-py and installing it in the environment
-                command="python -c 'import elodin; print(elodin.__version__)'",
-                flake=".#python",
-            ),
-        ],
+        # this step is just to verify that the package can be imported
+        # nix does all the actual work of building nox-py and installing it in the environment
+        command="python -c 'import elodin; print(elodin.__version__)'",
+        flake=".#python",
     ),
     group(
         name=":python: python",

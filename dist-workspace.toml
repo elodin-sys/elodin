@@ -47,11 +47,9 @@ libudev-dev = '*'
 libxkbcommon-x11-0 = '*'
 libwayland-dev = '*'
 libxkbcommon-dev = '*'
-protobuf-compiler = '*'
 gfortran = '*'
 gfortran-12 = '*'
 libgfortran-12-dev = '*'
 
 [dist.dependencies.chocolatey]
 cmake = '*'
-protoc = '*'
