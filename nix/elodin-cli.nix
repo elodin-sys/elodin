@@ -16,7 +16,6 @@
     doCheck = false;
     cargoExtraArgs = "--package=${crateName.pname}";
     buildInputs = with pkgs; [
-      protobuf
       pkg-config
       alsa-lib
       udev

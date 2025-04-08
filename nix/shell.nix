@@ -27,8 +27,6 @@
         python3Packages.polars
         openssl
         clang
-        protobuf
-        sccache
         alsa-lib
         alsa-oss
         alsa-utils
