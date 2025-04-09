@@ -1,16 +1,13 @@
 [package]
-name = "roci-multicopter"
+name = "sensor-fw"
+license = "MIT OR Apache-2.0"
 edition = "2024"
 version = "0.1.0"
 publish = false
 
 [[bin]]
 name = "fw"
-test = false
-bench = false
-
-[[bin]]
-name = "magcal"
+path = "src/main.rs"
 test = false
 bench = false
 

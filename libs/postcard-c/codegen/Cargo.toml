@@ -1,5 +1,6 @@
 [package]
 name = "postcard-c-codegen"
+license = "MIT OR Apache-2.0"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true

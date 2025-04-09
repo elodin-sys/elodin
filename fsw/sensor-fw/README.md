@@ -1,4 +1,4 @@
-# Aleph MultiCopter Flight Software
+# Aleph STM32 Firmware
 
 ## Pre-requisites
 
@@ -31,7 +31,7 @@ Debug Port: DPv2, Designer: STMicroelectronics, Part: 0x4500, Revision: 0x0, Ins
 │       ├── Cortex-M7 ETM   (Coresight Component)
 │       └── Coresight Component, Part: 0x0906, Devtype: 0x14, Archid: 0x0000, Designer: ARM Ltd
 ```
-3. Build and flash the firmware from the `fsw/multicopter` directory:
+3. Build and flash the firmware from the `fsw/sensor-fw` directory:
 ```sh
 cargo rrb fw
 ```

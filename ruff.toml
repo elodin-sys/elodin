@@ -1,0 +1,2 @@
+line-length = 100
+extend-exclude = ["vendor", "basilisk", "images/aleph/modules/mk-esp-contents.py"]

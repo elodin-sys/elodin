@@ -1,5 +1,6 @@
 [package]
 name = "memserve"
+license = "MIT OR Apache-2.0"
 version = "0.1.0"
 edition = "2024"
 description = "Web server that serves static web content from memory."
