@@ -138,17 +138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aleph-file-bridge"
-version = "0.13.0"
-dependencies = [
- "anyhow",
- "cobs",
- "libc",
- "serialport",
- "zerocopy 0.8.14",
-]
-
-[[package]]
 name = "aleph-serial-bridge"
 version = "0.13.0"
 dependencies = [
@@ -3320,7 +3309,7 @@ version = "3.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90eeab0aa92f3f9b4e87f258c72b139c207d251f9cbc1080a0086b86a8870dd3"
 dependencies = [
- "nix 0.29.0",
+ "nix",
  "windows-sys 0.59.0",
 ]
 
@@ -5135,7 +5124,7 @@ dependencies = [
  "libc",
  "libudev-sys",
  "log",
- "nix 0.29.0",
+ "nix",
  "uuid",
  "vec_map",
  "wasm-bindgen",
@@ -7364,17 +7353,6 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
-dependencies = [
- "bitflags 1.3.2",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
@@ -9355,7 +9333,7 @@ dependencies = [
  "impeller2-bbq",
  "impeller2-stellar",
  "impeller2-wkt",
- "nix 0.29.0",
+ "nix",
  "nox",
  "postcard",
  "postcard-schema",
@@ -9570,7 +9548,7 @@ dependencies = [
  "libc",
  "log",
  "memchr",
- "nix 0.29.0",
+ "nix",
  "radix_trie",
  "rustyline-derive",
  "unicode-segmentation",
@@ -9617,7 +9595,7 @@ dependencies = [
  "futures-lite 2.5.0",
  "ignore",
  "miette",
- "nix 0.29.0",
+ "nix",
  "nox-ecs",
  "nu-ansi-term 0.49.0",
  "serde",
@@ -9804,24 +9782,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
-]
-
-[[package]]
-name = "serialport"
-version = "4.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "779e2977f0cc2ff39708fef48f96f3768ac8ddd8c6caaaab82e83bd240ef99b2"
-dependencies = [
- "bitflags 2.6.0",
- "cfg-if",
- "core-foundation 0.10.0",
- "core-foundation-sys",
- "io-kit-sys",
- "mach2",
- "nix 0.26.4",
- "scopeguard",
- "unescaper",
- "winapi",
 ]
 
 [[package]]
@@ -11137,15 +11097,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
-name = "unescaper"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c878a167baa8afd137494101a688ef8c67125089ff2249284bd2b5f9bfedb815"
-dependencies = [
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "unicode-bidi"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12392,7 +12343,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hex",
- "nix 0.29.0",
+ "nix",
  "ordered-stream",
  "serde",
  "serde_repr",

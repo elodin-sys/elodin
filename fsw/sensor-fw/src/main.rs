@@ -10,8 +10,8 @@ use embedded_hal_compat::ForwardCompat;
 use fugit::{ExtU32 as _, RateExtU32 as _};
 use hal::{i2c, pac, usart};
 
-use roci_multicopter::bsp::aleph as bsp;
-use roci_multicopter::{dma::*, i2c_dma::*, peripheral::*, *};
+use sensor_fw::bsp::aleph as bsp;
+use sensor_fw::{dma::*, i2c_dma::*, peripheral::*, *};
 
 const ELRS_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(8000);
 const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
@@ -25,7 +25,7 @@ const USB_LOG_PERIOD: fugit::MicrosDuration<u64> = USB_LOG_RATE.into_duration();
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Starting");
-    roci_multicopter::init_heap();
+    sensor_fw::init_heap();
 
     let pins = bsp::Pins::take().unwrap();
     let bsp::Pins {

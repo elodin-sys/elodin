@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use roci_multicopter as _;
+use sensor_fw as _;
 
 #[defmt_test::tests]
 mod tests {

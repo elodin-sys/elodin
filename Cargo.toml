@@ -27,14 +27,13 @@ members = [
     "libs/stellarator/buf",
     "libs/stellarator/maitake",
     "libs/stellarator/maitake/util",
-    "fsw/file-bridge",
     "fsw/serial-bridge",
     "fsw/mekf",
     "fsw/lqr",
     "examples/msg-test",
     "libs/postcard-c/codegen",
 ]
-exclude = ["fsw/multicopter", "fsw/blackbox", "docs/memserve"]
+exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
 version = "0.13.0"

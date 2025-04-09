@@ -1,5 +1,6 @@
 [package]
 name = "elodin-editor"
+license = "GPL-3.0"
 description = "Elodin Editor"
 version.workspace = true
 edition = "2024"

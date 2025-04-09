@@ -8,7 +8,9 @@ AZ_CONFIG = {"cluster_name": "dev", "rg_name": "dev"}
 
 GITHUB_ACTION_TRIGGER = os.getenv("TRIGGERED_FROM_GHA", "") == "1"
 BRANCH_NAME = (
-    os.environ["PR_CLOSED_BRANCH"] if GITHUB_ACTION_TRIGGER else os.environ["BUILDKITE_BRANCH"]
+    os.environ["PR_CLOSED_BRANCH"]
+    if GITHUB_ACTION_TRIGGER
+    else os.environ["BUILDKITE_BRANCH"]
 )
 
 
@@ -22,9 +24,7 @@ def deploy_k8s_step(branch_name):
     overlay_name = "dev" if is_main else "dev-branch"
     docs_subdomain = "docs" if is_main else f"{cluster_name}-docs"
 
-    annotation_message = (
-        f"Deployed at https://{cluster_name}.elodin.dev | https://{docs_subdomain}.elodin.dev"
-    )
+    annotation_message = f"Deployed at https://{cluster_name}.elodin.dev | https://{docs_subdomain}.elodin.dev"
 
     command = " && ".join(
         [
@@ -57,9 +57,12 @@ test_steps = [
     group(
         name=":c: C",
         steps=[
-            c_step(label="db-c-example", command="cd libs/db; cc examples/client.c -lm"),
             c_step(
-                label="db-cpp-example", command="cd libs/db; c++ -std=c++23 examples/client.cpp"
+                label="db-c-example", command="cd libs/db; cc examples/client.c -lm"
+            ),
+            c_step(
+                label="db-cpp-example",
+                command="cd libs/db; c++ -std=c++23 examples/client.cpp",
             ),
         ],
     ),
@@ -68,7 +71,7 @@ test_steps = [
         steps=[
             rust_step(
                 label="clippy",
-                command="cargo clippy -- -Dwarnings; cd fsw/multicopter && cargo clippy -- -Dwarnings",
+                command="cargo clippy -- -Dwarnings; cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
             ),
             rust_step(
                 label="cargo test",
@@ -80,7 +83,7 @@ test_steps = [
             ),
             rust_step(
                 label="cargo fmt",
-                command="cargo fmt --check; cargo fmt --check --manifest-path fsw/multicopter/Cargo.toml",
+                command="cargo fmt --check; cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
         ],
     ),
