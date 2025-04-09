@@ -435,10 +435,10 @@ macro_rules! trace_waker_op {
     ($ptr:expr, $method: ident, op: $op:ident) => {
 
         #[cfg(any(feature = "tracing-01", loom))]
-        tracing_01::trace!(
+        tracing::trace!(
             target: "runtime::waker",
             {
-                task.id = (*$ptr).span().tracing_01_id(),
+                task.id = (*$ptr).span().tracing_id(),
                 task.addr = ?$ptr,
                 task.tid = (*$ptr).header.id.as_u64(),
                 op = concat!("waker.", stringify!($op)),

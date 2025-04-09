@@ -25,7 +25,7 @@ fn main() {
         q.wake();
         while completed < 10 {
             let tick = scheduler.tick();
-            tracing_01::info!(?tick);
+            tracing::info!(?tick);
             completed += tick.completed;
         }
         thread::sleep(Duration::from_secs(1));
