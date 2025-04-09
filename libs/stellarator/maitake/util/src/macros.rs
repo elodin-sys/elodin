@@ -62,6 +62,6 @@ macro_rules! test_info {
 #[cfg(all(test, loom))]
 macro_rules! test_info {
     ($($arg:tt)+) => {
-        tracing_01::trace!($($arg)+);
+        tracing::trace!($($arg)+);
     };
 }

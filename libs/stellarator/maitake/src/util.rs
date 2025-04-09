@@ -86,7 +86,7 @@ pub(crate) mod test {
         #[cfg(not(loom))]
         _x2: tracing_02::collect::DefaultGuard,
         #[cfg(loom)]
-        _x1: tracing_01::subscriber::DefaultGuard,
+        _x1: tracing::subscriber::DefaultGuard,
     }
 
     /// Initialize tracing with a default filter directive

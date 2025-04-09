@@ -7,8 +7,8 @@ macro_rules! span {
         crate::trace::Span {
             #[cfg(any(feature = "tracing-01", loom))]
             span_01: {
-                use tracing_01::Level;
-                tracing_01::span!($level, $($arg)+)
+                use tracing::Level;
+                tracing::span!($level, $($arg)+)
             },
 
             #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
@@ -24,7 +24,7 @@ macro_rules! trace {
     ($($arg:tt)+) => {
         #[cfg(any(feature = "tracing-01", loom))]
         {
-            tracing_01::trace!($($arg)+)
+            tracing::trace!($($arg)+)
         }
 
         #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
@@ -38,7 +38,7 @@ macro_rules! debug {
     ($($arg:tt)+) => {
         #[cfg(any(feature = "tracing-01", loom))]
         {
-            tracing_01::debug!($($arg)+)
+            tracing::debug!($($arg)+)
         }
 
         #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
@@ -53,7 +53,7 @@ macro_rules! info {
     ($($arg:tt)+) => {
         #[cfg(any(feature = "tracing-01", loom))]
         {
-            tracing_01::info!($($arg)+)
+            tracing::info!($($arg)+)
         }
 
         #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
@@ -127,7 +127,7 @@ macro_rules! test_trace {
 #[derive(Clone)]
 pub(crate) struct Span {
     #[cfg(any(feature = "tracing-01", loom))]
-    pub(crate) span_01: tracing_01::Span,
+    pub(crate) span_01: tracing::Span,
     #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
     pub(crate) span_02: tracing_02::Span,
 }
@@ -137,7 +137,7 @@ impl Span {
     pub(crate) const fn none() -> Self {
         Span {
             #[cfg(any(feature = "tracing-01", loom))]
-            span_01: tracing_01::Span::none(),
+            span_01: tracing::Span::none(),
             #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
             span_02: tracing_02::Span::none(),
         }
@@ -168,21 +168,21 @@ impl Span {
 
     #[cfg(any(feature = "tracing-01", loom))]
     #[inline]
-    pub(crate) fn tracing_01_id(&self) -> Option<core::num::NonZeroU64> {
+    pub(crate) fn tracing_id(&self) -> Option<core::num::NonZeroU64> {
         self.span_01.id().map(|id| id.into_non_zero_u64())
     }
 }
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const TRACING_01_FIELD: &str = "tracing_01";
+        const tracing_FIELD: &str = "tracing";
         const TRACING_02_FIELD: &str = "tracing_02";
 
         let mut s = f.debug_struct("Span");
 
         #[cfg(any(feature = "tracing-01", loom))]
         if let Some(id) = self.span_01.id() {
-            s.field(TRACING_01_FIELD, &id.into_u64());
+            s.field(tracing_FIELD, &id.into_u64());
         } else {
             s.field(TRACING_02_FIELD, &fmt::display("<none>"));
         }
@@ -191,7 +191,7 @@ impl fmt::Debug for Span {
         if let Some(id) = self.span_02.id() {
             s.field(TRACING_02_FIELD, &id.into_u64());
         } else {
-            s.field(TRACING_01_FIELD, &fmt::display("<none>"));
+            s.field(tracing_FIELD, &fmt::display("<none>"));
         }
 
         s.finish()
@@ -201,7 +201,7 @@ impl fmt::Debug for Span {
 #[derive(Debug)]
 pub(crate) struct Entered<'span> {
     #[cfg(any(feature = "tracing-01", loom))]
-    _enter_01: tracing_01::span::Entered<'span>,
+    _enter_01: tracing::span::Entered<'span>,
     #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
     _enter_02: tracing_02::span::Entered<'span>,
 
@@ -213,7 +213,7 @@ pub(crate) struct Entered<'span> {
 #[derive(Debug)]
 pub(crate) struct EnteredSpan {
     #[cfg(any(feature = "tracing-01", loom))]
-    _enter_01: tracing_01::span::EnteredSpan,
+    _enter_01: tracing::span::EnteredSpan,
     #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
     _enter_02: tracing_02::span::EnteredSpan,
 }

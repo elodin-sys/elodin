@@ -735,7 +735,7 @@ dependencies = [
  "polling",
  "rustix",
  "slab",
- "tracing 0.1.40",
+ "tracing",
  "windows-sys 0.59.0",
 ]
 
@@ -777,7 +777,7 @@ dependencies = [
  "event-listener 5.3.1",
  "futures-lite 2.5.0",
  "rustix",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -859,7 +859,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tokio",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -1022,7 +1022,7 @@ dependencies = [
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -1079,7 +1079,7 @@ dependencies = [
  "sync_wrapper 1.0.1",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -1161,8 +1161,8 @@ dependencies = [
  "roci-macros",
  "serde",
  "spin",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1723,9 +1723,9 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_utils",
- "tracing-log 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tracing-log",
  "tracing-oslog",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
  "tracing-wasm",
 ]
 
@@ -2132,7 +2132,7 @@ dependencies = [
  "getrandom 0.2.15",
  "hashbrown 0.14.5",
  "thread_local",
- "tracing 0.1.40",
+ "tracing",
  "web-time",
 ]
 
@@ -2905,7 +2905,7 @@ dependencies = [
  "prost 0.11.9",
  "prost-types",
  "tonic 0.9.2",
- "tracing-core 0.1.32",
+ "tracing-core",
 ]
 
 [[package]]
@@ -2927,9 +2927,9 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic 0.9.2",
- "tracing 0.1.40",
- "tracing-core 0.1.32",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3011,7 +3011,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec10f0a762d93c4498d2e97a333805cb6250d60bead623f71d8034f9a4152ba3"
 dependencies = [
  "loom 0.5.6",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -4135,7 +4135,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tonic 0.12.3",
- "tracing-subscriber 0.3.18",
+ "tracing-subscriber",
  "uuid",
  "zstd",
 ]
@@ -4174,8 +4174,8 @@ dependencies = [
  "thingbuf",
  "thiserror 2.0.12",
  "tokio",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
  "zerocopy 0.8.14",
 ]
 
@@ -5330,7 +5330,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -5349,7 +5349,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -5646,7 +5646,7 @@ dependencies = [
  "socket2",
  "tokio",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
  "want",
 ]
 
@@ -5730,7 +5730,7 @@ dependencies = [
  "socket2",
  "tokio",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -6683,8 +6683,8 @@ dependencies = [
  "cfg-if",
  "generator 0.7.5",
  "scoped-tls",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6699,8 +6699,8 @@ dependencies = [
  "scoped-tls",
  "serde",
  "serde_json",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6815,10 +6815,8 @@ dependencies = [
  "portable-atomic",
  "proptest",
  "tokio-test",
- "tracing 0.1.40",
- "tracing 0.2.0",
- "tracing-subscriber 0.3.0",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6837,8 +6835,8 @@ dependencies = [
  "proptest",
  "tokio",
  "tokio-test",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -6853,7 +6851,7 @@ dependencies = [
  "mycelium-bitfield",
  "pin-project",
  "portable-atomic",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -7146,10 +7144,8 @@ dependencies = [
  "maitake-sync 0.1.2",
  "mycelium-bitfield",
  "proptest",
- "tracing 0.1.40",
- "tracing 0.2.0",
- "tracing-subscriber 0.3.0",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -7190,7 +7186,7 @@ dependencies = [
  "regex-syntax 0.8.5",
  "rustc-hash 1.1.0",
  "thiserror 1.0.69",
- "tracing 0.1.40",
+ "tracing",
  "unicode-ident",
 ]
 
@@ -7511,8 +7507,8 @@ dependencies = [
  "tempfile",
  "thingbuf",
  "thiserror 2.0.12",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -7562,8 +7558,8 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "toml 0.8.19",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
  "walkdir",
  "zerocopy 0.8.14",
 ]
@@ -7991,7 +7987,7 @@ dependencies = [
  "percent-encoding",
  "snafu",
  "tokio",
- "tracing 0.1.40",
+ "tracing",
  "url",
  "walkdir",
 ]
@@ -8445,7 +8441,7 @@ dependencies = [
  "hermit-abi 0.4.0",
  "pin-project-lite",
  "rustix",
- "tracing 0.1.40",
+ "tracing",
  "windows-sys 0.59.0",
 ]
 
@@ -8851,7 +8847,7 @@ dependencies = [
  "socket2",
  "thiserror 1.0.69",
  "tokio",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -8868,7 +8864,7 @@ dependencies = [
  "slab",
  "thiserror 1.0.69",
  "tinyvec",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -8880,7 +8876,7 @@ dependencies = [
  "libc",
  "once_cell",
  "socket2",
- "tracing 0.1.40",
+ "tracing",
  "windows-sys 0.59.0",
 ]
 
@@ -9367,8 +9363,8 @@ dependencies = [
  "serde",
  "stellarator",
  "thingbuf",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9630,8 +9626,8 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "toml 0.8.19",
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
  "which 6.0.3",
 ]
 
@@ -10698,7 +10694,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "tracing 0.1.40",
+ "tracing",
  "windows-sys 0.52.0",
 ]
 
@@ -10867,7 +10863,7 @@ dependencies = [
  "tower 0.4.13",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -10899,7 +10895,7 @@ dependencies = [
  "tower 0.4.13",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
  "webpki-roots",
 ]
 
@@ -10920,7 +10916,7 @@ dependencies = [
  "tokio-util",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -10936,7 +10932,7 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
- "tracing 0.1.40",
+ "tracing",
 ]
 
 [[package]]
@@ -10959,18 +10955,8 @@ checksum = "c3523ab5a71916ccf420eebdf5521fcef02141234bbc0b8a49f2fdc4544364ef"
 dependencies = [
  "log",
  "pin-project-lite",
- "tracing-attributes 0.1.27",
- "tracing-core 0.1.32",
-]
-
-[[package]]
-name = "tracing"
-version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#bdbaf8007364ed2a766cca851d63de31b7c47e72"
-dependencies = [
- "pin-project-lite",
- "tracing-attributes 0.2.0",
- "tracing-core 0.2.0",
+ "tracing-attributes",
+ "tracing-core",
 ]
 
 [[package]]
@@ -10978,16 +10964,6 @@ name = "tracing-attributes"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
-name = "tracing-attributes"
-version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#bdbaf8007364ed2a766cca851d63de31b7c47e72"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11005,14 +10981,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-core"
-version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#bdbaf8007364ed2a766cca851d63de31b7c47e72"
-dependencies = [
- "once_cell",
-]
-
-[[package]]
 name = "tracing-log"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11020,17 +10988,7 @@ checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
- "tracing-core 0.1.32",
-]
-
-[[package]]
-name = "tracing-log"
-version = "0.2.0"
-source = "git+https://github.com/tokio-rs/tracing#b02a700ba6850ad813f77e65144114f866074a8f"
-dependencies = [
- "log",
- "once_cell",
- "tracing-core 0.2.0",
+ "tracing-core",
 ]
 
 [[package]]
@@ -11044,25 +11002,8 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "parking_lot",
- "tracing-core 0.1.32",
- "tracing-subscriber 0.3.18",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.3.0"
-source = "git+https://github.com/tokio-rs/tracing#b02a700ba6850ad813f77e65144114f866074a8f"
-dependencies = [
- "matchers",
- "nu-ansi-term 0.46.0",
- "once_cell",
- "regex",
- "sharded-slab",
- "smallvec",
- "thread_local",
- "tracing 0.2.0",
- "tracing-core 0.2.0",
- "tracing-log 0.2.0 (git+https://github.com/tokio-rs/tracing)",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -11079,9 +11020,9 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "tracing 0.1.40",
- "tracing-core 0.1.32",
- "tracing-log 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -11090,8 +11031,8 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07"
 dependencies = [
- "tracing 0.1.40",
- "tracing-subscriber 0.3.18",
+ "tracing",
+ "tracing-subscriber",
  "wasm-bindgen",
 ]
 
@@ -12217,7 +12158,7 @@ dependencies = [
  "sctk-adwaita",
  "smithay-client-toolkit",
  "smol_str",
- "tracing 0.1.40",
+ "tracing",
  "unicode-segmentation",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -12456,7 +12397,7 @@ dependencies = [
  "serde",
  "serde_repr",
  "static_assertions",
- "tracing 0.1.40",
+ "tracing",
  "uds_windows",
  "windows-sys 0.59.0",
  "winnow 0.7.2",
