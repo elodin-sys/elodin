@@ -30,7 +30,7 @@ links = "maitake"
 [features]
 default = ["alloc"]
 alloc = ["cordyceps/alloc", "maitake-sync/alloc"]
-std = ["alloc", "maitake-sync/std"]
+std = ["alloc", "maitake-sync/std", "tracing/std"]
 no-cache-pad = ["mycelium-util/no-cache-pad", "cordyceps/no-cache-pad", "maitake-sync/no-cache-pad"]
 core-error = ["maitake-sync/core-error"]
 critical-section = ["portable-atomic/critical-section"]
@@ -45,34 +45,21 @@ maitake-sync = { path = "./sync" }
 cordyceps = "0.3.2"
 pin-project = "1"
 portable-atomic = "1.2"
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
-[dependencies.tracing-02]
-package = "tracing"
-default-features = false
-git = "https://github.com/tokio-rs/tracing"
-optional = true
-
-[dependencies.tracing-01]
-package = "tracing"
-default-features = false
-version = "0.1.35"
-optional = true
 
 [dev-dependencies]
+tracing-subscriber = "0.3"
 futures-util = "0.3"
 futures = "0.3"
 tokio-test = "0.4"
 
 [target.'cfg(not(loom))'.dev-dependencies]
-tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["ansi", "fmt", "env-filter"] }
-tracing-02 = { package = "tracing", git = "https://github.com/tokio-rs/tracing", default-features = false, features = ["std"] }
 console-subscriber = "0.1.6"
 proptest = "1"
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { version = "0.7", features = ["futures", "checkpoint"] }
-tracing_01 = { package = "tracing", version = "0.1", default-features = false }
-tracing_subscriber_03 = { package = "tracing-subscriber", version = "0.3.11", features = ["fmt"] }
 
 [package.metadata.docs.rs]
 all-features = true
@@ -80,7 +67,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "tokio-console"
-required-features = ["tracing-01"]
 
 [lints.rust.unexpected_cfgs]
 level = "allow"
