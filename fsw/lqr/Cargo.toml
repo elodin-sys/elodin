@@ -1,5 +1,6 @@
 [package]
 name = "lqr"
+license = "MIT OR Apache-2.0"
 edition = "2024"
 version.workspace = true
 repository.workspace = true

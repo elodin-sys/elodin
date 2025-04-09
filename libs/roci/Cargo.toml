@@ -1,9 +1,9 @@
 [package]
 name = "roci"
+license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
 description = "Elodin flight software framework."
-license = "MIT OR Apache-2.0"
 repository = "https://github.com/elodin-sys/elodin"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

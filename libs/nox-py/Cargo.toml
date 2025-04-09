@@ -1,5 +1,6 @@
 [package]
 name = "nox-py"
+license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
 readme = "README.md"

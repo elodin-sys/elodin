@@ -1,9 +1,9 @@
 [package]
 name = "noxla"
+license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
 description = "Rust bindings to XLA's C++ API"
-license = "MIT OR Apache-2.0"
 repository = "https://github.com/elodin-sys/elodin"
 
 [features]

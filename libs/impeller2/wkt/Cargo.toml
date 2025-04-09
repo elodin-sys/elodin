@@ -1,5 +1,6 @@
 [package]
 name = "impeller2-wkt"
+license = "MIT OR Apache-2.0"
 version = "0.1.0"
 edition = "2024"
 
@@ -33,4 +34,3 @@ postcard-schema.features = ["use-std"]
 mlua.version = "0.10"
 mlua.features = ["serialize"]
 mlua.optional = true
-
