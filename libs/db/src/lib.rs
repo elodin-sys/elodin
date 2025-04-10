@@ -154,6 +154,7 @@ impl DB {
             let mut sink = DBSink {
                 components: &state.components,
                 last_updated: &self.last_updated,
+                sunk_new_time_series: false,
             };
             sink.apply_value(tick_component_id, globals_id, tick_component_view, None);
             Ok(())
@@ -663,6 +664,7 @@ impl Component {
 struct DBSink<'a> {
     components: &'a HashMap<(EntityId, ComponentId), Component>,
     last_updated: &'a AtomicCell<Timestamp>,
+    sunk_new_time_series: bool,
 }
 
 impl Decomponentize for DBSink<'_> {
@@ -679,9 +681,17 @@ impl Decomponentize for DBSink<'_> {
             warn!(component.id = ?component_id, entity.id = ?entity_id, "component not found when sinking");
             return;
         };
+        let time_series_empty = component.time_series.index().is_empty();
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
             warn!(?err, "failed to write head value");
             return;
+        }
+        if time_series_empty {
+            debug!(
+                "sunk new time series for component {} entity {}",
+                component_id, entity_id
+            );
+            self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
     }
@@ -1051,8 +1061,13 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 let mut sink = DBSink {
                     components: &state.components,
                     last_updated: &db.last_updated,
+                    sunk_new_time_series: false,
                 };
-                table.sink(&state.vtable_registry, &mut sink)
+                table.sink(&state.vtable_registry, &mut sink)?;
+                if sink.sunk_new_time_series {
+                    db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+                }
+                Ok::<_, Error>(())
             })?;
         }
 
@@ -1480,7 +1495,9 @@ impl StreamFilterExt for StreamFilter {
     ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {
         let mut vtable = VTableBuilder::default();
         self.visit(components, |entity| {
-            entity.add_to_vtable(&mut vtable)?;
+            if !entity.time_series.index().is_empty() {
+                entity.add_to_vtable(&mut vtable)?;
+            }
             Ok(())
         })?;
         Ok(vtable.build())
