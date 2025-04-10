@@ -175,14 +175,14 @@ impl Span {
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const tracing_FIELD: &str = "tracing";
+        const TRACING_FIELD: &str = "tracing";
         const TRACING_02_FIELD: &str = "tracing_02";
 
         let mut s = f.debug_struct("Span");
 
         #[cfg(any(feature = "tracing-01", loom))]
         if let Some(id) = self.span_01.id() {
-            s.field(tracing_FIELD, &id.into_u64());
+            s.field(TRACING_FIELD, &id.into_u64());
         } else {
             s.field(TRACING_02_FIELD, &fmt::display("<none>"));
         }
@@ -191,7 +191,7 @@ impl fmt::Debug for Span {
         if let Some(id) = self.span_02.id() {
             s.field(TRACING_02_FIELD, &id.into_u64());
         } else {
-            s.field(tracing_FIELD, &fmt::display("<none>"));
+            s.field(TRACING_FIELD, &fmt::display("<none>"));
         }
 
         s.finish()
