@@ -1,9 +1,11 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Fix a bug where the db wouldn't stream data to the editor correctly when there's a vtable that's registered but not used.
 
 ## v0.13
+
+### v0.13.1
+- **(fix)** Fix a bug where the db wouldn't stream data to the editor correctly when there's a vtable that's registered but not used.
 
 ### v0.13.0
 - **(breaking)** Remove `exec.write_to_dir(path)`. This is made obsolete by the new `SaveArchive` method in elodin-db.

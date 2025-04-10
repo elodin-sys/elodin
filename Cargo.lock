@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-serial-bridge"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "cobs",
@@ -4097,7 +4097,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "elodin"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "arc-swap",
  "arrow",
@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-editor"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "arrow",
  "bevy",
@@ -5956,7 +5956,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "bevy",
  "const-fnv1a-hash",
@@ -6703,7 +6703,7 @@ dependencies = [
 
 [[package]]
 name = "lqr"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
@@ -6921,7 +6921,7 @@ dependencies = [
 
 [[package]]
 name = "mekf"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
@@ -7098,7 +7098,7 @@ dependencies = [
 
 [[package]]
 name = "msg-test"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "fastrand 2.2.0",
@@ -7431,7 +7431,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "approx",
  "boxcar",
@@ -7513,7 +7513,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "bytes",
  "clap 4.5.20",
@@ -7544,7 +7544,7 @@ dependencies = [
 
 [[package]]
 name = "noxla"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyhow",
  "cc",
@@ -8463,7 +8463,7 @@ dependencies = [
 
 [[package]]
 name = "postcard-c-codegen"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "clap 4.5.20",
  "convert_case",
@@ -9323,7 +9323,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "bbq2",
  "csv",
@@ -9355,7 +9355,7 @@ dependencies = [
 
 [[package]]
 name = "roci-macros"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "convert_case",
  "darling",
@@ -9585,7 +9585,7 @@ checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "s10"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -10062,7 +10062,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellarator"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "blocking",
  "futures",
@@ -12179,7 +12179,7 @@ dependencies = [
 
 [[package]]
 name = "wmm"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "approx",
  "bindgen 0.70.1",
