@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Fix a bug where the db wouldn't stream data to the editor correctly when there's a vtable that's registered but not used.
 
 ## v0.13
 
