@@ -58,13 +58,7 @@ from the included SD card.
 ### Flashing from the Orin NX
 
 
-You can flash the STM32H7 from the Orin NX. This is useful if you are pushing out new firmware updates to the STM32 over the air. In an Orin NX terminal session run the following to reset the microcontroller and put it in DFU mode
-
-```
-sudo reset-mcu --bootloader
-```
-
-Then run the following. Replace `<elf path>` with the path to your firmware payload in the ELF file format
+You can flash the STM32H7 from the Orin NX. This is useful if you are pushing out new firmware updates to the STM32 over the air. In an Orin NX terminal session run the following command. Replace `<elf path>` with the path to your firmware payload in the ELF file format
 
 ```
 sudo flash-mcu --elf <elf path>
