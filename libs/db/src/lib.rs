@@ -968,9 +968,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     entity_metadata,
                     msg_metadata,
                 }
+                .with_request_id(m.req_id)
             });
             let tx = tx.lock().await;
-            tx.send(&msg).await.0?;
+            tx.send(msg).await.0?;
         }
         Packet::Msg(m) if m.id == DumpSchema::ID => {
             let msg = db.with_state(|state| {
@@ -979,11 +980,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .values()
                     .map(|c| (c.component_id, c.schema.to_schema()))
                     .collect();
-                DumpSchemaResp { schemas }
+                DumpSchemaResp { schemas }.with_request_id(m.req_id)
             });
 
             let tx = tx.lock().await;
-            tx.send(&msg).await.0?;
+            tx.send(msg).await.0?;
         }
 
         Packet::Msg(m) if m.id == DumpAssets::ID => {

@@ -15,6 +15,9 @@ order = 1
 
 ## v0.13
 
+### v0.13.2
+- **(fix)** Fix a bug where the dump schema and dump metadata responses didn't include the request id.
+
 ### v0.13.1
 - **(fix)** Fix a bug where the db wouldn't stream data to the editor correctly when there's a vtable that's registered but not used.
 
