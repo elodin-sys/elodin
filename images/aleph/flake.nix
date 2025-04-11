@@ -6,10 +6,16 @@
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";
     crane = {
       url = "github:ipetkov/crane";
+    };
+    deploy-rs = {
+      url = "github:serokell/deploy-rs";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.utils.follows = "flake-utils";
     };
   };
   outputs = {
@@ -20,110 +26,131 @@
     jetpack,
     crane,
     rust-overlay,
-  }:
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            jetpack.overlays.default
-            rust-overlay.overlays.default
-          ];
-        };
-      in rec {
-        nixosModules.default = {
-          pkgs,
-          config,
-          lib,
-          ...
-        }: {
-          imports =
-            [
-              "${nixpkgs}/nixos/modules/profiles/minimal.nix"
-              jetpack.nixosModules.default
-              ./modules/usb-eth.nix
-              ./modules/hardware.nix
-              ./modules/minimal.nix
-              ./modules/sd-image.nix
-              ./modules/systemd-boot-dtb.nix
-              ./modules/elodin-db.nix
-              ./modules/aleph-serial-bridge.nix
-              ./modules/mekf.nix
-              ./modules/aleph-dev.nix
-            ]
-            ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
+    deploy-rs,
+  }: let
+    system = "aarch64-linux";
+    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+    pkgs = import nixpkgs {inherit system;};
+    deployPkgs = import nixpkgs {
+      inherit system;
+      overlays = [
+        deploy-rs.overlays.default
+      ];
+    };
+    defaultModule = {
+      pkgs,
+      config,
+      lib,
+      ...
+    }: {
+      imports =
+        [
+          "${nixpkgs}/nixos/modules/profiles/minimal.nix"
+          jetpack.nixosModules.default
+          ./modules/usb-eth.nix
+          ./modules/hardware.nix
+          ./modules/minimal.nix
+          ./modules/sd-image.nix
+          ./modules/systemd-boot-dtb.nix
+          ./modules/aleph-dev.nix
+          ./modules/elodin-db.nix
+          ./modules/aleph-serial-bridge.nix
+          ./modules/mekf.nix
+        ]
+        ++ lib.optional (builtins.pathExists ./modules/elodin-dev.nix) ./modules/elodin-dev.nix;
 
-          nixpkgs.overlays = [
-            jetpack.overlays.default
-            rust-overlay.overlays.default
-            (final: prev: {
-              serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
-              elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
-              mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
-            })
-          ];
-          system.stateVersion = "24.05";
-          i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
-          services.openssh.settings.PasswordAuthentication = true;
-          services.openssh.enable = true;
-          services.openssh.settings.PermitRootLogin = "yes";
-          security.sudo.wheelNeedsPassword = false;
-          users.users.root.password = "root";
-          networking.hostName = "aleph";
-          networking.wireless.enable = true;
-          networking.dhcpcd.enable = true;
-          nix.settings.trusted-users = ["root" "@wheel"];
-          environment.systemPackages = with pkgs; [
-            pciutils
-            usbutils
-            nvme-cli
-            vim
-            htop
-            dtc
-          ];
+      nixpkgs.overlays = [
+        jetpack.overlays.default
+        rust-overlay.overlays.default
+        (final: prev: {
+          serial-bridge = final.callPackage ./pkgs/aleph-serial-bridge.nix {inherit crane;};
+          elodin-db = final.callPackage ./pkgs/elodin-db.nix {inherit crane;};
+          mekf = final.callPackage ./pkgs/mekf.nix {inherit crane;};
+        })
+      ];
+      system.stateVersion = "24.05";
+      i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
+      services.openssh.settings.PasswordAuthentication = true;
+      services.openssh.enable = true;
+      services.openssh.settings.PermitRootLogin = "yes";
+      services.nvpmodel.enable = false;
+      services.nvfancontrol.enable = false;
+      systemd.services."wifi-powersave@wlP1p1s0" = {
+        description = "Disables power-save on WiFi interface wlP1p1s0";
+        bindsTo = ["sys-subsystem-net-devices-wlP1p1s0.device"];
+        after = ["sys-subsystem-net-devices-wlP1p1s0.device"];
+        wantedBy = ["multi-user.target"];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "/run/current-system/sw/bin/iw wlP1p1s0 set power_save off";
+          RemainAfterExit = true;
         };
-        nixosModules.app = {lib, ...}: {
-          imports = [nixosModules.default];
-          fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
-          fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
-        };
-        nixosModules.installer = {...}: {
-          imports = [
-            nixosModules.default
-            ./modules/installer.nix
-          ];
-          aleph.installer.system = nixosConfigurations.default.config.system.build.toplevel;
-        };
-        nixosConfigurations = let
-          toGuest = builtins.replaceStrings ["darwin"] ["linux"];
-          # this fun little hack lets you build nixos modules on macOS or Linux on either x86 or arm64
-          cross-config = modules:
-            if toGuest system == "aarch64-linux"
-            then
-              nixpkgs.lib.nixosSystem {
-                system = "aarch64-linux";
-                inherit modules;
-              }
-            else
-              pkgs.pkgsCross.aarch64-multiplatform.nixos {
-                imports =
-                  modules;
-              };
-        in {
-          default = cross-config [nixosModules.app];
-          installer = cross-config [nixosModules.installer];
-        };
-        packages = {
-          default = nixosConfigurations.default.config.system.build.sdImage;
-          toplevel = nixosConfigurations.default.config.system.build.toplevel;
-          sdimage = nixosConfigurations.installer.config.system.build.sdImage;
-          flash-uefi = pkgs.runCommand "flash-uefi" {} ''
-            mkdir -p $out
-            cp ${jetpack.outputs.packages.${system}.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit $out/flash-uefi
-            sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/t186ref/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
-            chmod +x $out/flash-uefi
-          '';
+      };
+      security.sudo.wheelNeedsPassword = false;
+      users.users.root.password = "root";
+      networking.hostName = "aleph";
+      networking.wireless.enable = true;
+      networking.dhcpcd.enable = true;
+      nix.settings.trusted-users = ["root" "@wheel"];
+      nix.settings.experimental-features = ["nix-command" "flakes"];
+    };
+    appModule = {lib, ...}: {
+      imports = [defaultModule];
+      fileSystems."/".device = lib.mkForce "/dev/disk/by-label/APP";
+      fileSystems."/boot".device = lib.mkForce "/dev/disk/by-label/BOOT";
+    };
+    installerModule = {...}: {
+      imports = [
+        defaultModule
+        ./modules/installer.nix
+      ];
+      aleph.installer.system = defaultNixosConfig.config.system.build.toplevel;
+    };
+    defaultNixosConfig = nixpkgs.lib.nixosSystem {
+      inherit system;
+      modules = [appModule];
+    };
+    installerNixosConfig = nixpkgs.lib.nixosSystem {
+      inherit system;
+      modules = [installerModule];
+    };
+  in
+    flake-utils.lib.eachSystem systems (
+      system: {
+        apps.deploy = {
+          type = "app";
+          meta.description = "deploy-rs is a tool for deploying NixOS configurations";
+          program = "${deploy-rs.packages.${system}.deploy-rs}/bin/deploy";
         };
       }
-    );
+    )
+    // rec {
+      nixosModules = {
+        default = defaultModule;
+        app = appModule;
+        installer = installerModule;
+      };
+      nixosConfigurations = {
+        default = defaultNixosConfig;
+        installer = installerNixosConfig;
+      };
+      deploy.nodes.aleph = {
+        hostname = "aleph.local";
+        profiles.system = {
+          user = "root";
+          path = deployPkgs.deploy-rs.lib.activate.nixos self.nixosConfigurations.default;
+        };
+      };
+      packages.aarch64-linux = {
+        default = nixosConfigurations.default.config.system.build.sdImage;
+        toplevel = nixosConfigurations.default.config.system.build.toplevel;
+        sdimage = nixosConfigurations.installer.config.system.build.sdImage;
+        flash-uefi = pkgs.runCommand "flash-uefi" {} ''
+          mkdir -p $out
+          cp ${jetpack.outputs.packages.aarch64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit $out/flash-uefi
+          sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/t186ref/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
+          chmod +x $out/flash-uefi
+        '';
+      };
+    };
 }

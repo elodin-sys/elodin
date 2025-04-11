@@ -18,7 +18,9 @@ This is the recommended development workflow for iterating on the NixOS configur
 
 1. Connect to Aleph via the USB-C port with the Ethernet gadget enabled (right-most USB-C port).
 2. Modify the NixOS configuration in `flake.nix`, `kernel/`, or `modules/`.
-3. Run `deploy.sh`. This copies all necessary store paths to Aleph, activates the new configuration, and creates a new bootloader entry.
+3. Run `nix run .#deploy`.
+    - This copies all necessary store paths to Aleph, activates the new configuration, and creates a new bootloader entry.
+    - This requires an `aarch64-linux` remote builder to be available on your host system. If you don't have one setup, you can still build on Aleph by running `nix run .#deploy -- --remote-build` but note that this will be slower.
 
 To revert to the previous configuration, reboot and select the previous bootloader entry from the boot menu.
 
