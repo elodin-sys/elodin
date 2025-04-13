@@ -12,7 +12,7 @@ let
         #sha256 = "0951ac78df9d1febbbf5a69c8bfbb536dcb1c1174e956a48f2af72402fe246f7";
       }));
     isNormalUser = true;
-    extraGroups = ["wheel"];
+    extraGroups = ["wheel" "video" "dialout"];
     initialPassword = "nixos";
   };
 in

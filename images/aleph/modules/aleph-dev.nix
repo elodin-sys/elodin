@@ -1,4 +1,14 @@
-{pkgs, ...}: {
+{pkgs, ...}: let
+  pythonPackages = p:
+    with p; [
+      pipx
+      pip
+      virtualenv
+      numpy
+      # opencv4
+      # onnxruntime
+    ];
+in {
   environment.systemPackages = with pkgs; [
     libgpiod_1
     dfu-util
@@ -22,12 +32,11 @@
     vim
     htop
     dtc
-    (python3.withPackages (python-pkgs:
-      with python-pkgs; [
-        pipx
-        pip
-        virtualenv
-      ]))
+    nvidia-jetpack.cudaPackages.cudatoolkit
+    nvidia-jetpack.cudaPackages.tensorrt
+    nvidia-jetpack.l4t-tools
+    nvidia-jetpack.l4t-gstreamer
+    (python3.withPackages pythonPackages)
     (v4l-utils.override {withGUI = false;})
     (writeShellScriptBin "reset-mcu" (builtins.readFile ../scripts/reset-mcu.sh))
     (writeShellScriptBin "flash-mcu" (builtins.readFile ../scripts/flash-mcu.sh))
