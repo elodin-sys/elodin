@@ -9596,7 +9596,6 @@ dependencies = [
  "ignore",
  "miette",
  "nix",
- "nox-ecs",
  "nu-ansi-term 0.49.0",
  "serde",
  "smallvec",

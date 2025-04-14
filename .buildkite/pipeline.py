@@ -153,6 +153,11 @@ test_steps = [
     ),
     nix_step(label="alejandra", flake=".#nix-tools", command="alejandra -c ."),
     step(
+        label=":nix: elodin-cli",
+        key="elodin-cli",
+        command="nix build .#elodin-cli",
+    ),
+    step(
         label=":nix: aleph-os",
         key="aleph-os",
         command="cd images/aleph; nix build .#toplevel",

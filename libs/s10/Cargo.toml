@@ -56,6 +56,4 @@ ignore.version = "0.4"
 # python run
 which = "6.0.3"
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-nox-ecs.path = "../nox-ecs"
 elodin-db.path = "../db"
