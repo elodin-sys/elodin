@@ -136,18 +136,18 @@ mod inner {
             }
 
             let track = super::alloc::track::Registry::current();
-            let subscriber = tracing_02::Dispatch::default();
-            let span = tracing_02::Span::current();
+            let subscriber = tracing::Dispatch::default();
+            let span = tracing::Span::current();
             let num = CHILDREN.with(|children| children.fetch_add(1, Relaxed));
             std::thread::spawn(move || {
-                let _tracing = tracing_02::dispatch::set_default(&subscriber);
+                let _tracing = tracing::dispatcher::set_default(&subscriber);
                 let _span =
-                    tracing_02::info_span!(parent: span.id(), "thread", message = num).entered();
+                    tracing::info_span!(parent: span.id(), "thread", message = num).entered();
 
-                tracing_02::info!(num, "spawned child thread");
+                tracing::info!(num, "spawned child thread");
                 let _tracking = track.as_ref().map(|track| track.set_default());
                 let res = f();
-                tracing_02::info!(num, "child thread completed");
+                tracing::info!(num, "child thread completed");
 
                 res
             })
@@ -177,7 +177,7 @@ mod inner {
 
             pub(crate) fn check(&self, f: impl FnOnce()) {
                 let _trace = crate::util::test::trace_init();
-                let _span = tracing_02::info_span!(
+                let _span = tracing::info_span!(
                     "test",
                     message = std::thread::current().name().unwrap_or("<unnamed>")
                 )
@@ -185,9 +185,9 @@ mod inner {
                 let registry = super::alloc::track::Registry::default();
                 let _tracking = registry.set_default();
 
-                tracing_02::info!("started test...");
+                tracing::info!("started test...");
                 f();
-                tracing_02::info!("test completed successfully!");
+                tracing::info!("test completed successfully!");
 
                 registry.check();
             }

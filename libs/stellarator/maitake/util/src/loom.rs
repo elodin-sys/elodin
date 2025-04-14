@@ -20,9 +20,9 @@ mod inner {
             F: Send + 'static,
             T: Send + 'static,
         {
-            let dispatch = tracing::dispatch::Dispatch::default();
+            let dispatch = tracing::dispatcher::Dispatch::default();
             std::thread::spawn(move || {
-                let _guard = tracing::dispatch::set_default(&dispatch);
+                let _guard = tracing::dispatcher::set_default(&dispatch);
                 test_info!("thread spawned");
                 f()
             })

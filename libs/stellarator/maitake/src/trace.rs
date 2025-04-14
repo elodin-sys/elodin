@@ -5,61 +5,31 @@ use mycelium_util::fmt;
 macro_rules! span {
     ($level:expr, $($arg:tt)+) => {
         crate::trace::Span {
-            #[cfg(any(feature = "tracing-01", loom))]
             span_01: {
                 use tracing::Level;
                 tracing::span!($level, $($arg)+)
             },
-
-            #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-            span_02: {
-                use tracing_02::Level;
-                tracing_02::span!($level, $($arg)+)
-            }
         }
     }
 }
 
 macro_rules! trace {
     ($($arg:tt)+) => {
-        #[cfg(any(feature = "tracing-01", loom))]
-        {
             tracing::trace!($($arg)+)
-        }
 
-        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-        {
-            tracing_02::trace!($($arg)+)
-        }
     };
 }
 
 macro_rules! debug {
     ($($arg:tt)+) => {
-        #[cfg(any(feature = "tracing-01", loom))]
-        {
-            tracing::debug!($($arg)+)
-        }
-
-        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-        {
-            tracing_02::debug!($($arg)+)
-        }
+        tracing::debug!($($arg)+)
     };
 }
 
 #[cfg(test)]
 macro_rules! info {
     ($($arg:tt)+) => {
-        #[cfg(any(feature = "tracing-01", loom))]
-        {
-            tracing::info!($($arg)+)
-        }
-
-        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-        {
-            tracing_02::info!($($arg)+)
-        }
+        tracing::info!($($arg)+)
     };
 }
 
@@ -126,32 +96,21 @@ macro_rules! test_trace {
 
 #[derive(Clone)]
 pub(crate) struct Span {
-    #[cfg(any(feature = "tracing-01", loom))]
     pub(crate) span_01: tracing::Span,
-    #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-    pub(crate) span_02: tracing_02::Span,
 }
 
 impl Span {
     #[inline(always)]
     pub(crate) const fn none() -> Self {
         Span {
-            #[cfg(any(feature = "tracing-01", loom))]
             span_01: tracing::Span::none(),
-            #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-            span_02: tracing_02::Span::none(),
         }
     }
 
     #[inline]
     pub(crate) fn enter(&self) -> Entered<'_> {
         Entered {
-            #[cfg(any(feature = "tracing-01", loom))]
             _enter_01: self.span_01.enter(),
-
-            #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-            _enter_02: self.span_02.enter(),
-
             _p: core::marker::PhantomData,
         }
     }
@@ -159,37 +118,19 @@ impl Span {
     #[inline]
     pub(crate) fn entered(self) -> EnteredSpan {
         EnteredSpan {
-            #[cfg(any(feature = "tracing-01", loom))]
             _enter_01: self.span_01.entered(),
-            #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-            _enter_02: self.span_02.entered(),
         }
-    }
-
-    #[cfg(any(feature = "tracing-01", loom))]
-    #[inline]
-    pub(crate) fn tracing_id(&self) -> Option<core::num::NonZeroU64> {
-        self.span_01.id().map(|id| id.into_non_zero_u64())
     }
 }
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const TRACING_FIELD: &str = "tracing";
-        const TRACING_02_FIELD: &str = "tracing_02";
 
         let mut s = f.debug_struct("Span");
 
-        #[cfg(any(feature = "tracing-01", loom))]
         if let Some(id) = self.span_01.id() {
             s.field(TRACING_FIELD, &id.into_u64());
-        } else {
-            s.field(TRACING_02_FIELD, &fmt::display("<none>"));
-        }
-
-        #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-        if let Some(id) = self.span_02.id() {
-            s.field(TRACING_02_FIELD, &id.into_u64());
         } else {
             s.field(TRACING_FIELD, &fmt::display("<none>"));
         }
@@ -200,10 +141,7 @@ impl fmt::Debug for Span {
 
 #[derive(Debug)]
 pub(crate) struct Entered<'span> {
-    #[cfg(any(feature = "tracing-01", loom))]
     _enter_01: tracing::span::Entered<'span>,
-    #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-    _enter_02: tracing_02::span::Entered<'span>,
 
     /// This is just there so that the `'span` lifetime is used even when both
     /// `tracing` features are disabled.
@@ -212,8 +150,5 @@ pub(crate) struct Entered<'span> {
 
 #[derive(Debug)]
 pub(crate) struct EnteredSpan {
-    #[cfg(any(feature = "tracing-01", loom))]
     _enter_01: tracing::span::EnteredSpan,
-    #[cfg(any(feature = "tracing-02", all(test, not(loom))))]
-    _enter_02: tracing_02::span::EnteredSpan,
 }
