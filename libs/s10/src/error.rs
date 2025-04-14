@@ -23,9 +23,6 @@ pub enum Error {
     UnresolvedRecipe(String),
     #[error("failed to build sim {0:?}")]
     SimBuildFailed(Option<i32>),
-    #[cfg_attr(not(target_os = "windows"), error("nox ecs {0}"))]
-    #[cfg(not(target_os = "windows"))]
-    NoxEcs(#[from] nox_ecs::Error),
     #[error("join error")]
     JoinError,
     #[error(transparent)]
