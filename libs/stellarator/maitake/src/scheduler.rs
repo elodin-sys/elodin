@@ -905,7 +905,7 @@ impl Core {
             self.queued.fetch_sub(1, Relaxed);
             let _span = trace_span!(
                 "poll",
-                task.addr = ?fmt::ptr(&task),
+                // task.addr = ?fmt::ptr(&task),
                 task.tid = task.id().as_u64(),
             )
             .entered();

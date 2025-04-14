@@ -83,9 +83,6 @@ pub(crate) mod test {
     /// Exists to abstract over tracing 01/02 guard type differences.
     #[must_use]
     pub struct TestGuard {
-        #[cfg(not(loom))]
-        _x2: tracing_02::collect::DefaultGuard,
-        #[cfg(loom)]
         _x1: tracing::subscriber::DefaultGuard,
     }
 
@@ -103,7 +100,10 @@ pub(crate) mod test {
     /// tracing messages are correctly output
     #[cfg(not(loom))]
     pub(crate) fn trace_init_with_default(default: &str) -> TestGuard {
-        use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+        use tracing_subscriber::{
+            filter::{EnvFilter, LevelFilter},
+            util::SubscriberInitExt,
+        };
         let env = std::env::var("RUST_LOG").unwrap_or_default();
         let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
         let filter = if env.is_empty() {
@@ -120,7 +120,7 @@ pub(crate) mod test {
             .finish();
 
         TestGuard {
-            _x2: tracing_02::collect::set_default(collector),
+            _x1: collector.set_default(),
         }
     }
 

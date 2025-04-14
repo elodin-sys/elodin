@@ -1113,7 +1113,6 @@ impl TaskRef {
         let mut ptr = STO::into_raw(task);
 
         // attach the task span, if tracing is enabled.
-        #[cfg(any(feature = "tracing-01", feature = "tracing-02", test))]
         {
             let loc = match builder.location {
                 Some(ref loc) => loc,
@@ -1150,7 +1149,6 @@ impl TaskRef {
 
         let ptr = ptr.cast::<Header>();
 
-        #[cfg(not(any(feature = "tracing-01", feature = "tracing-02", test)))]
         let _ = builder;
         let this = Self(ptr);
         let join_handle = unsafe {
