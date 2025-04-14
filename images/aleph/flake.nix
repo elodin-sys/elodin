@@ -29,12 +29,17 @@
     deploy-rs,
   }: let
     system = "aarch64-linux";
-    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
     pkgs = import nixpkgs {inherit system;};
     deployPkgs = import nixpkgs {
       inherit system;
       overlays = [
         deploy-rs.overlays.default
+        (self: super: {
+          deploy-rs = {
+            inherit (pkgs) deploy-rs;
+            lib = super.deploy-rs.lib;
+          };
+        })
       ];
     };
     defaultModule = {
@@ -115,12 +120,17 @@
       modules = [installerModule];
     };
   in
-    flake-utils.lib.eachSystem systems (
-      system: {
-        apps.deploy = {
-          type = "app";
-          meta.description = "deploy-rs is a tool for deploying NixOS configurations";
-          program = "${deploy-rs.packages.${system}.deploy-rs}/bin/deploy";
+    flake-utils.lib.eachDefaultSystem (
+      system: let
+        pkgs = nixpkgs.legacyPackages.${system};
+      in {
+        devShells = {
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              just
+              deploy-rs.packages.${system}.deploy-rs
+            ];
+          };
         };
       }
     )
