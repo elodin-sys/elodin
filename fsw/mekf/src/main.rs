@@ -1,6 +1,7 @@
 use clap::Parser;
 use impeller2::types::{LenPacket, PacketId};
-use impeller2_wkt::{AssetHandle, Glb, SetAsset, Stream, StreamBehavior};
+use impeller2_stellar::Client;
+use impeller2_wkt::{AssetHandle, Glb, SetAsset};
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Mat3, Quat, SpatialTransform, Vec3},
@@ -12,11 +13,19 @@ use roci::{
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
-use stellarator::net::TcpStream;
-use stellarator::{io::SplitExt, rent};
-use zerocopy::{Immutable, IntoBytes};
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-#[derive(Componentize, Decomponentize, AsVTable, Default, Debug)]
+#[derive(
+    Componentize,
+    Decomponentize,
+    AsVTable,
+    Default,
+    Debug,
+    Clone,
+    TryFromBytes,
+    Immutable,
+    KnownLayout,
+)]
 #[roci(entity_id = 1)]
 pub struct Input {
     pub mag: Vec3<f32>,
@@ -37,37 +46,24 @@ pub struct Output {
 }
 
 async fn connect(config: &Config) -> anyhow::Result<()> {
-    let stream = TcpStream::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
+    let mut client = Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
         .map_err(anyhow::Error::from)?;
-    let (rx, tx) = stream.split();
-    let tx = impeller2_stellar::PacketSink::new(tx);
-    let rx = impeller2_stellar::PacketStream::new(rx);
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    tx.init_world::<Output>(id).await?;
-    let mut sub = rx.subscribe::<Input>();
-    let mut read = vec![0; 256];
+    client.init_world::<Output>(id).await?;
     let mut mekf = roci_adcs::mekf::State::new(
         tensor![1., 1., 1.] * config.mekf.gyro_sigma,
         tensor![1., 1., 1.] * config.mekf.gyro_bias_sigma,
         config.mekf.dt,
     );
     let glb_id = fastrand::u64(..);
-    tx.send(&SetAsset::new(glb_id, Glb(config.glb_url.clone()))?)
+    client
+        .send(&SetAsset::new(glb_id, Glb(config.glb_url.clone()))?)
         .await
         .0?;
-    tx.send(&Stream {
-        behavior: StreamBehavior::RealTime,
-        filter: Default::default(),
-        id: fastrand::u64(..),
-    })
-    .await
-    .0
-    .unwrap();
+    let mut sub = client.subscribe::<Input>().await?;
     loop {
-        let Some(input) = rent!(sub.next(read).await.unwrap(), read) else {
-            continue;
-        };
+        let input = sub.next().await?;
         mekf.omega = Vec3::from_buf(input.gyro.into_buf().map(|x| x.to_radians() as f64))
             * tensor![-1., -1., 1.];
         let accel =
@@ -95,7 +91,7 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
             gyro_est,
         };
         table.extend_from_slice(output.as_bytes());
-        tx.send(table).await.0?;
+        sub.send(table).await.0?;
     }
 }
 

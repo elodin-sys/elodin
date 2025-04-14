@@ -1,14 +1,18 @@
 use assets::open_assets;
+use impeller2::vtable::builder::{
+    OpBuilder, pair, raw_field, raw_table, schema, timestamp, vtable,
+};
+use impeller2::vtable::{RealizedField, builder};
 use impeller2::{
     com_de::Decomponentize,
     component::Component as _,
     registry,
     schema::Schema,
-    table::{VTable, VTableBuilder},
     types::{
         ComponentId, ComponentView, EntityId, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
         PacketId, PrimType, RequestId, Timestamp,
     },
+    vtable::VTable,
 };
 use impeller2_stellar::{PacketSink, PacketStream};
 use impeller2_wkt::*;
@@ -43,6 +47,7 @@ use stellarator::{
 };
 use time_series::TimeSeries;
 use tracing::{debug, info, trace, warn};
+use vtable_stream::handle_vtable_stream;
 use zerocopy::IntoBytes;
 
 pub use error::Error;
@@ -54,6 +59,7 @@ pub mod axum;
 mod error;
 mod msg_log;
 pub(crate) mod time_series;
+mod vtable_stream;
 
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
@@ -298,8 +304,15 @@ impl DB {
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
         self.with_state_mut(|state| {
-            for (entity_id, component_id, prim_ty, shape) in vtable.vtable.column_iter() {
-                let component_schema = ComponentSchema::new(prim_ty, shape);
+            for res in vtable.vtable.realize_fields(None) {
+                let RealizedField {
+                    entity_id,
+                    component_id,
+                    shape,
+                    ty,
+                    ..
+                } = res?;
+                let component_schema = ComponentSchema::new(ty, shape);
                 state.insert_component(component_id, component_schema, entity_id, &self.path)?;
                 self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             }
@@ -635,21 +648,12 @@ impl Component {
         })
     }
 
-    fn add_to_vtable(
-        &self,
-        vtable: &mut VTableBuilder<Vec<impeller2::table::Entry>, Vec<u8>>,
-    ) -> Result<(), Error> {
-        let timestamp = vtable.timestamp()?;
-        vtable.entity_with_timestamp(
-            self.entity_id,
-            &[(
-                self.component_id,
-                self.schema.prim_type,
-                &self.schema.shape(),
-            )],
-            Some(timestamp),
-        )?;
-        Ok(())
+    fn as_vtable_op(&self) -> Arc<OpBuilder> {
+        schema(
+            self.schema.prim_type,
+            &self.schema.shape(),
+            pair(self.entity_id, self.component_id),
+        )
     }
 
     fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
@@ -1165,6 +1169,15 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 .await
                 .0?;
         }
+        Packet::Msg(m) if m.id == VTableStream::ID => {
+            let vtable_stream = m.parse::<VTableStream>()?;
+            stellarator::spawn(handle_vtable_stream(
+                vtable_stream,
+                db.clone(),
+                tx.clone(),
+                m.req_id,
+            ));
+        }
         Packet::Msg(m) => db.push_msg(Timestamp::now(), m.id, &m.buf)?,
         _ => {}
     }
@@ -1362,9 +1375,13 @@ async fn handle_real_time_component<A: AsyncWrite>(
     component: Component,
     req_id: RequestId,
 ) -> Result<(), Error> {
-    let mut vtable = VTableBuilder::default();
-    component.add_to_vtable(&mut vtable)?;
-    let vtable = vtable.build();
+    let timestamp_loc = raw_table(0, size_of::<Timestamp>() as u16);
+    let prim_type = component.schema.prim_type;
+    let vtable = vtable([raw_field(
+        (prim_type.padding(8) + size_of::<Timestamp>()) as u16,
+        component.schema.size() as u16,
+        timestamp(timestamp_loc, component.as_vtable_op()),
+    )]);
     let waiter = component.time_series.waiter();
     let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     {
@@ -1381,7 +1398,6 @@ async fn handle_real_time_component<A: AsyncWrite>(
             .0?;
     }
 
-    let prim_type = component.schema.prim_type;
     let mut table = LenPacket::table(vtable_id, 2048 - 16);
     loop {
         let _ = waiter.wait().await;
@@ -1480,7 +1496,7 @@ pub trait StreamFilterExt {
     fn vtable(
         &self,
         components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error>;
+    ) -> Result<VTable, Error>;
     fn populate_table(
         &self,
         components: &HashMap<(EntityId, ComponentId), Component>,
@@ -1493,15 +1509,24 @@ impl StreamFilterExt for StreamFilter {
     fn vtable(
         &self,
         components: &HashMap<(EntityId, ComponentId), Component>,
-    ) -> Result<VTable<Vec<impeller2::table::Entry>, Vec<u8>>, Error> {
-        let mut vtable = VTableBuilder::default();
+    ) -> Result<VTable<Vec<impeller2::vtable::Op>, Vec<u8>, Vec<impeller2::vtable::Field>>, Error>
+    {
+        let mut fields = vec![];
+        let mut offset = 0;
         self.visit(components, |entity| {
             if !entity.time_series.index().is_empty() {
-                entity.add_to_vtable(&mut vtable)?;
+                offset += PrimType::U64.padding(offset);
+                let op = timestamp(builder::raw_table(offset as u16, 8), entity.as_vtable_op());
+                offset += size_of::<Timestamp>();
+                offset += entity.schema.prim_type.padding(offset);
+                let len = entity.schema.size();
+                let size = len as u16;
+                fields.push(raw_field(offset as u16, size, op));
+                offset += len;
             }
             Ok(())
         })?;
-        Ok(vtable.build())
+        Ok(vtable(fields))
     }
 
     fn populate_table(

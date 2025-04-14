@@ -28,30 +28,34 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
     let vtable_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
         let component_id = field.component_id();
+        let ident = &field.ident;
         if let Some(id) = field.entity_id.or(entity_id) {
             quote! {
                 {
 
                     let schema = <#ty as #impeller::component::Component>::schema();
-                    builder.column(
-                        #component_id,
-                        schema.prim_type(),
-                        schema.shape().iter().map(|&s| s as u64),
-                        [#impeller::types::EntityId(#id)],
-                    )?;
+                    assert_eq!(schema.size(), #impeller::vtable::builder::field_size!(Self, #ident), "to cast to a vtable each field must be the same size as the component");
+                    builder.push(
+                        #impeller::vtable::builder::field!(
+                            Self::#ident,
+                            #impeller::vtable::builder::schema(
+                                schema.prim_type(),
+                                schema.dim(),
+                                #impeller::vtable::builder::pair(#id, #component_id)
+                            )
+                        )
+                    );
                 }
             }
         } else {
             quote! {
-                <#ty as #crate_name::AsVTable>::populate_vtable_builder(builder);
+                <#ty as #crate_name::AsVTable>::populate_vtable_builder(builder)?;
             }
         }
     });
     quote! {
         impl #crate_name::AsVTable for #ident #generics #where_clause {
-            fn populate_vtable_builder<EntryBuf: #impeller::buf::Buf<#impeller::table::Entry>, DataBuf: #impeller::buf::Buf<u8>>(
-                builder: &mut #impeller::table::VTableBuilder<EntryBuf, DataBuf>,
-            ) -> Result<(), #impeller::error::Error> {
+            fn populate_vtable_fields(builder: &mut Vec<#impeller::vtable::builder::FieldBuilder>) -> Result<(), #impeller::error::Error> {
                 #(#vtable_items)*
                 Ok(())
             }

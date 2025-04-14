@@ -152,4 +152,4 @@ First install Elodin Editor using the instructions in [Quick Start](/home/quicks
 Next launch Elodin. You should be greeted with a startup window. You can connect to Aleph by selecting the "Connect to IP Address" option from the menu and entering `aleph.local:2240` in the IP address field.
 
 
-<img src="/assets/aleph-connect.png" alt="screnshot of editor connecting to ealeph"/>
+<img src="/assets/aleph-connect.png" alt="screenshot of editor connecting to aleph"/>

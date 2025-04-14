@@ -1,8 +1,11 @@
+#![no_std]
+extern crate alloc;
+
 use impeller2::buf::Buf;
 use impeller2::error::Error;
 
 #[derive(Default)]
-pub struct FrameDecoder<B: Buf<u8> = Vec<u8>> {
+pub struct FrameDecoder<B: Buf<u8> = alloc::vec::Vec<u8>> {
     frame: B,
     state: FrameDecoderState,
 }

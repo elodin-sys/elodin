@@ -19,9 +19,11 @@ impeller2.path = "../impeller2"
 impeller2.features = ["std"]
 impeller2-wkt.path = "../impeller2/wkt"
 
-# datastructures
+# data structures
 heapless = "0.8"
 thingbuf = "0.1.6"
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
 
 # async
 stellarator.path = "../stellarator"
@@ -66,7 +68,6 @@ serde.optional = true
 postcard.version = "1.1"
 postcard-schema.version = "0.2"
 postcard-schema.features = ["use-std"]
-
 
 [dev-dependencies]
 roci-macros.workspace = true

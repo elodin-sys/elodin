@@ -1,6 +1,7 @@
 use thiserror::Error;
 #[derive(Error, Debug, Clone)]
 #[cfg_attr(feature = "std", derive(miette::Diagnostic))]
+/// Error type used for all of impeller2
 pub enum Error {
     #[error("buffer underflow")]
     #[cfg_attr(
@@ -66,6 +67,25 @@ pub enum Error {
         diagnostic(code(impeller::invalid_packet), help("invalid_packet"))
     )]
     InvalidPacket,
+    #[error("op ref not found")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::op_ref_not_found), help("op ref not found"))
+    )]
+    OpRefNotFound,
+    #[error("invalid op")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::invalid_op), help("invalid_op"))
+    )]
+    InvalidOp,
+
+    #[error("schema not found")]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(code(impeller::schema_not_found), help("schema not found"))
+    )]
+    SchemaNotFound,
 }
 
 impl<A, B: ?Sized> From<zerocopy::CastError<A, B>> for Error {

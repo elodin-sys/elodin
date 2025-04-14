@@ -10,6 +10,9 @@ use nox::ArrayView;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 use crate::{buf::ByteBufExt, error::Error};
 use stellarator_buf::{AtomicValue, IoBuf, Slice};
 
@@ -553,6 +556,7 @@ pub const fn msg_id(name: &str) -> PacketId {
     }
 }
 
+#[cfg(feature = "alloc")]
 pub trait IntoLenPacket {
     fn into_len_packet(self) -> LenPacket;
 
@@ -564,6 +568,7 @@ pub trait IntoLenPacket {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<M: Msg> IntoLenPacket for &'_ M {
     fn into_len_packet(self) -> LenPacket {
         let msg = LenPacket::msg(M::ID, 0);
@@ -571,17 +576,20 @@ impl<M: Msg> IntoLenPacket for &'_ M {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl IntoLenPacket for LenPacket {
     fn into_len_packet(self) -> LenPacket {
         self
     }
 }
 
+#[cfg(feature = "alloc")]
 #[derive(Clone)]
 pub struct LenPacket {
     pub inner: Vec<u8>,
 }
 
+#[cfg(feature = "alloc")]
 impl LenPacket {
     pub fn new(ty: PacketTy, id: PacketId, cap: usize) -> Self {
         let mut inner = Vec::with_capacity(cap + 8);
@@ -670,6 +678,7 @@ impl LenPacket {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl postcard::ser_flavors::Flavor for LenPacket {
     type Output = LenPacket;
 
@@ -747,7 +756,7 @@ impl<B: IoBuf> OwnedTable<B> {
         sink: &mut impl crate::com_de::Decomponentize,
     ) -> Result<(), Error> {
         let vtable = registry.get(&self.id).ok_or(Error::VTableNotFound)?;
-        vtable.parse_table(stellarator_buf::deref(&self.buf), sink)
+        vtable.apply(stellarator_buf::deref(&self.buf), sink)
     }
 }
 

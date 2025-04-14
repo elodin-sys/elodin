@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct VTableRegistry {
-    pub map: HashMap<PacketId, VTable<Vec<Entry>, Vec<u8>>>,
+    pub map: HashMap<PacketId, VTable>,
 }
 
 impl impeller2::registry::VTableRegistry for VTableRegistry {

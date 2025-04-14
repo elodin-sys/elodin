@@ -1,6 +1,9 @@
-use std::{io, net::SocketAddr};
+use std::{
+    marker::PhantomData,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+};
 
-use futures_lite::{Stream, stream};
 use impeller2::types::{
     IntoLenPacket, LenPacket, Msg, OwnedPacket, Request, RequestId, TryFromPacket,
 };
@@ -60,8 +63,8 @@ impl<W: AsyncWrite> PacketSink<W> {
 
 pub struct Client {
     resp_buf: Option<Vec<u8>>,
-    tx: PacketSink<OwnedWriter<TcpStream>>,
-    rx: PacketStream<OwnedReader<TcpStream>>,
+    pub tx: PacketSink<OwnedWriter<TcpStream>>,
+    pub rx: PacketStream<OwnedReader<TcpStream>>,
     next_req_id: u8,
 }
 
@@ -123,23 +126,40 @@ impl Client {
     pub async fn stream<R: impeller2::types::Request + IntoLenPacket>(
         &mut self,
         req: R,
-    ) -> Result<impl Stream<Item = Result<R::Reply<Slice<Vec<u8>>>, Error>> + '_, Error> {
+    ) -> Result<SubStream<'_, R::Reply<Slice<Vec<u8>>>>, Error> {
         let req_id = self.next_req_id.wrapping_add(1);
         self.send(req.with_request_id(req_id)).await.0?;
-        Ok(stream::unfold(self, move |this| async move {
-            let res = this.recv(req_id).await;
-            match &res {
-                Err(Error::Stellar(stellarator::Error::EOF)) => return None,
-                Err(Error::Stellar(stellarator::Error::Io(err)))
-                    if err.kind() == io::ErrorKind::BrokenPipe
-                        || err.kind() == io::ErrorKind::ConnectionReset =>
-                {
-                    return None;
-                }
-                _ => {}
-            }
-            Some((res, this))
-        }))
+        Ok(SubStream {
+            req_id,
+            client: self,
+            _phantom_data: PhantomData,
+        })
+    }
+}
+
+pub struct SubStream<'a, R> {
+    req_id: RequestId,
+    client: &'a mut Client,
+    _phantom_data: PhantomData<R>,
+}
+
+impl<R: TryFromPacket<Slice<Vec<u8>>>> SubStream<'_, R> {
+    pub async fn next(&mut self) -> Result<R, Error> {
+        self.client.recv(self.req_id).await
+    }
+}
+
+impl<R> Deref for SubStream<'_, R> {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        self.client
+    }
+}
+
+impl<R> DerefMut for SubStream<'_, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.client
     }
 }
 
