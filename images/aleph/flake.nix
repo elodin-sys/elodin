@@ -1,4 +1,10 @@
 {
+  nixConfig = {
+    extra-substituters = ["http://ci-arm1.elodin.dev:5000"];
+    extra-trusted-public-keys = [
+      "builder-cache-1:rEmIQJ4ChX5bopj3to1Ow7McFb7kLnXIQJYqawVlKEs="
+    ];
+  };
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -98,6 +104,14 @@
       networking.dhcpcd.enable = true;
       nix.settings.trusted-users = ["root" "@wheel"];
       nix.settings.experimental-features = ["nix-command" "flakes"];
+      nix.settings.trusted-public-keys = [
+        "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+        "builder-cache-1:rEmIQJ4ChX5bopj3to1Ow7McFb7kLnXIQJYqawVlKEs="
+      ];
+      nix.settings.extra-substituters = [
+        "https://cache.nixos.org"
+        "http://ci-arm1.elodin.dev:5000"
+      ];
     };
     appModule = {lib, ...}: {
       imports = [defaultModule];
