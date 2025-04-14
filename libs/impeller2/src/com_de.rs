@@ -1,7 +1,14 @@
+//! Contains traits for converting Rust types to and form tables
+//!
+//! Componentize and Decomponentize are impeller's conceptual equivalent to [`serde::Serialize`] and [`serde::Deserialize`].
+//! They allow you to read data from a table into a type, and write data from a type into a table.
+//! They are designed to be chained together. So you can use `sink_columns` to write data into a type that implements [`Decomponentize`].
+
 use crate::{
     error::Error,
     types::{ComponentId, ComponentView, EntityId, Timestamp},
 };
+use core::slice;
 
 pub trait Componentize {
     fn sink_columns(&self, output: &mut impl Decomponentize);
@@ -163,7 +170,7 @@ macro_rules! impl_component_view {
         impl AsComponentView for $ty {
             fn as_component_view(&self) -> ComponentView<'_> {
                 ComponentView::$prim(nox::ArrayView::from_buf_shape_unchecked(
-                    std::slice::from_ref(self),
+                    slice::from_ref(self),
                     &[],
                 ))
             }

@@ -9,6 +9,7 @@ pub use impeller2_wkt;
 pub use roci_macros::{AsVTable, Componentize, Decomponentize, Metadatatize};
 pub use system_fn::*;
 pub use vtable::AsVTable;
+pub use zerocopy;
 
 pub mod combinators;
 #[cfg(feature = "csv")]

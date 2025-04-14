@@ -1,13 +1,14 @@
 use crate::{
     buf::Buf,
-    table::{Entry, VTable},
     types::PacketId,
+    vtable::{Field, Op, VTable},
 };
 
 pub trait VTableRegistry {
-    type EntryBuf: Buf<Entry>;
-    type DataBuf: Buf<u8>;
-    fn get(&self, id: &PacketId) -> Option<&VTable<Self::EntryBuf, Self::DataBuf>>;
+    type Ops: Buf<Op>;
+    type Fields: Buf<Field>;
+    type Data: Buf<u8>;
+    fn get(&self, id: &PacketId) -> Option<&VTable<Self::Ops, Self::Data, Self::Fields>>;
 }
 
 #[cfg(feature = "std")]
@@ -19,18 +20,17 @@ mod std {
     #[derive(Default)]
     #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
     pub struct HashMapRegistry {
-        pub map: HashMap<PacketId, VTable<Vec<Entry>, Vec<u8>>>,
+        pub map: HashMap<PacketId, VTable>,
     }
 
     impl VTableRegistry for HashMapRegistry {
-        type EntryBuf = Vec<Entry>;
+        type Ops = Vec<Op>;
 
-        type DataBuf = Vec<u8>;
+        type Fields = Vec<Field>;
 
-        fn get(
-            &self,
-            id: &PacketId,
-        ) -> Option<&crate::table::VTable<Self::EntryBuf, Self::DataBuf>> {
+        type Data = Vec<u8>;
+
+        fn get(&self, id: &PacketId) -> Option<&VTable<Self::Ops, Self::Data, Self::Fields>> {
             self.map.get(id)
         }
     }

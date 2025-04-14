@@ -12,7 +12,7 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 /// Represents a tensor with a specific type `T`, dimensionality `D`, and underlying representation `P`.
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout, zerocopy::FromBytes)]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Tensor<T: TensorItem, D: Dim, R: Repr = DefaultRepr> {
     #[cfg_attr(

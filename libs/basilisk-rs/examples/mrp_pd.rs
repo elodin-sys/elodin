@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use basilisk::{
     att_control::MrpPD,
     channel::BskChannel,
@@ -80,7 +78,5 @@ impl System for MRPHandler {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    let (tcp_tx, tcp_rx) =
-        roci::tcp::tcp_pair::<World, _>(SocketAddr::new([127, 0, 0, 1].into(), 2240));
-    os_sleep_driver(tcp_rx.pipe(MRPHandler::new()).pipe(tcp_tx)).run();
+    os_sleep_driver(MRPHandler::new()).run();
 }

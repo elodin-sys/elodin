@@ -20,6 +20,60 @@ pub enum ComponentValue {
 }
 
 impl ComponentValue {
+    pub fn zeros(shape: &[usize], prim_type: PrimType) -> Self {
+        match prim_type {
+            PrimType::U8 => Self::U8(Array::zeroed(shape)),
+            PrimType::U16 => Self::U16(Array::zeroed(shape)),
+            PrimType::U32 => Self::U32(Array::zeroed(shape)),
+            PrimType::U64 => Self::U64(Array::zeroed(shape)),
+            PrimType::I8 => Self::I8(Array::zeroed(shape)),
+            PrimType::I16 => Self::I16(Array::zeroed(shape)),
+            PrimType::I32 => Self::I32(Array::zeroed(shape)),
+            PrimType::I64 => Self::I64(Array::zeroed(shape)),
+            PrimType::Bool => Self::Bool(Array::zeroed(shape)),
+            PrimType::F32 => Self::F32(Array::zeroed(shape)),
+            PrimType::F64 => Self::F64(Array::zeroed(shape)),
+        }
+    }
+
+    pub fn fill_zeros(&mut self) {
+        match self {
+            Self::U8(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::U16(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::U32(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::U64(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::I8(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::I16(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::I32(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::I64(a) => {
+                a.buf.as_mut_buf().fill(0);
+            }
+            Self::Bool(a) => {
+                a.buf.as_mut_buf().fill(false);
+            }
+            Self::F32(a) => {
+                a.buf.as_mut_buf().fill(0.0);
+            }
+            Self::F64(a) => {
+                a.buf.as_mut_buf().fill(0.0);
+            }
+        }
+    }
+
     pub fn shape(&self) -> &[usize] {
         match self {
             Self::U8(arr) => arr.shape(),
@@ -33,6 +87,145 @@ impl ComponentValue {
             Self::Bool(arr) => arr.shape(),
             Self::F32(arr) => arr.shape(),
             Self::F64(arr) => arr.shape(),
+        }
+    }
+
+    pub fn add_view(&mut self, view: ComponentView<'_>) {
+        match (self, view) {
+            (Self::U8(arr), ComponentView::U8(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::U16(arr), ComponentView::U16(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::U32(arr), ComponentView::U32(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::U64(arr), ComponentView::U64(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::I8(arr), ComponentView::I8(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::I16(arr), ComponentView::I16(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::I32(arr), ComponentView::I32(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::I64(arr), ComponentView::I64(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = r.saturating_add(val);
+                    }
+                }
+            },
+            (Self::Bool(arr), ComponentView::Bool(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r = *r || val; // Logical OR for booleans
+                    }
+                }
+            },
+            (Self::F32(arr), ComponentView::F32(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r += val;
+                    }
+                }
+            },
+            (Self::F64(arr), ComponentView::F64(view)) => {
+                for (i, &val) in view.buf().iter().enumerate() {
+                    if let Some(r) = arr.buf.as_mut_buf().get_mut(i) {
+                        *r += val;
+                    }
+                }
+            },
+            _ => panic!("Cannot add values of different types"),
+        }
+    }
+
+    pub fn div(&mut self, count: f64) {
+        match self {
+            Self::U8(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as u8;
+                }
+            },
+            Self::U16(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as u16;
+                }
+            },
+            Self::U32(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as u32;
+                }
+            },
+            Self::U64(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as u64;
+                }
+            },
+            Self::I8(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as i8;
+                }
+            },
+            Self::I16(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as i16;
+                }
+            },
+            Self::I32(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count) as i32;
+                }
+            },
+            Self::I64(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r = (*r as f64 / count ) as i64;
+                }
+            },
+            Self::Bool(_) => panic!("Cannot divide boolean values"),
+            Self::F32(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r /= count as f32;
+                }
+            },
+            Self::F64(a) => {
+                for r in a.buf.as_mut_buf().iter_mut() {
+                    *r /= count ;
+                }
+            },
         }
     }
     pub fn copy_from_view(&mut self, view: ComponentView<'_>) {

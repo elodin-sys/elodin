@@ -57,7 +57,7 @@ pub mod prelude {
 
 /// A struct representing an array with type-safe dimensions and element type.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout)]
+#[derive(zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout, zerocopy::FromBytes)]
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Array<T: Elem, D: ArrayDim> {

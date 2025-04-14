@@ -32,9 +32,17 @@ impl<D: Buf<u64>> Schema<D> {
         self.prim_type
     }
 
+    pub fn dim(&self) -> &[u64] {
+        self.shape.as_slice()
+    }
+
     pub fn shape(&self) -> &[usize] {
         let bytes = self.shape.as_slice().as_bytes();
         <[usize]>::ref_from_bytes(bytes).unwrap()
+    }
+
+    pub fn size(&self) -> usize {
+        self.shape.as_slice().iter().copied().product::<u64>() as usize * self.prim_type.size()
     }
 }
 

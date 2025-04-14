@@ -4,19 +4,23 @@ use arrow::{
     error::ArrowError,
     util::display::{ArrayFormatter, FormatOptions},
 };
-use futures_lite::StreamExt;
 use impeller2::{
     com_de::Decomponentize,
     schema::Schema,
-    table::{Entry, VTable, VTableBuilder},
     types::{
         ComponentId, EntityId, Msg, OwnedTimeSeries, PacketId, PrimType, Request, Timestamp, msg_id,
+    },
+    vtable::{
+        self, VTable,
+        builder::{FieldBuilder, OpBuilder, schema},
     },
 };
 
 use impeller2::types::{IntoLenPacket, LenPacket, OwnedPacket};
 use impeller2_wkt::*;
-use mlua::{AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, Value};
+use mlua::{
+    AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, UserDataRef, Value,
+};
 use nu_ansi_term::Color;
 use rustyline::{
     Completer, CompletionType, Editor, Helper, Hinter, Validator,
@@ -26,13 +30,13 @@ use rustyline::{
     history::History,
     validate::MatchingBracketValidator,
 };
-// Unused imports removed
 use std::{
     borrow::Cow::{self, Borrowed, Owned},
     collections::HashMap,
     fmt::Display,
-    io::{self, Read, Write, stdout},
+    io::{self, Read},
     net::ToSocketAddrs,
+    ops::Deref,
     path::PathBuf,
     sync::{
         Arc,
@@ -154,8 +158,9 @@ impl Client {
         let stream = self.client.stream(&SQLQuery(sql.to_string())).await?;
         let mut batches = vec![];
         futures_lite::pin!(stream);
-        while let Some(msg) = stream.next().await {
-            let Some(batch) = msg?.batch else {
+        loop {
+            let msg = stream.next().await?;
+            let Some(batch) = msg.batch else {
                 break;
             };
             let mut decoder = arrow::ipc::reader::StreamDecoder::new();
@@ -183,16 +188,15 @@ impl Client {
         shape: Vec<u64>,
         buf: Value,
     ) -> anyhow::Result<()> {
+        use vtable::builder::*;
         let component_id = ComponentId(component_id);
         let entity_id = EntityId(entity_id);
-        let mut vtable: VTableBuilder<Vec<_>, Vec<_>> = VTableBuilder::default();
-        vtable.column(
-            component_id,
-            prim_type,
-            shape.into_iter(),
-            std::iter::once(entity_id),
-        )?;
-        let vtable = vtable.build();
+        let size = shape.iter().product::<u64>() as usize * prim_type.size();
+        let vtable = vtable([raw_field(
+            0,
+            size as u16,
+            schema(prim_type, &shape, pair(entity_id, component_id)),
+        )]);
         let id: [u8; 2] = fastrand::u16(..).to_le_bytes();
         let msg = VTableMsg { id, vtable };
         self.client.send(&msg).await.0?;
@@ -265,7 +269,7 @@ impl Client {
         let stream = self.client.stream(&stream).await?;
         let cancel = Arc::new(AtomicBool::new(true));
         let canceler = cancel.clone();
-        let mut vtable: HashMap<PacketId, VTable<Vec<Entry>, Vec<u8>>> = HashMap::new();
+        let mut vtable: HashMap<PacketId, VTable> = HashMap::new();
         std::thread::spawn(move || {
             let mut stdin = io::stdin().lock();
             let mut buf = [0u8];
@@ -275,20 +279,53 @@ impl Client {
 
         futures_lite::pin!(stream);
         while cancel.load(atomic::Ordering::SeqCst) {
-            match stream.next().await {
-                Some(Ok(StreamReply::Table(table))) => {
+            let msg = stream.next().await?;
+            match msg {
+                StreamReply::Table(table) => {
                     if let Some(vtable) = vtable.get(&table.id) {
-                        vtable.parse_table(&table.buf[..], &mut DebugSink)?;
+                        vtable.apply(&table.buf[..], &mut DebugSink)?;
                     } else {
                         println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
                     }
                 }
-                Some(Ok(StreamReply::VTable(msg))) => {
+                StreamReply::VTable(msg) => {
                     vtable.insert(msg.id, msg.vtable);
                 }
-                Some(Err(e)) => return Err(anyhow::Error::from(e)),
-                None => {
-                    break;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn vtable_stream(&mut self, mut stream: VTableStream) -> anyhow::Result<()> {
+        if stream.id == [0, 0] {
+            stream.id = fastrand::u16(..).to_le_bytes();
+        }
+        let mut vtable: HashMap<PacketId, VTable> = HashMap::new();
+        vtable.insert(stream.id, stream.vtable.clone());
+        let stream = self.client.stream(&stream).await?;
+        let cancel = Arc::new(AtomicBool::new(true));
+        let canceler = cancel.clone();
+        std::thread::spawn(move || {
+            let mut stdin = io::stdin().lock();
+            let mut buf = [0u8];
+            let _ = stdin.read(&mut buf);
+            canceler.store(false, atomic::Ordering::SeqCst);
+        });
+
+        futures_lite::pin!(stream);
+        while cancel.load(atomic::Ordering::SeqCst) {
+            let msg = stream.next().await?;
+            match msg {
+                StreamReply::Table(table) => {
+                    if let Some(vtable) = vtable.get(&table.id) {
+                        println!("found table with id {:?}", table.id);
+                        vtable.apply(&table.buf[..], &mut DebugSink)?;
+                    } else {
+                        println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
+                    }
+                }
+                StreamReply::VTable(msg) => {
+                    vtable.insert(msg.id, msg.vtable);
                 }
             }
         }
@@ -504,6 +541,17 @@ impl UserData for Client {
             Ok(())
         });
 
+        methods.add_async_method_mut(
+            "vtable_stream",
+            |_, mut this, fields: Vec<UserDataRef<LuaFieldBuilder>>| async move {
+                let fields = fields.into_iter().map(|field| field.0.clone());
+                let vtable = vtable::builder::vtable(fields);
+                this.vtable_stream(VTableStream { id: [0, 0], vtable })
+                    .await?;
+                Ok(())
+            },
+        );
+
         methods.add_async_method_mut("stream_msgs", |lua, mut this, id: Value| async move {
             let msg_id = if let Ok(id) = lua.from_value::<PacketId>(id.clone()) {
                 id
@@ -564,68 +612,6 @@ impl UserData for Client {
         add_req_reply_method!(dump_metadata, DumpMetadata, DumpMetadataResp);
         add_req_reply_method!(get_entity_metadata, GetEntityMetadata, EntityMetadata);
         add_req_reply_method!(get_schema, GetSchema, SchemaMsg);
-    }
-}
-
-struct LuaVTableBuilder {
-    id: PacketId,
-    vtable: impeller2::table::VTableBuilder<Vec<Entry>, Vec<u8>>,
-}
-
-impl UserData for LuaVTableBuilder {
-    fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method_mut(
-            "column",
-            |lua,
-             this,
-             (component_id, prim_type, shape, entity_ids): (
-                mlua::Value,
-                mlua::Value,
-                mlua::Value,
-                mlua::Value,
-            )| {
-                let component_id: ComponentId = lua.from_value(component_id)?;
-                let prim_type: PrimType = lua.from_value(prim_type)?;
-                let shape: Vec<u64> = lua.from_value(shape)?;
-                let entity_ids: Vec<EntityId> = lua.from_value(entity_ids)?;
-                let _ = this
-                    .vtable
-                    .column(component_id, prim_type, shape, entity_ids);
-                Ok(())
-            },
-        );
-        methods.add_method("msg", |_, this, ()| {
-            let vtable_msg = VTableMsg {
-                id: this.id,
-                vtable: this.vtable.clone().build(),
-            };
-            let vtable_msg = vtable_msg.into_len_packet().inner;
-            Ok(vtable_msg)
-        });
-        methods.add_method("build", |_, this, ()| Ok(this.build()));
-        methods.add_method("build_bin", |_, this, ()| {
-            let stdout = stdout();
-            let bytes = this.build();
-            let mut stdout = stdout.lock();
-            stdout.write_all(&bytes)?;
-            Ok(())
-        });
-    }
-}
-
-impl LuaVTableBuilder {
-    pub fn new(id: PacketId) -> Self {
-        Self {
-            id,
-            vtable: Default::default(),
-        }
-    }
-    pub fn build(&self) -> Vec<u8> {
-        let vtable = VTableMsg {
-            id: self.id,
-            vtable: self.vtable.clone().build(),
-        };
-        postcard::to_allocvec(&vtable).expect("vtable build failed")
     }
 }
 
@@ -699,10 +685,6 @@ pub fn lua() -> anyhow::Result<Lua> {
         let c = Client::connect(addr).await?;
         Ok(c)
     })?;
-    lua.globals().set(
-        "VTableBuilder",
-        lua.create_function(|_, id: u16| Ok(LuaVTableBuilder::new(id.to_le_bytes())))?,
-    )?;
     lua.globals().set("connect", client)?;
     lua.globals().set(
         "ComponentId",
@@ -739,8 +721,92 @@ pub fn lua() -> anyhow::Result<Lua> {
         lua.create_function(|lua, m: MsgStream| lua.create_ser_userdata(m))?,
     )?;
 
+    lua.globals().set(
+        "table_slice",
+        lua.create_function(|_, (offset, len): (u64, u64)| {
+            Ok(LuaOpBuilder(vtable::builder::raw_table(
+                offset as u16,
+                len as u16,
+            )))
+        })?,
+    )?;
+
+    lua.globals().set(
+        "field",
+        lua.create_function(
+            |_, (offset, len, op): (u64, u64, UserDataRef<LuaOpBuilder>)| {
+                let op = op.deref().0.clone();
+                Ok(LuaFieldBuilder(vtable::builder::raw_field(
+                    offset as u16,
+                    len as u16,
+                    op,
+                )))
+            },
+        )?,
+    )?;
+    lua.globals().set(
+        "pair",
+        lua.create_function(|lua, (entity_id, component_id): (u64, Value)| {
+            let component_id = if let Ok(id) = lua.from_value::<ComponentId>(component_id.clone()) {
+                id
+            } else if let Ok(name) = lua.from_value::<String>(component_id.clone()) {
+                ComponentId::new(&name)
+            } else if let Ok(id) = lua.from_value::<i64>(component_id) {
+                ComponentId(id as u64)
+            } else {
+                return Err(anyhow!("msg id must be a PacketId or String").into());
+            };
+            let entity_id = EntityId(entity_id);
+            Ok(LuaOpBuilder(vtable::builder::pair(entity_id, component_id)))
+        })?,
+    )?;
+    lua.globals().set(
+        "schema",
+        lua.create_function(
+            |lua, (ty, shape, arg): (Value, Vec<u64>, UserDataRef<LuaOpBuilder>)| {
+                let ty: PrimType = lua.from_value(ty)?;
+                let arg = arg.deref().0.clone();
+                Ok(LuaOpBuilder(schema(ty, &shape[..], arg)))
+            },
+        )?,
+    )?;
+    lua.globals().set(
+        "timestamp",
+        lua.create_function(
+            |_, (t, arg): (UserDataRef<LuaOpBuilder>, UserDataRef<LuaOpBuilder>)| {
+                let t = t.deref().0.clone();
+                let arg = arg.deref().0.clone();
+                Ok(LuaOpBuilder(vtable::builder::timestamp(t, arg)))
+            },
+        )?,
+    )?;
+    lua.globals().set(
+        "mean",
+        lua.create_function(|_, (window, arg): (u16, UserDataRef<LuaOpBuilder>)| {
+            let arg = arg.deref().0.clone();
+            Ok(LuaOpBuilder(vtable::builder::ext(MeanOp { window }, arg)))
+        })?,
+    )?;
+    lua.globals().set(
+        "vtable_msg",
+        lua.create_function(
+            |lua, (id, fields): (u16, Vec<UserDataRef<LuaFieldBuilder>>)| {
+                let fields = fields.into_iter().map(|field| field.0.clone());
+                let vtable = vtable::builder::vtable(fields);
+                let id = id.to_le_bytes();
+                lua.create_ser_userdata(VTableMsg { id, vtable })
+            },
+        )?,
+    )?;
+
     Ok(lua)
 }
+
+pub struct LuaOpBuilder(Arc<OpBuilder>);
+impl UserData for LuaOpBuilder {}
+
+pub struct LuaFieldBuilder(FieldBuilder);
+impl UserData for LuaFieldBuilder {}
 
 pub async fn run(args: Args) -> anyhow::Result<()> {
     let lua = lua()?;

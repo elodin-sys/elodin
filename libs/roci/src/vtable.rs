@@ -1,16 +1,16 @@
 use impeller2::{
-    buf::Buf,
     error::Error,
-    table::{Entry, VTable, VTableBuilder},
+    vtable::{
+        VTable,
+        builder::{FieldBuilder, vtable},
+    },
 };
 
 pub trait AsVTable {
-    fn populate_vtable_builder<EntryBuf: Buf<Entry>, DataBuf: Buf<u8>>(
-        builder: &mut VTableBuilder<EntryBuf, DataBuf>,
-    ) -> Result<(), Error>;
-    fn as_vtable() -> VTable<Vec<Entry>, Vec<u8>> {
-        let mut builder = VTableBuilder::<Vec<Entry>, Vec<u8>>::default();
-        Self::populate_vtable_builder(&mut builder).expect("failed to populate builder");
-        builder.build()
+    fn populate_vtable_fields(builder: &mut Vec<FieldBuilder>) -> Result<(), Error>;
+    fn as_vtable() -> VTable {
+        let mut fields = vec![];
+        Self::populate_vtable_fields(&mut fields).expect("vtable failed to form");
+        vtable(fields)
     }
 }

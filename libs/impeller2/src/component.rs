@@ -6,18 +6,16 @@ use serde::de::DeserializeOwned;
 
 use crate::schema::Schema;
 
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 pub trait Component {
     const NAME: &'static str;
     const ASSET: bool = false;
     const COMPONENT_ID: ComponentId = ComponentId::new(Self::NAME);
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>>;
-
-    // Allow implementations to provide a custom component ID if needed
-    fn component_id() -> ComponentId {
-        Self::COMPONENT_ID
-    }
 }
 
 impl<T, D, R> Component for Tensor<T, D, R>
@@ -28,6 +26,7 @@ where
 {
     const NAME: &'static str = concat_str!("tensor_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, D::DIM).unwrap()
     }
@@ -40,6 +39,7 @@ where
 {
     const NAME: &'static str = concat_str!("spatial_transform_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
     }
@@ -52,6 +52,7 @@ where
 {
     const NAME: &'static str = concat_str!("spatial_motion_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
     }
@@ -64,6 +65,7 @@ where
 {
     const NAME: &'static str = concat_str!("spatial_force_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, [6usize]).unwrap()
     }
@@ -76,6 +78,7 @@ where
 {
     const NAME: &'static str = concat_str!("spatial_inertia_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, [7usize]).unwrap()
     }
@@ -88,6 +91,7 @@ where
 {
     const NAME: &'static str = concat_str!("quaternion_", T::PRIM_TYPE.as_str());
 
+    #[cfg(feature = "alloc")]
     fn schema() -> Schema<Vec<u64>> {
         Schema::new(T::PRIM_TYPE, [4usize]).unwrap()
     }
@@ -125,6 +129,7 @@ macro_rules! impl_prim_component {
         impl Component for $ty {
             const NAME: &'static str = stringify!($ty);
 
+            #[cfg(feature = "alloc")]
             fn schema() -> Schema<Vec<u64>> {
                 Schema::new(<$ty>::PRIM_TYPE, [0u64; 0]).unwrap()
             }
@@ -134,6 +139,7 @@ macro_rules! impl_prim_component {
             const NAME: &'static str =
                 concat_str!(concat_str!(stringify!($ty), "x"), stringify!(N));
 
+            #[cfg(feature = "alloc")]
             fn schema() -> Schema<Vec<u64>> {
                 Schema::new(<$ty>::PRIM_TYPE, [N]).unwrap()
             }

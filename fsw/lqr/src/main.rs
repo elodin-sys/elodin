@@ -1,6 +1,6 @@
 use clap::Parser;
 use impeller2::types::{LenPacket, PacketId};
-use impeller2_wkt::{Stream, StreamBehavior};
+use impeller2_stellar::Client;
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Quat, Vec3},
@@ -12,11 +12,19 @@ use roci::{
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
-use stellarator::net::TcpStream;
-use stellarator::{io::SplitExt, rent};
-use zerocopy::{Immutable, IntoBytes};
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-#[derive(Componentize, Decomponentize, AsVTable, Default, Debug)]
+#[derive(
+    Componentize,
+    Decomponentize,
+    AsVTable,
+    Default,
+    Debug,
+    Clone,
+    TryFromBytes,
+    Immutable,
+    KnownLayout,
+)]
 #[roci(entity_id = 1)]
 pub struct Input {
     pub gyro_est: Vec3<f64>,
@@ -31,34 +39,20 @@ pub struct Output {
 }
 
 async fn connect(config: &Config) -> anyhow::Result<()> {
-    let stream = TcpStream::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
+    let mut client = Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
         .map_err(anyhow::Error::from)?;
-    let (rx, tx) = stream.split();
-    let tx = impeller2_stellar::PacketSink::new(tx);
-    let rx = impeller2_stellar::PacketStream::new(rx);
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    tx.init_world::<Output>(id).await?;
-    let mut sub = rx.subscribe::<Input>();
-    let mut read = vec![0; 256];
-    tx.send(&Stream {
-        behavior: StreamBehavior::RealTime,
-        filter: Default::default(),
-        id: fastrand::u64(..),
-    })
-    .await
-    .0
-    .unwrap();
+    client.init_world::<Output>(id).await?;
+    let mut sub = client.subscribe::<Input>().await?;
     let lqr = roci_adcs::yang_lqr::YangLQR::new(config.j, config.q_ang_vel, config.q_pos, config.r);
     loop {
-        let Some(input) = rent!(sub.next(read).await.unwrap(), read) else {
-            continue;
-        };
+        let input = sub.next().await?;
         let mut table = LenPacket::table(id, 64);
         let control_torque = lqr.control(input.q_hat, input.gyro_est, input.target_att);
         let output = Output { control_torque };
         table.extend_from_slice(output.as_bytes());
-        tx.send(table).await.0?;
+        sub.send(table).await.0?;
     }
 }
 

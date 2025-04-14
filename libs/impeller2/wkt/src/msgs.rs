@@ -1,11 +1,11 @@
 use impeller2::{
     buf::IoBuf,
     schema::Schema,
-    table::{Entry, VTable},
     types::{
         ComponentId, EntityId, Msg, OwnedTable, OwnedTimeSeries, PacketId, Request, Timestamp,
         TryFromPacket,
     },
+    vtable::{Field, Op, VTable},
 };
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use crate::AssetId;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VTableMsg {
     pub id: PacketId,
-    pub vtable: VTable<Vec<Entry>, Vec<u8>>,
+    pub vtable: VTable<Vec<Op>, Vec<u8>, Vec<Field>>,
 }
 
 impl Msg for VTableMsg {
@@ -37,6 +37,16 @@ pub struct Stream {
     pub behavior: StreamBehavior,
     #[serde(default)]
     pub id: StreamId,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct VTableStream {
+    pub id: PacketId,
+    pub vtable: VTable<Vec<Op>, Vec<u8>, Vec<Field>>,
+}
+
+impl Request for VTableStream {
+    type Reply<B: IoBuf + Clone> = StreamReply<B>;
 }
 
 #[derive(Clone)]
@@ -62,6 +72,12 @@ impl<B: IoBuf + Clone> TryFromPacket<B> for StreamReply<B> {
 
 impl Request for Stream {
     type Reply<B: IoBuf + Clone> = StreamReply<B>;
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
+pub struct FixedRateOp {
+    pub stream_id: StreamId,
+    pub behavior: FixedRateBehavior,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
@@ -366,6 +382,8 @@ macro_rules! impl_user_data_msg {
     };
 }
 
+impl_user_data_msg!(VTableStream);
+impl_user_data_msg!(VTableMsg);
 impl_user_data_msg!(Stream);
 impl_user_data_msg!(MsgStream);
 impl_user_data_msg!(SetAsset<'_>);
@@ -548,4 +566,9 @@ impl Request for SaveArchive {
 pub enum ArchiveFormat {
     ArrowIpc,
     Parquet,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
+pub struct MeanOp {
+    pub window: u16,
 }
