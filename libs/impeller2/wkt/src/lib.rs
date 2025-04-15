@@ -54,21 +54,24 @@ pub struct Tick(pub u64);
 
 #[cfg(feature = "nox")]
 impl impeller2::com_de::Decomponentize for Tick {
+    type Error = core::convert::Infallible;
+
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
         if component_id != Tick::COMPONENT_ID {
-            return;
+            return Ok(());
         }
         let impeller2::types::ComponentView::U64(view) = value else {
-            return;
+            return Ok(());
         };
         let buf = view.buf();
         self.0 = buf[0];
+        Ok(())
     }
 }
 
@@ -76,7 +79,7 @@ impl impeller2::component::Component for Tick {
     const NAME: &'static str = "tick";
 
     fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [1usize])
+        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [0u64; 0])
             .expect("failed to create schema")
     }
 }
@@ -106,21 +109,23 @@ impl impeller2::component::Component for SimulationTimeStep {
 
 #[cfg(feature = "nox")]
 impl impeller2::com_de::Decomponentize for SimulationTimeStep {
+    type Error = core::convert::Infallible;
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
         if component_id != SimulationTimeStep::COMPONENT_ID {
-            return;
+            return Ok(());
         }
         let impeller2::types::ComponentView::F64(view) = value else {
-            return;
+            return Ok(());
         };
         let buf = view.buf();
         self.0 = buf[0];
+        Ok(())
     }
 }
 
@@ -154,24 +159,27 @@ impl Component for WorldPos {
 
 #[cfg(feature = "nox")]
 impl impeller2::com_de::Decomponentize for WorldPos {
+    type Error = core::convert::Infallible;
+
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
         if component_id != WorldPos::COMPONENT_ID {
-            return;
+            return Ok(());
         }
         let impeller2::types::ComponentView::F64(view) = value else {
-            return;
+            return Ok(());
         };
         let buf = view.buf();
         let att: [f64; 4] = buf[..4].try_into().expect("slice size wrong");
         self.att = nox::Quaternion(nox::Tensor::from_buf(att));
         let pos: [f64; 3] = buf[4..].try_into().expect("slice size wrong");
         self.pos = nox::Tensor::from_buf(pos);
+        Ok(())
     }
 }
 
@@ -199,20 +207,23 @@ impl impeller2::component::Component for CurrentTimestamp {
 
 #[cfg(feature = "nox")]
 impl impeller2::com_de::Decomponentize for CurrentTimestamp {
+    type Error = core::convert::Infallible;
+
     fn apply_value(
         &mut self,
         component_id: impeller2::types::ComponentId,
         _entity_id: impeller2::types::EntityId,
         value: impeller2::types::ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
         if component_id != CurrentTimestamp::COMPONENT_ID {
-            return;
+            return Ok(());
         }
         let impeller2::types::ComponentView::I64(view) = value else {
-            return;
+            return Ok(());
         };
         let buf = view.buf();
         self.0 = Timestamp(buf[0]);
+        Ok(())
     }
 }

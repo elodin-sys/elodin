@@ -69,7 +69,7 @@ test_steps = [
         steps=[
             rust_step(
                 label="clippy",
-                command="cargo clippy -- -Dwarnings; cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
+                command="cargo clippy -- -Dwarnings && cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
             ),
             rust_step(
                 label="cargo test",
@@ -81,7 +81,7 @@ test_steps = [
             ),
             rust_step(
                 label="cargo fmt",
-                command="cargo fmt --check; cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
+                command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
         ],
     ),
@@ -115,7 +115,7 @@ test_steps = [
             ),
             nix_step(
                 label=":python: lint",
-                command="ruff format --check; ruff check",
+                command="ruff format --check && ruff check",
                 flake=".#python",
             ),
         ],

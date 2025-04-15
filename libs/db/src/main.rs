@@ -39,7 +39,8 @@ struct RunArgs {
     reset: bool,
 }
 
-fn main() -> miette::Result<()> {
+#[stellarator::main]
+async fn main() -> miette::Result<()> {
     let filter = if std::env::var("RUST_LOG").is_ok() {
         EnvFilter::builder().from_env_lossy()
     } else {
@@ -54,63 +55,61 @@ fn main() -> miette::Result<()> {
         ))
         .try_init();
     let args = Cli::parse();
-    stellarator::run(|| async {
-        match args.command {
-            Commands::Run(RunArgs {
-                addr,
-                http_addr,
-                path,
-                config,
-                reset,
-            }) => {
-                let path = path.unwrap_or_else(|| {
-                    let dirs =
-                        directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
-                    dirs.data_dir().join("data")
+    match args.command {
+        Commands::Run(RunArgs {
+            addr,
+            http_addr,
+            path,
+            config,
+            reset,
+        }) => {
+            let path = path.unwrap_or_else(|| {
+                let dirs =
+                    directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+                dirs.data_dir().join("data")
+            });
+            if reset && path.exists() {
+                info!(?path, "resetting db");
+                std::fs::remove_dir_all(&path).unwrap_or_else(|_| {
+                    tracing::warn!("failed to remove existing data directory");
                 });
-                if reset && path.exists() {
-                    info!(?path, "resetting db");
-                    std::fs::remove_dir_all(&path).unwrap_or_else(|_| {
-                        tracing::warn!("failed to remove existing data directory");
-                    });
-                }
-                info!(?path, "starting db");
-                let server = Server::new(path, addr).into_diagnostic()?;
-                let axum_db = server.db.clone();
-                let db = stellarator::spawn(server.run());
-                if let Some(http_addr) = http_addr {
-                    stellarator::struc_con::tokio(move |_| async move {
-                        elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
-                    });
-                }
-                if let Some(lua_config) = config {
-                    let args = impeller2_cli::Args {
-                        path: Some(lua_config),
-                    };
-                    impeller2_cli::run(args)
-                        .await
-                        .map_err(|e| miette::miette!(e))?;
-                }
-                db.await.unwrap().into_diagnostic()
             }
-            Commands::Lua(args) => impeller2_cli::run(args)
-                .await
-                .map_err(|e| miette::miette!(e)),
-            Commands::GenCpp { output_path } => {
-                let defs = [
-                    include_str!("../../postcard-c/postcard.h").to_string(),
-                    include_str!("./helpers.hpp").to_string(),
-                    impeller2_wkt::InitialTimestamp::to_cpp()?,
-                    impeller2_wkt::FixedRateBehavior::to_cpp()?,
-                    impeller2_wkt::StreamBehavior::to_cpp()?,
-                    impeller2_wkt::StreamFilter::to_cpp()?,
-                    impeller2_wkt::Stream::to_cpp()?,
-                    impeller2_wkt::MsgStream::to_cpp()?,
-                ]
-                .join("\n");
-                std::fs::write(output_path, defs).into_diagnostic()?;
-                Ok(())
+            info!(?path, "starting db");
+            let server = Server::new(path, addr).into_diagnostic()?;
+            let axum_db = server.db.clone();
+            let db = stellarator::spawn(server.run());
+            if let Some(http_addr) = http_addr {
+                stellarator::struc_con::tokio(move |_| async move {
+                    elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
+                });
             }
+            if let Some(lua_config) = config {
+                let args = impeller2_cli::Args {
+                    path: Some(lua_config),
+                };
+                impeller2_cli::run(args)
+                    .await
+                    .map_err(|e| miette::miette!(e))?;
+            }
+            db.await.unwrap().into_diagnostic()
         }
-    })
+        Commands::Lua(args) => impeller2_cli::run(args)
+            .await
+            .map_err(|e| miette::miette!(e)),
+        Commands::GenCpp { output_path } => {
+            let defs = [
+                include_str!("../../postcard-c/postcard.h").to_string(),
+                include_str!("./helpers.hpp").to_string(),
+                impeller2_wkt::InitialTimestamp::to_cpp()?,
+                impeller2_wkt::FixedRateBehavior::to_cpp()?,
+                impeller2_wkt::StreamBehavior::to_cpp()?,
+                impeller2_wkt::StreamFilter::to_cpp()?,
+                impeller2_wkt::Stream::to_cpp()?,
+                impeller2_wkt::MsgStream::to_cpp()?,
+            ]
+            .join("\n");
+            std::fs::write(output_path, defs).into_diagnostic()?;
+            Ok(())
+        }
+    }
 }

@@ -48,6 +48,8 @@ pub enum Error {
     #[cfg(feature = "parquet")]
     #[error("parquet {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
+    #[error("schema mismatch")]
+    SchemaMismatch,
 }
 
 impl From<impeller2_stellar::Error> for Error {

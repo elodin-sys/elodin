@@ -50,19 +50,21 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                self.#ident.apply_value(component_id, entity_id, value.clone(), timestamp.clone());
+                self.#ident.apply_value(component_id, entity_id, value.clone(), timestamp.clone())?;
             }
         }
     });
     quote! {
         impl #crate_name::Decomponentize for #ident #generics #where_clause {
+            type Error = core::convert::Infallible;
             fn apply_value(&mut self,
                             component_id: #impeller::types::ComponentId,
                             entity_id: #impeller::types::EntityId,
                             view: #impeller::types::ComponentView<'_>,
                             timestamp: Option<#impeller::types::Timestamp>
-            ) {
+            ) -> Result<(), Self::Error>{
                 #(#if_arms)*
+                Ok(())
             }
         }
     }

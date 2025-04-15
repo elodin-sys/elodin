@@ -442,7 +442,11 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
     ///
     /// This evaluates each field in the VTable against the provided table data and
     /// applies the resulting values to the sink
-    pub fn apply(&self, table: &[u8], sink: &mut impl Decomponentize) -> Result<(), Error> {
+    pub fn apply<D: Decomponentize>(
+        &self,
+        table: &[u8],
+        sink: &mut D,
+    ) -> Result<Result<(), D::Error>, Error> {
         for res in self.realize_fields(Some(table)) {
             let RealizedField {
                 entity_id,
@@ -452,9 +456,11 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                 ..
             } = res?;
             let view = view.expect("table not found");
-            sink.apply_value(component_id, entity_id, view, timestamp);
+            if let Err(err) = sink.apply_value(component_id, entity_id, view, timestamp) {
+                return Ok(Err(err));
+            }
         }
-        Ok(())
+        Ok(Ok(()))
     }
 }
 
@@ -719,6 +725,7 @@ pub mod builder {
 
 #[cfg(test)]
 mod tests {
+    use core::convert::Infallible;
     use std::collections::HashMap;
 
     use nox::{Array, ArrayBuf, Dyn};
@@ -737,13 +744,14 @@ mod tests {
     }
 
     impl Decomponentize for TestSink {
+        type Error = Infallible;
         fn apply_value(
             &mut self,
             component_id: ComponentId,
             entity_id: EntityId,
             value: ComponentView<'_>,
             timestamp: Option<Timestamp>,
-        ) {
+        ) -> Result<(), Self::Error> {
             if let Some(timestamp) = timestamp {
                 self.timestamp = Some(timestamp);
             }

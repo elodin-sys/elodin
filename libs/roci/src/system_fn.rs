@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
-
 use crate::drivers::DriverMode;
 use crate::{Componentize, Decomponentize, System};
+use core::convert::Infallible;
+use std::marker::PhantomData;
 
 pub struct SystemFn<D: DriverMode, P, F> {
     f: F,
@@ -14,7 +14,7 @@ macro_rules! impl_system_fn {
         where
             F: for<'a> Fn($(&'a mut $ty,)*),
             D: DriverMode,
-            $($ty: Componentize + Decomponentize + Default),+
+            $($ty: Componentize + Decomponentize<Error = Infallible> + Default),+
         {
 
             type World = ($($ty,)*);
@@ -29,7 +29,7 @@ macro_rules! impl_system_fn {
         }
         impl<F, $($ty),*> IntoSystem<($($ty,)*)> for F
             where F: for<'a> Fn($(&'a mut $ty,)*),
-            $($ty: Componentize + Decomponentize + Default),+
+            $($ty: Componentize + Decomponentize<Error = Infallible> + Default),+
         {
 
             type System<D: DriverMode> = SystemFn<D, ($($ty,)*), F>;

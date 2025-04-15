@@ -30,7 +30,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         let ident = field.ident.as_ref().expect("only named fields allowed");
         if let Some(id) = field.entity_id.or(entity_id) {
             quote! {
-                output.apply_value(
+                let _ = output.apply_value(
                     #component_id,
                     #impeller::types::EntityId(#id),
                     self.#ident.as_component_view(),

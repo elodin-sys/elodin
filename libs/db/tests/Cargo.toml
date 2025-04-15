@@ -1,0 +1,23 @@
+[package]
+name = "tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+elodin-db = { path = ".." }
+stellarator = { path = "../../stellarator" }
+impeller2 = { path = "../../impeller2" }
+impeller2-wkt = { path = "../../impeller2/wkt" }
+impeller2-stellar = { path = "../../impeller2/stellar" }
+nox = { path = "../../nox" }
+fastrand = "2.2.0"
+futures-lite = "2.5.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2"
+miette = { version = "7.2", features = ["fancy"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono"] }
+zerocopy = "0.8"
+arrow.version = "54.2.0"
+postcard-schema = "0.2"
+postcard = "1"

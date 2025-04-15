@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     types::{ComponentId, ComponentView, EntityId, Timestamp},
 };
-use core::slice;
+use core::{convert::Infallible, slice};
 
 pub trait Componentize {
     fn sink_columns(&self, output: &mut impl Decomponentize);
@@ -64,23 +64,26 @@ impl_componentize!(
 );
 
 pub trait Decomponentize {
+    type Error;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: EntityId,
         value: ComponentView<'_>,
         timestamp: Option<Timestamp>,
-    );
+    ) -> Result<(), Self::Error>;
 }
 
 impl Decomponentize for () {
+    type Error = Infallible;
     fn apply_value(
         &mut self,
         _component_id: ComponentId,
         _entity_id: EntityId,
         _value: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 }
 
@@ -88,23 +91,26 @@ impl<F> Decomponentize for F
 where
     F: for<'a> FnMut(ComponentId, EntityId, ComponentView<'_>, Option<Timestamp>),
 {
+    type Error = Infallible;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: EntityId,
         value: ComponentView<'_>,
         timestamp: Option<Timestamp>,
-    ) {
-        (self)(component_id, entity_id, value, timestamp)
+    ) -> Result<(), Self::Error> {
+        (self)(component_id, entity_id, value, timestamp);
+        Ok(())
     }
 }
 
 macro_rules! impl_decomponentize {
     ($($ty:tt),+) => {
-        impl<$($ty),*> Decomponentize for ($($ty,)*)
+        impl<E, $($ty),*> Decomponentize for ($($ty,)*)
         where
-            $($ty: Decomponentize),+
+            $($ty: Decomponentize<Error = E>),+
         {
+            type Error = E;
             #[allow(unused_parens, non_snake_case)]
             fn apply_value(
                 &mut self,
@@ -112,11 +118,12 @@ macro_rules! impl_decomponentize {
                 entity_id: EntityId,
                 value: ComponentView<'_>,
                 timestamp: Option<Timestamp>
-            ) {
+            ) -> Result<(), Self::Error>{
                 let ($($ty,)*) = self;
                 $(
-                    $ty.apply_value(component_id, entity_id, value.clone(), timestamp);
+                    $ty.apply_value(component_id, entity_id, value.clone(), timestamp)?;
                 )*
+                Ok(())
             }
         }
     };

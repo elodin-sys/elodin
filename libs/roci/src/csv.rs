@@ -27,7 +27,7 @@ where
 
 impl<W, D> System for CSVLogger<W, D>
 where
-    W: Serialize + Default + Componentize + Decomponentize,
+    W: Serialize + Default + Componentize + Decomponentize<Error = core::convert::Infallible>,
     D: DriverMode,
 {
     type World = W;

@@ -255,72 +255,69 @@ mod tests {
     use std::net::SocketAddr;
 
     use crate::net::{TcpListener, TcpStream};
+    use crate::test;
 
     use super::*;
 
     #[test]
-    fn test_length_del_tcp() {
-        crate::test!(async {
-            let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let addr = listener.local_addr().unwrap();
-            let handle = crate::spawn(async move {
-                let stream = listener.accept().await.unwrap();
-                stream.write(&[4, 0, 0, 0, 1, 2, 3, 4][..]).await.0.unwrap();
-                stream.write(&[3, 0, 0, 0, 5][..]).await.0.unwrap();
-                stream.write(&[6, 7, 1, 0][..]).await.0.unwrap();
-                stream.write(&[0, 0, 0xff][..]).await.0.unwrap();
-            });
-            let stream = TcpStream::connect(addr).await.unwrap();
-            let mut stream = LengthDelReader::<_, u32>::new(stream);
+    async fn test_length_del_tcp() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = crate::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            stream.write(&[4, 0, 0, 0, 1, 2, 3, 4][..]).await.0.unwrap();
+            stream.write(&[3, 0, 0, 0, 5][..]).await.0.unwrap();
+            stream.write(&[6, 7, 1, 0][..]).await.0.unwrap();
+            stream.write(&[0, 0, 0xff][..]).await.0.unwrap();
+        });
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = LengthDelReader::<_, u32>::new(stream);
 
-            let buf = vec![0u8; 64];
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[1, 2, 3, 4]);
-            let buf = out.into_inner();
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[5, 6, 7]);
-            let buf = out.into_inner();
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[0xff]);
+        let buf = vec![0u8; 64];
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[1, 2, 3, 4]);
+        let buf = out.into_inner();
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[5, 6, 7]);
+        let buf = out.into_inner();
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[0xff]);
 
-            handle.await.unwrap();
-        })
+        handle.await.unwrap();
     }
 
     #[test]
-    fn test_length_del_tcp_u64() {
-        crate::test!(async {
-            let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let addr = listener.local_addr().unwrap();
-            let handle = crate::spawn(async move {
-                let stream = listener.accept().await.unwrap();
-                stream
-                    .write(&[4, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4][..])
-                    .await
-                    .0
-                    .unwrap();
-                stream
-                    .write(&[3, 0, 0, 0, 0, 0, 0, 0, 5][..])
-                    .await
-                    .0
-                    .unwrap();
-                stream.write(&[6, 7, 1, 0, 0][..]).await.0.unwrap();
-                stream.write(&[0, 0, 0, 0, 0, 0xff][..]).await.0.unwrap();
-            });
-            let stream = TcpStream::connect(addr).await.unwrap();
-            let mut stream = LengthDelReader::<_, u64>::new(stream);
+    async fn test_length_del_tcp_u64() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = crate::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            stream
+                .write(&[4, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4][..])
+                .await
+                .0
+                .unwrap();
+            stream
+                .write(&[3, 0, 0, 0, 0, 0, 0, 0, 5][..])
+                .await
+                .0
+                .unwrap();
+            stream.write(&[6, 7, 1, 0, 0][..]).await.0.unwrap();
+            stream.write(&[0, 0, 0, 0, 0, 0xff][..]).await.0.unwrap();
+        });
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = LengthDelReader::<_, u64>::new(stream);
 
-            let buf = vec![0u8; 64];
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[1, 2, 3, 4]);
-            let buf = out.into_inner();
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[5, 6, 7]);
-            let buf = out.into_inner();
-            let out = stream.recv(buf).await.unwrap();
-            assert_eq!(&out[..], &[0xff]);
+        let buf = vec![0u8; 64];
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[1, 2, 3, 4]);
+        let buf = out.into_inner();
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[5, 6, 7]);
+        let buf = out.into_inner();
+        let out = stream.recv(buf).await.unwrap();
+        assert_eq!(&out[..], &[0xff]);
 
-            handle.await.unwrap();
-        })
+        handle.await.unwrap();
     }
 }
