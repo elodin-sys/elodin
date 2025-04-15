@@ -1,3 +1,5 @@
+use core::convert::Infallible;
+
 use crate::{Componentize, Decomponentize, DriverMode, System};
 
 pub struct Pipe<L: System, R: System> {
@@ -7,8 +9,8 @@ pub struct Pipe<L: System, R: System> {
 
 impl<LW, RW, L, R> System for Pipe<L, R>
 where
-    LW: Default + Componentize + Decomponentize,
-    RW: Default + Componentize + Decomponentize,
+    LW: Default + Componentize + Decomponentize<Error = Infallible>,
+    RW: Default + Componentize + Decomponentize<Error = Infallible>,
     L: System<World = LW>,
     R: System<World = RW>,
     L::Driver: DriverMode<Output = <R::Driver as DriverMode>::Input>,

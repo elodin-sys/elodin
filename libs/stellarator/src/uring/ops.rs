@@ -437,20 +437,16 @@ mod tests {
 
     #[test]
     fn test_nop() {
-        test!(async {
-            Completion::run(Nop).await.unwrap();
-        })
+        Completion::run(Nop).await.unwrap();
     }
 
     #[test]
     fn test_timeout() {
-        test!(async {
-            let start = Instant::now();
-            Completion::run(Timeout::new(Duration::from_millis(250)))
-                .await
-                .unwrap();
-            let delta = start.elapsed().as_millis().abs_diff(250);
-            assert!(delta <= 10, "Δt ({}) > 10ms", delta)
-        })
+        let start = Instant::now();
+        Completion::run(Timeout::new(Duration::from_millis(250)))
+            .await
+            .unwrap();
+        let delta = start.elapsed().as_millis().abs_diff(250);
+        assert!(delta <= 10, "Δt ({}) > 10ms", delta)
     }
 }

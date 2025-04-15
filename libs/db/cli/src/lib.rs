@@ -283,7 +283,7 @@ impl Client {
             match msg {
                 StreamReply::Table(table) => {
                     if let Some(vtable) = vtable.get(&table.id) {
-                        vtable.apply(&table.buf[..], &mut DebugSink)?;
+                        vtable.apply(&table.buf[..], &mut DebugSink)??;
                     } else {
                         println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
                     }
@@ -319,7 +319,7 @@ impl Client {
                 StreamReply::Table(table) => {
                     if let Some(vtable) = vtable.get(&table.id) {
                         println!("found table with id {:?}", table.id);
-                        vtable.apply(&table.buf[..], &mut DebugSink)?;
+                        vtable.apply(&table.buf[..], &mut DebugSink)??;
                     } else {
                         println!("table ({:?}) = {:?}", table.id, &table.buf[..]);
                     }
@@ -1015,15 +1015,18 @@ fn print_message(msg: impl Display) {
 struct DebugSink;
 
 impl Decomponentize for DebugSink {
+    type Error = core::convert::Infallible;
+
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Self::Error> {
         let epoch = timestamp
             .map(|timestamp| hifitime::Epoch::from_unix_milliseconds(timestamp.0 as f64 / 1000.0));
         println!("({component_id:?},{entity_id:?}) @ {epoch:?} = {value:?}");
+        Ok(())
     }
 }

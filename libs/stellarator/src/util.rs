@@ -245,28 +245,25 @@ impl<A: AtomicValue> AtomicCell<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test;
 
     #[test]
-    fn test_simple_cancel() {
-        crate::test!(async {
-            let token = CancelToken::default();
-            assert_eq!(token.is_cancelled(), false);
-            token.cancel();
-            token.wait().await;
-        })
+    async fn test_simple_cancel() {
+        let token = CancelToken::default();
+        assert_eq!(token.is_cancelled(), false);
+        token.cancel();
+        token.wait().await;
     }
 
     #[test]
-    fn test_cancel_parent() {
-        crate::test!(async {
-            let parent = CancelToken::default();
-            let a = parent.child();
-            let b = parent.child();
-            assert_eq!(a.is_cancelled(), false);
-            b.cancel();
-            assert_eq!(parent.is_cancelled(), false);
-            parent.cancel();
-            assert_eq!(a.is_cancelled(), true);
-        })
+    async fn test_cancel_parent() {
+        let parent = CancelToken::default();
+        let a = parent.child();
+        let b = parent.child();
+        assert_eq!(a.is_cancelled(), false);
+        b.cancel();
+        assert_eq!(parent.is_cancelled(), false);
+        parent.cancel();
+        assert_eq!(a.is_cancelled(), true);
     }
 }

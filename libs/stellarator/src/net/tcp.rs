@@ -5,7 +5,7 @@ use crate::reactor::{Completion, ops};
 use crate::{BufResult, Error};
 use socket2::{SockAddr, Socket};
 use std::io::{self};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use super::SockAddrRaw;
 
@@ -65,7 +65,13 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
+    pub fn bind(addrs: impl ToSocketAddrs) -> io::Result<TcpListener> {
+        let addr = addrs.to_socket_addrs()?.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not resolve to any addresses",
+            )
+        })?;
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(addr),
             socket2::Type::STREAM,
@@ -100,26 +106,24 @@ impl TcpListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rent;
+    use crate::{rent, test};
 
     #[test]
-    fn test_echo_server() {
-        crate::test!(async {
-            let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let addr = listener.local_addr().unwrap();
-            let handle = crate::spawn(async move {
-                let stream = listener.accept().await.unwrap();
-                let mut buf = vec![0u8; 128];
-                let n = rent!(stream.read(buf).await, buf).unwrap();
-                buf.truncate(n);
-                stream.write(buf).await.0.unwrap();
-            });
-            let stream = TcpStream::connect(addr).await.unwrap();
-            stream.write(b"foo").await.0.unwrap();
-            let mut buf = vec![0; 128];
+    async fn test_echo_server() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = crate::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 128];
             let n = rent!(stream.read(buf).await, buf).unwrap();
-            assert_eq!(&buf[..n], b"foo");
-            handle.await.unwrap();
-        })
+            buf.truncate(n);
+            stream.write(buf).await.0.unwrap();
+        });
+        let stream = TcpStream::connect(addr).await.unwrap();
+        stream.write(b"foo").await.0.unwrap();
+        let mut buf = vec![0; 128];
+        let n = rent!(stream.read(buf).await, buf).unwrap();
+        assert_eq!(&buf[..n], b"foo");
+        handle.await.unwrap();
     }
 }

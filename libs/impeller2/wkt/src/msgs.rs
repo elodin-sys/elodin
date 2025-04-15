@@ -326,6 +326,10 @@ impl Msg for LastUpdated {
     const ID: PacketId = [224, 18];
 }
 
+impl Request for SubscribeLastUpdated {
+    type Reply<B: IoBuf + Clone> = LastUpdated;
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct SetDbSettings {
     pub recording: Option<bool>,
@@ -422,6 +426,10 @@ pub struct DumpSchemaResp {
 
 impl Msg for DumpSchemaResp {
     const ID: PacketId = [224, 25];
+}
+
+impl Request for DumpSchema {
+    type Reply<B: IoBuf + Clone> = DumpSchemaResp;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

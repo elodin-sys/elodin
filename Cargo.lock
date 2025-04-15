@@ -10073,6 +10073,7 @@ dependencies = [
  "spin",
  "stack_dst",
  "stellarator-buf",
+ "stellarator-macros",
  "tempfile",
  "thiserror 2.0.12",
  "tokio",
@@ -10083,6 +10084,16 @@ dependencies = [
 [[package]]
 name = "stellarator-buf"
 version = "0.1.0"
+
+[[package]]
+name = "stellarator-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
 
 [[package]]
 name = "strict-num"
@@ -10430,6 +10441,29 @@ checksum = "21bebf2b7c9e0a515f6e0f8c51dc0f8e4696391e6f1ff30379559f8365fb0df7"
 dependencies = [
  "rustix",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "tests"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "elodin-db",
+ "fastrand 2.2.0",
+ "futures-lite 2.5.0",
+ "impeller2",
+ "impeller2-stellar",
+ "impeller2-wkt",
+ "miette",
+ "nox",
+ "postcard",
+ "postcard-schema",
+ "serde",
+ "stellarator",
+ "thiserror 2.0.12",
+ "tracing",
+ "tracing-subscriber",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]

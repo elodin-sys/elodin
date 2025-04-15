@@ -128,7 +128,7 @@ impl DB {
     }
 
     fn init_globals(&mut self) -> Result<(), Error> {
-        let arr = nox::array![0u64];
+        let arr: nox::Array<u64, ()> = 0.into();
         let globals_id = EntityId(0);
         let globals_metadata = EntityMetadata {
             entity_id: globals_id,
@@ -162,8 +162,7 @@ impl DB {
                 last_updated: &self.last_updated,
                 sunk_new_time_series: false,
             };
-            sink.apply_value(tick_component_id, globals_id, tick_component_view, None);
-            Ok(())
+            sink.apply_value(tick_component_id, globals_id, tick_component_view, None)
         })
     }
 
@@ -354,7 +353,14 @@ impl State {
         entity_id: EntityId,
         db_path: &Path,
     ) -> Result<(), Error> {
-        if self.components.contains_key(&(entity_id, component_id)) {
+        if let Some(existing_component) = self.components.get(&(entity_id, component_id)) {
+            if existing_component.schema != schema {
+                warn!( ?existing_component.schema, new_component.schema = ?schema,
+                       ?existing_component.component_id,
+                       ?existing_component.entity_id,
+                      "schema mismatch");
+                return Err(Error::SchemaMismatch);
+            }
             return Ok(());
         }
         info!(entity.id = ?entity_id.0, component.id = ?component_id.0, "inserting");
@@ -672,24 +678,21 @@ struct DBSink<'a> {
 }
 
 impl Decomponentize for DBSink<'_> {
+    type Error = Error;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: EntityId,
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Error> {
         let timestamp = timestamp.unwrap_or_else(Timestamp::now);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&(entity_id, component_id)) else {
-            warn!(component.id = ?component_id, entity.id = ?entity_id, "component not found when sinking");
-            return;
+            return Err(Error::ComponentNotFound(component_id));
         };
         let time_series_empty = component.time_series.index().is_empty();
-        if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
-            warn!(?err, "failed to write head value");
-            return;
-        }
+        component.time_series.push_buf(timestamp, value_buf)?;
         if time_series_empty {
             debug!(
                 "sunk new time series for component {} entity {}",
@@ -698,6 +701,7 @@ impl Decomponentize for DBSink<'_> {
             self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
+        Ok(())
     }
 }
 
@@ -710,16 +714,18 @@ impl Server {
     pub fn new(path: impl AsRef<Path>, addr: SocketAddr) -> Result<Server, Error> {
         info!(?addr, "listening");
         let listener = TcpListener::bind(addr)?;
+        Server::from_listener(listener, path)
+    }
+
+    pub fn from_listener(listener: TcpListener, path: impl AsRef<Path>) -> Result<Server, Error> {
         let path = path.as_ref().to_path_buf();
         let db = if path.exists() && path.join("entity_metadata").exists() {
             DB::open(path)?
         } else {
             DB::create(path)?
         };
-        Ok(Server {
-            listener,
-            db: Arc::new(db),
-        })
+        let db = Arc::new(db);
+        Ok(Server { listener, db })
     }
 
     pub async fn run(self) -> Result<(), Error> {
@@ -869,7 +875,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 } = get_time_series;
                 let entity = db.with_state(|state| {
                     let Some(component) = state.components.get(&(entity_id, component_id)) else {
-                        return Err(Error::ComponentNotFound(component_id));
+                        if state.component_metadata.contains_key(&component_id) {
+                            return Err(Error::EntityNotFound(entity_id));
+                        } else {
+                            return Err(Error::ComponentNotFound(component_id));
+                        }
                     };
                     Ok(component.clone())
                 })?;
@@ -915,7 +925,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 let Some(metadata) = state.component_metadata.get(&component_id) else {
                     return Err(Error::ComponentNotFound(component_id));
                 };
-                Ok(metadata.into_len_packet())
+                Ok(metadata.with_request_id(m.req_id))
             })?;
             let tx = tx.lock().await;
             tx.send(metadata).await.0?;
@@ -932,7 +942,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 let Some(metadata) = state.entity_metadata.get(&entity_id) else {
                     return Err(Error::EntityNotFound(entity_id));
                 };
-                Ok(metadata.into_len_packet())
+                Ok(metadata.with_request_id(m.req_id))
             })?;
             let tx = tx.lock().await;
             tx.send(msg).await.0?;
@@ -952,7 +962,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     id,
                     buf: Cow::Borrowed(&mmap[..]),
                 };
-                Ok(asset.into_len_packet())
+                Ok(asset.into_len_packet().with_request_id(m.req_id))
             })?;
             let tx = tx.lock().await;
             tx.send(packet).await.0?;
@@ -988,7 +998,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             });
 
             let tx = tx.lock().await;
-            tx.send(msg).await.0?;
+            tx.send(msg.with_request_id(m.req_id)).await.0?;
         }
 
         Packet::Msg(m) if m.id == DumpAssets::ID => {
@@ -1012,13 +1022,14 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
             let tx = tx.clone();
             let db = db.clone();
+            let req_id = m.req_id;
             stellarator::spawn(async move {
                 loop {
                     let last_updated = db.last_updated.latest();
                     {
                         let tx = tx.lock().await;
                         match tx
-                            .send(&LastUpdated(last_updated))
+                            .send(LastUpdated(last_updated).with_request_id(req_id))
                             .await
                             .0
                             .map_err(Error::from)
@@ -1068,7 +1079,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
                 };
-                table.sink(&state.vtable_registry, &mut sink)?;
+                table
+                    .sink(&state.vtable_registry, &mut sink)?
+                    .inspect_err(|err| {
+                        dbg!(err);
+                    })?;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
@@ -1079,7 +1094,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
             let tx = tx.lock().await;
             let settings = db.db_settings();
-            tx.send(&settings).await.0?;
+            tx.send(settings.with_request_id(m.req_id)).await.0?;
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
@@ -1148,8 +1163,12 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 range,
                 limit,
             } = m.parse::<GetMsgs>()?;
-            let msg_log =
-                db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
+            let msg_log = db.with_state_mut(|s| {
+                s.msg_logs
+                    .get(&msg_id)
+                    .ok_or(Error::MsgNotFound(msg_id))
+                    .cloned()
+            })?;
             let iter = msg_log.get_range(range).map(|(t, b)| (t, b.to_vec()));
             let data = if let Some(limit) = limit {
                 iter.take(limit).collect()
@@ -1365,7 +1384,6 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
                 Ok(())
             })
         })?;
-        // TODO: Terminate previous generation streams to avoid stream duplication
         db.vtable_gen.wait().await;
     }
 }

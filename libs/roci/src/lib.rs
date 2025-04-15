@@ -1,3 +1,5 @@
+use core::convert::Infallible;
+
 use combinators::Pipe;
 use drivers::DriverMode;
 
@@ -27,7 +29,7 @@ pub mod metadata;
 pub use metadata::Metadatatize;
 
 pub trait System {
-    type World: Default + Decomponentize + Componentize;
+    type World: Default + Decomponentize<Error = Infallible> + Componentize;
     const MAX_SIZE: usize = Self::World::MAX_SIZE;
 
     type Driver: DriverMode;

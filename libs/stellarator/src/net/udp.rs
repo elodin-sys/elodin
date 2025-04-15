@@ -87,64 +87,60 @@ impl AsyncWrite for UdpSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rent;
+    use crate::{rent, test};
 
     #[test]
-    fn test_p2p_send() {
-        crate::test!(async {
-            let mut a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let mut b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let a_addr = a.local_addr().unwrap();
-            let b_addr = b.local_addr().unwrap();
-            a.connect(b_addr);
-            a.send(b"foo").await.0.unwrap();
-            b.connect(a_addr);
-            b.send(b"bar").await.0.unwrap();
-            let mut out_buf = vec![0u8; 64];
-            let n = rent!(a.recv(out_buf).await, out_buf).unwrap();
-            assert_eq!(&out_buf[..n], b"bar");
-            let mut out_buf = vec![0u8; 64];
-            let n = rent!(b.recv(out_buf).await, out_buf).unwrap();
-            assert_eq!(&out_buf[..n], b"foo");
-        })
+    async fn test_p2p_send() {
+        let mut a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let mut b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let a_addr = a.local_addr().unwrap();
+        let b_addr = b.local_addr().unwrap();
+        a.connect(b_addr);
+        a.send(b"foo").await.0.unwrap();
+        b.connect(a_addr);
+        b.send(b"bar").await.0.unwrap();
+        let mut out_buf = vec![0u8; 64];
+        let n = rent!(a.recv(out_buf).await, out_buf).unwrap();
+        assert_eq!(&out_buf[..n], b"bar");
+        let mut out_buf = vec![0u8; 64];
+        let n = rent!(b.recv(out_buf).await, out_buf).unwrap();
+        assert_eq!(&out_buf[..n], b"foo");
     }
 
     #[test]
-    fn test_send_to_with_recv() {
-        crate::test!(async {
-            // Create two UDP sockets with dynamically assigned ports
-            let a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-            let b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    async fn test_send_to_with_recv() {
+        // Create two UDP sockets with dynamically assigned ports
+        let a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
 
-            // Get socket addresses
-            let a_addr = a.local_addr().unwrap();
-            let b_addr = b.local_addr().unwrap();
+        // Get socket addresses
+        let a_addr = a.local_addr().unwrap();
+        let b_addr = b.local_addr().unwrap();
 
-            // Send a message from socket A to socket B using send_to
-            let (sent, _) = a.send_to(b"hello from a", b_addr).await;
-            assert_eq!(sent.unwrap(), 12); // "hello from a" is 12 bytes
+        // Send a message from socket A to socket B using send_to
+        let (sent, _) = a.send_to(b"hello from a", b_addr).await;
+        assert_eq!(sent.unwrap(), 12); // "hello from a" is 12 bytes
 
-            // Receive the message on socket B using regular recv
-            let mut recv_buf = vec![0u8; 64];
-            let (received, buf) = b.recv(recv_buf).await;
-            let received_len = received.unwrap();
+        // Receive the message on socket B using regular recv
+        let mut recv_buf = vec![0u8; 64];
+        let (received, buf) = b.recv(recv_buf).await;
+        let received_len = received.unwrap();
 
-            // Get the buffer back and verify its contents
-            recv_buf = buf;
-            assert_eq!(&recv_buf[..received_len], b"hello from a");
+        // Get the buffer back and verify its contents
+        recv_buf = buf;
+        assert_eq!(&recv_buf[..received_len], b"hello from a");
 
-            // Now send from B to A using send_to
-            let (sent, _) = b.send_to(b"response from b", a_addr).await;
-            assert_eq!(sent.unwrap(), 15); // "response from b" is 15 bytes
+        // Now send from B to A using send_to
+        let (sent, _) = b.send_to(b"response from b", a_addr).await;
+        assert_eq!(sent.unwrap(), 15); // "response from b" is 15 bytes
 
-            // Receive on A using regular recv
-            let mut recv_buf = vec![0u8; 64];
-            let (received, buf) = a.recv(recv_buf).await;
-            let received_len = received.unwrap();
+        // Receive on A using regular recv
+        let mut recv_buf = vec![0u8; 64];
+        let (received, buf) = a.recv(recv_buf).await;
+        let received_len = received.unwrap();
 
-            // Verify the response
-            recv_buf = buf;
-            assert_eq!(&recv_buf[..received_len], b"response from b");
-        })
+        // Verify the response
+        recv_buf = buf;
+        assert_eq!(&recv_buf[..received_len], b"response from b");
     }
 }

@@ -38,6 +38,9 @@ pub(crate) use uring as reactor;
 pub use maitake::future::yield_now;
 pub use maitake::sync;
 
+#[cfg(feature = "derive")]
+pub use stellarator_macros::*;
+
 thread_local! {
     static EXEC: UnsafeCell<Option<Executor>> = UnsafeCell::new(Some(Executor::default()));
 }
@@ -214,15 +217,6 @@ impl<O> futures::future::FusedFuture for JoinHandle<O> {
 }
 
 #[macro_export]
-macro_rules! test {
-    ($fut:expr) => {
-        std::thread::spawn(|| $crate::run(|| $fut))
-            .join()
-            .expect("join failed")
-    };
-}
-
-#[macro_export]
 macro_rules! rent {
     ($call:expr, $buf:ident) => {{
         let (res, o) = $call;
@@ -240,26 +234,25 @@ macro_rules! rent_read {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Instant};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
 
-    use sync::WaitCell;
+    use maitake::sync::WaitCell;
 
-    use super::*;
-
-    #[test]
-    fn test_sleep() {
-        test!(async {
-            let start = Instant::now();
-            println!("sleep start");
-            sleep(Duration::from_millis(250)).await;
-            println!("slept");
-            let delta = start.elapsed().as_millis().abs_diff(250);
-            assert!(delta <= 10, "Δt ({}) > 10ms", delta)
-        })
+    #[stellarator_macros::test]
+    async fn test_sleep() {
+        let start = Instant::now();
+        println!("sleep start");
+        crate::sleep(Duration::from_millis(250)).await;
+        println!("slept");
+        let delta = start.elapsed().as_millis().abs_diff(250);
+        assert!(delta <= 10, "Δt ({}) > 10ms", delta)
     }
 
-    #[test]
-    fn test_cross_thread_wake() {
+    #[stellarator_macros::test]
+    async fn test_cross_thread_wake() {
         let a = Arc::new(WaitCell::new());
         let b = a.clone();
         std::thread::spawn(move || {
@@ -267,9 +260,8 @@ mod tests {
             b.wake();
             println!("woke wait cell");
         });
-        test!(async move {
-            println!("waiting wait cell");
-            a.wait().await.unwrap();
-        })
+
+        println!("waiting wait cell");
+        a.wait().await.unwrap();
     }
 }

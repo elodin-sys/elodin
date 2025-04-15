@@ -750,11 +750,11 @@ pub struct OwnedTable<B: IoBuf> {
 }
 
 impl<B: IoBuf> OwnedTable<B> {
-    pub fn sink(
+    pub fn sink<D: crate::com_de::Decomponentize>(
         &self,
         registry: &impl crate::registry::VTableRegistry,
-        sink: &mut impl crate::com_de::Decomponentize,
-    ) -> Result<(), Error> {
+        sink: &mut D,
+    ) -> Result<Result<(), D::Error>, Error> {
         let vtable = registry.get(&self.id).ok_or(Error::VTableNotFound)?;
         vtable.apply(stellarator_buf::deref(&self.buf), sink)
     }

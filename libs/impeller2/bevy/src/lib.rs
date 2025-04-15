@@ -32,6 +32,7 @@ use impeller2_wkt::{
 use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
+    convert::Infallible,
     marker::PhantomData,
     time::Duration,
 };
@@ -183,7 +184,7 @@ fn sink_inner(
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
-                table.sink(&*vtable_registry, &mut world_sink)?;
+                let _ = table.sink(&*vtable_registry, &mut world_sink)?;
             }
             OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == impeller2_wkt::Asset::ID => {
@@ -292,16 +293,17 @@ pub struct WorldSink<'w, 's> {
 }
 
 impl Decomponentize for WorldSink<'_, '_> {
+    type Error = core::convert::Infallible;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
         entity_id: impeller2::types::EntityId,
         view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
-    ) {
+    ) -> Result<(), Infallible> {
         let e = if let Some(entity) = self.entity_map.get(&entity_id) {
             let Some(e) = self.commands.get_entity(*entity) else {
-                return;
+                return Ok(());
             };
             e.id()
         } else {
@@ -321,7 +323,7 @@ impl Decomponentize for WorldSink<'_, '_> {
             e
         };
         let Ok(mut value_map) = self.query.get_mut(e) else {
-            return;
+            return Ok(());
         };
         if let Some(value) = value_map.0.get_mut(&component_id) {
             value.copy_from_view(view);
@@ -337,13 +339,13 @@ impl Decomponentize for WorldSink<'_, '_> {
             .unwrap_or_default()
         {
             let Some(adapter) = self.asset_adapters.get(&component_id) else {
-                return;
+                return Ok(());
             };
             let Some(asset_id) = view.as_asset_id() else {
-                return;
+                return Ok(());
             };
             let Some(asset) = self.asset_store.get(&asset_id) else {
-                return;
+                return Ok(());
             };
             adapter.insert(
                 &mut self.commands,
@@ -354,10 +356,11 @@ impl Decomponentize for WorldSink<'_, '_> {
             );
         } else {
             let Some(adapter) = self.component_adapters.get(&component_id) else {
-                return;
+                return Ok(());
             };
             adapter.insert(&mut self.commands, &mut self.entity_map, entity_id, view);
         }
+        Ok(())
     }
 }
 
@@ -436,7 +439,7 @@ where
         value: ComponentView<'_>,
     ) {
         let mut val = C::default();
-        val.apply_value(C::COMPONENT_ID, entity_id, value, None);
+        let _ = val.apply_value(C::COMPONENT_ID, entity_id, value, None);
         let mut e = if let Some(entity) = entity_map.0.get(&entity_id) {
             let Some(e) = commands.get_entity(*entity) else {
                 return;

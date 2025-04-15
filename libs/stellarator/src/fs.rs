@@ -239,23 +239,20 @@ impl os::fd::AsFd for File {
 mod tests {
     use super::*;
     use crate::{rent, test};
-
     #[test]
-    fn test_open_write_read() {
+    async fn test_open_write_read() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test");
 
-        test!(async move {
-            let mut options = OpenOptions::default();
-            options.create(true).read(true).write(true);
-            let file = File::open_with(path, &options).await.unwrap();
-            let mut buf: &'static [u8] = b"test";
-            let written = rent!(file.write(buf).await, buf).unwrap();
-            assert_eq!(written, 4);
-            let mut out_buf = vec![0u8; 4];
-            let n = rent!(file.read_at(out_buf, 0).await, out_buf).unwrap();
-            assert_eq!(n, 4);
-            assert_eq!(&out_buf, buf);
-        })
+        let mut options = OpenOptions::default();
+        options.create(true).read(true).write(true);
+        let file = File::open_with(path, &options).await.unwrap();
+        let mut buf: &'static [u8] = b"test";
+        let written = rent!(file.write(buf).await, buf).unwrap();
+        assert_eq!(written, 4);
+        let mut out_buf = vec![0u8; 4];
+        let n = rent!(file.read_at(out_buf, 0).await, out_buf).unwrap();
+        assert_eq!(n, 4);
+        assert_eq!(&out_buf, buf);
     }
 }
